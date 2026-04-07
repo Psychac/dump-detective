@@ -71,6 +71,8 @@ namespace DumpDetective
                 new MemoryAnalyzer(writer).Analyze(heap);
                 new GCGenerationAnalyzer(writer).Analyze(heap);
                 new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
+                new StaticRootLeakDetector(writer).Analyze(heap);
+                new EventHandlerLeakDetector(writer).Analyze(heap);
                 new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, topCount: 5);
                 new ThreadAnalyzer(writer).Analyze(runtime);
                 new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);

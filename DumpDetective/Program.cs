@@ -76,30 +76,88 @@ namespace DumpDetective
                 }
                 else
                 {
-                    WriteLine($"\nFound {eventLeaks.Count} potential event leak(s):\n", fileWriter);
-
-                    int count = 1;
-                    foreach (var leak in eventLeaks.OrderByDescending(l => l.SubscriberCount))
-                    {
-                        WriteLine($"#{count++}", fileWriter);
-                        WriteLine($"  Publisher Type: {leak.PublisherType}", fileWriter);
-                        WriteLine($"  Event Field: {leak.EventFieldName}", fileWriter);
-                        WriteLine($"  Subscriber Count: {leak.SubscriberCount}", fileWriter);
-                        WriteLine($"  Publisher Address: 0x{leak.PublisherAddress:X}", fileWriter);
-
-                        if (leak.Subscribers.Count > 0)
+                    var groupedLeaks = eventLeaks
+                        .GroupBy(e => new { e.PublisherType, e.EventFieldName })
+                        .Select(g => new EventGroupInfo
                         {
-                            WriteLine("  Subscribers:", fileWriter);
-                            foreach (var subscriber in leak.Subscribers.Take(10))
+                            PublisherType = g.Key.PublisherType,
+                            EventFieldName = g.Key.EventFieldName,
+                            InstanceCount = g.Count(),
+                            TotalSubscribers = g.Sum(x => x.SubscriberCount),
+                            AverageSubscribers = g.Average(x => x.SubscriberCount),
+                            MaxSubscribers = g.Max(x => x.SubscriberCount),
+                            MinSubscribers = g.Min(x => x.SubscriberCount),
+                            Instances = g.ToList()
+                        })
+                        .OrderByDescending(g => g.TotalSubscribers)
+                        .ToList();
+
+                    WriteLine($"\nFound {eventLeaks.Count} event instance(s) across {groupedLeaks.Count} event type(s):\n", fileWriter);
+                    WriteLine("SUMMARY BY EVENT TYPE:", fileWriter);
+                    WriteLine(new string('=', 80), fileWriter);
+
+                    int groupCount = 1;
+                    foreach (var group in groupedLeaks)
+                    {
+                        WriteLine($"\n[{groupCount++}] {group.PublisherType}.{group.EventFieldName}", fileWriter);
+                        WriteLine($"  Instance Count: {group.InstanceCount}", fileWriter);
+                        WriteLine($"  Total Subscribers: {group.TotalSubscribers}", fileWriter);
+                        WriteLine($"  Average Subscribers: {group.AverageSubscribers:F2}", fileWriter);
+                        WriteLine($"  Min/Max Subscribers: {group.MinSubscribers}/{group.MaxSubscribers}", fileWriter);
+
+                        var subscriberTypes = group.Instances
+                            .SelectMany(i => i.Subscribers)
+                            .GroupBy(s => s.Type)
+                            .OrderByDescending(g => g.Count())
+                            .Take(5)
+                            .ToList();
+
+                        if (subscriberTypes.Any())
+                        {
+                            WriteLine($"  Top Subscriber Types:", fileWriter);
+                            foreach (var subType in subscriberTypes)
                             {
-                                WriteLine($"    - {subscriber.Type} (0x{subscriber.Address:X})", fileWriter);
-                            }
-                            if (leak.Subscribers.Count > 10)
-                            {
-                                WriteLine($"    ... and {leak.Subscribers.Count - 10} more", fileWriter);
+                                WriteLine($"    - {subType.Key} ({subType.Count()} instance(s))", fileWriter);
                             }
                         }
-                        WriteLine(string.Empty, fileWriter);
+                    }
+
+                    WriteLine($"\n{new string('=', 80)}", fileWriter);
+                    WriteLine("\nDETAILED INSTANCES:", fileWriter);
+                    WriteLine(new string('=', 80), fileWriter);
+
+                    int detailCount = 1;
+                    foreach (var group in groupedLeaks)
+                    {
+                        WriteLine($"\n[{group.PublisherType}.{group.EventFieldName}] - {group.InstanceCount} instance(s)", fileWriter);
+                        WriteLine(new string('-', 80), fileWriter);
+
+                        foreach (var leak in group.Instances.OrderByDescending(l => l.SubscriberCount).Take(5))
+                        {
+                            WriteLine($"  Instance #{detailCount++}", fileWriter);
+                            WriteLine($"    Address: 0x{leak.PublisherAddress:X}", fileWriter);
+                            WriteLine($"    Subscribers: {leak.SubscriberCount}", fileWriter);
+
+                            if (leak.Subscribers.Count > 0)
+                            {
+                                WriteLine($"    Subscriber Types:", fileWriter);
+                                foreach (var subscriber in leak.Subscribers.Take(5))
+                                {
+                                    WriteLine($"      - {subscriber.Type} (0x{subscriber.Address:X})", fileWriter);
+                                }
+                                if (leak.Subscribers.Count > 5)
+                                {
+                                    WriteLine($"      ... and {leak.Subscribers.Count - 5} more", fileWriter);
+                                }
+                            }
+                            WriteLine(string.Empty, fileWriter);
+                        }
+
+                        if (group.InstanceCount > 5)
+                        {
+                            WriteLine($"  ... and {group.InstanceCount - 5} more instance(s)", fileWriter);
+                            WriteLine(string.Empty, fileWriter);
+                        }
                     }
                 }
 

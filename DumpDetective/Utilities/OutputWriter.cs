@@ -18,12 +18,12 @@ namespace DumpDetective.Utilities
         public void WriteHeader(string title)
         {
             WriteLine($"\n{title}");
-            WriteLine(new string('=', 80));
+            WriteLine(StringConstants.Equals80);
         }
 
         public void WriteSeparator()
         {
-            WriteLine(new string('-', 80));
+            WriteLine(StringConstants.Separator80);
         }
     }
 }

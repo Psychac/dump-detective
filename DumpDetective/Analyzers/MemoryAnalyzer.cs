@@ -13,68 +13,56 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("MEMORY ANALYSIS:");
 
-            var stats = CollectMemoryStatistics(heap);
+            // Use cached type statistics instead of re-enumerating
+            var typeStats = cache.GetOrBuildTypeStatistics(heap);
+            var stats = ConvertToMemoryStatistics(typeStats);
 
             PrintSummary(stats);
             PrintTopObjectsByCount(stats.TypeStats);
             PrintTopObjectsBySize(stats.TypeStats);
             PrintLOHUsage(stats);
 
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
         }
 
-        private MemoryStatistics CollectMemoryStatistics(ClrHeap heap)
+        private MemoryStatistics ConvertToMemoryStatistics(Dictionary<string, TypeStatistics> typeStats)
         {
-            // Pre-allocate dictionary with reasonable capacity to reduce rehashing
-            var typeStats = new Dictionary<string, EnhancedTypeStats>(capacity: 1024);
-
             int totalObjects = 0;
             ulong totalMemory = 0;
-            int lohObjectCount = 0;
-            ulong lohMemorySize = 0;
+            int totalLohObjects = 0;
+            ulong totalLohMemory = 0;
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            var enhancedStats = new Dictionary<string, EnhancedTypeStats>(typeStats.Count);
+
+            foreach (var kvp in typeStats)
             {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
+                var stat = kvp.Value;
+                totalObjects += stat.Count;
+                totalMemory += stat.TotalSize;
+                totalLohObjects += stat.LohCount;
+                totalLohMemory += stat.LohSize;
 
-                string typeName = obj.Type.Name ?? "Unknown";
-                ulong size = obj.Size;
-                bool isLoh = size >= LOH_THRESHOLD;
-
-                totalObjects++;
-                totalMemory += size;
-
-                // Use TryGetValue pattern - more efficient than ContainsKey + indexer
-                if (!typeStats.TryGetValue(typeName, out var stat))
+                enhancedStats[kvp.Key] = new EnhancedTypeStats
                 {
-                    stat = new EnhancedTypeStats { TypeName = typeName };
-                    typeStats[typeName] = stat;
-                }
-
-                stat.Count++;
-                stat.TotalSize += size;
-
-                if (isLoh)
-                {
-                    stat.LohCount++;
-                    stat.LohSize += size;
-                    lohObjectCount++;
-                    lohMemorySize += size;
-                }
+                    TypeName = stat.TypeName,
+                    Count = stat.Count,
+                    TotalSize = stat.TotalSize,
+                    LohCount = stat.LohCount,
+                    LohSize = stat.LohSize
+                };
             }
 
             return new MemoryStatistics
             {
-                TypeStats = typeStats,
+                TypeStats = enhancedStats,
                 TotalObjects = totalObjects,
                 TotalMemory = totalMemory,
-                TotalLohObjects = lohObjectCount,
-                TotalLohMemory = lohMemorySize
+                TotalLohObjects = totalLohObjects,
+                TotalLohMemory = totalLohMemory
             };
         }
 

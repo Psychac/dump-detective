@@ -12,17 +12,17 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
             _writer.WriteLine("Identifying static fields that may be causing memory leaks...\n");
 
-            var staticRootAnalysis = AnalyzeStaticRoots(heap);
+            var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
 
             if (staticRootAnalysis.Count == 0)
             {
                 _writer.WriteLine("No concerning static roots found.");
-                _writer.WriteLine($"\n{new string('=', 80)}");
+                _writer.WriteLine($"\n{StringConstants.Equals80}");
                 return;
             }
 
@@ -65,38 +65,36 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine(string.Empty);
             }
 
-            _writer.WriteLine($"{new string('=', 80)}");
+            _writer.WriteLine(StringConstants.Equals80);
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, HeapAnalysisCache cache)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
-                if (!root.RootKind.ToString().Contains("Static", StringComparison.OrdinalIgnoreCase))
+                if (!root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 ClrObject obj = root.Object;
-                if (!obj.IsValid || processedRoots.Contains(obj.Address))
+                if (!obj.IsValid || !processedRoots.Add(obj.Address))
                     continue;
 
-                processedRoots.Add(obj.Address);
+                // Calculate retained memory using cache
+                var retainedObjects = cache.GetRetainedObjects(heap, obj.Address);
 
-                // Calculate retained memory
-                var retainedObjects = GetRetainedObjects(heap, obj.Address);
-                
                 // Only report if significant memory impact (> 1MB or > 100 objects)
                 ulong totalSize = (ulong)retainedObjects.Sum(addr => (long)heap.GetObject(addr).Size);
-                
+
                 if (totalSize > 1024 * 1024 || retainedObjects.Count > 100)
                 {
                     var analysis = new StaticRootAnalysis
                     {
                         RootDescription = root.ToString() ?? "Unknown Static Root",
                         DirectObjectAddress = obj.Address,
-                        DirectObjectType = obj.Type?.Name ?? "Unknown",
+                        DirectObjectType = obj.Type?.Name ?? StringConstants.UnknownType,
                         DirectObjectSize = obj.Size,
                         TotalMemoryImpact = totalSize,
                         ObjectsKeptAlive = retainedObjects.Count,
@@ -112,34 +110,6 @@ namespace DumpDetective.Analyzers
             return results;
         }
 
-        private HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
-        {
-            var retained = new HashSet<ulong>();
-            var queue = new Queue<ulong>();
-            queue.Enqueue(rootAddress);
-            retained.Add(rootAddress);
-
-            while (queue.Count > 0 && retained.Count < maxObjects)
-            {
-                var current = queue.Dequeue();
-                var obj = heap.GetObject(current);
-
-                if (!obj.IsValid)
-                    continue;
-
-                foreach (var reference in obj.EnumerateReferences(carefully: true))
-                {
-                    if (reference.IsValid && !retained.Contains(reference.Address))
-                    {
-                        retained.Add(reference.Address);
-                        queue.Enqueue(reference.Address);
-                    }
-                }
-            }
-
-            return retained;
-        }
-
         private List<RetainedTypeInfo> GetTopRetainedTypes(ClrHeap heap, HashSet<ulong> addresses)
         {
             var typeStats = new Dictionary<string, RetainedTypeInfo>();
@@ -150,15 +120,16 @@ namespace DumpDetective.Analyzers
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
-                string typeName = obj.Type.Name ?? "Unknown";
-                
-                if (!typeStats.ContainsKey(typeName))
+                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
+
+                if (!typeStats.TryGetValue(typeName, out var info))
                 {
-                    typeStats[typeName] = new RetainedTypeInfo { TypeName = typeName };
+                    info = new RetainedTypeInfo { TypeName = typeName };
+                    typeStats[typeName] = info;
                 }
 
-                typeStats[typeName].Count++;
-                typeStats[typeName].TotalSize += obj.Size;
+                info.Count++;
+                info.TotalSize += obj.Size;
             }
 
             return typeStats.Values.OrderByDescending(t => t.TotalSize).ToList();
@@ -172,16 +143,8 @@ namespace DumpDetective.Analyzers
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
-                string typeName = obj.Type.Name ?? "";
-                if (typeName.Contains("Dictionary") || 
-                    typeName.Contains("List") || 
-                    typeName.Contains("Collection") ||
-                    typeName.Contains("HashSet") ||
-                    typeName.Contains("Queue") ||
-                    typeName.Contains("Stack"))
-                {
+                if (TypeFilterHelper.IsCollectionType(obj.Type.Name))
                     return true;
-                }
             }
             return false;
         }
@@ -196,12 +159,8 @@ namespace DumpDetective.Analyzers
 
                 foreach (var field in obj.Type.Fields)
                 {
-                    if (field.Type?.Name != null && 
-                        (field.Type.Name.Contains("EventHandler") || 
-                         field.Type.Name.Contains("Delegate")))
-                    {
+                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
                         return true;
-                    }
                 }
             }
             return false;

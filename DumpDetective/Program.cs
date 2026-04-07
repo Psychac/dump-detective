@@ -54,6 +54,7 @@ namespace DumpDetective
 
                 using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
                 var writer = new OutputWriter(fileWriter);
+                var cache = new HeapAnalysisCache();
 
                 writer.WriteLine($"Dump file: {dumpPath}");
                 writer.WriteLine(string.Empty);
@@ -90,13 +91,16 @@ namespace DumpDetective
                     return;
                 }
 
-                // Run all analyses
-                new MemoryAnalyzer(writer).Analyze(heap);
-                new GCGenerationAnalyzer(writer).Analyze(heap);
+                // Run all analyses (with shared cache for performance)
+                // Build cache first (single heap enumeration)
+                var typeStats = cache.GetOrBuildTypeStatistics(heap);
+
+                new MemoryAnalyzer(writer).Analyze(heap, cache);
+                new GCGenerationAnalyzer(writer).Analyze(heap, cache);
                 new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
-                new StaticRootLeakDetector(writer).Analyze(heap);
-                new EventHandlerLeakDetector(writer).Analyze(heap);
-                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, topCount: 5);
+                new StaticRootLeakDetector(writer).Analyze(heap, cache);
+                new EventHandlerLeakDetector(writer).Analyze(heap, cache);
+                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 5);
                 new ThreadAnalyzer(writer).Analyze(runtime);
                 new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
 

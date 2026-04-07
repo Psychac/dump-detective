@@ -7,24 +7,6 @@ namespace DumpDetective.Analyzers
     {
         private readonly OutputWriter _writer;
 
-        // Constants for delegate field names
-        private const string TargetFieldName = "_target";
-        private const string InvocationListFieldName = "_invocationList";
-        private const string MulticastDelegateName = "MulticastDelegate";
-
-        // Cache for system namespaces check
-        private static readonly string[] SystemNamespaces =
-        {
-            "System.",
-            "Microsoft.",
-            "MS.",
-            "Internal.",
-            "Windows.",
-            "Interop.",
-            "FxResources.",
-            "System_Private_CoreLib"
-        };
-
         public EventLeakAnalyzer(OutputWriter writer)
         {
             _writer = writer;
@@ -56,7 +38,7 @@ namespace DumpDetective.Analyzers
                 if (!obj.IsValid || !processedObjects.Add(obj.Address))
                     continue;
 
-                if (obj.Type == null || IsSystemType(obj.Type.Name))
+                if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name))
                     continue;
 
                 // Cache fields enumeration
@@ -66,7 +48,7 @@ namespace DumpDetective.Analyzers
                 // Quick check if type has any event-like fields before processing
                 foreach (var field in fields)
                 {
-                    if (IsEventField(field))
+                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
                     {
                         hasEventFields = true;
                         break;
@@ -79,7 +61,7 @@ namespace DumpDetective.Analyzers
                 // Now process event fields
                 foreach (ClrInstanceField field in fields)
                 {
-                    if (IsEventField(field))
+                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
                     {
                         var subscribers = GetEventSubscribers(obj, field);
 
@@ -88,8 +70,8 @@ namespace DumpDetective.Analyzers
                             leaks.Add(new EventLeakInfo
                             {
                                 PublisherAddress = obj.Address,
-                                PublisherType = obj.Type.Name ?? "Unknown",
-                                EventFieldName = field.Name ?? "Unknown",
+                                PublisherType = obj.Type.Name ?? StringConstants.UnknownType,
+                                EventFieldName = field.Name ?? StringConstants.UnknownType,
                                 SubscriberCount = subscribers.Count,
                                 Subscribers = subscribers
                             });
@@ -267,33 +249,6 @@ namespace DumpDetective.Analyzers
             }
         }
 
-        private static bool IsSystemType(string? typeName)
-        {
-            if (string.IsNullOrEmpty(typeName))
-                return false;
-
-            // Use for loop instead of LINQ for better performance
-            foreach (var ns in SystemNamespaces)
-            {
-                if (typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-
-            return false;
-        }
-
-        private static bool IsEventField(ClrInstanceField field)
-        {
-            if (field.Type?.Name is not string typeName)
-                return false;
-
-            // Use Contains with StringComparison for better performance
-            return typeName.Contains("EventHandler", StringComparison.Ordinal) ||
-                   typeName.Contains("Action", StringComparison.Ordinal) ||
-                   typeName.Contains("Func", StringComparison.Ordinal) ||
-                   typeName.Contains("Delegate", StringComparison.Ordinal);
-        }
-
         private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField)
         {
             var subscribers = new List<SubscriberInfo>();
@@ -306,7 +261,7 @@ namespace DumpDetective.Analyzers
                     return subscribers;
 
                 // Check if it's a multicast delegate
-                if (eventDelegate.Type.Name?.Contains(MulticastDelegateName, StringComparison.Ordinal) == true)
+                if (eventDelegate.Type.Name?.Contains(StringConstants.MulticastDelegateName, StringComparison.Ordinal) == true)
                 {
                     ExtractMulticastSubscribers(eventDelegate, subscribers);
                 }
@@ -325,7 +280,7 @@ namespace DumpDetective.Analyzers
 
         private static void ExtractMulticastSubscribers(ClrObject eventDelegate, List<SubscriberInfo> subscribers)
         {
-            var invocationListField = eventDelegate.Type?.GetFieldByName(InvocationListFieldName);
+            var invocationListField = DelegateHelper.GetCachedField(eventDelegate.Type, StringConstants.DelegateInvocationListField);
             if (invocationListField == null)
                 return;
 
@@ -347,7 +302,7 @@ namespace DumpDetective.Analyzers
 
         private static void ExtractSingleSubscriber(ClrObject delegateObj, List<SubscriberInfo> subscribers)
         {
-            var targetField = delegateObj.Type?.GetFieldByName(TargetFieldName);
+            var targetField = DelegateHelper.GetCachedField(delegateObj.Type, StringConstants.DelegateTargetField);
             if (targetField == null)
                 return;
 
@@ -357,7 +312,7 @@ namespace DumpDetective.Analyzers
                 subscribers.Add(new SubscriberInfo
                 {
                     Address = target.Address,
-                    Type = target.Type.Name ?? "Unknown"
+                    Type = target.Type.Name ?? StringConstants.UnknownType
                 });
             }
         }

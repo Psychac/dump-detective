@@ -6,77 +6,116 @@ namespace DumpDetective.Analyzers
     internal class GCGenerationAnalyzer
     {
         private readonly OutputWriter _writer;
+        private const int LOH_THRESHOLD = 85000;
 
         public GCGenerationAnalyzer(OutputWriter writer)
         {
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
 
-            var gen2Objects = new Dictionary<string, GenStats>();
-            var lohObjects = new Dictionary<string, GenStats>();
+            // Use cached type statistics instead of re-enumerating
+            var cachedStats = cache.GetOrBuildTypeStatistics(heap);
+            var stats = ConvertToGenerationStatistics(cachedStats);
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            PrintSummary(stats);
+            PrintTopTypes(stats.Gen2Stats);
+
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
+        }
+
+        private GenerationStatistics ConvertToGenerationStatistics(Dictionary<string, TypeStatistics> cachedStats)
+        {
+            var gen2Stats = new Dictionary<string, GenStats>(capacity: 512);
+            var lohStats = new Dictionary<string, GenStats>(capacity: 128);
+
+            int gen2Count = 0;
+            int lohCount = 0;
+            ulong gen2Size = 0;
+            ulong lohSize = 0;
+
+            foreach (var kvp in cachedStats)
             {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
+                var stat = kvp.Value;
 
-                string typeName = obj.Type.Name ?? "Unknown";
-                ulong size = obj.Size;
+                // Add to gen2 stats (all objects < LOH threshold)
+                if (stat.Count > stat.LohCount)
+                {
+                    gen2Stats[kvp.Key] = new GenStats
+                    {
+                        TypeName = stat.TypeName,
+                        Count = stat.Count - stat.LohCount,
+                        TotalSize = stat.TotalSize - stat.LohSize
+                    };
+                    gen2Count += stat.Count - stat.LohCount;
+                    gen2Size += stat.TotalSize - stat.LohSize;
+                }
 
-                Dictionary<string, GenStats> targetGen;
-                if (size >= 85000)
+                // Add to LOH stats if applicable
+                if (stat.LohCount > 0)
                 {
-                    targetGen = lohObjects;
+                    lohStats[kvp.Key] = new GenStats
+                    {
+                        TypeName = stat.TypeName,
+                        Count = stat.LohCount,
+                        TotalSize = stat.LohSize
+                    };
+                    lohCount += stat.LohCount;
+                    lohSize += stat.LohSize;
                 }
-                else
-                {
-                    targetGen = gen2Objects;
-                }
-
-                if (!targetGen.ContainsKey(typeName))
-                {
-                    targetGen[typeName] = new GenStats { TypeName = typeName };
-                }
-                targetGen[typeName].Count++;
-                targetGen[typeName].TotalSize += size;
             }
 
-            PrintSummary(gen2Objects, lohObjects);
-            PrintTopTypes(gen2Objects);
-
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            return new GenerationStatistics
+            {
+                Gen2Stats = gen2Stats,
+                LohStats = lohStats,
+                TotalGen2Count = gen2Count,
+                TotalLohCount = lohCount,
+                TotalGen2Size = gen2Size,
+                TotalLohSize = lohSize
+            };
         }
 
-        private void PrintSummary(Dictionary<string, GenStats> gen2Objects, Dictionary<string, GenStats> lohObjects)
+        private void PrintSummary(GenerationStatistics stats)
         {
-            int totalGen2 = gen2Objects.Values.Sum(s => s.Count);
-            int totalLOH = lohObjects.Values.Sum(s => s.Count);
-
-            ulong sizeGen2 = (ulong)gen2Objects.Values.Sum(s => (long)s.TotalSize);
-            ulong sizeLOH = (ulong)lohObjects.Values.Sum(s => (long)s.TotalSize);
-
             _writer.WriteLine("\nHeap Summary:");
-            _writer.WriteLine($"  Small/Medium Objects (< 85KB): {totalGen2,12:N0} objects  {FormatHelper.FormatBytes(sizeGen2),12}");
-            _writer.WriteLine($"  Large Objects (LOH >= 85KB):   {totalLOH,12:N0} objects  {FormatHelper.FormatBytes(sizeLOH),12}");
-            _writer.WriteLine($"  Total:                          {totalGen2 + totalLOH,12:N0} objects  {FormatHelper.FormatBytes(sizeGen2 + sizeLOH),12}");
+            _writer.WriteLine($"  Small/Medium Objects (< 85KB): {stats.TotalGen2Count,12:N0} objects  {FormatHelper.FormatBytes(stats.TotalGen2Size),12}");
+            _writer.WriteLine($"  Large Objects (LOH >= 85KB):   {stats.TotalLohCount,12:N0} objects  {FormatHelper.FormatBytes(stats.TotalLohSize),12}");
+            _writer.WriteLine($"  Total:                          {stats.TotalGen2Count + stats.TotalLohCount,12:N0} objects  {FormatHelper.FormatBytes(stats.TotalGen2Size + stats.TotalLohSize),12}");
+
+            if (stats.TotalLohCount > 0)
+            {
+                double lohPercentage = (stats.TotalLohSize / (double)(stats.TotalGen2Size + stats.TotalLohSize)) * 100;
+                _writer.WriteLine($"  LOH Percentage:                  {lohPercentage,11:F1}%");
+            }
         }
 
-        private void PrintTopTypes(Dictionary<string, GenStats> gen2Objects)
+        private void PrintTopTypes(Dictionary<string, GenStats> gen2Stats)
         {
-            if (gen2Objects.Any())
+            if (gen2Stats.Count > 0)
             {
                 _writer.WriteLine("\nTop 15 Object Types by Count (potential leak sources if excessive):");
                 _writer.WriteLine($"{"Type",-60} {"Count",12} {"Size",12}");
                 _writer.WriteSeparator();
-                foreach (var stat in gen2Objects.Values.OrderByDescending(s => s.Count).Take(15))
+
+                foreach (var stat in gen2Stats.Values.OrderByDescending(s => s.Count).Take(15))
                 {
                     _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {stat.Count,12:N0} {FormatHelper.FormatBytes(stat.TotalSize),12}");
                 }
             }
         }
+    }
+
+    internal class GenerationStatistics
+    {
+        public Dictionary<string, GenStats> Gen2Stats { get; set; } = new();
+        public Dictionary<string, GenStats> LohStats { get; set; } = new();
+        public int TotalGen2Count { get; set; }
+        public int TotalLohCount { get; set; }
+        public ulong TotalGen2Size { get; set; }
+        public ulong TotalLohSize { get; set; }
     }
 }

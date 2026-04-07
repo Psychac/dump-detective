@@ -6,6 +6,9 @@ namespace DumpDetective.Analyzers
     internal class MemoryLeakAnalyzer
     {
         private readonly OutputWriter _writer;
+        private const int HighReferenceThreshold = 50;
+        private const int MaxStringLength = 500;
+        private const int MinDuplicateCount = 10;
 
         public MemoryLeakAnalyzer(OutputWriter writer)
         {
@@ -22,31 +25,33 @@ namespace DumpDetective.Analyzers
             AnalyzeHighlyReferencedObjects(heap);
             AnalyzeRootedObjects(heap);
 
-            _writer.WriteLine($"{new string('=', 80)}");
+            _writer.WriteLine(StringConstants.Equals80);
             _writer.WriteHeader("EVENT LEAK DETECTION:");
-            _writer.WriteLine($"{new string('=', 80)}");
+            _writer.WriteLine(StringConstants.Equals80);
         }
 
         private void AnalyzeFinalizerQueue(ClrHeap heap)
         {
             var finalizerQueue = heap.EnumerateFinalizableObjects().ToList();
-            if (finalizerQueue.Any())
+            if (finalizerQueue.Count > 0)
             {
                 _writer.WriteLine("\nFINALIZER QUEUE:");
                 _writer.WriteSeparator();
                 _writer.WriteLine($"Objects waiting for finalization: {finalizerQueue.Count:N0}");
 
-                var finalizerTypes = finalizerQueue
-                    .Select(obj => obj.Type?.Name ?? "Unknown")
-                    .GroupBy(name => name)
-                    .Select(g => new { Type = g.Key, Count = g.Count() })
-                    .OrderByDescending(x => x.Count)
-                    .Take(10);
+                // Manual grouping for better performance
+                var finalizerTypes = new Dictionary<string, int>();
+                foreach (var obj in finalizerQueue)
+                {
+                    string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
+                    finalizerTypes.TryGetValue(typeName, out int count);
+                    finalizerTypes[typeName] = count + 1;
+                }
 
                 _writer.WriteLine("\nTop types in finalizer queue:");
-                foreach (var type in finalizerTypes)
+                foreach (var kvp in finalizerTypes.OrderByDescending(x => x.Value).Take(10))
                 {
-                    _writer.WriteLine($"  {type.Type}: {type.Count:N0} object(s)");
+                    _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} object(s)");
                 }
             }
             else
@@ -64,22 +69,23 @@ namespace DumpDetective.Analyzers
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
-                bool isStaticRoot = root.RootKind.ToString().Contains("Static", StringComparison.OrdinalIgnoreCase);
+                bool isStaticRoot = root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase);
 
                 if (isStaticRoot)
                 {
                     ClrObject obj = root.Object;
                     if (obj.IsValid && obj.Type != null)
                     {
-                        string typeName = obj.Type.Name ?? "Unknown";
+                        string typeName = obj.Type.Name ?? StringConstants.UnknownType;
                         string rootName = root.ToString() ?? "Unknown Root";
 
-                        if (!staticRoots.ContainsKey(typeName))
+                        if (!staticRoots.TryGetValue(typeName, out var list))
                         {
-                            staticRoots[typeName] = new List<RootInfo>();
+                            list = new List<RootInfo>();
+                            staticRoots[typeName] = list;
                         }
 
-                        staticRoots[typeName].Add(new RootInfo
+                        list.Add(new RootInfo
                         {
                             Address = obj.Address,
                             Size = obj.Size,
@@ -89,7 +95,7 @@ namespace DumpDetective.Analyzers
                 }
             }
 
-            if (staticRoots.Any())
+            if (staticRoots.Count > 0)
             {
                 _writer.WriteLine("Objects held by static fields (potential leak sources):");
                 _writer.WriteLine($"Total static-rooted object types: {staticRoots.Count:N0}");
@@ -100,9 +106,10 @@ namespace DumpDetective.Analyzers
                     ulong totalSize = (ulong)kvp.Value.Sum(r => (long)r.Size);
                     _writer.WriteLine($"  {FormatHelper.TruncateString(kvp.Key, 50),-50} {kvp.Value.Count,8:N0} instances  {FormatHelper.FormatBytes(totalSize),12}");
 
-                    foreach (var root in kvp.Value.Take(2))
+                    int displayCount = Math.Min(2, kvp.Value.Count);
+                    for (int i = 0; i < displayCount; i++)
                     {
-                        _writer.WriteLine($"    └─ {FormatHelper.TruncateString(root.RootName, 70)}");
+                        _writer.WriteLine($"    └─ {FormatHelper.TruncateString(kvp.Value[i].RootName, 70)}");
                     }
                     if (kvp.Value.Count > 2)
                     {
@@ -121,7 +128,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine("\n\nDUPLICATE STRING ANALYSIS:");
             _writer.WriteSeparator();
 
-            var stringStats = new Dictionary<string, StringLeakInfo>();
+            var stringStats = new Dictionary<string, StringLeakInfo>(capacity: 1024);
             int totalStrings = 0;
             ulong totalStringMemory = 0;
 
@@ -133,14 +140,15 @@ namespace DumpDetective.Analyzers
                     totalStringMemory += obj.Size;
 
                     string? value = obj.AsString();
-                    if (value != null && value.Length > 0 && value.Length < 500)
+                    if (value != null && value.Length > 0 && value.Length < MaxStringLength)
                     {
-                        if (!stringStats.ContainsKey(value))
+                        if (!stringStats.TryGetValue(value, out var info))
                         {
-                            stringStats[value] = new StringLeakInfo { Value = value };
+                            info = new StringLeakInfo { Value = value };
+                            stringStats[value] = info;
                         }
-                        stringStats[value].Count++;
-                        stringStats[value].TotalSize += obj.Size;
+                        info.Count++;
+                        info.TotalSize += obj.Size;
                     }
                 }
             }
@@ -150,7 +158,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"Unique strings: {stringStats.Count:N0}");
 
             var duplicates = stringStats.Values
-                .Where(s => s.Count > 10)
+                .Where(s => s.Count > MinDuplicateCount)
                 .OrderByDescending(s => s.TotalSize)
                 .Take(20);
 
@@ -176,7 +184,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteSeparator();
             _writer.WriteLine("Objects with many incoming references (may indicate leaks):\n");
 
-            var referenceCount = new Dictionary<ulong, int>();
+            var referenceCount = new Dictionary<ulong, int>(capacity: 1024);
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -186,17 +194,14 @@ namespace DumpDetective.Analyzers
                 {
                     if (reference.IsValid)
                     {
-                        if (!referenceCount.ContainsKey(reference.Address))
-                        {
-                            referenceCount[reference.Address] = 0;
-                        }
-                        referenceCount[reference.Address]++;
+                        referenceCount.TryGetValue(reference.Address, out int count);
+                        referenceCount[reference.Address] = count + 1;
                     }
                 }
             }
 
             var highlyReferenced = referenceCount
-                .Where(kvp => kvp.Value > 50)
+                .Where(kvp => kvp.Value > HighReferenceThreshold)
                 .OrderByDescending(kvp => kvp.Value)
                 .Take(15);
 
@@ -205,7 +210,7 @@ namespace DumpDetective.Analyzers
                 ClrObject obj = heap.GetObject(kvp.Key);
                 if (obj.IsValid && obj.Type != null)
                 {
-                    _writer.WriteLine($"  {obj.Type.Name ?? "Unknown"}");
+                    _writer.WriteLine($"  {obj.Type.Name ?? StringConstants.UnknownType}");
                     _writer.WriteLine($"    Address: 0x{obj.Address:X}");
                     _writer.WriteLine($"    Size: {FormatHelper.FormatBytes(obj.Size)}");
                     _writer.WriteLine($"    Incoming references: {kvp.Value:N0}");
@@ -220,29 +225,27 @@ namespace DumpDetective.Analyzers
             _writer.WriteSeparator();
             _writer.WriteLine("Objects kept alive by GC roots:\n");
 
-            var rootedObjectsByType = new Dictionary<string, RootedTypeInfo>();
+            var rootedObjectsByType = new Dictionary<string, RootedTypeInfo>(capacity: 512);
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 ClrObject obj = root.Object;
                 if (obj.IsValid && obj.Type != null)
                 {
-                    string typeName = obj.Type.Name ?? "Unknown";
+                    string typeName = obj.Type.Name ?? StringConstants.UnknownType;
 
-                    if (!rootedObjectsByType.ContainsKey(typeName))
+                    if (!rootedObjectsByType.TryGetValue(typeName, out var info))
                     {
-                        rootedObjectsByType[typeName] = new RootedTypeInfo { TypeName = typeName };
+                        info = new RootedTypeInfo { TypeName = typeName };
+                        rootedObjectsByType[typeName] = info;
                     }
 
-                    rootedObjectsByType[typeName].Count++;
-                    rootedObjectsByType[typeName].TotalSize += obj.Size;
+                    info.Count++;
+                    info.TotalSize += obj.Size;
 
                     string rootKind = root.RootKind.ToString();
-                    if (!rootedObjectsByType[typeName].RootKinds.ContainsKey(rootKind))
-                    {
-                        rootedObjectsByType[typeName].RootKinds[rootKind] = 0;
-                    }
-                    rootedObjectsByType[typeName].RootKinds[rootKind]++;
+                    info.RootKinds.TryGetValue(rootKind, out int kindCount);
+                    info.RootKinds[rootKind] = kindCount + 1;
                 }
             }
 
@@ -257,7 +260,7 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"{FormatHelper.TruncateString(kvp.TypeName, 50),-50} {kvp.Count,10:N0} {FormatHelper.FormatBytes(kvp.TotalSize),12} {primaryRootKind.Key,-20}");
             }
 
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
         }
     }
 }

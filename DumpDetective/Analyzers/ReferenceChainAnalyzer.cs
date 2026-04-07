@@ -14,27 +14,13 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void AnalyzeTopTypes(ClrHeap heap, int topCount = 10)
+        public void AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache, int topCount = 10)
         {
             _writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
             _writer.WriteLine("Finding why top memory-consuming objects are still alive...\n");
 
-            // Get top types by total memory
-            var typeStats = new Dictionary<string, (int Count, ulong TotalSize)>();
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? "Unknown";
-                if (!typeStats.ContainsKey(typeName))
-                {
-                    typeStats[typeName] = (0, 0);
-                }
-                var stats = typeStats[typeName];
-                typeStats[typeName] = (stats.Count + 1, stats.TotalSize + obj.Size);
-            }
+            // Use cached type statistics instead of re-enumerating
+            var typeStats = cache.GetOrBuildTypeStatistics(heap);
 
             var topTypes = typeStats
                 .OrderByDescending(kvp => kvp.Value.TotalSize)
@@ -45,30 +31,23 @@ namespace DumpDetective.Analyzers
             foreach (var typeKvp in topTypes)
             {
                 string typeName = typeKvp.Key;
-                
-                // Skip system types
-                if (IsSystemType(typeName))
+                var stats = typeKvp.Value;
+
+                // Skip system types using shared utility
+                if (TypeFilterHelper.IsSystemType(typeName))
                     continue;
 
                 _writer.WriteLine($"\n[{typeNum++}] Type: {typeName}");
-                _writer.WriteLine($"    Count: {typeKvp.Value.Count:N0}");
-                _writer.WriteLine($"    Total Size: {FormatHelper.FormatBytes(typeKvp.Value.TotalSize)}");
+                _writer.WriteLine($"    Count: {stats.Count:N0}");
+                _writer.WriteLine($"    Total Size: {FormatHelper.FormatBytes(stats.TotalSize)}");
                 _writer.WriteSeparator();
 
-                // Find sample instance
-                ClrObject? sampleObj = null;
-                foreach (ClrObject obj in heap.EnumerateObjects())
-                {
-                    if (obj.IsValid && obj.Type?.Name == typeName)
-                    {
-                        sampleObj = obj;
-                        break;
-                    }
-                }
+                // Use cached sample instance instead of full heap walk
+                ulong? sampleAddress = cache.GetSampleInstanceAddress(typeName);
 
-                if (sampleObj.HasValue && sampleObj.Value.IsValid)
+                if (sampleAddress.HasValue)
                 {
-                    AnalyzeObject(heap, sampleObj.Value.Address);
+                    AnalyzeObject(heap, sampleAddress.Value);
                 }
                 else
                 {
@@ -76,13 +55,25 @@ namespace DumpDetective.Analyzers
                 }
             }
 
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
+        }
+
+        private ClrObject? FindSampleInstance(ClrHeap heap, string typeName)
+        {
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (obj.IsValid && obj.Type?.Name == typeName)
+                {
+                    return obj;
+                }
+            }
+            return null;
         }
 
         public void AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
             ClrObject obj = heap.GetObject(objectAddress);
-            
+
             if (!obj.IsValid)
             {
                 _writer.WriteLine($"    Object at 0x{objectAddress:X} is not valid.");
@@ -90,9 +81,9 @@ namespace DumpDetective.Analyzers
             }
 
             _writer.WriteLine($"    Sample Instance: 0x{objectAddress:X}");
-            _writer.WriteLine($"    Type: {obj.Type?.Name ?? "Unknown"}");
+            _writer.WriteLine($"    Type: {obj.Type?.Name ?? StringConstants.UnknownType}");
             _writer.WriteLine($"    Size: {FormatHelper.FormatBytes(obj.Size)}");
-            
+
             var paths = FindPathsToRoot(heap, objectAddress);
 
             if (paths.Count == 0)
@@ -103,7 +94,7 @@ namespace DumpDetective.Analyzers
             {
                 _writer.WriteLine($"    Status: Kept alive by {paths.Count} root path(s)");
                 _writer.WriteLine($"\n    Reference Chains (showing up to {MaxPathsToShow}):");
-                
+
                 int pathNum = 1;
                 foreach (var path in paths.Take(MaxPathsToShow))
                 {
@@ -150,35 +141,36 @@ namespace DumpDetective.Analyzers
 
         private Dictionary<ulong, List<ulong>> BuildReferrersMap(ClrHeap heap, ulong targetAddress)
         {
-            var referrersMap = new Dictionary<ulong, List<ulong>>();
-            var targetRegion = new HashSet<ulong>();
-            
+            var referrersMap = new Dictionary<ulong, List<ulong>>(capacity: 512);
+            var targetRegion = new HashSet<ulong>(capacity: 1024);
+
             // Collect target and nearby objects to limit search space
-            var queue = new Queue<ulong>();
+            var queue = new Queue<ulong>(capacity: 256);
             queue.Enqueue(targetAddress);
             targetRegion.Add(targetAddress);
-            
+
             int maxRegionSize = 10000;
             while (queue.Count > 0 && targetRegion.Count < maxRegionSize)
             {
                 var current = queue.Dequeue();
                 var obj = heap.GetObject(current);
-                
+
                 if (!obj.IsValid) continue;
 
                 foreach (var reference in obj.EnumerateReferences(carefully: true))
                 {
                     if (!reference.IsValid) continue;
-                    
-                    if (!referrersMap.ContainsKey(reference.Address))
-                    {
-                        referrersMap[reference.Address] = new List<ulong>();
-                    }
-                    referrersMap[reference.Address].Add(current);
 
-                    if (!targetRegion.Contains(reference.Address))
+                    // Use TryGetValue pattern for better performance
+                    if (!referrersMap.TryGetValue(reference.Address, out var list))
                     {
-                        targetRegion.Add(reference.Address);
+                        list = new List<ulong>();
+                        referrersMap[reference.Address] = list;
+                    }
+                    list.Add(current);
+
+                    if (targetRegion.Add(reference.Address))
+                    {
                         queue.Enqueue(reference.Address);
                     }
                 }
@@ -193,8 +185,8 @@ namespace DumpDetective.Analyzers
             if (startAddress == targetAddress)
                 return true;
 
-            var visited = new HashSet<ulong> { startAddress };
-            var queue = new Queue<ulong>();
+            var visited = new HashSet<ulong>(capacity: 1024) { startAddress };
+            var queue = new Queue<ulong>(capacity: 256);
             queue.Enqueue(startAddress);
 
             int maxSearch = 5000;
@@ -214,9 +206,8 @@ namespace DumpDetective.Analyzers
                     if (reference.Address == targetAddress)
                         return true;
 
-                    if (!visited.Contains(reference.Address))
+                    if (visited.Add(reference.Address))
                     {
-                        visited.Add(reference.Address);
                         queue.Enqueue(reference.Address);
                     }
                 }
@@ -254,21 +245,19 @@ namespace DumpDetective.Analyzers
         private bool ExploreReferences(ClrHeap heap, ClrObject obj, ulong targetAddress,
             List<ReferenceNode> currentPath, HashSet<ulong> visited)
         {
-            if (!obj.IsValid || visited.Contains(obj.Address))
+            if (!obj.IsValid || !visited.Add(obj.Address))
                 return false;
-
-            visited.Add(obj.Address);
 
             foreach (var reference in obj.EnumerateReferences(carefully: true))
             {
                 if (!reference.IsValid) continue;
 
                 string fieldName = GetFieldName(obj, reference.Address);
-                
+
                 var node = new ReferenceNode
                 {
                     Address = reference.Address,
-                    TypeName = reference.Type?.Name ?? "Unknown",
+                    TypeName = reference.Type?.Name ?? StringConstants.UnknownType,
                     FieldName = fieldName,
                     IsRoot = false
                 };
@@ -333,11 +322,12 @@ namespace DumpDetective.Analyzers
 
         private void PrintPath(List<ReferenceNode> path)
         {
+            // Pre-allocate space strings to avoid repeated allocations
             for (int i = 0; i < path.Count; i++)
             {
                 var node = path[i];
                 string indent = new string(' ', 6 + i * 2);
-                
+
                 if (node.IsRoot)
                 {
                     _writer.WriteLine($"{indent}↓ {node.FieldName}");
@@ -349,26 +339,6 @@ namespace DumpDetective.Analyzers
                     _writer.WriteLine($"{indent}  {node.TypeName} @ 0x{node.Address:X}");
                 }
             }
-        }
-
-        private static bool IsSystemType(string? typeName)
-        {
-            if (string.IsNullOrEmpty(typeName))
-                return false;
-
-            string[] systemNamespaces =
-            {
-                "System.",
-                "Microsoft.",
-                "MS.",
-                "Internal.",
-                "Windows.",
-                "Interop.",
-                "FxResources.",
-                "System_Private_CoreLib"
-            };
-
-            return systemNamespaces.Any(ns => typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase));
         }
     }
 

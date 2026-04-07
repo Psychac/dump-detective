@@ -12,17 +12,17 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("EVENT HANDLER LEAK DETECTION:");
             _writer.WriteLine("Identifying event subscriptions that may be causing memory leaks...\n");
 
-            var leaks = DetectEventHandlerLeaks(heap);
+            var leaks = DetectEventHandlerLeaks(heap, cache);
 
             if (leaks.Count == 0)
             {
                 _writer.WriteLine("No event handler leaks detected (good!).");
-                _writer.WriteLine($"\n{new string('=', 80)}");
+                _writer.WriteLine($"\n{StringConstants.Equals80}");
                 return;
             }
 
@@ -42,7 +42,7 @@ namespace DumpDetective.Analyzers
                 if (leak.SubscriberDetails.Any())
                 {
                     _writer.WriteLine($"\n  Subscribers (keeping objects alive):");
-                    
+
                     var grouped = leak.SubscriberDetails
                         .GroupBy(s => s.SubscriberType)
                         .OrderByDescending(g => g.Count())
@@ -52,11 +52,11 @@ namespace DumpDetective.Analyzers
                     {
                         var totalSize = group.Sum(s => (long)s.Size);
                         _writer.WriteLine($"    - {group.Key}: {group.Count()} instance(s), {FormatHelper.FormatBytes((ulong)totalSize)}");
-                        
+
                         // Show first instance details
                         var first = group.First();
                         _writer.WriteLine($"      Example: 0x{first.SubscriberAddress:X}");
-                        
+
                         if (first.IsStaticRooted)
                         {
                             _writer.WriteLine($"      ⚠️  Rooted by: {first.RootDescription}");
@@ -90,31 +90,29 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine(string.Empty);
             }
 
-            _writer.WriteLine($"{new string('=', 80)}");
+            _writer.WriteLine(StringConstants.Equals80);
         }
 
-        private List<EventHandlerLeak> DetectEventHandlerLeaks(ClrHeap heap)
+        private List<EventHandlerLeak> DetectEventHandlerLeaks(ClrHeap heap, HeapAnalysisCache cache)
         {
             var leaks = new List<EventHandlerLeak>();
             var processedObjects = new HashSet<ulong>();
-            var staticRoots = GetStaticRootedAddresses(heap);
+            var staticRoots = cache.GetStaticRootedAddresses(heap);
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
-                if (!obj.IsValid || processedObjects.Contains(obj.Address) || obj.Type == null)
+                if (!obj.IsValid || !processedObjects.Add(obj.Address) || obj.Type == null)
                     continue;
 
-                processedObjects.Add(obj.Address);
-
-                // Skip system types
-                if (IsSystemType(obj.Type.Name))
+                // Skip system types using shared utility
+                if (TypeFilterHelper.IsSystemType(obj.Type.Name))
                     continue;
 
                 bool isStaticRooted = staticRoots.Contains(obj.Address);
 
                 foreach (var field in obj.Type.Fields)
                 {
-                    if (IsEventField(field))
+                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
                     {
                         var subscriberDetails = GetEventSubscriberDetails(heap, obj, field, staticRoots);
 
@@ -128,8 +126,8 @@ namespace DumpDetective.Analyzers
                             leaks.Add(new EventHandlerLeak
                             {
                                 PublisherAddress = obj.Address,
-                                PublisherType = obj.Type.Name ?? "Unknown",
-                                EventName = field.Name ?? "Unknown",
+                                PublisherType = obj.Type.Name ?? StringConstants.UnknownType,
+                                EventName = field.Name ?? StringConstants.UnknownType,
                                 SubscriberCount = subscriberDetails.Count,
                                 SubscriberDetails = subscriberDetails,
                                 TotalRetainedMemory = totalRetained,
@@ -173,9 +171,9 @@ namespace DumpDetective.Analyzers
                 if (!eventDelegate.IsValid)
                     return subscribers;
 
-                if (eventDelegate.Type?.Name?.Contains("MulticastDelegate") == true)
+                if (eventDelegate.Type?.Name?.Contains(StringConstants.MulticastDelegateName, StringComparison.Ordinal) == true)
                 {
-                    var invocationListField = eventDelegate.Type.GetFieldByName("_invocationList");
+                    var invocationListField = DelegateHelper.GetCachedField(eventDelegate.Type, StringConstants.DelegateInvocationListField);
                     if (invocationListField != null)
                     {
                         ClrObject invocationList = invocationListField.ReadObject(eventDelegate, interior: false);
@@ -186,7 +184,7 @@ namespace DumpDetective.Analyzers
                                 ClrObject delegateObj = invocationList.AsArray().GetObjectValue(i);
                                 if (delegateObj.IsValid)
                                 {
-                                    var targetField = delegateObj.Type?.GetFieldByName("_target");
+                                    var targetField = DelegateHelper.GetCachedField(delegateObj.Type, StringConstants.DelegateTargetField);
                                     if (targetField != null)
                                     {
                                         ClrObject target = targetField.ReadObject(delegateObj, interior: false);
@@ -198,7 +196,7 @@ namespace DumpDetective.Analyzers
                                             subscribers.Add(new EventSubscriberDetail
                                             {
                                                 SubscriberAddress = target.Address,
-                                                SubscriberType = target.Type.Name ?? "Unknown",
+                                                SubscriberType = target.Type.Name ?? StringConstants.UnknownType,
                                                 Size = target.Size,
                                                 IsStaticRooted = isStatic,
                                                 RootDescription = rootDesc
@@ -212,7 +210,7 @@ namespace DumpDetective.Analyzers
                 }
                 else
                 {
-                    var targetField = eventDelegate.Type?.GetFieldByName("_target");
+                    var targetField = DelegateHelper.GetCachedField(eventDelegate.Type, StringConstants.DelegateTargetField);
                     if (targetField != null)
                     {
                         ClrObject target = targetField.ReadObject(eventDelegate, interior: false);
@@ -224,7 +222,7 @@ namespace DumpDetective.Analyzers
                             subscribers.Add(new EventSubscriberDetail
                             {
                                 SubscriberAddress = target.Address,
-                                SubscriberType = target.Type.Name ?? "Unknown",
+                                SubscriberType = target.Type.Name ?? StringConstants.UnknownType,
                                 Size = target.Size,
                                 IsStaticRooted = isStatic,
                                 RootDescription = rootDesc
@@ -243,45 +241,12 @@ namespace DumpDetective.Analyzers
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 if (root.Object.Address == address && 
-                    root.RootKind.ToString().Contains("Static", StringComparison.OrdinalIgnoreCase))
+                    root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
                 {
                     return root.ToString() ?? "Static Root";
                 }
             }
             return "Static Root";
-        }
-
-        private static bool IsSystemType(string? typeName)
-        {
-            if (string.IsNullOrEmpty(typeName))
-                return false;
-
-            string[] systemNamespaces =
-            {
-                "System.",
-                "Microsoft.",
-                "MS.",
-                "Internal.",
-                "Windows.",
-                "Interop.",
-                "FxResources.",
-                "System_Private_CoreLib"
-            };
-
-            return systemNamespaces.Any(ns => typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static bool IsEventField(ClrInstanceField field)
-        {
-            if (field.Type == null)
-                return false;
-
-            string? typeName = field.Type.Name;
-            return typeName != null &&
-                   (typeName.Contains("EventHandler") ||
-                    typeName.Contains("Action") ||
-                    typeName.Contains("Func") ||
-                    typeName.Contains("Delegate"));
         }
     }
 

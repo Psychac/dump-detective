@@ -16,13 +16,13 @@ namespace DumpDetective.Analyzers
         {
             _writer.WriteHeader("THREAD ANALYSIS:");
 
-            var threads = runtime.Threads.ToList();
+            var threadInfo = CategorizeThreads(runtime.Threads);
 
-            _writer.WriteLine($"\nTotal Threads: {threads.Count}");
+            _writer.WriteLine($"\nTotal Threads: {threadInfo.TotalCount}");
 
-            PrintThreadStatistics(threads);
-            PrintThreadsWithLocks(threads);
-            PrintBlockedThreads(threads);
+            PrintThreadStatistics(threadInfo);
+            PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
+            PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
 
             _writer.WriteLine($"\nNote: Deadlock detection requires complex lock chain analysis.");
             _writer.WriteLine($"Review threads with high lock counts and waiting patterns manually.");
@@ -30,36 +30,118 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\n{new string('=', 80)}");
         }
 
-        private void PrintThreadStatistics(List<ClrThread> threads)
+        private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)
         {
-            int aliveThreads = threads.Count(t => t.IsAlive);
-            int gcThreads = threads.Count(t => t.IsGc);
-            int finalizerThreads = threads.Count(t => t.IsFinalizer);
+            var result = new ThreadCategorization();
+            var threadsWithLocks = new List<ThreadWithStackTrace>();
+            var blockedThreads = new List<ThreadWithStackTrace>();
 
-            _writer.WriteLine($"Alive Threads: {aliveThreads}");
-            _writer.WriteLine($"GC Threads: {gcThreads}");
-            _writer.WriteLine($"Finalizer Threads: {finalizerThreads}");
+            foreach (var thread in threads)
+            {
+                result.TotalCount++;
+
+                if (thread.IsAlive)
+                {
+                    result.AliveCount++;
+
+                    // Check for locks
+                    if (thread.LockCount > 0)
+                    {
+                        var stackFrames = thread.EnumerateStackTrace().Take(5).ToList();
+                        threadsWithLocks.Add(new ThreadWithStackTrace
+                        {
+                            Thread = thread,
+                            TopFrames = stackFrames
+                        });
+                    }
+
+                    // Check for potentially blocked threads (only check first 50 alive threads)
+                    if (blockedThreads.Count < 50)
+                    {
+                        var topFrames = thread.EnumerateStackTrace().Take(3).ToList();
+                        if (topFrames.Count > 0 && IsThreadWaiting(topFrames))
+                        {
+                            blockedThreads.Add(new ThreadWithStackTrace
+                            {
+                                Thread = thread,
+                                TopFrames = topFrames
+                            });
+                        }
+                    }
+                }
+
+                if (thread.IsGc)
+                    result.GcCount++;
+
+                if (thread.IsFinalizer)
+                    result.FinalizerCount++;
+            }
+
+            // Sort threads with locks by lock count (descending)
+            result.ThreadsWithLocks = threadsWithLocks
+                .OrderByDescending(t => t.Thread.LockCount)
+                .ToList();
+
+            result.PotentiallyBlockedThreads = blockedThreads;
+
+            return result;
         }
 
-        private void PrintThreadsWithLocks(List<ClrThread> threads)
+        private bool IsThreadWaiting(List<ClrStackFrame> frames)
         {
-            var threadsWithLocks = threads.Where(t => t.IsAlive && t.LockCount > 0).ToList();
+            // Pre-defined patterns to avoid repeated allocations
+            ReadOnlySpan<string> waitPatterns = new[]
+            {
+                "wait",
+                "sleep",
+                "lock",
+                "monitor.enter",
+                "semaphore",
+                "mutex"
+            };
 
-            if (threadsWithLocks.Any())
+            foreach (var frame in frames)
+            {
+                string signature = frame.Method?.Signature ?? frame.ToString() ?? "";
+
+                foreach (var pattern in waitPatterns)
+                {
+                    if (signature.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void PrintThreadStatistics(ThreadCategorization info)
+        {
+            _writer.WriteLine($"Alive Threads: {info.AliveCount}");
+            _writer.WriteLine($"GC Threads: {info.GcCount}");
+            _writer.WriteLine($"Finalizer Threads: {info.FinalizerCount}");
+        }
+
+        private void PrintThreadsWithLocks(List<ThreadWithStackTrace> threadsWithLocks)
+        {
+            if (threadsWithLocks.Count > 0)
             {
                 _writer.WriteLine($"\nThreads Holding Locks: {threadsWithLocks.Count}");
                 _writer.WriteLine("\nTHREADS WITH LOCKS:");
                 _writer.WriteSeparator();
 
-                foreach (var thread in threadsWithLocks.OrderByDescending(t => t.LockCount).Take(10))
+                int displayCount = Math.Min(10, threadsWithLocks.Count);
+                for (int i = 0; i < displayCount; i++)
                 {
+                    var threadInfo = threadsWithLocks[i];
+                    var thread = threadInfo.Thread;
+
                     _writer.WriteLine($"\nThread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
                     _writer.WriteLine($"  Lock Count: {thread.LockCount}");
 
-                    if (thread.EnumerateStackTrace().Any())
+                    if (threadInfo.TopFrames.Count > 0)
                     {
-                        _writer.WriteLine($"  Stack Trace (top 5 frames):");
-                        foreach (var frame in thread.EnumerateStackTrace().Take(5))
+                        _writer.WriteLine($"  Stack Trace (top {threadInfo.TopFrames.Count} frames):");
+                        foreach (var frame in threadInfo.TopFrames)
                         {
                             string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
                             _writer.WriteLine($"    {FormatHelper.TruncateString(method, 70)}");
@@ -78,57 +160,57 @@ namespace DumpDetective.Analyzers
             }
         }
 
-        private void PrintBlockedThreads(List<ClrThread> threads)
+        private void PrintBlockedThreads(List<ThreadWithStackTrace> blockedThreads)
         {
             _writer.WriteLine("\n\nPOTENTIALLY BLOCKED THREADS:");
             _writer.WriteSeparator();
             _writer.WriteLine("Threads that appear to be waiting (based on stack traces):\n");
 
-            int blockedCount = 0;
-            foreach (var thread in threads.Where(t => t.IsAlive).Take(50))
-            {
-                var stack = thread.EnumerateStackTrace().ToList();
-                if (stack.Any())
-                {
-                    var topFrames = stack.Take(3).ToList();
-                    bool isWaiting = topFrames.Any(f =>
-                    {
-                        string sig = f.Method?.Signature?.ToLower() ?? "";
-                        return sig.Contains("wait") ||
-                               sig.Contains("sleep") ||
-                               sig.Contains("lock") ||
-                               sig.Contains("monitor.enter") ||
-                               sig.Contains("semaphore") ||
-                               sig.Contains("mutex");
-                    });
-
-                    if (isWaiting)
-                    {
-                        blockedCount++;
-                        if (blockedCount <= 10)
-                        {
-                            _writer.WriteLine($"Thread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
-                            _writer.WriteLine($"  Locks: {thread.LockCount}");
-                            _writer.WriteLine($"  Top frames:");
-                            foreach (var frame in topFrames)
-                            {
-                                string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
-                                _writer.WriteLine($"    {FormatHelper.TruncateString(method, 70)}");
-                            }
-                            _writer.WriteLine(string.Empty);
-                        }
-                    }
-                }
-            }
-
-            if (blockedCount == 0)
+            if (blockedThreads.Count == 0)
             {
                 _writer.WriteLine("No obviously blocked threads detected (good!).");
             }
-            else if (blockedCount > 10)
+            else
             {
-                _writer.WriteLine($"... and {blockedCount - 10} more potentially blocked threads");
+                int displayCount = Math.Min(10, blockedThreads.Count);
+                for (int i = 0; i < displayCount; i++)
+                {
+                    var threadInfo = blockedThreads[i];
+                    var thread = threadInfo.Thread;
+
+                    _writer.WriteLine($"Thread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
+                    _writer.WriteLine($"  Locks: {thread.LockCount}");
+                    _writer.WriteLine($"  Top frames:");
+
+                    foreach (var frame in threadInfo.TopFrames)
+                    {
+                        string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
+                        _writer.WriteLine($"    {FormatHelper.TruncateString(method, 70)}");
+                    }
+                    _writer.WriteLine(string.Empty);
+                }
+
+                if (blockedThreads.Count > 10)
+                {
+                    _writer.WriteLine($"... and {blockedThreads.Count - 10} more potentially blocked threads");
+                }
             }
         }
+    }
+
+    internal class ThreadCategorization
+    {
+        public int TotalCount { get; set; }
+        public int AliveCount { get; set; }
+        public int GcCount { get; set; }
+        public int FinalizerCount { get; set; }
+        public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
+        public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();
+    }
+
+    internal class ThreadWithStackTrace
+    {
+        public ClrThread Thread { get; set; }
+        public List<ClrStackFrame> TopFrames { get; set; } = new();
     }
 }

@@ -7,6 +7,24 @@ namespace DumpDetective.Analyzers
     {
         private readonly OutputWriter _writer;
 
+        // Constants for delegate field names
+        private const string TargetFieldName = "_target";
+        private const string InvocationListFieldName = "_invocationList";
+        private const string MulticastDelegateName = "MulticastDelegate";
+
+        // Cache for system namespaces check
+        private static readonly string[] SystemNamespaces =
+        {
+            "System.",
+            "Microsoft.",
+            "MS.",
+            "Internal.",
+            "Windows.",
+            "Interop.",
+            "FxResources.",
+            "System_Private_CoreLib"
+        };
+
         public EventLeakAnalyzer(OutputWriter writer)
         {
             _writer = writer;
@@ -34,19 +52,36 @@ namespace DumpDetective.Analyzers
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
-                if (!obj.IsValid || processedObjects.Contains(obj.Address))
+                // Use Add's return value - returns false if already exists
+                if (!obj.IsValid || !processedObjects.Add(obj.Address))
                     continue;
-
-                processedObjects.Add(obj.Address);
 
                 if (obj.Type == null || IsSystemType(obj.Type.Name))
                     continue;
 
-                foreach (ClrInstanceField field in obj.Type.Fields)
+                // Cache fields enumeration
+                var fields = obj.Type.Fields;
+                bool hasEventFields = false;
+
+                // Quick check if type has any event-like fields before processing
+                foreach (var field in fields)
                 {
                     if (IsEventField(field))
                     {
-                        var subscribers = GetEventSubscribers(obj, field, heap);
+                        hasEventFields = true;
+                        break;
+                    }
+                }
+
+                if (!hasEventFields)
+                    continue;
+
+                // Now process event fields
+                foreach (ClrInstanceField field in fields)
+                {
+                    if (IsEventField(field))
+                    {
+                        var subscribers = GetEventSubscribers(obj, field);
 
                         if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                         {
@@ -68,21 +103,57 @@ namespace DumpDetective.Analyzers
 
         private List<EventGroupInfo> GroupEventLeaks(List<EventLeakInfo> eventLeaks)
         {
-            return eventLeaks
-                .GroupBy(e => new { e.PublisherType, e.EventFieldName })
-                .Select(g => new EventGroupInfo
+            // Pre-allocate with expected capacity
+            var groups = new Dictionary<(string PublisherType, string EventFieldName), List<EventLeakInfo>>();
+
+            // Manual grouping to avoid LINQ overhead
+            foreach (var leak in eventLeaks)
+            {
+                var key = (leak.PublisherType, leak.EventFieldName);
+
+                if (!groups.TryGetValue(key, out var list))
                 {
-                    PublisherType = g.Key.PublisherType,
-                    EventFieldName = g.Key.EventFieldName,
-                    InstanceCount = g.Count(),
-                    TotalSubscribers = g.Sum(x => x.SubscriberCount),
-                    AverageSubscribers = g.Average(x => x.SubscriberCount),
-                    MaxSubscribers = g.Max(x => x.SubscriberCount),
-                    MinSubscribers = g.Min(x => x.SubscriberCount),
-                    Instances = g.ToList()
-                })
-                .OrderByDescending(g => g.TotalSubscribers)
-                .ToList();
+                    list = new List<EventLeakInfo>();
+                    groups[key] = list;
+                }
+                list.Add(leak);
+            }
+
+            // Convert to EventGroupInfo and calculate stats
+            var result = new List<EventGroupInfo>(groups.Count);
+
+            foreach (var kvp in groups)
+            {
+                var instances = kvp.Value;
+                int totalSubs = 0;
+                int minSubs = int.MaxValue;
+                int maxSubs = 0;
+
+                foreach (var instance in instances)
+                {
+                    int count = instance.SubscriberCount;
+                    totalSubs += count;
+                    if (count < minSubs) minSubs = count;
+                    if (count > maxSubs) maxSubs = count;
+                }
+
+                result.Add(new EventGroupInfo
+                {
+                    PublisherType = kvp.Key.PublisherType,
+                    EventFieldName = kvp.Key.EventFieldName,
+                    InstanceCount = instances.Count,
+                    TotalSubscribers = totalSubs,
+                    AverageSubscribers = (double)totalSubs / instances.Count,
+                    MaxSubscribers = maxSubs,
+                    MinSubscribers = minSubs,
+                    Instances = instances
+                });
+            }
+
+            // Sort by total subscribers
+            result.Sort((a, b) => b.TotalSubscribers.CompareTo(a.TotalSubscribers));
+
+            return result;
         }
 
         private void PrintSummary(List<EventLeakInfo> eventLeaks, List<EventGroupInfo> groupedLeaks)
@@ -100,22 +171,49 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"  Average Subscribers: {group.AverageSubscribers:F2}");
                 _writer.WriteLine($"  Min/Max Subscribers: {group.MinSubscribers}/{group.MaxSubscribers}");
 
-                var subscriberTypes = group.Instances
-                    .SelectMany(i => i.Subscribers)
-                    .GroupBy(s => s.Type)
-                    .OrderByDescending(g => g.Count())
-                    .Take(5)
-                    .ToList();
+                // Optimized subscriber type grouping
+                var subscriberTypeCounts = GetTopSubscriberTypes(group.Instances, topCount: 5);
 
-                if (subscriberTypes.Any())
+                if (subscriberTypeCounts.Count > 0)
                 {
                     _writer.WriteLine($"  Top Subscriber Types:");
-                    foreach (var subType in subscriberTypes)
+                    foreach (var (type, count) in subscriberTypeCounts)
                     {
-                        _writer.WriteLine($"    - {subType.Key} ({subType.Count()} instance(s))");
+                        _writer.WriteLine($"    - {type} ({count} instance(s))");
                     }
                 }
             }
+        }
+
+        private List<(string Type, int Count)> GetTopSubscriberTypes(List<EventLeakInfo> instances, int topCount)
+        {
+            var typeCounts = new Dictionary<string, int>();
+
+            foreach (var instance in instances)
+            {
+                foreach (var subscriber in instance.Subscribers)
+                {
+                    if (!typeCounts.TryGetValue(subscriber.Type, out int count))
+                    {
+                        typeCounts[subscriber.Type] = 1;
+                    }
+                    else
+                    {
+                        typeCounts[subscriber.Type] = count + 1;
+                    }
+                }
+            }
+
+            // Convert to list and sort
+            var result = new List<(string Type, int Count)>(typeCounts.Count);
+            foreach (var kvp in typeCounts)
+            {
+                result.Add((kvp.Key, kvp.Value));
+            }
+
+            result.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+            return result.Count > topCount ? result.GetRange(0, topCount) : result;
         }
 
         private void PrintDetailedInstances(List<EventGroupInfo> groupedLeaks)
@@ -130,7 +228,13 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"\n[{group.PublisherType}.{group.EventFieldName}] - {group.InstanceCount} instance(s)");
                 _writer.WriteSeparator();
 
-                foreach (var leak in group.Instances.OrderByDescending(l => l.SubscriberCount).Take(5))
+                // Sort instances and take top 5
+                var topInstances = group.Instances
+                    .OrderByDescending(l => l.SubscriberCount)
+                    .Take(5)
+                    .ToList();
+
+                foreach (var leak in topInstances)
                 {
                     _writer.WriteLine($"  Instance #{detailCount++}");
                     _writer.WriteLine($"    Address: 0x{leak.PublisherAddress:X}");
@@ -139,10 +243,14 @@ namespace DumpDetective.Analyzers
                     if (leak.Subscribers.Count > 0)
                     {
                         _writer.WriteLine($"    Subscriber Types:");
-                        foreach (var subscriber in leak.Subscribers.Take(5))
+
+                        int displayCount = Math.Min(5, leak.Subscribers.Count);
+                        for (int i = 0; i < displayCount; i++)
                         {
+                            var subscriber = leak.Subscribers[i];
                             _writer.WriteLine($"      - {subscriber.Type} (0x{subscriber.Address:X})");
                         }
+
                         if (leak.Subscribers.Count > 5)
                         {
                             _writer.WriteLine($"      ... and {leak.Subscribers.Count - 5} more");
@@ -164,36 +272,29 @@ namespace DumpDetective.Analyzers
             if (string.IsNullOrEmpty(typeName))
                 return false;
 
-            string[] systemNamespaces =
+            // Use for loop instead of LINQ for better performance
+            foreach (var ns in SystemNamespaces)
             {
-                "System.",
-                "Microsoft.",
-                "MS.",
-                "Internal.",
-                "Windows.",
-                "Interop.",
-                "FxResources.",
-                "System_Private_CoreLib"
-            };
+                if (typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
 
-            return systemNamespaces.Any(ns => typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase));
+            return false;
         }
 
         private static bool IsEventField(ClrInstanceField field)
         {
-            if (field.Type == null)
+            if (field.Type?.Name is not string typeName)
                 return false;
 
-            string? typeName = field.Type.Name;
-
-            return typeName != null &&
-                   (typeName.Contains("EventHandler") ||
-                    typeName.Contains("Action") ||
-                    typeName.Contains("Func") ||
-                    typeName.Contains("Delegate"));
+            // Use Contains with StringComparison for better performance
+            return typeName.Contains("EventHandler", StringComparison.Ordinal) ||
+                   typeName.Contains("Action", StringComparison.Ordinal) ||
+                   typeName.Contains("Func", StringComparison.Ordinal) ||
+                   typeName.Contains("Delegate", StringComparison.Ordinal);
         }
 
-        private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField, ClrHeap heap)
+        private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField)
         {
             var subscribers = new List<SubscriberInfo>();
 
@@ -201,63 +302,64 @@ namespace DumpDetective.Analyzers
             {
                 ClrObject eventDelegate = eventField.ReadObject(obj, interior: false);
 
-                if (!eventDelegate.IsValid)
+                if (!eventDelegate.IsValid || eventDelegate.Type == null)
                     return subscribers;
 
-                if (eventDelegate.Type?.Name?.Contains("MulticastDelegate") == true)
+                // Check if it's a multicast delegate
+                if (eventDelegate.Type.Name?.Contains(MulticastDelegateName, StringComparison.Ordinal) == true)
                 {
-                    var invocationListField = eventDelegate.Type.GetFieldByName("_invocationList");
-                    if (invocationListField != null)
-                    {
-                        ClrObject invocationList = invocationListField.ReadObject(eventDelegate, interior: false);
-
-                        if (invocationList.IsValid && invocationList.IsArray)
-                        {
-                            for (int i = 0; i < invocationList.AsArray().Length; i++)
-                            {
-                                ClrObject delegateObj = invocationList.AsArray().GetObjectValue(i);
-                                if (delegateObj.IsValid)
-                                {
-                                    var targetField = delegateObj.Type?.GetFieldByName("_target");
-                                    if (targetField != null)
-                                    {
-                                        ClrObject target = targetField.ReadObject(delegateObj, interior: false);
-                                        if (target.IsValid && target.Type != null)
-                                        {
-                                            subscribers.Add(new SubscriberInfo
-                                            {
-                                                Address = target.Address,
-                                                Type = target.Type.Name ?? "Unknown"
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ExtractMulticastSubscribers(eventDelegate, subscribers);
                 }
                 else
                 {
-                    var targetField = eventDelegate.Type?.GetFieldByName("_target");
-                    if (targetField != null)
-                    {
-                        ClrObject target = targetField.ReadObject(eventDelegate, interior: false);
-                        if (target.IsValid && target.Type != null)
-                        {
-                            subscribers.Add(new SubscriberInfo
-                            {
-                                Address = target.Address,
-                                Type = target.Type.Name ?? "Unknown"
-                            });
-                        }
-                    }
+                    ExtractSingleSubscriber(eventDelegate, subscribers);
                 }
             }
             catch
             {
+                // Silently handle errors in delegate inspection
             }
 
             return subscribers;
+        }
+
+        private static void ExtractMulticastSubscribers(ClrObject eventDelegate, List<SubscriberInfo> subscribers)
+        {
+            var invocationListField = eventDelegate.Type?.GetFieldByName(InvocationListFieldName);
+            if (invocationListField == null)
+                return;
+
+            ClrObject invocationList = invocationListField.ReadObject(eventDelegate, interior: false);
+
+            if (!invocationList.IsValid || !invocationList.IsArray)
+                return;
+
+            var array = invocationList.AsArray();
+            for (int i = 0; i < array.Length; i++)
+            {
+                ClrObject delegateObj = array.GetObjectValue(i);
+                if (delegateObj.IsValid)
+                {
+                    ExtractSingleSubscriber(delegateObj, subscribers);
+                }
+            }
+        }
+
+        private static void ExtractSingleSubscriber(ClrObject delegateObj, List<SubscriberInfo> subscribers)
+        {
+            var targetField = delegateObj.Type?.GetFieldByName(TargetFieldName);
+            if (targetField == null)
+                return;
+
+            ClrObject target = targetField.ReadObject(delegateObj, interior: false);
+            if (target.IsValid && target.Type != null)
+            {
+                subscribers.Add(new SubscriberInfo
+                {
+                    Address = target.Address,
+                    Type = target.Type.Name ?? "Unknown"
+                });
+            }
         }
     }
 }

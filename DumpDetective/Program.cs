@@ -58,7 +58,30 @@ namespace DumpDetective
                 writer.WriteLine($"Dump file: {dumpPath}");
                 writer.WriteLine(string.Empty);
 
-                ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+                // Display CLR version information
+                writer.WriteLine("CLR VERSION INFORMATION:");
+                writer.WriteSeparator();
+
+                if (dataTarget.ClrVersions.Length == 0)
+                {
+                    writer.WriteLine("No CLR versions found in dump!");
+                    return;
+                }
+
+                foreach (ClrInfo clrVersion in dataTarget.ClrVersions)
+                {
+                    writer.WriteLine($"CLR Version: {clrVersion.Version}");
+                    writer.WriteLine($"Module: {clrVersion.ModuleInfo.FileName}");
+                    writer.WriteLine($"Module Base: 0x{clrVersion.ModuleInfo.ImageBase:X}");
+                    writer.WriteLine(string.Empty);
+                }
+
+                // Use the first (primary) CLR version for analysis
+                ClrInfo primaryClr = dataTarget.ClrVersions[0];
+                writer.WriteLine($"Analyzing using CLR Version: {primaryClr.Version}");
+                writer.WriteLine(string.Empty);
+
+                ClrRuntime runtime = primaryClr.CreateRuntime();
                 ClrHeap heap = runtime.Heap;
 
                 if (!heap.CanWalkHeap)
@@ -78,7 +101,7 @@ namespace DumpDetective
                 new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
 
                 writer.WriteSeparator();
-                writer.WriteLine($"Analysis complete. Total objects analyzed");
+                writer.WriteLine($"Analysis complete");
 
                 if (outputPath != null)
                 {

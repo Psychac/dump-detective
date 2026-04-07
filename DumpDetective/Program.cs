@@ -8,12 +8,14 @@ namespace DumpDetective
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: DumpDetective <dump-file-path>");
-                Console.WriteLine("Example: DumpDetective C:\\dumps\\myapp.dmp");
+                Console.WriteLine("Usage: DumpDetective <dump-file-path> [output-file-path]");
+                Console.WriteLine("Example: DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt");
                 return;
             }
 
             string dumpPath = args[0];
+            //string dumpPath = Path.GetFullPath("D:\\DUmps\\01-02\\Time_03_07_47PM__ProcessList\\w3wp.exe__BALLOADTEST__PID__772__Date__04_01_2026__Time_03_07_47PM__418__Manual Dump.dmp");
+            string? outputPath = args.Length > 1 ? args[1] : null;
 
             if (!File.Exists(dumpPath))
             {
@@ -22,11 +24,15 @@ namespace DumpDetective
             }
 
             Console.WriteLine($"Analyzing dump: {dumpPath}");
+            if (outputPath != null)
+            {
+                Console.WriteLine($"Output will be written to: {outputPath}");
+            }
             Console.WriteLine();
 
             try
             {
-                AnalyzeDump(dumpPath);
+                AnalyzeDump(dumpPath, outputPath);
             }
             catch (Exception ex)
             {
@@ -35,65 +41,89 @@ namespace DumpDetective
             }
         }
 
-        static void AnalyzeDump(string dumpPath)
+        static void AnalyzeDump(string dumpPath, string? outputPath)
         {
-            using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
-
-            Console.WriteLine($"Dump file: {dumpPath}");
-            Console.WriteLine();
-
-            ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
-            ClrHeap heap = runtime.Heap;
-
-            if (!heap.CanWalkHeap)
+            StreamWriter? fileWriter = null;
+            try
             {
-                Console.WriteLine("Cannot walk the heap!");
-                return;
-            }
-
-            Console.WriteLine("Searching for event leaks...");
-            Console.WriteLine(new string('-', 80));
-
-            var eventLeaks = FindEventLeaks(heap);
-
-            if (eventLeaks.Count == 0)
-            {
-                Console.WriteLine("No event leaks detected!");
-            }
-            else
-            {
-                Console.WriteLine($"\nFound {eventLeaks.Count} potential event leak(s):\n");
-
-                int count = 1;
-                foreach (var leak in eventLeaks.OrderByDescending(l => l.SubscriberCount))
+                if (outputPath != null)
                 {
-                    Console.WriteLine($"#{count++}");
-                    Console.WriteLine($"  Publisher Type: {leak.PublisherType}");
-                    Console.WriteLine($"  Event Field: {leak.EventFieldName}");
-                    Console.WriteLine($"  Subscriber Count: {leak.SubscriberCount}");
-                    Console.WriteLine($"  Publisher Address: 0x{leak.PublisherAddress:X}");
+                    fileWriter = new StreamWriter(outputPath, false);
+                }
 
-                    if (leak.Subscribers.Count > 0)
+                using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+
+                WriteLine($"Dump file: {dumpPath}", fileWriter);
+                WriteLine(string.Empty, fileWriter);
+
+                ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+                ClrHeap heap = runtime.Heap;
+
+                if (!heap.CanWalkHeap)
+                {
+                    WriteLine("Cannot walk the heap!", fileWriter);
+                    return;
+                }
+
+                WriteLine("Searching for event leaks...", fileWriter);
+                WriteLine(new string('-', 80), fileWriter);
+
+                var eventLeaks = FindEventLeaks(heap, 0);
+
+                if (eventLeaks.Count == 0)
+                {
+                    WriteLine("No event leaks detected!", fileWriter);
+                }
+                else
+                {
+                    WriteLine($"\nFound {eventLeaks.Count} potential event leak(s):\n", fileWriter);
+
+                    int count = 1;
+                    foreach (var leak in eventLeaks.OrderByDescending(l => l.SubscriberCount))
                     {
-                        Console.WriteLine("  Subscribers:");
-                        foreach (var subscriber in leak.Subscribers.Take(10))
+                        WriteLine($"#{count++}", fileWriter);
+                        WriteLine($"  Publisher Type: {leak.PublisherType}", fileWriter);
+                        WriteLine($"  Event Field: {leak.EventFieldName}", fileWriter);
+                        WriteLine($"  Subscriber Count: {leak.SubscriberCount}", fileWriter);
+                        WriteLine($"  Publisher Address: 0x{leak.PublisherAddress:X}", fileWriter);
+
+                        if (leak.Subscribers.Count > 0)
                         {
-                            Console.WriteLine($"    - {subscriber.Type} (0x{subscriber.Address:X})");
+                            WriteLine("  Subscribers:", fileWriter);
+                            foreach (var subscriber in leak.Subscribers.Take(10))
+                            {
+                                WriteLine($"    - {subscriber.Type} (0x{subscriber.Address:X})", fileWriter);
+                            }
+                            if (leak.Subscribers.Count > 10)
+                            {
+                                WriteLine($"    ... and {leak.Subscribers.Count - 10} more", fileWriter);
+                            }
                         }
-                        if (leak.Subscribers.Count > 10)
-                        {
-                            Console.WriteLine($"    ... and {leak.Subscribers.Count - 10} more");
-                        }
+                        WriteLine(string.Empty, fileWriter);
                     }
-                    Console.WriteLine();
+                }
+
+                WriteLine(new string('-', 80), fileWriter);
+                WriteLine($"Analysis complete. Total objects analyzed", fileWriter);
+
+                if (outputPath != null)
+                {
+                    Console.WriteLine($"\nReport written to: {outputPath}");
                 }
             }
-
-            Console.WriteLine(new string('-', 80));
-            Console.WriteLine($"Analysis complete. Total objects analyzed");
+            finally
+            {
+                fileWriter?.Dispose();
+            }
         }
 
-        static List<EventLeakInfo> FindEventLeaks(ClrHeap heap)
+        static void WriteLine(string message, StreamWriter? fileWriter)
+        {
+            Console.WriteLine(message);
+            fileWriter?.WriteLine(message);
+        }
+
+        static List<EventLeakInfo> FindEventLeaks(ClrHeap heap, int minSubscribers = 5)
         {
             var leaks = new List<EventLeakInfo>();
             var processedObjects = new HashSet<ulong>();
@@ -108,13 +138,16 @@ namespace DumpDetective
                 if (obj.Type == null)
                     continue;
 
+                if (IsSystemType(obj.Type.Name))
+                    continue;
+
                 foreach (ClrInstanceField field in obj.Type.Fields)
                 {
                     if (IsEventField(field))
                     {
                         var subscribers = GetEventSubscribers(obj, field, heap);
 
-                        if (subscribers.Count > 5)
+                        if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                         {
                             leaks.Add(new EventLeakInfo
                             {
@@ -130,6 +163,26 @@ namespace DumpDetective
             }
 
             return leaks;
+        }
+
+        static bool IsSystemType(string? typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return false;
+
+            string[] systemNamespaces = 
+            {
+                "System.",
+                "Microsoft.",
+                "MS.",
+                "Internal.",
+                "Windows.",
+                "Interop.",
+                "FxResources.",
+                "System_Private_CoreLib"
+            };
+
+            return systemNamespaces.Any(ns => typeName.StartsWith(ns, StringComparison.OrdinalIgnoreCase));
         }
 
         static bool IsEventField(ClrInstanceField field)

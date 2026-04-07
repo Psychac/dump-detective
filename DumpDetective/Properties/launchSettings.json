@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DumpDetective": {
+      "commandName": "Project",
+      "commandLineArgs": "\"D:\\\\DUmps\\\\01-02\\\\Time_03_07_47PM__ProcessList\\\\w3wp.exe__BALLOADTEST__PID__772__Date__04_01_2026__Time_03_07_47PM__418__Manual Dump.dmp\" \"D:\\\\DUmps\\\\01-02\\\\Time_03_07_47PM__ProcessList\\\\w3wp.exe__BALLOADTEST__PID__772__Date__04_01_2026__Time_03_07_47PM__418__Manual Dump.txt\""
+    }
+  }
+}

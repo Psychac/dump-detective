@@ -1,6 +1,8 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Utilities;
 
+using System.Diagnostics;
+
 namespace DumpDetective.Analyzers
 {
     internal class MemoryAnalyzer
@@ -13,12 +15,12 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public void Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("MEMORY ANALYSIS:");
 
-            // Use cached type statistics directly - no copying
-            var typeStats = cache.GetOrBuildTypeStatistics(heap);
+            // Build type statistics on-demand
+            var typeStats = BuildTypeStatistics(heap);
 
             PrintSummary(typeStats);
             PrintTopObjectsByCount(typeStats);
@@ -26,6 +28,38 @@ namespace DumpDetective.Analyzers
             PrintLOHUsage(typeStats);
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
+        }
+
+        private Dictionary<string, TypeStatistics> BuildTypeStatistics(ClrHeap heap)
+        {
+            var typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type == null)
+                    continue;
+
+                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
+                ulong size = obj.Size;
+                bool isLoh = size >= 85000;
+
+                if (!typeStats.TryGetValue(typeName, out var stats))
+                {
+                    stats = new TypeStatistics { TypeName = typeName };
+                    typeStats[typeName] = stats;
+                }
+
+                stats.Count++;
+                stats.TotalSize += size;
+
+                if (isLoh)
+                {
+                    stats.LohCount++;
+                    stats.LohSize += size;
+                }
+            }
+
+            return typeStats;
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)

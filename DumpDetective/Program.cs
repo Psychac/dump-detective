@@ -56,6 +56,10 @@ namespace DumpDetective
                 var writer = new OutputWriter(fileWriter);
                 var cache = new HeapAnalysisCache();
 
+                // Memory diagnostic setup - track memory at each checkpoint
+                MemorySnapshot previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
+                MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
+
                 writer.WriteLine($"Dump file: {dumpPath}");
                 writer.WriteLine(string.Empty);
 
@@ -85,33 +89,65 @@ namespace DumpDetective
                 ClrRuntime runtime = primaryClr.CreateRuntime();
                 ClrHeap heap = runtime.Heap;
 
+                var snapshot = MemoryDiagnostic.TakeSnapshot("1. After runtime creation");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+
                 if (!heap.CanWalkHeap)
                 {
                     writer.WriteLine("Cannot walk the heap!");
                     return;
                 }
 
-                // Run all analyses (with shared cache for performance)
-                // Build cache first (single heap enumeration)
-                var typeStats = cache.GetOrBuildTypeStatistics(heap);
+                // Run all analyses (no shared cache - saves memory)
+                Console.WriteLine("\n▶ Running core memory analyzers...");
+                new MemoryAnalyzer(writer).Analyze(heap);
 
-                // Core memory analysis
-                new MemoryAnalyzer(writer).Analyze(heap, cache);
-                new GCGenerationAnalyzer(writer).Analyze(heap, cache);
+                snapshot = MemoryDiagnostic.TakeSnapshot("2. After MemoryAnalyzer");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+
+                new GCGenerationAnalyzer(writer).Analyze(heap);
+
+                snapshot = MemoryDiagnostic.TakeSnapshot("3. After GCGenerationAnalyzer");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
 
                 // Crash/Hang detection (run early for critical issues)
+                Console.WriteLine("\n▶ Analyzing for crashes and hangs...");
                 new CrashAnalyzer(writer).Analyze(runtime, heap);
                 new HangAnalyzer(writer).Analyze(runtime, heap);
 
+                snapshot = MemoryDiagnostic.TakeSnapshot("4. After CrashAnalyzer + HangAnalyzer");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+
                 // Memory leak detection
+                Console.WriteLine("\n▶ Detecting memory leaks...");
                 new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
-                new StaticRootLeakDetector(writer).Analyze(heap, cache);
-                new EventHandlerLeakDetector(writer).Analyze(heap, cache);
-                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 5);
+
+                snapshot = MemoryDiagnostic.TakeSnapshot("5. After MemoryLeakAnalyzer");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+
+                Console.WriteLine("\n▶ Analyzing static roots and event handlers...");
+                new StaticRootLeakDetector(writer).Analyze(heap);
+                new EventHandlerLeakDetector(writer).Analyze(heap);
+                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 2);
+
+                snapshot = MemoryDiagnostic.TakeSnapshot("6. After all leak detectors");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
 
                 // Thread and event analysis
+                Console.WriteLine("\n▶ Analyzing threads and events...");
                 new ThreadAnalyzer(writer).Analyze(runtime);
-                new EventLeakAnalyzer(writer).Analyze(heap, cache, minSubscribers: 0);
+                new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
+
+                snapshot = MemoryDiagnostic.TakeSnapshot("7. After ThreadAnalyzer + EventLeakAnalyzer");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+
+                Console.WriteLine("\n✅ Analysis complete!");
 
                 writer.WriteSeparator();
                 writer.WriteLine($"Analysis complete");

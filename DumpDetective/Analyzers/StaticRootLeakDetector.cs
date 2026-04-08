@@ -12,12 +12,12 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public void Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
             _writer.WriteLine("Identifying static fields that may be causing memory leaks...\n");
 
-            var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
+            var staticRootAnalysis = AnalyzeStaticRoots(heap);
 
             if (staticRootAnalysis.Count == 0)
             {
@@ -77,7 +77,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine(StringConstants.Equals80);
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, HeapAnalysisCache cache)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
@@ -91,8 +91,8 @@ namespace DumpDetective.Analyzers
                 if (!obj.IsValid || !processedRoots.Add(obj.Address))
                     continue;
 
-                // Calculate retained memory using cache
-                var retainedObjects = cache.GetRetainedObjects(heap, obj.Address);
+                // Calculate retained memory on-demand (no cache)
+                var retainedObjects = GetRetainedObjects(heap, obj.Address);
 
                 // Only report if significant memory impact (> 1MB or > 100 objects)
                 ulong totalSize = (ulong)retainedObjects.Sum(addr => (long)heap.GetObject(addr).Size);
@@ -180,6 +180,34 @@ namespace DumpDetective.Analyzers
                 }
             }
             return false;
+        }
+
+        private HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
+        {
+            var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
+            var queue = new Queue<ulong>(capacity: 256);
+
+            queue.Enqueue(rootAddress);
+            retained.Add(rootAddress);
+
+            while (queue.Count > 0 && retained.Count < maxObjects)
+            {
+                var current = queue.Dequeue();
+                var obj = heap.GetObject(current);
+
+                if (!obj.IsValid)
+                    continue;
+
+                foreach (var reference in obj.EnumerateReferences(carefully: true))
+                {
+                    if (reference.IsValid && retained.Add(reference.Address))
+                    {
+                        queue.Enqueue(reference.Address);
+                    }
+                }
+            }
+
+            return retained;
         }
     }
 

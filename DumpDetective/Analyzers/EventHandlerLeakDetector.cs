@@ -12,12 +12,12 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public void Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("EVENT HANDLER LEAK DETECTION:");
             _writer.WriteLine("Identifying event subscriptions that may be causing memory leaks...\n");
 
-            var leaks = DetectEventHandlerLeaks(heap, cache);
+            var leaks = DetectEventHandlerLeaks(heap);
 
             if (leaks.Count == 0)
             {
@@ -119,18 +119,18 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine(StringConstants.Equals80);
         }
 
-        private List<EventHandlerLeak> DetectEventHandlerLeaks(ClrHeap heap, HeapAnalysisCache cache)
+        private List<EventHandlerLeak> DetectEventHandlerLeaks(ClrHeap heap)
         {
             var leaks = new List<EventHandlerLeak>();
-            var staticRoots = cache.GetStaticRootedAddresses(heap);
+            var processedObjects = new HashSet<ulong>();
+            var staticRoots = GetStaticRootedAddresses(heap);
 
-            // Use cached event publishers instead of heap enumeration
-            var eventPublishers = cache.GetEventPublishers();
-
-            foreach (var publisherInfo in eventPublishers)
+            foreach (ClrObject obj in heap.EnumerateObjects())
             {
-                ClrObject obj = heap.GetObject(publisherInfo.Address);
-                if (!obj.IsValid || obj.Type == null)
+                if (!obj.IsValid || !processedObjects.Add(obj.Address) || obj.Type == null)
+                    continue;
+
+                if (TypeFilterHelper.IsSystemType(obj.Type.Name))
                     continue;
 
                 bool isStaticRooted = staticRoots.Contains(obj.Address);

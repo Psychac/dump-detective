@@ -8,7 +8,6 @@ namespace DumpDetective.Utilities
         private HashSet<ulong>? _staticRootedAddresses;
         private Dictionary<string, TypeStatistics>? _typeStats;
         private Dictionary<string, ulong>? _sampleInstances;
-        private List<EventPublisherInfo>? _eventPublishers;
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)
         {
@@ -38,7 +37,6 @@ namespace DumpDetective.Utilities
 
             _typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
             _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
-            _eventPublishers = new List<EventPublisherInfo>(capacity: 256);
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -63,30 +61,6 @@ namespace DumpDetective.Utilities
                 {
                     stats.LohCount++;
                     stats.LohSize += size;
-                }
-
-                // Collect event publisher objects (non-system types with event fields)
-                if (!TypeFilterHelper.IsSystemType(typeName))
-                {
-                    bool hasEventFields = false;
-                    foreach (var field in obj.Type.Fields)
-                    {
-                        if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
-                        {
-                            hasEventFields = true;
-                            break;
-                        }
-                    }
-
-                    if (hasEventFields)
-                    {
-                        _eventPublishers.Add(new EventPublisherInfo
-                        {
-                            Address = obj.Address,
-                            TypeName = typeName,
-                            Size = size
-                        });
-                    }
                 }
             }
 
@@ -127,18 +101,6 @@ namespace DumpDetective.Utilities
 
             return retained;
         }
-
-        public List<EventPublisherInfo> GetEventPublishers()
-        {
-            return _eventPublishers ?? new List<EventPublisherInfo>();
-        }
-    }
-
-    internal class EventPublisherInfo
-    {
-        public ulong Address { get; set; }
-        public string TypeName { get; set; } = string.Empty;
-        public ulong Size { get; set; }
     }
 
     internal class TaskStatistics
@@ -160,3 +122,4 @@ namespace DumpDetective.Utilities
         public ulong LohSize { get; set; }
     }
 }
+

@@ -12,9 +12,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache, int minSubscribers = 0)
+        public void Analyze(ClrHeap heap, int minSubscribers = 0)
         {
-            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers);
+            var eventLeaks = FindEventLeaks(heap, minSubscribers);
 
             if (eventLeaks.Count == 0)
             {
@@ -27,17 +27,17 @@ namespace DumpDetective.Analyzers
             PrintDetailedInstances(groupedLeaks);
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, HeapAnalysisCache cache, int minSubscribers)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, int minSubscribers)
         {
             var leaks = new List<EventLeakInfo>();
+            var processedObjects = new HashSet<ulong>();
 
-            // Use cached event publishers instead of heap enumeration
-            var eventPublishers = cache.GetEventPublishers();
-
-            foreach (var publisherInfo in eventPublishers)
+            foreach (ClrObject obj in heap.EnumerateObjects())
             {
-                ClrObject obj = heap.GetObject(publisherInfo.Address);
-                if (!obj.IsValid || obj.Type == null)
+                if (!obj.IsValid || !processedObjects.Add(obj.Address))
+                    continue;
+
+                if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name))
                     continue;
 
                 // Process event fields

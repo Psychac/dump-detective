@@ -11,8 +11,14 @@ namespace DumpDetective.Utilities
 
         public void WriteLine(string message)
         {
-            Console.WriteLine(message);
+            // Write to file only - console is reserved for progress/diagnostics
             _fileWriter?.WriteLine(message);
+
+            // If no file writer, write to console (when user doesn't specify output file)
+            if (_fileWriter == null)
+            {
+                Console.WriteLine(message);
+            }
         }
 
         public void WriteHeader(string title)

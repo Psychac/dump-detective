@@ -95,12 +95,21 @@ namespace DumpDetective
                 // Build cache first (single heap enumeration)
                 var typeStats = cache.GetOrBuildTypeStatistics(heap);
 
+                // Core memory analysis
                 new MemoryAnalyzer(writer).Analyze(heap, cache);
                 new GCGenerationAnalyzer(writer).Analyze(heap, cache);
+
+                // Crash/Hang detection (run early for critical issues)
+                new CrashAnalyzer(writer).Analyze(runtime, heap);
+                new HangAnalyzer(writer).Analyze(runtime, heap);
+
+                // Memory leak detection
                 new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
                 new StaticRootLeakDetector(writer).Analyze(heap, cache);
                 new EventHandlerLeakDetector(writer).Analyze(heap, cache);
                 new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 5);
+
+                // Thread and event analysis
                 new ThreadAnalyzer(writer).Analyze(runtime);
                 new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
 

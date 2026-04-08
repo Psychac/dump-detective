@@ -1,6 +1,10 @@
 {
   "profiles": {
-    "DumpDetective": {
+    "CrashAnalysis": {
+      "commandName": "Project",
+      "commandLineArgs": "\"D:\\DUmps\\Crash_IIS_BALTSTPRD\\\\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.dmp\" \"D:\\DUmps\\Crash_IIS_BALTSTPRD\\\\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.txt\""
+    },
+    "MemoryLeak": {
       "commandName": "Project",
       "commandLineArgs": "\"D:\\\\DUmps\\\\01-02\\\\Time_03_07_47PM__ProcessList\\\\w3wp.exe__BALLOADTEST__PID__772__Date__04_01_2026__Time_03_07_47PM__418__Manual Dump.dmp\" \"D:\\\\DUmps\\\\01-02\\\\Time_03_07_47PM__ProcessList\\\\w3wp.exe__BALLOADTEST__PID__772__Date__04_01_2026__Time_03_07_47PM__418__Manual Dump.txt\""
     }

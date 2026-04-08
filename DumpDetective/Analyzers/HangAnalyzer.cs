@@ -133,7 +133,10 @@ namespace DumpDetective.Analyzers
         {
             var analysis = new ThreadPoolAnalysis();
 
-            // Look for ThreadPool-related objects
+            // Limit memory usage - don't enumerate all tasks
+            const int MaxTasksToScan = 50000;
+            int tasksScanned = 0;
+
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
                 if (!obj.IsValid || obj.Type == null)
@@ -148,29 +151,41 @@ namespace DumpDetective.Analyzers
                     analysis.QueuedWorkItems++;
                 }
 
-                // Count tasks
+                // Count tasks (limit to prevent memory issues)
                 if (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 {
+                    tasksScanned++;
                     analysis.TotalTasks++;
-                    
-                    // Try to determine task state
-                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                    if (stateField != null)
-                    {
-                        int stateFlags = stateField.Read<int>(obj, interior: false);
-                        
-                        // Task state flags (from Task source code)
-                        bool isCompleted = (stateFlags & 0x1000000) != 0;
-                        bool isFaulted = (stateFlags & 0x200000) != 0;
-                        bool isCanceled = (stateFlags & 0x400000) != 0;
 
-                        if (isFaulted)
-                            analysis.FaultedTasks++;
-                        else if (isCanceled)
-                            analysis.CanceledTasks++;
-                        else if (!isCompleted)
-                            analysis.PendingTasks++;
+                    // Only analyze task state for first N tasks to save memory
+                    if (tasksScanned <= MaxTasksToScan)
+                    {
+                        // Try to determine task state
+                        var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                        if (stateField != null)
+                        {
+                            int stateFlags = stateField.Read<int>(obj, interior: false);
+
+                            // Task state flags (from Task source code)
+                            bool isCompleted = (stateFlags & 0x1000000) != 0;
+                            bool isFaulted = (stateFlags & 0x200000) != 0;
+                            bool isCanceled = (stateFlags & 0x400000) != 0;
+
+                            if (isFaulted)
+                                analysis.FaultedTasks++;
+                            else if (isCanceled)
+                                analysis.CanceledTasks++;
+                            else if (!isCompleted)
+                                analysis.PendingTasks++;
+                        }
                     }
+                }
+
+                // Early exit if we've scanned enough
+                if (tasksScanned > MaxTasksToScan && analysis.QueuedWorkItems > 1000)
+                {
+                    analysis.TaskScanLimited = true;
+                    break;
                 }
             }
 
@@ -267,6 +282,11 @@ namespace DumpDetective.Analyzers
             {
                 _writer.WriteLine($"\n⚠️  WARNING: {tpInfo.PendingTasks} pending tasks!");
                 _writer.WriteLine($"    Many tasks waiting to execute - may indicate thread starvation.");
+            }
+
+            if (tpInfo.TaskScanLimited)
+            {
+                _writer.WriteLine($"\n📊 Note: Task scan limited to prevent memory issues (50,000 tasks analyzed).");
             }
         }
 
@@ -377,6 +397,7 @@ namespace DumpDetective.Analyzers
         public int PendingTasks { get; set; }
         public int FaultedTasks { get; set; }
         public int CanceledTasks { get; set; }
+        public bool TaskScanLimited { get; set; }
     }
 
     internal enum WaitType

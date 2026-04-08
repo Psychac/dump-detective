@@ -37,6 +37,9 @@ namespace DumpDetective.Analyzers
             var analysis = new ExceptionAnalysis();
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
 
+            // Limit memory usage - only store top exceptions
+            const int MaxExceptionsPerType = 10;
+
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
                 if (!obj.IsValid || obj.Type == null)
@@ -47,19 +50,40 @@ namespace DumpDetective.Analyzers
                 {
                     analysis.TotalExceptions++;
 
-                    var exceptionInstance = ExtractExceptionInfo(obj, runtime);
-                    
-                    if (!exceptionsByType.TryGetValue(exceptionInstance.Type, out var list))
+                    // Only extract detailed info if we haven't hit the limit
+                    if (!exceptionsByType.TryGetValue(obj.Type.Name, out var list))
                     {
-                        list = new List<ExceptionInstance>();
-                        exceptionsByType[exceptionInstance.Type] = list;
+                        list = new List<ExceptionInstance>(capacity: MaxExceptionsPerType);
+                        exceptionsByType[obj.Type.Name] = list;
                     }
-                    list.Add(exceptionInstance);
 
-                    // Check if this exception is on a thread (likely the crash)
-                    if (exceptionInstance.ThreadId.HasValue)
+                    // Only store details for top N exceptions per type to save memory
+                    if (list.Count < MaxExceptionsPerType)
                     {
-                        analysis.ActiveExceptions++;
+                        var exceptionInstance = ExtractExceptionInfo(obj, runtime);
+                        list.Add(exceptionInstance);
+
+                        // Check if this exception is on a thread (likely the crash)
+                        if (exceptionInstance.ThreadId.HasValue)
+                        {
+                            analysis.ActiveExceptions++;
+                        }
+                    }
+                    else
+                    {
+                        // Still check if it's active for the count
+                        foreach (var thread in runtime.Threads)
+                        {
+                            if (thread.CurrentException != null && thread.CurrentException.Address == obj.Address)
+                            {
+                                analysis.ActiveExceptions++;
+
+                                // If active, extract it even if over limit (crashes are priority)
+                                var exceptionInstance = ExtractExceptionInfo(obj, runtime);
+                                list.Add(exceptionInstance);
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -110,6 +134,9 @@ namespace DumpDetective.Analyzers
                     }
                 }
 
+                // Get the ORIGINAL stack trace from exception object (not thread stack)
+                instance.OriginalStackTrace = ExtractExceptionStackTrace(exceptionObj);
+
                 // Find thread that has this exception
                 foreach (var thread in runtime.Threads)
                 {
@@ -117,7 +144,7 @@ namespace DumpDetective.Analyzers
                     {
                         instance.ThreadId = (uint)thread.ManagedThreadId;
                         instance.OSThreadId = thread.OSThreadId;
-                        instance.StackTrace = thread.EnumerateStackTrace().Take(10).ToList();
+                        instance.CurrentThreadStack = thread.EnumerateStackTrace().Take(10).ToList();
                         break;
                     }
                 }
@@ -128,6 +155,104 @@ namespace DumpDetective.Analyzers
             }
 
             return instance;
+        }
+
+        private List<string> ExtractExceptionStackTrace(ClrObject exceptionObj)
+        {
+            var stackFrames = new List<string>();
+
+            try
+            {
+                // Try to get _stackTraceString first (formatted string)
+                var stackTraceStringField = exceptionObj.Type?.GetFieldByName("_stackTraceString");
+                if (stackTraceStringField != null)
+                {
+                    var stackTraceObj = stackTraceStringField.ReadObject(exceptionObj, interior: false);
+                    if (stackTraceObj.IsValid)
+                    {
+                        string? stackTraceStr = stackTraceObj.AsString();
+                        if (!string.IsNullOrEmpty(stackTraceStr))
+                        {
+                            // Split by newlines and clean up
+                            var lines = stackTraceStr.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var line in lines)
+                            {
+                                string trimmed = line.Trim();
+                                if (!string.IsNullOrEmpty(trimmed))
+                                {
+                                    stackFrames.Add(trimmed);
+                                }
+                            }
+                            return stackFrames;
+                        }
+                    }
+                }
+
+                // Try to parse _stackTrace field (native format)
+                var stackTraceField = exceptionObj.Type?.GetFieldByName("_stackTrace");
+                if (stackTraceField != null)
+                {
+                    var stackTraceObj = stackTraceField.ReadObject(exceptionObj, interior: false);
+                    if (stackTraceObj.IsValid && stackTraceObj.IsArray)
+                    {
+                        var array = stackTraceObj.AsArray();
+                        for (int i = 0; i < Math.Min(array.Length, 50); i++)
+                        {
+                            var element = array.GetObjectValue(i);
+                            if (element.IsValid && element.Type != null)
+                            {
+                                // Each element is a StackTraceElement - try to extract method info
+                                var methodField = element.Type.GetFieldByName("_method");
+                                if (methodField != null)
+                                {
+                                    var methodObj = methodField.ReadObject(element, interior: false);
+                                    if (methodObj.IsValid)
+                                    {
+                                        // Try to get method name
+                                        var nameField = methodObj.Type?.GetFieldByName("_name");
+                                        if (nameField != null)
+                                        {
+                                            var nameObj = nameField.ReadObject(methodObj, interior: false);
+                                            if (nameObj.IsValid)
+                                            {
+                                                string? methodName = nameObj.AsString();
+                                                if (!string.IsNullOrEmpty(methodName))
+                                                {
+                                                    stackFrames.Add($"   at {methodName}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If still no stack, try to get from exception's ToString()
+                if (stackFrames.Count == 0)
+                {
+                    var remoteStackField = exceptionObj.Type?.GetFieldByName("_remoteStackTraceString");
+                    if (remoteStackField != null)
+                    {
+                        var remoteStackObj = remoteStackField.ReadObject(exceptionObj, interior: false);
+                        if (remoteStackObj.IsValid)
+                        {
+                            string? remoteStack = remoteStackObj.AsString();
+                            if (!string.IsNullOrEmpty(remoteStack))
+                            {
+                                stackFrames.Add(remoteStack);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Return what we have
+            }
+
+            return stackFrames;
         }
 
         private void PrintExceptionSummary(ExceptionAnalysis analysis)
@@ -188,20 +313,35 @@ namespace DumpDetective.Analyzers
                     if (ex.ThreadId.HasValue)
                     {
                         _writer.WriteLine($"    ⚠️  ACTIVE on Thread: {ex.ThreadId} (OS: {ex.OSThreadId})");
-                        
-                        if (ex.StackTrace.Count > 0)
-                        {
-                            _writer.WriteLine($"    Stack Trace:");
-                            foreach (var frame in ex.StackTrace)
-                            {
-                                string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
-                                _writer.WriteLine($"      {FormatHelper.TruncateString(method, 70)}");
-                            }
-                        }
                     }
                     else
                     {
                         _writer.WriteLine($"    Status: Inactive (collected exception object)");
+                    }
+
+                    // Print ORIGINAL exception stack trace (where it was thrown)
+                    if (ex.OriginalStackTrace.Count > 0)
+                    {
+                        _writer.WriteLine($"\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
+                        foreach (var frame in ex.OriginalStackTrace.Take(20))
+                        {
+                            _writer.WriteLine($"      {frame}");
+                        }
+                        if (ex.OriginalStackTrace.Count > 20)
+                        {
+                            _writer.WriteLine($"      ... and {ex.OriginalStackTrace.Count - 20} more frames");
+                        }
+                    }
+
+                    // Show current thread position (if different)
+                    if (ex.CurrentThreadStack.Count > 0 && ex.ThreadId.HasValue)
+                    {
+                        _writer.WriteLine($"\n    Current Thread Position (exception handling):");
+                        foreach (var frame in ex.CurrentThreadStack.Take(5))
+                        {
+                            string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
+                            _writer.WriteLine($"      {FormatHelper.TruncateString(method, 70)}");
+                        }
                     }
                 }
 
@@ -229,6 +369,7 @@ namespace DumpDetective.Analyzers
         public string? InnerExceptionType { get; set; }
         public uint? ThreadId { get; set; }
         public uint? OSThreadId { get; set; }
-        public List<ClrStackFrame> StackTrace { get; set; } = new();
+        public List<string> OriginalStackTrace { get; set; } = new();
+        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
     }
 }

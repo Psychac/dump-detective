@@ -28,9 +28,14 @@ namespace DumpDetective.Analyzers
 
             _writer.WriteLine($"Found {staticRootAnalysis.Count} static root(s) with significant memory impact:\n");
 
+            // Manual sorting - no LINQ allocations
+            staticRootAnalysis.Sort((a, b) => b.TotalMemoryImpact.CompareTo(a.TotalMemoryImpact));
+
             int rootNum = 1;
-            foreach (var analysis in staticRootAnalysis.OrderByDescending(a => a.TotalMemoryImpact).Take(15))
+            int rootCount = 0;
+            foreach (var analysis in staticRootAnalysis)
             {
+                if (rootCount >= 15) break;
                 _writer.WriteLine($"[{rootNum++}] STATIC ROOT LEAK");
                 _writer.WriteSeparator();
                 _writer.WriteLine($"  Root: {analysis.RootDescription}");
@@ -39,12 +44,15 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"  Total Retained Memory: {FormatHelper.FormatBytes(analysis.TotalMemoryImpact)}");
                 _writer.WriteLine($"  Objects Kept Alive: {analysis.ObjectsKeptAlive:N0}");
 
-                if (analysis.TopRetainedTypes.Any())
+                if (analysis.TopRetainedTypes.Count > 0)
                 {
                     _writer.WriteLine($"\n  Top Types Kept Alive:");
-                    foreach (var typeInfo in analysis.TopRetainedTypes.Take(5))
+                    int typeCount = 0;
+                    foreach (var typeInfo in analysis.TopRetainedTypes)
                     {
+                        if (typeCount >= 5) break;
                         _writer.WriteLine($"    - {typeInfo.TypeName}: {typeInfo.Count:N0} instance(s), {FormatHelper.FormatBytes(typeInfo.TotalSize)}");
+                        typeCount++;
                     }
                 }
 
@@ -63,6 +71,7 @@ namespace DumpDetective.Analyzers
                 }
 
                 _writer.WriteLine(string.Empty);
+                rootCount++;
             }
 
             _writer.WriteLine(StringConstants.Equals80);
@@ -132,19 +141,26 @@ namespace DumpDetective.Analyzers
                 info.TotalSize += obj.Size;
             }
 
-            return typeStats.Values.OrderByDescending(t => t.TotalSize).ToList();
+            // Manual sorting - no LINQ allocations
+            var result = new List<RetainedTypeInfo>(typeStats.Values);
+            result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
+            return result;
         }
 
         private bool ContainsCollectionTypes(ClrHeap heap, HashSet<ulong> addresses)
         {
-            foreach (var address in addresses.Take(100))
+            int checkedCount = 0;
+            foreach (var address in addresses)
             {
+                if (checkedCount >= 100) break;
                 var obj = heap.GetObject(address);
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
                 if (TypeFilterHelper.IsCollectionType(obj.Type.Name))
                     return true;
+
+                checkedCount++;
             }
             return false;
         }

@@ -12,9 +12,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, int minSubscribers = 0)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache, int minSubscribers = 0)
         {
-            var eventLeaks = FindEventLeaks(heap, minSubscribers);
+            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers);
 
             if (eventLeaks.Count == 0)
             {
@@ -27,39 +27,21 @@ namespace DumpDetective.Analyzers
             PrintDetailedInstances(groupedLeaks);
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, int minSubscribers)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, HeapAnalysisCache cache, int minSubscribers)
         {
             var leaks = new List<EventLeakInfo>();
-            var processedObjects = new HashSet<ulong>();
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            // Use cached event publishers instead of heap enumeration
+            var eventPublishers = cache.GetEventPublishers();
+
+            foreach (var publisherInfo in eventPublishers)
             {
-                // Use Add's return value - returns false if already exists
-                if (!obj.IsValid || !processedObjects.Add(obj.Address))
+                ClrObject obj = heap.GetObject(publisherInfo.Address);
+                if (!obj.IsValid || obj.Type == null)
                     continue;
 
-                if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name))
-                    continue;
-
-                // Cache fields enumeration
-                var fields = obj.Type.Fields;
-                bool hasEventFields = false;
-
-                // Quick check if type has any event-like fields before processing
-                foreach (var field in fields)
-                {
-                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
-                    {
-                        hasEventFields = true;
-                        break;
-                    }
-                }
-
-                if (!hasEventFields)
-                    continue;
-
-                // Now process event fields
-                foreach (ClrInstanceField field in fields)
+                // Process event fields
+                foreach (ClrInstanceField field in obj.Type.Fields)
                 {
                     if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
                     {

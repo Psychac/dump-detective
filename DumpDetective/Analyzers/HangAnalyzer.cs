@@ -133,7 +133,7 @@ namespace DumpDetective.Analyzers
         {
             var analysis = new ThreadPoolAnalysis();
 
-            // Limit memory usage - don't enumerate all tasks
+            // On-demand task enumeration (not cached - saves memory)
             const int MaxTasksToScan = 50000;
             int tasksScanned = 0;
 
@@ -151,22 +151,18 @@ namespace DumpDetective.Analyzers
                     analysis.QueuedWorkItems++;
                 }
 
-                // Count tasks (limit to prevent memory issues)
+                // Count tasks
                 if (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 {
                     tasksScanned++;
                     analysis.TotalTasks++;
 
-                    // Only analyze task state for first N tasks to save memory
                     if (tasksScanned <= MaxTasksToScan)
                     {
-                        // Try to determine task state
                         var stateField = obj.Type.GetFieldByName("m_stateFlags");
                         if (stateField != null)
                         {
                             int stateFlags = stateField.Read<int>(obj, interior: false);
-
-                            // Task state flags (from Task source code)
                             bool isCompleted = (stateFlags & 0x1000000) != 0;
                             bool isFaulted = (stateFlags & 0x200000) != 0;
                             bool isCanceled = (stateFlags & 0x400000) != 0;
@@ -181,7 +177,6 @@ namespace DumpDetective.Analyzers
                     }
                 }
 
-                // Early exit if we've scanned enough
                 if (tasksScanned > MaxTasksToScan && analysis.QueuedWorkItems > 1000)
                 {
                     analysis.TaskScanLimited = true;
@@ -229,17 +224,30 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\n\nWAITING THREADS BREAKDOWN:");
             _writer.WriteSeparator();
 
-            // Group by wait type
-            var byWaitType = waitingThreads
-                .GroupBy(w => w.WaitType)
-                .OrderByDescending(g => g.Count());
-
-            foreach (var group in byWaitType)
+            // Manual grouping - no LINQ allocations
+            var byWaitType = new Dictionary<WaitType, List<WaitingThreadInfo>>();
+            foreach (var thread in waitingThreads)
             {
-                _writer.WriteLine($"\n{group.Key} ({group.Count()} thread(s)):");
-                
-                foreach (var waitThread in group.Take(5))
+                if (!byWaitType.TryGetValue(thread.WaitType, out var list))
                 {
+                    list = new List<WaitingThreadInfo>();
+                    byWaitType[thread.WaitType] = list;
+                }
+                list.Add(thread);
+            }
+
+            // Manual sorting by count
+            var sortedGroups = new List<KeyValuePair<WaitType, List<WaitingThreadInfo>>>(byWaitType);
+            sortedGroups.Sort((a, b) => b.Value.Count.CompareTo(a.Value.Count));
+
+            foreach (var group in sortedGroups)
+            {
+                _writer.WriteLine($"\n{group.Key} ({group.Value.Count} thread(s)):");
+
+                int threadCount = 0;
+                foreach (var waitThread in group.Value)
+                {
+                    if (threadCount >= 5) break;
                     _writer.WriteLine($"  Thread {waitThread.ThreadId} (OS: {waitThread.OSThreadId})");
                     _writer.WriteLine($"    Reason: {waitThread.WaitReason}");
                     _writer.WriteLine($"    Locks Held: {waitThread.LockCount}");
@@ -251,11 +259,12 @@ namespace DumpDetective.Analyzers
                         string method = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown";
                         _writer.WriteLine($"      {FormatHelper.TruncateString(method, 65)}");
                     }
+                    threadCount++;
                 }
 
-                if (group.Count() > 5)
+                if (group.Value.Count > 5)
                 {
-                    _writer.WriteLine($"  ... and {group.Count() - 5} more");
+                    _writer.WriteLine($"  ... and {group.Value.Count - 5} more");
                 }
             }
         }

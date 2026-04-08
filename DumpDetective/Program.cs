@@ -111,7 +111,7 @@ namespace DumpDetective
 
                 // Thread and event analysis
                 new ThreadAnalyzer(writer).Analyze(runtime);
-                new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
+                new EventLeakAnalyzer(writer).Analyze(heap, cache, minSubscribers: 0);
 
                 writer.WriteSeparator();
                 writer.WriteLine($"Analysis complete");
@@ -125,6 +125,8 @@ namespace DumpDetective
             {
                 fileWriter?.Dispose();
             }
+
+            Console.ReadKey();
         }
     }
 }

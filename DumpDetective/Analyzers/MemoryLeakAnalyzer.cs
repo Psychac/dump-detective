@@ -44,14 +44,22 @@ namespace DumpDetective.Analyzers
                 foreach (var obj in finalizerQueue)
                 {
                     string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
-                    finalizerTypes.TryGetValue(typeName, out int count);
-                    finalizerTypes[typeName] = count + 1;
+                    finalizerTypes.TryGetValue(typeName, out int typeCount);
+                    finalizerTypes[typeName] = typeCount + 1;
                 }
 
                 _writer.WriteLine("\nTop types in finalizer queue:");
-                foreach (var kvp in finalizerTypes.OrderByDescending(x => x.Value).Take(10))
+
+                // Manual sorting - no LINQ allocations
+                var sortedTypes = new List<KeyValuePair<string, int>>(finalizerTypes);
+                sortedTypes.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+                int count = 0;
+                foreach (var kvp in sortedTypes)
                 {
+                    if (count >= 10) break;
                     _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} object(s)");
+                    count++;
                 }
             }
             else
@@ -101,8 +109,14 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"Total static-rooted object types: {staticRoots.Count:N0}");
                 _writer.WriteLine("\nTop types by count:");
 
-                foreach (var kvp in staticRoots.OrderByDescending(x => x.Value.Count).Take(15))
+                // Manual sorting - no LINQ allocations
+                var sortedRoots = new List<KeyValuePair<string, List<RootInfo>>>(staticRoots);
+                sortedRoots.Sort((a, b) => b.Value.Count.CompareTo(a.Value.Count));
+
+                int count = 0;
+                foreach (var kvp in sortedRoots)
                 {
+                    if (count >= 15) break;
                     ulong totalSize = (ulong)kvp.Value.Sum(r => (long)r.Size);
                     _writer.WriteLine($"  {FormatHelper.TruncateString(kvp.Key, 50),-50} {kvp.Value.Count,8:N0} instances  {FormatHelper.FormatBytes(totalSize),12}");
 
@@ -115,6 +129,7 @@ namespace DumpDetective.Analyzers
                     {
                         _writer.WriteLine($"    └─ ... and {kvp.Value.Count - 2} more");
                     }
+                    count++;
                 }
             }
             else
@@ -128,9 +143,11 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine("\n\nDUPLICATE STRING ANALYSIS:");
             _writer.WriteSeparator();
 
+            // On-demand string enumeration (not cached - saves memory)
             var stringStats = new Dictionary<string, StringLeakInfo>(capacity: 1024);
             int totalStrings = 0;
             ulong totalStringMemory = 0;
+            const int MaxStringLength = 500;
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -184,7 +201,8 @@ namespace DumpDetective.Analyzers
             _writer.WriteSeparator();
             _writer.WriteLine("Objects with many incoming references (may indicate leaks):\n");
 
-            var referenceCount = new Dictionary<ulong, int>(capacity: 1024);
+            // On-demand reference counting (not cached - saves memory)
+            var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -254,10 +272,17 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"{"Type",-50} {"Count",10} {"Size",12} {"Primary Root Kind",-20}");
             _writer.WriteSeparator();
 
-            foreach (var kvp in rootedObjectsByType.Values.OrderByDescending(r => r.Count).Take(20))
+            // Manual sorting - no LINQ allocations
+            var sortedRooted = new List<RootedTypeInfo>(rootedObjectsByType.Values);
+            sortedRooted.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+            int count = 0;
+            foreach (var kvp in sortedRooted)
             {
+                if (count >= 20) break;
                 var primaryRootKind = kvp.RootKinds.OrderByDescending(rk => rk.Value).First();
                 _writer.WriteLine($"{FormatHelper.TruncateString(kvp.TypeName, 50),-50} {kvp.Count,10:N0} {FormatHelper.FormatBytes(kvp.TotalSize),12} {primaryRootKind.Key,-20}");
+                count++;
             }
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");

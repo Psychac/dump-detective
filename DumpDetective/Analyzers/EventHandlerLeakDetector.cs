@@ -28,9 +28,15 @@ namespace DumpDetective.Analyzers
 
             _writer.WriteLine($"Found {leaks.Count} potential event handler leak(s):\n");
 
+            // Manual sorting - no LINQ allocations
+            leaks.Sort((a, b) => b.SubscriberCount.CompareTo(a.SubscriberCount));
+
             int leakNum = 1;
-            foreach (var leak in leaks.OrderByDescending(l => l.SubscriberCount).Take(20))
+            int leakCount = 0;
+            foreach (var leak in leaks)
             {
+                if (leakCount >= 20) break;
+
                 _writer.WriteLine($"[{leakNum++}] EVENT HANDLER LEAK");
                 _writer.WriteSeparator();
                 _writer.WriteLine($"  Publisher: {leak.PublisherType}");
@@ -43,24 +49,43 @@ namespace DumpDetective.Analyzers
                 {
                     _writer.WriteLine($"\n  Subscribers (keeping objects alive):");
 
-                    var grouped = leak.SubscriberDetails
-                        .GroupBy(s => s.SubscriberType)
-                        .OrderByDescending(g => g.Count())
-                        .Take(5);
-
-                    foreach (var group in grouped)
+                    // Manual grouping - no LINQ allocations
+                    var groupedSubscribers = new Dictionary<string, List<EventSubscriberDetail>>();
+                    foreach (var sub in leak.SubscriberDetails)
                     {
-                        var totalSize = group.Sum(s => (long)s.Size);
-                        _writer.WriteLine($"    - {group.Key}: {group.Count()} instance(s), {FormatHelper.FormatBytes((ulong)totalSize)}");
+                        if (!groupedSubscribers.TryGetValue(sub.SubscriberType, out var list))
+                        {
+                            list = new List<EventSubscriberDetail>();
+                            groupedSubscribers[sub.SubscriberType] = list;
+                        }
+                        list.Add(sub);
+                    }
+
+                    // Manual sorting by count
+                    var sortedGroups = new List<KeyValuePair<string, List<EventSubscriberDetail>>>(groupedSubscribers);
+                    sortedGroups.Sort((a, b) => b.Value.Count.CompareTo(a.Value.Count));
+
+                    int groupCount = 0;
+                    foreach (var group in sortedGroups)
+                    {
+                        if (groupCount >= 5) break;
+
+                        long totalSize = 0;
+                        foreach (var s in group.Value)
+                        {
+                            totalSize += (long)s.Size;
+                        }
+                        _writer.WriteLine($"    - {group.Key}: {group.Value.Count} instance(s), {FormatHelper.FormatBytes((ulong)totalSize)}");                        _writer.WriteLine($"    - {group.Key}: {group.Value.Count} instance(s), {FormatHelper.FormatBytes((ulong)totalSize)}");
 
                         // Show first instance details
-                        var first = group.First();
+                        var first = group.Value[0];
                         _writer.WriteLine($"      Example: 0x{first.SubscriberAddress:X}");
 
                         if (first.IsStaticRooted)
                         {
                             _writer.WriteLine($"      ⚠️  Rooted by: {first.RootDescription}");
                         }
+                        groupCount++;
                     }
                 }
 
@@ -86,8 +111,9 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"\n  📝 CODE PATTERN TO FIX:");
                 _writer.WriteLine($"     public void Dispose() {{");
                 _writer.WriteLine($"         publisher.{leak.EventName} -= OnEventHandler;");
-                _writer.WriteLine($"     }}");
+                _writer.WriteLine($"     }}}}");
                 _writer.WriteLine(string.Empty);
+                leakCount++;
             }
 
             _writer.WriteLine(StringConstants.Equals80);
@@ -96,16 +122,15 @@ namespace DumpDetective.Analyzers
         private List<EventHandlerLeak> DetectEventHandlerLeaks(ClrHeap heap, HeapAnalysisCache cache)
         {
             var leaks = new List<EventHandlerLeak>();
-            var processedObjects = new HashSet<ulong>();
             var staticRoots = cache.GetStaticRootedAddresses(heap);
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || !processedObjects.Add(obj.Address) || obj.Type == null)
-                    continue;
+            // Use cached event publishers instead of heap enumeration
+            var eventPublishers = cache.GetEventPublishers();
 
-                // Skip system types using shared utility
-                if (TypeFilterHelper.IsSystemType(obj.Type.Name))
+            foreach (var publisherInfo in eventPublishers)
+            {
+                ClrObject obj = heap.GetObject(publisherInfo.Address);
+                if (!obj.IsValid || obj.Type == null)
                     continue;
 
                 bool isStaticRooted = staticRoots.Contains(obj.Address);

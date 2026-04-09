@@ -137,7 +137,7 @@ namespace DumpDetective.Analyzers
 
                 foreach (var field in obj.Type.Fields)
                 {
-                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
+                    if (TypeFilterHelper.IsDelegateType(field.Type))
                     {
                         var subscriberDetails = GetEventSubscriberDetails(heap, obj, field, staticRoots);
 

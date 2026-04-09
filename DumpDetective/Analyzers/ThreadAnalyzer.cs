@@ -1,10 +1,36 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Utilities;
+using System.Runtime.InteropServices;
 
 namespace DumpDetective.Analyzers
 {
     internal class ThreadAnalyzer
     {
+        private const int MaxFramesForThreadScan = 8;
+        private const int MaxThreadsToDisplayPerSection = 12;
+        private const int MaxStackRootsToCount = 256;
+        private const int MaxTopFrameHotspotsToDisplay = 10;
+        private const int MaxDistributionRowsToDisplay = 10;
+        private const int MaxMethodLength = 85;
+
+        private static readonly WaitPattern[] WaitPatterns =
+        [
+            new("MonitorWait", "monitor.wait", "Thread waiting on monitor pulse/event."),
+            new("MonitorContention", "monitor.enter", "Thread contending for a lock (monitor)."),
+            new("TaskBlocking", "task.wait", "Synchronous wait on task completion."),
+            new("TaskBlocking", "task`1.get_result", "Blocking on Task.Result."),
+            new("Sleep", "thread.sleep", "Thread is sleeping."),
+            new("Semaphore", "semaphore", "Waiting on semaphore permit."),
+            new("Mutex", "mutex", "Waiting on mutex ownership."),
+            new("WaitHandle", "waithandle", "Waiting on synchronization handle."),
+            new("WaitHandle", "manualresetevent", "Waiting on ManualResetEvent."),
+            new("WaitHandle", "autoresetevent", "Waiting on AutoResetEvent."),
+            new("ThreadJoin", "thread.join", "Waiting for another thread to complete."),
+            new("BlockingIO", "socket.receive", "Potentially blocked waiting for network data."),
+            new("BlockingIO", "socket.accept", "Potentially blocked accepting network connection."),
+            new("BlockingIO", "filestream.read", "Potentially blocked on file I/O.")
+        ];
+
         private readonly OutputWriter _writer;
 
         public ThreadAnalyzer(OutputWriter writer)
@@ -21,13 +47,20 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\nTotal Threads: {threadInfo.TotalCount}");
 
             PrintThreadStatistics(threadInfo);
+            PrintDistribution("THREAD STATE DISTRIBUTION:", threadInfo.StateDistribution);
+            PrintDistribution("GC MODE DISTRIBUTION:", threadInfo.GcModeDistribution);
+            PrintDistribution("APP DOMAIN DISTRIBUTION:", threadInfo.AppDomainDistribution);
+            PrintDistribution("WAIT CATEGORY DISTRIBUTION:", threadInfo.WaitCategoryDistribution);
+            PrintDistribution("ACTIVE EXCEPTION TYPES ON THREADS:", threadInfo.ExceptionTypeDistribution);
+            PrintTopFrameHotspots(threadInfo.TopFrameHotspots);
             PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
             PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
+            PrintThreadsWithExceptions(threadInfo.ThreadsWithExceptions);
 
-            _writer.WriteLine($"\nNote: Deadlock detection requires complex lock chain analysis.");
-            _writer.WriteLine($"Review threads with high lock counts and waiting patterns manually.");
+            _writer.WriteLine("\nNote: Deadlock detection requires full lock-graph analysis.");
+            _writer.WriteLine("Use lock-heavy + blocked thread overlap and hotspot methods as triage anchors.");
 
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
         }
 
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)
@@ -35,38 +68,72 @@ namespace DumpDetective.Analyzers
             var result = new ThreadCategorization();
             var threadsWithLocks = new List<ThreadWithStackTrace>();
             var blockedThreads = new List<ThreadWithStackTrace>();
+            var threadsWithExceptions = new List<ThreadWithStackTrace>();
+            var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
 
             foreach (var thread in threads)
             {
                 result.TotalCount++;
+                IncrementCount(result.StateDistribution, thread.State.ToString());
+                IncrementCount(result.GcModeDistribution, thread.GCMode.ToString());
+
+                string appDomain = thread.CurrentAppDomain?.Name ?? "<No AppDomain>";
+                IncrementCount(result.AppDomainDistribution, appDomain);
+
+                // Cache the property — each access reads from CLRMD runtime structures
+                var currentException = thread.CurrentException;
+                if (currentException != null)
+                {
+                    result.ThreadsWithActiveExceptionsCount++;
+                    string exceptionType = currentException.Type?.Name ?? StringConstants.UnknownType;
+                    IncrementCount(result.ExceptionTypeDistribution, exceptionType);
+                }
 
                 if (thread.IsAlive)
                 {
                     result.AliveCount++;
+                    // Enumerate stack once and share the list across all categories for this thread
+                    var stackFrames = thread.EnumerateStackTrace().Take(MaxFramesForThreadScan).ToList();
+                    TrackTopFrameHotspot(result.TopFrameHotspots, stackFrames);
+
+                    if (currentException != null)
+                    {
+                        threadsWithExceptions.Add(new ThreadWithStackTrace
+                        {
+                            Thread = thread,
+                            TopFrames = stackFrames,
+                            ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
+                            ExceptionMessage = currentException.Message,
+                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
+                        });
+                    }
 
                     // Check for locks
                     if (thread.LockCount > 0)
                     {
-                        var stackFrames = thread.EnumerateStackTrace().Take(5).ToList();
                         threadsWithLocks.Add(new ThreadWithStackTrace
                         {
                             Thread = thread,
-                            TopFrames = stackFrames
+                            TopFrames = stackFrames,
+                            ExceptionType = currentException?.Type?.Name,
+                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
                         });
                     }
 
-                    // Check for potentially blocked threads (only check first 50 alive threads)
-                    if (blockedThreads.Count < 50)
+                    // Detect wait/block patterns across all alive threads — cheap since frames are already materialized
+                    var waitDetection = DetectWaitPattern(stackFrames);
+                    if (waitDetection != null)
                     {
-                        var topFrames = thread.EnumerateStackTrace().Take(3).ToList();
-                        if (topFrames.Count > 0 && IsThreadWaiting(topFrames))
+                        IncrementCount(result.WaitCategoryDistribution, waitDetection.Category);
+                        blockedThreads.Add(new ThreadWithStackTrace
                         {
-                            blockedThreads.Add(new ThreadWithStackTrace
-                            {
-                                Thread = thread,
-                                TopFrames = topFrames
-                            });
-                        }
+                            Thread = thread,
+                            TopFrames = stackFrames,
+                            WaitCategory = waitDetection.Category,
+                            WaitReason = waitDetection.Reason,
+                            ExceptionType = currentException?.Type?.Name,
+                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
+                        });
                     }
                 }
 
@@ -82,43 +149,122 @@ namespace DumpDetective.Analyzers
                 .OrderByDescending(t => t.Thread.LockCount)
                 .ToList();
 
-            result.PotentiallyBlockedThreads = blockedThreads;
+            result.PotentiallyBlockedThreads = blockedThreads
+                .OrderByDescending(t => t.Thread.LockCount)
+                .ToList();
+
+            result.ThreadsWithExceptions = threadsWithExceptions
+                .OrderByDescending(t => t.Thread.LockCount)
+                .ToList();
 
             return result;
         }
 
-        private bool IsThreadWaiting(List<ClrStackFrame> frames)
+        private static int GetOrCountStackRoots(ClrThread thread, Dictionary<ulong, int> cache)
         {
-            // Pre-defined patterns to avoid repeated allocations
-            ReadOnlySpan<string> waitPatterns = new[]
-            {
-                "wait",
-                "sleep",
-                "lock",
-                "monitor.enter",
-                "semaphore",
-                "mutex"
-            };
+            if (cache.TryGetValue(thread.Address, out int existing))
+                return existing;
 
+            int count = 0;
+            foreach (var _ in thread.EnumerateStackRoots().Take(MaxStackRootsToCount))
+                count++;
+
+            cache[thread.Address] = count;
+            return count;
+        }
+
+        private WaitDetection? DetectWaitPattern(List<ClrStackFrame> frames)
+        {
             foreach (var frame in frames)
             {
-                string signature = frame.Method?.Signature ?? frame.ToString() ?? "";
+                string signature = GetFrameSignature(frame);
 
-                foreach (var pattern in waitPatterns)
+                foreach (var pattern in WaitPatterns)
                 {
-                    if (signature.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                        return true;
+                    if (signature.Contains(pattern.Token, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new WaitDetection(pattern.Category, pattern.Reason);
+                    }
                 }
             }
 
-            return false;
+            return null;
+        }
+
+        private static string GetFrameSignature(ClrStackFrame frame)
+        {
+            // Intentionally avoid frame.ToString() — it can return raw hex addresses
+            // which pollute hotspot keys and are useless as triage output.
+            return frame.Method?.Signature
+                ?? frame.FrameName
+                ?? string.Empty;
+        }
+
+        private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, List<ClrStackFrame> frames)
+        {
+            if (frames.Count == 0)
+                return;
+
+            string top = GetFrameSignature(frames[0]);
+            if (string.IsNullOrWhiteSpace(top))
+                return;
+
+            IncrementCount(hotspots, top);
+        }
+
+        private static void IncrementCount(Dictionary<string, int> map, string key)
+        {
+            // Single hash lookup vs two (TryGetValue + indexer)
+            ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out _);
+            count++;
+        }
+
+        private void PrintDistribution(string title, Dictionary<string, int> distribution)
+        {
+            _writer.WriteLine($"\n{title}");
+            _writer.WriteSeparator();
+
+            if (distribution.Count == 0)
+            {
+                _writer.WriteLine("No data.");
+                return;
+            }
+
+            foreach (var kvp in distribution
+                .OrderByDescending(k => k.Value)
+                .ThenBy(k => k.Key, StringComparer.Ordinal)
+                .Take(MaxDistributionRowsToDisplay))
+            {
+                _writer.WriteLine($"{kvp.Key}: {kvp.Value}");
+            }
+        }
+
+        private void PrintTopFrameHotspots(Dictionary<string, int> hotspots)
+        {
+            _writer.WriteLine("\nTOP STACK HOTSPOTS (TOP FRAME):");
+            _writer.WriteSeparator();
+
+            if (hotspots.Count == 0)
+            {
+                _writer.WriteLine("No stack hotspot data available.");
+                return;
+            }
+
+            foreach (var hotspot in hotspots
+                .OrderByDescending(x => x.Value)
+                .Take(MaxTopFrameHotspotsToDisplay))
+            {
+                _writer.WriteLine($"{hotspot.Value,4}  {FormatHelper.TruncateString(hotspot.Key, MaxMethodLength)}");
+            }
         }
 
         private void PrintThreadStatistics(ThreadCategorization info)
         {
             _writer.WriteLine($"Alive Threads: {info.AliveCount}");
+            _writer.WriteLine($"Inactive Threads: {info.TotalCount - info.AliveCount}");
             _writer.WriteLine($"GC Threads: {info.GcCount}");
             _writer.WriteLine($"Finalizer Threads: {info.FinalizerCount}");
+            _writer.WriteLine($"Threads with active exceptions: {info.ThreadsWithActiveExceptionsCount}");
         }
 
         private void PrintThreadsWithLocks(List<ThreadWithStackTrace> threadsWithLocks)
@@ -129,7 +275,7 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine("\nTHREADS WITH LOCKS:");
                 _writer.WriteSeparator();
 
-                int displayCount = Math.Min(10, threadsWithLocks.Count);
+                int displayCount = Math.Min(MaxThreadsToDisplayPerSection, threadsWithLocks.Count);
                 for (int i = 0; i < displayCount; i++)
                 {
                     var threadInfo = threadsWithLocks[i];
@@ -137,21 +283,28 @@ namespace DumpDetective.Analyzers
 
                     _writer.WriteLine($"\nThread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
                     _writer.WriteLine($"  Lock Count: {thread.LockCount}");
+                    _writer.WriteLine($"  State: {thread.State} | GC Mode: {thread.GCMode}");
+                    _writer.WriteLine($"  Stack Roots: {threadInfo.StackRootCount}");
+
+                    if (!string.IsNullOrWhiteSpace(threadInfo.ExceptionType))
+                    {
+                        _writer.WriteLine($"  Active Exception: {threadInfo.ExceptionType}");
+                    }
 
                     if (threadInfo.TopFrames.Count > 0)
                     {
                         _writer.WriteLine($"  Stack Trace (top {threadInfo.TopFrames.Count} frames):");
                         foreach (var frame in threadInfo.TopFrames)
                         {
-                            string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
-                            _writer.WriteLine($"    {FormatHelper.TruncateString(method, 70)}");
+                            string method = GetFrameSignature(frame);
+                            _writer.WriteLine($"    {FormatHelper.TruncateString(method, MaxMethodLength)}");
                         }
                     }
                 }
 
-                if (threadsWithLocks.Count > 10)
+                if (threadsWithLocks.Count > MaxThreadsToDisplayPerSection)
                 {
-                    _writer.WriteLine($"\n... and {threadsWithLocks.Count - 10} more threads with locks");
+                    _writer.WriteLine($"\n... and {threadsWithLocks.Count - MaxThreadsToDisplayPerSection} more threads with locks");
                 }
             }
             else
@@ -164,7 +317,7 @@ namespace DumpDetective.Analyzers
         {
             _writer.WriteLine("\n\nPOTENTIALLY BLOCKED THREADS:");
             _writer.WriteSeparator();
-            _writer.WriteLine("Threads that appear to be waiting (based on stack traces):\n");
+            _writer.WriteLine("Threads that appear to be waiting (based on stack patterns):\n");
 
             if (blockedThreads.Count == 0)
             {
@@ -172,28 +325,84 @@ namespace DumpDetective.Analyzers
             }
             else
             {
-                int displayCount = Math.Min(10, blockedThreads.Count);
+                int displayCount = Math.Min(MaxThreadsToDisplayPerSection, blockedThreads.Count);
                 for (int i = 0; i < displayCount; i++)
                 {
                     var threadInfo = blockedThreads[i];
                     var thread = threadInfo.Thread;
 
                     _writer.WriteLine($"Thread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
+                    _writer.WriteLine($"  Category: {threadInfo.WaitCategory ?? "Unknown"}");
+                    _writer.WriteLine($"  Reason: {threadInfo.WaitReason ?? "Unknown pattern"}");
+                    _writer.WriteLine($"  State: {thread.State} | GC Mode: {thread.GCMode}");
                     _writer.WriteLine($"  Locks: {thread.LockCount}");
+                    _writer.WriteLine($"  Stack Roots: {threadInfo.StackRootCount}");
+
+                    if (!string.IsNullOrWhiteSpace(threadInfo.ExceptionType))
+                    {
+                        _writer.WriteLine($"  Active Exception: {threadInfo.ExceptionType}");
+                    }
+
                     _writer.WriteLine($"  Top frames:");
 
                     foreach (var frame in threadInfo.TopFrames)
                     {
-                        string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
-                        _writer.WriteLine($"    {FormatHelper.TruncateString(method, 70)}");
+                        string method = GetFrameSignature(frame);
+                        _writer.WriteLine($"    {FormatHelper.TruncateString(method, MaxMethodLength)}");
                     }
                     _writer.WriteLine(string.Empty);
                 }
 
-                if (blockedThreads.Count > 10)
+                if (blockedThreads.Count > MaxThreadsToDisplayPerSection)
                 {
-                    _writer.WriteLine($"... and {blockedThreads.Count - 10} more potentially blocked threads");
+                    _writer.WriteLine($"... and {blockedThreads.Count - MaxThreadsToDisplayPerSection} more potentially blocked threads");
                 }
+            }
+        }
+
+        private void PrintThreadsWithExceptions(List<ThreadWithStackTrace> threadsWithExceptions)
+        {
+            _writer.WriteLine("\n\nTHREADS WITH ACTIVE EXCEPTIONS:");
+            _writer.WriteSeparator();
+
+            if (threadsWithExceptions.Count == 0)
+            {
+                _writer.WriteLine("No active exceptions associated with alive threads.");
+                return;
+            }
+
+            int displayCount = Math.Min(MaxThreadsToDisplayPerSection, threadsWithExceptions.Count);
+            for (int i = 0; i < displayCount; i++)
+            {
+                var info = threadsWithExceptions[i];
+                var thread = info.Thread;
+
+                _writer.WriteLine($"Thread {thread.OSThreadId} (Managed: {thread.ManagedThreadId}):");
+                _writer.WriteLine($"  Exception: {info.ExceptionType ?? StringConstants.UnknownType}");
+
+                if (!string.IsNullOrWhiteSpace(info.ExceptionMessage))
+                {
+                    _writer.WriteLine($"  Message: {FormatHelper.TruncateString(info.ExceptionMessage, MaxMethodLength)}");
+                }
+
+                _writer.WriteLine($"  Locks: {thread.LockCount} | State: {thread.State} | GC Mode: {thread.GCMode}");
+                _writer.WriteLine($"  Stack Roots: {info.StackRootCount}");
+
+                if (info.TopFrames.Count > 0)
+                {
+                    _writer.WriteLine("  Top frames:");
+                    foreach (var frame in info.TopFrames)
+                    {
+                        _writer.WriteLine($"    {FormatHelper.TruncateString(GetFrameSignature(frame), MaxMethodLength)}");
+                    }
+                }
+
+                _writer.WriteLine(string.Empty);
+            }
+
+            if (threadsWithExceptions.Count > MaxThreadsToDisplayPerSection)
+            {
+                _writer.WriteLine($"... and {threadsWithExceptions.Count - MaxThreadsToDisplayPerSection} more threads with active exceptions");
             }
         }
     }
@@ -204,13 +413,52 @@ namespace DumpDetective.Analyzers
         public int AliveCount { get; set; }
         public int GcCount { get; set; }
         public int FinalizerCount { get; set; }
+        public int ThreadsWithActiveExceptionsCount { get; set; }
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();
+        public List<ThreadWithStackTrace> ThreadsWithExceptions { get; set; } = new();
+        public Dictionary<string, int> StateDistribution { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> GcModeDistribution { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> AppDomainDistribution { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> WaitCategoryDistribution { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> ExceptionTypeDistribution { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> TopFrameHotspots { get; set; } = new(StringComparer.Ordinal);
     }
 
     internal class ThreadWithStackTrace
     {
-        public ClrThread Thread { get; set; }
+        public required ClrThread Thread { get; set; }
         public List<ClrStackFrame> TopFrames { get; set; } = new();
+        public int StackRootCount { get; set; }
+        public string? WaitCategory { get; set; }
+        public string? WaitReason { get; set; }
+        public string? ExceptionType { get; set; }
+        public string? ExceptionMessage { get; set; }
+    }
+
+    internal sealed class WaitPattern
+    {
+        public WaitPattern(string category, string token, string reason)
+        {
+            Category = category;
+            Token = token;
+            Reason = reason;
+        }
+
+        public string Category { get; }
+        public string Token { get; }
+        public string Reason { get; }
+    }
+
+    internal sealed class WaitDetection
+    {
+        public WaitDetection(string category, string reason)
+        {
+            Category = category;
+            Reason = reason;
+        }
+
+        public string Category { get; }
+        public string Reason { get; }
     }
 }

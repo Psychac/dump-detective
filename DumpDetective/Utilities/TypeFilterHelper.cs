@@ -1,3 +1,5 @@
+using Microsoft.Diagnostics.Runtime;
+
 namespace DumpDetective.Utilities
 {
     internal static class TypeFilterHelper
@@ -29,17 +31,11 @@ namespace DumpDetective.Utilities
             return false;
         }
 
-        public static bool IsEventField(string? typeName)
-        {
-            if (typeName == null)
-                return false;
+        public static bool IsDelegateType(ClrType? type) =>
+            type?.BaseType?.Name == "System.MulticastDelegate";
 
-            // Use Ordinal comparison for better performance
-            return typeName.Contains("EventHandler", StringComparison.Ordinal) ||
-                   typeName.Contains("Action", StringComparison.Ordinal) ||
-                   typeName.Contains("Func", StringComparison.Ordinal) ||
-                   typeName.Contains("Delegate", StringComparison.Ordinal);
-        }
+        public static bool IsCompilerGenerated(string? name) =>
+            name != null && name.Contains("<>", StringComparison.Ordinal);
 
         public static bool IsCollectionType(string? typeName)
         {

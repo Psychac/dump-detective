@@ -1,6 +1,5 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analyzers;
-using DumpDetective.Utilities;
+﻿using DumpDetective.Configuration;
+using DumpDetective.Services;
 
 namespace DumpDetective
 {
@@ -8,32 +7,28 @@ namespace DumpDetective
     {
         static void Main(string[] args)
         {
-            if (args.Length == 0)
-            {
-                Console.WriteLine("Usage: DumpDetective <dump-file-path> [output-file-path]");
-                Console.WriteLine("Example: DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt");
-                return;
-            }
-
-            string dumpPath = args[0];
-            string? outputPath = args.Length > 1 ? args[1] : null;
-
-            if (!File.Exists(dumpPath))
-            {
-                Console.WriteLine($"Error: Dump file not found at '{dumpPath}'");
-                return;
-            }
-
-            Console.WriteLine($"Analyzing dump: {dumpPath}");
-            if (outputPath != null)
-            {
-                Console.WriteLine($"Output will be written to: {outputPath}");
-            }
-            Console.WriteLine();
-
             try
             {
-                AnalyzeDump(dumpPath, outputPath);
+                if (args.Length == 0)
+                {
+                    PrintUsage();
+                    return;
+                }
+
+                var config = AnalysisConfiguration.FromCommandLineArgs(args);
+                config.PrintConfiguration();
+
+                var service = new DumpAnalysisService(config);
+                service.Execute();
+            }
+            catch (FileNotFoundException ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+            catch (ArgumentException ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                PrintUsage();
             }
             catch (Exception ex)
             {
@@ -42,132 +37,10 @@ namespace DumpDetective
             }
         }
 
-        static void AnalyzeDump(string dumpPath, string? outputPath)
+        private static void PrintUsage()
         {
-            StreamWriter? fileWriter = null;
-            try
-            {
-                if (outputPath != null)
-                {
-                    fileWriter = new StreamWriter(outputPath, false);
-                }
-
-                using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
-                var writer = new OutputWriter(fileWriter);
-                var cache = new HeapAnalysisCache();
-
-                // Memory diagnostic setup - track memory at each checkpoint
-                MemorySnapshot previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
-                MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
-
-                writer.WriteLine($"Dump file: {dumpPath}");
-                writer.WriteLine(string.Empty);
-
-                // Display CLR version information
-                writer.WriteLine("CLR VERSION INFORMATION:");
-                writer.WriteSeparator();
-
-                if (dataTarget.ClrVersions.Length == 0)
-                {
-                    writer.WriteLine("No CLR versions found in dump!");
-                    return;
-                }
-
-                foreach (ClrInfo clrVersion in dataTarget.ClrVersions)
-                {
-                    writer.WriteLine($"CLR Version: {clrVersion.Version}");
-                    writer.WriteLine($"Module: {clrVersion.ModuleInfo.FileName}");
-                    writer.WriteLine($"Module Base: 0x{clrVersion.ModuleInfo.ImageBase:X}");
-                    writer.WriteLine(string.Empty);
-                }
-
-                // Use the first (primary) CLR version for analysis
-                ClrInfo primaryClr = dataTarget.ClrVersions[0];
-                writer.WriteLine($"Analyzing using CLR Version: {primaryClr.Version}");
-                writer.WriteLine(string.Empty);
-
-                ClrRuntime runtime = primaryClr.CreateRuntime();
-                ClrHeap heap = runtime.Heap;
-
-                var snapshot = MemoryDiagnostic.TakeSnapshot("1. After runtime creation");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                if (!heap.CanWalkHeap)
-                {
-                    writer.WriteLine("Cannot walk the heap!");
-                    return;
-                }
-
-                // Run all analyses (with shared cache for performance)
-                Console.WriteLine("\n▶ Building type statistics cache...");
-                var typeStats = cache.GetOrBuildTypeStatistics(heap);
-                Console.WriteLine($"   Cached {typeStats.Count:N0} unique types");
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("2. After cache build");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                Console.WriteLine("\n▶ Running core memory analyzers...");
-                new MemoryAnalyzer(writer).Analyze(heap);
-                new GCGenerationAnalyzer(writer).Analyze(heap);
-                new ModuleAnalyzer(writer).Analyze(runtime);
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("3. After core analyzers");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                // Crash/Hang detection (run early for critical issues)
-                Console.WriteLine("\n▶ Analyzing for crashes and hangs...");
-                new CrashAnalyzer(writer).Analyze(runtime, heap);
-                new HangAnalyzer(writer).Analyze(runtime, heap);
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("4. After Crash + Hang analysis");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                // Memory leak detection
-                Console.WriteLine("\n▶ Detecting memory leaks...");
-                new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
-                new CollectionAnalyzer(writer).Analyze(heap);
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("5. After MemoryLeak + Collection analysis");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                Console.WriteLine("\n▶ Analyzing static roots and event handlers...");
-                new StaticRootLeakDetector(writer).Analyze(heap);
-                new EventHandlerLeakDetector(writer).Analyze(heap);
-                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 5);
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("6. After leak detectors");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-                previousSnapshot = snapshot;
-
-                // Thread and event analysis
-                Console.WriteLine("\n▶ Analyzing threads and events...");
-                new ThreadAnalyzer(writer).Analyze(runtime);
-                new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
-
-                snapshot = MemoryDiagnostic.TakeSnapshot("9. After Thread + Event analysis");
-                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-
-                Console.WriteLine("\n✅ Analysis complete!");
-
-                writer.WriteSeparator();
-                writer.WriteLine($"Analysis complete");
-
-                if (outputPath != null)
-                {
-                    Console.WriteLine($"\nReport written to: {outputPath}");
-                }
-            }
-            finally
-            {
-                fileWriter?.Dispose();
-            }
-
-            Console.ReadKey();
+            Console.WriteLine("Usage: DumpDetective <dump-file-path> [output-file-path]");
+            Console.WriteLine("Example: DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt");
         }
     }
 }

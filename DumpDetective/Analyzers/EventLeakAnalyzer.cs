@@ -6,6 +6,8 @@ namespace DumpDetective.Analyzers
     internal class EventLeakAnalyzer
     {
         private readonly OutputWriter _writer;
+        private static readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
+        private static readonly object _eventNameCacheLock = new();
 
         public EventLeakAnalyzer(OutputWriter writer)
         {
@@ -31,36 +33,70 @@ namespace DumpDetective.Analyzers
         {
             var leaks = new List<EventLeakInfo>();
             var processedObjects = new HashSet<ulong>();
+            var processedStaticTypes = new HashSet<string>();
+            var processedStaticDelegates = new HashSet<ulong>();
+            var appDomains = heap.Runtime.AppDomains;
+            var rootHints = BuildRootHintMap(heap);
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
                 if (!obj.IsValid || !processedObjects.Add(obj.Address))
                     continue;
 
-                if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name))
+                if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name)
+                    || TypeFilterHelper.IsCompilerGenerated(obj.Type.Name))
                     continue;
 
-                // Process event fields
+                // Process instance event fields
                 foreach (ClrInstanceField field in obj.Type.Fields)
                 {
-                    if (field.Type?.Name != null && TypeFilterHelper.IsEventField(field.Type.Name))
+                    if (TypeFilterHelper.IsDelegateType(field.Type)
+                        && IsLikelyEventField(obj.Type, field.Name)
+                        && !TypeFilterHelper.IsCompilerGenerated(field.Name))
                     {
                         var subscribers = GetEventSubscribers(obj, field);
 
                         if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                         {
-                            leaks.Add(new EventLeakInfo
+                            leaks.Add(CreateLeakInfo(
+                                publisherAddress: obj.Address,
+                                publisherType: obj.Type.Name ?? StringConstants.UnknownType,
+                                eventFieldName: field.Name ?? StringConstants.UnknownType,
+                                isStatic: false,
+                                subscribers,
+                                rootHints));
+                        }
+                    }
+                }
+
+                // Process static event fields once per unique type
+                if (processedStaticTypes.Add(obj.Type.Name ?? string.Empty))
+                {
+                    foreach (ClrStaticField field in obj.Type.StaticFields)
+                    {
+                        if (TypeFilterHelper.IsDelegateType(field.Type)
+                            && IsLikelyEventField(obj.Type, field.Name)
+                            && !TypeFilterHelper.IsCompilerGenerated(field.Name))
+                        {
+                            var subscribers = GetStaticEventSubscribers(field, appDomains, processedStaticDelegates);
+
+                            if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                             {
-                                PublisherAddress = obj.Address,
-                                PublisherType = obj.Type.Name ?? StringConstants.UnknownType,
-                                EventFieldName = field.Name ?? StringConstants.UnknownType,
-                                SubscriberCount = subscribers.Count,
-                                Subscribers = subscribers
-                            });
+                                leaks.Add(CreateLeakInfo(
+                                    publisherAddress: 0,
+                                    publisherType: obj.Type.Name ?? StringConstants.UnknownType,
+                                    eventFieldName: field.Name ?? StringConstants.UnknownType,
+                                    isStatic: true,
+                                    subscribers,
+                                    rootHints));
+                            }
                         }
                     }
                 }
             }
+
+            // Cover static-only publisher types by reading static roots directly.
+            FindStaticRootOnlyEventLeaks(heap, processedStaticDelegates, rootHints, minSubscribers, leaks);
 
             return leaks;
         }
@@ -68,12 +104,12 @@ namespace DumpDetective.Analyzers
         private List<EventGroupInfo> GroupEventLeaks(List<EventLeakInfo> eventLeaks)
         {
             // Pre-allocate with expected capacity
-            var groups = new Dictionary<(string PublisherType, string EventFieldName), List<EventLeakInfo>>();
+            var groups = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), List<EventLeakInfo>>();
 
             // Manual grouping to avoid LINQ overhead
             foreach (var leak in eventLeaks)
             {
-                var key = (leak.PublisherType, leak.EventFieldName);
+                var key = (leak.PublisherType, leak.EventFieldName, leak.IsStatic);
 
                 if (!groups.TryGetValue(key, out var list))
                 {
@@ -92,6 +128,7 @@ namespace DumpDetective.Analyzers
                 int totalSubs = 0;
                 int minSubs = int.MaxValue;
                 int maxSubs = 0;
+                int maxSeverity = 0;
 
                 foreach (var instance in instances)
                 {
@@ -99,12 +136,15 @@ namespace DumpDetective.Analyzers
                     totalSubs += count;
                     if (count < minSubs) minSubs = count;
                     if (count > maxSubs) maxSubs = count;
+                    if (instance.SeverityScore > maxSeverity) maxSeverity = instance.SeverityScore;
                 }
 
                 result.Add(new EventGroupInfo
                 {
                     PublisherType = kvp.Key.PublisherType,
                     EventFieldName = kvp.Key.EventFieldName,
+                    IsStatic = kvp.Key.IsStatic,
+                    SeverityScore = maxSeverity,
                     InstanceCount = instances.Count,
                     TotalSubscribers = totalSubs,
                     AverageSubscribers = (double)totalSubs / instances.Count,
@@ -129,9 +169,10 @@ namespace DumpDetective.Analyzers
             int groupCount = 1;
             foreach (var group in groupedLeaks)
             {
-                _writer.WriteLine($"\n[{groupCount++}] {group.PublisherType}.{group.EventFieldName}");
+                _writer.WriteLine($"\n[{groupCount++}] {(group.IsStatic ? "[STATIC] " : "[INSTANCE] ")}{group.PublisherType}.{group.EventFieldName} (Severity: {group.SeverityScore})");
                 _writer.WriteLine($"  Instance Count: {group.InstanceCount}");
                 _writer.WriteLine($"  Total Subscribers: {group.TotalSubscribers}");
+                _writer.WriteLine($"  Severity Score: {group.SeverityScore}");
                 _writer.WriteLine($"  Average Subscribers: {group.AverageSubscribers:F2}");
                 _writer.WriteLine($"  Min/Max Subscribers: {group.MinSubscribers}/{group.MaxSubscribers}");
 
@@ -189,7 +230,7 @@ namespace DumpDetective.Analyzers
             int detailCount = 1;
             foreach (var group in groupedLeaks)
             {
-                _writer.WriteLine($"\n[{group.PublisherType}.{group.EventFieldName}] - {group.InstanceCount} instance(s)");
+                _writer.WriteLine($"\n[{(group.IsStatic ? "STATIC" : "INSTANCE")}] {group.PublisherType}.{group.EventFieldName} - {group.InstanceCount} instance(s)");
                 _writer.WriteSeparator();
 
                 // Sort instances and take top 5
@@ -200,8 +241,13 @@ namespace DumpDetective.Analyzers
 
                 foreach (var leak in topInstances)
                 {
-                    _writer.WriteLine($"  Instance #{detailCount++}");
-                    _writer.WriteLine($"    Address: 0x{leak.PublisherAddress:X}");
+                    _writer.WriteLine($"  Instance #{detailCount++} (Severity: {leak.SeverityScore})");
+                    _writer.WriteLine(leak.IsStatic
+                        ? "    Address: (static)"
+                        : $"    Address: 0x{leak.PublisherAddress:X}");
+                    _writer.WriteLine($"    Severity Score: {leak.SeverityScore}");
+                    if (!string.IsNullOrEmpty(leak.RootHint))
+                        _writer.WriteLine($"    Root Hint: {leak.RootHint}");
                     _writer.WriteLine($"    Subscribers: {leak.SubscriberCount}");
 
                     if (leak.Subscribers.Count > 0)
@@ -233,30 +279,245 @@ namespace DumpDetective.Analyzers
 
         private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField)
         {
-            var subscribers = new List<SubscriberInfo>();
-
             try
             {
                 ClrObject eventDelegate = eventField.ReadObject(obj, interior: false);
-
-                if (!eventDelegate.IsValid || eventDelegate.Type == null)
-                    return subscribers;
-
-                // Check if it's a multicast delegate
-                if (eventDelegate.Type.Name?.Contains(StringConstants.MulticastDelegateName, StringComparison.Ordinal) == true)
-                {
-                    ExtractMulticastSubscribers(eventDelegate, subscribers);
-                }
-                else
-                {
-                    ExtractSingleSubscriber(eventDelegate, subscribers);
-                }
+                return ExtractSubscribersFromDelegate(eventDelegate);
             }
             catch
             {
-                // Silently handle errors in delegate inspection
+                return new List<SubscriberInfo>();
+            }
+        }
+
+        private static List<SubscriberInfo> GetStaticEventSubscribers(ClrStaticField field, IReadOnlyList<ClrAppDomain> appDomains, HashSet<ulong>? processedStaticDelegates = null)
+        {
+            var subscribers = new List<SubscriberInfo>();
+            var seen = new HashSet<(ulong Address, string Type)>();
+
+            foreach (var appDomain in appDomains)
+            {
+                try
+                {
+                    ClrObject eventDelegate = field.ReadObject(appDomain);
+                    if (eventDelegate.IsValid)
+                        processedStaticDelegates?.Add(eventDelegate.Address);
+
+                    var domainSubscribers = ExtractSubscribersFromDelegate(eventDelegate);
+
+                    foreach (var subscriber in domainSubscribers)
+                    {
+                        if (seen.Add((subscriber.Address, subscriber.Type)))
+                        {
+                            subscribers.Add(subscriber);
+                        }
+                    }
+                }
+                catch
+                {
+                }
             }
 
+            return subscribers;
+        }
+
+        private static EventLeakInfo CreateLeakInfo(
+            ulong publisherAddress,
+            string publisherType,
+            string eventFieldName,
+            bool isStatic,
+            List<SubscriberInfo> subscribers,
+            Dictionary<ulong, string> rootHints,
+            string? preferredRootHint = null)
+        {
+            string rootHint = preferredRootHint ?? string.Empty;
+
+            if (string.IsNullOrEmpty(rootHint))
+            {
+                foreach (var subscriber in subscribers)
+                {
+                    if (rootHints.TryGetValue(subscriber.Address, out var hint))
+                    {
+                        rootHint = hint;
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(rootHint) && publisherAddress != 0 && rootHints.TryGetValue(publisherAddress, out var publisherHint))
+            {
+                rootHint = publisherHint;
+            }
+
+            return new EventLeakInfo
+            {
+                PublisherAddress = publisherAddress,
+                PublisherType = publisherType,
+                EventFieldName = eventFieldName,
+                IsStatic = isStatic,
+                SubscriberCount = subscribers.Count,
+                Subscribers = subscribers,
+                RootHint = rootHint,
+                SeverityScore = CalculateSeverity(isStatic, subscribers.Count, rootHint)
+            };
+        }
+
+        private static int CalculateSeverity(bool isStatic, int subscriberCount, string rootHint)
+        {
+            int score = subscriberCount;
+            if (subscriberCount >= 10) score += 5;
+            if (isStatic) score += 10;
+            if (!string.IsNullOrEmpty(rootHint)) score += 5;
+            return score;
+        }
+
+        private static Dictionary<ulong, string> BuildRootHintMap(ClrHeap heap)
+        {
+            var map = new Dictionary<ulong, string>();
+
+            foreach (ClrRoot root in heap.EnumerateRoots())
+            {
+                if (!root.Object.IsValid)
+                    continue;
+
+                ulong address = root.Object.Address;
+                if (!map.ContainsKey(address))
+                {
+                    map[address] = root.ToString() ?? root.RootKind.ToString();
+                }
+            }
+
+            return map;
+        }
+
+        private static void FindStaticRootOnlyEventLeaks(
+            ClrHeap heap,
+            HashSet<ulong> processedStaticDelegates,
+            Dictionary<ulong, string> rootHints,
+            int minSubscribers,
+            List<EventLeakInfo> leaks)
+        {
+            foreach (ClrRoot root in heap.EnumerateRoots())
+            {
+                if (!root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ClrObject rootObj = root.Object;
+                if (!rootObj.IsValid || rootObj.Type == null || !TypeFilterHelper.IsDelegateType(rootObj.Type))
+                    continue;
+
+                if (!processedStaticDelegates.Add(rootObj.Address))
+                    continue;
+
+                string rootDescription = root.ToString() ?? StringConstants.UnknownType;
+                ParseRootPublisher(rootDescription, out string publisherType, out string eventFieldName);
+
+                if (TypeFilterHelper.IsCompilerGenerated(publisherType)
+                    || TypeFilterHelper.IsCompilerGenerated(eventFieldName))
+                {
+                    continue;
+                }
+
+                var subscribers = ExtractSubscribersFromDelegate(rootObj);
+                if (subscribers.Count == 0 || subscribers.Count < minSubscribers)
+                    continue;
+
+                leaks.Add(CreateLeakInfo(
+                    publisherAddress: 0,
+                    publisherType,
+                    eventFieldName,
+                    isStatic: true,
+                    subscribers,
+                    rootHints,
+                    preferredRootHint: rootDescription));
+            }
+        }
+
+        private static void ParseRootPublisher(string rootDescription, out string publisherType, out string eventFieldName)
+        {
+            publisherType = "StaticRoot";
+            eventFieldName = StringConstants.UnknownType;
+
+            int lastDot = rootDescription.LastIndexOf('.');
+            if (lastDot > 0 && lastDot < rootDescription.Length - 1)
+            {
+                publisherType = rootDescription[..lastDot].Trim();
+                eventFieldName = rootDescription[(lastDot + 1)..].Trim();
+            }
+        }
+
+        private static bool IsLikelyEventField(ClrType ownerType, string? fieldName)
+        {
+            if (string.IsNullOrEmpty(fieldName))
+                return false;
+
+            if (TypeFilterHelper.IsCompilerGenerated(fieldName))
+                return false;
+
+            var eventNames = GetEventNames(ownerType);
+            if (eventNames.Count == 0)
+                return true;
+
+            return eventNames.Contains(fieldName);
+        }
+
+        private static HashSet<string> GetEventNames(ClrType type)
+        {
+            string cacheKey = type.Name ?? StringConstants.UnknownType;
+
+            lock (_eventNameCacheLock)
+            {
+                if (_eventNameCache.TryGetValue(cacheKey, out var cached))
+                    return cached;
+
+                var addNames = new HashSet<string>(StringComparer.Ordinal);
+                var removeNames = new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var method in type.Methods)
+                {
+                    var name = method.Name;
+                    if (name == null)
+                        continue;
+
+                    if (name.StartsWith("add_", StringComparison.Ordinal) && name.Length > 4)
+                        addNames.Add(name[4..]);
+                    else if (name.StartsWith("remove_", StringComparison.Ordinal) && name.Length > 7)
+                        removeNames.Add(name[7..]);
+                }
+
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var eventName in addNames)
+                {
+                    if (removeNames.Contains(eventName))
+                        names.Add(eventName);
+                }
+
+                _eventNameCache[cacheKey] = names;
+                return names;
+            }
+        }
+
+        // All C# delegates derive from MulticastDelegate. Dispatch is based on
+        // whether _invocationList is a non-null array (multiple subscribers) vs null (single subscriber).
+        private static List<SubscriberInfo> ExtractSubscribersFromDelegate(ClrObject eventDelegate)
+        {
+            var subscribers = new List<SubscriberInfo>();
+
+            if (!eventDelegate.IsValid || eventDelegate.Type == null)
+                return subscribers;
+
+            var invocationListField = DelegateHelper.GetCachedField(eventDelegate.Type, StringConstants.DelegateInvocationListField);
+            if (invocationListField != null)
+            {
+                ClrObject invocationList = invocationListField.ReadObject(eventDelegate, interior: false);
+                if (invocationList.IsValid && invocationList.IsArray)
+                {
+                    ExtractMulticastSubscribers(eventDelegate, subscribers);
+                    return subscribers;
+                }
+            }
+
+            ExtractSingleSubscriber(eventDelegate, subscribers);
             return subscribers;
         }
 

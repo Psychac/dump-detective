@@ -99,17 +99,21 @@ namespace DumpDetective
                     return;
                 }
 
-                // Run all analyses (no shared cache - saves memory)
-                Console.WriteLine("\n▶ Running core memory analyzers...");
-                new MemoryAnalyzer(writer).Analyze(heap);
+                // Run all analyses (with shared cache for performance)
+                Console.WriteLine("\n▶ Building type statistics cache...");
+                var typeStats = cache.GetOrBuildTypeStatistics(heap);
+                Console.WriteLine($"   Cached {typeStats.Count:N0} unique types");
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("2. After MemoryAnalyzer");
+                snapshot = MemoryDiagnostic.TakeSnapshot("2. After cache build");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
                 previousSnapshot = snapshot;
 
+                Console.WriteLine("\n▶ Running core memory analyzers...");
+                new MemoryAnalyzer(writer).Analyze(heap);
                 new GCGenerationAnalyzer(writer).Analyze(heap);
+                new ModuleAnalyzer(writer).Analyze(runtime);
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("3. After GCGenerationAnalyzer");
+                snapshot = MemoryDiagnostic.TakeSnapshot("3. After core analyzers");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
                 previousSnapshot = snapshot;
 
@@ -118,24 +122,25 @@ namespace DumpDetective
                 new CrashAnalyzer(writer).Analyze(runtime, heap);
                 new HangAnalyzer(writer).Analyze(runtime, heap);
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("4. After CrashAnalyzer + HangAnalyzer");
+                snapshot = MemoryDiagnostic.TakeSnapshot("4. After Crash + Hang analysis");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
                 previousSnapshot = snapshot;
 
                 // Memory leak detection
                 Console.WriteLine("\n▶ Detecting memory leaks...");
                 new MemoryLeakAnalyzer(writer).Analyze(heap, runtime);
+                new CollectionAnalyzer(writer).Analyze(heap);
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("5. After MemoryLeakAnalyzer");
+                snapshot = MemoryDiagnostic.TakeSnapshot("5. After MemoryLeak + Collection analysis");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
                 previousSnapshot = snapshot;
 
                 Console.WriteLine("\n▶ Analyzing static roots and event handlers...");
                 new StaticRootLeakDetector(writer).Analyze(heap);
                 new EventHandlerLeakDetector(writer).Analyze(heap);
-                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 2);
+                new ReferenceChainAnalyzer(writer).AnalyzeTopTypes(heap, cache, topCount: 5);
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("6. After all leak detectors");
+                snapshot = MemoryDiagnostic.TakeSnapshot("6. After leak detectors");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
                 previousSnapshot = snapshot;
 
@@ -144,7 +149,7 @@ namespace DumpDetective
                 new ThreadAnalyzer(writer).Analyze(runtime);
                 new EventLeakAnalyzer(writer).Analyze(heap, minSubscribers: 0);
 
-                snapshot = MemoryDiagnostic.TakeSnapshot("7. After ThreadAnalyzer + EventLeakAnalyzer");
+                snapshot = MemoryDiagnostic.TakeSnapshot("9. After Thread + Event analysis");
                 MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
 
                 Console.WriteLine("\n✅ Analysis complete!");

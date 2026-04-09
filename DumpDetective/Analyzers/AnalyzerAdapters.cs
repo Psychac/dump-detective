@@ -1,4 +1,5 @@
 using DumpDetective.Utilities;
+using DumpDetective.Configuration;
 
 namespace DumpDetective.Analyzers
 {
@@ -90,17 +91,19 @@ namespace DumpDetective.Analyzers
     internal class MemoryLeakAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
+        private readonly AnalysisConfiguration _config;
 
         public string Name => "Memory Leak Analysis";
 
-        public MemoryLeakAnalyzerAdapter(OutputWriter writer)
+        public MemoryLeakAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
+            _config = config;
         }
 
         public void Execute(AnalysisContext context)
         {
-            new MemoryLeakAnalyzer(_writer).Analyze(context.Heap, context.Runtime);
+            new MemoryLeakAnalyzer(_writer, _config).Analyze(context.Heap, context.Runtime);
         }
     }
 

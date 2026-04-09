@@ -150,7 +150,7 @@ namespace DumpDetective.Services
                     new CrashAnalyzerAdapter(writer),
                     new HangAnalyzerAdapter(writer))
                 .AddStage("Detecting memory leaks",
-                    new MemoryLeakAnalyzerAdapter(writer),
+                    new MemoryLeakAnalyzerAdapter(writer, _config),
                     new CollectionAnalyzerAdapter(writer))
                 .AddStage("Analyzing static roots and event handlers",
                     new StaticRootLeakDetectorAdapter(writer),

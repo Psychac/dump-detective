@@ -5,6 +5,10 @@ namespace DumpDetective.Analyzers
 {
     internal class CollectionAnalyzer
     {
+        private const ulong WasteThresholdBytes = 10 * 1024;           // 10 KB per collection
+        private const ulong SummaryWarnThresholdBytes = 10 * 1024 * 1024; // 10 MB total
+        private const int TopWastefulCount = 15;
+
         private readonly OutputWriter _writer;
 
         public CollectionAnalyzer(OutputWriter writer)
@@ -51,7 +55,7 @@ namespace DumpDetective.Analyzers
                     stats.Dictionaries++;
                     
                     var waste = AnalyzeDictionary(obj);
-                    if (waste != null && waste.WastedMemory > 10 * 1024) // >10KB wasted
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {
                         wasteful.Add(waste);
                     }
@@ -63,7 +67,7 @@ namespace DumpDetective.Analyzers
                     stats.Lists++;
                     
                     var waste = AnalyzeList(obj);
-                    if (waste != null && waste.WastedMemory > 10 * 1024)
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {
                         wasteful.Add(waste);
                     }
@@ -73,6 +77,12 @@ namespace DumpDetective.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
+
+                    var waste = AnalyzeHashSet(obj);
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    {
+                        wasteful.Add(waste);
+                    }
                 }
                 // Analyze Queue
                 else if (typeName.StartsWith("System.Collections.Generic.Queue", StringComparison.Ordinal))
@@ -83,7 +93,7 @@ namespace DumpDetective.Analyzers
             }
 
             stats.WastefulCollections = wasteful.OrderByDescending(w => w.WastedMemory).ToList();
-            stats.TotalWastedMemory = (ulong)wasteful.Sum(w => (long)w.WastedMemory);
+            stats.TotalWastedMemory = wasteful.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);
 
             return stats;
         }
@@ -93,38 +103,37 @@ namespace DumpDetective.Analyzers
             try
             {
                 var countField = dictObj.Type?.GetFieldByName("_count");
-                var bucketsField = dictObj.Type?.GetFieldByName("_buckets");
+                var entriesField = dictObj.Type?.GetFieldByName("_entries");
 
-                if (countField == null || bucketsField == null)
+                if (countField == null || entriesField == null)
                     return null;
 
-                int count = countField.Read<int>(dictObj, interior: false);
-                var bucketsObj = bucketsField.ReadObject(dictObj, interior: false);
+                int count = Math.Max(0, countField.Read<int>(dictObj, interior: false));
+                var entriesObj = entriesField.ReadObject(dictObj, interior: false);
 
-                if (!bucketsObj.IsValid || !bucketsObj.IsArray)
+                if (!entriesObj.IsValid || !entriesObj.IsArray)
                     return null;
 
-                int capacity = bucketsObj.AsArray().Length;
+                int capacity = entriesObj.AsArray().Length;
 
-                if (capacity > 0)
+                // No waste if fully packed or empty
+                if (capacity <= 0 || count >= capacity)
+                    return null;
+
+                double fillRate = (count / (double)capacity) * 100;
+                ulong elementSize = entriesObj.Size / (ulong)capacity;
+                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                return new WastefulCollection
                 {
-                    double fillRate = (count / (double)capacity) * 100;
-                    
-                    // Calculate wasted memory
-                    ulong elementSize = bucketsObj.Size / (ulong)capacity;
-                    ulong wastedSlots = (ulong)(capacity - count);
-                    ulong wastedMemory = wastedSlots * elementSize;
-
-                    return new WastefulCollection
-                    {
-                        Address = dictObj.Address,
-                        Type = dictObj.Type?.Name ?? "Dictionary",
-                        Count = count,
-                        Capacity = capacity,
-                        FillRate = fillRate,
-                        WastedMemory = wastedMemory
-                    };
-                }
+                    Address = dictObj.Address,
+                    Type = dictObj.Type?.Name ?? "Dictionary",
+                    Count = count,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory
+                };
             }
             catch { }
 
@@ -141,7 +150,7 @@ namespace DumpDetective.Analyzers
                 if (sizeField == null || itemsField == null)
                     return null;
 
-                int count = sizeField.Read<int>(listObj, interior: false);
+                int count = Math.Max(0, sizeField.Read<int>(listObj, interior: false));
                 var itemsObj = itemsField.ReadObject(listObj, interior: false);
 
                 if (!itemsObj.IsValid || !itemsObj.IsArray)
@@ -149,24 +158,66 @@ namespace DumpDetective.Analyzers
 
                 int capacity = itemsObj.AsArray().Length;
 
-                if (capacity > 0)
-                {
-                    double fillRate = (count / (double)capacity) * 100;
-                    
-                    ulong elementSize = itemsObj.Size / (ulong)capacity;
-                    ulong wastedSlots = (ulong)(capacity - count);
-                    ulong wastedMemory = wastedSlots * elementSize;
+                // No waste if fully packed or empty
+                if (capacity <= 0 || count >= capacity)
+                    return null;
 
-                    return new WastefulCollection
-                    {
-                        Address = listObj.Address,
-                        Type = listObj.Type?.Name ?? "List",
-                        Count = count,
-                        Capacity = capacity,
-                        FillRate = fillRate,
-                        WastedMemory = wastedMemory
-                    };
-                }
+                double fillRate = (count / (double)capacity) * 100;
+                ulong elementSize = itemsObj.Size / (ulong)capacity;
+                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                return new WastefulCollection
+                {
+                    Address = listObj.Address,
+                    Type = listObj.Type?.Name ?? "List",
+                    Count = count,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory
+                };
+            }
+            catch { }
+
+            return null;
+        }
+
+        private WastefulCollection? AnalyzeHashSet(ClrObject hashSetObj)
+        {
+            try
+            {
+                var countField = hashSetObj.Type?.GetFieldByName("_count");
+                var entriesField = hashSetObj.Type?.GetFieldByName("_entries");
+
+                if (countField == null || entriesField == null)
+                    return null;
+
+                int count = Math.Max(0, countField.Read<int>(hashSetObj, interior: false));
+                var entriesObj = entriesField.ReadObject(hashSetObj, interior: false);
+
+                if (!entriesObj.IsValid || !entriesObj.IsArray)
+                    return null;
+
+                int capacity = entriesObj.AsArray().Length;
+
+                // No waste if fully packed or empty
+                if (capacity <= 0 || count >= capacity)
+                    return null;
+
+                double fillRate = (count / (double)capacity) * 100;
+                ulong elementSize = entriesObj.Size / (ulong)capacity;
+                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                return new WastefulCollection
+                {
+                    Address = hashSetObj.Address,
+                    Type = hashSetObj.Type?.Name ?? "HashSet",
+                    Count = count,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory
+                };
             }
             catch { }
 
@@ -184,7 +235,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"  Queues: {stats.Queues:N0}");
             _writer.WriteLine($"\nTotal Wasted Memory: {FormatHelper.FormatBytes(stats.TotalWastedMemory)}");
 
-            if (stats.TotalWastedMemory > 10 * 1024 * 1024)
+            if (stats.TotalWastedMemory > SummaryWarnThresholdBytes)
             {
                 _writer.WriteLine($"⚠️  Over 10 MB wasted in under-filled collections!");
             }
@@ -198,12 +249,12 @@ namespace DumpDetective.Analyzers
                 return;
             }
 
-            _writer.WriteLine($"\n\nMOST WASTEFUL COLLECTIONS (Top 15):");
+            _writer.WriteLine($"\n\nMOST WASTEFUL COLLECTIONS (Top {TopWastefulCount}):");
             _writer.WriteSeparator();
             _writer.WriteLine($"{"Type",-50} {"Count/Capacity",-15} {"Fill Rate",10} {"Wasted",12}");
             _writer.WriteSeparator();
 
-            foreach (var waste in stats.WastefulCollections.Take(15))
+            foreach (var waste in stats.WastefulCollections.Take(TopWastefulCount))
             {
                 string countCapacity = $"{waste.Count}/{waste.Capacity}";
                 _writer.WriteLine($"{FormatHelper.TruncateString(waste.Type, 50),-50} {countCapacity,-15} {waste.FillRate,9:F1}% {FormatHelper.FormatBytes(waste.WastedMemory),12}");

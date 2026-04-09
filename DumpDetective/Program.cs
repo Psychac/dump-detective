@@ -39,8 +39,17 @@ namespace DumpDetective
 
         private static void PrintUsage()
         {
-            Console.WriteLine("Usage: DumpDetective <dump-file-path> [output-file-path]");
-            Console.WriteLine("Example: DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt");
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  DumpDetective <dump-file-path> [output-file-path] [options]");
+            Console.WriteLine();
+            Console.WriteLine("Memory leak analyzer options:");
+            Console.WriteLine("  --high-reference-threshold=<int>      Default: 50");
+            Console.WriteLine("  --max-duplicate-string-length=<int>   Default: 500");
+            Console.WriteLine("  --min-duplicate-string-count=<int>    Default: 10");
+            Console.WriteLine("  --max-reference-addresses=<int>       Default: 1000000");
+            Console.WriteLine();
+            Console.WriteLine("Example:");
+            Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt --max-reference-addresses=300000 --max-duplicate-string-length=200");
         }
     }
 }

@@ -33,14 +33,14 @@ namespace DumpDetective.Services
                 MemorySnapshot previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
                 MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
 
-                WriteHeader(writer, dataTarget);
+                WriteHeader(writer);
 
                 if (!ValidateClrVersions(dataTarget, writer))
                 {
                     return;
                 }
 
-                using ClrRuntime runtime = InitializeRuntime(dataTarget, writer, ref previousSnapshot);
+                using ClrRuntime runtime = InitializeRuntime(dataTarget, ref previousSnapshot);
                 var heap = runtime.Heap;
 
                 if (!ValidateHeap(heap, writer))
@@ -72,7 +72,7 @@ namespace DumpDetective.Services
             }
         }
 
-        private void WriteHeader(OutputWriter writer, DataTarget dataTarget)
+        private void WriteHeader(OutputWriter writer)
         {
             writer.WriteLine($"Dump file: {_config.DumpPath}");
             writer.WriteLine(string.Empty);
@@ -104,7 +104,7 @@ namespace DumpDetective.Services
             return true;
         }
 
-        private ClrRuntime InitializeRuntime(DataTarget dataTarget, OutputWriter writer, ref MemorySnapshot previousSnapshot)
+        private ClrRuntime InitializeRuntime(DataTarget dataTarget, ref MemorySnapshot previousSnapshot)
         {
             Console.WriteLine("Fetching required dlls from Symbol Servers.");
             ClrInfo primaryClr = dataTarget.ClrVersions[0];
@@ -141,24 +141,23 @@ namespace DumpDetective.Services
 
         private void RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot initialSnapshot)
         {
-            var pipeline = new AnalysisPipeline(writer, initialSnapshot)
+            var pipeline = new AnalysisPipeline(initialSnapshot)
                 .AddStage("Running core memory analyzers",
                     new MemoryAnalyzerAdapter(writer),
                     new GCGenerationAnalyzerAdapter(writer),
-                    new ModuleAnalyzerAdapter(writer));
-                //.AddStage("Analyzing for crashes and hangs",
-                //    new CrashAnalyzerAdapter(writer),
-                //    new HangAnalyzerAdapter(writer))
-                //.AddStage("Detecting memory leaks",
-                //    new MemoryLeakAnalyzerAdapter(writer, _config),
-                //    new CollectionAnalyzerAdapter(writer))
-                //.AddStage("Analyzing static roots and event handlers",
-                //    new StaticRootLeakDetectorAdapter(writer),
-                //    new EventHandlerLeakDetectorAdapter(writer),
-                //    new ReferenceChainAnalyzerAdapter(writer, _config.ReferenceChainTopCount))
-                //.AddStage("Analyzing threads and events",
-                //    new ThreadAnalyzerAdapter(writer),
-                //    new EventLeakAnalyzerAdapter(writer, _config.EventLeakMinSubscribers));
+                    new ModuleAnalyzerAdapter(writer))
+                .AddStage("Analyzing for crashes and hangs",
+                    new CrashAnalyzerAdapter(writer),
+                    new HangAnalyzerAdapter(writer))
+                .AddStage("Detecting memory leaks",
+                    new MemoryLeakAnalyzerAdapter(writer, _config),
+                    new CollectionAnalyzerAdapter(writer))
+                .AddStage("Analyzing static roots and event handlers",
+                    new StaticRootLeakDetectorAdapter(writer),
+                    new ReferenceChainAnalyzerAdapter(writer, _config.ReferenceChainTopCount))
+                .AddStage("Analyzing threads and events",
+                    new ThreadAnalyzerAdapter(writer),
+                    new EventLeakAnalyzerAdapter(writer, _config.EventLeakMinSubscribers));
 
             pipeline.Execute(context);
 
@@ -168,7 +167,7 @@ namespace DumpDetective.Services
         private void WriteFooter(OutputWriter writer)
         {
             writer.WriteSeparator();
-            writer.WriteLine($"Analysis complete");
+            writer.WriteLine("Analysis complete");
 
             if (_config.OutputPath != null)
             {

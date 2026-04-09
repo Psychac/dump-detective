@@ -58,18 +58,6 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\n{StringConstants.Equals80}");
         }
 
-        private ClrObject? FindSampleInstance(ClrHeap heap, string typeName)
-        {
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (obj.IsValid && obj.Type?.Name == typeName)
-                {
-                    return obj;
-                }
-            }
-            return null;
-        }
-
         public void AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
             ClrObject obj = heap.GetObject(objectAddress);

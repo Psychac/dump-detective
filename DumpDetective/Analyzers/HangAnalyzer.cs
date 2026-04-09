@@ -8,6 +8,9 @@ namespace DumpDetective.Analyzers
         private readonly OutputWriter _writer;
         private const int LongWaitThreshold = 5; // threads waiting
         private const int HighThreadPoolThreshold = 100;
+        private const int MaxTasksToScan = 50000;
+        private const int TopWaitingThreadsPerGroup = 5;
+        private const int TopContinuationTypesToShow = 5;
 
         public HangAnalyzer(OutputWriter writer)
         {
@@ -24,7 +27,7 @@ namespace DumpDetective.Analyzers
             PrintHangSummary(hangInfo);
             PrintWaitingThreads(hangInfo.WaitingThreads);
             PrintThreadPoolInfo(hangInfo);
-            PrintTaskInfo(heap);
+            PrintTaskInfo(hangInfo);
             PrintDeadlockSuspicion(hangInfo);
 
             _writer.WriteLine(StringConstants.Equals80);
@@ -42,12 +45,18 @@ namespace DumpDetective.Analyzers
 
                 analysis.TotalAliveThreads++;
 
-                // Analyze thread state
-                var stackTrace = thread.EnumerateStackTrace().Take(10).ToList();
-                if (stackTrace.Count == 0)
+                // Analyze thread state (top frame only to reduce allocations)
+                ClrStackFrame? topFrame = null;
+                foreach (var frame in thread.EnumerateStackTrace())
+                {
+                    topFrame = frame;
+                    break;
+                }
+
+                if (topFrame == null)
                     continue;
 
-                var waitInfo = DetectWaitPattern(thread, stackTrace);
+                var waitInfo = DetectWaitPattern(thread, topFrame);
                 if (waitInfo != null)
                 {
                     waitingThreads.Add(waitInfo);
@@ -61,18 +70,17 @@ namespace DumpDetective.Analyzers
             }
 
             analysis.WaitingThreads = waitingThreads;
-            analysis.ThreadPoolInfo = AnalyzeThreadPool(heap);
+            AnalyzeAsyncWork(heap, analysis);
 
             return analysis;
         }
 
-        private WaitingThreadInfo? DetectWaitPattern(ClrThread thread, List<ClrStackFrame> stackTrace)
+        private WaitingThreadInfo? DetectWaitPattern(ClrThread thread, ClrStackFrame topFrame)
         {
-            var topFrame = stackTrace.FirstOrDefault();
             if (topFrame.Method == null)
                 return null;
 
-            string topMethod = topFrame.Method.Signature?.ToLower() ?? "";
+            string topMethod = topFrame.Method.Signature?.ToLowerInvariant() ?? "";
             
             WaitType? waitType = null;
             string? waitReason = null;
@@ -122,20 +130,19 @@ namespace DumpDetective.Analyzers
                     WaitType = waitType.Value,
                     WaitReason = waitReason ?? "Unknown wait",
                     LockCount = (int)thread.LockCount,
-                    StackTrace = stackTrace
+                    TopStackFrame = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown"
                 };
             }
 
             return null;
         }
 
-        private ThreadPoolAnalysis AnalyzeThreadPool(ClrHeap heap)
+        private void AnalyzeAsyncWork(ClrHeap heap, HangAnalysis analysis)
         {
-            var analysis = new ThreadPoolAnalysis();
-
-            // On-demand task enumeration (not cached - saves memory)
-            const int MaxTasksToScan = 50000;
+            var threadPool = new ThreadPoolAnalysis();
+            var taskContinuations = new Dictionary<string, int>();
             int tasksScanned = 0;
+            int totalContinuations = 0;
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -148,14 +155,14 @@ namespace DumpDetective.Analyzers
                 if (typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal) ||
                     typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal))
                 {
-                    analysis.QueuedWorkItems++;
+                    threadPool.QueuedWorkItems++;
                 }
 
                 // Count tasks
                 if (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 {
                     tasksScanned++;
-                    analysis.TotalTasks++;
+                    threadPool.TotalTasks++;
 
                     if (tasksScanned <= MaxTasksToScan)
                     {
@@ -168,23 +175,33 @@ namespace DumpDetective.Analyzers
                             bool isCanceled = (stateFlags & 0x400000) != 0;
 
                             if (isFaulted)
-                                analysis.FaultedTasks++;
+                                threadPool.FaultedTasks++;
                             else if (isCanceled)
-                                analysis.CanceledTasks++;
+                                threadPool.CanceledTasks++;
                             else if (!isCompleted)
-                                analysis.PendingTasks++;
+                                threadPool.PendingTasks++;
                         }
                     }
                 }
 
-                if (tasksScanned > MaxTasksToScan && analysis.QueuedWorkItems > 1000)
+                if (typeName.Contains("ContinuationTask", StringComparison.Ordinal) ||
+                    typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal))
                 {
-                    analysis.TaskScanLimited = true;
+                    totalContinuations++;
+                    taskContinuations.TryGetValue(typeName, out int count);
+                    taskContinuations[typeName] = count + 1;
+                }
+
+                if (tasksScanned > MaxTasksToScan && threadPool.QueuedWorkItems > 1000)
+                {
+                    threadPool.TaskScanLimited = true;
                     break;
                 }
             }
 
-            return analysis;
+            analysis.ThreadPoolInfo = threadPool;
+            analysis.TaskContinuations = taskContinuations;
+            analysis.TotalContinuations = totalContinuations;
         }
 
         private void PrintHangSummary(HangAnalysis analysis)
@@ -194,6 +211,12 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"Total Alive Threads: {analysis.TotalAliveThreads}");
             _writer.WriteLine($"Waiting/Blocked Threads: {analysis.WaitingThreads.Count}");
             _writer.WriteLine($"Threads Holding Locks: {analysis.ThreadsHoldingLocks}");
+
+            if (analysis.TotalAliveThreads == 0)
+            {
+                _writer.WriteLine("No alive managed threads found.");
+                return;
+            }
 
             double waitingPercentage = (analysis.WaitingThreads.Count / (double)analysis.TotalAliveThreads) * 100;
 
@@ -247,24 +270,19 @@ namespace DumpDetective.Analyzers
                 int threadCount = 0;
                 foreach (var waitThread in group.Value)
                 {
-                    if (threadCount >= 5) break;
+                    if (threadCount >= TopWaitingThreadsPerGroup) break;
                     _writer.WriteLine($"  Thread {waitThread.ThreadId} (OS: {waitThread.OSThreadId})");
                     _writer.WriteLine($"    Reason: {waitThread.WaitReason}");
                     _writer.WriteLine($"    Locks Held: {waitThread.LockCount}");
-                    
-                    if (waitThread.StackTrace.Count > 0)
-                    {
-                        _writer.WriteLine($"    Top Stack Frame:");
-                        var topFrame = waitThread.StackTrace[0];
-                        string method = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown";
-                        _writer.WriteLine($"      {FormatHelper.TruncateString(method, 65)}");
-                    }
+
+                    _writer.WriteLine($"    Top Stack Frame:");
+                    _writer.WriteLine($"      {FormatHelper.TruncateString(waitThread.TopStackFrame, 65)}");
                     threadCount++;
                 }
 
-                if (group.Value.Count > 5)
+                if (group.Value.Count > TopWaitingThreadsPerGroup)
                 {
-                    _writer.WriteLine($"  ... and {group.Value.Count - 5} more");
+                    _writer.WriteLine($"  ... and {group.Value.Count - TopWaitingThreadsPerGroup} more");
                 }
             }
         }
@@ -299,41 +317,32 @@ namespace DumpDetective.Analyzers
             }
         }
 
-        private void PrintTaskInfo(ClrHeap heap)
+        private void PrintTaskInfo(HangAnalysis analysis)
         {
             _writer.WriteLine($"\n\nASYNC TASK ANALYSIS:");
             _writer.WriteSeparator();
 
-            var taskContinuations = new Dictionary<string, int>();
-            int totalContinuations = 0;
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            if (analysis.TotalContinuations > 0)
             {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                if (obj.Type.Name?.Contains("ContinuationTask", StringComparison.Ordinal) == true ||
-                    obj.Type.Name?.Contains("AwaitTaskContinuation", StringComparison.Ordinal) == true)
-                {
-                    totalContinuations++;
-                    taskContinuations.TryGetValue(obj.Type.Name, out int count);
-                    taskContinuations[obj.Type.Name] = count + 1;
-                }
-            }
-
-            if (totalContinuations > 0)
-            {
-                _writer.WriteLine($"Total Task Continuations: {totalContinuations:N0}");
+                _writer.WriteLine($"Total Task Continuations: {analysis.TotalContinuations:N0}");
                 
-                if (totalContinuations > 1000)
+                if (analysis.TotalContinuations > 1000)
                 {
                     _writer.WriteLine($"⚠️  HIGH: Many continuations may indicate async over-use or hangs.");
                 }
 
                 _writer.WriteLine($"\nContinuation Types:");
-                foreach (var kvp in taskContinuations.OrderByDescending(x => x.Value).Take(5))
+                var continuationTypes = new List<KeyValuePair<string, int>>(analysis.TaskContinuations);
+                continuationTypes.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+                int shown = 0;
+                foreach (var kvp in continuationTypes)
                 {
+                    if (shown >= TopContinuationTypesToShow)
+                        break;
+
                     _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0}");
+                    shown++;
                 }
             }
             else
@@ -347,13 +356,17 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\n\nDEADLOCK DETECTION:");
             _writer.WriteSeparator();
 
-            var monitorWaits = analysis.WaitingThreads.Where(w => w.WaitType == WaitType.MonitorWait).ToList();
-            var lockedThreads = analysis.WaitingThreads.Where(w => w.LockCount > 0).ToList();
+            int monitorWaitCount = 0;
+            foreach (var waiting in analysis.WaitingThreads)
+            {
+                if (waiting.WaitType == WaitType.MonitorWait)
+                    monitorWaitCount++;
+            }
 
-            if (monitorWaits.Count >= 2 && analysis.ThreadsHoldingLocks >= 2)
+            if (monitorWaitCount >= 2 && analysis.ThreadsHoldingLocks >= 2)
             {
                 _writer.WriteLine($"⚠️  POTENTIAL DEADLOCK DETECTED:");
-                _writer.WriteLine($"    - {monitorWaits.Count} thread(s) waiting on monitors");
+                _writer.WriteLine($"    - {monitorWaitCount} thread(s) waiting on monitors");
                 _writer.WriteLine($"    - {analysis.ThreadsHoldingLocks} thread(s) holding locks");
                 _writer.WriteLine($"    - Threads may be waiting on each other (circular dependency)");
                 _writer.WriteLine($"\n💡 INVESTIGATION STEPS:");
@@ -373,6 +386,11 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"    - Blocking I/O on UI/main thread");
                 _writer.WriteLine($"    - Synchronous wait on async code (Task.Wait/Result)");
             }
+            else if (analysis.WaitingThreads.Count >= LongWaitThreshold)
+            {
+                _writer.WriteLine($"⚠️  Elevated wait activity detected ({analysis.WaitingThreads.Count} waiting threads).");
+                _writer.WriteLine("Review top waiting groups and thread pool pressure for early hang signals.");
+            }
             else
             {
                 _writer.WriteLine("No obvious deadlock patterns detected.");
@@ -387,6 +405,8 @@ namespace DumpDetective.Analyzers
         public int ThreadsHoldingLocks { get; set; }
         public List<WaitingThreadInfo> WaitingThreads { get; set; } = new();
         public ThreadPoolAnalysis ThreadPoolInfo { get; set; } = new();
+        public int TotalContinuations { get; set; }
+        public Dictionary<string, int> TaskContinuations { get; set; } = new();
     }
 
     internal class WaitingThreadInfo
@@ -396,7 +416,7 @@ namespace DumpDetective.Analyzers
         public WaitType WaitType { get; set; }
         public string WaitReason { get; set; } = string.Empty;
         public int LockCount { get; set; }
-        public List<ClrStackFrame> StackTrace { get; set; } = new();
+        public string TopStackFrame { get; set; } = string.Empty;
     }
 
     internal class ThreadPoolAnalysis

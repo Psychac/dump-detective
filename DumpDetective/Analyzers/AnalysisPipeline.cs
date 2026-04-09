@@ -5,12 +5,10 @@ namespace DumpDetective.Analyzers
     internal class AnalysisPipeline
     {
         private readonly List<AnalysisStage> _stages = new();
-        private readonly OutputWriter _writer;
         private MemorySnapshot _previousSnapshot;
 
-        public AnalysisPipeline(OutputWriter writer, MemorySnapshot initialSnapshot)
+        public AnalysisPipeline(MemorySnapshot initialSnapshot)
         {
-            _writer = writer;
             _previousSnapshot = initialSnapshot;
         }
 
@@ -22,8 +20,9 @@ namespace DumpDetective.Analyzers
 
         public void Execute(AnalysisContext context)
         {
-            foreach (var stage in _stages)
+            for (int i = 0; i < _stages.Count; i++)
             {
+                var stage = _stages[i];
                 Console.WriteLine($"\n▶ {stage.Name}...");
 
                 foreach (var analyzer in stage.Analyzers)
@@ -31,7 +30,7 @@ namespace DumpDetective.Analyzers
                     analyzer.Execute(context);
                 }
 
-                var snapshot = MemoryDiagnostic.TakeSnapshot($"{_stages.IndexOf(stage) + 1}. After {stage.Name}");
+                var snapshot = MemoryDiagnostic.TakeSnapshot($"{i + 1}. After {stage.Name}");
                 MemoryDiagnostic.PrintDeltaToConsole(_previousSnapshot, snapshot);
                 _previousSnapshot = snapshot;
             }

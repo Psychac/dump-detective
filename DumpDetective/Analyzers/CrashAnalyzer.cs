@@ -5,6 +5,13 @@ namespace DumpDetective.Analyzers
 {
     internal class CrashAnalyzer
     {
+        private const int MaxExceptionsPerType = 10;
+        private const int TopExceptionTypesCount = 10;
+        private const int MaxDetailedExceptionsPerType = 5;
+        private const int MaxOriginalStackFramesToPrint = 20;
+        private const int MaxCurrentThreadFramesToPrint = 5;
+        private const int TopCrashThreadCandidates = 5;
+
         private readonly OutputWriter _writer;
 
         public CrashAnalyzer(OutputWriter writer)
@@ -27,6 +34,7 @@ namespace DumpDetective.Analyzers
             }
 
             PrintExceptionSummary(exceptionInfo);
+            PrintLikelyCrashThreads(exceptionInfo);
             PrintExceptionDetails(exceptionInfo);
 
             _writer.WriteLine(StringConstants.Equals80);
@@ -36,9 +44,10 @@ namespace DumpDetective.Analyzers
         {
             var analysis = new ExceptionAnalysis();
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
-
-            // Limit memory usage - only store top exceptions
-            const int MaxExceptionsPerType = 10;
+            var exceptionTypeCounts = new Dictionary<string, int>();
+            var activeExceptionTypeCounts = new Dictionary<string, int>();
+            var activeExceptions = BuildActiveExceptionLookup(runtime);
+            var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
@@ -46,56 +55,96 @@ namespace DumpDetective.Analyzers
                     continue;
 
                 // Check if object is an exception
-                if (obj.Type.Name?.Contains("Exception", StringComparison.Ordinal) == true)
+                string? typeName = obj.Type.Name;
+                if (typeName?.Contains("Exception", StringComparison.Ordinal) == true)
                 {
                     analysis.TotalExceptions++;
+                    exceptionTypeCounts.TryGetValue(typeName, out int typeCount);
+                    exceptionTypeCounts[typeName] = typeCount + 1;
+
+                    bool isActive = activeExceptions.TryGetValue(obj.Address, out var activeExceptionContext);
+                    if (isActive)
+                    {
+                        analysis.ActiveExceptions++;
+                        activeExceptionTypeCounts.TryGetValue(typeName, out int activeTypeCount);
+                        activeExceptionTypeCounts[typeName] = activeTypeCount + 1;
+
+                        if (!crashThreadCandidates.TryGetValue(activeExceptionContext.ThreadId, out var candidate))
+                        {
+                            candidate = new CrashThreadCandidate
+                            {
+                                ThreadId = activeExceptionContext.ThreadId,
+                                OSThreadId = activeExceptionContext.OSThreadId,
+                                CurrentThreadStack = activeExceptionContext.CurrentThreadStack,
+                                PrimaryExceptionType = typeName
+                            };
+                            crashThreadCandidates[activeExceptionContext.ThreadId] = candidate;
+                        }
+
+                        candidate.ActiveExceptionCount++;
+                    }
 
                     // Only extract detailed info if we haven't hit the limit
-                    if (!exceptionsByType.TryGetValue(obj.Type.Name, out var list))
+                    if (!exceptionsByType.TryGetValue(typeName, out var list))
                     {
                         list = new List<ExceptionInstance>(capacity: MaxExceptionsPerType);
-                        exceptionsByType[obj.Type.Name] = list;
+                        exceptionsByType[typeName] = list;
                     }
 
-                    // Only store details for top N exceptions per type to save memory
-                    if (list.Count < MaxExceptionsPerType)
+                    // Only store details for top N exceptions per type to save memory.
+                    // Always include active exceptions, even beyond the cap.
+                    if (list.Count < MaxExceptionsPerType || isActive)
                     {
-                        var exceptionInstance = ExtractExceptionInfo(obj, runtime);
+                        var exceptionInstance = ExtractExceptionInfo(obj, activeExceptionContext);
                         list.Add(exceptionInstance);
-
-                        // Check if this exception is on a thread (likely the crash)
-                        if (exceptionInstance.ThreadId.HasValue)
-                        {
-                            analysis.ActiveExceptions++;
-                        }
-                    }
-                    else
-                    {
-                        // Still check if it's active for the count
-                        foreach (var thread in runtime.Threads)
-                        {
-                            if (thread.CurrentException != null && thread.CurrentException.Address == obj.Address)
-                            {
-                                analysis.ActiveExceptions++;
-
-                                // If active, extract it even if over limit (crashes are priority)
-                                var exceptionInstance = ExtractExceptionInfo(obj, runtime);
-                                list.Add(exceptionInstance);
-                                break;
-                            }
-                        }
                     }
                 }
             }
 
-            analysis.ExceptionsByType = exceptionsByType
-                .OrderByDescending(kvp => kvp.Value.Count)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            var sortedTypeNames = exceptionTypeCounts
+                .OrderByDescending(kvp => kvp.Value)
+                .Select(kvp => kvp.Key);
+
+            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(exceptionsByType.Count);
+            foreach (string typeName in sortedTypeNames)
+            {
+                if (exceptionsByType.TryGetValue(typeName, out var list))
+                {
+                    sortedExceptionsByType[typeName] = list;
+                }
+            }
+
+            analysis.ExceptionTypeCounts = exceptionTypeCounts;
+            analysis.ActiveExceptionTypeCounts = activeExceptionTypeCounts;
+            analysis.ExceptionsByType = sortedExceptionsByType;
+            analysis.CrashThreadCandidates = crashThreadCandidates.Values
+                .OrderByDescending(c => c.ActiveExceptionCount)
+                .ToList();
 
             return analysis;
         }
 
-        private ExceptionInstance ExtractExceptionInfo(ClrObject exceptionObj, ClrRuntime runtime)
+        private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)
+        {
+            var lookup = new Dictionary<ulong, ActiveExceptionContext>();
+
+            foreach (var thread in runtime.Threads)
+            {
+                if (thread.CurrentException == null)
+                    continue;
+
+                lookup[thread.CurrentException.Address] = new ActiveExceptionContext
+                {
+                    ThreadId = (uint)thread.ManagedThreadId,
+                    OSThreadId = thread.OSThreadId,
+                    CurrentThreadStack = thread.EnumerateStackTrace().Take(10).ToList()
+                };
+            }
+
+            return lookup;
+        }
+
+        private ExceptionInstance ExtractExceptionInfo(ClrObject exceptionObj, ActiveExceptionContext? activeContext)
         {
             var instance = new ExceptionInstance
             {
@@ -137,16 +186,11 @@ namespace DumpDetective.Analyzers
                 // Get the ORIGINAL stack trace from exception object (not thread stack)
                 instance.OriginalStackTrace = ExtractExceptionStackTrace(exceptionObj);
 
-                // Find thread that has this exception
-                foreach (var thread in runtime.Threads)
+                if (activeContext != null)
                 {
-                    if (thread.CurrentException != null && thread.CurrentException.Address == exceptionObj.Address)
-                    {
-                        instance.ThreadId = (uint)thread.ManagedThreadId;
-                        instance.OSThreadId = thread.OSThreadId;
-                        instance.CurrentThreadStack = thread.EnumerateStackTrace().Take(10).ToList();
-                        break;
-                    }
+                    instance.ThreadId = activeContext.ThreadId;
+                    instance.OSThreadId = activeContext.OSThreadId;
+                    instance.CurrentThreadStack = activeContext.CurrentThreadStack;
                 }
             }
             catch
@@ -261,7 +305,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteSeparator();
             _writer.WriteLine($"Total Exception Objects: {analysis.TotalExceptions:N0}");
             _writer.WriteLine($"Active Exceptions (on threads): {analysis.ActiveExceptions}");
-            _writer.WriteLine($"Unique Exception Types: {analysis.ExceptionsByType.Count}");
+            _writer.WriteLine($"Unique Exception Types: {analysis.ExceptionTypeCounts.Count}");
 
             if (analysis.ActiveExceptions > 0)
             {
@@ -269,11 +313,41 @@ namespace DumpDetective.Analyzers
             }
 
             _writer.WriteLine($"\nTop Exception Types:");
-            foreach (var kvp in analysis.ExceptionsByType.Take(10))
+            foreach (var kvp in analysis.ExceptionTypeCounts.Take(TopExceptionTypesCount))
             {
-                int activeCount = kvp.Value.Count(e => e.ThreadId.HasValue);
+                analysis.ActiveExceptionTypeCounts.TryGetValue(kvp.Key, out int activeCount);
                 string activeMarker = activeCount > 0 ? $" ({activeCount} active ⚠️)" : "";
-                _writer.WriteLine($"  {kvp.Key}: {kvp.Value.Count:N0} instance(s){activeMarker}");
+                _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} instance(s){activeMarker}");
+            }
+        }
+
+        private void PrintLikelyCrashThreads(ExceptionAnalysis analysis)
+        {
+            _writer.WriteLine("\nLIKELY CRASH THREADS:");
+            _writer.WriteSeparator();
+
+            if (analysis.CrashThreadCandidates.Count == 0)
+            {
+                _writer.WriteLine("No active exception thread candidates found.");
+                return;
+            }
+
+            int rank = 1;
+            foreach (var candidate in analysis.CrashThreadCandidates.Take(TopCrashThreadCandidates))
+            {
+                string confidence = candidate.ActiveExceptionCount > 1 ? "High" : "Medium";
+                _writer.WriteLine($"[{rank}] Thread {candidate.ThreadId} (OS: {candidate.OSThreadId}) - Confidence: {confidence}");
+                _writer.WriteLine($"    Active exceptions on thread: {candidate.ActiveExceptionCount}");
+                _writer.WriteLine($"    Primary exception type: {candidate.PrimaryExceptionType}");
+
+                if (candidate.CurrentThreadStack.Count > 0)
+                {
+                    var topFrame = candidate.CurrentThreadStack[0];
+                    string method = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown";
+                    _writer.WriteLine($"    Top frame: {FormatHelper.TruncateString(method, 100)}");
+                }
+
+                rank++;
             }
         }
 
@@ -289,7 +363,7 @@ namespace DumpDetective.Analyzers
                 var activeExceptions = kvp.Value.Where(e => e.ThreadId.HasValue).ToList();
                 var inactiveExceptions = kvp.Value.Where(e => !e.ThreadId.HasValue).Take(2).ToList();
 
-                foreach (var ex in activeExceptions.Concat(inactiveExceptions).Take(5))
+                foreach (var ex in activeExceptions.Concat(inactiveExceptions).Take(MaxDetailedExceptionsPerType))
                 {
                     _writer.WriteLine($"\n[{exNum++}] {ex.Type}");
                     _writer.WriteLine($"    Address: 0x{ex.Address:X}");
@@ -323,13 +397,13 @@ namespace DumpDetective.Analyzers
                     if (ex.OriginalStackTrace.Count > 0)
                     {
                         _writer.WriteLine($"\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
-                        foreach (var frame in ex.OriginalStackTrace.Take(20))
+                        foreach (var frame in ex.OriginalStackTrace.Take(MaxOriginalStackFramesToPrint))
                         {
                             _writer.WriteLine($"      {frame}");
                         }
-                        if (ex.OriginalStackTrace.Count > 20)
+                        if (ex.OriginalStackTrace.Count > MaxOriginalStackFramesToPrint)
                         {
-                            _writer.WriteLine($"      ... and {ex.OriginalStackTrace.Count - 20} more frames");
+                            _writer.WriteLine($"      ... and {ex.OriginalStackTrace.Count - MaxOriginalStackFramesToPrint} more frames");
                         }
                     }
 
@@ -337,7 +411,7 @@ namespace DumpDetective.Analyzers
                     if (ex.CurrentThreadStack.Count > 0 && ex.ThreadId.HasValue)
                     {
                         _writer.WriteLine($"\n    Current Thread Position (exception handling):");
-                        foreach (var frame in ex.CurrentThreadStack.Take(5))
+                        foreach (var frame in ex.CurrentThreadStack.Take(MaxCurrentThreadFramesToPrint))
                         {
                             string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
                             _writer.WriteLine($"      {FormatHelper.TruncateString(method, 70)}");
@@ -345,9 +419,10 @@ namespace DumpDetective.Analyzers
                     }
                 }
 
-                if (kvp.Value.Count > 5)
+                analysis.ExceptionTypeCounts.TryGetValue(kvp.Key, out int totalTypeCount);
+                if (totalTypeCount > MaxDetailedExceptionsPerType)
                 {
-                    _writer.WriteLine($"\n    ... and {kvp.Value.Count - 5} more {kvp.Key} instance(s)");
+                    _writer.WriteLine($"\n    ... and {totalTypeCount - MaxDetailedExceptionsPerType} more {kvp.Key} instance(s)");
                 }
             }
         }
@@ -357,7 +432,26 @@ namespace DumpDetective.Analyzers
     {
         public int TotalExceptions { get; set; }
         public int ActiveExceptions { get; set; }
+        public Dictionary<string, int> ExceptionTypeCounts { get; set; } = new();
+        public Dictionary<string, int> ActiveExceptionTypeCounts { get; set; } = new();
         public Dictionary<string, List<ExceptionInstance>> ExceptionsByType { get; set; } = new();
+        public List<CrashThreadCandidate> CrashThreadCandidates { get; set; } = new();
+    }
+
+    internal class CrashThreadCandidate
+    {
+        public uint ThreadId { get; set; }
+        public uint OSThreadId { get; set; }
+        public int ActiveExceptionCount { get; set; }
+        public string PrimaryExceptionType { get; set; } = string.Empty;
+        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
+    }
+
+    internal class ActiveExceptionContext
+    {
+        public uint ThreadId { get; set; }
+        public uint OSThreadId { get; set; }
+        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
     }
 
     internal class ExceptionInstance

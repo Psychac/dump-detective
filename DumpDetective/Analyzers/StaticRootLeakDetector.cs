@@ -5,6 +5,13 @@ namespace DumpDetective.Analyzers
 {
     internal class StaticRootLeakDetector
     {
+        private const int MaxRootsToReport = 15;
+        private const int TopRetainedTypesToReport = 5;
+        private const int SampleRetainedObjectsToInspect = 100;
+        private const ulong SignificantMemoryThresholdBytes = 1024 * 1024;
+        private const int SignificantObjectCountThreshold = 100;
+        private const int MaxRetainedObjectsToScan = 10000;
+
         private readonly OutputWriter _writer;
 
         public StaticRootLeakDetector(OutputWriter writer)
@@ -12,12 +19,12 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
             _writer.WriteLine("Identifying static fields that may be causing memory leaks...\n");
 
-            var staticRootAnalysis = AnalyzeStaticRoots(heap);
+            var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
 
             if (staticRootAnalysis.Count == 0)
             {
@@ -35,7 +42,7 @@ namespace DumpDetective.Analyzers
             int rootCount = 0;
             foreach (var analysis in staticRootAnalysis)
             {
-                if (rootCount >= 15) break;
+                if (rootCount >= MaxRootsToReport) break;
                 _writer.WriteLine($"[{rootNum++}] STATIC ROOT LEAK");
                 _writer.WriteSeparator();
                 _writer.WriteLine($"  Root: {analysis.RootDescription}");
@@ -50,7 +57,7 @@ namespace DumpDetective.Analyzers
                     int typeCount = 0;
                     foreach (var typeInfo in analysis.TopRetainedTypes)
                     {
-                        if (typeCount >= 5) break;
+                        if (typeCount >= TopRetainedTypesToReport) break;
                         _writer.WriteLine($"    - {typeInfo.TypeName}: {typeInfo.Count:N0} instance(s), {FormatHelper.FormatBytes(typeInfo.TotalSize)}");
                         typeCount++;
                     }
@@ -77,7 +84,7 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine(StringConstants.Equals80);
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, HeapAnalysisCache cache)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
@@ -91,13 +98,57 @@ namespace DumpDetective.Analyzers
                 if (!obj.IsValid || !processedRoots.Add(obj.Address))
                     continue;
 
-                // Calculate retained memory on-demand (no cache)
-                var retainedObjects = GetRetainedObjects(heap, obj.Address);
+                var retainedObjects = cache.GetRetainedObjects(heap, obj.Address, MaxRetainedObjectsToScan);
+
+                var typeStats = new Dictionary<string, RetainedTypeInfo>();
+                ulong totalSize = 0;
+                bool containsCollections = false;
+                bool containsEventHandlers = false;
+                int sampledCount = 0;
+
+                foreach (var address in retainedObjects)
+                {
+                    var retainedObj = heap.GetObject(address);
+                    if (!retainedObj.IsValid || retainedObj.Type == null)
+                        continue;
+
+                    totalSize += retainedObj.Size;
+
+                    string typeName = retainedObj.Type.Name ?? StringConstants.UnknownType;
+                    if (!typeStats.TryGetValue(typeName, out var info))
+                    {
+                        info = new RetainedTypeInfo { TypeName = typeName };
+                        typeStats[typeName] = info;
+                    }
+
+                    info.Count++;
+                    info.TotalSize += retainedObj.Size;
+
+                    if (sampledCount < SampleRetainedObjectsToInspect)
+                    {
+                        if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
+                        {
+                            containsCollections = true;
+                        }
+
+                        if (!containsEventHandlers)
+                        {
+                            foreach (var field in retainedObj.Type.Fields)
+                            {
+                                if (TypeFilterHelper.IsDelegateType(field.Type))
+                                {
+                                    containsEventHandlers = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        sampledCount++;
+                    }
+                }
 
                 // Only report if significant memory impact (> 1MB or > 100 objects)
-                ulong totalSize = (ulong)retainedObjects.Sum(addr => (long)heap.GetObject(addr).Size);
-
-                if (totalSize > 1024 * 1024 || retainedObjects.Count > 100)
+                if (totalSize > SignificantMemoryThresholdBytes || retainedObjects.Count > SignificantObjectCountThreshold)
                 {
                     var analysis = new StaticRootAnalysis
                     {
@@ -107,9 +158,9 @@ namespace DumpDetective.Analyzers
                         DirectObjectSize = obj.Size,
                         TotalMemoryImpact = totalSize,
                         ObjectsKeptAlive = retainedObjects.Count,
-                        TopRetainedTypes = GetTopRetainedTypes(heap, retainedObjects),
-                        ContainsCollections = ContainsCollectionTypes(heap, retainedObjects),
-                        ContainsEventHandlers = ContainsEventHandlers(heap, retainedObjects)
+                        TopRetainedTypes = GetTopRetainedTypes(typeStats),
+                        ContainsCollections = containsCollections,
+                        ContainsEventHandlers = containsEventHandlers
                     };
 
                     results.Add(analysis);
@@ -119,95 +170,12 @@ namespace DumpDetective.Analyzers
             return results;
         }
 
-        private List<RetainedTypeInfo> GetTopRetainedTypes(ClrHeap heap, HashSet<ulong> addresses)
+        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)
         {
-            var typeStats = new Dictionary<string, RetainedTypeInfo>();
-
-            foreach (var address in addresses)
-            {
-                var obj = heap.GetObject(address);
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
-
-                if (!typeStats.TryGetValue(typeName, out var info))
-                {
-                    info = new RetainedTypeInfo { TypeName = typeName };
-                    typeStats[typeName] = info;
-                }
-
-                info.Count++;
-                info.TotalSize += obj.Size;
-            }
-
             // Manual sorting - no LINQ allocations
             var result = new List<RetainedTypeInfo>(typeStats.Values);
             result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
             return result;
-        }
-
-        private bool ContainsCollectionTypes(ClrHeap heap, HashSet<ulong> addresses)
-        {
-            int checkedCount = 0;
-            foreach (var address in addresses)
-            {
-                if (checkedCount >= 100) break;
-                var obj = heap.GetObject(address);
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                if (TypeFilterHelper.IsCollectionType(obj.Type.Name))
-                    return true;
-
-                checkedCount++;
-            }
-            return false;
-        }
-
-        private bool ContainsEventHandlers(ClrHeap heap, HashSet<ulong> addresses)
-        {
-            foreach (var address in addresses.Take(100))
-            {
-                var obj = heap.GetObject(address);
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                foreach (var field in obj.Type.Fields)
-                {
-                    if (TypeFilterHelper.IsDelegateType(field.Type))
-                        return true;
-                }
-            }
-            return false;
-        }
-
-        private HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
-        {
-            var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
-            var queue = new Queue<ulong>(capacity: 256);
-
-            queue.Enqueue(rootAddress);
-            retained.Add(rootAddress);
-
-            while (queue.Count > 0 && retained.Count < maxObjects)
-            {
-                var current = queue.Dequeue();
-                var obj = heap.GetObject(current);
-
-                if (!obj.IsValid)
-                    continue;
-
-                foreach (var reference in obj.EnumerateReferences(carefully: true))
-                {
-                    if (reference.IsValid && retained.Add(reference.Address))
-                    {
-                        queue.Enqueue(reference.Address);
-                    }
-                }
-            }
-
-            return retained;
         }
     }
 

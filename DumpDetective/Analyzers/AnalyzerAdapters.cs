@@ -137,24 +137,7 @@ namespace DumpDetective.Analyzers
 
         public void Execute(AnalysisContext context)
         {
-            new StaticRootLeakDetector(_writer).Analyze(context.Heap);
-        }
-    }
-
-    internal class EventHandlerLeakDetectorAdapter : IAnalyzer
-    {
-        private readonly OutputWriter _writer;
-
-        public string Name => "Event Handler Leak Detection";
-
-        public EventHandlerLeakDetectorAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
-        public void Execute(AnalysisContext context)
-        {
-            new EventHandlerLeakDetector(_writer).Analyze(context.Heap);
+            new StaticRootLeakDetector(_writer).Analyze(context.Heap, context.Cache);
         }
     }
 

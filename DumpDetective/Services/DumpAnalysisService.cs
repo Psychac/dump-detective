@@ -154,10 +154,10 @@ namespace DumpDetective.Services
                     new CollectionAnalyzerAdapter(writer))
                 .AddStage("Analyzing static roots and event handlers",
                     new StaticRootLeakDetectorAdapter(writer),
-                    new ReferenceChainAnalyzerAdapter(writer, _config.ReferenceChainTopCount))
+                    new ReferenceChainAnalyzerAdapter(writer, _config))
                 .AddStage("Analyzing threads and events",
                     new ThreadAnalyzerAdapter(writer),
-                    new EventLeakAnalyzerAdapter(writer, _config.EventLeakMinSubscribers));
+                    new EventLeakAnalyzerAdapter(writer, _config));
 
             pipeline.Execute(context);
 

@@ -1,21 +1,32 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Configuration;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
     internal class EventLeakAnalyzer
     {
+        private const int TopSubscriberTypesToShow = 5;
+        private const int TopDetailedInstancesPerGroup = 5;
+        private const int SeveritySubscriberThreshold = 10;
+        private const int SeveritySubscriberBonus = 5;
+        private const int SeverityStaticPublisherBonus = 10;
+        private const int SeverityRootHintBonus = 5;
+
         private readonly OutputWriter _writer;
+        private readonly AnalysisConfiguration _config;
         private static readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
         private static readonly object _eventNameCacheLock = new();
 
-        public EventLeakAnalyzer(OutputWriter writer)
+        public EventLeakAnalyzer(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
+            _config = config;
         }
 
-        public void Analyze(ClrHeap heap, int minSubscribers = 0)
+        public void Analyze(ClrHeap heap)
         {
+            int minSubscribers = _config.EventLeakMinSubscribers;
             var eventLeaks = FindEventLeaks(heap, minSubscribers);
 
             if (eventLeaks.Count == 0)
@@ -177,7 +188,7 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"  Min/Max Subscribers: {group.MinSubscribers}/{group.MaxSubscribers}");
 
                 // Optimized subscriber type grouping
-                var subscriberTypeCounts = GetTopSubscriberTypes(group.Instances, topCount: 5);
+                var subscriberTypeCounts = GetTopSubscriberTypes(group.Instances, topCount: TopSubscriberTypesToShow);
 
                 if (subscriberTypeCounts.Count > 0)
                 {
@@ -223,9 +234,9 @@ namespace DumpDetective.Analyzers
 
         private void PrintDetailedInstances(List<EventGroupInfo> groupedLeaks)
         {
-            _writer.WriteLine($"\n{new string('=', 80)}");
+            _writer.WriteLine($"\n{StringConstants.Equals80}");
             _writer.WriteLine("\nDETAILED INSTANCES:");
-            _writer.WriteLine(new string('=', 80));
+            _writer.WriteLine(StringConstants.Equals80);
 
             int detailCount = 1;
             foreach (var group in groupedLeaks)
@@ -236,7 +247,7 @@ namespace DumpDetective.Analyzers
                 // Sort instances and take top 5
                 var topInstances = group.Instances
                     .OrderByDescending(l => l.SubscriberCount)
-                    .Take(5)
+                    .Take(TopDetailedInstancesPerGroup)
                     .ToList();
 
                 foreach (var leak in topInstances)
@@ -254,24 +265,24 @@ namespace DumpDetective.Analyzers
                     {
                         _writer.WriteLine($"    Subscriber Types:");
 
-                        int displayCount = Math.Min(5, leak.Subscribers.Count);
+                        int displayCount = Math.Min(TopSubscriberTypesToShow, leak.Subscribers.Count);
                         for (int i = 0; i < displayCount; i++)
                         {
                             var subscriber = leak.Subscribers[i];
                             _writer.WriteLine($"      - {subscriber.Type} (0x{subscriber.Address:X})");
                         }
 
-                        if (leak.Subscribers.Count > 5)
+                        if (leak.Subscribers.Count > TopSubscriberTypesToShow)
                         {
-                            _writer.WriteLine($"      ... and {leak.Subscribers.Count - 5} more");
+                            _writer.WriteLine($"      ... and {leak.Subscribers.Count - TopSubscriberTypesToShow} more");
                         }
                     }
                     _writer.WriteLine(string.Empty);
                 }
 
-                if (group.InstanceCount > 5)
+                if (group.InstanceCount > TopDetailedInstancesPerGroup)
                 {
-                    _writer.WriteLine($"  ... and {group.InstanceCount - 5} more instance(s)");
+                    _writer.WriteLine($"  ... and {group.InstanceCount - TopDetailedInstancesPerGroup} more instance(s)");
                     _writer.WriteLine(string.Empty);
                 }
             }
@@ -365,9 +376,9 @@ namespace DumpDetective.Analyzers
         private static int CalculateSeverity(bool isStatic, int subscriberCount, string rootHint)
         {
             int score = subscriberCount;
-            if (subscriberCount >= 10) score += 5;
-            if (isStatic) score += 10;
-            if (!string.IsNullOrEmpty(rootHint)) score += 5;
+            if (subscriberCount >= SeveritySubscriberThreshold) score += SeveritySubscriberBonus;
+            if (isStatic) score += SeverityStaticPublisherBonus;
+            if (!string.IsNullOrEmpty(rootHint)) score += SeverityRootHintBonus;
             return score;
         }
 
@@ -381,10 +392,7 @@ namespace DumpDetective.Analyzers
                     continue;
 
                 ulong address = root.Object.Address;
-                if (!map.ContainsKey(address))
-                {
-                    map[address] = root.ToString() ?? root.RootKind.ToString();
-                }
+                map.TryAdd(address, root.ToString() ?? root.RootKind.ToString());
             }
 
             return map;

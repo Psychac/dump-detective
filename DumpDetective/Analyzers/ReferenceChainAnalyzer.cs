@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Configuration;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -6,18 +7,23 @@ namespace DumpDetective.Analyzers
     internal class ReferenceChainAnalyzer
     {
         private readonly OutputWriter _writer;
+        private readonly AnalysisConfiguration _config;
         private const int MaxPathsToShow = 5;
+        private const int DefaultTopTypeCount = 10;
         private const int MaxDepth = 50;
 
-        public ReferenceChainAnalyzer(OutputWriter writer)
+        public ReferenceChainAnalyzer(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
+            _config = config;
         }
 
-        public void AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache, int topCount = 10)
+        public void AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
             _writer.WriteLine("Finding why top memory-consuming objects are still alive...\n");
+
+            int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
 
             // Use cached type statistics instead of re-enumerating
             var typeStats = cache.GetOrBuildTypeStatistics(heap);

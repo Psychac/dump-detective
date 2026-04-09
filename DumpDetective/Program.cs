@@ -47,6 +47,9 @@ namespace DumpDetective
             Console.WriteLine("  --max-duplicate-string-length=<int>   Default: 500");
             Console.WriteLine("  --min-duplicate-string-count=<int>    Default: 10");
             Console.WriteLine("  --max-reference-addresses=<int>       Default: 1000000");
+            Console.WriteLine("General analyzer options:");
+            Console.WriteLine("  --reference-chain-top-count=<int>     Default: 5");
+            Console.WriteLine("  --event-leak-min-subscribers=<int>    Default: 0");
             Console.WriteLine();
             Console.WriteLine("Example:");
             Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt --max-reference-addresses=300000 --max-duplicate-string-length=200");

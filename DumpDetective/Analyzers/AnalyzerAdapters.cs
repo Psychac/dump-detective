@@ -144,19 +144,19 @@ namespace DumpDetective.Analyzers
     internal class ReferenceChainAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-        private readonly int _topCount;
+        private readonly AnalysisConfiguration _config;
 
         public string Name => "Reference Chain Analysis";
 
-        public ReferenceChainAnalyzerAdapter(OutputWriter writer, int topCount = 5)
+        public ReferenceChainAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
-            _topCount = topCount;
+            _config = config;
         }
 
         public void Execute(AnalysisContext context)
         {
-            new ReferenceChainAnalyzer(_writer).AnalyzeTopTypes(context.Heap, context.Cache, _topCount);
+            new ReferenceChainAnalyzer(_writer, _config).AnalyzeTopTypes(context.Heap, context.Cache);
         }
     }
 
@@ -180,19 +180,19 @@ namespace DumpDetective.Analyzers
     internal class EventLeakAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-        private readonly int _minSubscribers;
+        private readonly AnalysisConfiguration _config;
 
         public string Name => "Event Leak Analysis";
 
-        public EventLeakAnalyzerAdapter(OutputWriter writer, int minSubscribers = 0)
+        public EventLeakAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
-            _minSubscribers = minSubscribers;
+            _config = config;
         }
 
         public void Execute(AnalysisContext context)
         {
-            new EventLeakAnalyzer(_writer).Analyze(context.Heap, _minSubscribers);
+            new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap);
         }
     }
 }

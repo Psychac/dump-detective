@@ -16,7 +16,7 @@ namespace DumpDetective.Analyzers
 
         public void Execute(AnalysisContext context)
         {
-            new MemoryAnalyzer(_writer).Analyze(context.Heap);
+            new MemoryAnalyzer(_writer).Analyze(context.Heap, context.Cache);
         }
     }
 
@@ -33,7 +33,7 @@ namespace DumpDetective.Analyzers
 
         public void Execute(AnalysisContext context)
         {
-            new GCGenerationAnalyzer(_writer).Analyze(context.Heap);
+            new GCGenerationAnalyzer(_writer).Analyze(context.Heap, context.Cache);
         }
     }
 

@@ -5,6 +5,8 @@ namespace DumpDetective.Analyzers
 {
     internal class ModuleAnalyzer
     {
+        private const int TopLoadedAssembliesCount = 30;
+
         private readonly OutputWriter _writer;
 
         public ModuleAnalyzer(OutputWriter writer)
@@ -37,13 +39,13 @@ namespace DumpDetective.Analyzers
                     continue;
 
                 string moduleName = Path.GetFileName(module.Name);
-                string? version = module.AssemblyName ?? "Unknown";
+                string assemblyName = module.AssemblyName ?? "Unknown";
 
                 var moduleInfo = new ModuleInfo
                 {
                     Name = moduleName,
                     FullPath = module.Name,
-                    AssemblyName = version,
+                    AssemblyName = assemblyName,
                     Address = module.Address,
                     Size = module.Size,
                     IsDynamic = module.IsDynamic
@@ -63,9 +65,27 @@ namespace DumpDetective.Analyzers
             }
 
             analysis.ModulesByName = modulesByName;
-            analysis.VersionConflicts = modulesByName
-                .Where(kvp => kvp.Value.Count > 1)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+            var versionConflicts = new Dictionary<string, List<ModuleInfo>>();
+            foreach (var kvp in modulesByName)
+            {
+                if (kvp.Value.Count <= 1)
+                    continue;
+
+                // Conflict means same module file-name appears with different assembly identities.
+                var assemblyNames = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var moduleInfo in kvp.Value)
+                {
+                    assemblyNames.Add(moduleInfo.AssemblyName);
+                    if (assemblyNames.Count > 1)
+                    {
+                        versionConflicts[kvp.Key] = kvp.Value;
+                        break;
+                    }
+                }
+            }
+
+            analysis.VersionConflicts = versionConflicts;
 
             return analysis;
         }
@@ -86,20 +106,39 @@ namespace DumpDetective.Analyzers
 
         private void PrintLoadedAssemblies(ModuleAnalysis analysis)
         {
-            _writer.WriteLine("\n\nLOADED ASSEMBLIES (Top 30):");
+            _writer.WriteLine($"\n\nLOADED ASSEMBLIES (Top {TopLoadedAssembliesCount}):");
             _writer.WriteSeparator();
             _writer.WriteLine($"{"Module Name",-40} {"Version/Assembly Name",-45} {"Size",12}");
             _writer.WriteSeparator();
 
-            var topModules = analysis.ModulesByName.Values
-                .Select(list => list.First())
-                .OrderByDescending(m => m.Size)
-                .Take(30);
+            var topModules = new List<ModuleInfo>(analysis.ModulesByName.Count);
+            foreach (var moduleGroup in analysis.ModulesByName.Values)
+            {
+                if (moduleGroup.Count == 0)
+                    continue;
 
+                // Pick the largest instance for this module name.
+                ModuleInfo selected = moduleGroup[0];
+                for (int i = 1; i < moduleGroup.Count; i++)
+                {
+                    if (moduleGroup[i].Size > selected.Size)
+                        selected = moduleGroup[i];
+                }
+
+                topModules.Add(selected);
+            }
+
+            topModules.Sort((a, b) => b.Size.CompareTo(a.Size));
+
+            int count = 0;
             foreach (var module in topModules)
             {
+                if (count >= TopLoadedAssembliesCount)
+                    break;
+
                 string dynamicMarker = module.IsDynamic ? " [Dynamic]" : "";
                 _writer.WriteLine($"{FormatHelper.TruncateString(module.Name, 40),-40} {FormatHelper.TruncateString(module.AssemblyName, 45),-45} {FormatHelper.FormatBytes(module.Size),12}{dynamicMarker}");
+                count++;
             }
         }
 

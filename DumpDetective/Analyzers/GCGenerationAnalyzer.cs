@@ -6,56 +6,25 @@ namespace DumpDetective.Analyzers
     internal class GCGenerationAnalyzer
     {
         private readonly OutputWriter _writer;
-        private const int LOH_THRESHOLD = 85000;
+        private const ulong LohThresholdBytes = 85_000;
+        private const int TopTypeCount = 15;
 
         public GCGenerationAnalyzer(OutputWriter writer)
         {
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
 
-            // Build type statistics on-demand
-            var cachedStats = BuildTypeStatistics(heap);
+            // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
+            var cachedStats = cache.GetOrBuildTypeStatistics(heap);
 
             PrintSummary(cachedStats);
             PrintTopTypes(cachedStats);
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-        }
-
-        private Dictionary<string, TypeStatistics> BuildTypeStatistics(ClrHeap heap)
-        {
-            var typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
-                ulong size = obj.Size;
-                bool isLoh = size >= 85000;
-
-                if (!typeStats.TryGetValue(typeName, out var stats))
-                {
-                    stats = new TypeStatistics { TypeName = typeName };
-                    typeStats[typeName] = stats;
-                }
-
-                stats.Count++;
-                stats.TotalSize += size;
-
-                if (isLoh)
-                {
-                    stats.LohCount++;
-                    stats.LohSize += size;
-                }
-            }
-
-            return typeStats;
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)
@@ -79,8 +48,8 @@ namespace DumpDetective.Analyzers
                 totalLohSize += stat.LohSize;
             }
 
-            _writer.WriteLine($"  Small/Medium Objects (< 85KB): {totalGen2Count,12:N0} objects  {FormatHelper.FormatBytes(totalGen2Size),12}");
-            _writer.WriteLine($"  Large Objects (LOH >= 85KB):   {totalLohCount,12:N0} objects  {FormatHelper.FormatBytes(totalLohSize),12}");
+            _writer.WriteLine($"  Small/Medium Objects (< {LohThresholdBytes / 1000}KB): {totalGen2Count,12:N0} objects  {FormatHelper.FormatBytes(totalGen2Size),12}");
+            _writer.WriteLine($"  Large Objects (LOH >= {LohThresholdBytes / 1000}KB):   {totalLohCount,12:N0} objects  {FormatHelper.FormatBytes(totalLohSize),12}");
             _writer.WriteLine($"  Total:                          {totalGen2Count + totalLohCount,12:N0} objects  {FormatHelper.FormatBytes(totalGen2Size + totalLohSize),12}");
 
             if (totalLohCount > 0)
@@ -94,12 +63,12 @@ namespace DumpDetective.Analyzers
         {
             if (typeStats.Count > 0)
             {
-                _writer.WriteLine("\nTop 15 Object Types by Count (potential leak sources if excessive):");
+                _writer.WriteLine($"\nTop {TopTypeCount} Object Types by Count (potential leak sources if excessive):");
                 _writer.WriteLine($"{"Type",-60} {"Count",12} {"Size",12}");
                 _writer.WriteSeparator();
 
                 // Create list of types with gen2 objects (Count > LohCount)
-                var gen2Types = new List<TypeStatistics>();
+                var gen2Types = new List<TypeStatistics>(typeStats.Count);
                 foreach (var stat in typeStats.Values)
                 {
                     if (stat.Count > stat.LohCount)
@@ -119,7 +88,7 @@ namespace DumpDetective.Analyzers
                 int count = 0;
                 foreach (var stat in gen2Types)
                 {
-                    if (count >= 15) break;
+                    if (count >= TopTypeCount) break;
                     int gen2Count = stat.Count - stat.LohCount;
                     ulong gen2Size = stat.TotalSize - stat.LohSize;
                     _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {gen2Count,12:N0} {FormatHelper.FormatBytes(gen2Size),12}");

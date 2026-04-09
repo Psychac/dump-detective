@@ -1,26 +1,26 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Utilities;
 
-using System.Diagnostics;
-
 namespace DumpDetective.Analyzers
 {
     internal class MemoryAnalyzer
     {
         private readonly OutputWriter _writer;
-        private const int LOH_THRESHOLD = 85000;
+        private const ulong LohThresholdBytes = 85_000;
+        private const int TopTypeCount = 20;
+        private const int TopLohTypeCount = 15;
 
         public MemoryAnalyzer(OutputWriter writer)
         {
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("MEMORY ANALYSIS:");
 
-            // Build type statistics on-demand
-            var typeStats = BuildTypeStatistics(heap);
+            // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
+            var typeStats = cache.GetOrBuildTypeStatistics(heap);
 
             PrintSummary(typeStats);
             PrintTopObjectsByCount(typeStats);
@@ -28,38 +28,6 @@ namespace DumpDetective.Analyzers
             PrintLOHUsage(typeStats);
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-        }
-
-        private Dictionary<string, TypeStatistics> BuildTypeStatistics(ClrHeap heap)
-        {
-            var typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
-                ulong size = obj.Size;
-                bool isLoh = size >= 85000;
-
-                if (!typeStats.TryGetValue(typeName, out var stats))
-                {
-                    stats = new TypeStatistics { TypeName = typeName };
-                    typeStats[typeName] = stats;
-                }
-
-                stats.Count++;
-                stats.TotalSize += size;
-
-                if (isLoh)
-                {
-                    stats.LohCount++;
-                    stats.LohSize += size;
-                }
-            }
-
-            return typeStats;
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)
@@ -89,24 +57,26 @@ namespace DumpDetective.Analyzers
             {
                 double lohPercentage = (totalLohMemory / (double)totalMemory) * 100;
                 _writer.WriteLine($"LOH Objects: {totalLohObjects:N0} ({lohPercentage:F1}% of total memory)");
+                _writer.WriteLine($"LOH Threshold: {LohThresholdBytes:N0} bytes");
             }
         }
 
         private void PrintTopObjectsByCount(Dictionary<string, TypeStatistics> typeStats)
         {
-            _writer.WriteLine("\nTOP 20 OBJECT TYPES BY COUNT:");
+            _writer.WriteLine($"\nTOP {TopTypeCount} OBJECT TYPES BY COUNT:");
             _writer.WriteSeparator();
             _writer.WriteLine($"{"Type",-60} {"Count",12} {"Total Size",15}");
             _writer.WriteSeparator();
 
             // Manual sorting - no LINQ allocations
-            var statsList = new List<TypeStatistics>(typeStats.Values);
+            var statsList = new List<TypeStatistics>(typeStats.Count);
+            statsList.AddRange(typeStats.Values);
             statsList.Sort((a, b) => b.Count.CompareTo(a.Count));
 
             int count = 0;
             foreach (var stat in statsList)
             {
-                if (count >= 20) break;
+                if (count >= TopTypeCount) break;
                 _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {stat.Count,12:N0} {FormatHelper.FormatBytes(stat.TotalSize),15}");
                 count++;
             }
@@ -114,19 +84,20 @@ namespace DumpDetective.Analyzers
 
         private void PrintTopObjectsBySize(Dictionary<string, TypeStatistics> typeStats)
         {
-            _writer.WriteLine("\nTOP 20 OBJECT TYPES BY MEMORY SIZE:");
+            _writer.WriteLine($"\nTOP {TopTypeCount} OBJECT TYPES BY MEMORY SIZE:");
             _writer.WriteSeparator();
             _writer.WriteLine($"{"Type",-60} {"Count",12} {"Total Size",15}");
             _writer.WriteSeparator();
 
             // Manual sorting - no LINQ allocations
-            var statsList = new List<TypeStatistics>(typeStats.Values);
+            var statsList = new List<TypeStatistics>(typeStats.Count);
+            statsList.AddRange(typeStats.Values);
             statsList.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
 
             int count = 0;
             foreach (var stat in statsList)
             {
-                if (count >= 20) break;
+                if (count >= TopTypeCount) break;
                 _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {stat.Count,12:N0} {FormatHelper.FormatBytes(stat.TotalSize),15}");
                 count++;
             }
@@ -135,7 +106,7 @@ namespace DumpDetective.Analyzers
         private void PrintLOHUsage(Dictionary<string, TypeStatistics> typeStats)
         {
             // Calculate LOH totals and collect LOH types in single pass
-            var lohTypes = new List<TypeStatistics>();
+            var lohTypes = new List<TypeStatistics>(typeStats.Count);
             int totalLohObjects = 0;
             ulong totalLohMemory = 0;
 
@@ -165,7 +136,7 @@ namespace DumpDetective.Analyzers
                 int count = 0;
                 foreach (var stat in lohTypes)
                 {
-                    if (count >= 15) break;
+                    if (count >= TopLohTypeCount) break;
                     _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {stat.LohCount,12:N0} {FormatHelper.FormatBytes(stat.LohSize),15}");
                     count++;
                 }

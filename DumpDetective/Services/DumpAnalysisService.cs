@@ -145,20 +145,20 @@ namespace DumpDetective.Services
                 .AddStage("Running core memory analyzers",
                     new MemoryAnalyzerAdapter(writer),
                     new GCGenerationAnalyzerAdapter(writer),
-                    new ModuleAnalyzerAdapter(writer))
-                .AddStage("Analyzing for crashes and hangs",
-                    new CrashAnalyzerAdapter(writer),
-                    new HangAnalyzerAdapter(writer))
-                .AddStage("Detecting memory leaks",
-                    new MemoryLeakAnalyzerAdapter(writer, _config),
-                    new CollectionAnalyzerAdapter(writer))
-                .AddStage("Analyzing static roots and event handlers",
-                    new StaticRootLeakDetectorAdapter(writer),
-                    new EventHandlerLeakDetectorAdapter(writer),
-                    new ReferenceChainAnalyzerAdapter(writer, _config.ReferenceChainTopCount))
-                .AddStage("Analyzing threads and events",
-                    new ThreadAnalyzerAdapter(writer),
-                    new EventLeakAnalyzerAdapter(writer, _config.EventLeakMinSubscribers));
+                    new ModuleAnalyzerAdapter(writer));
+                //.AddStage("Analyzing for crashes and hangs",
+                //    new CrashAnalyzerAdapter(writer),
+                //    new HangAnalyzerAdapter(writer))
+                //.AddStage("Detecting memory leaks",
+                //    new MemoryLeakAnalyzerAdapter(writer, _config),
+                //    new CollectionAnalyzerAdapter(writer))
+                //.AddStage("Analyzing static roots and event handlers",
+                //    new StaticRootLeakDetectorAdapter(writer),
+                //    new EventHandlerLeakDetectorAdapter(writer),
+                //    new ReferenceChainAnalyzerAdapter(writer, _config.ReferenceChainTopCount))
+                //.AddStage("Analyzing threads and events",
+                //    new ThreadAnalyzerAdapter(writer),
+                //    new EventLeakAnalyzerAdapter(writer, _config.EventLeakMinSubscribers));
 
             pipeline.Execute(context);
 

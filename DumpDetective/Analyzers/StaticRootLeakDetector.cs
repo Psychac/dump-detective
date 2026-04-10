@@ -39,7 +39,9 @@ namespace DumpDetective.Analyzers
                     Title: "No high-impact static roots",
                     Evidence: "Static-root scan found no roots exceeding significant memory/object thresholds.",
                     Recommendation: "No immediate static-root retention remediation required.",
-                    Tags: ["static-root", "leak", "retention"]));
+                    Tags: ["static-root", "leak", "retention"],
+                    MetricValue: 0,
+                    MetricUnit: "retained-bytes"));
                 _writer.WriteLine($"\n{StringConstants.Equals80}");
                 return findings;
             }
@@ -117,7 +119,9 @@ namespace DumpDetective.Analyzers
                 Title: "Static-root retention candidates detected",
                 Evidence: $"{staticRootAnalysis.Count:N0} root(s) retain ~{FormatHelper.FormatBytes(totalImpact)} cumulative memory.",
                 Recommendation: "Audit static ownership and clear or weaken references for expired object graphs.",
-                Tags: ["static-root", "retention", "memory-leak"]);
+                Tags: ["static-root", "retention", "memory-leak"],
+                MetricValue: totalImpact,
+                MetricUnit: "retained-bytes");
         }
 
         private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, HeapAnalysisCache cache)

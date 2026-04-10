@@ -102,7 +102,9 @@ namespace DumpDetective.Analyzers
                 Title: "Dependent-handle retention summary",
                 Evidence: $"Dependent handles: {dependentHandleCount:N0}; resolved source->target edges: {resolvedEdgeCount:N0}; unresolved targets: {unresolvedTargetCount:N0} ({unresolvedPct:F1}%).",
                 Recommendation: "Inspect dominant dependent-handle source/target pairs to identify hidden retention relationships.",
-                Tags: ["dependent-handle", "retention", "conditionalweaktable"]);
+                Tags: ["dependent-handle", "retention", "conditionalweaktable"],
+                MetricValue: unresolvedPct,
+                MetricUnit: "% unresolved-targets");
         }
 
         private void PrintTop(string title, Dictionary<string, int> counts)

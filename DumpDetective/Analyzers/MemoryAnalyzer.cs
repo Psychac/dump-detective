@@ -58,7 +58,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: lohPct >= 40
                     ? "Review large-object allocation patterns and retention lifetimes."
                     : "Use top types by size/count as primary triage anchors.",
-                Tags: ["heap", "composition", "loh"]);
+                Tags: ["heap", "composition", "loh"],
+                MetricValue: lohPct,
+                MetricUnit: "%");
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)

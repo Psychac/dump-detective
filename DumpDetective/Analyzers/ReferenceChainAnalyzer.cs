@@ -129,7 +129,9 @@ namespace DumpDetective.Analyzers
                     Title: "No sample instances available for reference-chain tracing",
                     Evidence: "Reference-chain analyzer could not obtain valid sample objects for configured top types.",
                     Recommendation: "Review type statistics and dump integrity; re-run with broader type coverage if needed.",
-                    Tags: ["reference-chain", "roots", "retention"]);
+                    Tags: ["reference-chain", "roots", "retention"],
+                    MetricValue: 0,
+                    MetricUnit: "% retained-samples");
             }
 
             double retainedPct = retainedSamples * 100.0 / analyzedSamples;
@@ -141,7 +143,9 @@ namespace DumpDetective.Analyzers
                 Title: "Reference-chain retention coverage",
                 Evidence: $"{retainedSamples:N0}/{analyzedSamples:N0} sampled top types had at least one GC-root path ({retainedPct:F1}%).",
                 Recommendation: "Focus on root paths for retained top types to identify ownership leaks.",
-                Tags: ["reference-chain", "gc-roots", "retention"]);
+                Tags: ["reference-chain", "gc-roots", "retention"],
+                MetricValue: retainedPct,
+                MetricUnit: "% retained-samples");
         }
 
         private List<List<ReferenceNode>> FindPathsToRoot(ClrHeap heap, ulong targetAddress)

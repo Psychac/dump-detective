@@ -39,7 +39,9 @@ namespace DumpDetective.Analyzers
                     Title: "No exception objects detected",
                     Evidence: "Crash analysis found no exception objects in the heap snapshot.",
                     Recommendation: "Validate dump type and capture settings if a crash was expected.",
-                    Tags: ["crash", "exception", "stability"]));
+                    Tags: ["crash", "exception", "stability"],
+                    MetricValue: 0,
+                    MetricUnit: "active-exceptions"));
                 _writer.WriteLine(StringConstants.Equals80);
                 return findings;
             }
@@ -70,7 +72,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: analysis.ActiveExceptions > 0
                     ? "Prioritize active exception threads and top exception types for root-cause isolation."
                     : "Review top exception families for recurring fault paths.",
-                Tags: ["crash", "exceptions", "threads"]);
+                Tags: ["crash", "exceptions", "threads"],
+                MetricValue: analysis.ActiveExceptions,
+                MetricUnit: "active-exceptions");
         }
 
         private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime)

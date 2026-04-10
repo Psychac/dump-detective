@@ -59,7 +59,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: severity == FindingSeverity.Critical
                     ? "Investigate wait groups and lock owners immediately for deadlock/contention storms."
                     : "Review waiting-thread categories and thread-pool saturation indicators.",
-                Tags: ["hang", "deadlock", "threadpool", "waits"]);
+                Tags: ["hang", "deadlock", "threadpool", "waits"],
+                MetricValue: waitingPct,
+                MetricUnit: "% waiting threads");
         }
 
         private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap)

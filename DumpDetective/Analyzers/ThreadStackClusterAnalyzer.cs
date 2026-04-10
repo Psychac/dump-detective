@@ -67,7 +67,9 @@ namespace DumpDetective.Analyzers
                     Title: "No thread clusters available",
                     Evidence: "No alive managed threads were available for stack-signature clustering.",
                     Recommendation: "Capture a dump with active managed threads for clustering insights.",
-                    Tags: ["thread-cluster", "threads", "diagnostics"]));
+                    Tags: ["thread-cluster", "threads", "diagnostics"],
+                    MetricValue: 0,
+                    MetricUnit: "% signature-diversity"));
                 _writer.WriteLine(StringConstants.Equals80);
                 return findings;
             }
@@ -109,7 +111,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: severity == FindingSeverity.Warning
                     ? "Low diversity suggests hotspot wait/execution patterns; inspect top clusters for bottlenecks."
                     : "Thread stack diversity appears healthy for this snapshot.",
-                Tags: ["thread-cluster", "hotspot", "contention"]);
+                Tags: ["thread-cluster", "hotspot", "contention"],
+                MetricValue: diversity,
+                MetricUnit: "% signature-diversity");
         }
 
         private static string BuildSignature(ClrThread thread)

@@ -81,7 +81,9 @@ namespace DumpDetective.Analyzers
                 Title: "Thread-state triage summary",
                 Evidence: $"Alive threads: {info.AliveCount:N0}; blocked-pattern threads: {info.PotentiallyBlockedThreads.Count:N0}; lock-holding threads: {info.ThreadsWithLocks.Count:N0}; active thread exceptions: {info.ThreadsWithActiveExceptionsCount:N0}.",
                 Recommendation: "Correlate blocked groups with lock owners and hotspot frames to isolate contention/deadlock candidates.",
-                Tags: ["threads", "locks", "blocked", "exceptions"]);
+                Tags: ["threads", "locks", "blocked", "exceptions"],
+                MetricValue: info.PotentiallyBlockedThreads.Count,
+                MetricUnit: "blocked-threads");
         }
 
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)

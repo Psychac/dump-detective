@@ -86,7 +86,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: severity == FindingSeverity.Warning
                     ? "Inspect pinned-handle-heavy types and reduce long-lived pinning where possible."
                     : "Handle distribution appears within expected bounds for this snapshot.",
-                Tags: ["gc-handle", "pinning", "retention"]);
+                Tags: ["gc-handle", "pinning", "retention"],
+                MetricValue: totalHandles,
+                MetricUnit: "total-handles");
         }
 
         private void PrintSummary(int total, int strongLike, int weakLike, Dictionary<string, int> byKind)

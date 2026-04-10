@@ -11,6 +11,7 @@ namespace DumpDetective.Services
     internal class DumpAnalysisService
     {
         private readonly AnalysisConfiguration _config;
+        private readonly TrendAnalyzer _trendAnalyzer = new();
 
         public DumpAnalysisService(AnalysisConfiguration config)
         {
@@ -21,16 +22,135 @@ namespace DumpDetective.Services
         {
             var runStopwatch = Stopwatch.StartNew();
             ConsoleUx.Header("DumpDetective Analysis");
+            List<(string Name, TimeSpan Duration)>? runTimings = _config.EnablePerformanceDiagnostics
+                ? new List<(string Name, TimeSpan Duration)>(capacity: 12)
+                : null;
 
-            StringBuilder? reportBufferBuilder = _config.OutputPath != null ? new StringBuilder(capacity: 64 * 1024) : null;
-            using StringWriter? reportWriter = reportBufferBuilder != null ? new StringWriter(reportBufferBuilder) : null;
+            List<string> dumpSequence = BuildDumpSequence();
+            var runs = new List<AnalysisRunResult>(dumpSequence.Count);
+
+            for (int i = 0; i < dumpSequence.Count; i++)
+            {
+                string dumpPath = dumpSequence[i];
+                ConsoleUx.Info($"Analyzing dump [{i + 1}/{dumpSequence.Count}]: {Path.GetFileName(dumpPath)}");
+                var dumpStopwatch = Stopwatch.StartNew();
+                runs.Add(AnalyzeDump(dumpPath, i));
+                dumpStopwatch.Stop();
+                runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
+            }
+
+            AnalysisRunResult currentRun = runs[^1];
+            var reportFindings = currentRun.Snapshot.Findings.ToList();
+            var reportMergeStopwatch = Stopwatch.StartNew();
+            string detailedReport = BuildCombinedDetailedReport(runs);
+            reportMergeStopwatch.Stop();
+            runTimings?.Add(("Detailed report merge", reportMergeStopwatch.Elapsed));
+
+            var additionalInsights = new List<string>();
+
+            if (runs.Count > 1)
+            {
+                var snapshots = runs.Select(r => r.Snapshot).ToList();
+
+                var trendCompareStopwatch = Stopwatch.StartNew();
+                IReadOnlyList<TrendStepComparison> steps = _trendAnalyzer.CompareSeries(snapshots);
+                TrendComparisonResult overall = _trendAnalyzer.Compare(snapshots[0], snapshots[^1]);
+                trendCompareStopwatch.Stop();
+                runTimings?.Add(("Trend comparison compute", trendCompareStopwatch.Elapsed));
+
+                var trendComposeStopwatch = Stopwatch.StartNew();
+                detailedReport = BuildTrendComparisonSection(steps, overall) + Environment.NewLine + detailedReport;
+                reportFindings.AddRange(BuildTrendFindings(steps, overall));
+                additionalInsights.AddRange(BuildTrendInsights(steps, overall));
+                trendComposeStopwatch.Stop();
+                runTimings?.Add(("Trend report/findings compose", trendComposeStopwatch.Elapsed));
+            }
+
+            var normalizeReportFindingsStopwatch = Stopwatch.StartNew();
+            FindingTagger.Normalize(reportFindings);
+            normalizeReportFindingsStopwatch.Stop();
+            runTimings?.Add(("Final finding normalization", normalizeReportFindingsStopwatch.Elapsed));
+
+            if (_config.OutputPath != null)
+            {
+                var reportInsightsStopwatch = Stopwatch.StartNew();
+                var insights = BuildReportInsights(runStopwatch.Elapsed, reportFindings, additionalInsights);
+                reportInsightsStopwatch.Stop();
+                runTimings?.Add(("Insights generation", reportInsightsStopwatch.Elapsed));
+
+                var reportFormatStopwatch = Stopwatch.StartNew();
+                string formattedReport = ReportFormatter.Format(_config.ReportFormat, detailedReport, insights, _config.DumpPath, reportFindings);
+                reportFormatStopwatch.Stop();
+                runTimings?.Add(("Report formatting", reportFormatStopwatch.Elapsed));
+
+                var reportWriteStopwatch = Stopwatch.StartNew();
+                File.WriteAllText(_config.OutputPath, formattedReport, Encoding.UTF8);
+                reportWriteStopwatch.Stop();
+                runTimings?.Add(("Report file write", reportWriteStopwatch.Elapsed));
+
+                ConsoleUx.Success($"Report written to: {_config.OutputPath}");
+            }
+
+            runStopwatch.Stop();
+
+            if (_config.EnablePerformanceDiagnostics && runTimings is { Count: > 0 })
+            {
+                ConsoleUx.PerformanceBreakdown("Run timing breakdown", runTimings, runStopwatch.Elapsed);
+            }
+
+            ConsoleUx.Success($"Total analysis time: {runStopwatch.Elapsed.TotalSeconds:F1}s");
+
+            if (_config.WaitForKeyPressOnComplete)
+            {
+                Console.ReadKey();
+            }
+        }
+
+        private List<string> BuildDumpSequence()
+        {
+            var sequence = new List<string>();
+
+            if (_config.TrendDumpPaths is { Count: > 0 })
+            {
+                foreach (string dump in _config.TrendDumpPaths)
+                {
+                    if (!string.Equals(dump, _config.DumpPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sequence.Add(dump);
+                    }
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(_config.BaselineDumpPath))
+            {
+                sequence.Add(_config.BaselineDumpPath);
+            }
+
+            sequence.Add(_config.DumpPath);
+
+            return sequence
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private AnalysisRunResult AnalyzeDump(string dumpPath, int snapshotIndex)
+        {
+            var dumpStopwatch = Stopwatch.StartNew();
+            List<(string Name, TimeSpan Duration)>? dumpTimings = _config.EnablePerformanceDiagnostics
+                ? new List<(string Name, TimeSpan Duration)>(capacity: 10)
+                : null;
+
+            var reportBufferBuilder = new StringBuilder(capacity: 64 * 1024);
+            using StringWriter reportWriter = new(reportBufferBuilder);
 
             ConsoleUx.Info("Loading dump file...");
+            var loadDumpStopwatch = Stopwatch.StartNew();
             // Load the dump file (ClrMD defaults to Microsoft symbol server if DAC is needed)
-            using DataTarget dataTarget = DataTarget.LoadDump(_config.DumpPath);
+            using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+            loadDumpStopwatch.Stop();
+            dumpTimings?.Add(("Load dump", loadDumpStopwatch.Elapsed));
             ConsoleUx.Success("Dump loaded.");
 
-            var writer = new OutputWriter(reportWriter, writeToConsoleWhenNoWriter: _config.OutputPath == null);
+            var writer = new OutputWriter(reportWriter, writeToConsoleWhenNoWriter: false);
             var cache = new HeapAnalysisCache();
 
             MemorySnapshot? previousSnapshot = null;
@@ -44,22 +164,45 @@ namespace DumpDetective.Services
                 ConsoleUx.Info("Memory diagnostics are disabled (use --memory-diagnostics to enable). Focus mode: stage/analyzer progress.");
             }
 
-            WriteHeader(writer);
+            WriteHeader(writer, dumpPath);
 
             if (!ValidateClrVersions(dataTarget, writer))
             {
-                return;
+                dumpStopwatch.Stop();
+                if (_config.EnablePerformanceDiagnostics && dumpTimings is { Count: > 0 })
+                {
+                    ConsoleUx.PerformanceBreakdown($"Dump timing breakdown: {Path.GetFileName(dumpPath)}", dumpTimings, dumpStopwatch.Elapsed);
+                }
+
+                return new AnalysisRunResult(
+                    reportBufferBuilder.ToString(),
+                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], DateTime.UtcNow));
             }
 
+            var runtimeStopwatch = Stopwatch.StartNew();
             using ClrRuntime runtime = InitializeRuntime(dataTarget, ref previousSnapshot);
+            runtimeStopwatch.Stop();
+            dumpTimings?.Add(("Initialize CLR runtime", runtimeStopwatch.Elapsed));
+
             var heap = runtime.Heap;
 
             if (!ValidateHeap(heap, writer))
             {
-                return;
+                dumpStopwatch.Stop();
+                if (_config.EnablePerformanceDiagnostics && dumpTimings is { Count: > 0 })
+                {
+                    ConsoleUx.PerformanceBreakdown($"Dump timing breakdown: {Path.GetFileName(dumpPath)}", dumpTimings, dumpStopwatch.Elapsed);
+                }
+
+                return new AnalysisRunResult(
+                    reportBufferBuilder.ToString(),
+                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], DateTime.UtcNow));
             }
 
+            var cacheStopwatch = Stopwatch.StartNew();
             BuildTypeStatisticsCache(heap, cache, ref previousSnapshot);
+            cacheStopwatch.Stop();
+            dumpTimings?.Add(("Type statistics cache build", cacheStopwatch.Elapsed));
 
             var context = new AnalysisContext
             {
@@ -68,33 +211,34 @@ namespace DumpDetective.Services
                 Cache = cache
             };
 
+            var pipelineStopwatch = Stopwatch.StartNew();
             var findings = RunAnalysisPipeline(writer, context, previousSnapshot);
+            pipelineStopwatch.Stop();
+            dumpTimings?.Add(("Analyzer pipeline", pipelineStopwatch.Elapsed));
+
+            var normalizedFindings = findings.ToList();
+
+            var normalizeFindingsStopwatch = Stopwatch.StartNew();
+            FindingTagger.Normalize(normalizedFindings);
+            normalizeFindingsStopwatch.Stop();
+            dumpTimings?.Add(("Per-dump finding normalization", normalizeFindingsStopwatch.Elapsed));
 
             WriteFooter(writer);
 
-            if (_config.OutputPath != null && reportBufferBuilder != null)
+            dumpStopwatch.Stop();
+            if (_config.EnablePerformanceDiagnostics && dumpTimings is { Count: > 0 })
             {
-                string detailedReport = reportBufferBuilder.ToString();
-                var normalizedFindings = findings.ToList();
-                FindingTagger.Normalize(normalizedFindings);
-                var insights = BuildReportInsights(runStopwatch.Elapsed, normalizedFindings);
-                string formattedReport = ReportFormatter.Format(_config.ReportFormat, detailedReport, insights, _config.DumpPath, normalizedFindings);
-                File.WriteAllText(_config.OutputPath, formattedReport, Encoding.UTF8);
-                ConsoleUx.Success($"Report written to: {_config.OutputPath}");
+                ConsoleUx.PerformanceBreakdown($"Dump timing breakdown: {Path.GetFileName(dumpPath)}", dumpTimings, dumpStopwatch.Elapsed);
             }
 
-            runStopwatch.Stop();
-            ConsoleUx.Success($"Total analysis time: {runStopwatch.Elapsed.TotalSeconds:F1}s");
-
-            if (_config.WaitForKeyPressOnComplete)
-            {
-                Console.ReadKey();
-            }
+            return new AnalysisRunResult(
+                reportBufferBuilder.ToString(),
+                new AnalysisSnapshot(snapshotIndex, dumpPath, normalizedFindings, DateTime.UtcNow));
         }
 
-        private void WriteHeader(OutputWriter writer)
+        private void WriteHeader(OutputWriter writer, string dumpPath)
         {
-            writer.WriteLine($"Dump file: {_config.DumpPath}");
+            writer.WriteLine($"Dump file: {dumpPath}");
             writer.WriteLine(string.Empty);
         }
 
@@ -206,9 +350,15 @@ namespace DumpDetective.Services
             writer.WriteLine("Analysis complete");
         }
 
-        private static List<string> BuildReportInsights(TimeSpan elapsed, IReadOnlyList<InsightFinding> findings)
+        private static List<string> BuildReportInsights(TimeSpan elapsed, IReadOnlyList<InsightFinding> findings, IReadOnlyList<string>? additionalInsights = null)
         {
             var insights = new List<string>(capacity: 8);
+
+            if (additionalInsights != null && additionalInsights.Count > 0)
+            {
+                insights.AddRange(additionalInsights);
+            }
+
             int criticalCount = findings.Count(f => f.Severity == FindingSeverity.Critical);
             int warningCount = findings.Count(f => f.Severity == FindingSeverity.Warning);
 
@@ -238,5 +388,147 @@ namespace DumpDetective.Services
 
             return insights;
         }
+
+        private static List<string> BuildTrendInsights(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        {
+            int metricComparedCount = overall.MetricComparedFindings.Count;
+            return
+            [
+                $"[INFO] Trend comparison across {steps.Count + 1} dumps: +{overall.NewFindings.Count} new, {overall.PersistentFindings.Count} persistent, -{overall.ResolvedFindings.Count} resolved findings.",
+                $"[INFO] Severity delta (first -> last): Critical {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}, Warning {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}.",
+                $"[INFO] Metric-to-metric comparisons evaluated for {metricComparedCount} persistent finding(s)."
+            ];
+        }
+
+        private static List<InsightFinding> BuildTrendFindings(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        {
+            var findings = new List<InsightFinding>(capacity: 2)
+            {
+                new(
+                    Analyzer: "TrendAnalyzer",
+                    Category: "Comparison",
+                    Severity: overall.CurrentCriticalCount > overall.BaselineCriticalCount ? FindingSeverity.Warning : FindingSeverity.Info,
+                    Title: "Trend severity delta (first -> last)",
+                    Evidence: $"Critical {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}, Warning {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}",
+                    Recommendation: overall.CurrentCriticalCount > overall.BaselineCriticalCount
+                        ? "Prioritize newly introduced critical findings compared to baseline."
+                        : "No critical severity regression compared to baseline.",
+                    Tags: ["trend", "comparison"]),
+                new(
+                    Analyzer: "TrendAnalyzer",
+                    Category: "Comparison",
+                    Severity: overall.NewFindings.Count > overall.ResolvedFindings.Count ? FindingSeverity.Warning : FindingSeverity.Info,
+                    Title: "Trend finding lifecycle summary",
+                    Evidence: $"New {overall.NewFindings.Count}, Persistent {overall.PersistentFindings.Count}, Resolved {overall.ResolvedFindings.Count}, Steps {steps.Count}",
+                    Recommendation: "Focus first on new and persistent high-severity findings.",
+                    Tags: ["trend", "lifecycle", "comparison"],
+                    MetricValue: overall.NewFindings.Count - overall.ResolvedFindings.Count,
+                    MetricUnit: "net-findings")
+            };
+
+            return findings;
+        }
+
+        private static string BuildTrendComparisonSection(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("TREND COMPARISON:");
+            builder.AppendLine(StringConstants.Separator80);
+            builder.AppendLine($"Dumps analyzed: {steps.Count + 1}");
+            builder.AppendLine($"Net new findings (first -> last): {overall.NewFindings.Count}");
+            builder.AppendLine($"Net persistent findings: {overall.PersistentFindings.Count}");
+            builder.AppendLine($"Net resolved findings: {overall.ResolvedFindings.Count}");
+            builder.AppendLine($"Critical delta: {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}");
+            builder.AppendLine($"Warning delta: {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}");
+            builder.AppendLine($"Metric comparisons: {overall.MetricComparedFindings.Count}");
+
+            builder.AppendLine();
+            builder.AppendLine("Step-by-step deltas:");
+            foreach (var step in steps)
+            {
+                builder.AppendLine($"  {Path.GetFileName(step.Baseline.DumpPath)} -> {Path.GetFileName(step.Current.DumpPath)} | +{step.Comparison.NewFindings.Count} new, {step.Comparison.PersistentFindings.Count} persistent, -{step.Comparison.ResolvedFindings.Count} resolved");
+            }
+
+            var biggestMetricChanges = overall.MetricComparedFindings
+                .Where(d => d.MetricDelta.HasValue)
+                .OrderByDescending(d => Math.Abs(d.MetricDelta!.Value))
+                .Take(10)
+                .ToList();
+
+            if (biggestMetricChanges.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Top metric deltas (first -> last):");
+                foreach (var delta in biggestMetricChanges)
+                {
+                    var current = delta.Current;
+                    if (current == null)
+                    {
+                        continue;
+                    }
+
+                    string sign = delta.MetricDelta >= 0 ? "+" : string.Empty;
+                    string percentPart = delta.MetricDeltaPercent.HasValue
+                        ? $" ({sign}{delta.MetricDeltaPercent.Value:F1}%)"
+                        : string.Empty;
+                    string unit = string.IsNullOrWhiteSpace(delta.MetricUnit) ? string.Empty : $" {delta.MetricUnit}";
+
+                    builder.AppendLine($"  - {current.Analyzer}: {current.Title} => {sign}{delta.MetricDelta!.Value:F2}{unit}{percentPart}");
+                }
+            }
+
+            if (overall.NewFindings.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Top new findings:");
+                foreach (var delta in overall.NewFindings.Take(5))
+                {
+                    var finding = delta.Current;
+                    if (finding != null)
+                    {
+                        builder.AppendLine($"  - [{finding.Severity}] {finding.Analyzer}: {finding.Title}");
+                    }
+                }
+            }
+
+            if (overall.ResolvedFindings.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Top resolved findings:");
+                foreach (var delta in overall.ResolvedFindings.Take(5))
+                {
+                    var finding = delta.Baseline;
+                    if (finding != null)
+                    {
+                        builder.AppendLine($"  - [{finding.Severity}] {finding.Analyzer}: {finding.Title}");
+                    }
+                }
+            }
+
+            builder.AppendLine();
+            return builder.ToString();
+        }
+
+        private static string BuildCombinedDetailedReport(IReadOnlyList<AnalysisRunResult> runs)
+        {
+            if (runs.Count == 1)
+            {
+                return runs[0].DetailedReport;
+            }
+
+            var builder = new StringBuilder(capacity: runs.Sum(r => r.DetailedReport.Length) + 2048);
+            for (int i = 0; i < runs.Count; i++)
+            {
+                var run = runs[i];
+                builder.AppendLine($"ANALYSIS SNAPSHOT {i + 1}/{runs.Count}: {run.Snapshot.DumpPath}");
+                builder.AppendLine(StringConstants.Separator80);
+                builder.AppendLine(run.DetailedReport);
+                builder.AppendLine();
+            }
+
+            return builder.ToString();
+        }
+
+        private sealed record AnalysisRunResult(string DetailedReport, AnalysisSnapshot Snapshot);
     }
 }

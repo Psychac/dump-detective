@@ -53,7 +53,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: lohPct >= 35
                     ? "Inspect large object churn and promotion patterns."
                     : "Generation split appears within expected range for this dump.",
-                Tags: ["gc", "generations", "loh"]);
+                Tags: ["gc", "generations", "loh"],
+                MetricValue: lohPct,
+                MetricUnit: "%");
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)

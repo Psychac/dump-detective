@@ -329,7 +329,9 @@ namespace DumpDetective.Analyzers
                     Title: "Finalizer queue backlog is very high",
                     Evidence: $"{finalizerCount:N0} objects are waiting for finalization.",
                     Recommendation: "Investigate finalizers and implement IDisposable/using patterns to reduce finalizer pressure.",
-                    Tags: ["finalizer", "memory-leak", "gc"]));
+                    Tags: ["finalizer", "memory-leak", "gc"],
+                    MetricValue: finalizerCount,
+                    MetricUnit: "finalizer-objects"));
             }
             else if (finalizerCount > 0)
             {
@@ -340,7 +342,9 @@ namespace DumpDetective.Analyzers
                     Title: "Finalizer queue contains pending objects",
                     Evidence: $"{finalizerCount:N0} objects are waiting for finalization.",
                     Recommendation: "Review top finalizable types and avoid unnecessary finalizers.",
-                    Tags: ["finalizer", "memory"]));
+                    Tags: ["finalizer", "memory"],
+                    MetricValue: finalizerCount,
+                    MetricUnit: "finalizer-objects"));
             }
 
             if (signals.DuplicateStringCount > 0)
@@ -352,7 +356,9 @@ namespace DumpDetective.Analyzers
                     Title: "High duplicate string pressure detected",
                     Evidence: $"{signals.DuplicateStringCount:N0} duplicate string patterns with ~{FormatHelper.FormatBytes(signals.DuplicateStringWastedBytes)} estimated waste.",
                     Recommendation: "Consider string interning/pooling or de-duplicating repeated payloads.",
-                    Tags: ["string", "memory", "allocation"]));
+                    Tags: ["string", "memory", "allocation"],
+                    MetricValue: signals.DuplicateStringWastedBytes,
+                    MetricUnit: "wasted-bytes"));
             }
 
             if (signals.HighlyReferencedObjectCount > 0)
@@ -365,7 +371,9 @@ namespace DumpDetective.Analyzers
                     Title: "Highly referenced objects detected",
                     Evidence: $"{signals.HighlyReferencedObjectCount:N0} objects exceeded {_highReferenceThreshold:N0} incoming references.",
                     Recommendation: "Inspect root paths and long-lived graphs retaining these objects.",
-                    Tags: ["retention", "references", "memory-leak"]));
+                    Tags: ["retention", "references", "memory-leak"],
+                    MetricValue: signals.HighlyReferencedObjectCount,
+                    MetricUnit: "objects"));
             }
 
             if (signals.SkippedReferenceAddresses > 0)
@@ -377,7 +385,9 @@ namespace DumpDetective.Analyzers
                     Title: "Reference tracking was capped",
                     Evidence: $"Skipped {signals.SkippedReferenceAddresses:N0} references after hitting {_maxReferenceAddressesToTrack:N0} tracked addresses.",
                     Recommendation: "Increase MaxReferenceAddressesToTrack for deeper incoming-reference coverage.",
-                    Tags: ["analysis-quality", "references"]));
+                    Tags: ["analysis-quality", "references"],
+                    MetricValue: signals.SkippedReferenceAddresses,
+                    MetricUnit: "references"));
             }
         }
 

@@ -52,7 +52,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: conflicts > 0
                     ? "Align dependency versions and verify binding redirects/deployment consistency."
                     : "No immediate module-version conflict action required.",
-                Tags: ["modules", "assemblies", "dependency"]);
+                Tags: ["modules", "assemblies", "dependency"],
+                MetricValue: conflicts,
+                MetricUnit: "conflict-groups");
         }
 
         private ModuleAnalysis AnalyzeModules(ClrRuntime runtime)

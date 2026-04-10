@@ -36,7 +36,9 @@ namespace DumpDetective.Analyzers
                     Title: "No generic collections detected",
                     Evidence: "Collection analyzer did not find list/dictionary/hashset instances for evaluation.",
                     Recommendation: "No collection-sizing action required from this snapshot.",
-                    Tags: ["collections", "capacity"]));
+                    Tags: ["collections", "capacity"],
+                    MetricValue: 0,
+                    MetricUnit: "wasted-bytes"));
                 _writer.WriteLine(StringConstants.Equals80);
                 return findings;
             }
@@ -64,7 +66,9 @@ namespace DumpDetective.Analyzers
                 Recommendation: severity == FindingSeverity.Warning
                     ? "Trim long-lived collections and initialize with realistic capacities."
                     : "Collection sizing appears acceptable in this snapshot.",
-                Tags: ["collections", "memory-waste", "capacity"]);
+                Tags: ["collections", "memory-waste", "capacity"],
+                MetricValue: stats.TotalWastedMemory,
+                MetricUnit: "wasted-bytes");
         }
 
         private CollectionStatistics AnalyzeCollections(ClrHeap heap)

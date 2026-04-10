@@ -133,6 +133,33 @@ namespace DumpDetective.Utilities
             AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]ℹ[/] Progress: [bold]{completedStages}/{totalStages}[/] ([silver]{percent:F0}%[/]) | Elapsed: [silver]{Escape(FormatElapsed(elapsed))}[/] | Remaining: [silver]{Escape(etaText)}[/]");
         }
 
+        public static void PerformanceCheckpoint(string label, TimeSpan duration)
+        {
+            FlushScanLineIfNeeded();
+            AnsiConsole.MarkupLine($"{Timestamp()} [mediumpurple2]⏱[/] {Escape(label)}: [silver]{Escape(FormatElapsed(duration))}[/]");
+        }
+
+        public static void PerformanceBreakdown(string title, IReadOnlyList<(string Name, TimeSpan Duration)> timings, TimeSpan total)
+        {
+            FlushScanLineIfNeeded();
+            if (timings.Count == 0)
+            {
+                return;
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"{Timestamp()} [bold mediumpurple2]⏱ {Escape(title)}[/]");
+            foreach (var timing in timings.OrderByDescending(t => t.Duration))
+            {
+                double percent = total.TotalMilliseconds > 0
+                    ? timing.Duration.TotalMilliseconds * 100.0 / total.TotalMilliseconds
+                    : 0;
+                AnsiConsole.MarkupLine($"{Timestamp()}   [mediumpurple2]•[/] {Escape(timing.Name)}: [silver]{Escape(FormatElapsed(timing.Duration))}[/] ([silver]{percent:F1}%[/])");
+            }
+
+            AnsiConsole.MarkupLine($"{Timestamp()}   [bold]Total:[/] [silver]{Escape(FormatElapsed(total))}[/]");
+        }
+
         public static void ObjectScanProgress(string operation, long scannedCount, TimeSpan elapsed)
         {
             double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;

@@ -14,5 +14,14 @@ namespace DumpDetective.Models
         string Title,
         string Evidence,
         string Recommendation,
-        IReadOnlyList<string> Tags);
+        IReadOnlyList<string> Tags,
+        string? Fingerprint = null,
+        double? MetricValue = null,
+        string? MetricUnit = null)
+    {
+        public string EffectiveFingerprint =>
+            !string.IsNullOrWhiteSpace(Fingerprint)
+                ? Fingerprint
+                : FindingFingerprint.Build(Analyzer, Category, Title, Tags);
+    }
 }

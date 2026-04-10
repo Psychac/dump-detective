@@ -76,7 +76,9 @@ namespace DumpDetective.Analyzers
                     Title: "No LOH segments were detected",
                     Evidence: "Heap scan did not report large-object-heap segments.",
                     Recommendation: "No LOH-fragmentation action required for this dump.",
-                    Tags: ["loh", "fragmentation"]));
+                    Tags: ["loh", "fragmentation"],
+                    MetricValue: 0,
+                    MetricUnit: "% fragmentation"));
                 _writer.WriteLine(StringConstants.Equals80);
                 return findings;
             }
@@ -109,7 +111,9 @@ namespace DumpDetective.Analyzers
                     : severity == FindingSeverity.Warning
                         ? "Monitor LOH allocation patterns and reduce churn from short-lived large allocations."
                         : "LOH fragmentation is currently within acceptable range.",
-                Tags: ["loh", "fragmentation", "memory"]);
+                Tags: ["loh", "fragmentation", "memory"],
+                MetricValue: fragmentationPercent,
+                MetricUnit: "% fragmentation");
         }
 
         private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)

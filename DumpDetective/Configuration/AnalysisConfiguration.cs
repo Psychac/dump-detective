@@ -19,7 +19,10 @@ namespace DumpDetective.Configuration
         private const string ReferenceChainTopCountOption = "--reference-chain-top-count=";
         private const string EventLeakMinSubscribersOption = "--event-leak-min-subscribers=";
         private const string EnableMemoryDiagnosticsOption = "--memory-diagnostics";
+        private const string EnablePerformanceDiagnosticsOption = "--performance-diagnostics";
         private const string ReportFormatOption = "--report-format=";
+        private const string BaselineDumpOption = "--baseline=";
+        private const string TrendDumpsOption = "--trend=";
         private const string ConfigFileOption = "--config=";
         private const string DefaultConfigFileName = "config.json";
         private const string FallbackSampleConfigFileName = "config.sample.json";
@@ -33,6 +36,8 @@ namespace DumpDetective.Configuration
         /// Optional output report path. When null, results are written only to console.
         /// </summary>
         public string? OutputPath { get; init; }
+        public string? BaselineDumpPath { get; init; }
+        public IReadOnlyList<string>? TrendDumpPaths { get; init; }
         public ReportFormat ReportFormat { get; init; } = ReportFormat.Html;
 
         /// <summary>
@@ -45,6 +50,7 @@ namespace DumpDetective.Configuration
         /// </summary>
         public int EventLeakMinSubscribers { get; init; } = DefaultEventLeakMinSubscribers;
         public bool EnableMemoryDiagnostics { get; init; } = false;
+        public bool EnablePerformanceDiagnostics { get; init; } = false;
         public bool WaitForKeyPressOnComplete { get; init; } = true;
         public bool ForceGCBetweenStages { get; init; } = false;
 
@@ -76,12 +82,26 @@ namespace DumpDetective.Configuration
         {
             string? configPath = null;
             string? dumpPathFromCli = null;
+            string? baselineDumpPath = null;
+            List<string>? trendDumpPaths = null;
 
             foreach (string arg in args)
             {
                 if (arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase))
                 {
                     configPath = ParseStringOption(arg, ConfigFileOption.TrimEnd('='));
+                    continue;
+                }
+
+                if (arg.StartsWith(BaselineDumpOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    baselineDumpPath = ParseStringOption(arg, BaselineDumpOption.TrimEnd('='));
+                    continue;
+                }
+
+                if (arg.StartsWith(TrendDumpsOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    trendDumpPaths = ParseDumpListOption(arg, TrendDumpsOption.TrimEnd('='));
                     continue;
                 }
 
@@ -109,6 +129,27 @@ namespace DumpDetective.Configuration
                 throw new FileNotFoundException($"Dump file not found at '{dumpPath}'", dumpPath);
             }
 
+            if (!string.IsNullOrWhiteSpace(baselineDumpPath) && !File.Exists(baselineDumpPath))
+            {
+                throw new FileNotFoundException($"Baseline dump file not found at '{baselineDumpPath}'", baselineDumpPath);
+            }
+
+            if (trendDumpPaths != null)
+            {
+                foreach (string trendDumpPath in trendDumpPaths)
+                {
+                    if (!File.Exists(trendDumpPath))
+                    {
+                        throw new FileNotFoundException($"Trend dump file not found at '{trendDumpPath}'", trendDumpPath);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(baselineDumpPath) && trendDumpPaths is { Count: > 0 })
+            {
+                throw new ArgumentException("Options '--baseline' and '--trend' are mutually exclusive. Use only one.");
+            }
+
             int highReferenceThreshold = fileConfig?.HighReferenceThreshold ?? DefaultHighReferenceThreshold;
             int maxDuplicateStringLength = fileConfig?.MaxDuplicateStringLength ?? DefaultMaxDuplicateStringLength;
             int minDuplicateStringCount = fileConfig?.MinDuplicateStringCount ?? DefaultMinDuplicateStringCount;
@@ -116,6 +157,7 @@ namespace DumpDetective.Configuration
             int referenceChainTopCount = fileConfig?.ReferenceChainTopCount ?? DefaultReferenceChainTopCount;
             int eventLeakMinSubscribers = fileConfig?.EventLeakMinSubscribers ?? DefaultEventLeakMinSubscribers;
             bool enableMemoryDiagnostics = fileConfig?.EnableMemoryDiagnostics ?? false;
+            bool enablePerformanceDiagnostics = fileConfig?.EnablePerformanceDiagnostics ?? false;
             ReportFormat reportFormat = ReportFormat.Html;
             bool waitForKeyPressOnComplete = fileConfig?.WaitForKeyPressOnComplete ?? true;
             bool forceGCBetweenStages = fileConfig?.ForceGCBetweenStages ?? false;
@@ -128,7 +170,9 @@ namespace DumpDetective.Configuration
                 string arg = args[i];
 
                 if (!arg.StartsWith("--", StringComparison.Ordinal) ||
-                    arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase))
+                    arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase) ||
+                    arg.StartsWith(BaselineDumpOption, StringComparison.OrdinalIgnoreCase) ||
+                    arg.StartsWith(TrendDumpsOption, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -172,6 +216,10 @@ namespace DumpDetective.Configuration
                 {
                     enableMemoryDiagnostics = true;
                 }
+                else if (arg.Equals(EnablePerformanceDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    enablePerformanceDiagnostics = true;
+                }
                 else
                 {
                     throw new ArgumentException($"Unknown option '{arg}'.");
@@ -184,6 +232,8 @@ namespace DumpDetective.Configuration
             {
                 DumpPath = dumpPath,
                 OutputPath = outputPath,
+                BaselineDumpPath = baselineDumpPath,
+                TrendDumpPaths = trendDumpPaths,
                 HighReferenceThreshold = highReferenceThreshold,
                 MaxDuplicateStringLength = maxDuplicateStringLength,
                 MinDuplicateStringCount = minDuplicateStringCount,
@@ -191,6 +241,7 @@ namespace DumpDetective.Configuration
                 ReferenceChainTopCount = referenceChainTopCount,
                 EventLeakMinSubscribers = eventLeakMinSubscribers,
                 EnableMemoryDiagnostics = enableMemoryDiagnostics,
+                EnablePerformanceDiagnostics = enablePerformanceDiagnostics,
                 ReportFormat = reportFormat,
                 WaitForKeyPressOnComplete = waitForKeyPressOnComplete,
                 ForceGCBetweenStages = forceGCBetweenStages,
@@ -332,6 +383,14 @@ namespace DumpDetective.Configuration
         public void PrintConfiguration()
         {
             Console.WriteLine($"Analyzing dump: {DumpPath}");
+            if (!string.IsNullOrWhiteSpace(BaselineDumpPath))
+            {
+                Console.WriteLine($"Comparing against baseline dump: {BaselineDumpPath}");
+            }
+            if (TrendDumpPaths is { Count: > 0 })
+            {
+                Console.WriteLine($"Trend mode enabled with {TrendDumpPaths.Count} historical dump(s).");
+            }
             if (OutputPath != null)
             {
                 Console.WriteLine($"Output will be written to: {OutputPath}");
@@ -345,6 +404,7 @@ namespace DumpDetective.Configuration
             Console.WriteLine($"  ReferenceChainTopCount: {ReferenceChainTopCount:N0}");
             Console.WriteLine($"  EventLeakMinSubscribers: {EventLeakMinSubscribers:N0}");
             Console.WriteLine($"  MemoryDiagnostics: {(EnableMemoryDiagnostics ? "Enabled" : "Disabled (default)")}");
+            Console.WriteLine($"  PerformanceDiagnostics: {(EnablePerformanceDiagnostics ? "Enabled" : "Disabled (default)")}");
             Console.WriteLine($"  ReportFormat: {ReportFormat}");
             Console.WriteLine();
         }
@@ -354,6 +414,7 @@ namespace DumpDetective.Configuration
             public int? ReferenceChainTopCount { get; init; }
             public int? EventLeakMinSubscribers { get; init; }
             public bool? EnableMemoryDiagnostics { get; init; }
+            public bool? EnablePerformanceDiagnostics { get; init; }
             public bool? WaitForKeyPressOnComplete { get; init; }
             public bool? ForceGCBetweenStages { get; init; }
             public int? HighReferenceThreshold { get; init; }
@@ -362,6 +423,23 @@ namespace DumpDetective.Configuration
             public int? MaxReferenceAddressesToTrack { get; init; }
             public string[]? SymbolPaths { get; init; }
             public string? SymbolCachePath { get; init; }
+        }
+
+        private static List<string> ParseDumpListOption(string arg, string optionName)
+        {
+            string value = ParseStringOption(arg, optionName);
+            var result = value
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (result.Count == 0)
+            {
+                throw new ArgumentException($"Option '{optionName}' requires one or more dump paths separated by ';'.");
+            }
+
+            return result;
         }
     }
 }

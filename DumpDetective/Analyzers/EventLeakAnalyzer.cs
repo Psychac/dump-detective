@@ -41,7 +41,9 @@ namespace DumpDetective.Analyzers
                     Title: "No event-leak signatures detected",
                     Evidence: $"No event instances exceeded the {minSubscribers:N0} subscriber threshold.",
                     Recommendation: "No immediate action required for event retention patterns.",
-                    Tags: ["event", "leak", "subscriptions"]));
+                    Tags: ["event", "leak", "subscriptions"],
+                    MetricValue: 0,
+                    MetricUnit: "subscribers"));
                 return findings;
             }
 
@@ -73,7 +75,9 @@ namespace DumpDetective.Analyzers
                     Recommendation: "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.",
                     Tags: group.IsStatic
                         ? ["event-leak", "static-event", "retention"]
-                        : ["event-leak", "instance-event", "retention"]));
+                        : ["event-leak", "instance-event", "retention"],
+                    MetricValue: group.TotalSubscribers,
+                    MetricUnit: "subscribers"));
             }
         }
 

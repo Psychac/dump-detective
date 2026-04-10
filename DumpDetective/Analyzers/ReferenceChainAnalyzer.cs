@@ -108,6 +108,7 @@ namespace DumpDetective.Analyzers
             var paths = new List<List<ReferenceNode>>();
             var visited = new HashSet<ulong>();
             var currentPath = new List<ReferenceNode>();
+            var scanCounter = new ObjectScanCounter("Reference chain root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
             // Build reverse reference map for faster lookup
             var referrersMap = BuildReferrersMap(heap, targetAddress);
@@ -115,6 +116,8 @@ namespace DumpDetective.Analyzers
             // Find all roots that can reach this object
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
+                scanCounter.Tick();
+
                 if (CanReachTarget(heap, root.Object.Address, targetAddress, referrersMap))
                 {
                     visited.Clear();
@@ -129,6 +132,8 @@ namespace DumpDetective.Analyzers
                     }
                 }
             }
+
+            scanCounter.Complete();
 
             return paths;
         }

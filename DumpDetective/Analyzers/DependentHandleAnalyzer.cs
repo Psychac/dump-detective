@@ -18,6 +18,7 @@ namespace DumpDetective.Analyzers
         {
             _writer.WriteHeader("DEPENDENT HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing dependent handles (ConditionalWeakTable-style retention edges)...\n");
+            var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
             int resolvedEdgeCount = 0;
@@ -29,6 +30,7 @@ namespace DumpDetective.Analyzers
 
             foreach (ClrHandle handle in runtime.EnumerateHandles())
             {
+                scanCounter.Tick();
                 string kind = handle.HandleKind.ToString();
                 if (!kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -55,6 +57,8 @@ namespace DumpDetective.Analyzers
                 Increment(targetTypeCounts, targetType);
                 Increment(sourceTargetPairCounts, $"{sourceType} -> {targetType}");
             }
+
+            scanCounter.Complete();
 
             _writer.WriteLine("DEPENDENT HANDLE SUMMARY:");
             _writer.WriteSeparator();

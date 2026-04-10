@@ -40,9 +40,12 @@ namespace DumpDetective.Analyzers
         {
             var stats = new CollectionStatistics();
             var wasteful = new List<WastefulCollection>();
+            var scanCounter = new ObjectScanCounter("Collection scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                scanCounter.Tick();
+
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
@@ -91,6 +94,8 @@ namespace DumpDetective.Analyzers
                     stats.Queues++;
                 }
             }
+
+            scanCounter.Complete();
 
             stats.WastefulCollections = wasteful.OrderByDescending(w => w.WastedMemory).ToList();
             stats.TotalWastedMemory = wasteful.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);

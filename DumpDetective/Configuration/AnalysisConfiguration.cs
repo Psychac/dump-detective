@@ -15,6 +15,7 @@ namespace DumpDetective.Configuration
         private const string MaxReferenceAddressesOption = "--max-reference-addresses=";
         private const string ReferenceChainTopCountOption = "--reference-chain-top-count=";
         private const string EventLeakMinSubscribersOption = "--event-leak-min-subscribers=";
+        private const string EnableMemoryDiagnosticsOption = "--memory-diagnostics";
 
         /// <summary>
         /// Full path to the dump file to analyze.
@@ -35,7 +36,7 @@ namespace DumpDetective.Configuration
         /// Event leak analyzer: minimum subscriber count to report a leak candidate.
         /// </summary>
         public int EventLeakMinSubscribers { get; init; } = DefaultEventLeakMinSubscribers;
-        public bool EnableMemoryDiagnostics { get; init; } = true;
+        public bool EnableMemoryDiagnostics { get; init; } = false;
         public bool WaitForKeyPressOnComplete { get; init; } = true;
         public bool ForceGCBetweenStages { get; init; } = false;
 
@@ -71,7 +72,14 @@ namespace DumpDetective.Configuration
             }
 
             string dumpPath = args[0];
-            string? outputPath = args.Length > 1 ? args[1] : null;
+            string? outputPath = null;
+            int optionStartIndex = 1;
+
+            if (args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal))
+            {
+                outputPath = args[1];
+                optionStartIndex = 2;
+            }
 
             if (!File.Exists(dumpPath))
             {
@@ -84,8 +92,9 @@ namespace DumpDetective.Configuration
             int maxReferenceAddressesToTrack = DefaultMaxReferenceAddressesToTrack;
             int referenceChainTopCount = DefaultReferenceChainTopCount;
             int eventLeakMinSubscribers = DefaultEventLeakMinSubscribers;
+            bool enableMemoryDiagnostics = false;
 
-            for (int i = 2; i < args.Length; i++)
+            for (int i = optionStartIndex; i < args.Length; i++)
             {
                 string arg = args[i];
 
@@ -113,6 +122,10 @@ namespace DumpDetective.Configuration
                 {
                     eventLeakMinSubscribers = ParseNonNegativeIntOption(arg, EventLeakMinSubscribersOption.TrimEnd('='));
                 }
+                else if (arg.Equals(EnableMemoryDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    enableMemoryDiagnostics = true;
+                }
                 else
                 {
                     throw new ArgumentException($"Unknown option '{arg}'.");
@@ -128,7 +141,8 @@ namespace DumpDetective.Configuration
                 MinDuplicateStringCount = minDuplicateStringCount,
                 MaxReferenceAddressesToTrack = maxReferenceAddressesToTrack,
                 ReferenceChainTopCount = referenceChainTopCount,
-                EventLeakMinSubscribers = eventLeakMinSubscribers
+                EventLeakMinSubscribers = eventLeakMinSubscribers,
+                EnableMemoryDiagnostics = enableMemoryDiagnostics
             };
         }
 
@@ -181,6 +195,7 @@ namespace DumpDetective.Configuration
             Console.WriteLine("General analyzer settings:");
             Console.WriteLine($"  ReferenceChainTopCount: {ReferenceChainTopCount:N0}");
             Console.WriteLine($"  EventLeakMinSubscribers: {EventLeakMinSubscribers:N0}");
+            Console.WriteLine($"  MemoryDiagnostics: {(EnableMemoryDiagnostics ? "Enabled" : "Disabled (default)")}");
             Console.WriteLine();
         }
     }

@@ -88,9 +88,12 @@ namespace DumpDetective.Analyzers
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
+            var scanCounter = new ObjectScanCounter("Static root scan");
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
+                scanCounter.Tick();
+
                 if (!root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
                     continue;
 
@@ -166,6 +169,8 @@ namespace DumpDetective.Analyzers
                     results.Add(analysis);
                 }
             }
+
+            scanCounter.Complete();
 
             return results;
         }

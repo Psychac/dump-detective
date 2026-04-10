@@ -37,14 +37,18 @@ namespace DumpDetective.Analyzers
             // Single pass — no intermediate list allocation
             var finalizerTypes = new Dictionary<string, int>();
             int finalizerCount = 0;
+            var scanCounter = new ObjectScanCounter("Finalizer queue scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var obj in heap.EnumerateFinalizableObjects())
             {
+                scanCounter.Tick();
                 finalizerCount++;
                 string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
                 finalizerTypes.TryGetValue(typeName, out int typeCount);
                 finalizerTypes[typeName] = typeCount + 1;
             }
+
+            scanCounter.Complete();
 
             if (finalizerCount > 0)
             {
@@ -77,9 +81,11 @@ namespace DumpDetective.Analyzers
             // Single pass over roots — collects data for both static references and rooted objects
             var staticRoots = new Dictionary<string, StaticRootTypeInfo>();
             var rootedObjectsByType = new Dictionary<string, RootedTypeInfo>(capacity: 512);
+            var scanCounter = new ObjectScanCounter("GC root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
+                scanCounter.Tick();
                 ClrObject obj = root.Object;
                 if (!obj.IsValid || obj.Type == null)
                     continue;
@@ -116,6 +122,8 @@ namespace DumpDetective.Analyzers
                 typeInfo.RootKinds.TryGetValue(rootKind, out int kindCount);
                 typeInfo.RootKinds[rootKind] = kindCount + 1;
             }
+
+            scanCounter.Complete();
 
             PrintStaticReferences(staticRoots);
             PrintRootedObjects(rootedObjectsByType);
@@ -168,9 +176,12 @@ namespace DumpDetective.Analyzers
             ulong totalStringMemory = 0;
             var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
             long skippedReferenceAddresses = 0;
+            var scanCounter = new ObjectScanCounter("Memory leak object scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                scanCounter.Tick();
+
                 if (!obj.IsValid) continue;
 
                 if (obj.Type?.Name == "System.String")
@@ -212,6 +223,8 @@ namespace DumpDetective.Analyzers
                     }
                 }
             }
+
+            scanCounter.Complete();
 
             PrintDuplicateStrings(stringStats, totalStrings, totalStringMemory);
             PrintHighlyReferencedObjects(heap, referenceCount, skippedReferenceAddresses);

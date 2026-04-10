@@ -48,9 +48,12 @@ namespace DumpDetective.Analyzers
             var processedStaticDelegates = new HashSet<ulong>();
             var appDomains = heap.Runtime.AppDomains;
             var rootHints = BuildRootHintMap(heap);
+            var scanCounter = new ObjectScanCounter("Event leak object scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                scanCounter.Tick();
+
                 if (!obj.IsValid || !processedObjects.Add(obj.Address))
                     continue;
 
@@ -108,6 +111,8 @@ namespace DumpDetective.Analyzers
 
             // Cover static-only publisher types by reading static roots directly.
             FindStaticRootOnlyEventLeaks(heap, processedStaticDelegates, rootHints, minSubscribers, leaks);
+
+            scanCounter.Complete();
 
             return leaks;
         }

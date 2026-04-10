@@ -36,8 +36,16 @@ namespace DumpDetective.Services
                 var writer = new OutputWriter(fileWriter);
                 var cache = new HeapAnalysisCache();
 
-                MemorySnapshot previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
-                MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
+                MemorySnapshot? previousSnapshot = null;
+                if (_config.EnableMemoryDiagnostics)
+                {
+                    previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
+                    MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
+                }
+                else
+                {
+                    ConsoleUx.Info("Memory diagnostics are disabled (use --memory-diagnostics to enable). Focus mode: stage/analyzer progress.");
+                }
 
                 WriteHeader(writer);
 
@@ -113,16 +121,19 @@ namespace DumpDetective.Services
             return true;
         }
 
-        private ClrRuntime InitializeRuntime(DataTarget dataTarget, ref MemorySnapshot previousSnapshot)
+        private ClrRuntime InitializeRuntime(DataTarget dataTarget, ref MemorySnapshot? previousSnapshot)
         {
             ConsoleUx.Info("Initializing CLR runtime (fetching required symbol files)...");
             ClrInfo primaryClr = dataTarget.ClrVersions[0];
             ClrRuntime runtime = primaryClr.CreateRuntime();
             ConsoleUx.Success("CLR runtime initialized.");
 
-            var snapshot = MemoryDiagnostic.TakeSnapshot("1. After runtime creation");
-            MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-            previousSnapshot = snapshot;
+            if (_config.EnableMemoryDiagnostics && previousSnapshot != null)
+            {
+                var snapshot = MemoryDiagnostic.TakeSnapshot("1. After runtime creation");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+            }
 
             return runtime;
         }
@@ -138,23 +149,26 @@ namespace DumpDetective.Services
             return true;
         }
 
-        private void BuildTypeStatisticsCache(ClrHeap heap, HeapAnalysisCache cache, ref MemorySnapshot previousSnapshot)
+        private void BuildTypeStatisticsCache(ClrHeap heap, HeapAnalysisCache cache, ref MemorySnapshot? previousSnapshot)
         {
             ConsoleUx.Info("Building type statistics cache...");
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
             ConsoleUx.Success($"Type statistics cache ready ({typeStats.Count:N0} unique types).");
 
-            var snapshot = MemoryDiagnostic.TakeSnapshot("2. After cache build");
-            MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
-            previousSnapshot = snapshot;
+            if (_config.EnableMemoryDiagnostics && previousSnapshot != null)
+            {
+                var snapshot = MemoryDiagnostic.TakeSnapshot("2. After cache build");
+                MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
+                previousSnapshot = snapshot;
+            }
         }
 
-        private void RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot initialSnapshot)
+        private void RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
         {
             ConsoleUx.Header("Analysis Pipeline");
             ConsoleUx.Info("Starting analysis pipeline...");
 
-            var pipeline = new AnalysisPipeline(initialSnapshot)
+            var pipeline = new AnalysisPipeline(initialSnapshot, _config.EnableMemoryDiagnostics)
                 .AddStage("Running core memory analyzers",
                     new MemoryAnalyzerAdapter(writer),
                     new GCGenerationAnalyzerAdapter(writer),

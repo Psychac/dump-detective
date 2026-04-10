@@ -32,9 +32,12 @@ namespace DumpDetective.Analyzers
         {
             var analysis = new ModuleAnalysis();
             var modulesByName = new Dictionary<string, List<ModuleInfo>>();
+            var scanCounter = new ObjectScanCounter("Module scan");
 
             foreach (var module in runtime.EnumerateModules())
             {
+                scanCounter.Tick();
+
                 if (module.Name == null)
                     continue;
 
@@ -63,6 +66,8 @@ namespace DumpDetective.Analyzers
                 if (module.IsDynamic)
                     analysis.DynamicModules++;
             }
+
+            scanCounter.Complete();
 
             analysis.ModulesByName = modulesByName;
 

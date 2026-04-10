@@ -70,9 +70,12 @@ namespace DumpDetective.Analyzers
             var blockedThreads = new List<ThreadWithStackTrace>();
             var threadsWithExceptions = new List<ThreadWithStackTrace>();
             var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
+            var scanCounter = new ObjectScanCounter("Thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var thread in threads)
             {
+                scanCounter.Tick();
+
                 result.TotalCount++;
                 IncrementCount(result.StateDistribution, thread.State.ToString());
                 IncrementCount(result.GcModeDistribution, thread.GCMode.ToString());
@@ -156,6 +159,8 @@ namespace DumpDetective.Analyzers
             result.ThreadsWithExceptions = threadsWithExceptions
                 .OrderByDescending(t => t.Thread.LockCount)
                 .ToList();
+
+            scanCounter.Complete();
 
             return result;
         }

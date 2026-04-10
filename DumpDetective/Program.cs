@@ -51,6 +51,7 @@ namespace DumpDetective
             Console.WriteLine("General analyzer options:");
             Console.WriteLine("  --reference-chain-top-count=<int>     Default: 5");
             Console.WriteLine("  --event-leak-min-subscribers=<int>    Default: 0");
+            Console.WriteLine("  --memory-diagnostics                  Enable stage-by-stage memory snapshots/deltas (Default: Off)");
             Console.WriteLine();
             Console.WriteLine("Example:");
             Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.txt --max-reference-addresses=300000 --max-duplicate-string-length=200");

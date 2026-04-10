@@ -37,9 +37,12 @@ namespace DumpDetective.Analyzers
         {
             var analysis = new HangAnalysis();
             var waitingThreads = new List<WaitingThreadInfo>();
+            var threadScanCounter = new ObjectScanCounter("Hang thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var thread in runtime.Threads)
             {
+                threadScanCounter.Tick();
+
                 if (!thread.IsAlive)
                     continue;
 
@@ -68,6 +71,8 @@ namespace DumpDetective.Analyzers
                     analysis.ThreadsHoldingLocks++;
                 }
             }
+
+            threadScanCounter.Complete();
 
             analysis.WaitingThreads = waitingThreads;
             AnalyzeAsyncWork(heap, analysis);
@@ -143,9 +148,12 @@ namespace DumpDetective.Analyzers
             var taskContinuations = new Dictionary<string, int>();
             int tasksScanned = 0;
             int totalContinuations = 0;
+            var objectScanCounter = new ObjectScanCounter("Hang async object scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                objectScanCounter.Tick();
+
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
@@ -198,6 +206,8 @@ namespace DumpDetective.Analyzers
                     break;
                 }
             }
+
+            objectScanCounter.Complete();
 
             analysis.ThreadPoolInfo = threadPool;
             analysis.TaskContinuations = taskContinuations;

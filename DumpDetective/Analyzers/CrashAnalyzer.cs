@@ -48,9 +48,12 @@ namespace DumpDetective.Analyzers
             var activeExceptionTypeCounts = new Dictionary<string, int>();
             var activeExceptions = BuildActiveExceptionLookup(runtime);
             var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
+            var scanCounter = new ObjectScanCounter("Crash exception scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                scanCounter.Tick();
+
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
@@ -101,6 +104,8 @@ namespace DumpDetective.Analyzers
                 }
             }
 
+            scanCounter.Complete();
+
             var sortedTypeNames = exceptionTypeCounts
                 .OrderByDescending(kvp => kvp.Value)
                 .Select(kvp => kvp.Key);
@@ -127,9 +132,12 @@ namespace DumpDetective.Analyzers
         private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)
         {
             var lookup = new Dictionary<ulong, ActiveExceptionContext>();
+            var scanCounter = new ObjectScanCounter("Crash thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var thread in runtime.Threads)
             {
+                scanCounter.Tick();
+
                 if (thread.CurrentException == null)
                     continue;
 
@@ -140,6 +148,8 @@ namespace DumpDetective.Analyzers
                     CurrentThreadStack = thread.EnumerateStackTrace().Take(10).ToList()
                 };
             }
+
+            scanCounter.Complete();
 
             return lookup;
         }

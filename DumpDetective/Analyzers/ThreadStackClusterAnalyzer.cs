@@ -22,9 +22,12 @@ namespace DumpDetective.Analyzers
 
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;
+            var scanCounter = new ObjectScanCounter("Thread clustering scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (ClrThread thread in runtime.Threads)
             {
+                scanCounter.Tick();
+
                 if (!thread.IsAlive)
                     continue;
 
@@ -43,6 +46,8 @@ namespace DumpDetective.Analyzers
                     cluster.SampleThreadIds.Add(thread.OSThreadId);
                 }
             }
+
+            scanCounter.Complete();
 
             _writer.WriteLine("CLUSTER SUMMARY:");
             _writer.WriteSeparator();

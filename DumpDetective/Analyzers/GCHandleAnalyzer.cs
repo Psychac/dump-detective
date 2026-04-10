@@ -17,6 +17,7 @@ namespace DumpDetective.Analyzers
         {
             _writer.WriteHeader("GC HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing GC handle distribution and pinned handle pressure...\n");
+            var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -28,6 +29,7 @@ namespace DumpDetective.Analyzers
 
             foreach (ClrHandle handle in runtime.EnumerateHandles())
             {
+                scanCounter.Tick();
                 totalHandles++;
 
                 string kind = handle.HandleKind.ToString();
@@ -49,6 +51,8 @@ namespace DumpDetective.Analyzers
                     Increment(pinnedTypes, typeName);
                 }
             }
+
+            scanCounter.Complete();
 
             PrintSummary(totalHandles, strongLikeHandles, weakLikeHandles, byKind);
             PrintTopTypes("TOP TYPES REFERENCED BY HANDLES:", allTargetTypes, TopTypeCount);

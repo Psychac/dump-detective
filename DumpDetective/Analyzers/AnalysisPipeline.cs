@@ -6,11 +6,13 @@ namespace DumpDetective.Analyzers
     internal class AnalysisPipeline
     {
         private readonly List<AnalysisStage> _stages = new();
-        private MemorySnapshot _previousSnapshot;
+        private readonly bool _enableMemoryDiagnostics;
+        private MemorySnapshot? _previousSnapshot;
 
-        public AnalysisPipeline(MemorySnapshot initialSnapshot)
+        public AnalysisPipeline(MemorySnapshot? initialSnapshot, bool enableMemoryDiagnostics)
         {
             _previousSnapshot = initialSnapshot;
+            _enableMemoryDiagnostics = enableMemoryDiagnostics;
         }
 
         public AnalysisPipeline AddStage(string name, params IAnalyzer[] analyzers)
@@ -22,11 +24,20 @@ namespace DumpDetective.Analyzers
         public void Execute(AnalysisContext context)
         {
             var stageResults = new List<(string StageName, TimeSpan Duration, int AnalyzerCount)>();
+            var pipelineStopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < _stages.Count; i++)
             {
                 var stage = _stages[i];
-                ConsoleUx.StageStart(i + 1, _stages.Count, stage.Name);
+                TimeSpan? etaBeforeStart = null;
+                if (stageResults.Count > 0)
+                {
+                    double avgStageSeconds = stageResults.Average(s => s.Duration.TotalSeconds);
+                    int stagesRemainingIncludingCurrent = _stages.Count - i;
+                    etaBeforeStart = TimeSpan.FromSeconds(avgStageSeconds * stagesRemainingIncludingCurrent);
+                }
+
+                ConsoleUx.StageStart(i + 1, _stages.Count, stage.Name, etaBeforeStart);
                 var stageStopwatch = Stopwatch.StartNew();
 
                 for (int analyzerIndex = 0; analyzerIndex < stage.Analyzers.Length; analyzerIndex++)
@@ -36,19 +47,34 @@ namespace DumpDetective.Analyzers
                     var analyzerStopwatch = Stopwatch.StartNew();
                     analyzer.Execute(context);
                     analyzerStopwatch.Stop();
-                    ConsoleUx.AnalyzerComplete(analyzer.Name, analyzerStopwatch);
+                    ConsoleUx.AnalyzerComplete(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name, analyzerStopwatch);
                 }
 
                 stageStopwatch.Stop();
 
-                var snapshot = MemoryDiagnostic.TakeSnapshot($"{i + 1}. After {stage.Name}");
-                MemoryDiagnostic.PrintDeltaToConsole(_previousSnapshot, snapshot);
-                _previousSnapshot = snapshot;
+                if (_enableMemoryDiagnostics && _previousSnapshot != null)
+                {
+                    var snapshot = MemoryDiagnostic.TakeSnapshot($"{i + 1}. After {stage.Name}");
+                    MemoryDiagnostic.PrintDeltaToConsole(_previousSnapshot, snapshot);
+                    _previousSnapshot = snapshot;
+                }
 
                 ConsoleUx.StageComplete(stage.Name, stageStopwatch);
                 stageResults.Add((stage.Name, stageStopwatch.Elapsed, stage.Analyzers.Length));
+
+                int completedStages = i + 1;
+                int remainingStages = _stages.Count - completedStages;
+                TimeSpan? etaAfterStage = null;
+                if (remainingStages > 0)
+                {
+                    double avgStageSeconds = stageResults.Average(s => s.Duration.TotalSeconds);
+                    etaAfterStage = TimeSpan.FromSeconds(avgStageSeconds * remainingStages);
+                }
+
+                ConsoleUx.PipelineProgress(completedStages, _stages.Count, pipelineStopwatch.Elapsed, etaAfterStage);
             }
 
+            pipelineStopwatch.Stop();
             ConsoleUx.PipelineSummary(stageResults);
         }
 

@@ -37,9 +37,12 @@ namespace DumpDetective.Utilities
 
             _typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
             _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
+            var scanCounter = new ObjectScanCounter("Type statistics scan");
 
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                scanCounter.Tick();
+
                 if (!obj.IsValid || obj.Type == null)
                     continue;
 
@@ -63,6 +66,8 @@ namespace DumpDetective.Utilities
                     stats.LohSize += size;
                 }
             }
+
+            scanCounter.Complete();
 
             return _typeStats;
         }

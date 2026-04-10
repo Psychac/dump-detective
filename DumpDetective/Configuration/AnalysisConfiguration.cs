@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DumpDetective.Configuration
 {
     internal class AnalysisConfiguration
@@ -16,6 +19,10 @@ namespace DumpDetective.Configuration
         private const string ReferenceChainTopCountOption = "--reference-chain-top-count=";
         private const string EventLeakMinSubscribersOption = "--event-leak-min-subscribers=";
         private const string EnableMemoryDiagnosticsOption = "--memory-diagnostics";
+        private const string ReportFormatOption = "--report-format=";
+        private const string ConfigFileOption = "--config=";
+        private const string DefaultConfigFileName = "config.json";
+        private const string FallbackSampleConfigFileName = "config.sample.json";
 
         /// <summary>
         /// Full path to the dump file to analyze.
@@ -26,6 +33,7 @@ namespace DumpDetective.Configuration
         /// Optional output report path. When null, results are written only to console.
         /// </summary>
         public string? OutputPath { get; init; }
+        public ReportFormat ReportFormat { get; init; } = ReportFormat.Text;
 
         /// <summary>
         /// Reference chain analyzer: number of top memory-consuming types to analyze.
@@ -66,19 +74,43 @@ namespace DumpDetective.Configuration
 
         public static AnalysisConfiguration FromCommandLineArgs(string[] args)
         {
-            if (args.Length == 0)
+            string? configPath = null;
+            var positionalArgs = new List<string>(capacity: 2);
+
+            foreach (string arg in args)
             {
-                throw new ArgumentException("Dump file path is required");
+                if (arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    configPath = ParseStringOption(arg, ConfigFileOption.TrimEnd('='));
+                    continue;
+                }
+
+                if (!arg.StartsWith("--", StringComparison.Ordinal))
+                {
+                    positionalArgs.Add(arg);
+                }
             }
 
-            string dumpPath = args[0];
-            string? outputPath = null;
-            int optionStartIndex = 1;
+            string? resolvedConfigPath = ResolveConfigPath(configPath);
+            AnalysisConfigurationFileModel? fileConfig = resolvedConfigPath != null
+                ? LoadConfigurationFile(resolvedConfigPath)
+                : null;
+            bool hasFileConfig = fileConfig != null;
 
-            if (args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal))
+            string? dumpPath = positionalArgs.Count > 0 ? positionalArgs[0] : fileConfig?.DumpPath;
+            string? outputPath = positionalArgs.Count > 1 ? positionalArgs[1] : fileConfig?.OutputPath;
+
+            // File-first precedence: if config file is found, use config values and only use CLI positional
+            // dump/output as fallback when config omits them.
+            if (hasFileConfig)
             {
-                outputPath = args[1];
-                optionStartIndex = 2;
+                dumpPath = fileConfig!.DumpPath ?? dumpPath;
+                outputPath = fileConfig.OutputPath ?? outputPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(dumpPath))
+            {
+                throw new ArgumentException("Dump file path is required. Provide it as first argument or in --config JSON (DumpPath).");
             }
 
             if (!File.Exists(dumpPath))
@@ -86,50 +118,74 @@ namespace DumpDetective.Configuration
                 throw new FileNotFoundException($"Dump file not found at '{dumpPath}'", dumpPath);
             }
 
-            int highReferenceThreshold = DefaultHighReferenceThreshold;
-            int maxDuplicateStringLength = DefaultMaxDuplicateStringLength;
-            int minDuplicateStringCount = DefaultMinDuplicateStringCount;
-            int maxReferenceAddressesToTrack = DefaultMaxReferenceAddressesToTrack;
-            int referenceChainTopCount = DefaultReferenceChainTopCount;
-            int eventLeakMinSubscribers = DefaultEventLeakMinSubscribers;
-            bool enableMemoryDiagnostics = false;
+            int highReferenceThreshold = fileConfig?.HighReferenceThreshold ?? DefaultHighReferenceThreshold;
+            int maxDuplicateStringLength = fileConfig?.MaxDuplicateStringLength ?? DefaultMaxDuplicateStringLength;
+            int minDuplicateStringCount = fileConfig?.MinDuplicateStringCount ?? DefaultMinDuplicateStringCount;
+            int maxReferenceAddressesToTrack = fileConfig?.MaxReferenceAddressesToTrack ?? DefaultMaxReferenceAddressesToTrack;
+            int referenceChainTopCount = fileConfig?.ReferenceChainTopCount ?? DefaultReferenceChainTopCount;
+            int eventLeakMinSubscribers = fileConfig?.EventLeakMinSubscribers ?? DefaultEventLeakMinSubscribers;
+            bool enableMemoryDiagnostics = fileConfig?.EnableMemoryDiagnostics ?? false;
+            ReportFormat reportFormat = fileConfig?.ReportFormat ?? ReportFormat.Text;
+            bool waitForKeyPressOnComplete = fileConfig?.WaitForKeyPressOnComplete ?? true;
+            bool forceGCBetweenStages = fileConfig?.ForceGCBetweenStages ?? false;
+            string[]? symbolPaths = fileConfig?.SymbolPaths;
+            string? symbolCachePath = fileConfig?.SymbolCachePath;
 
-            for (int i = optionStartIndex; i < args.Length; i++)
+            // CLI options are only considered when config file is not found.
+            if (!hasFileConfig)
             {
-                string arg = args[i];
+                for (int i = 0; i < args.Length; i++)
+                {
+                    string arg = args[i];
 
-                if (arg.StartsWith(HighReferenceThresholdOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    highReferenceThreshold = ParsePositiveIntOption(arg, HighReferenceThresholdOption.TrimEnd('='));
+                    if (!arg.StartsWith("--", StringComparison.Ordinal) ||
+                        arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (arg.StartsWith(HighReferenceThresholdOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        highReferenceThreshold = ParsePositiveIntOption(arg, HighReferenceThresholdOption.TrimEnd('='));
+                    }
+                    else if (arg.StartsWith(MaxDuplicateStringLengthOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        maxDuplicateStringLength = ParsePositiveIntOption(arg, MaxDuplicateStringLengthOption.TrimEnd('='));
+                    }
+                    else if (arg.StartsWith(MinDuplicateStringCountOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        minDuplicateStringCount = ParsePositiveIntOption(arg, MinDuplicateStringCountOption.TrimEnd('='));
+                    }
+                    else if (arg.StartsWith(MaxReferenceAddressesOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        maxReferenceAddressesToTrack = ParsePositiveIntOption(arg, MaxReferenceAddressesOption.TrimEnd('='));
+                    }
+                    else if (arg.StartsWith(ReferenceChainTopCountOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        referenceChainTopCount = ParsePositiveIntOption(arg, ReferenceChainTopCountOption.TrimEnd('='));
+                    }
+                    else if (arg.StartsWith(EventLeakMinSubscribersOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        eventLeakMinSubscribers = ParseNonNegativeIntOption(arg, EventLeakMinSubscribersOption.TrimEnd('='));
+                    }
+                    else if (arg.Equals(EnableMemoryDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        enableMemoryDiagnostics = true;
+                    }
+                    else if (arg.StartsWith(ReportFormatOption, StringComparison.OrdinalIgnoreCase))
+                    {
+                        reportFormat = ParseReportFormatOption(arg, ReportFormatOption.TrimEnd('='));
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Unknown option '{arg}'.");
+                    }
                 }
-                else if (arg.StartsWith(MaxDuplicateStringLengthOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    maxDuplicateStringLength = ParsePositiveIntOption(arg, MaxDuplicateStringLengthOption.TrimEnd('='));
-                }
-                else if (arg.StartsWith(MinDuplicateStringCountOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    minDuplicateStringCount = ParsePositiveIntOption(arg, MinDuplicateStringCountOption.TrimEnd('='));
-                }
-                else if (arg.StartsWith(MaxReferenceAddressesOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    maxReferenceAddressesToTrack = ParsePositiveIntOption(arg, MaxReferenceAddressesOption.TrimEnd('='));
-                }
-                else if (arg.StartsWith(ReferenceChainTopCountOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    referenceChainTopCount = ParsePositiveIntOption(arg, ReferenceChainTopCountOption.TrimEnd('='));
-                }
-                else if (arg.StartsWith(EventLeakMinSubscribersOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    eventLeakMinSubscribers = ParseNonNegativeIntOption(arg, EventLeakMinSubscribersOption.TrimEnd('='));
-                }
-                else if (arg.Equals(EnableMemoryDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
-                {
-                    enableMemoryDiagnostics = true;
-                }
-                else
-                {
-                    throw new ArgumentException($"Unknown option '{arg}'.");
-                }
+            }
+
+            if (outputPath != null && reportFormat == ReportFormat.Text)
+            {
+                reportFormat = InferReportFormatFromOutputPath(outputPath);
             }
 
             return new AnalysisConfiguration
@@ -142,7 +198,96 @@ namespace DumpDetective.Configuration
                 MaxReferenceAddressesToTrack = maxReferenceAddressesToTrack,
                 ReferenceChainTopCount = referenceChainTopCount,
                 EventLeakMinSubscribers = eventLeakMinSubscribers,
-                EnableMemoryDiagnostics = enableMemoryDiagnostics
+                EnableMemoryDiagnostics = enableMemoryDiagnostics,
+                ReportFormat = reportFormat,
+                WaitForKeyPressOnComplete = waitForKeyPressOnComplete,
+                ForceGCBetweenStages = forceGCBetweenStages,
+                SymbolPaths = symbolPaths,
+                SymbolCachePath = symbolCachePath
+            };
+        }
+
+        private static AnalysisConfigurationFileModel LoadConfigurationFile(string configPath)
+        {
+            if (!File.Exists(configPath))
+            {
+                throw new FileNotFoundException($"Config file not found at '{configPath}'", configPath);
+            }
+
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                ReadCommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true
+            };
+            options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+
+            string json = File.ReadAllText(configPath);
+            AnalysisConfigurationFileModel? config = JsonSerializer.Deserialize<AnalysisConfigurationFileModel>(json, options);
+
+            if (config == null)
+            {
+                throw new ArgumentException($"Config file '{configPath}' is empty or invalid.");
+            }
+
+            return config;
+        }
+
+        private static string? ResolveConfigPath(string? cliConfigPath)
+        {
+            if (!string.IsNullOrWhiteSpace(cliConfigPath))
+            {
+                return File.Exists(cliConfigPath) ? cliConfigPath : null;
+            }
+
+            string baseDirectory = AppContext.BaseDirectory;
+            string primaryPath = Path.Combine(baseDirectory, DefaultConfigFileName);
+            if (File.Exists(primaryPath))
+            {
+                return primaryPath;
+            }
+
+            string samplePath = Path.Combine(baseDirectory, FallbackSampleConfigFileName);
+            return File.Exists(samplePath) ? samplePath : null;
+        }
+
+        private static ReportFormat ParseReportFormatOption(string arg, string optionName)
+        {
+            int separatorIndex = arg.IndexOf('=');
+            if (separatorIndex <= 0 || separatorIndex == arg.Length - 1)
+            {
+                throw new ArgumentException($"Option '{optionName}' requires a value in the format '{optionName}=<text|markdown|html>'.");
+            }
+
+            string value = arg[(separatorIndex + 1)..].Trim();
+            return value.ToLowerInvariant() switch
+            {
+                "text" or "txt" => ReportFormat.Text,
+                "markdown" or "md" => ReportFormat.Markdown,
+                "html" or "htm" => ReportFormat.Html,
+                _ => throw new ArgumentException($"Option '{optionName}' value '{value}' is invalid. Expected one of: text, markdown, html.")
+            };
+        }
+
+        private static string ParseStringOption(string arg, string optionName)
+        {
+            int separatorIndex = arg.IndexOf('=');
+            if (separatorIndex <= 0 || separatorIndex == arg.Length - 1)
+            {
+                throw new ArgumentException($"Option '{optionName}' requires a value in the format '{optionName}=<value>'.");
+            }
+
+            return arg[(separatorIndex + 1)..].Trim();
+        }
+
+        private static ReportFormat InferReportFormatFromOutputPath(string outputPath)
+        {
+            string extension = Path.GetExtension(outputPath);
+            return extension.ToLowerInvariant() switch
+            {
+                ".md" or ".markdown" => ReportFormat.Markdown,
+                ".html" or ".htm" => ReportFormat.Html,
+                _ => ReportFormat.Text
             };
         }
 
@@ -196,7 +341,26 @@ namespace DumpDetective.Configuration
             Console.WriteLine($"  ReferenceChainTopCount: {ReferenceChainTopCount:N0}");
             Console.WriteLine($"  EventLeakMinSubscribers: {EventLeakMinSubscribers:N0}");
             Console.WriteLine($"  MemoryDiagnostics: {(EnableMemoryDiagnostics ? "Enabled" : "Disabled (default)")}");
+            Console.WriteLine($"  ReportFormat: {ReportFormat}");
             Console.WriteLine();
+        }
+
+        private sealed class AnalysisConfigurationFileModel
+        {
+            public string? DumpPath { get; init; }
+            public string? OutputPath { get; init; }
+            public int? ReferenceChainTopCount { get; init; }
+            public int? EventLeakMinSubscribers { get; init; }
+            public bool? EnableMemoryDiagnostics { get; init; }
+            public bool? WaitForKeyPressOnComplete { get; init; }
+            public bool? ForceGCBetweenStages { get; init; }
+            public int? HighReferenceThreshold { get; init; }
+            public int? MaxDuplicateStringLength { get; init; }
+            public int? MinDuplicateStringCount { get; init; }
+            public int? MaxReferenceAddressesToTrack { get; init; }
+            public string[]? SymbolPaths { get; init; }
+            public string? SymbolCachePath { get; init; }
+            public ReportFormat? ReportFormat { get; init; }
         }
     }
 }

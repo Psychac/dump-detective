@@ -3,6 +3,8 @@ using DumpDetective.Analyzers;
 using DumpDetective.Configuration;
 using DumpDetective.Utilities;
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DumpDetective.Services
 {
@@ -17,71 +19,70 @@ namespace DumpDetective.Services
 
         public void Execute()
         {
-            StreamWriter? fileWriter = null;
-            try
+            var runStopwatch = Stopwatch.StartNew();
+            ConsoleUx.Header("DumpDetective Analysis");
+
+            StringBuilder? reportBufferBuilder = _config.OutputPath != null ? new StringBuilder(capacity: 64 * 1024) : null;
+            using StringWriter? reportWriter = reportBufferBuilder != null ? new StringWriter(reportBufferBuilder) : null;
+
+            ConsoleUx.Info("Loading dump file...");
+            // Load the dump file (ClrMD defaults to Microsoft symbol server if DAC is needed)
+            using DataTarget dataTarget = DataTarget.LoadDump(_config.DumpPath);
+            ConsoleUx.Success("Dump loaded.");
+
+            var writer = new OutputWriter(reportWriter, writeToConsoleWhenNoWriter: _config.OutputPath == null);
+            var cache = new HeapAnalysisCache();
+
+            MemorySnapshot? previousSnapshot = null;
+            if (_config.EnableMemoryDiagnostics)
             {
-                var runStopwatch = Stopwatch.StartNew();
-                ConsoleUx.Header("DumpDetective Analysis");
-
-                if (_config.OutputPath != null)
-                {
-                    fileWriter = new StreamWriter(_config.OutputPath, false);
-                }
-
-                ConsoleUx.Info("Loading dump file...");
-                // Load the dump file (ClrMD defaults to Microsoft symbol server if DAC is needed)
-                using DataTarget dataTarget = DataTarget.LoadDump(_config.DumpPath);
-                ConsoleUx.Success("Dump loaded.");
-
-                var writer = new OutputWriter(fileWriter);
-                var cache = new HeapAnalysisCache();
-
-                MemorySnapshot? previousSnapshot = null;
-                if (_config.EnableMemoryDiagnostics)
-                {
-                    previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
-                    MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
-                }
-                else
-                {
-                    ConsoleUx.Info("Memory diagnostics are disabled (use --memory-diagnostics to enable). Focus mode: stage/analyzer progress.");
-                }
-
-                WriteHeader(writer);
-
-                if (!ValidateClrVersions(dataTarget, writer))
-                {
-                    return;
-                }
-
-                using ClrRuntime runtime = InitializeRuntime(dataTarget, ref previousSnapshot);
-                var heap = runtime.Heap;
-
-                if (!ValidateHeap(heap, writer))
-                {
-                    return;
-                }
-
-                BuildTypeStatisticsCache(heap, cache, ref previousSnapshot);
-
-                var context = new AnalysisContext
-                {
-                    Runtime = runtime,
-                    Heap = heap,
-                    Cache = cache
-                };
-
-                RunAnalysisPipeline(writer, context, previousSnapshot);
-
-                WriteFooter(writer);
-
-                runStopwatch.Stop();
-                ConsoleUx.Success($"Total analysis time: {runStopwatch.Elapsed.TotalSeconds:F1}s");
+                previousSnapshot = MemoryDiagnostic.TakeSnapshot("0. Initial");
+                MemoryDiagnostic.PrintSnapshotToConsole(previousSnapshot);
             }
-            finally
+            else
             {
-                fileWriter?.Dispose();
+                ConsoleUx.Info("Memory diagnostics are disabled (use --memory-diagnostics to enable). Focus mode: stage/analyzer progress.");
             }
+
+            WriteHeader(writer);
+
+            if (!ValidateClrVersions(dataTarget, writer))
+            {
+                return;
+            }
+
+            using ClrRuntime runtime = InitializeRuntime(dataTarget, ref previousSnapshot);
+            var heap = runtime.Heap;
+
+            if (!ValidateHeap(heap, writer))
+            {
+                return;
+            }
+
+            BuildTypeStatisticsCache(heap, cache, ref previousSnapshot);
+
+            var context = new AnalysisContext
+            {
+                Runtime = runtime,
+                Heap = heap,
+                Cache = cache
+            };
+
+            RunAnalysisPipeline(writer, context, previousSnapshot);
+
+            WriteFooter(writer);
+
+            if (_config.OutputPath != null && reportBufferBuilder != null)
+            {
+                string detailedReport = reportBufferBuilder.ToString();
+                var insights = BuildReportInsights(runStopwatch.Elapsed, detailedReport);
+                string formattedReport = ReportFormatter.Format(_config.ReportFormat, detailedReport, insights, _config.DumpPath);
+                File.WriteAllText(_config.OutputPath, formattedReport, Encoding.UTF8);
+                ConsoleUx.Success($"Report written to: {_config.OutputPath}");
+            }
+
+            runStopwatch.Stop();
+            ConsoleUx.Success($"Total analysis time: {runStopwatch.Elapsed.TotalSeconds:F1}s");
 
             if (_config.WaitForKeyPressOnComplete)
             {
@@ -200,11 +201,88 @@ namespace DumpDetective.Services
         {
             writer.WriteSeparator();
             writer.WriteLine("Analysis complete");
+        }
 
-            if (_config.OutputPath != null)
+        private List<string> BuildReportInsights(TimeSpan elapsed, string detailedReport)
+        {
+            var insights = new List<string>(capacity: 8);
+
+            double? lohFragPercent = TryGetDouble(detailedReport, @"LOH Free Size:\s+.+\((?<value>\d+(?:\.\d+)?)% fragmentation\)");
+            if (lohFragPercent.HasValue)
             {
-                ConsoleUx.Success($"Report written to: {_config.OutputPath}");
+                if (lohFragPercent.Value >= 30)
+                    insights.Add($"[CRITICAL] LOH fragmentation is high at {lohFragPercent.Value:F1}% - large-object allocations may fail or trigger heavy GC compaction.");
+                else if (lohFragPercent.Value >= 15)
+                    insights.Add($"[WARNING] LOH fragmentation is {lohFragPercent.Value:F1}% - monitor allocation pressure for large objects.");
+                else
+                    insights.Add($"[OK] LOH fragmentation is {lohFragPercent.Value:F1}%.");
             }
+
+            int? finalizerQueueCount = TryGetInt(detailedReport, @"Objects waiting for finalization:\s+(?<value>[\d,]+)");
+            if (finalizerQueueCount.HasValue)
+            {
+                if (finalizerQueueCount.Value >= 1000)
+                    insights.Add($"[CRITICAL] Finalizer queue backlog is {finalizerQueueCount.Value:N0} objects - potential finalizer bottleneck.");
+                else if (finalizerQueueCount.Value > 0)
+                    insights.Add($"[WARNING] {finalizerQueueCount.Value:N0} object(s) are waiting in the finalizer queue.");
+                else
+                    insights.Add("[OK] Finalizer queue is empty.");
+            }
+
+            int? eventLeakInstances = TryGetInt(detailedReport, @"Found\s+(?<value>[\d,]+)\s+event instance\(s\)\s+across");
+            if (eventLeakInstances.HasValue)
+            {
+                if (eventLeakInstances.Value >= 25)
+                    insights.Add($"[CRITICAL] {eventLeakInstances.Value:N0} event leak instance(s) detected.");
+                else if (eventLeakInstances.Value > 0)
+                    insights.Add($"[WARNING] {eventLeakInstances.Value:N0} potential event leak instance(s) detected.");
+            }
+            else if (detailedReport.Contains("No event leaks detected!", StringComparison.OrdinalIgnoreCase))
+            {
+                insights.Add("[OK] Event leak analyzer did not find suspicious publisher/subscriber patterns.");
+            }
+
+            int? staticRootCount = TryGetInt(detailedReport, @"Found\s+(?<value>[\d,]+)\s+static root\(s\) with significant memory impact");
+            if (staticRootCount.HasValue)
+            {
+                if (staticRootCount.Value >= 10)
+                    insights.Add($"[CRITICAL] {staticRootCount.Value:N0} static roots are retaining significant memory.");
+                else
+                    insights.Add($"[WARNING] {staticRootCount.Value:N0} static root leak candidate(s) identified.");
+            }
+
+            if (detailedReport.Contains("No objects with more than", StringComparison.OrdinalIgnoreCase))
+            {
+                insights.Add($"[OK] No heavily-referenced objects exceeded the {_config.HighReferenceThreshold:N0} incoming-reference threshold.");
+            }
+
+            insights.Add($"[INFO] Analysis completed in {elapsed.TotalSeconds:F1}s.");
+
+            if (insights.Count == 1)
+            {
+                insights.Insert(0, "[INFO] No high-confidence issue signals were extracted from analyzer summaries. Review detailed sections for context.");
+            }
+
+            return insights;
+        }
+
+        private static int? TryGetInt(string text, string pattern)
+        {
+            Match match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!match.Success)
+                return null;
+
+            string value = match.Groups["value"].Value.Replace(",", string.Empty, StringComparison.Ordinal);
+            return int.TryParse(value, out int parsed) ? parsed : null;
+        }
+
+        private static double? TryGetDouble(string text, string pattern)
+        {
+            Match match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!match.Success)
+                return null;
+
+            return double.TryParse(match.Groups["value"].Value, out double parsed) ? parsed : null;
         }
     }
 }

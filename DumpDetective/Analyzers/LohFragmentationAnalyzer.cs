@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 using System.Reflection;
 
@@ -14,10 +15,11 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
             _writer.WriteLine("Analyzing Large Object Heap segments for free-space fragmentation...\n");
+            var findings = new List<InsightFinding>(capacity: 1);
 
             var segmentStats = new List<LohSegmentStats>();
             var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
@@ -67,13 +69,61 @@ namespace DumpDetective.Analyzers
             if (segmentStats.Count == 0)
             {
                 _writer.WriteLine("No LOH segments found.");
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(LohFragmentationAnalyzer),
+                    Category: "Performance",
+                    Severity: FindingSeverity.Info,
+                    Title: "No LOH segments were detected",
+                    Evidence: "Heap scan did not report large-object-heap segments.",
+                    Recommendation: "No LOH-fragmentation action required for this dump.",
+                    Tags: ["loh", "fragmentation"]));
                 _writer.WriteLine(StringConstants.Equals80);
-                return;
+                return findings;
             }
+
+            double overallFragmentation = CalculateOverallFragmentationPercent(segmentStats);
+            findings.Add(CreateFinding(overallFragmentation, segmentStats.Count));
 
             PrintSummary(segmentStats);
             PrintTopFragmentedSegments(segmentStats);
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)
+        {
+            FindingSeverity severity = fragmentationPercent >= 30
+                ? FindingSeverity.Critical
+                : fragmentationPercent >= 15
+                    ? FindingSeverity.Warning
+                    : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(LohFragmentationAnalyzer),
+                Category: "Fragmentation",
+                Severity: severity,
+                Title: "LOH fragmentation assessment",
+                Evidence: $"{fragmentationPercent:F1}% overall free-space fragmentation across {segmentCount:N0} LOH segment(s).",
+                Recommendation: severity == FindingSeverity.Critical
+                    ? "Investigate large object allocation churn and retention; consider compaction strategies and pooling."
+                    : severity == FindingSeverity.Warning
+                        ? "Monitor LOH allocation patterns and reduce churn from short-lived large allocations."
+                        : "LOH fragmentation is currently within acceptable range.",
+                Tags: ["loh", "fragmentation", "memory"]);
+        }
+
+        private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
+        {
+            ulong totalBytes = 0;
+            ulong freeBytes = 0;
+
+            foreach (var segment in segmentStats)
+            {
+                totalBytes += segment.TotalBytes;
+                freeBytes += segment.FreeBytes;
+            }
+
+            return totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
         }
 
         private static bool IsLohSegment(ClrSegment segment)

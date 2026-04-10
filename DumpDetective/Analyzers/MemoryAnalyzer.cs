@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -15,7 +16,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("MEMORY ANALYSIS:");
 
@@ -26,8 +27,38 @@ namespace DumpDetective.Analyzers
             PrintTopObjectsByCount(typeStats);
             PrintTopObjectsBySize(typeStats);
             PrintLOHUsage(typeStats);
+            var findings = new List<InsightFinding>(capacity: 1)
+            {
+                CreateFinding(typeStats)
+            };
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)
+        {
+            ulong totalMemory = 0;
+            ulong totalLohMemory = 0;
+            foreach (var stat in typeStats.Values)
+            {
+                totalMemory += stat.TotalSize;
+                totalLohMemory += stat.LohSize;
+            }
+
+            double lohPct = totalMemory == 0 ? 0 : totalLohMemory * 100.0 / totalMemory;
+            FindingSeverity severity = lohPct >= 40 ? FindingSeverity.Warning : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(MemoryAnalyzer),
+                Category: "Memory",
+                Severity: severity,
+                Title: "Heap composition overview",
+                Evidence: $"{typeStats.Count:N0} unique types, {FormatHelper.FormatBytes(totalMemory)} total memory, LOH share {lohPct:F1}%.",
+                Recommendation: lohPct >= 40
+                    ? "Review large-object allocation patterns and retention lifetimes."
+                    : "Use top types by size/count as primary triage anchors.",
+                Tags: ["heap", "composition", "loh"]);
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)

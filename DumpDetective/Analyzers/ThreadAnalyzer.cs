@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 using System.Runtime.InteropServices;
 
@@ -38,9 +39,11 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("THREAD ANALYSIS:");
+
+            var findings = new List<InsightFinding>(capacity: 1);
 
             var threadInfo = CategorizeThreads(runtime.Threads);
 
@@ -56,11 +59,29 @@ namespace DumpDetective.Analyzers
             PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
             PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
             PrintThreadsWithExceptions(threadInfo.ThreadsWithExceptions);
+            findings.Add(CreateFinding(threadInfo));
 
             _writer.WriteLine("\nNote: Deadlock detection requires full lock-graph analysis.");
             _writer.WriteLine("Use lock-heavy + blocked thread overlap and hotspot methods as triage anchors.");
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(ThreadCategorization info)
+        {
+            FindingSeverity severity = (info.ThreadsWithActiveExceptionsCount > 0 || info.PotentiallyBlockedThreads.Count >= 10)
+                ? FindingSeverity.Warning
+                : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(ThreadAnalyzer),
+                Category: "Threading",
+                Severity: severity,
+                Title: "Thread-state triage summary",
+                Evidence: $"Alive threads: {info.AliveCount:N0}; blocked-pattern threads: {info.PotentiallyBlockedThreads.Count:N0}; lock-holding threads: {info.ThreadsWithLocks.Count:N0}; active thread exceptions: {info.ThreadsWithActiveExceptionsCount:N0}.",
+                Recommendation: "Correlate blocked groups with lock owners and hotspot frames to isolate contention/deadlock candidates.",
+                Tags: ["threads", "locks", "blocked", "exceptions"]);
         }
 
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)

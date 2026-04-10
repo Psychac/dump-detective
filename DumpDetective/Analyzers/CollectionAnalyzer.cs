@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -16,24 +17,54 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap)
+        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("COLLECTION EFFICIENCY ANALYSIS:");
             _writer.WriteLine("Analyzing dictionaries, lists, and other collections for waste...\n");
+
+            var findings = new List<InsightFinding>(capacity: 1);
 
             var collectionStats = AnalyzeCollections(heap);
 
             if (collectionStats.TotalCollections == 0)
             {
                 _writer.WriteLine("No collections found for analysis.");
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(CollectionAnalyzer),
+                    Category: "Memory",
+                    Severity: FindingSeverity.Info,
+                    Title: "No generic collections detected",
+                    Evidence: "Collection analyzer did not find list/dictionary/hashset instances for evaluation.",
+                    Recommendation: "No collection-sizing action required from this snapshot.",
+                    Tags: ["collections", "capacity"]));
                 _writer.WriteLine(StringConstants.Equals80);
-                return;
+                return findings;
             }
 
             PrintCollectionSummary(collectionStats);
             PrintWastefulCollections(collectionStats);
+            findings.Add(CreateFinding(collectionStats));
 
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(CollectionStatistics stats)
+        {
+            FindingSeverity severity = stats.TotalWastedMemory >= SummaryWarnThresholdBytes
+                ? FindingSeverity.Warning
+                : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(CollectionAnalyzer),
+                Category: "Memory",
+                Severity: severity,
+                Title: "Collection capacity efficiency",
+                Evidence: $"{stats.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(stats.TotalWastedMemory)} across {stats.WastefulCollections.Count:N0} wasteful collections.",
+                Recommendation: severity == FindingSeverity.Warning
+                    ? "Trim long-lived collections and initialize with realistic capacities."
+                    : "Collection sizing appears acceptable in this snapshot.",
+                Tags: ["collections", "memory-waste", "capacity"]);
         }
 
         private CollectionStatistics AnalyzeCollections(ClrHeap heap)

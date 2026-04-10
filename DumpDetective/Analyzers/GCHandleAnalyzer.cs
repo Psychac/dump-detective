@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -13,10 +14,11 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("GC HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing GC handle distribution and pinned handle pressure...\n");
+            var findings = new List<InsightFinding>(capacity: 1);
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -57,8 +59,34 @@ namespace DumpDetective.Analyzers
             PrintSummary(totalHandles, strongLikeHandles, weakLikeHandles, byKind);
             PrintTopTypes("TOP TYPES REFERENCED BY HANDLES:", allTargetTypes, TopTypeCount);
             PrintTopTypes("TOP TYPES REFERENCED BY PINNED HANDLES:", pinnedTypes, TopTypeCount);
+            findings.Add(CreateFinding(totalHandles, pinnedTypes));
 
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)
+        {
+            int pinnedHandleTargets = 0;
+            foreach (var kv in pinnedTypes)
+            {
+                pinnedHandleTargets += kv.Value;
+            }
+
+            FindingSeverity severity = pinnedHandleTargets >= 1000 || totalHandles >= 10000
+                ? FindingSeverity.Warning
+                : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(GCHandleAnalyzer),
+                Category: "GC",
+                Severity: severity,
+                Title: "GC handle pressure summary",
+                Evidence: $"Total handles: {totalHandles:N0}; pinned-handle target count: {pinnedHandleTargets:N0}; pinned target types: {pinnedTypes.Count:N0}.",
+                Recommendation: severity == FindingSeverity.Warning
+                    ? "Inspect pinned-handle-heavy types and reduce long-lived pinning where possible."
+                    : "Handle distribution appears within expected bounds for this snapshot.",
+                Tags: ["gc-handle", "pinning", "retention"]);
         }
 
         private void PrintSummary(int total, int strongLike, int weakLike, Dictionary<string, int> byKind)

@@ -1,4 +1,5 @@
 using DumpDetective.Utilities;
+using DumpDetective.Models;
 using System.Diagnostics;
 
 namespace DumpDetective.Analyzers
@@ -21,9 +22,10 @@ namespace DumpDetective.Analyzers
             return this;
         }
 
-        public void Execute(AnalysisContext context)
+        public IReadOnlyList<InsightFinding> Execute(AnalysisContext context)
         {
             var stageResults = new List<(string StageName, TimeSpan Duration, int AnalyzerCount)>();
+            var findings = new List<InsightFinding>(capacity: 64);
             var pipelineStopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < _stages.Count; i++)
@@ -45,8 +47,12 @@ namespace DumpDetective.Analyzers
                     var analyzer = stage.Analyzers[analyzerIndex];
                     ConsoleUx.AnalyzerStart(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name);
                     var analyzerStopwatch = Stopwatch.StartNew();
-                    analyzer.Execute(context);
+                    AnalyzerExecutionResult result = analyzer.Execute(context);
                     analyzerStopwatch.Stop();
+                    if (result.Findings.Count > 0)
+                    {
+                        findings.AddRange(result.Findings);
+                    }
                     ConsoleUx.AnalyzerComplete(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name, analyzerStopwatch);
                 }
 
@@ -76,6 +82,7 @@ namespace DumpDetective.Analyzers
 
             pipelineStopwatch.Stop();
             ConsoleUx.PipelineSummary(stageResults);
+            return findings;
         }
 
         private record AnalysisStage(string Name, IAnalyzer[] Analyzers);

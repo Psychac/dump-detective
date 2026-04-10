@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -17,10 +18,12 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime, ClrHeap heap)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             _writer.WriteHeader("HANG ANALYSIS:");
             _writer.WriteLine("Detecting potential application hangs...\n");
+
+            var findings = new List<InsightFinding>(capacity: 1);
 
             var hangInfo = AnalyzeForHang(runtime, heap);
 
@@ -29,8 +32,34 @@ namespace DumpDetective.Analyzers
             PrintThreadPoolInfo(hangInfo);
             PrintTaskInfo(hangInfo);
             PrintDeadlockSuspicion(hangInfo);
+            findings.Add(CreateFinding(hangInfo));
 
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(HangAnalysis analysis)
+        {
+            double waitingPct = analysis.TotalAliveThreads == 0
+                ? 0
+                : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
+
+            FindingSeverity severity = waitingPct >= 80
+                ? FindingSeverity.Critical
+                : waitingPct >= 50 || analysis.ThreadPoolInfo.QueuedWorkItems > HighThreadPoolThreshold
+                    ? FindingSeverity.Warning
+                    : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(HangAnalyzer),
+                Category: "Hang",
+                Severity: severity,
+                Title: "Hang-risk assessment",
+                Evidence: $"Waiting threads: {analysis.WaitingThreads.Count:N0}/{analysis.TotalAliveThreads:N0} ({waitingPct:F1}%); queued work items: {analysis.ThreadPoolInfo.QueuedWorkItems:N0}.",
+                Recommendation: severity == FindingSeverity.Critical
+                    ? "Investigate wait groups and lock owners immediately for deadlock/contention storms."
+                    : "Review waiting-thread categories and thread-pool saturation indicators.",
+                Tags: ["hang", "deadlock", "threadpool", "waits"]);
         }
 
         private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap)

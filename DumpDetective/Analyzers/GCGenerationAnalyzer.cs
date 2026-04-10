@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -14,7 +15,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
 
@@ -23,8 +24,36 @@ namespace DumpDetective.Analyzers
 
             PrintSummary(cachedStats);
             PrintTopTypes(cachedStats);
+            var findings = new List<InsightFinding>(capacity: 1)
+            {
+                CreateFinding(cachedStats)
+            };
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)
+        {
+            ulong total = 0;
+            ulong loh = 0;
+            foreach (var stat in typeStats.Values)
+            {
+                total += stat.TotalSize;
+                loh += stat.LohSize;
+            }
+
+            double lohPct = total == 0 ? 0 : loh * 100.0 / total;
+            return new InsightFinding(
+                Analyzer: nameof(GCGenerationAnalyzer),
+                Category: "GC",
+                Severity: lohPct >= 35 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "GC generation footprint snapshot",
+                Evidence: $"LOH memory share is {lohPct:F1}% of managed heap.",
+                Recommendation: lohPct >= 35
+                    ? "Inspect large object churn and promotion patterns."
+                    : "Generation split appears within expected range for this dump.",
+                Tags: ["gc", "generations", "loh"]);
         }
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)

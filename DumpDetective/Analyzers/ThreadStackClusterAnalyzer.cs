@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -15,10 +16,11 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("THREAD STACK SIGNATURE CLUSTERING:");
             _writer.WriteLine("Grouping alive threads by top stack-frame signatures to highlight hot wait/execution patterns...\n");
+            var findings = new List<InsightFinding>(capacity: 1);
 
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;
@@ -58,8 +60,16 @@ namespace DumpDetective.Analyzers
             if (clusters.Count == 0)
             {
                 _writer.WriteLine("\nNo alive managed threads were available for clustering.");
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(ThreadStackClusterAnalyzer),
+                    Category: "Threading",
+                    Severity: FindingSeverity.Info,
+                    Title: "No thread clusters available",
+                    Evidence: "No alive managed threads were available for stack-signature clustering.",
+                    Recommendation: "Capture a dump with active managed threads for clustering insights.",
+                    Tags: ["thread-cluster", "threads", "diagnostics"]));
                 _writer.WriteLine(StringConstants.Equals80);
-                return;
+                return findings;
             }
 
             _writer.WriteLine("\nTOP THREAD CLUSTERS:");
@@ -80,7 +90,26 @@ namespace DumpDetective.Analyzers
             }
 
             _writer.WriteLine("\nTip: Large clusters with wait-related signatures often indicate contention bottlenecks or hangs.");
+            findings.Add(CreateFinding(aliveThreads, clusters.Count));
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(int aliveThreads, int uniqueClusters)
+        {
+            double diversity = aliveThreads == 0 ? 0 : uniqueClusters * 100.0 / aliveThreads;
+            FindingSeverity severity = diversity <= 25 ? FindingSeverity.Warning : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(ThreadStackClusterAnalyzer),
+                Category: "Threading",
+                Severity: severity,
+                Title: "Thread stack-signature diversity",
+                Evidence: $"{uniqueClusters:N0} unique signatures across {aliveThreads:N0} alive threads ({diversity:F1}% diversity).",
+                Recommendation: severity == FindingSeverity.Warning
+                    ? "Low diversity suggests hotspot wait/execution patterns; inspect top clusters for bottlenecks."
+                    : "Thread stack diversity appears healthy for this snapshot.",
+                Tags: ["thread-cluster", "hotspot", "contention"]);
         }
 
         private static string BuildSignature(ClrThread thread)

@@ -1,5 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Configuration;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -21,18 +22,22 @@ namespace DumpDetective.Analyzers
             _maxReferenceAddressesToTrack = config.MaxReferenceAddressesToTrack;
         }
 
-        public void Analyze(ClrHeap heap, ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, ClrRuntime runtime)
         {
             _writer.WriteHeader("MEMORY LEAK ANALYSIS:");
+            var findings = new List<InsightFinding>(capacity: 4);
 
-            AnalyzeFinalizerQueue(heap);
+            int finalizerCount = AnalyzeFinalizerQueue(heap);
             AnalyzeRootsPass(heap);     // static refs + rooted objects in one pass
-            AnalyzeObjectsPass(heap);   // string dups + reference counts in one pass
+            LeakSignals signals = AnalyzeObjectsPass(heap);   // string dups + reference counts in one pass
+
+            AddFindings(findings, finalizerCount, signals);
 
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
         }
 
-        private void AnalyzeFinalizerQueue(ClrHeap heap)
+        private int AnalyzeFinalizerQueue(ClrHeap heap)
         {
             // Single pass — no intermediate list allocation
             var finalizerTypes = new Dictionary<string, int>();
@@ -74,6 +79,8 @@ namespace DumpDetective.Analyzers
             {
                 _writer.WriteLine("\nFINALIZER QUEUE: Empty (good!)");
             }
+
+            return finalizerCount;
         }
 
         private void AnalyzeRootsPass(ClrHeap heap)
@@ -168,7 +175,7 @@ namespace DumpDetective.Analyzers
             }
         }
 
-        private void AnalyzeObjectsPass(ClrHeap heap)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap)
         {
             // Single pass over heap objects — collects data for both string analysis and reference counting
             var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
@@ -226,11 +233,13 @@ namespace DumpDetective.Analyzers
 
             scanCounter.Complete();
 
-            PrintDuplicateStrings(stringStats, totalStrings, totalStringMemory);
-            PrintHighlyReferencedObjects(heap, referenceCount, skippedReferenceAddresses);
+            DuplicateStringResult duplicateResult = PrintDuplicateStrings(stringStats, totalStrings, totalStringMemory);
+            int highlyReferencedCount = PrintHighlyReferencedObjects(heap, referenceCount, skippedReferenceAddresses);
+
+            return new LeakSignals(duplicateResult.DuplicateCount, duplicateResult.TotalWastedBytes, highlyReferencedCount, skippedReferenceAddresses);
         }
 
-        private void PrintDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, int totalStrings, ulong totalStringMemory)
+        private DuplicateStringResult PrintDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, int totalStrings, ulong totalStringMemory)
         {
             _writer.WriteLine("\n\nDUPLICATE STRING ANALYSIS:");
             _writer.WriteSeparator();
@@ -257,9 +266,17 @@ namespace DumpDetective.Analyzers
                     _writer.WriteLine($"{dup.Preview,-50} {dup.Count,12:N0} {FormatHelper.FormatBytes(wastedMemory),15}");
                 }
             }
+
+            ulong totalWastedBytes = 0;
+            foreach (var dup in duplicates)
+            {
+                totalWastedBytes += dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
+            }
+
+            return new DuplicateStringResult(duplicates.Count, totalWastedBytes);
         }
 
-        private void PrintHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, long skippedReferenceAddresses)
+        private int PrintHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, long skippedReferenceAddresses)
         {
             _writer.WriteLine("\n\nHIGHLY REFERENCED OBJECTS:");
             _writer.WriteSeparator();
@@ -294,6 +311,73 @@ namespace DumpDetective.Analyzers
             if (!foundHighlyReferenced)
             {
                 _writer.WriteLine($"  ✅ No objects with more than {_highReferenceThreshold} incoming references found.");
+            }
+
+            return foundHighlyReferenced
+                ? referenceCount.Count(kvp => kvp.Value > _highReferenceThreshold)
+                : 0;
+        }
+
+        private void AddFindings(List<InsightFinding> findings, int finalizerCount, LeakSignals signals)
+        {
+            if (finalizerCount >= 1000)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Leak",
+                    Severity: FindingSeverity.Critical,
+                    Title: "Finalizer queue backlog is very high",
+                    Evidence: $"{finalizerCount:N0} objects are waiting for finalization.",
+                    Recommendation: "Investigate finalizers and implement IDisposable/using patterns to reduce finalizer pressure.",
+                    Tags: ["finalizer", "memory-leak", "gc"]));
+            }
+            else if (finalizerCount > 0)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Leak",
+                    Severity: FindingSeverity.Warning,
+                    Title: "Finalizer queue contains pending objects",
+                    Evidence: $"{finalizerCount:N0} objects are waiting for finalization.",
+                    Recommendation: "Review top finalizable types and avoid unnecessary finalizers.",
+                    Tags: ["finalizer", "memory"]));
+            }
+
+            if (signals.DuplicateStringCount > 0)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Optimization",
+                    Severity: FindingSeverity.Warning,
+                    Title: "High duplicate string pressure detected",
+                    Evidence: $"{signals.DuplicateStringCount:N0} duplicate string patterns with ~{FormatHelper.FormatBytes(signals.DuplicateStringWastedBytes)} estimated waste.",
+                    Recommendation: "Consider string interning/pooling or de-duplicating repeated payloads.",
+                    Tags: ["string", "memory", "allocation"]));
+            }
+
+            if (signals.HighlyReferencedObjectCount > 0)
+            {
+                var severity = signals.HighlyReferencedObjectCount >= 10 ? FindingSeverity.Critical : FindingSeverity.Warning;
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Leak",
+                    Severity: severity,
+                    Title: "Highly referenced objects detected",
+                    Evidence: $"{signals.HighlyReferencedObjectCount:N0} objects exceeded {_highReferenceThreshold:N0} incoming references.",
+                    Recommendation: "Inspect root paths and long-lived graphs retaining these objects.",
+                    Tags: ["retention", "references", "memory-leak"]));
+            }
+
+            if (signals.SkippedReferenceAddresses > 0)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Diagnostics",
+                    Severity: FindingSeverity.Info,
+                    Title: "Reference tracking was capped",
+                    Evidence: $"Skipped {signals.SkippedReferenceAddresses:N0} references after hitting {_maxReferenceAddressesToTrack:N0} tracked addresses.",
+                    Recommendation: "Increase MaxReferenceAddressesToTrack for deeper incoming-reference coverage.",
+                    Tags: ["analysis-quality", "references"]));
             }
         }
 
@@ -357,6 +441,8 @@ namespace DumpDetective.Analyzers
         }
 
         private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
+        private readonly record struct DuplicateStringResult(int DuplicateCount, ulong TotalWastedBytes);
+        private readonly record struct LeakSignals(int DuplicateStringCount, ulong DuplicateStringWastedBytes, int HighlyReferencedObjectCount, long SkippedReferenceAddresses);
 
         private sealed class StaticRootTypeInfo
         {

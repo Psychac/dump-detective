@@ -1,10 +1,10 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analyzers;
 using DumpDetective.Configuration;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace DumpDetective.Services
 {
@@ -68,15 +68,17 @@ namespace DumpDetective.Services
                 Cache = cache
             };
 
-            RunAnalysisPipeline(writer, context, previousSnapshot);
+            var findings = RunAnalysisPipeline(writer, context, previousSnapshot);
 
             WriteFooter(writer);
 
             if (_config.OutputPath != null && reportBufferBuilder != null)
             {
                 string detailedReport = reportBufferBuilder.ToString();
-                var insights = BuildReportInsights(runStopwatch.Elapsed, detailedReport);
-                string formattedReport = ReportFormatter.Format(_config.ReportFormat, detailedReport, insights, _config.DumpPath);
+                var normalizedFindings = findings.ToList();
+                FindingTagger.Normalize(normalizedFindings);
+                var insights = BuildReportInsights(runStopwatch.Elapsed, normalizedFindings);
+                string formattedReport = ReportFormatter.Format(_config.ReportFormat, detailedReport, insights, _config.DumpPath, normalizedFindings);
                 File.WriteAllText(_config.OutputPath, formattedReport, Encoding.UTF8);
                 ConsoleUx.Success($"Report written to: {_config.OutputPath}");
             }
@@ -164,7 +166,7 @@ namespace DumpDetective.Services
             }
         }
 
-        private void RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
+        private IReadOnlyList<InsightFinding> RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
         {
             ConsoleUx.Header("Analysis Pipeline");
             ConsoleUx.Info("Starting analysis pipeline...");
@@ -192,9 +194,10 @@ namespace DumpDetective.Services
                     new ThreadAnalyzerAdapter(writer),
                     new EventLeakAnalyzerAdapter(writer, _config));
 
-            pipeline.Execute(context);
+            var findings = pipeline.Execute(context);
 
             ConsoleUx.Success("Analysis pipeline complete.");
+            return findings;
         }
 
         private void WriteFooter(OutputWriter writer)
@@ -203,86 +206,37 @@ namespace DumpDetective.Services
             writer.WriteLine("Analysis complete");
         }
 
-        private List<string> BuildReportInsights(TimeSpan elapsed, string detailedReport)
+        private static List<string> BuildReportInsights(TimeSpan elapsed, IReadOnlyList<InsightFinding> findings)
         {
             var insights = new List<string>(capacity: 8);
+            int criticalCount = findings.Count(f => f.Severity == FindingSeverity.Critical);
+            int warningCount = findings.Count(f => f.Severity == FindingSeverity.Warning);
 
-            double? lohFragPercent = TryGetDouble(detailedReport, @"LOH Free Size:\s+.+\((?<value>\d+(?:\.\d+)?)% fragmentation\)");
-            if (lohFragPercent.HasValue)
+            if (criticalCount > 0)
             {
-                if (lohFragPercent.Value >= 30)
-                    insights.Add($"[CRITICAL] LOH fragmentation is high at {lohFragPercent.Value:F1}% - large-object allocations may fail or trigger heavy GC compaction.");
-                else if (lohFragPercent.Value >= 15)
-                    insights.Add($"[WARNING] LOH fragmentation is {lohFragPercent.Value:F1}% - monitor allocation pressure for large objects.");
-                else
-                    insights.Add($"[OK] LOH fragmentation is {lohFragPercent.Value:F1}%.");
+                insights.Add($"[CRITICAL] {criticalCount:N0} critical finding(s) detected. Prioritize these first.");
             }
 
-            int? finalizerQueueCount = TryGetInt(detailedReport, @"Objects waiting for finalization:\s+(?<value>[\d,]+)");
-            if (finalizerQueueCount.HasValue)
+            if (warningCount > 0)
             {
-                if (finalizerQueueCount.Value >= 1000)
-                    insights.Add($"[CRITICAL] Finalizer queue backlog is {finalizerQueueCount.Value:N0} objects - potential finalizer bottleneck.");
-                else if (finalizerQueueCount.Value > 0)
-                    insights.Add($"[WARNING] {finalizerQueueCount.Value:N0} object(s) are waiting in the finalizer queue.");
-                else
-                    insights.Add("[OK] Finalizer queue is empty.");
+                insights.Add($"[WARNING] {warningCount:N0} warning finding(s) detected. Address these after critical issues.");
             }
 
-            int? eventLeakInstances = TryGetInt(detailedReport, @"Found\s+(?<value>[\d,]+)\s+event instance\(s\)\s+across");
-            if (eventLeakInstances.HasValue)
+            foreach (var finding in findings
+                .Where(f => f.Severity != FindingSeverity.Info)
+                .OrderByDescending(f => f.Severity)
+                .Take(3))
             {
-                if (eventLeakInstances.Value >= 25)
-                    insights.Add($"[CRITICAL] {eventLeakInstances.Value:N0} event leak instance(s) detected.");
-                else if (eventLeakInstances.Value > 0)
-                    insights.Add($"[WARNING] {eventLeakInstances.Value:N0} potential event leak instance(s) detected.");
+                insights.Add($"[{finding.Severity}] {finding.Title} — {finding.Evidence}");
             }
-            else if (detailedReport.Contains("No event leaks detected!", StringComparison.OrdinalIgnoreCase))
-            {
-                insights.Add("[OK] Event leak analyzer did not find suspicious publisher/subscriber patterns.");
-            }
-
-            int? staticRootCount = TryGetInt(detailedReport, @"Found\s+(?<value>[\d,]+)\s+static root\(s\) with significant memory impact");
-            if (staticRootCount.HasValue)
-            {
-                if (staticRootCount.Value >= 10)
-                    insights.Add($"[CRITICAL] {staticRootCount.Value:N0} static roots are retaining significant memory.");
-                else
-                    insights.Add($"[WARNING] {staticRootCount.Value:N0} static root leak candidate(s) identified.");
-            }
-
-            if (detailedReport.Contains("No objects with more than", StringComparison.OrdinalIgnoreCase))
-            {
-                insights.Add($"[OK] No heavily-referenced objects exceeded the {_config.HighReferenceThreshold:N0} incoming-reference threshold.");
-            }
-
             insights.Add($"[INFO] Analysis completed in {elapsed.TotalSeconds:F1}s.");
 
-            if (insights.Count == 1)
+            if (findings.Count == 0)
             {
-                insights.Insert(0, "[INFO] No high-confidence issue signals were extracted from analyzer summaries. Review detailed sections for context.");
+                insights.Insert(0, "[INFO] No structured findings were emitted by analyzers.");
             }
 
             return insights;
-        }
-
-        private static int? TryGetInt(string text, string pattern)
-        {
-            Match match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            if (!match.Success)
-                return null;
-
-            string value = match.Groups["value"].Value.Replace(",", string.Empty, StringComparison.Ordinal);
-            return int.TryParse(value, out int parsed) ? parsed : null;
-        }
-
-        private static double? TryGetDouble(string text, string pattern)
-        {
-            Match match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            if (!match.Success)
-                return null;
-
-            return double.TryParse(match.Groups["value"].Value, out double parsed) ? parsed : null;
         }
     }
 }

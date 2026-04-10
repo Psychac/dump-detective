@@ -1,5 +1,6 @@
 using DumpDetective.Utilities;
 using DumpDetective.Configuration;
+using DumpDetective.Models;
 
 namespace DumpDetective.Analyzers
 {
@@ -14,9 +15,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new MemoryAnalyzer(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(new MemoryAnalyzer(_writer).Analyze(context.Heap, context.Cache));
         }
     }
 
@@ -31,9 +32,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new GCGenerationAnalyzer(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(new GCGenerationAnalyzer(_writer).Analyze(context.Heap, context.Cache));
         }
     }
 
@@ -48,9 +49,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new ModuleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(new ModuleAnalyzer(_writer).Analyze(context.Runtime));
         }
     }
 
@@ -65,9 +66,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new CrashAnalyzer(_writer).Analyze(context.Runtime, context.Heap);
+            return new AnalyzerExecutionResult(new CrashAnalyzer(_writer).Analyze(context.Runtime, context.Heap));
         }
     }
 
@@ -82,9 +83,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new HangAnalyzer(_writer).Analyze(context.Runtime, context.Heap);
+            return new AnalyzerExecutionResult(new HangAnalyzer(_writer).Analyze(context.Runtime, context.Heap));
         }
     }
 
@@ -101,9 +102,9 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new MemoryLeakAnalyzer(_writer, _config).Analyze(context.Heap, context.Runtime);
+            return new AnalyzerExecutionResult(new MemoryLeakAnalyzer(_writer, _config).Analyze(context.Heap, context.Runtime));
         }
     }
 
@@ -118,9 +119,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new CollectionAnalyzer(_writer).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(new CollectionAnalyzer(_writer).Analyze(context.Heap));
         }
     }
 
@@ -135,9 +136,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new StaticRootLeakDetector(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(new StaticRootLeakDetector(_writer).Analyze(context.Heap, context.Cache));
         }
     }
 
@@ -154,9 +155,9 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new ReferenceChainAnalyzer(_writer, _config).AnalyzeTopTypes(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(new ReferenceChainAnalyzer(_writer, _config).AnalyzeTopTypes(context.Heap, context.Cache));
         }
     }
 
@@ -171,9 +172,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new ThreadAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(new ThreadAnalyzer(_writer).Analyze(context.Runtime));
         }
     }
 
@@ -190,9 +191,9 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap));
         }
     }
 
@@ -207,9 +208,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new GCHandleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(new GCHandleAnalyzer(_writer).Analyze(context.Runtime));
         }
     }
 
@@ -224,9 +225,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new LohFragmentationAnalyzer(_writer).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(new LohFragmentationAnalyzer(_writer).Analyze(context.Heap));
         }
     }
 
@@ -241,9 +242,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new DependentHandleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(new DependentHandleAnalyzer(_writer).Analyze(context.Runtime));
         }
     }
 
@@ -258,9 +259,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Execute(AnalysisContext context)
+        public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            new ThreadStackClusterAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(new ThreadStackClusterAnalyzer(_writer).Analyze(context.Runtime));
         }
     }
 }

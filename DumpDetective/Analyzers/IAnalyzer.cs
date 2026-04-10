@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -6,7 +7,12 @@ namespace DumpDetective.Analyzers
     internal interface IAnalyzer
     {
         string Name { get; }
-        void Execute(AnalysisContext context);
+        AnalyzerExecutionResult Execute(AnalysisContext context);
+    }
+
+    internal sealed record AnalyzerExecutionResult(IReadOnlyList<InsightFinding> Findings)
+    {
+        public static AnalyzerExecutionResult Empty { get; } = new([]);
     }
 
     internal class AnalysisContext

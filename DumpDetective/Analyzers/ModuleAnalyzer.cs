@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -14,7 +15,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("MODULE/ASSEMBLY ANALYSIS:");
             _writer.WriteLine("Analyzing loaded modules and assemblies...\n");
@@ -24,8 +25,34 @@ namespace DumpDetective.Analyzers
             PrintModuleSummary(modules);
             PrintLoadedAssemblies(modules);
             PrintVersionConflicts(modules);
+            var findings = new List<InsightFinding>(capacity: 1)
+            {
+                CreateFinding(modules)
+            };
 
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(ModuleAnalysis analysis)
+        {
+            int conflicts = analysis.VersionConflicts.Count;
+            FindingSeverity severity = conflicts >= 3
+                ? FindingSeverity.Critical
+                : conflicts > 0
+                    ? FindingSeverity.Warning
+                    : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(ModuleAnalyzer),
+                Category: "Dependency",
+                Severity: severity,
+                Title: conflicts > 0 ? "Module identity conflicts detected" : "Module dependency snapshot",
+                Evidence: $"{analysis.TotalModules:N0} modules loaded, {analysis.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).",
+                Recommendation: conflicts > 0
+                    ? "Align dependency versions and verify binding redirects/deployment consistency."
+                    : "No immediate module-version conflict action required.",
+                Tags: ["modules", "assemblies", "dependency"]);
         }
 
         private ModuleAnalysis AnalyzeModules(ClrRuntime runtime)

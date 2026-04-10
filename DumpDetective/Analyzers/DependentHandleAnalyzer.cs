@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 using System.Reflection;
 
@@ -14,10 +15,11 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public void Analyze(ClrRuntime runtime)
+        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("DEPENDENT HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing dependent handles (ConditionalWeakTable-style retention edges)...\n");
+            var findings = new List<InsightFinding>(capacity: 1);
             var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
@@ -70,15 +72,37 @@ namespace DumpDetective.Analyzers
             {
                 _writer.WriteLine("\nNo dependent handles were found in this dump.");
                 _writer.WriteLine(StringConstants.Equals80);
-                return;
+                return findings;
             }
 
             PrintTop("TOP SOURCE TYPES IN DEPENDENT HANDLES:", sourceTypeCounts);
             PrintTop("TOP TARGET TYPES KEPT ALIVE BY DEPENDENT HANDLES:", targetTypeCounts);
             PrintTop("TOP SOURCE -> TARGET RETENTION EDGES:", sourceTargetPairCounts);
+            findings.Add(CreateFinding(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount));
 
             _writer.WriteLine("\nNote: Some runtimes do not expose dependent targets via DAC. Unresolved targets are expected in that case.");
             _writer.WriteLine(StringConstants.Equals80);
+            return findings;
+        }
+
+        private static InsightFinding CreateFinding(int dependentHandleCount, int resolvedEdgeCount, int unresolvedTargetCount)
+        {
+            double unresolvedPct = dependentHandleCount == 0
+                ? 0
+                : unresolvedTargetCount * 100.0 / dependentHandleCount;
+
+            FindingSeverity severity = unresolvedPct >= 50
+                ? FindingSeverity.Warning
+                : FindingSeverity.Info;
+
+            return new InsightFinding(
+                Analyzer: nameof(DependentHandleAnalyzer),
+                Category: "Retention",
+                Severity: severity,
+                Title: "Dependent-handle retention summary",
+                Evidence: $"Dependent handles: {dependentHandleCount:N0}; resolved source->target edges: {resolvedEdgeCount:N0}; unresolved targets: {unresolvedTargetCount:N0} ({unresolvedPct:F1}%).",
+                Recommendation: "Inspect dominant dependent-handle source/target pairs to identify hidden retention relationships.",
+                Tags: ["dependent-handle", "retention", "conditionalweaktable"]);
         }
 
         private void PrintTop(string title, Dictionary<string, int> counts)

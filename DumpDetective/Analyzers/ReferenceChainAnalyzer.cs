@@ -1,5 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Configuration;
+using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
@@ -18,10 +19,11 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public void AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
+        public IReadOnlyList<InsightFinding> AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
             _writer.WriteLine("Finding why top memory-consuming objects are still alive...\n");
+            var findings = new List<InsightFinding>(capacity: 1);
 
             int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
 
@@ -32,6 +34,9 @@ namespace DumpDetective.Analyzers
                 .OrderByDescending(kvp => kvp.Value.TotalSize)
                 .Take(topCount)
                 .ToList();
+
+            int retainedSamples = 0;
+            int analyzedSamples = 0;
 
             int typeNum = 1;
             foreach (var typeKvp in topTypes)
@@ -53,7 +58,11 @@ namespace DumpDetective.Analyzers
 
                 if (sampleAddress.HasValue)
                 {
-                    AnalyzeObject(heap, sampleAddress.Value);
+                    analyzedSamples++;
+                    if (AnalyzeObject(heap, sampleAddress.Value))
+                    {
+                        retainedSamples++;
+                    }
                 }
                 else
                 {
@@ -61,17 +70,20 @@ namespace DumpDetective.Analyzers
                 }
             }
 
+            findings.Add(CreateFinding(analyzedSamples, retainedSamples));
+
             _writer.WriteLine($"\n{StringConstants.Equals80}");
+            return findings;
         }
 
-        public void AnalyzeObject(ClrHeap heap, ulong objectAddress)
+        public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
             ClrObject obj = heap.GetObject(objectAddress);
 
             if (!obj.IsValid)
             {
                 _writer.WriteLine($"    Object at 0x{objectAddress:X} is not valid.");
-                return;
+                return false;
             }
 
             _writer.WriteLine($"    Sample Instance: 0x{objectAddress:X}");
@@ -83,6 +95,7 @@ namespace DumpDetective.Analyzers
             if (paths.Count == 0)
             {
                 _writer.WriteLine("    Status: No GC root found (may be eligible for collection)");
+                return false;
             }
             else
             {
@@ -100,7 +113,35 @@ namespace DumpDetective.Analyzers
                 {
                     _writer.WriteLine($"\n    ... and {paths.Count - MaxPathsToShow} more path(s)");
                 }
+
+                return true;
             }
+        }
+
+        private static InsightFinding CreateFinding(int analyzedSamples, int retainedSamples)
+        {
+            if (analyzedSamples == 0)
+            {
+                return new InsightFinding(
+                    Analyzer: nameof(ReferenceChainAnalyzer),
+                    Category: "Retention",
+                    Severity: FindingSeverity.Info,
+                    Title: "No sample instances available for reference-chain tracing",
+                    Evidence: "Reference-chain analyzer could not obtain valid sample objects for configured top types.",
+                    Recommendation: "Review type statistics and dump integrity; re-run with broader type coverage if needed.",
+                    Tags: ["reference-chain", "roots", "retention"]);
+            }
+
+            double retainedPct = retainedSamples * 100.0 / analyzedSamples;
+            FindingSeverity severity = retainedPct >= 70 ? FindingSeverity.Warning : FindingSeverity.Info;
+            return new InsightFinding(
+                Analyzer: nameof(ReferenceChainAnalyzer),
+                Category: "Retention",
+                Severity: severity,
+                Title: "Reference-chain retention coverage",
+                Evidence: $"{retainedSamples:N0}/{analyzedSamples:N0} sampled top types had at least one GC-root path ({retainedPct:F1}%).",
+                Recommendation: "Focus on root paths for retained top types to identify ownership leaks.",
+                Tags: ["reference-chain", "gc-roots", "retention"]);
         }
 
         private List<List<ReferenceNode>> FindPathsToRoot(ClrHeap heap, ulong targetAddress)

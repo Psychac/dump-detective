@@ -195,4 +195,72 @@ namespace DumpDetective.Analyzers
             new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap);
         }
     }
+
+    internal class GCHandleAnalyzerAdapter : IAnalyzer
+    {
+        private readonly OutputWriter _writer;
+
+        public string Name => "GC Handle Analysis";
+
+        public GCHandleAnalyzerAdapter(OutputWriter writer)
+        {
+            _writer = writer;
+        }
+
+        public void Execute(AnalysisContext context)
+        {
+            new GCHandleAnalyzer(_writer).Analyze(context.Runtime);
+        }
+    }
+
+    internal class LohFragmentationAnalyzerAdapter : IAnalyzer
+    {
+        private readonly OutputWriter _writer;
+
+        public string Name => "LOH Fragmentation Analysis";
+
+        public LohFragmentationAnalyzerAdapter(OutputWriter writer)
+        {
+            _writer = writer;
+        }
+
+        public void Execute(AnalysisContext context)
+        {
+            new LohFragmentationAnalyzer(_writer).Analyze(context.Heap);
+        }
+    }
+
+    internal class DependentHandleAnalyzerAdapter : IAnalyzer
+    {
+        private readonly OutputWriter _writer;
+
+        public string Name => "Dependent Handle Analysis";
+
+        public DependentHandleAnalyzerAdapter(OutputWriter writer)
+        {
+            _writer = writer;
+        }
+
+        public void Execute(AnalysisContext context)
+        {
+            new DependentHandleAnalyzer(_writer).Analyze(context.Runtime);
+        }
+    }
+
+    internal class ThreadStackClusterAnalyzerAdapter : IAnalyzer
+    {
+        private readonly OutputWriter _writer;
+
+        public string Name => "Thread Stack Signature Clustering";
+
+        public ThreadStackClusterAnalyzerAdapter(OutputWriter writer)
+        {
+            _writer = writer;
+        }
+
+        public void Execute(AnalysisContext context)
+        {
+            new ThreadStackClusterAnalyzer(_writer).Analyze(context.Runtime);
+        }
+    }
 }

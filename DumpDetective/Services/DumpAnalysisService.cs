@@ -168,6 +168,11 @@ namespace DumpDetective.Services
                 .AddStage("Analyzing static roots and event handlers",
                     new StaticRootLeakDetectorAdapter(writer),
                     new ReferenceChainAnalyzerAdapter(writer, _config))
+                .AddStage("Performing ClrMD deep analysis",
+                    new GCHandleAnalyzerAdapter(writer),
+                    new DependentHandleAnalyzerAdapter(writer),
+                    new LohFragmentationAnalyzerAdapter(writer),
+                    new ThreadStackClusterAnalyzerAdapter(writer))
                 .AddStage("Analyzing threads and events",
                     new ThreadAnalyzerAdapter(writer),
                     new EventLeakAnalyzerAdapter(writer, _config));

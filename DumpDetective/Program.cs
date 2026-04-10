@@ -41,8 +41,9 @@ namespace DumpDetective
         private static void PrintUsage()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  DumpDetective <dump-file-path> [output-file-path] [options]");
+            Console.WriteLine("  DumpDetective <dump-file-path> [options]");
             Console.WriteLine("  DumpDetective --config=<config-json-path> [options]");
+            Console.WriteLine("  Output file is auto-generated from dump path and report format extension (.html/.md/.txt).");
             Console.WriteLine();
             Console.WriteLine("Memory leak analyzer options:");
             Console.WriteLine("  --high-reference-threshold=<int>      Default: 50");
@@ -54,10 +55,10 @@ namespace DumpDetective
             Console.WriteLine("  --reference-chain-top-count=<int>     Default: 5");
             Console.WriteLine("  --event-leak-min-subscribers=<int>    Default: 0");
             Console.WriteLine("  --memory-diagnostics                  Enable stage-by-stage memory snapshots/deltas (Default: Off)");
-            Console.WriteLine("  --report-format=<text|markdown|html> Report format (Default: text; auto-infers from output extension .md/.html)");
+            Console.WriteLine("  --report-format=<text|markdown|html> Report format (Default: html)");
             Console.WriteLine();
             Console.WriteLine("Example:");
-            Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp C:\\reports\\analysis.md --report-format=markdown --max-reference-addresses=300000 --max-duplicate-string-length=200");
+            Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp --report-format=markdown --max-reference-addresses=300000 --max-duplicate-string-length=200");
             Console.WriteLine("  DumpDetective --config=C:\\config\\dumpdetective.config.json");
         }
     }

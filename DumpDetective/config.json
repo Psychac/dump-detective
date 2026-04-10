@@ -1,8 +1,4 @@
 {
-  "DumpPath": "D:\\DUmps\\Crash_IIS_BALTSTPRD\\\\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.dmp",
-  "OutputPath": "D:\\DUmps\\Crash_IIS_BALTSTPRD\\\\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.html",
-  "ReportFormat": "Html",
-
   "HighReferenceThreshold": 50,
   "MaxDuplicateStringLength": 500,
   "MinDuplicateStringCount": 10,

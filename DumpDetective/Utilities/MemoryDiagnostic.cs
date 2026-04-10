@@ -73,28 +73,12 @@ namespace DumpDetective.Utilities
 
         public static void PrintSnapshotToConsole(MemorySnapshot snapshot)
         {
-            Console.WriteLine($"\n═══════════════════════════════════════════════════════════════");
-            Console.WriteLine($"🔍 MEMORY SNAPSHOT: {snapshot.Label}");
-            Console.WriteLine($"   Managed Heap: {FormatHelper.FormatBytes((ulong)snapshot.ManagedMemory)}");
-            Console.WriteLine($"   Working Set: {FormatHelper.FormatBytes((ulong)snapshot.WorkingSet)}");
-            Console.WriteLine($"   Private Memory: {FormatHelper.FormatBytes((ulong)snapshot.PrivateMemory)}");
-            Console.WriteLine($"═══════════════════════════════════════════════════════════════");
+            ConsoleUx.MemorySnapshot(snapshot);
         }
 
         public static void PrintDeltaToConsole(MemorySnapshot before, MemorySnapshot after)
         {
-            long managedDelta = after.ManagedMemory - before.ManagedMemory;
-            long workingSetDelta = after.WorkingSet - before.WorkingSet;
-            long privateDelta = after.PrivateMemory - before.PrivateMemory;
-
-            string arrow = workingSetDelta >= 0 ? "↑" : "↓";
-            string color = workingSetDelta > 100_000_000 ? "🔴" : (workingSetDelta > 10_000_000 ? "🟡" : "🟢");
-
-            Console.WriteLine($"\n{color} {after.Label}");
-            Console.WriteLine($"   Managed: {FormatHelper.FormatBytes((ulong)Math.Abs(managedDelta))} {arrow}");
-            Console.WriteLine($"   Working Set: {FormatHelper.FormatBytes((ulong)Math.Abs(workingSetDelta))} {arrow}  [Total: {FormatHelper.FormatBytes((ulong)after.WorkingSet)}]");
-            Console.WriteLine($"   Private: {FormatHelper.FormatBytes((ulong)Math.Abs(privateDelta))} {arrow}");
-            Console.WriteLine($"   GC: Gen0={after.Gen0Collections - before.Gen0Collections}, Gen1={after.Gen1Collections - before.Gen1Collections}, Gen2={after.Gen2Collections - before.Gen2Collections}");
+            ConsoleUx.MemoryDelta(before, after);
         }
     }
 

@@ -1,4 +1,5 @@
 using DumpDetective.Utilities;
+using System.Diagnostics;
 
 namespace DumpDetective.Analyzers
 {
@@ -20,20 +21,35 @@ namespace DumpDetective.Analyzers
 
         public void Execute(AnalysisContext context)
         {
+            var stageResults = new List<(string StageName, TimeSpan Duration, int AnalyzerCount)>();
+
             for (int i = 0; i < _stages.Count; i++)
             {
                 var stage = _stages[i];
-                Console.WriteLine($"\n▶ {stage.Name}...");
+                ConsoleUx.StageStart(i + 1, _stages.Count, stage.Name);
+                var stageStopwatch = Stopwatch.StartNew();
 
-                foreach (var analyzer in stage.Analyzers)
+                for (int analyzerIndex = 0; analyzerIndex < stage.Analyzers.Length; analyzerIndex++)
                 {
+                    var analyzer = stage.Analyzers[analyzerIndex];
+                    ConsoleUx.AnalyzerStart(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name);
+                    var analyzerStopwatch = Stopwatch.StartNew();
                     analyzer.Execute(context);
+                    analyzerStopwatch.Stop();
+                    ConsoleUx.AnalyzerComplete(analyzer.Name, analyzerStopwatch);
                 }
+
+                stageStopwatch.Stop();
 
                 var snapshot = MemoryDiagnostic.TakeSnapshot($"{i + 1}. After {stage.Name}");
                 MemoryDiagnostic.PrintDeltaToConsole(_previousSnapshot, snapshot);
                 _previousSnapshot = snapshot;
+
+                ConsoleUx.StageComplete(stage.Name, stageStopwatch);
+                stageResults.Add((stage.Name, stageStopwatch.Elapsed, stage.Analyzers.Length));
             }
+
+            ConsoleUx.PipelineSummary(stageResults);
         }
 
         private record AnalysisStage(string Name, IAnalyzer[] Analyzers);

@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analyzers;
 using DumpDetective.Configuration;
 using DumpDetective.Utilities;
+using System.Diagnostics;
 
 namespace DumpDetective.Services
 {
@@ -19,13 +20,18 @@ namespace DumpDetective.Services
             StreamWriter? fileWriter = null;
             try
             {
+                var runStopwatch = Stopwatch.StartNew();
+                ConsoleUx.Header("DumpDetective Analysis");
+
                 if (_config.OutputPath != null)
                 {
                     fileWriter = new StreamWriter(_config.OutputPath, false);
                 }
 
+                ConsoleUx.Info("Loading dump file...");
                 // Load the dump file (ClrMD defaults to Microsoft symbol server if DAC is needed)
                 using DataTarget dataTarget = DataTarget.LoadDump(_config.DumpPath);
+                ConsoleUx.Success("Dump loaded.");
 
                 var writer = new OutputWriter(fileWriter);
                 var cache = new HeapAnalysisCache();
@@ -60,6 +66,9 @@ namespace DumpDetective.Services
                 RunAnalysisPipeline(writer, context, previousSnapshot);
 
                 WriteFooter(writer);
+
+                runStopwatch.Stop();
+                ConsoleUx.Success($"Total analysis time: {runStopwatch.Elapsed.TotalSeconds:F1}s");
             }
             finally
             {
@@ -106,9 +115,10 @@ namespace DumpDetective.Services
 
         private ClrRuntime InitializeRuntime(DataTarget dataTarget, ref MemorySnapshot previousSnapshot)
         {
-            Console.WriteLine("Fetching required dlls from Symbol Servers.");
+            ConsoleUx.Info("Initializing CLR runtime (fetching required symbol files)...");
             ClrInfo primaryClr = dataTarget.ClrVersions[0];
             ClrRuntime runtime = primaryClr.CreateRuntime();
+            ConsoleUx.Success("CLR runtime initialized.");
 
             var snapshot = MemoryDiagnostic.TakeSnapshot("1. After runtime creation");
             MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
@@ -130,9 +140,9 @@ namespace DumpDetective.Services
 
         private void BuildTypeStatisticsCache(ClrHeap heap, HeapAnalysisCache cache, ref MemorySnapshot previousSnapshot)
         {
-            Console.WriteLine("\n▶ Building type statistics cache...");
+            ConsoleUx.Info("Building type statistics cache...");
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
-            Console.WriteLine($"   Cached {typeStats.Count:N0} unique types");
+            ConsoleUx.Success($"Type statistics cache ready ({typeStats.Count:N0} unique types).");
 
             var snapshot = MemoryDiagnostic.TakeSnapshot("2. After cache build");
             MemoryDiagnostic.PrintDeltaToConsole(previousSnapshot, snapshot);
@@ -141,6 +151,9 @@ namespace DumpDetective.Services
 
         private void RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot initialSnapshot)
         {
+            ConsoleUx.Header("Analysis Pipeline");
+            ConsoleUx.Info("Starting analysis pipeline...");
+
             var pipeline = new AnalysisPipeline(initialSnapshot)
                 .AddStage("Running core memory analyzers",
                     new MemoryAnalyzerAdapter(writer),
@@ -161,7 +174,7 @@ namespace DumpDetective.Services
 
             pipeline.Execute(context);
 
-            Console.WriteLine("\n✅ Analysis complete!");
+            ConsoleUx.Success("Analysis pipeline complete.");
         }
 
         private void WriteFooter(OutputWriter writer)
@@ -171,7 +184,7 @@ namespace DumpDetective.Services
 
             if (_config.OutputPath != null)
             {
-                Console.WriteLine($"\nReport written to: {_config.OutputPath}");
+                ConsoleUx.Success($"Report written to: {_config.OutputPath}");
             }
         }
     }

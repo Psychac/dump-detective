@@ -1,5 +1,6 @@
 ﻿using DumpDetective.Configuration;
 using DumpDetective.Services;
+using DumpDetective.Utilities;
 
 namespace DumpDetective
 {
@@ -23,16 +24,16 @@ namespace DumpDetective
             }
             catch (FileNotFoundException ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                ConsoleUx.Error(ex.Message);
             }
             catch (ArgumentException ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                ConsoleUx.Error(ex.Message);
                 PrintUsage();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error analyzing dump: {ex.Message}");
+                ConsoleUx.Error($"Error analyzing dump: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
             }
         }

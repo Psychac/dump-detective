@@ -23,7 +23,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             _writer.WriteHeader("CRASH ANALYSIS:");
-            _writer.WriteLine("Detecting exceptions and crash information...\n");
 
             var exceptionInfo = AnalyzeExceptions(heap, runtime);
 

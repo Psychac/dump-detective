@@ -18,7 +18,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
-            _writer.WriteLine("Analyzing Large Object Heap segments for free-space fragmentation...\n");
 
             var segmentStats = new List<LohSegmentStats>();
             var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));

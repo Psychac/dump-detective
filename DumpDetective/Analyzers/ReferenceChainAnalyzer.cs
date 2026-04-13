@@ -22,7 +22,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
-            _writer.WriteLine("Finding why top memory-consuming objects are still alive...\n");
 
             int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
 

@@ -18,7 +18,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("MODULE/ASSEMBLY ANALYSIS:");
-            _writer.WriteLine("Analyzing loaded modules and assemblies...\n");
 
             var modules = AnalyzeModules(runtime);
 

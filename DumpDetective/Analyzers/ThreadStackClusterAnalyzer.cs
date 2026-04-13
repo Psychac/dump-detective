@@ -19,7 +19,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("THREAD STACK SIGNATURE CLUSTERING:");
-            _writer.WriteLine("Grouping alive threads by top stack-frame signatures to highlight hot wait/execution patterns...\n");
 
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;

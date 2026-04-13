@@ -17,7 +17,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("GC HANDLE ANALYSIS:");
-            _writer.WriteLine("Analyzing GC handle distribution and pinned handle pressure...\n");
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);

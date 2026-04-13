@@ -23,7 +23,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
-            _writer.WriteLine("Identifying static fields that may be causing memory leaks...\n");
 
             var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
 

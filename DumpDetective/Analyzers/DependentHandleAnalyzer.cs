@@ -18,7 +18,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("DEPENDENT HANDLE ANALYSIS:");
-            _writer.WriteLine("Analyzing dependent handles (ConditionalWeakTable-style retention edges)...\n");
             var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;

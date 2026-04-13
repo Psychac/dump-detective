@@ -21,7 +21,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             _writer.WriteHeader("HANG ANALYSIS:");
-            _writer.WriteLine("Detecting potential application hangs...\n");
 
             var hangInfo = AnalyzeForHang(runtime, heap);
 

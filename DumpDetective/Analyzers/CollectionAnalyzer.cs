@@ -20,7 +20,6 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("COLLECTION EFFICIENCY ANALYSIS:");
-            _writer.WriteLine("Analyzing dictionaries, lists, and other collections for waste...\n");
 
             var collectionStats = AnalyzeCollections(heap);
             var domainResult = new CollectionDomainResult(

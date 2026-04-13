@@ -99,18 +99,24 @@ namespace DumpDetective.Utilities
                     b.AppendLine();
                 }
 
-                foreach (var section in block.Sections)
+                string groupHd = block.Label != null ? "####" : "###";
+                foreach (var (groupName, groupIcon, groupSections) in GroupSections(block.Sections))
                 {
-                    string icon = SectionIcon(section.Title);
-                    b.AppendLine("<details>");
-                    b.AppendLine($"<summary>{icon} <strong>{WebUtility.HtmlEncode(section.Title)}</strong></summary>");
+                    b.AppendLine($"{groupHd} {groupIcon} {groupName}");
                     b.AppendLine();
-                    b.AppendLine("```text");
-                    foreach (string line in section.Lines)
-                        b.AppendLine(line);
-                    b.AppendLine("```");
-                    b.AppendLine("</details>");
-                    b.AppendLine();
+                    foreach (var section in groupSections)
+                    {
+                        string icon = SectionIcon(section.Title);
+                        b.AppendLine("<details>");
+                        b.AppendLine($"<summary>{icon} <strong>{WebUtility.HtmlEncode(section.Title)}</strong></summary>");
+                        b.AppendLine();
+                        b.AppendLine("```text");
+                        foreach (string line in section.Lines)
+                            b.AppendLine(line);
+                        b.AppendLine("```");
+                        b.AppendLine("</details>");
+                        b.AppendLine();
+                    }
                 }
             }
 
@@ -440,16 +446,22 @@ namespace DumpDetective.Utilities
                     b.AppendLine("</div>");
                 }
 
-                foreach (var section in block.Sections)
+                foreach (var (groupName, groupIcon, groupSections) in GroupSections(block.Sections))
                 {
-                    string icon = SectionIcon(section.Title);
-                    b.AppendLine("<details class=\"section\">");
-                    b.AppendLine($"  <summary>{icon} {HtmlEnc(section.Title)}</summary>");
-                    b.AppendLine("  <div class=\"section-body\"><pre>");
-                    foreach (var line in section.Lines)
-                        b.AppendLine(HtmlEnc(line));
-                    b.AppendLine("  </pre></div>");
-                    b.AppendLine("</details>");
+                    b.AppendLine("<div class=\"analysis-group\">");
+                    b.AppendLine($"  <div class=\"group-hdr\">{groupIcon} {HtmlEnc(groupName)}</div>");
+                    foreach (var section in groupSections)
+                    {
+                        string icon = SectionIcon(section.Title);
+                        b.AppendLine("  <details class=\"section\">");
+                        b.AppendLine($"    <summary>{icon} {HtmlEnc(section.Title)}</summary>");
+                        b.AppendLine("    <div class=\"section-body\"><pre>");
+                        foreach (var line in section.Lines)
+                            b.AppendLine(HtmlEnc(line));
+                        b.AppendLine("    </pre></div>");
+                        b.AppendLine("  </details>");
+                    }
+                    b.AppendLine("</div>");
                 }
             }
 
@@ -568,6 +580,10 @@ namespace DumpDetective.Utilities
                 .snapshot-hdr { display:flex; align-items:center; gap:10px; margin:28px 0 12px 0; padding-bottom:8px; border-bottom:2px solid var(--bd); }
                 .snapshot-hdr-title { font-size:.95rem; font-weight:700; }
                 .snapshot-current-badge { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--info-fg); color:#fff; padding:2px 8px; border-radius:20px; }
+
+                /* Analysis groups */
+                .analysis-group { margin-bottom:16px; }
+                .group-hdr { font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:#57606a; margin:20px 0 6px 0; padding-bottom:4px; border-bottom:1px dashed var(--bd); display:flex; align-items:center; gap:6px; }
 
                 .empty { color:#57606a; font-style:italic; }
               </style>
@@ -731,8 +747,61 @@ namespace DumpDetective.Utilities
             return "📋";
         }
 
+        private static (string Name, string Icon) SectionGroupInfo(string title)
+        {
+            string u = title.ToUpperInvariant();
+            // More-specific patterns checked before broad ones
+            if (u.Contains("MEMORY LEAK") || u.Contains("FINALIZER") || u.Contains("DUPLICATE") ||
+                u.Contains("STATIC ROOT")  || u.Contains("REFERENCE CHAIN") ||
+                u.Contains("COLLECTION")   || u.Contains("EVENT LEAK"))
+                return ("Leak Detection", "💧");
+
+            if (u.Contains("CRASH") || u.Contains("EXCEPTION") || u.Contains("HANG"))
+                return ("Stability", "🩺");
+
+            if (u.Contains("MEMORY") || u.Contains("HEAP")  || u.Contains("LOH") ||
+                u.Contains("GC GENERATION") || u.Contains("OVERALL") || u.Contains("TOP TYPES"))
+                return ("Memory Health", "🧠");
+
+            if (u.Contains("GC HANDLE") || u.Contains("DEPENDENT HANDLE"))
+                return ("Handles & Roots", "🔗");
+
+            if (u.Contains("THREAD"))
+                return ("Threading", "🧵");
+
+            if (u.Contains("MODULE") || u.Contains("ASSEMBLY") ||
+                u.Contains("CLR VERSION") || u.Contains("VERSION CONFLICT"))
+                return ("Infrastructure", "🏗️");
+
+            return ("General", "📋");
+        }
+
+        private static int GroupSortOrder(string groupName) => groupName switch
+        {
+            "Stability"       => 0,
+            "Leak Detection"  => 1,
+            "Memory Health"   => 2,
+            "Handles & Roots" => 3,
+            "Threading"       => 4,
+            "Infrastructure"  => 5,
+            _                 => 6
+        };
+
+        private static IEnumerable<(string Name, string Icon, IEnumerable<ReportSection> Sections)> GroupSections(
+            IReadOnlyList<ReportSection> sections)
+        {
+            return sections
+                .Select(s => (Section: s, Info: SectionGroupInfo(s.Title)))
+                .GroupBy(x => x.Info)
+                .OrderBy(g => GroupSortOrder(g.Key.Name))
+                .Select(g => (g.Key.Name, g.Key.Icon, g.Select(x => x.Section)));
+        }
+
         private static void AddSectionIfNotEmpty(List<ReportSection> sections, string title, List<string> lines)
         {
+            while (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1]))
+                lines.RemoveAt(lines.Count - 1);
+
             if (lines.Count > 0)
                 sections.Add(new ReportSection(title, lines));
         }

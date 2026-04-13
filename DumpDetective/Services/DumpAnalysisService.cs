@@ -37,7 +37,7 @@ namespace DumpDetective.Services
                 dumpStopwatch.Stop();
                 runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
 
-                if (_config.ForceGCBetweenStages)
+                //if (_config.ForceGCBetweenStages)
                     ForceFullCollection();
             }
 

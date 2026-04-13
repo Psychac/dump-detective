@@ -38,12 +38,9 @@ namespace DumpDetective.Services
                 dumpStopwatch.Stop();
                 runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
 
-                if (i < dumpSequence.Count - 1)
-                {
-                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
-                    GC.WaitForPendingFinalizers();
-                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
-                }
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+                GC.WaitForPendingFinalizers();
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
             }
 
             AnalysisRunResult currentRun = runs[^1];

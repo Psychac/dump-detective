@@ -288,7 +288,7 @@ namespace DumpDetective.Analyzers
 
         private void PrintDetailedInstances(List<EventGroupInfo> groupedLeaks)
         {
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
             _writer.WriteLine("\nDETAILED INSTANCES:");
             _writer.WriteLine(StringConstants.Equals80);
 

@@ -433,7 +433,7 @@ namespace DumpDetective.Analyzers
                 count++;
             }
 
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
         }
 
         private static StringFingerprint CreateStringFingerprint(string value)

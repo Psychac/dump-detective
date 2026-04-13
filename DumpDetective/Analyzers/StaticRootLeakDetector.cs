@@ -29,7 +29,7 @@ namespace DumpDetective.Analyzers
             if (staticRootAnalysis.Count == 0)
             {
                 _writer.WriteLine("No concerning static roots found.");
-                _writer.WriteLine($"\n{StringConstants.Equals80}");
+                _writer.WriteLine(StringConstants.Equals80);
                 return new AnalyzerOutput(
                     [new InsightFinding(
                         Analyzer: nameof(StaticRootLeakDetector),

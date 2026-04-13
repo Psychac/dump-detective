@@ -60,7 +60,7 @@ namespace DumpDetective.Analyzers
 
             _writer.WriteLine("\nNote: Deadlock detection requires full lock-graph analysis.");
             _writer.WriteLine("Use lock-heavy + blocked thread overlap and hotspot methods as triage anchors.");
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
 
             return new AnalyzerOutput(
                 [CreateFinding(threadInfo)],

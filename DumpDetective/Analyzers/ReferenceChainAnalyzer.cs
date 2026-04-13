@@ -67,7 +67,7 @@ namespace DumpDetective.Analyzers
             }
 
             double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
             return new AnalyzerOutput(
                 [CreateFinding(analyzedSamples, retainedSamples)],
                 new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct));

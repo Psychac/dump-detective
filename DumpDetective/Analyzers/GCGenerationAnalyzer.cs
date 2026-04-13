@@ -25,7 +25,7 @@ namespace DumpDetective.Analyzers
             PrintSummary(cachedStats);
             PrintTopTypes(cachedStats);
 
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
             return new AnalyzerOutput(
                 [CreateFinding(cachedStats)],
                 BuildDomainResult(cachedStats));
@@ -75,7 +75,8 @@ namespace DumpDetective.Analyzers
 
         private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)
         {
-            _writer.WriteLine("\nHeap Summary:");
+            _writer.WriteLine("\nHEAP SUMMARY:");
+            _writer.WriteSeparator();
 
             // Calculate totals in a single pass
             int totalGen2Count = 0;
@@ -109,7 +110,8 @@ namespace DumpDetective.Analyzers
         {
             if (typeStats.Count > 0)
             {
-                _writer.WriteLine($"\nTop {TopTypeCount} Object Types by Count (potential leak sources if excessive):");
+                _writer.WriteLine($"\nTOP {TopTypeCount} OBJECT TYPES BY COUNT:");
+                _writer.WriteSeparator();
                 _writer.WriteLine($"{"Type",-60} {"Count",12} {"Size",12}");
                 _writer.WriteSeparator();
 

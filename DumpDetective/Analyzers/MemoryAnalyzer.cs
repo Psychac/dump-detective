@@ -28,7 +28,7 @@ namespace DumpDetective.Analyzers
             PrintTopObjectsBySize(typeStats);
             PrintLOHUsage(typeStats);
 
-            _writer.WriteLine($"\n{StringConstants.Equals80}");
+            _writer.WriteLine(StringConstants.Equals80);
             return new AnalyzerOutput(
                 [CreateFinding(typeStats)],
                 BuildDomainResult(typeStats));

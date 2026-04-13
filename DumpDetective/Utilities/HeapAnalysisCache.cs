@@ -1,5 +1,4 @@
 using Microsoft.Diagnostics.Runtime;
-using DumpDetective;
 
 namespace DumpDetective.Utilities
 {

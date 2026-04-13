@@ -37,9 +37,8 @@ namespace DumpDetective.Services
                 dumpStopwatch.Stop();
                 runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
 
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
-                GC.WaitForPendingFinalizers();
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+                if (_config.ForceGCBetweenStages)
+                    ForceFullCollection();
             }
 
             AnalysisRunResult currentRun = runs[^1];
@@ -112,6 +111,13 @@ namespace DumpDetective.Services
             }
         }
 
+        private static void ForceFullCollection()
+        {
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+        }
+
         private List<string> BuildDumpSequence()
         {
             var sequence = new List<string>();
@@ -135,6 +141,5 @@ namespace DumpDetective.Services
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
-
-            }
-        }
+    }
+}

@@ -1,6 +1,6 @@
-namespace DumpDetective
+namespace DumpDetective.Models
 {
-    class StringLeakInfo
+    internal class StringLeakInfo
     {
         public string Preview { get; set; } = string.Empty;
         public int Count { get; set; }

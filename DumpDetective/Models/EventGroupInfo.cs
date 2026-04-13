@@ -1,4 +1,4 @@
-namespace DumpDetective
+namespace DumpDetective.Models
 {
     internal class EventGroupInfo
     {

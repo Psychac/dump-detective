@@ -1,6 +1,6 @@
-namespace DumpDetective
+namespace DumpDetective.Models
 {
-    class RootedTypeInfo
+    internal class RootedTypeInfo
     {
         public string TypeName { get; set; } = string.Empty;
         public int Count { get; set; }

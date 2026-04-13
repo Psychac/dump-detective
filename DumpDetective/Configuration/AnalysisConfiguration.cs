@@ -113,7 +113,14 @@ namespace DumpDetective.Configuration
 
             if (string.IsNullOrWhiteSpace(dumpPathFromCli))
             {
-                throw new ArgumentException("Dump file path is required as first command-line argument.");
+                if (trendDumpPaths is { Count: > 0 })
+                {
+                    dumpPathFromCli = trendDumpPaths[^1];
+                }
+                else
+                {
+                    throw new ArgumentException("Dump file path is required as first command-line argument (or implicitly from the last --trend entry).");
+                }
             }
 
             string? resolvedConfigPath = ResolveConfigPath(configPath);

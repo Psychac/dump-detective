@@ -22,10 +22,11 @@ namespace DumpDetective.Analyzers
             return this;
         }
 
-        public IReadOnlyList<InsightFinding> Execute(AnalysisContext context)
+        public (IReadOnlyList<InsightFinding> Findings, IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults) Execute(AnalysisContext context)
         {
             var stageResults = new List<(string StageName, TimeSpan Duration, int AnalyzerCount)>();
             var findings = new List<InsightFinding>(capacity: 64);
+            var domainResults = new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal);
             var pipelineStopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < _stages.Count; i++)
@@ -52,6 +53,10 @@ namespace DumpDetective.Analyzers
                     if (result.Findings.Count > 0)
                     {
                         findings.AddRange(result.Findings);
+                    }
+                    if (result.DomainResult != null)
+                    {
+                        domainResults[analyzer.Name] = result.DomainResult;
                     }
                     ConsoleUx.AnalyzerComplete(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name, analyzerStopwatch);
                 }
@@ -82,7 +87,7 @@ namespace DumpDetective.Analyzers
 
             pipelineStopwatch.Stop();
             ConsoleUx.PipelineSummary(stageResults);
-            return findings;
+            return (findings, domainResults);
         }
 
         private record AnalysisStage(string Name, IAnalyzer[] Analyzers);

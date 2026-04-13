@@ -37,6 +37,13 @@ namespace DumpDetective.Services
                 runs.Add(AnalyzeDump(dumpPath, i));
                 dumpStopwatch.Stop();
                 runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
+
+                if (i < dumpSequence.Count - 1)
+                {
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true);
+                }
             }
 
             AnalysisRunResult currentRun = runs[^1];
@@ -46,22 +53,24 @@ namespace DumpDetective.Services
             reportMergeStopwatch.Stop();
             runTimings?.Add(("Detailed report merge", reportMergeStopwatch.Elapsed));
 
+            var snapshots = runs.Select(r => r.Snapshot).ToList();
+            runs.Clear();
+
             var additionalInsights = new List<string>();
 
-            if (runs.Count > 1)
+            if (snapshots.Count > 1)
             {
-                var snapshots = runs.Select(r => r.Snapshot).ToList();
-
                 var trendCompareStopwatch = Stopwatch.StartNew();
-                IReadOnlyList<TrendStepComparison> steps = _trendAnalyzer.CompareSeries(snapshots);
-                TrendComparisonResult overall = _trendAnalyzer.Compare(snapshots[0], snapshots[^1]);
+                IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps = _trendAnalyzer.CompareSeries(snapshots);
+                IReadOnlyList<AnalyzerTrendResult> overall = _trendAnalyzer.CompareAll(snapshots[0], snapshots[^1]);
+                FindingLifecycleResult lifecycle = _trendAnalyzer.CompareFindings(snapshots[0], snapshots[^1]);
                 trendCompareStopwatch.Stop();
                 runTimings?.Add(("Trend comparison compute", trendCompareStopwatch.Elapsed));
 
                 var trendComposeStopwatch = Stopwatch.StartNew();
-                detailedReport = BuildTrendComparisonSection(steps, overall) + Environment.NewLine + detailedReport;
-                reportFindings.AddRange(BuildTrendFindings(steps, overall));
-                additionalInsights.AddRange(BuildTrendInsights(steps, overall));
+                detailedReport = BuildTrendComparisonSection(steps, overall, lifecycle, snapshots) + Environment.NewLine + detailedReport;
+                reportFindings.AddRange(BuildTrendFindings(overall, lifecycle));
+                additionalInsights.AddRange(BuildTrendInsights(overall, lifecycle, snapshots.Count));
                 trendComposeStopwatch.Stop();
                 runTimings?.Add(("Trend report/findings compose", trendComposeStopwatch.Elapsed));
             }
@@ -176,7 +185,7 @@ namespace DumpDetective.Services
 
                 return new AnalysisRunResult(
                     reportBufferBuilder.ToString(),
-                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], DateTime.UtcNow));
+                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow));
             }
 
             var runtimeStopwatch = Stopwatch.StartNew();
@@ -196,7 +205,7 @@ namespace DumpDetective.Services
 
                 return new AnalysisRunResult(
                     reportBufferBuilder.ToString(),
-                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], DateTime.UtcNow));
+                    new AnalysisSnapshot(snapshotIndex, dumpPath, [], new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow));
             }
 
             var cacheStopwatch = Stopwatch.StartNew();
@@ -212,7 +221,7 @@ namespace DumpDetective.Services
             };
 
             var pipelineStopwatch = Stopwatch.StartNew();
-            var findings = RunAnalysisPipeline(writer, context, previousSnapshot);
+            var (findings, domainResults) = RunAnalysisPipeline(writer, context, previousSnapshot);
             pipelineStopwatch.Stop();
             dumpTimings?.Add(("Analyzer pipeline", pipelineStopwatch.Elapsed));
 
@@ -233,7 +242,7 @@ namespace DumpDetective.Services
 
             return new AnalysisRunResult(
                 reportBufferBuilder.ToString(),
-                new AnalysisSnapshot(snapshotIndex, dumpPath, normalizedFindings, DateTime.UtcNow));
+                new AnalysisSnapshot(snapshotIndex, dumpPath, normalizedFindings, domainResults, DateTime.UtcNow));
         }
 
         private void WriteHeader(OutputWriter writer, string dumpPath)
@@ -310,7 +319,7 @@ namespace DumpDetective.Services
             }
         }
 
-        private IReadOnlyList<InsightFinding> RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
+        private (IReadOnlyList<InsightFinding> Findings, IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults) RunAnalysisPipeline(OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
         {
             ConsoleUx.Header("Analysis Pipeline");
             ConsoleUx.Info("Starting analysis pipeline...");
@@ -338,10 +347,10 @@ namespace DumpDetective.Services
                     new ThreadAnalyzerAdapter(writer),
                     new EventLeakAnalyzerAdapter(writer, _config));
 
-            var findings = pipeline.Execute(context);
+            var (findings, domainResults) = pipeline.Execute(context);
 
             ConsoleUx.Success("Analysis pipeline complete.");
-            return findings;
+            return (findings, domainResults);
         }
 
         private void WriteFooter(OutputWriter writer)
@@ -389,120 +398,111 @@ namespace DumpDetective.Services
             return insights;
         }
 
-        private static List<string> BuildTrendInsights(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        private static List<string> BuildTrendInsights(
+            IReadOnlyList<AnalyzerTrendResult> overall,
+            FindingLifecycleResult lifecycle,
+            int dumpCount)
         {
-            int metricComparedCount = overall.MetricComparedFindings.Count;
+            int regressionCount = overall.Sum(r => r.Regressions.Count);
             return
             [
-                $"[INFO] Trend comparison across {steps.Count + 1} dumps: +{overall.NewFindings.Count} new, {overall.PersistentFindings.Count} persistent, -{overall.ResolvedFindings.Count} resolved findings.",
-                $"[INFO] Severity delta (first -> last): Critical {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}, Warning {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}.",
-                $"[INFO] Metric-to-metric comparisons evaluated for {metricComparedCount} persistent finding(s)."
+                $"[INFO] Trend comparison across {dumpCount} dumps: +{lifecycle.NewFindings.Count} new, {lifecycle.PersistentFindings.Count} persistent, -{lifecycle.ResolvedFindings.Count} resolved findings.",
+                $"[INFO] Metric regressions detected: {regressionCount} across {overall.Count} analyzers."
             ];
         }
 
-        private static List<InsightFinding> BuildTrendFindings(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        private static List<InsightFinding> BuildTrendFindings(
+            IReadOnlyList<AnalyzerTrendResult> overall,
+            FindingLifecycleResult lifecycle)
         {
-            var findings = new List<InsightFinding>(capacity: 2)
-            {
+            int topRegressions = overall.Sum(r => r.Regressions.Count);
+            FindingSeverity severity = topRegressions >= 5 ? FindingSeverity.Warning : FindingSeverity.Info;
+
+            return
+            [
                 new(
                     Analyzer: "TrendAnalyzer",
                     Category: "Comparison",
-                    Severity: overall.CurrentCriticalCount > overall.BaselineCriticalCount ? FindingSeverity.Warning : FindingSeverity.Info,
-                    Title: "Trend severity delta (first -> last)",
-                    Evidence: $"Critical {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}, Warning {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}",
-                    Recommendation: overall.CurrentCriticalCount > overall.BaselineCriticalCount
-                        ? "Prioritize newly introduced critical findings compared to baseline."
-                        : "No critical severity regression compared to baseline.",
-                    Tags: ["trend", "comparison"]),
-                new(
-                    Analyzer: "TrendAnalyzer",
-                    Category: "Comparison",
-                    Severity: overall.NewFindings.Count > overall.ResolvedFindings.Count ? FindingSeverity.Warning : FindingSeverity.Info,
+                    Severity: lifecycle.NewFindings.Count > lifecycle.ResolvedFindings.Count ? FindingSeverity.Warning : FindingSeverity.Info,
                     Title: "Trend finding lifecycle summary",
-                    Evidence: $"New {overall.NewFindings.Count}, Persistent {overall.PersistentFindings.Count}, Resolved {overall.ResolvedFindings.Count}, Steps {steps.Count}",
+                    Evidence: $"New {lifecycle.NewFindings.Count}, Persistent {lifecycle.PersistentFindings.Count}, Resolved {lifecycle.ResolvedFindings.Count}",
                     Recommendation: "Focus first on new and persistent high-severity findings.",
                     Tags: ["trend", "lifecycle", "comparison"],
-                    MetricValue: overall.NewFindings.Count - overall.ResolvedFindings.Count,
-                    MetricUnit: "net-findings")
-            };
-
-            return findings;
+                    MetricValue: lifecycle.NewFindings.Count - lifecycle.ResolvedFindings.Count,
+                    MetricUnit: "net-findings"),
+                new(
+                    Analyzer: "TrendAnalyzer",
+                    Category: "Comparison",
+                    Severity: severity,
+                    Title: "Trend metric regression summary",
+                    Evidence: $"{topRegressions} metric regression(s) across {overall.Count} analyzer(s) compared.",
+                    Recommendation: topRegressions > 0
+                        ? "Review per-analyzer metric regressions in the trend comparison section."
+                        : "No metric regressions detected across compared analyzers.",
+                    Tags: ["trend", "metrics", "comparison"])
+            ];
         }
 
-        private static string BuildTrendComparisonSection(IReadOnlyList<TrendStepComparison> steps, TrendComparisonResult overall)
+        private static string BuildTrendComparisonSection(
+            IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps,
+            IReadOnlyList<AnalyzerTrendResult> overall,
+            FindingLifecycleResult lifecycle,
+            IReadOnlyList<AnalysisSnapshot> snapshots)
         {
             var builder = new StringBuilder();
             builder.AppendLine("TREND COMPARISON:");
             builder.AppendLine(StringConstants.Separator80);
-            builder.AppendLine($"Dumps analyzed: {steps.Count + 1}");
-            builder.AppendLine($"Net new findings (first -> last): {overall.NewFindings.Count}");
-            builder.AppendLine($"Net persistent findings: {overall.PersistentFindings.Count}");
-            builder.AppendLine($"Net resolved findings: {overall.ResolvedFindings.Count}");
-            builder.AppendLine($"Critical delta: {overall.BaselineCriticalCount} -> {overall.CurrentCriticalCount}");
-            builder.AppendLine($"Warning delta: {overall.BaselineWarningCount} -> {overall.CurrentWarningCount}");
-            builder.AppendLine($"Metric comparisons: {overall.MetricComparedFindings.Count}");
+            builder.AppendLine($"Dumps analyzed: {snapshots.Count}");
+            builder.AppendLine($"New findings: {lifecycle.NewFindings.Count}");
+            builder.AppendLine($"Persistent findings: {lifecycle.PersistentFindings.Count}");
+            builder.AppendLine($"Resolved findings: {lifecycle.ResolvedFindings.Count}");
 
-            builder.AppendLine();
-            builder.AppendLine("Step-by-step deltas:");
-            foreach (var step in steps)
-            {
-                builder.AppendLine($"  {Path.GetFileName(step.Baseline.DumpPath)} -> {Path.GetFileName(step.Current.DumpPath)} | +{step.Comparison.NewFindings.Count} new, {step.Comparison.PersistentFindings.Count} persistent, -{step.Comparison.ResolvedFindings.Count} resolved");
-            }
+            int totalRegressions = overall.Sum(r => r.Regressions.Count);
+            int totalImprovements = overall.Sum(r => r.Improvements.Count);
+            builder.AppendLine($"Metric regressions: {totalRegressions}");
+            builder.AppendLine($"Metric improvements: {totalImprovements}");
 
-            var biggestMetricChanges = overall.MetricComparedFindings
-                .Where(d => d.MetricDelta.HasValue)
-                .OrderByDescending(d => Math.Abs(d.MetricDelta!.Value))
-                .Take(10)
-                .ToList();
-
-            if (biggestMetricChanges.Count > 0)
+            if (overall.Count > 0)
             {
                 builder.AppendLine();
-                builder.AppendLine("Top metric deltas (first -> last):");
-                foreach (var delta in biggestMetricChanges)
+                builder.AppendLine("PER-ANALYZER METRIC DELTAS (first -> last dump):");
+                foreach (var analyzerResult in overall.OrderByDescending(r => r.Regressions.Count))
                 {
-                    var current = delta.Current;
-                    if (current == null)
+                    if (analyzerResult.Deltas.Count == 0) continue;
+                    builder.AppendLine($"  [{analyzerResult.AnalyzerName}]");
+
+                    foreach (var delta in analyzerResult.Regressions.Take(5))
                     {
-                        continue;
+                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
+                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
+                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
+                        builder.AppendLine($"    ⚠️  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
                     }
 
-                    string sign = delta.MetricDelta >= 0 ? "+" : string.Empty;
-                    string percentPart = delta.MetricDeltaPercent.HasValue
-                        ? $" ({sign}{delta.MetricDeltaPercent.Value:F1}%)"
-                        : string.Empty;
-                    string unit = string.IsNullOrWhiteSpace(delta.MetricUnit) ? string.Empty : $" {delta.MetricUnit}";
-
-                    builder.AppendLine($"  - {current.Analyzer}: {current.Title} => {sign}{delta.MetricDelta!.Value:F2}{unit}{percentPart}");
-                }
-            }
-
-            if (overall.NewFindings.Count > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine("Top new findings:");
-                foreach (var delta in overall.NewFindings.Take(5))
-                {
-                    var finding = delta.Current;
-                    if (finding != null)
+                    foreach (var delta in analyzerResult.Improvements.Take(3))
                     {
-                        builder.AppendLine($"  - [{finding.Severity}] {finding.Analyzer}: {finding.Title}");
+                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
+                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
+                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
+                        builder.AppendLine($"    ✅  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
                     }
                 }
             }
 
-            if (overall.ResolvedFindings.Count > 0)
+            if (lifecycle.NewFindings.Count > 0)
             {
                 builder.AppendLine();
-                builder.AppendLine("Top resolved findings:");
-                foreach (var delta in overall.ResolvedFindings.Take(5))
-                {
-                    var finding = delta.Baseline;
-                    if (finding != null)
-                    {
-                        builder.AppendLine($"  - [{finding.Severity}] {finding.Analyzer}: {finding.Title}");
-                    }
-                }
+                builder.AppendLine("New findings:");
+                foreach (var f in lifecycle.NewFindings.OrderByDescending(f => f.Severity).Take(5))
+                    builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
+            }
+
+            if (lifecycle.ResolvedFindings.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Resolved findings:");
+                foreach (var f in lifecycle.ResolvedFindings.Take(5))
+                    builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
             }
 
             builder.AppendLine();

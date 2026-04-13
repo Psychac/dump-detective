@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
+        public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("MODULE/ASSEMBLY ANALYSIS:");
             _writer.WriteLine("Analyzing loaded modules and assemblies...\n");
@@ -25,13 +25,15 @@ namespace DumpDetective.Analyzers
             PrintModuleSummary(modules);
             PrintLoadedAssemblies(modules);
             PrintVersionConflicts(modules);
-            var findings = new List<InsightFinding>(capacity: 1)
-            {
-                CreateFinding(modules)
-            };
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(modules)],
+                new ModuleDomainResult(
+                    modules.TotalModules,
+                    modules.DynamicModules,
+                    modules.VersionConflicts.Count,
+                    modules.VersionConflicts.Keys.ToList()));
         }
 
         private static InsightFinding CreateFinding(ModuleAnalysis analysis)

@@ -1,29 +1,63 @@
 using DumpDetective.Models;
+using DumpDetective.Services.Comparers;
 
 namespace DumpDetective.Services
 {
     internal sealed class TrendAnalyzer
     {
-        public IReadOnlyList<TrendStepComparison> CompareSeries(IReadOnlyList<AnalysisSnapshot> snapshots)
+        private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers;
+
+        public TrendAnalyzer()
+        {
+            var list = new List<IAnalyzerTrendComparer>
+            {
+                new MemoryAnalyzerTrendComparer(),
+                new GCGenerationTrendComparer(),
+                new ModuleTrendComparer(),
+                new CrashTrendComparer(),
+                new HangTrendComparer(),
+                new MemoryLeakTrendComparer(),
+                new CollectionTrendComparer(),
+                new StaticRootTrendComparer(),
+                new ReferenceChainTrendComparer(),
+                new ThreadTrendComparer(),
+                new GCHandleTrendComparer(),
+                new LohFragmentationTrendComparer(),
+                new DependentHandleTrendComparer(),
+                new ThreadStackClusterTrendComparer(),
+                new EventLeakTrendComparer()
+            };
+            _comparers = list.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
+        }
+
+        public IReadOnlyList<AnalyzerTrendResult> CompareAll(AnalysisSnapshot baseline, AnalysisSnapshot current)
+        {
+            var results = new List<AnalyzerTrendResult>();
+            foreach (var (analyzerName, baselineDomain) in baseline.DomainResults)
+            {
+                if (!current.DomainResults.TryGetValue(analyzerName, out var currentDomain))
+                    continue;
+                if (!_comparers.TryGetValue(analyzerName, out var comparer))
+                    continue;
+                var deltas = comparer.Compare(baselineDomain, currentDomain);
+                if (deltas.Count > 0)
+                    results.Add(new AnalyzerTrendResult(analyzerName, deltas));
+            }
+            return results;
+        }
+
+        public IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> CompareSeries(IReadOnlyList<AnalysisSnapshot> snapshots)
         {
             if (snapshots.Count < 2)
-            {
                 return [];
-            }
 
-            var steps = new List<TrendStepComparison>(snapshots.Count - 1);
+            var steps = new List<IReadOnlyList<AnalyzerTrendResult>>(snapshots.Count - 1);
             for (int i = 1; i < snapshots.Count; i++)
-            {
-                AnalysisSnapshot baseline = snapshots[i - 1];
-                AnalysisSnapshot current = snapshots[i];
-                TrendComparisonResult comparison = Compare(baseline, current);
-                steps.Add(new TrendStepComparison(baseline, current, comparison));
-            }
-
+                steps.Add(CompareAll(snapshots[i - 1], snapshots[i]));
             return steps;
         }
 
-        public TrendComparisonResult Compare(AnalysisSnapshot baseline, AnalysisSnapshot current)
+        public FindingLifecycleResult CompareFindings(AnalysisSnapshot baseline, AnalysisSnapshot current)
         {
             var baselineByKey = baseline.Findings
                 .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
@@ -36,56 +70,26 @@ namespace DumpDetective.Services
             var allKeys = new HashSet<string>(baselineByKey.Keys, StringComparer.Ordinal);
             allKeys.UnionWith(currentByKey.Keys);
 
-            var deltas = new List<FindingTrendDelta>(allKeys.Count);
-            foreach (string key in allKeys.OrderBy(k => k, StringComparer.Ordinal))
+            var newFindings = new List<InsightFinding>();
+            var persistentFindings = new List<InsightFinding>();
+            var resolvedFindings = new List<InsightFinding>();
+
+            foreach (string key in allKeys)
             {
-                bool hasBaseline = baselineByKey.TryGetValue(key, out InsightFinding? baselineFinding);
-                bool hasCurrent = currentByKey.TryGetValue(key, out InsightFinding? currentFinding);
+                bool inBaseline = baselineByKey.ContainsKey(key);
+                bool inCurrent = currentByKey.ContainsKey(key);
 
-                FindingTrendState state = hasBaseline switch
-                {
-                    true when hasCurrent => FindingTrendState.Persistent,
-                    true => FindingTrendState.Resolved,
-                    _ => FindingTrendState.New
-                };
-
-                bool hasMetricComparison = false;
-                double? metricDelta = null;
-                double? metricDeltaPercent = null;
-                string? metricUnit = null;
-
-                if (hasBaseline && hasCurrent
-                    && baselineFinding?.MetricValue is double baselineMetric
-                    && currentFinding?.MetricValue is double currentMetric
-                    && string.Equals(baselineFinding.MetricUnit, currentFinding.MetricUnit, StringComparison.OrdinalIgnoreCase))
-                {
-                    hasMetricComparison = true;
-                    metricDelta = currentMetric - baselineMetric;
-                    metricUnit = currentFinding.MetricUnit;
-
-                    if (Math.Abs(baselineMetric) > double.Epsilon)
-                    {
-                        metricDeltaPercent = metricDelta.Value * 100.0 / baselineMetric;
-                    }
-                }
-
-                deltas.Add(new FindingTrendDelta(
-                    key,
-                    state,
-                    currentFinding,
-                    baselineFinding,
-                    hasMetricComparison,
-                    metricDelta,
-                    metricDeltaPercent,
-                    metricUnit));
+                if (inCurrent && !inBaseline) newFindings.Add(currentByKey[key]);
+                else if (inCurrent && inBaseline) persistentFindings.Add(currentByKey[key]);
+                else resolvedFindings.Add(baselineByKey[key]);
             }
 
-            return new TrendComparisonResult(
-                deltas,
-                CurrentCriticalCount: current.Findings.Count(f => f.Severity == FindingSeverity.Critical),
-                BaselineCriticalCount: baseline.Findings.Count(f => f.Severity == FindingSeverity.Critical),
-                CurrentWarningCount: current.Findings.Count(f => f.Severity == FindingSeverity.Warning),
-                BaselineWarningCount: baseline.Findings.Count(f => f.Severity == FindingSeverity.Warning));
+            return new FindingLifecycleResult(newFindings, persistentFindings, resolvedFindings);
         }
     }
+
+    internal sealed record FindingLifecycleResult(
+        IReadOnlyList<InsightFinding> NewFindings,
+        IReadOnlyList<InsightFinding> PersistentFindings,
+        IReadOnlyList<InsightFinding> ResolvedFindings);
 }

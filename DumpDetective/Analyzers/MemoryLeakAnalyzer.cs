@@ -22,19 +22,26 @@ namespace DumpDetective.Analyzers
             _maxReferenceAddressesToTrack = config.MaxReferenceAddressesToTrack;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, ClrRuntime runtime)
+        public AnalyzerOutput Analyze(ClrHeap heap, ClrRuntime runtime)
         {
             _writer.WriteHeader("MEMORY LEAK ANALYSIS:");
             var findings = new List<InsightFinding>(capacity: 4);
 
             int finalizerCount = AnalyzeFinalizerQueue(heap);
-            AnalyzeRootsPass(heap);     // static refs + rooted objects in one pass
-            LeakSignals signals = AnalyzeObjectsPass(heap);   // string dups + reference counts in one pass
+            AnalyzeRootsPass(heap);
+            LeakSignals signals = AnalyzeObjectsPass(heap);
 
             AddFindings(findings, finalizerCount, signals);
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                findings,
+                new MemoryLeakDomainResult(
+                    finalizerCount,
+                    signals.DuplicateStringCount,
+                    signals.DuplicateStringWastedBytes,
+                    signals.HighlyReferencedObjectCount,
+                    signals.SkippedReferenceAddresses));
         }
 
         private int AnalyzeFinalizerQueue(ClrHeap heap)

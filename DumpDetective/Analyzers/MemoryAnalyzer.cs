@@ -16,7 +16,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("MEMORY ANALYSIS:");
 
@@ -27,13 +27,40 @@ namespace DumpDetective.Analyzers
             PrintTopObjectsByCount(typeStats);
             PrintTopObjectsBySize(typeStats);
             PrintLOHUsage(typeStats);
-            var findings = new List<InsightFinding>(capacity: 1)
-            {
-                CreateFinding(typeStats)
-            };
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(typeStats)],
+                BuildDomainResult(typeStats));
+        }
+
+        private static MemoryDomainResult BuildDomainResult(Dictionary<string, TypeStatistics> typeStats)
+        {
+            ulong totalMemory = 0;
+            ulong totalLohMemory = 0;
+            foreach (var stat in typeStats.Values)
+            {
+                totalMemory += stat.TotalSize;
+                totalLohMemory += stat.LohSize;
+            }
+
+            double lohPct = totalMemory == 0 ? 0 : totalLohMemory * 100.0 / totalMemory;
+
+            var bySize = new List<TypeStatistics>(typeStats.Values);
+            bySize.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
+            var byCount = new List<TypeStatistics>(typeStats.Values);
+            byCount.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+            static TypeSnapshot ToSnapshot(TypeStatistics s) =>
+                new(s.TypeName, s.Count, s.TotalSize, s.LohSize);
+
+            return new MemoryDomainResult(
+                totalMemory,
+                totalLohMemory,
+                lohPct,
+                typeStats.Count,
+                bySize.Take(20).Select(ToSnapshot).ToList(),
+                byCount.Take(20).Select(ToSnapshot).ToList());
         }
 
         private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)

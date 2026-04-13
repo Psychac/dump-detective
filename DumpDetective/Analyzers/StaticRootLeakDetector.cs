@@ -20,30 +20,29 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
             _writer.WriteLine("Identifying static fields that may be causing memory leaks...\n");
-
-            var findings = new List<InsightFinding>(capacity: 1);
 
             var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
 
             if (staticRootAnalysis.Count == 0)
             {
                 _writer.WriteLine("No concerning static roots found.");
-                findings.Add(new InsightFinding(
-                    Analyzer: nameof(StaticRootLeakDetector),
-                    Category: "Leak",
-                    Severity: FindingSeverity.Info,
-                    Title: "No high-impact static roots",
-                    Evidence: "Static-root scan found no roots exceeding significant memory/object thresholds.",
-                    Recommendation: "No immediate static-root retention remediation required.",
-                    Tags: ["static-root", "leak", "retention"],
-                    MetricValue: 0,
-                    MetricUnit: "retained-bytes"));
                 _writer.WriteLine($"\n{StringConstants.Equals80}");
-                return findings;
+                return new AnalyzerOutput(
+                    [new InsightFinding(
+                        Analyzer: nameof(StaticRootLeakDetector),
+                        Category: "Leak",
+                        Severity: FindingSeverity.Info,
+                        Title: "No high-impact static roots",
+                        Evidence: "Static-root scan found no roots exceeding significant memory/object thresholds.",
+                        Recommendation: "No immediate static-root retention remediation required.",
+                        Tags: ["static-root", "leak", "retention"],
+                        MetricValue: 0,
+                        MetricUnit: "retained-bytes")],
+                    new StaticRootDomainResult(0, 0));
             }
 
             _writer.WriteLine($"Found {staticRootAnalysis.Count} static root(s) with significant memory impact:\n");
@@ -81,23 +80,23 @@ namespace DumpDetective.Analyzers
                 _writer.WriteLine($"     Options: Use WeakReference, implement IDisposable pattern, or clear collections.");
 
                 if (analysis.ContainsCollections)
-                {
                     _writer.WriteLine($"     ⚠️  Contains collections - ensure they're being cleared when done.");
-                }
 
                 if (analysis.ContainsEventHandlers)
-                {
                     _writer.WriteLine($"     ⚠️  Contains event handlers - ensure proper unsubscription.");
-                }
 
                 _writer.WriteLine(string.Empty);
                 rootCount++;
             }
 
-            findings.Add(CreateFinding(staticRootAnalysis));
+            ulong totalImpact = 0;
+            foreach (var item in staticRootAnalysis)
+                totalImpact += item.TotalMemoryImpact;
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(staticRootAnalysis)],
+                new StaticRootDomainResult(staticRootAnalysis.Count, totalImpact));
         }
 
         private static InsightFinding CreateFinding(List<StaticRootAnalysis> staticRootAnalysis)

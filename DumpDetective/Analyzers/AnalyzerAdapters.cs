@@ -7,85 +7,60 @@ namespace DumpDetective.Analyzers
     internal class MemoryAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Memory Analysis";
-
-        public MemoryAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public MemoryAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new MemoryAnalyzer(_writer).Analyze(context.Heap, context.Cache));
+            var output = new MemoryAnalyzer(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class GCGenerationAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "GC Generation Analysis";
-
-        public GCGenerationAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public GCGenerationAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new GCGenerationAnalyzer(_writer).Analyze(context.Heap, context.Cache));
+            var output = new GCGenerationAnalyzer(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class ModuleAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Module Analysis";
-
-        public ModuleAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public ModuleAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new ModuleAnalyzer(_writer).Analyze(context.Runtime));
+            var output = new ModuleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class CrashAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Crash Analysis";
-
-        public CrashAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public CrashAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new CrashAnalyzer(_writer).Analyze(context.Runtime, context.Heap));
+            var output = new CrashAnalyzer(_writer).Analyze(context.Runtime, context.Heap);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class HangAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Hang Analysis";
-
-        public HangAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public HangAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new HangAnalyzer(_writer).Analyze(context.Runtime, context.Heap));
+            var output = new HangAnalyzer(_writer).Analyze(context.Runtime, context.Heap);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
@@ -93,52 +68,40 @@ namespace DumpDetective.Analyzers
     {
         private readonly OutputWriter _writer;
         private readonly AnalysisConfiguration _config;
-
         public string Name => "Memory Leak Analysis";
-
         public MemoryLeakAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
             _config = config;
         }
-
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new MemoryLeakAnalyzer(_writer, _config).Analyze(context.Heap, context.Runtime));
+            var output = new MemoryLeakAnalyzer(_writer, _config).Analyze(context.Heap, context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class CollectionAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Collection Analysis";
-
-        public CollectionAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public CollectionAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new CollectionAnalyzer(_writer).Analyze(context.Heap));
+            var output = new CollectionAnalyzer(_writer).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class StaticRootLeakDetectorAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Static Root Leak Detection";
-
-        public StaticRootLeakDetectorAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public StaticRootLeakDetectorAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new StaticRootLeakDetector(_writer).Analyze(context.Heap, context.Cache));
+            var output = new StaticRootLeakDetector(_writer).Analyze(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
@@ -146,35 +109,28 @@ namespace DumpDetective.Analyzers
     {
         private readonly OutputWriter _writer;
         private readonly AnalysisConfiguration _config;
-
         public string Name => "Reference Chain Analysis";
-
         public ReferenceChainAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
             _config = config;
         }
-
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new ReferenceChainAnalyzer(_writer, _config).AnalyzeTopTypes(context.Heap, context.Cache));
+            var output = new ReferenceChainAnalyzer(_writer, _config).AnalyzeTopTypes(context.Heap, context.Cache);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class ThreadAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Thread Analysis";
-
-        public ThreadAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public ThreadAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new ThreadAnalyzer(_writer).Analyze(context.Runtime));
+            var output = new ThreadAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
@@ -182,69 +138,52 @@ namespace DumpDetective.Analyzers
     {
         private readonly OutputWriter _writer;
         private readonly AnalysisConfiguration _config;
-
         public string Name => "Event Leak Analysis";
-
         public EventLeakAnalyzerAdapter(OutputWriter writer, AnalysisConfiguration config)
         {
             _writer = writer;
             _config = config;
         }
-
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap));
+            var output = new EventLeakAnalyzer(_writer, _config).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class GCHandleAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "GC Handle Analysis";
-
-        public GCHandleAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public GCHandleAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new GCHandleAnalyzer(_writer).Analyze(context.Runtime));
+            var output = new GCHandleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class LohFragmentationAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "LOH Fragmentation Analysis";
-
-        public LohFragmentationAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public LohFragmentationAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new LohFragmentationAnalyzer(_writer).Analyze(context.Heap));
+            var output = new LohFragmentationAnalyzer(_writer).Analyze(context.Heap);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
     internal class DependentHandleAnalyzerAdapter : IAnalyzer
     {
         private readonly OutputWriter _writer;
-
         public string Name => "Dependent Handle Analysis";
-
-        public DependentHandleAnalyzerAdapter(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
+        public DependentHandleAnalyzerAdapter(OutputWriter writer) => _writer = writer;
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new DependentHandleAnalyzer(_writer).Analyze(context.Runtime));
+            var output = new DependentHandleAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 
@@ -261,7 +200,8 @@ namespace DumpDetective.Analyzers
 
         public AnalyzerExecutionResult Execute(AnalysisContext context)
         {
-            return new AnalyzerExecutionResult(new ThreadStackClusterAnalyzer(_writer).Analyze(context.Runtime));
+            var output = new ThreadStackClusterAnalyzer(_writer).Analyze(context.Runtime);
+            return new AnalyzerExecutionResult(output.Findings, output.DomainResult);
         }
     }
 }

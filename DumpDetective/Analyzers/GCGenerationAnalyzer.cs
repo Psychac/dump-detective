@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
 
@@ -24,13 +24,28 @@ namespace DumpDetective.Analyzers
 
             PrintSummary(cachedStats);
             PrintTopTypes(cachedStats);
-            var findings = new List<InsightFinding>(capacity: 1)
-            {
-                CreateFinding(cachedStats)
-            };
 
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(cachedStats)],
+                BuildDomainResult(cachedStats));
+        }
+
+        private static GCGenerationDomainResult BuildDomainResult(Dictionary<string, TypeStatistics> typeStats)
+        {
+            ulong gen2Bytes = 0;
+            ulong lohBytes = 0;
+            int totalObjects = 0;
+            int lohObjects = 0;
+            foreach (var stat in typeStats.Values)
+            {
+                gen2Bytes += stat.TotalSize - stat.LohSize;
+                lohBytes += stat.LohSize;
+                totalObjects += stat.Count;
+                lohObjects += stat.LohCount;
+            }
+            double lohPct = (gen2Bytes + lohBytes) == 0 ? 0 : lohBytes * 100.0 / (gen2Bytes + lohBytes);
+            return new GCGenerationDomainResult(gen2Bytes, lohBytes, lohPct, totalObjects, lohObjects);
         }
 
         private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)

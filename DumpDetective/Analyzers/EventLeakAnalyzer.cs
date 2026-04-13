@@ -25,7 +25,7 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap)
+        public AnalyzerOutput Analyze(ClrHeap heap)
         {
             int minSubscribers = _config.EventLeakMinSubscribers;
             var eventLeaks = FindEventLeaks(heap, minSubscribers);
@@ -34,24 +34,32 @@ namespace DumpDetective.Analyzers
             if (eventLeaks.Count == 0)
             {
                 _writer.WriteLine("No event leaks detected!");
-                findings.Add(new InsightFinding(
-                    Analyzer: nameof(EventLeakAnalyzer),
-                    Category: "Leak",
-                    Severity: FindingSeverity.Info,
-                    Title: "No event-leak signatures detected",
-                    Evidence: $"No event instances exceeded the {minSubscribers:N0} subscriber threshold.",
-                    Recommendation: "No immediate action required for event retention patterns.",
-                    Tags: ["event", "leak", "subscriptions"],
-                    MetricValue: 0,
-                    MetricUnit: "subscribers"));
-                return findings;
+                return new AnalyzerOutput(
+                    [new InsightFinding(
+                        Analyzer: nameof(EventLeakAnalyzer),
+                        Category: "Leak",
+                        Severity: FindingSeverity.Info,
+                        Title: "No event-leak signatures detected",
+                        Evidence: $"No event instances exceeded the {minSubscribers:N0} subscriber threshold.",
+                        Recommendation: "No immediate action required for event retention patterns.",
+                        Tags: ["event", "leak", "subscriptions"],
+                        MetricValue: 0,
+                        MetricUnit: "subscribers")],
+                    new EventLeakDomainResult(0, 0, 0, 0));
             }
 
             var groupedLeaks = GroupEventLeaks(eventLeaks);
             PrintSummary(eventLeaks, groupedLeaks);
             PrintDetailedInstances(groupedLeaks);
             AddFindings(findings, groupedLeaks);
-            return findings;
+
+            int totalSubscribers = groupedLeaks.Sum(g => g.TotalSubscribers);
+            int staticLeaks = groupedLeaks.Count(g => g.IsStatic);
+            int instanceLeaks = groupedLeaks.Count(g => !g.IsStatic);
+
+            return new AnalyzerOutput(
+                findings,
+                new EventLeakDomainResult(groupedLeaks.Count, totalSubscribers, staticLeaks, instanceLeaks));
         }
 
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)

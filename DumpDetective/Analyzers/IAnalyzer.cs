@@ -10,7 +10,9 @@ namespace DumpDetective.Analyzers
         AnalyzerExecutionResult Execute(AnalysisContext context);
     }
 
-    internal sealed record AnalyzerExecutionResult(IReadOnlyList<InsightFinding> Findings)
+    internal sealed record AnalyzerExecutionResult(
+        IReadOnlyList<InsightFinding> Findings,
+        AnalyzerDomainResult? DomainResult = null)
     {
         public static AnalyzerExecutionResult Empty { get; } = new([]);
     }

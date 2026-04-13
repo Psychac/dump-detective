@@ -39,11 +39,9 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
+        public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("THREAD ANALYSIS:");
-
-            var findings = new List<InsightFinding>(capacity: 1);
 
             var threadInfo = CategorizeThreads(runtime.Threads);
 
@@ -59,13 +57,19 @@ namespace DumpDetective.Analyzers
             PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
             PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
             PrintThreadsWithExceptions(threadInfo.ThreadsWithExceptions);
-            findings.Add(CreateFinding(threadInfo));
 
             _writer.WriteLine("\nNote: Deadlock detection requires full lock-graph analysis.");
             _writer.WriteLine("Use lock-heavy + blocked thread overlap and hotspot methods as triage anchors.");
-
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-            return findings;
+
+            return new AnalyzerOutput(
+                [CreateFinding(threadInfo)],
+                new ThreadDomainResult(
+                    threadInfo.AliveCount,
+                    threadInfo.PotentiallyBlockedThreads.Count,
+                    threadInfo.ThreadsWithLocks.Count,
+                    threadInfo.ThreadsWithActiveExceptionsCount,
+                    new Dictionary<string, int>(threadInfo.WaitCategoryDistribution)));
         }
 
         private static InsightFinding CreateFinding(ThreadCategorization info)

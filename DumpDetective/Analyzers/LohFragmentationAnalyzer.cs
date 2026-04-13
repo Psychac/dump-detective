@@ -15,11 +15,10 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap)
+        public AnalyzerOutput Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
             _writer.WriteLine("Analyzing Large Object Heap segments for free-space fragmentation...\n");
-            var findings = new List<InsightFinding>(capacity: 1);
 
             var segmentStats = new List<LohSegmentStats>();
             var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
@@ -69,27 +68,36 @@ namespace DumpDetective.Analyzers
             if (segmentStats.Count == 0)
             {
                 _writer.WriteLine("No LOH segments found.");
-                findings.Add(new InsightFinding(
-                    Analyzer: nameof(LohFragmentationAnalyzer),
-                    Category: "Performance",
-                    Severity: FindingSeverity.Info,
-                    Title: "No LOH segments were detected",
-                    Evidence: "Heap scan did not report large-object-heap segments.",
-                    Recommendation: "No LOH-fragmentation action required for this dump.",
-                    Tags: ["loh", "fragmentation"],
-                    MetricValue: 0,
-                    MetricUnit: "% fragmentation"));
                 _writer.WriteLine(StringConstants.Equals80);
-                return findings;
+                return new AnalyzerOutput(
+                    [new InsightFinding(
+                        Analyzer: nameof(LohFragmentationAnalyzer),
+                        Category: "Performance",
+                        Severity: FindingSeverity.Info,
+                        Title: "No LOH segments were detected",
+                        Evidence: "Heap scan did not report large-object-heap segments.",
+                        Recommendation: "No LOH-fragmentation action required for this dump.",
+                        Tags: ["loh", "fragmentation"],
+                        MetricValue: 0,
+                        MetricUnit: "% fragmentation")],
+                    new LohFragmentationDomainResult(0, 0, 0, 0, 0));
             }
 
             double overallFragmentation = CalculateOverallFragmentationPercent(segmentStats);
-            findings.Add(CreateFinding(overallFragmentation, segmentStats.Count));
+            ulong totalAllBytes = 0, totalFreeBytes = 0, maxFreeBlock = 0;
+            foreach (var s in segmentStats)
+            {
+                totalAllBytes += s.TotalBytes;
+                totalFreeBytes += s.FreeBytes;
+                if (s.LargestFreeBlock > maxFreeBlock) maxFreeBlock = s.LargestFreeBlock;
+            }
 
             PrintSummary(segmentStats);
             PrintTopFragmentedSegments(segmentStats);
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(overallFragmentation, segmentStats.Count)],
+                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, overallFragmentation, maxFreeBlock));
         }
 
         private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)

@@ -20,39 +20,43 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime, ClrHeap heap)
+        public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             _writer.WriteHeader("CRASH ANALYSIS:");
             _writer.WriteLine("Detecting exceptions and crash information...\n");
 
-            var findings = new List<InsightFinding>(capacity: 1);
-
             var exceptionInfo = AnalyzeExceptions(heap, runtime);
+
+            var domainResult = new CrashDomainResult(
+                exceptionInfo.TotalExceptions,
+                exceptionInfo.ActiveExceptions,
+                new Dictionary<string, int>(exceptionInfo.ExceptionTypeCounts),
+                new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts));
 
             if (exceptionInfo.TotalExceptions == 0)
             {
                 _writer.WriteLine("No exceptions detected in dump (likely not a crash dump).");
-                findings.Add(new InsightFinding(
-                    Analyzer: nameof(CrashAnalyzer),
-                    Category: "Stability",
-                    Severity: FindingSeverity.Info,
-                    Title: "No exception objects detected",
-                    Evidence: "Crash analysis found no exception objects in the heap snapshot.",
-                    Recommendation: "Validate dump type and capture settings if a crash was expected.",
-                    Tags: ["crash", "exception", "stability"],
-                    MetricValue: 0,
-                    MetricUnit: "active-exceptions"));
                 _writer.WriteLine(StringConstants.Equals80);
-                return findings;
+                return new AnalyzerOutput(
+                    [new InsightFinding(
+                        Analyzer: nameof(CrashAnalyzer),
+                        Category: "Stability",
+                        Severity: FindingSeverity.Info,
+                        Title: "No exception objects detected",
+                        Evidence: "Crash analysis found no exception objects in the heap snapshot.",
+                        Recommendation: "Validate dump type and capture settings if a crash was expected.",
+                        Tags: ["crash", "exception", "stability"],
+                        MetricValue: 0,
+                        MetricUnit: "active-exceptions")],
+                    domainResult);
             }
 
             PrintExceptionSummary(exceptionInfo);
             PrintLikelyCrashThreads(exceptionInfo);
             PrintExceptionDetails(exceptionInfo);
-            findings.Add(CreateFinding(exceptionInfo));
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput([CreateFinding(exceptionInfo)], domainResult);
         }
 
         private static InsightFinding CreateFinding(ExceptionAnalysis analysis)

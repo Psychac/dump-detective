@@ -53,7 +53,7 @@ namespace DumpDetective
             Console.WriteLine("General analyzer options:");
             Console.WriteLine("  --config=<path-to-json>               Load all settings from JSON file");
             Console.WriteLine("  --baseline=<baseline-dump-path>       Compare current dump against a baseline dump");
-            Console.WriteLine("  --trend=<dump1;dump2;...>             Compare current dump against N historical dumps (ordered oldest to newest)");
+            Console.WriteLine("  --trend=<dump1;dump2;...>             Analyze a series of dumps (ordered oldest to newest); last entry is treated as current");
             Console.WriteLine("  --reference-chain-top-count=<int>     Default: 5");
             Console.WriteLine("  --event-leak-min-subscribers=<int>    Default: 0");
             Console.WriteLine("  --memory-diagnostics                  Enable stage-by-stage memory snapshots/deltas (Default: Off)");
@@ -63,7 +63,7 @@ namespace DumpDetective
             Console.WriteLine("Example:");
             Console.WriteLine("  DumpDetective C:\\dumps\\myapp.dmp --report-format=markdown --max-reference-addresses=300000 --max-duplicate-string-length=200");
             Console.WriteLine("  DumpDetective C:\\dumps\\current.dmp --baseline=C:\\dumps\\baseline.dmp --report-format=html");
-            Console.WriteLine("  DumpDetective C:\\dumps\\current.dmp --trend=C:\\dumps\\week1.dmp;C:\\dumps\\week2.dmp;C:\\dumps\\week3.dmp --report-format=html");
+            Console.WriteLine("  DumpDetective --trend=C:\\dumps\\week1.dmp;C:\\dumps\\week2.dmp;C:\\dumps\\week3.dmp --report-format=html");
             Console.WriteLine("  DumpDetective --config=C:\\config\\dumpdetective.config.json");
         }
     }

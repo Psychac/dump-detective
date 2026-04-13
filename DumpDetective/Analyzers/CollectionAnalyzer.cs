@@ -17,38 +17,43 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrHeap heap)
+        public AnalyzerOutput Analyze(ClrHeap heap)
         {
             _writer.WriteHeader("COLLECTION EFFICIENCY ANALYSIS:");
             _writer.WriteLine("Analyzing dictionaries, lists, and other collections for waste...\n");
 
-            var findings = new List<InsightFinding>(capacity: 1);
-
             var collectionStats = AnalyzeCollections(heap);
+            var domainResult = new CollectionDomainResult(
+                collectionStats.TotalCollections,
+                collectionStats.Dictionaries,
+                collectionStats.Lists,
+                collectionStats.HashSets,
+                collectionStats.TotalWastedMemory,
+                collectionStats.WastefulCollections.Count);
 
             if (collectionStats.TotalCollections == 0)
             {
                 _writer.WriteLine("No collections found for analysis.");
-                findings.Add(new InsightFinding(
-                    Analyzer: nameof(CollectionAnalyzer),
-                    Category: "Memory",
-                    Severity: FindingSeverity.Info,
-                    Title: "No generic collections detected",
-                    Evidence: "Collection analyzer did not find list/dictionary/hashset instances for evaluation.",
-                    Recommendation: "No collection-sizing action required from this snapshot.",
-                    Tags: ["collections", "capacity"],
-                    MetricValue: 0,
-                    MetricUnit: "wasted-bytes"));
                 _writer.WriteLine(StringConstants.Equals80);
-                return findings;
+                return new AnalyzerOutput(
+                    [new InsightFinding(
+                        Analyzer: nameof(CollectionAnalyzer),
+                        Category: "Memory",
+                        Severity: FindingSeverity.Info,
+                        Title: "No generic collections detected",
+                        Evidence: "Collection analyzer did not find list/dictionary/hashset instances for evaluation.",
+                        Recommendation: "No collection-sizing action required from this snapshot.",
+                        Tags: ["collections", "capacity"],
+                        MetricValue: 0,
+                        MetricUnit: "wasted-bytes")],
+                    domainResult);
             }
 
             PrintCollectionSummary(collectionStats);
             PrintWastefulCollections(collectionStats);
-            findings.Add(CreateFinding(collectionStats));
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput([CreateFinding(collectionStats)], domainResult);
         }
 
         private static InsightFinding CreateFinding(CollectionStatistics stats)

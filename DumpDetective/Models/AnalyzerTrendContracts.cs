@@ -1,0 +1,65 @@
+namespace DumpDetective.Models
+{
+    internal enum MetricTrendDirection
+    {
+        HigherIsWorse,
+        LowerIsWorse,
+        Neutral
+    }
+
+    internal sealed record AnalyzerMetric(
+        string Key,
+        string? Scope,
+        double Value,
+        string Unit,
+        MetricTrendDirection Direction);
+
+    internal sealed record MetricDelta(
+        string Key,
+        string? Scope,
+        double Baseline,
+        double Current,
+        double Delta,
+        double? DeltaPercent,
+        string Unit,
+        MetricTrendDirection Direction)
+    {
+        public bool IsRegression => Direction switch
+        {
+            MetricTrendDirection.HigherIsWorse => Delta > 0,
+            MetricTrendDirection.LowerIsWorse  => Delta < 0,
+            _                                  => false
+        };
+
+        public bool IsImprovement => Direction switch
+        {
+            MetricTrendDirection.HigherIsWorse => Delta < 0,
+            MetricTrendDirection.LowerIsWorse  => Delta > 0,
+            _                                  => false
+        };
+    }
+
+    internal interface IAnalyzerTrendComparer
+    {
+        string AnalyzerName { get; }
+        IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result);
+        IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current);
+    }
+
+    internal sealed record AnalyzerTrendResult(
+        string AnalyzerName,
+        IReadOnlyList<MetricDelta> Deltas)
+    {
+        public IReadOnlyList<MetricDelta> Regressions =>
+            Deltas.Where(d => d.IsRegression).OrderByDescending(d => Math.Abs(d.Delta)).ToList();
+
+        public IReadOnlyList<MetricDelta> Improvements =>
+            Deltas.Where(d => d.IsImprovement).OrderByDescending(d => Math.Abs(d.Delta)).ToList();
+
+        public bool HasRegressions => Deltas.Any(d => d.IsRegression);
+    }
+
+    internal sealed record AnalyzerOutput(
+        IReadOnlyList<InsightFinding> Findings,
+        AnalyzerDomainResult DomainResult);
+}

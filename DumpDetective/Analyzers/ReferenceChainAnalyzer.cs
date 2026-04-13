@@ -19,11 +19,10 @@ namespace DumpDetective.Analyzers
             _config = config;
         }
 
-        public IReadOnlyList<InsightFinding> AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerOutput AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
         {
             _writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
             _writer.WriteLine("Finding why top memory-consuming objects are still alive...\n");
-            var findings = new List<InsightFinding>(capacity: 1);
 
             int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
 
@@ -60,9 +59,7 @@ namespace DumpDetective.Analyzers
                 {
                     analyzedSamples++;
                     if (AnalyzeObject(heap, sampleAddress.Value))
-                    {
                         retainedSamples++;
-                    }
                 }
                 else
                 {
@@ -70,10 +67,11 @@ namespace DumpDetective.Analyzers
                 }
             }
 
-            findings.Add(CreateFinding(analyzedSamples, retainedSamples));
-
+            double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
             _writer.WriteLine($"\n{StringConstants.Equals80}");
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(analyzedSamples, retainedSamples)],
+                new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct));
         }
 
         public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)

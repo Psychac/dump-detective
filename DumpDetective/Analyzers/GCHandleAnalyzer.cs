@@ -14,11 +14,10 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
+        public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("GC HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing GC handle distribution and pinned handle pressure...\n");
-            var findings = new List<InsightFinding>(capacity: 1);
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -49,9 +48,7 @@ namespace DumpDetective.Analyzers
                 Increment(allTargetTypes, typeName);
 
                 if (kind.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
-                {
                     Increment(pinnedTypes, typeName);
-                }
             }
 
             scanCounter.Complete();
@@ -59,10 +56,12 @@ namespace DumpDetective.Analyzers
             PrintSummary(totalHandles, strongLikeHandles, weakLikeHandles, byKind);
             PrintTopTypes("TOP TYPES REFERENCED BY HANDLES:", allTargetTypes, TopTypeCount);
             PrintTopTypes("TOP TYPES REFERENCED BY PINNED HANDLES:", pinnedTypes, TopTypeCount);
-            findings.Add(CreateFinding(totalHandles, pinnedTypes));
 
+            int pinnedHandleTargets = pinnedTypes.Values.Sum();
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(totalHandles, pinnedTypes)],
+                new GCHandleDomainResult(totalHandles, strongLikeHandles, weakLikeHandles, pinnedHandleTargets));
         }
 
         private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)

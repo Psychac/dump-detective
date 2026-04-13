@@ -18,12 +18,10 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime, ClrHeap heap)
+        public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             _writer.WriteHeader("HANG ANALYSIS:");
             _writer.WriteLine("Detecting potential application hangs...\n");
-
-            var findings = new List<InsightFinding>(capacity: 1);
 
             var hangInfo = AnalyzeForHang(runtime, heap);
 
@@ -32,10 +30,30 @@ namespace DumpDetective.Analyzers
             PrintThreadPoolInfo(hangInfo);
             PrintTaskInfo(hangInfo);
             PrintDeadlockSuspicion(hangInfo);
-            findings.Add(CreateFinding(hangInfo));
+
+            var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var wt in hangInfo.WaitingThreads)
+            {
+                string category = wt.WaitType.ToString();
+                waitCategoryBreakdown.TryGetValue(category, out int count);
+                waitCategoryBreakdown[category] = count + 1;
+            }
+
+            double waitingPct = hangInfo.TotalAliveThreads == 0 ? 0
+                : hangInfo.WaitingThreads.Count * 100.0 / hangInfo.TotalAliveThreads;
 
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(hangInfo)],
+                new HangDomainResult(
+                    hangInfo.TotalAliveThreads,
+                    hangInfo.WaitingThreads.Count,
+                    waitingPct,
+                    waitCategoryBreakdown,
+                    hangInfo.ThreadPoolInfo.QueuedWorkItems,
+                    hangInfo.ThreadPoolInfo.PendingTasks,
+                    hangInfo.ThreadPoolInfo.FaultedTasks,
+                    hangInfo.ThreadPoolInfo.CanceledTasks));
         }
 
         private static InsightFinding CreateFinding(HangAnalysis analysis)

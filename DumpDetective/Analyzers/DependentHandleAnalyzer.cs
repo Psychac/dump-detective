@@ -15,11 +15,10 @@ namespace DumpDetective.Analyzers
             _writer = writer;
         }
 
-        public IReadOnlyList<InsightFinding> Analyze(ClrRuntime runtime)
+        public AnalyzerOutput Analyze(ClrRuntime runtime)
         {
             _writer.WriteHeader("DEPENDENT HANDLE ANALYSIS:");
             _writer.WriteLine("Analyzing dependent handles (ConditionalWeakTable-style retention edges)...\n");
-            var findings = new List<InsightFinding>(capacity: 1);
             var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
@@ -68,21 +67,27 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"Resolved Source->Target Edges: {resolvedEdgeCount:N0}");
             _writer.WriteLine($"Unresolved Targets: {unresolvedTargetCount:N0}");
 
+            double unresolvedPct = dependentHandleCount == 0 ? 0
+                : unresolvedTargetCount * 100.0 / dependentHandleCount;
+
             if (dependentHandleCount == 0)
             {
                 _writer.WriteLine("\nNo dependent handles were found in this dump.");
                 _writer.WriteLine(StringConstants.Equals80);
-                return findings;
+                return new AnalyzerOutput(
+                    [],
+                    new DependentHandleDomainResult(0, 0, 0, 0));
             }
 
             PrintTop("TOP SOURCE TYPES IN DEPENDENT HANDLES:", sourceTypeCounts);
             PrintTop("TOP TARGET TYPES KEPT ALIVE BY DEPENDENT HANDLES:", targetTypeCounts);
             PrintTop("TOP SOURCE -> TARGET RETENTION EDGES:", sourceTargetPairCounts);
-            findings.Add(CreateFinding(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount));
 
             _writer.WriteLine("\nNote: Some runtimes do not expose dependent targets via DAC. Unresolved targets are expected in that case.");
             _writer.WriteLine(StringConstants.Equals80);
-            return findings;
+            return new AnalyzerOutput(
+                [CreateFinding(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount)],
+                new DependentHandleDomainResult(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount, unresolvedPct));
         }
 
         private static InsightFinding CreateFinding(int dependentHandleCount, int resolvedEdgeCount, int unresolvedTargetCount)

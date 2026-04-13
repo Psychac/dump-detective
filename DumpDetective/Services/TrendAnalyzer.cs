@@ -57,6 +57,57 @@ namespace DumpDetective.Services
             return steps;
         }
 
+        /// <summary>
+        /// For every analyzer, extracts each headline (unscoped) metric's value at every snapshot,
+        /// producing a timeline that shows how each stat evolved across all N dumps.
+        /// </summary>
+        public IReadOnlyList<AnalyzerMetricTimeline> ExtractTimeline(IReadOnlyList<AnalysisSnapshot> snapshots)
+        {
+            var result = new List<AnalyzerMetricTimeline>(_comparers.Count);
+
+            foreach (var (analyzerName, comparer) in _comparers)
+            {
+                // Build per-snapshot metric lookup: key → value
+                var snapshotLookups = new List<Dictionary<string, double>>(snapshots.Count);
+                var allKeys = new Dictionary<string, (string Unit, MetricTrendDirection Direction)>(StringComparer.Ordinal);
+                bool anyFound = false;
+
+                foreach (var snapshot in snapshots)
+                {
+                    var lookup = new Dictionary<string, double>(StringComparer.Ordinal);
+                    if (snapshot.DomainResults.TryGetValue(analyzerName, out var domainResult))
+                    {
+                        anyFound = true;
+                        foreach (var metric in comparer.ExtractMetrics(domainResult))
+                        {
+                            if (metric.Scope != null)
+                                continue;  // skip per-type / per-exception scoped metrics
+                            lookup[metric.Key] = metric.Value;
+                            allKeys.TryAdd(metric.Key, (metric.Unit, metric.Direction));
+                        }
+                    }
+                    snapshotLookups.Add(lookup);
+                }
+
+                if (!anyFound)
+                    continue;
+
+                var points = new List<MetricTimelinePoint>(allKeys.Count);
+                foreach (var (key, (unit, direction)) in allKeys)
+                {
+                    var values = snapshotLookups
+                        .Select(d => d.TryGetValue(key, out double v) ? v : double.NaN)
+                        .ToList();
+                    points.Add(new MetricTimelinePoint(key, unit, direction, values));
+                }
+
+                if (points.Count > 0)
+                    result.Add(new AnalyzerMetricTimeline(analyzerName, points));
+            }
+
+            return result;
+        }
+
         public FindingLifecycleResult CompareFindings(AnalysisSnapshot baseline, AnalysisSnapshot current)
         {
             var baselineByKey = baseline.Findings

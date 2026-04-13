@@ -66,4 +66,20 @@ namespace DumpDetective.Models
     internal sealed record AnalyzerOutput(
         IReadOnlyList<InsightFinding> Findings,
         AnalyzerDomainResult DomainResult);
+
+    /// <summary>
+    /// A single metric's value at every snapshot in the trend sequence (one value per dump, in order).
+    /// </summary>
+    internal sealed record MetricTimelinePoint(
+        string Key,
+        string Unit,
+        MetricTrendDirection Direction,
+        IReadOnlyList<double> Values);  // indexed by snapshot position; double.NaN when not available
+
+    /// <summary>
+    /// All headline (unscoped) metric timelines for one analyzer across all trend dumps.
+    /// </summary>
+    internal sealed record AnalyzerMetricTimeline(
+        string AnalyzerName,
+        IReadOnlyList<MetricTimelinePoint> Points);
 }

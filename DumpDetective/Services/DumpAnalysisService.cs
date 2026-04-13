@@ -64,11 +64,12 @@ namespace DumpDetective.Services
                 IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps = _trendAnalyzer.CompareSeries(snapshots);
                 IReadOnlyList<AnalyzerTrendResult> overall = _trendAnalyzer.CompareAll(snapshots[0], snapshots[^1]);
                 FindingLifecycleResult lifecycle = _trendAnalyzer.CompareFindings(snapshots[0], snapshots[^1]);
+                IReadOnlyList<AnalyzerMetricTimeline> timeline = _trendAnalyzer.ExtractTimeline(snapshots);
                 trendCompareStopwatch.Stop();
                 runTimings?.Add(("Trend comparison compute", trendCompareStopwatch.Elapsed));
 
                 var trendComposeStopwatch = Stopwatch.StartNew();
-                detailedReport = BuildTrendComparisonSection(steps, overall, lifecycle, snapshots) + Environment.NewLine + detailedReport;
+                detailedReport = BuildTrendComparisonSection(steps, overall, lifecycle, timeline, snapshots) + Environment.NewLine + detailedReport;
                 reportFindings.AddRange(BuildTrendFindings(overall, lifecycle));
                 additionalInsights.AddRange(BuildTrendInsights(overall, lifecycle, snapshots.Count));
                 trendComposeStopwatch.Stop();
@@ -447,6 +448,7 @@ namespace DumpDetective.Services
             IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps,
             IReadOnlyList<AnalyzerTrendResult> overall,
             FindingLifecycleResult lifecycle,
+            IReadOnlyList<AnalyzerMetricTimeline> timeline,
             IReadOnlyList<AnalysisSnapshot> snapshots)
         {
             var builder = new StringBuilder();
@@ -462,37 +464,48 @@ namespace DumpDetective.Services
             builder.AppendLine($"Metric regressions: {totalRegressions}");
             builder.AppendLine($"Metric improvements: {totalImprovements}");
 
-            if (overall.Count > 0)
+            if (timeline.Count > 0)
             {
                 builder.AppendLine();
-                builder.AppendLine("PER-ANALYZER METRIC DELTAS (first -> last dump):");
-                foreach (var analyzerResult in overall.OrderByDescending(r => r.Regressions.Count))
+                builder.AppendLine($"PER-ANALYZER METRIC TIMELINE ({snapshots.Count} dumps):");
+
+                // Order: analyzers with regressions first
+                var regressionsByAnalyzer = overall.ToDictionary(r => r.AnalyzerName, r => r.Regressions.Count, StringComparer.Ordinal);
+                var orderedTimeline = timeline.OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName));
+
+                foreach (var analyzerTimeline in orderedTimeline)
                 {
-                    if (analyzerResult.Regressions.Count == 0 && analyzerResult.Improvements.Count == 0 && analyzerResult.NeutralDeltas.Count == 0) continue;
-                    builder.AppendLine($"  [{analyzerResult.AnalyzerName}]");
+                    builder.AppendLine($"  [{analyzerTimeline.AnalyzerName}]");
 
-                    foreach (var delta in analyzerResult.Regressions.Take(5))
+                    foreach (var point in analyzerTimeline.Points)
                     {
-                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
-                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
-                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
-                        builder.AppendLine($"    ⚠️  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
-                    }
+                        // Skip points where no snapshot had a value
+                        var validValues = point.Values.Where(v => !double.IsNaN(v)).ToList();
+                        if (validValues.Count == 0) continue;
 
-                    foreach (var delta in analyzerResult.Improvements.Take(3))
-                    {
-                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
-                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
-                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
-                        builder.AppendLine($"    ✅  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
-                    }
+                        // Format each snapshot value
+                        string valuesLine = string.Join(" → ", point.Values.Select(v => FormatHelper.FormatMetricValue(v, point.Unit)));
 
-                    foreach (var delta in analyzerResult.NeutralDeltas.Take(3))
-                    {
-                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
-                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
-                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
-                        builder.AppendLine($"    ℹ️  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
+                        // Compute first→last overall delta
+                        double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
+                        double lastVal = point.Values.Last(v => !double.IsNaN(v));
+                        double delta = lastVal - firstVal;
+                        double? deltaPercent = Math.Abs(firstVal) > double.Epsilon ? delta * 100.0 / firstVal : null;
+
+                        string deltaStr = FormatHelper.FormatDeltaValue(delta, point.Unit);
+                        string pctStr = deltaPercent.HasValue ? $", {(deltaPercent.Value >= 0 ? "+" : string.Empty)}{deltaPercent.Value:F1}%" : string.Empty;
+
+                        string icon = (point.Direction, delta > 0) switch
+                        {
+                            (MetricTrendDirection.HigherIsWorse, true)  => "⚠️ ",
+                            (MetricTrendDirection.HigherIsWorse, false) when delta < 0 => "✅ ",
+                            (MetricTrendDirection.LowerIsWorse, false) when delta < 0  => "⚠️ ",
+                            (MetricTrendDirection.LowerIsWorse, true)   => "✅ ",
+                            _ => "ℹ️ "
+                        };
+
+                        string deltaLabel = delta == 0 ? "no change" : $"Δ {deltaStr}{pctStr}";
+                        builder.AppendLine($"    {icon} {point.Key}: {valuesLine}   ({deltaLabel})");
                     }
                 }
             }

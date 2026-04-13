@@ -165,6 +165,11 @@ namespace DumpDetective.Analyzers
                             StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
                         });
                     }
+
+                    // ThreadPool worker threads surface a recognisable dispatch frame;
+                    // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
+                    if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread) || IsThreadPoolWorker(stackFrames))
+                        result.ThreadPoolCount++;
                 }
 
                 if (thread.IsGc)
@@ -172,6 +177,9 @@ namespace DumpDetective.Analyzers
 
                 if (thread.IsFinalizer)
                     result.FinalizerCount++;
+
+                if (thread.State.HasFlag(ClrThreadState.TS_Background))
+                    result.BackgroundCount++;
             }
 
             // Sort threads with locks by lock count (descending)
@@ -230,6 +238,19 @@ namespace DumpDetective.Analyzers
             return frame.Method?.Signature
                 ?? frame.FrameName
                 ?? string.Empty;
+        }
+
+        private static bool IsThreadPoolWorker(List<ClrStackFrame> frames)
+        {
+            foreach (var frame in frames)
+            {
+                string sig = GetFrameSignature(frame);
+                if (sig.Contains("ThreadPoolWorkQueue", StringComparison.OrdinalIgnoreCase) ||
+                    sig.Contains("ThreadPool.WorkQueue", StringComparison.OrdinalIgnoreCase) ||
+                    sig.Contains("PortableThreadPool", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, List<ClrStackFrame> frames)
@@ -296,6 +317,8 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"Inactive Threads: {info.TotalCount - info.AliveCount}");
             _writer.WriteLine($"GC Threads: {info.GcCount}");
             _writer.WriteLine($"Finalizer Threads: {info.FinalizerCount}");
+            _writer.WriteLine($"Background Threads: {info.BackgroundCount}");
+            _writer.WriteLine($"ThreadPool Worker Threads (alive): {info.ThreadPoolCount}");
             _writer.WriteLine($"Threads with active exceptions: {info.ThreadsWithActiveExceptionsCount}");
         }
 
@@ -445,6 +468,8 @@ namespace DumpDetective.Analyzers
         public int AliveCount { get; set; }
         public int GcCount { get; set; }
         public int FinalizerCount { get; set; }
+        public int BackgroundCount { get; set; }
+        public int ThreadPoolCount { get; set; }
         public int ThreadsWithActiveExceptionsCount { get; set; }
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();

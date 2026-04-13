@@ -123,9 +123,28 @@ namespace DumpDetective.Analyzers
             threadScanCounter.Complete();
 
             analysis.WaitingThreads = waitingThreads;
+            ReadRuntimeThreadPool(runtime, analysis);
             AnalyzeAsyncWork(heap, analysis);
 
             return analysis;
+        }
+
+        private static void ReadRuntimeThreadPool(ClrRuntime runtime, HangAnalysis analysis)
+        {
+            ClrThreadPool? tp = runtime.ThreadPool;
+            if (tp == null)
+                return;
+
+            var info = analysis.ThreadPoolInfo;
+            info.RuntimeInitialized = true;
+            info.RuntimeMinThreads = tp.MinThreads;
+            info.RuntimeMaxThreads = tp.MaxThreads;
+            info.RuntimeActiveWorkerThreads = tp.ActiveWorkerThreads;
+            info.RuntimeIdleWorkerThreads = tp.IdleWorkerThreads;
+            info.RuntimeRetiredWorkerThreads = tp.RetiredWorkerThreads;
+            info.RuntimeCpuUtilization = tp.CpuUtilization;
+            info.UsingPortableThreadPool = tp.UsingPortableThreadPool;
+            info.UsingWindowsThreadPool = tp.UsingWindowsThreadPool;
         }
 
         private WaitingThreadInfo? DetectWaitPattern(ClrThread thread, ClrStackFrame topFrame)
@@ -351,7 +370,38 @@ namespace DumpDetective.Analyzers
 
             _writer.WriteLine($"\n\nTHREAD POOL STATUS:");
             _writer.WriteSeparator();
-            _writer.WriteLine($"Queued Work Items: {tpInfo.QueuedWorkItems:N0}");
+
+            // Runtime counters (from ClrThreadPool — most reliable source)
+            if (tpInfo.RuntimeInitialized)
+            {
+                string impl = tpInfo.UsingPortableThreadPool ? "Portable (.NET)" :
+                              tpInfo.UsingWindowsThreadPool ? "Windows OS" : "Native CLR";
+                _writer.WriteLine($"Implementation: {impl}");
+                _writer.WriteLine($"Worker Threads: {tpInfo.RuntimeActiveWorkerThreads} active / {tpInfo.RuntimeIdleWorkerThreads} idle / {tpInfo.RuntimeMaxThreads} max (min {tpInfo.RuntimeMinThreads})");
+                _writer.WriteLine($"Retired Workers: {tpInfo.RuntimeRetiredWorkerThreads}");
+                _writer.WriteLine($"CPU Utilization: {tpInfo.RuntimeCpuUtilization}%");
+
+                bool workersSaturated = tpInfo.RuntimeMaxThreads > 0 &&
+                                        tpInfo.RuntimeActiveWorkerThreads >= tpInfo.RuntimeMaxThreads;
+                bool cpuIdle = tpInfo.RuntimeCpuUtilization < 20;
+                if (workersSaturated && cpuIdle)
+                {
+                    _writer.WriteLine($"\n⚠️  THREAD STARVATION: all {tpInfo.RuntimeMaxThreads} worker threads active at low CPU ({tpInfo.RuntimeCpuUtilization}%).");
+                    _writer.WriteLine($"    Threads are likely blocked (sync-over-async, I/O waits, or lock contention) — not CPU-bound.");
+                }
+                else if (workersSaturated)
+                {
+                    _writer.WriteLine($"\n⚠️  WORKER SATURATION: {tpInfo.RuntimeActiveWorkerThreads}/{tpInfo.RuntimeMaxThreads} workers active.");
+                    _writer.WriteLine($"    New work items will queue. Increase ThreadPool.SetMinThreads or switch to async I/O.");
+                }
+            }
+            else
+            {
+                _writer.WriteLine("Runtime ThreadPool data unavailable (dump may be from managed-only snapshot).");
+            }
+
+            // Heap-scan counters
+            _writer.WriteLine($"\nQueued Work Items (heap scan): {tpInfo.QueuedWorkItems:N0}");
             _writer.WriteLine($"Total Tasks: {tpInfo.TotalTasks:N0}");
             _writer.WriteLine($"Pending Tasks: {tpInfo.PendingTasks:N0}");
             _writer.WriteLine($"Faulted Tasks: {tpInfo.FaultedTasks:N0}");
@@ -414,24 +464,46 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\n\nDEADLOCK DETECTION:");
             _writer.WriteSeparator();
 
+            // Cross-correlate: threads waiting on a monitor WHILE holding a lock
+            // are the only true circular-wait candidates accessible without a full lock graph.
+            var circularWaitCandidates = new List<WaitingThreadInfo>();
             int monitorWaitCount = 0;
+
             foreach (var waiting in analysis.WaitingThreads)
             {
                 if (waiting.WaitType == WaitType.MonitorWait)
+                {
                     monitorWaitCount++;
+                    if (waiting.LockCount > 0)
+                        circularWaitCandidates.Add(waiting);
+                }
             }
 
-            if (monitorWaitCount >= 2 && analysis.ThreadsHoldingLocks >= 2)
+            if (circularWaitCandidates.Count >= 2)
             {
-                _writer.WriteLine($"⚠️  POTENTIAL DEADLOCK DETECTED:");
-                _writer.WriteLine($"    - {monitorWaitCount} thread(s) waiting on monitors");
-                _writer.WriteLine($"    - {analysis.ThreadsHoldingLocks} thread(s) holding locks");
-                _writer.WriteLine($"    - Threads may be waiting on each other (circular dependency)");
+                _writer.WriteLine($"⚠️  PROBABLE DEADLOCK: {circularWaitCandidates.Count} thread(s) waiting on a monitor while holding a lock.");
+                _writer.WriteLine($"    Each of these threads holds a lock it won't release until it acquires another.");
+
+                foreach (var t in circularWaitCandidates)
+                    _writer.WriteLine($"    Thread {t.ThreadId} (OS: {t.OSThreadId}) — locks held: {t.LockCount}, frame: {FormatHelper.TruncateString(t.TopStackFrame, 65)}");
+
                 _writer.WriteLine($"\n💡 INVESTIGATION STEPS:");
-                _writer.WriteLine($"    1. Check 'THREADS WITH LOCKS' section above");
-                _writer.WriteLine($"    2. Look for threads waiting on monitors while holding locks");
-                _writer.WriteLine($"    3. Use WinDbg command: !syncblk to see detailed lock information");
-                _writer.WriteLine($"    4. Review code for lock acquisition order issues");
+                _writer.WriteLine($"    1. Run !syncblk in WinDbg/SOS to map lock addresses to owner threads");
+                _writer.WriteLine($"    2. Confirm these thread IDs form a wait cycle (A waits for B's lock, B waits for A's lock)");
+                _writer.WriteLine($"    3. Review lock acquisition order in source to identify the inversion point");
+            }
+            else if (circularWaitCandidates.Count == 1)
+            {
+                var t = circularWaitCandidates[0];
+                _writer.WriteLine($"⚠️  DEADLOCK CANDIDATE: Thread {t.ThreadId} (OS: {t.OSThreadId}) is waiting on a monitor while holding {t.LockCount} lock(s).");
+                _writer.WriteLine($"    A second thread holding the contested lock and waiting on this one would complete the cycle.");
+                _writer.WriteLine($"    Frame: {FormatHelper.TruncateString(t.TopStackFrame, 65)}");
+            }
+            else if (monitorWaitCount >= 2 && analysis.ThreadsHoldingLocks >= 2)
+            {
+                _writer.WriteLine($"⚠️  POSSIBLE DEADLOCK: {monitorWaitCount} thread(s) waiting on monitors; {analysis.ThreadsHoldingLocks} thread(s) holding locks.");
+                _writer.WriteLine($"    No thread was observed doing both simultaneously in this snapshot (top-frame only scan).");
+                _writer.WriteLine($"    Run !syncblk and cross-reference lock owners against the waiting thread list.");
             }
             else if (analysis.WaitingThreads.Count > analysis.TotalAliveThreads * 0.8)
             {
@@ -479,12 +551,24 @@ namespace DumpDetective.Analyzers
 
     internal class ThreadPoolAnalysis
     {
+        // Heap-scan counters
         public int QueuedWorkItems { get; set; }
         public int TotalTasks { get; set; }
         public int PendingTasks { get; set; }
         public int FaultedTasks { get; set; }
         public int CanceledTasks { get; set; }
         public bool TaskScanLimited { get; set; }
+
+        // Runtime-sourced counters (from ClrThreadPool)
+        public bool RuntimeInitialized { get; set; }
+        public int RuntimeMinThreads { get; set; }
+        public int RuntimeMaxThreads { get; set; }
+        public int RuntimeActiveWorkerThreads { get; set; }
+        public int RuntimeIdleWorkerThreads { get; set; }
+        public int RuntimeRetiredWorkerThreads { get; set; }
+        public int RuntimeCpuUtilization { get; set; }
+        public bool UsingPortableThreadPool { get; set; }
+        public bool UsingWindowsThreadPool { get; set; }
     }
 
     internal enum WaitType

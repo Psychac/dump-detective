@@ -468,7 +468,7 @@ namespace DumpDetective.Services
                 builder.AppendLine("PER-ANALYZER METRIC DELTAS (first -> last dump):");
                 foreach (var analyzerResult in overall.OrderByDescending(r => r.Regressions.Count))
                 {
-                    if (analyzerResult.Deltas.Count == 0) continue;
+                    if (analyzerResult.Regressions.Count == 0 && analyzerResult.Improvements.Count == 0 && analyzerResult.NeutralDeltas.Count == 0) continue;
                     builder.AppendLine($"  [{analyzerResult.AnalyzerName}]");
 
                     foreach (var delta in analyzerResult.Regressions.Take(5))
@@ -485,6 +485,14 @@ namespace DumpDetective.Services
                         string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
                         string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
                         builder.AppendLine($"    ✅  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
+                    }
+
+                    foreach (var delta in analyzerResult.NeutralDeltas.Take(3))
+                    {
+                        string sign = delta.Delta >= 0 ? "+" : string.Empty;
+                        string pct = delta.DeltaPercent.HasValue ? $" ({sign}{delta.DeltaPercent.Value:F1}%)" : string.Empty;
+                        string scope = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" [{delta.Scope}]";
+                        builder.AppendLine($"    ℹ️  {delta.Key}{scope}: {delta.Baseline:F2} -> {delta.Current:F2} {delta.Unit} ({sign}{delta.Delta:F2}{pct})");
                     }
                 }
             }

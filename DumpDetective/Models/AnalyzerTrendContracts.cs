@@ -56,6 +56,10 @@ namespace DumpDetective.Models
         public IReadOnlyList<MetricDelta> Improvements =>
             Deltas.Where(d => d.IsImprovement).OrderByDescending(d => Math.Abs(d.Delta)).ToList();
 
+        public IReadOnlyList<MetricDelta> NeutralDeltas =>
+            Deltas.Where(d => d.Direction == MetricTrendDirection.Neutral && d.Delta != 0)
+                  .OrderByDescending(d => Math.Abs(d.Delta)).ToList();
+
         public bool HasRegressions => Deltas.Any(d => d.IsRegression);
     }
 

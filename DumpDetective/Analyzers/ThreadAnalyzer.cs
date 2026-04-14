@@ -54,6 +54,7 @@ namespace DumpDetective.Analyzers
             PrintDistribution("WAIT CATEGORY DISTRIBUTION:", threadInfo.WaitCategoryDistribution);
             PrintDistribution("ACTIVE EXCEPTION TYPES ON THREADS:", threadInfo.ExceptionTypeDistribution);
             PrintTopFrameHotspots(threadInfo.TopFrameHotspots);
+            PrintFinalizerDiagnostics(threadInfo);
             PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
             PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
             PrintThreadsWithExceptions(threadInfo.ThreadsWithExceptions);
@@ -170,6 +171,23 @@ namespace DumpDetective.Analyzers
                     // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
                     if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread) || IsThreadPoolWorker(stackFrames))
                         result.ThreadPoolCount++;
+
+                    // Capture the finalizer thread's stack and blocked state once
+                    if (thread.IsFinalizer)
+                    {
+                        result.FinalizerThread = thread;
+                        result.FinalizerFrames = stackFrames;
+                        result.FinalizerIsBlocked = DetectWaitPattern(stackFrames) != null;
+                    }
+
+                    // Count MoveNext frames to measure async state-machine chain depth
+                    int moveNextDepth = CountMoveNextDepth(stackFrames);
+                    if (moveNextDepth > 0)
+                    {
+                        result.AsyncChainThreadCount++;
+                        if (moveNextDepth > result.MaxAsyncChainDepth)
+                            result.MaxAsyncChainDepth = moveNextDepth;
+                    }
                 }
 
                 if (thread.IsGc)
@@ -253,6 +271,17 @@ namespace DumpDetective.Analyzers
             return false;
         }
 
+        private static int CountMoveNextDepth(List<ClrStackFrame> frames)
+        {
+            int depth = 0;
+            foreach (var frame in frames)
+            {
+                if (GetFrameSignature(frame).Contains(".MoveNext()", StringComparison.OrdinalIgnoreCase))
+                    depth++;
+            }
+            return depth;
+        }
+
         private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, List<ClrStackFrame> frames)
         {
             if (frames.Count == 0)
@@ -320,6 +349,43 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"Background Threads: {info.BackgroundCount}");
             _writer.WriteLine($"ThreadPool Worker Threads (alive): {info.ThreadPoolCount}");
             _writer.WriteLine($"Threads with active exceptions: {info.ThreadsWithActiveExceptionsCount}");
+            _writer.WriteLine($"Threads with async chains (MoveNext): {info.AsyncChainThreadCount}  max depth: {info.MaxAsyncChainDepth}");
+        }
+
+        private void PrintFinalizerDiagnostics(ThreadCategorization info)
+        {
+            _writer.WriteLine("\n\nFINALIZER THREAD:");
+            _writer.WriteSeparator();
+
+            if (info.FinalizerThread == null)
+            {
+                _writer.WriteLine("Finalizer thread not found in dump.");
+                return;
+            }
+
+            var thread = info.FinalizerThread;
+            string status = info.FinalizerIsBlocked ? "⚠️  BLOCKED" : "✅ Running";
+            _writer.WriteLine($"Status:     {status}");
+            _writer.WriteLine($"OS Thread:  {thread.OSThreadId}  Managed: {thread.ManagedThreadId}");
+            _writer.WriteLine($"Lock Count: {thread.LockCount}");
+
+            if (info.FinalizerFrames.Count > 0)
+            {
+                _writer.WriteLine("Stack:");
+                foreach (var frame in info.FinalizerFrames)
+                {
+                    string method = GetFrameSignature(frame);
+                    if (!string.IsNullOrWhiteSpace(method))
+                        _writer.WriteLine($"  {FormatHelper.TruncateString(method, MaxMethodLength)}");
+                }
+            }
+
+            if (info.FinalizerIsBlocked)
+            {
+                _writer.WriteLine("\n⚠️  A blocked finalizer thread prevents GC from draining the finalization queue.");
+                _writer.WriteLine("    Objects pending finalization cannot be reclaimed, causing steady memory growth.");
+                _writer.WriteLine("    Look for lock contention or blocking calls inside Dispose/finalizer methods above.");
+            }
         }
 
         private void PrintThreadsWithLocks(List<ThreadWithStackTrace> threadsWithLocks)
@@ -471,6 +537,16 @@ namespace DumpDetective.Analyzers
         public int BackgroundCount { get; set; }
         public int ThreadPoolCount { get; set; }
         public int ThreadsWithActiveExceptionsCount { get; set; }
+
+        // Finalizer thread detail
+        public ClrThread? FinalizerThread { get; set; }
+        public bool FinalizerIsBlocked { get; set; }
+        public List<ClrStackFrame> FinalizerFrames { get; set; } = new();
+
+        // Async state-machine chain depth
+        public int AsyncChainThreadCount { get; set; }
+        public int MaxAsyncChainDepth { get; set; }
+
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();
         public List<ThreadWithStackTrace> ThreadsWithExceptions { get; set; } = new();

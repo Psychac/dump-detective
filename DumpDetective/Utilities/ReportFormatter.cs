@@ -67,7 +67,7 @@ namespace DumpDetective.Utilities
         private static (string Name, string Icon) SectionGroupInfo(string title)
         {
             string u = title.ToUpperInvariant();
-            if (u.Contains("MEMORY LEAK") || u.Contains("FINALIZER") || u.Contains("DUPLICATE") ||
+            if (u.Contains("MEMORY LEAK") || (u.Contains("FINALIZER") && !u.Contains("THREAD")) || u.Contains("DUPLICATE") ||
                 u.Contains("STATIC ROOT")  || u.Contains("REFERENCE CHAIN") ||
                 u.Contains("COLLECTION")   || u.Contains("EVENT LEAK"))
                 return ("Leak Detection", "💧");

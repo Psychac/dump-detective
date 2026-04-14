@@ -41,7 +41,8 @@ namespace DumpDetective.Models
         int QueuedWorkItems,
         int PendingTasks,
         int FaultedTasks,
-        int CanceledTasks) : AnalyzerDomainResult;
+        int CanceledTasks,
+        int HealthScore) : AnalyzerDomainResult;
 
     internal sealed record MemoryLeakDomainResult(
         int FinalizerQueueCount,

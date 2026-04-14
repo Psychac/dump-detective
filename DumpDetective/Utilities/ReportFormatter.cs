@@ -45,22 +45,37 @@ namespace DumpDetective.Utilities
         private static string SectionIcon(string title)
         {
             string u = title.ToUpperInvariant();
-            if (u.Contains("MEMORY LEAK"))      return "💧";
-            if (u.Contains("MEMORY"))           return "🧠";
-            if (u.Contains("GC GENERATION"))    return "♻️";
-            if (u.Contains("GC HANDLE"))        return "🔗";
-            if (u.Contains("CRASH"))            return "💥";
-            if (u.Contains("HANG"))             return "⏸️";
-            if (u.Contains("COLLECTION"))       return "📦";
-            if (u.Contains("THREAD STACK"))     return "📚";
-            if (u.Contains("THREAD"))           return "🧵";
-            if (u.Contains("EVENT"))            return "📡";
-            if (u.Contains("LOH"))              return "🧩";
-            if (u.Contains("DEPENDENT HANDLE")) return "⛓️";
-            if (u.Contains("STATIC ROOT"))      return "🌱";
-            if (u.Contains("REFERENCE CHAIN"))  return "🔍";
-            if (u.Contains("MODULE"))           return "📚";
-            if (u.Contains("CLR VERSION"))      return "🔧";
+            if (u.Contains("MEMORY LEAK"))                       return "💧";
+            if (u.Contains("FINALIZER") && !u.Contains("THREAD")) return "💧";
+            if (u.Contains("HIGHLY REFERENCED"))                 return "📎";
+            if (u.Contains("ROOTED OBJECTS"))                    return "⚓";
+            if (u.Contains("STATIC FIELD"))                      return "🌱";
+            if (u.Contains("DEADLOCK"))                          return "🔒";
+            if (u.Contains("ASYNC TASK"))                        return "⏳";
+            if (u.Contains("OBJECT TYPES"))                      return "📊";
+            if (u.Contains("MEMORY"))                            return "🧠";
+            if (u.Contains("GC GENERATION"))                     return "♻️";
+            if (u.Contains("GC MODE"))                           return "♻️";
+            if (u.Contains("GC HANDLE"))                         return "🔗";
+            if (u.Contains("DEPENDENT HANDLE"))                  return "⛓️";
+            if (u.Contains("HANDLE"))                            return "🔗";
+            if (u.Contains("RETENTION"))                         return "⛓️";
+            if (u.Contains("CRASH"))                             return "💥";
+            if (u.Contains("HANG"))                              return "⏸️";
+            if (u.Contains("COLLECTION"))                        return "📦";
+            if (u.Contains("THREAD STACK"))                      return "📚";
+            if (u.Contains("CLUSTER"))                           return "🎯";
+            if (u.Contains("THREAD"))                            return "🧵";
+            if (u.Contains("WAIT CATEGORY"))                     return "⏸️";
+            if (u.Contains("APP DOMAIN"))                        return "🏗️";
+            if (u.Contains("HOTSPOT"))                           return "🔥";
+            if (u.Contains("EVENT"))                             return "📡";
+            if (u.Contains("INSTANCES"))                         return "📡";
+            if (u.Contains("LOH"))                               return "🧩";
+            if (u.Contains("STATIC ROOT"))                       return "🌱";
+            if (u.Contains("REFERENCE CHAIN"))                   return "🔍";
+            if (u.Contains("MODULE"))                            return "📚";
+            if (u.Contains("CLR VERSION"))                       return "🔧";
             return "📋";
         }
 
@@ -69,20 +84,26 @@ namespace DumpDetective.Utilities
             string u = title.ToUpperInvariant();
             if (u.Contains("MEMORY LEAK") || (u.Contains("FINALIZER") && !u.Contains("THREAD")) || u.Contains("DUPLICATE") ||
                 u.Contains("STATIC ROOT")  || u.Contains("REFERENCE CHAIN") ||
-                u.Contains("COLLECTION")   || u.Contains("EVENT LEAK"))
+                u.Contains("COLLECTION")   || u.Contains("EVENT LEAK") ||
+                u.Contains("HIGHLY REFERENCED") || u.Contains("ROOTED OBJECTS") || u.Contains("STATIC FIELD") ||
+                u.Contains("EVENT")        || u.Contains("INSTANCES"))
                 return ("Leak Detection", "💧");
 
-            if (u.Contains("CRASH") || u.Contains("EXCEPTION") || u.Contains("HANG"))
+            if (u.Contains("CRASH") || u.Contains("EXCEPTION") || u.Contains("HANG") ||
+                u.Contains("DEADLOCK") || u.Contains("ASYNC TASK"))
                 return ("Stability", "🩺");
 
-            if (u.Contains("MEMORY") || u.Contains("HEAP")  || u.Contains("LOH") ||
-                u.Contains("GC GENERATION") || u.Contains("OVERALL") || u.Contains("TOP TYPES"))
-                return ("Memory Health", "🧠");
-
-            if (u.Contains("GC HANDLE") || u.Contains("DEPENDENT HANDLE"))
+            if (u.Contains("GC HANDLE") || u.Contains("DEPENDENT HANDLE") ||
+                u.Contains("HANDLE")    || u.Contains("RETENTION"))
                 return ("Handles & Roots", "🔗");
 
-            if (u.Contains("THREAD"))
+            if (u.Contains("MEMORY") || u.Contains("HEAP")  || u.Contains("LOH") ||
+                u.Contains("GC GENERATION") || u.Contains("OVERALL") || u.Contains("TOP TYPES") ||
+                u.Contains("OBJECT TYPES")  || u.Contains("GC MODE"))
+                return ("Memory Health", "🧠");
+
+            if (u.Contains("THREAD") || u.Contains("WAIT CATEGORY") ||
+                u.Contains("APP DOMAIN") || u.Contains("HOTSPOT") || u.Contains("CLUSTER"))
                 return ("Threading", "🧵");
 
             if (u.Contains("MODULE") || u.Contains("ASSEMBLY") ||

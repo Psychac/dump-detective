@@ -28,6 +28,7 @@ namespace DumpDetective.Analyzers
         public AnalyzerOutput Analyze(ClrHeap heap)
         {
             int minSubscribers = _config.EventLeakMinSubscribers;
+            _writer.WriteHeader("EVENT LEAK ANALYSIS:");
             var eventLeaks = FindEventLeaks(heap, minSubscribers);
             var findings = new List<InsightFinding>(capacity: 5);
 

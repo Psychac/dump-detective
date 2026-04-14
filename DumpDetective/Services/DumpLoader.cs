@@ -213,7 +213,6 @@ namespace DumpDetective.Services
         private static void WriteFooter(OutputWriter writer)
         {
             writer.WriteSeparator();
-            writer.WriteLine("Analysis complete");
         }
     }
 

@@ -202,6 +202,7 @@ namespace DumpDetective.Services
                     new FunctionalAnalyzer("Thread Stack Signature Clustering", ctx => new ThreadStackClusterAnalyzer(writer).Analyze(ctx.Runtime)))
                 .AddStage("Analyzing threads and events",
                     new FunctionalAnalyzer("Thread Analysis",     ctx => new ThreadAnalyzer(writer).Analyze(ctx.Runtime)),
+                    new FunctionalAnalyzer("Lock Graph Analysis", ctx => new LockGraphAnalyzer(writer).Analyze(ctx.Runtime, ctx.Heap)),
                     new FunctionalAnalyzer("Event Leak Analysis", ctx => new EventLeakAnalyzer(writer, config).Analyze(ctx.Heap)));
 
             var (findings, domainResults) = pipeline.Execute(context);

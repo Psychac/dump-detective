@@ -95,7 +95,7 @@ namespace DumpDetective.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
-                    
+
                     var waste = AnalyzeDictionary(obj);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {

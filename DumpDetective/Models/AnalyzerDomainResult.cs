@@ -105,4 +105,10 @@ namespace DumpDetective.Models
         int TotalSubscribers,
         int StaticEventLeakCount,
         int InstanceEventLeakCount) : AnalyzerDomainResult;
+
+    internal sealed record LockGraphDomainResult(
+        int TotalHeldLocks,
+        int ContestedLockCount,
+        int MaxWaitersOnSingleLock,
+        int DeadlockCandidateCount) : AnalyzerDomainResult;
 }

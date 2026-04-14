@@ -50,7 +50,8 @@ namespace DumpDetective.Utilities
             if (u.Contains("HIGHLY REFERENCED"))                 return "📎";
             if (u.Contains("ROOTED OBJECTS"))                    return "⚓";
             if (u.Contains("STATIC FIELD"))                      return "🌱";
-            if (u.Contains("DEADLOCK"))                          return "🔒";
+            if (u.Contains("DEADLOCK"))                          return "🔴";
+            if (u.Contains("LOCK GRAPH") || u.Contains("LOCK CONTENTION") || u.Contains("CAUSALITY")) return "🔒";
             if (u.Contains("ASYNC TASK"))                        return "⏳";
             if (u.Contains("OBJECT TYPES"))                      return "📊";
             if (u.Contains("MEMORY"))                            return "🧠";
@@ -90,7 +91,8 @@ namespace DumpDetective.Utilities
                 return ("Leak Detection", "💧");
 
             if (u.Contains("CRASH") || u.Contains("EXCEPTION") || u.Contains("HANG") ||
-                u.Contains("DEADLOCK") || u.Contains("ASYNC TASK"))
+                u.Contains("DEADLOCK") || u.Contains("ASYNC TASK") ||
+                u.Contains("LOCK GRAPH") || u.Contains("LOCK CONTENTION") || u.Contains("CAUSALITY"))
                 return ("Stability", "🩺");
 
             if (u.Contains("GC HANDLE") || u.Contains("DEPENDENT HANDLE") ||

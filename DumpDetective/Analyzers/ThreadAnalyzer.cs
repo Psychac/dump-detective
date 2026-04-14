@@ -13,6 +13,21 @@ namespace DumpDetective.Analyzers
         private const int MaxTopFrameHotspotsToDisplay = 10;
         private const int MaxDistributionRowsToDisplay = 10;
         private const int MaxMethodLength = 85;
+        private const int TopActiveFramesToShow = 5;
+
+        private static readonly Dictionary<string, (string Icon, string Label, string Pattern, bool IsWarning, string? RiskNote)> GroupMeta =
+            new(StringComparer.Ordinal)
+            {
+                ["TaskBlocking"]      = ("⏳", "Sync-over-Async",         ".Wait() / .Result blocking on async task",           true,  "Deadlock risk under ThreadPool load \u2014 replace with await or Task.Run()"),
+                ["MonitorContention"] = ("🔒", "Monitor Lock Contention", "Competing to enter a locked monitor (lock keyword)", true,  null),
+                ["MonitorWait"]       = ("🔒", "Monitor Wait",            "Parked in Monitor.Wait() \u2014 awaiting a Pulse()",   false, null),
+                ["Sleep"]             = ("😴", "Thread Sleep",            "Thread.Sleep() \u2014 deliberate timed pause",            false, null),
+                ["Semaphore"]         = ("🚦", "Semaphore Wait",          "Waiting to acquire a semaphore permit",              false, null),
+                ["Mutex"]             = ("🔐", "Mutex Wait",              "Waiting to acquire OS mutex ownership",              false, null),
+                ["WaitHandle"]        = ("⌛", "WaitHandle / Event",      "Waiting on a manual/auto-reset event or WaitHandle", false, null),
+                ["ThreadJoin"]        = ("🔗", "Thread.Join",             "Blocked waiting for another thread to finish",       false, null),
+                ["BlockingIO"]        = ("📡", "Blocking I/O",            "Blocking synchronous network or file I/O call",      false, null),
+            };
 
         private static readonly WaitPattern[] WaitPatterns =
         [
@@ -48,12 +63,14 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"\nTotal Threads: {threadInfo.TotalCount}");
 
             PrintThreadStatistics(threadInfo);
+            PrintThreadGroups(threadInfo);
             PrintDistribution("THREAD STATE DISTRIBUTION:", threadInfo.StateDistribution);
             PrintDistribution("GC MODE DISTRIBUTION:", threadInfo.GcModeDistribution);
             PrintDistribution("APP DOMAIN DISTRIBUTION:", threadInfo.AppDomainDistribution);
             PrintDistribution("WAIT CATEGORY DISTRIBUTION:", threadInfo.WaitCategoryDistribution);
             PrintDistribution("ACTIVE EXCEPTION TYPES ON THREADS:", threadInfo.ExceptionTypeDistribution);
             PrintTopFrameHotspots(threadInfo.TopFrameHotspots);
+            PrintAsyncIssues(threadInfo);
             PrintFinalizerDiagnostics(threadInfo);
             PrintThreadsWithLocks(threadInfo.ThreadsWithLocks);
             PrintBlockedThreads(threadInfo.PotentiallyBlockedThreads);
@@ -166,6 +183,11 @@ namespace DumpDetective.Analyzers
                             StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
                         });
                     }
+                    else if (!thread.IsGc && !thread.IsFinalizer)
+                    {
+                        // Non-blocked user thread — track top frame for the Active Processing group
+                        TrackTopFrameHotspot(result.ActiveThreadHotspots, stackFrames);
+                    }
 
                     // ThreadPool worker threads surface a recognisable dispatch frame;
                     // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
@@ -271,6 +293,17 @@ namespace DumpDetective.Analyzers
             return false;
         }
 
+        private static string GetHotspotAnnotation(string signature)
+        {
+            if (string.IsNullOrEmpty(signature)) return string.Empty;
+            foreach (var pattern in WaitPatterns)
+            {
+                if (signature.Contains(pattern.Token, StringComparison.OrdinalIgnoreCase))
+                    return $"  \u26a0\ufe0f  {pattern.Category}";
+            }
+            return string.Empty;
+        }
+
         private static int CountMoveNextDepth(List<ClrStackFrame> frames)
         {
             int depth = 0;
@@ -299,6 +332,136 @@ namespace DumpDetective.Analyzers
             // Single hash lookup vs two (TryGetValue + indexer)
             ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out _);
             count++;
+        }
+
+        private void PrintThreadGroups(ThreadCategorization info)
+        {
+            _writer.WriteLine("\n\nTHREAD GROUPS:");
+            _writer.WriteSeparator();
+
+            if (info.AliveCount == 0)
+            {
+                _writer.WriteLine("No alive managed threads found.");
+                return;
+            }
+
+            int blockedCount = info.PotentiallyBlockedThreads.Count;
+            int systemCount  = info.GcCount + info.FinalizerCount;
+            int activeCount  = Math.Max(0, info.AliveCount - blockedCount);
+
+            _writer.WriteLine($"Alive: {info.AliveCount}  |  Blocked/Waiting: {blockedCount}  |  Active: {activeCount}  |  GC/System: {systemCount}");
+
+            // Pre-compute per-category most-common top frame and lock-holder count
+            var categoryTopFrames = BuildCategoryTopFrames(info.PotentiallyBlockedThreads);
+            var categoryLockHolders = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var bt in info.PotentiallyBlockedThreads)
+            {
+                if (bt.WaitCategory != null && bt.Thread.LockCount > 0)
+                {
+                    categoryLockHolders.TryGetValue(bt.WaitCategory, out int n);
+                    categoryLockHolders[bt.WaitCategory] = n + 1;
+                }
+            }
+
+            // ── Active Processing ──────────────────────────────────────────────
+            double activePct = activeCount * 100.0 / info.AliveCount;
+            _writer.WriteLine(string.Empty);
+            _writer.WriteLine($"\u2699\ufe0f  Active Processing                    {activeCount,4} threads ({activePct:F1}%)");
+            if (info.ActiveThreadHotspots.Count > 0)
+            {
+                _writer.WriteLine($"    Top frames:");
+                foreach (var kvp in info.ActiveThreadHotspots
+                    .OrderByDescending(x => x.Value)
+                    .Take(TopActiveFramesToShow))
+                {
+                    string ann = GetHotspotAnnotation(kvp.Key);
+                    _writer.WriteLine($"      {kvp.Value,3}  {FormatHelper.TruncateString(kvp.Key, MaxMethodLength - 8)}{ann}");
+                }
+            }
+
+            // ── Blocked / Waiting groups, sorted by thread count descending ───
+            foreach (var kvp in info.WaitCategoryDistribution
+                .OrderByDescending(k => k.Value))
+            {
+                string category = kvp.Key;
+                int    count    = kvp.Value;
+                double pct      = count * 100.0 / info.AliveCount;
+
+                _writer.WriteLine(string.Empty);
+
+                if (!GroupMeta.TryGetValue(category, out var meta))
+                {
+                    _writer.WriteLine($"\u23f8\ufe0f  {category,-36} {count,4} threads ({pct:F1}%)");
+                    continue;
+                }
+
+                string warn = meta.IsWarning ? "  \u26a0\ufe0f" : string.Empty;
+                _writer.WriteLine($"{meta.Icon}  {meta.Label,-36}{warn}  {count,4} threads ({pct:F1}%)");
+                _writer.WriteLine($"    Pattern: {meta.Pattern}");
+
+                if (meta.RiskNote != null)
+                    _writer.WriteLine($"    Risk:    {meta.RiskNote}");
+
+                if (category == "TaskBlocking" && info.AsyncChainThreadCount > 0)
+                    _writer.WriteLine($"    Async chains detected: {info.AsyncChainThreadCount} thread(s)  (max MoveNext depth: {info.MaxAsyncChainDepth})");
+
+                if (categoryLockHolders.TryGetValue(category, out int lockHolders) && lockHolders > 0)
+                    _writer.WriteLine($"    Threads also holding locks: {lockHolders}  \u26a0\ufe0f  cross-lock / escalation risk");
+
+                if (categoryTopFrames.TryGetValue(category, out string? topFrame) && !string.IsNullOrEmpty(topFrame))
+                    _writer.WriteLine($"    Top frame: {FormatHelper.TruncateString(topFrame, MaxMethodLength - 6)}");
+            }
+
+            // ── System thread groups ───────────────────────────────────────────
+            if (info.ThreadPoolCount > 0)
+            {
+                _writer.WriteLine(string.Empty);
+                _writer.WriteLine($"\ud83e\uddf5  ThreadPool Workers                   {info.ThreadPoolCount,4} threads (identified by flag or dispatch frame)");
+            }
+
+            if (info.GcCount > 0 || info.FinalizerCount > 0)
+            {
+                string finStatus = info.FinalizerThread != null
+                    ? (info.FinalizerIsBlocked ? "BLOCKED \u26a0\ufe0f" : "Running \u2705")
+                    : "not detected";
+
+                _writer.WriteLine(string.Empty);
+                _writer.WriteLine($"\u267b\ufe0f  GC / System Threads");
+                if (info.GcCount > 0)       _writer.WriteLine($"    GC Threads:       {info.GcCount}");
+                if (info.FinalizerCount > 0) _writer.WriteLine($"    Finalizer Thread: {finStatus}");
+            }
+        }
+
+        private static Dictionary<string, string> BuildCategoryTopFrames(
+            List<ThreadWithStackTrace> blockedThreads)
+        {
+            var frameCounts = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+            foreach (var bt in blockedThreads)
+            {
+                if (bt.WaitCategory == null || bt.TopFrames.Count == 0) continue;
+                string sig = GetFrameSignature(bt.TopFrames[0]);
+                if (string.IsNullOrWhiteSpace(sig)) continue;
+
+                if (!frameCounts.TryGetValue(bt.WaitCategory, out var catMap))
+                {
+                    catMap = new Dictionary<string, int>(StringComparer.Ordinal);
+                    frameCounts[bt.WaitCategory] = catMap;
+                }
+                catMap.TryGetValue(sig, out int n);
+                catMap[sig] = n + 1;
+            }
+
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (category, catMap) in frameCounts)
+            {
+                string? best = null;
+                int bestCount = 0;
+                foreach (var (sig, n) in catMap)
+                    if (n > bestCount) { bestCount = n; best = sig; }
+                if (best != null)
+                    result[category] = best;
+            }
+            return result;
         }
 
         private void PrintDistribution(string title, Dictionary<string, int> distribution)
@@ -336,7 +499,8 @@ namespace DumpDetective.Analyzers
                 .OrderByDescending(x => x.Value)
                 .Take(MaxTopFrameHotspotsToDisplay))
             {
-                _writer.WriteLine($"{hotspot.Value,4}  {FormatHelper.TruncateString(hotspot.Key, MaxMethodLength)}");
+                string annotation = GetHotspotAnnotation(hotspot.Key);
+                _writer.WriteLine($"{hotspot.Value,4}  {FormatHelper.TruncateString(hotspot.Key, MaxMethodLength)}{annotation}");
             }
         }
 
@@ -350,6 +514,47 @@ namespace DumpDetective.Analyzers
             _writer.WriteLine($"ThreadPool Worker Threads (alive): {info.ThreadPoolCount}");
             _writer.WriteLine($"Threads with active exceptions: {info.ThreadsWithActiveExceptionsCount}");
             _writer.WriteLine($"Threads with async chains (MoveNext): {info.AsyncChainThreadCount}  max depth: {info.MaxAsyncChainDepth}");
+        }
+
+        private void PrintAsyncIssues(ThreadCategorization info)
+        {
+            _writer.WriteLine("\n\nASYNC THREAD ISSUES:");
+            _writer.WriteSeparator();
+
+            info.WaitCategoryDistribution.TryGetValue("TaskBlocking", out int taskBlockingCount);
+            int chainThreads = info.AsyncChainThreadCount;
+            int maxDepth = info.MaxAsyncChainDepth;
+
+            if (taskBlockingCount == 0 && chainThreads == 0)
+            {
+                _writer.WriteLine("No async/await issues detected.");
+                return;
+            }
+
+            if (taskBlockingCount > 0)
+                _writer.WriteLine($"Sync-over-async threads (.Wait() / .Result):  {taskBlockingCount}");
+
+            if (chainThreads > 0)
+            {
+                _writer.WriteLine($"Threads with async state-machine chains:       {chainThreads}  (max MoveNext depth: {maxDepth})");
+                if (maxDepth >= 5)
+                    _writer.WriteLine($"  Deep chain depth ({maxDepth}) suggests a long async pipeline stalled on a single resource.");
+            }
+
+            if (taskBlockingCount > 0)
+            {
+                _writer.WriteLine(string.Empty);
+                if (taskBlockingCount >= 10)
+                {
+                    _writer.WriteLine($"\u26a0\ufe0f  SYNC-OVER-ASYNC DEADLOCK RISK: {taskBlockingCount} threads synchronously blocking on async operations.");
+                    _writer.WriteLine($"    Under ThreadPool load this exhausts available workers and causes full deadlock.");
+                    _writer.WriteLine($"    Fix: replace .Wait() / .Result with await, or isolate with Task.Run().");
+                }
+                else
+                {
+                    _writer.WriteLine($"\u26a0\ufe0f  Sync-over-async detected ({taskBlockingCount} thread(s)) — replace .Wait()/.Result with await.");
+                }
+            }
         }
 
         private void PrintFinalizerDiagnostics(ThreadCategorization info)
@@ -546,6 +751,9 @@ namespace DumpDetective.Analyzers
         // Async state-machine chain depth
         public int AsyncChainThreadCount { get; set; }
         public int MaxAsyncChainDepth { get; set; }
+
+        // Non-blocked user thread top-frame hotspots (Active Processing group)
+        public Dictionary<string, int> ActiveThreadHotspots { get; set; } = new(StringComparer.Ordinal);
 
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();

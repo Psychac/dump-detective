@@ -25,7 +25,8 @@ namespace DumpDetective.Services
                 new LohFragmentationTrendComparer(),
                 new DependentHandleTrendComparer(),
                 new ThreadStackClusterTrendComparer(),
-                new EventLeakTrendComparer()
+                new EventLeakTrendComparer(),
+                new LockGraphTrendComparer()
             };
             _comparers = list.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
         }

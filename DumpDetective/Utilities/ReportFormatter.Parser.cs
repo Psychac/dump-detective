@@ -205,24 +205,20 @@ namespace DumpDetective.Utilities
             MergeSectionInto(normalized, "LOH RISK SIGNAL", "HEAP SUMMARY", "LOH Signal");
             MergeSectionInto(normalized, "FRAGMENTATION SIGNAL", "LOH SEGMENT SUMMARY", "Fragmentation Signal");
             MergeSectionInto(normalized, "HANDLE PRESSURE SIGNAL", "HANDLE SUMMARY", "Handle Signal");
-            MergeSectionInto(normalized, "EVENT LEAK SIGNAL", "EVENT RETENTION SUMMARY", "Event Signal");
+            MergeSectionInto(normalized, "EVENT LEAK SIGNAL", "EVENT LEAK ANALYSIS", "Event Signal");
             MergeSectionInto(normalized, "THREAD HEALTH SIGNAL", "THREAD TRIAGE SUMMARY", "Thread Health Signal");
             MergeSectionInto(normalized, "DIVERSITY SIGNAL", "CLUSTER SUMMARY", "Diversity Signal");
             MergeSectionInto(normalized, "GC-ROOT COVERAGE SIGNAL", "REFERENCE RETENTION SUMMARY", "Retention Signal");
             MergeSectionInto(normalized, "CAPACITY RECOMMENDATION", "WASTE SIGNAL", "Capacity Recommendation");
             MergeSectionInto(normalized, "RESOLUTION QUALITY SIGNAL", "DEPENDENT HANDLE SUMMARY", "Resolution Signal");
 
-            AddAlias(normalized, "FINALIZER SIGNAL", "FINALIZER QUEUE");
-            AddAlias(normalized, "DUPLICATE STRING SIGNAL", "DUPLICATE STRING ANALYSIS");
             AddAlias(normalized, "HIGH-REFERENCE SIGNAL", "HIGHLY REFERENCED OBJECTS");
-            AddAlias(normalized, "COLLECTION MIX", "COLLECTION SUMMARY");
             AddAlias(normalized, "THREAD TRIAGE SUMMARY", "THREAD ANALYSIS");
             AddAlias(normalized, "WAIT CATEGORY BREAKDOWN", "WAIT CATEGORY DISTRIBUTION");
             AddAlias(normalized, "LOH SEGMENT SUMMARY", "LOH SUMMARY");
             AddAlias(normalized, "LOH SEGMENT SUMMARY", "LARGE OBJECT HEAP (LOH) USAGE");
             AddAlias(normalized, "TOP FRAGMENTED SEGMENTS", "TOP FRAGMENTED LOH SEGMENTS");
             AddAlias(normalized, "REFERENCE RETENTION SUMMARY", "REFERENCE CHAIN ANALYSIS");
-            AddAlias(normalized, "STATIC ROOT SUMMARY", "STATIC ROOT LEAK DETECTION");
             AddAlias(normalized, "TOP TYPES BY MEMORY SIZE", "TOP 20 OBJECT TYPES BY MEMORY SIZE");
             AddAlias(normalized, "TOP TYPES BY OBJECT COUNT", "TOP 20 OBJECT TYPES BY COUNT");
             AddAlias(normalized, "TOP TYPES BY OBJECT COUNT", "TOP 15 OBJECT TYPES BY COUNT");
@@ -232,7 +228,6 @@ namespace DumpDetective.Utilities
             SynthesizeThreadGroups(normalized);
             SynthesizeLockCausalityChain(normalized);
             SynthesizeRootAndStaticSections(normalized);
-            SynthesizeEventLeakAnalysis(normalized);
 
             EnsureDistinctSectionTitles(normalized);
             return normalized;
@@ -353,19 +348,7 @@ namespace DumpDetective.Utilities
         private static void SynthesizeRootAndStaticSections(List<ReportSection> sections)
         {
             AddAlias(sections, "TOP TYPES KEPT ALIVE", "ROOTED OBJECTS ANALYSIS");
-            AddAlias(sections, "STATIC ROOT SUMMARY", "STATIC FIELD REFERENCES");
-        }
-
-        private static void SynthesizeEventLeakAnalysis(List<ReportSection> sections)
-        {
-            if (FindSectionIndex(sections, "EVENT LEAK ANALYSIS") >= 0)
-                return;
-
-            int summaryIndex = FindSectionIndex(sections, "EVENT RETENTION SUMMARY");
-            if (summaryIndex < 0)
-                return;
-
-            sections.Insert(summaryIndex + 1, new ReportSection("EVENT LEAK ANALYSIS", [.. sections[summaryIndex].Lines]));
+            AddAlias(sections, "STATIC ROOT LEAK DETECTION", "STATIC FIELD REFERENCES");
         }
 
         private static int FindSectionIndex(List<ReportSection> sections, string title)

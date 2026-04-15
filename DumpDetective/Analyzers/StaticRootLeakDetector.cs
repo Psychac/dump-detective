@@ -19,9 +19,18 @@ namespace DumpDetective.Analyzers
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
-            var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
+            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache);
+            var significantStaticRoots = allStaticRootAnalysis
+                .Where(IsSignificant)
+                .ToList();
 
-            if (staticRootAnalysis.Count == 0)
+            var topRoots = allStaticRootAnalysis
+                .OrderByDescending(r => r.TotalMemoryImpact)
+                .Take(MaxRootsToReport)
+                .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
+                .ToList();
+
+            if (significantStaticRoots.Count == 0)
             {
                 return new AnalyzerExecutionResult(
                     [new InsightFinding(
@@ -34,22 +43,22 @@ namespace DumpDetective.Analyzers
                         Tags: ["static-root", "leak", "retention"],
                         MetricValue: 0,
                         MetricUnit: "retained-bytes")],
-                    new StaticRootDomainResult(0, 0));
+                    new StaticRootDomainResult(0, 0, topRoots));
             }
 
             ulong totalImpact = 0;
-            foreach (var item in staticRootAnalysis)
+            foreach (var item in significantStaticRoots)
                 totalImpact += item.TotalMemoryImpact;
 
-            var topRoots = staticRootAnalysis
-                .OrderByDescending(r => r.TotalMemoryImpact)
-                .Take(MaxRootsToReport)
-                .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
-                .ToList();
-
             return new AnalyzerExecutionResult(
-                [CreateFinding(staticRootAnalysis)],
-                new StaticRootDomainResult(staticRootAnalysis.Count, totalImpact, topRoots));
+                [CreateFinding(significantStaticRoots)],
+                new StaticRootDomainResult(significantStaticRoots.Count, totalImpact, topRoots));
+        }
+
+        private static bool IsSignificant(StaticRootAnalysis analysis)
+        {
+            return analysis.TotalMemoryImpact > SignificantMemoryThresholdBytes
+                || analysis.ObjectsKeptAlive > SignificantObjectCountThreshold;
         }
 
         private static InsightFinding CreateFinding(List<StaticRootAnalysis> staticRootAnalysis)
@@ -142,24 +151,20 @@ namespace DumpDetective.Analyzers
                     }
                 }
 
-                // Only report if significant memory impact (> 1MB or > 100 objects)
-                if (totalSize > SignificantMemoryThresholdBytes || retainedObjects.Count > SignificantObjectCountThreshold)
+                var analysis = new StaticRootAnalysis
                 {
-                    var analysis = new StaticRootAnalysis
-                    {
-                        RootDescription = root.ToString() ?? "Unknown Static Root",
-                        DirectObjectAddress = obj.Address,
-                        DirectObjectType = obj.Type?.Name ?? StringConstants.UnknownType,
-                        DirectObjectSize = obj.Size,
-                        TotalMemoryImpact = totalSize,
-                        ObjectsKeptAlive = retainedObjects.Count,
-                        TopRetainedTypes = GetTopRetainedTypes(typeStats),
-                        ContainsCollections = containsCollections,
-                        ContainsEventHandlers = containsEventHandlers
-                    };
+                    RootDescription = root.ToString() ?? "Unknown Static Root",
+                    DirectObjectAddress = obj.Address,
+                    DirectObjectType = obj.Type?.Name ?? StringConstants.UnknownType,
+                    DirectObjectSize = obj.Size,
+                    TotalMemoryImpact = totalSize,
+                    ObjectsKeptAlive = retainedObjects.Count,
+                    TopRetainedTypes = GetTopRetainedTypes(typeStats),
+                    ContainsCollections = containsCollections,
+                    ContainsEventHandlers = containsEventHandlers
+                };
 
-                    results.Add(analysis);
-                }
+                results.Add(analysis);
             }
 
             scanCounter.Complete();

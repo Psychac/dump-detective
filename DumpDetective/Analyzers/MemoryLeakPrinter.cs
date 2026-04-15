@@ -15,19 +15,36 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("MEMORY LEAK ANALYSIS:");
-            writer.WriteLine("FINALIZER SIGNAL:");
+            writer.WriteLine("FINALIZER QUEUE:");
             writer.WriteSeparator();
             writer.WriteLine($"Finalizer queue objects: {domain.FinalizerQueueCount:N0}");
             var finalizerTypes = domain.TopFinalizerTypes ?? [];
             if (finalizerTypes.Count > 0)
             {
                 writer.WriteLine("\nTop types in finalizer queue:");
+                writer.WriteLine($"{"Type",-80} {"Count",12} {"% Queue",8}");
                 foreach (var type in finalizerTypes)
-                    writer.WriteLine($"  {type.Name}: {type.Count:N0} object(s)");
+                {
+                    double pct = domain.FinalizerQueueCount == 0
+                        ? 0
+                        : type.Count * 100.0 / domain.FinalizerQueueCount;
+
+                    var wrappedTypeLines = WrapText(type.Name, 80).ToList();
+                    if (wrappedTypeLines.Count == 0)
+                        wrappedTypeLines.Add(string.Empty);
+
+                    writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {pct,7:F1}%");
+                    for (int i = 1; i < wrappedTypeLines.Count; i++)
+                        writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,8}");
+                }
             }
 
-            writer.WriteLine("\nDUPLICATE STRING SIGNAL:");
+            writer.WriteLine("\nDUPLICATE STRING ANALYSIS:");
             writer.WriteSeparator();
+            writer.WriteLine($"Total strings: {domain.TotalStrings:N0}");
+            writer.WriteLine($"Total string memory: {FormatHelper.FormatBytes(domain.TotalStringMemoryBytes)}");
+            writer.WriteLine($"Unique strings: {domain.UniqueStrings:N0}");
+            writer.WriteLine(string.Empty);
             writer.WriteLine($"Duplicate string patterns: {domain.DuplicateStringPatternCount:N0}");
             writer.WriteLine($"Estimated duplicate-string waste: {FormatHelper.FormatBytes(domain.DuplicateStringWastedBytes)}");
             var duplicateStrings = domain.TopDuplicateStrings ?? [];
@@ -60,6 +77,43 @@ namespace DumpDetective.Analyzers
                 writer.WriteLine($"Reference tracking cap hit; skipped addresses: {domain.SkippedReferenceAddresses:N0}");
 
             writer.WriteLine(StringConstants.Equals80);
+        }
+
+        private static IEnumerable<string> WrapText(string? value, int width)
+        {
+            if (string.IsNullOrWhiteSpace(value) || width <= 0)
+            {
+                yield return string.Empty;
+                yield break;
+            }
+
+            var text = value.Trim();
+            int index = 0;
+
+            while (index < text.Length)
+            {
+                int remaining = text.Length - index;
+                if (remaining <= width)
+                {
+                    yield return text[index..];
+                    yield break;
+                }
+
+                int lastSpace = text.LastIndexOf(' ', index + width, width);
+                if (lastSpace <= index)
+                {
+                    yield return text.Substring(index, width);
+                    index += width;
+                }
+                else
+                {
+                    yield return text.Substring(index, lastSpace - index).TrimEnd();
+                    index = lastSpace + 1;
+                }
+
+                while (index < text.Length && text[index] == ' ')
+                    index++;
+            }
         }
     }
 }

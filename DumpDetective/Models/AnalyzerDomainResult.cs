@@ -107,6 +107,9 @@ namespace DumpDetective.Models
         int FinalizerQueueCount,
         int DuplicateStringPatternCount,
         ulong DuplicateStringWastedBytes,
+        int TotalStrings,
+        ulong TotalStringMemoryBytes,
+        int UniqueStrings,
         int HighlyReferencedObjectCount,
         long SkippedReferenceAddresses,
         IReadOnlyList<NameCountEntry>? TopFinalizerTypes = null,
@@ -121,8 +124,18 @@ namespace DumpDetective.Models
         int Dictionaries,
         int Lists,
         int HashSets,
+        int Queues,
         ulong TotalWastedMemory,
-        int WastefulCollectionCount) : AnalyzerDomainResult;
+        int WastefulCollectionCount,
+        IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null) : AnalyzerDomainResult;
+
+    internal sealed record WastefulCollectionSnapshot(
+        string Type,
+        int Count,
+        int Capacity,
+        double FillRate,
+        ulong WastedMemory,
+        ulong Address);
 
     internal sealed record StaticRootDomainResult(
         int RootCount,
@@ -134,7 +147,18 @@ namespace DumpDetective.Models
         int RetainedSamples,
         double RetainedPercent,
         IReadOnlyList<NameCountEntry>? TopRetainedTypes = null,
-        IReadOnlyList<string>? SampleReferenceChains = null) : AnalyzerDomainResult;
+        IReadOnlyList<string>? SampleReferenceChains = null,
+        IReadOnlyList<ReferenceTypeSampleSnapshot>? TopTypeSampleTraces = null) : AnalyzerDomainResult;
+
+    internal sealed record ReferenceTypeSampleSnapshot(
+        string TypeName,
+        int Count,
+        ulong TotalSizeBytes,
+        ulong? SampleAddress,
+        string? SampleObjectType,
+        ulong SampleObjectSize,
+        bool HasGcRoot,
+        string? RootPath);
 
     internal sealed record ThreadDomainResult(
         int AliveThreadCount,

@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("EVENT LEAK ANALYSIS:");
-            writer.WriteLine("EVENT RETENTION SUMMARY:");
+            writer.WriteLine("EVENT LEAK ANALYSIS:");
             writer.WriteSeparator();
             writer.WriteLine($"Potential event leak groups: {domain.TotalEventLeakInstances:N0}");
             writer.WriteLine($"Total subscribers: {domain.TotalSubscribers:N0}");

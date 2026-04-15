@@ -35,34 +35,53 @@ namespace DumpDetective.Analyzers
             int analyzedSamples = 0;
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
+            var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Count);
 
             foreach (var typeKvp in topTypes)
             {
                 string typeName = typeKvp.Key;
-
-                // Skip system types using shared utility
-                if (TypeFilterHelper.IsSystemType(typeName))
-                    continue;
+                var stats = typeKvp.Value;
 
                 // Use cached sample instance instead of full heap walk
                 ulong? sampleAddress = cache.GetSampleInstanceAddress(typeName);
+                string? sampleType = null;
+                ulong sampleSize = 0;
+                bool hasGcRoot = false;
+                string? path = null;
 
                 if (sampleAddress.HasValue)
                 {
-                    analyzedSamples++;
-
-                    if (TryFindAnyRootPath(heap, sampleAddress.Value, out string? path))
+                    ClrObject sampleObj = heap.GetObject(sampleAddress.Value);
+                    if (sampleObj.IsValid)
                     {
-                        retainedSamples++;
-                        if (retainedTypeCounts.TryGetValue(typeName, out int current))
-                            retainedTypeCounts[typeName] = current + 1;
-                        else
-                            retainedTypeCounts[typeName] = 1;
+                        analyzedSamples++;
+                        sampleType = sampleObj.Type?.Name ?? StringConstants.UnknownType;
+                        sampleSize = sampleObj.Size;
 
-                        if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
-                            sampleReferenceChains.Add($"{typeName}: {path}");
+                        hasGcRoot = TryFindAnyRootPath(heap, sampleAddress.Value, out path);
+                        if (hasGcRoot)
+                        {
+                            retainedSamples++;
+                            if (retainedTypeCounts.TryGetValue(typeName, out int current))
+                                retainedTypeCounts[typeName] = current + 1;
+                            else
+                                retainedTypeCounts[typeName] = 1;
+
+                            if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
+                                sampleReferenceChains.Add($"{typeName}: {path}");
+                        }
                     }
                 }
+
+                topTypeSampleTraces.Add(new ReferenceTypeSampleSnapshot(
+                    typeName,
+                    stats.Count,
+                    stats.TotalSize,
+                    sampleAddress,
+                    sampleType,
+                    sampleSize,
+                    hasGcRoot,
+                    path));
             }
 
             double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
@@ -75,7 +94,7 @@ namespace DumpDetective.Analyzers
 
             return new AnalyzerExecutionResult(
                 [CreateFinding(analyzedSamples, retainedSamples)],
-                new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains));
+                new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces));
         }
 
         public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)

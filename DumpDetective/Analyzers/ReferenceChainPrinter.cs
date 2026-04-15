@@ -26,6 +26,40 @@ namespace DumpDetective.Analyzers
             writer.WriteLine(domain.AnalyzedSamples == 0
                 ? "No valid sample instance found."
                 : $"{domain.RetainedSamples:N0} sampled top-type instance(s) had at least one GC-root path.");
+
+            var traces = domain.TopTypeSampleTraces ?? [];
+            if (traces.Count > 0)
+            {
+                writer.WriteLine(string.Empty);
+                int index = 1;
+                foreach (var trace in traces.Take(10))
+                {
+                    writer.WriteLine($"[{index++}] Type: {trace.TypeName}");
+                    writer.WriteLine($"    Count: {trace.Count:N0}");
+                    writer.WriteLine($"    Total Size: {FormatHelper.FormatBytes(trace.TotalSizeBytes)}");
+
+                    if (trace.SampleAddress.HasValue)
+                    {
+                        writer.WriteLine($"    Sample Instance: 0x{trace.SampleAddress.Value:X}");
+                        writer.WriteLine($"    Type: {trace.SampleObjectType ?? StringConstants.UnknownType}");
+                        writer.WriteLine($"    Size: {FormatHelper.FormatBytes(trace.SampleObjectSize)}");
+                        writer.WriteLine(trace.HasGcRoot
+                            ? "    Status: GC root path found"
+                            : "    Status: No GC root found (may be eligible for collection)");
+
+                        if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
+                            writer.WriteLine($"    Root Path: {trace.RootPath}");
+                    }
+                    else
+                    {
+                        writer.WriteLine("    Sample Instance: not available");
+                        writer.WriteLine("    Status: Sample instance unavailable for tracing");
+                    }
+
+                    writer.WriteLine(string.Empty);
+                }
+            }
+
             var topRetainedTypes = domain.TopRetainedTypes ?? [];
             if (topRetainedTypes.Count > 0)
             {

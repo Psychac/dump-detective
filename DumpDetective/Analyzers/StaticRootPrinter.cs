@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
-            writer.WriteLine("STATIC ROOT SUMMARY:");
+            writer.WriteLine("STATIC ROOT LEAK DETECTION:");
             writer.WriteSeparator();
             writer.WriteLine($"Concerning static roots: {domain.RootCount:N0}");
             writer.WriteLine($"Total retained bytes: {FormatHelper.FormatBytes(domain.TotalRetainedBytes)}");

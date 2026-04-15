@@ -8,6 +8,7 @@ namespace DumpDetective.Analyzers
     {
         private const ulong WasteThresholdBytes = 10 * 1024;           // 10 KB per collection
         private const ulong SummaryWarnThresholdBytes = 10 * 1024 * 1024; // 10 MB total
+        private const int TopWastefulCollectionsToShow = 15;
 
         public string Name => "Collection Analysis";
 
@@ -21,8 +22,19 @@ namespace DumpDetective.Analyzers
                 collectionStats.Dictionaries,
                 collectionStats.Lists,
                 collectionStats.HashSets,
+                collectionStats.Queues,
                 collectionStats.TotalWastedMemory,
-                collectionStats.WastefulCollections.Count);
+                collectionStats.WastefulCollections.Count,
+                collectionStats.WastefulCollections
+                    .Take(TopWastefulCollectionsToShow)
+                    .Select(w => new WastefulCollectionSnapshot(
+                        w.Type,
+                        w.Count,
+                        w.Capacity,
+                        w.FillRate,
+                        w.WastedMemory,
+                        w.Address))
+                    .ToList());
 
             if (collectionStats.TotalCollections == 0)
             {

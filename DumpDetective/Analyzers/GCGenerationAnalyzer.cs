@@ -4,29 +4,18 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class GCGenerationAnalyzer
+    internal class GCGenerationAnalyzer : IAnalyzer
     {
-        private readonly OutputWriter _writer;
-        private const ulong LohThresholdBytes = 85_000;
-        private const int TopTypeCount = 15;
+        public string Name => "GC Generation Analysis";
 
-        public GCGenerationAnalyzer(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
-        {
-            _writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
-
             // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
             var cachedStats = cache.GetOrBuildTypeStatistics(heap);
 
-            PrintSummary(cachedStats);
-            PrintTopTypes(cachedStats);
-
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 [CreateFinding(cachedStats)],
                 BuildDomainResult(cachedStats));
         }
@@ -71,78 +60,6 @@ namespace DumpDetective.Analyzers
                 Tags: ["gc", "generations", "loh"],
                 MetricValue: lohPct,
                 MetricUnit: "%");
-        }
-
-        private void PrintSummary(Dictionary<string, TypeStatistics> typeStats)
-        {
-            _writer.WriteLine("\nHEAP SUMMARY:");
-            _writer.WriteSeparator();
-
-            // Calculate totals in a single pass
-            int totalGen2Count = 0;
-            int totalLohCount = 0;
-            ulong totalGen2Size = 0;
-            ulong totalLohSize = 0;
-
-            foreach (var stat in typeStats.Values)
-            {
-                int gen2Count = stat.Count - stat.LohCount;
-                ulong gen2Size = stat.TotalSize - stat.LohSize;
-
-                totalGen2Count += gen2Count;
-                totalGen2Size += gen2Size;
-                totalLohCount += stat.LohCount;
-                totalLohSize += stat.LohSize;
-            }
-
-            _writer.WriteLine($"  Small/Medium Objects (< {LohThresholdBytes / 1000}KB): {totalGen2Count,12:N0} objects  {FormatHelper.FormatBytes(totalGen2Size),12}");
-            _writer.WriteLine($"  Large Objects (LOH >= {LohThresholdBytes / 1000}KB):   {totalLohCount,12:N0} objects  {FormatHelper.FormatBytes(totalLohSize),12}");
-            _writer.WriteLine($"  Total:                          {totalGen2Count + totalLohCount,12:N0} objects  {FormatHelper.FormatBytes(totalGen2Size + totalLohSize),12}");
-
-            if (totalLohCount > 0)
-            {
-                double lohPercentage = (totalLohSize / (double)(totalGen2Size + totalLohSize)) * 100;
-                _writer.WriteLine($"  LOH Percentage:                  {lohPercentage,11:F1}%");
-            }
-        }
-
-        private void PrintTopTypes(Dictionary<string, TypeStatistics> typeStats)
-        {
-            if (typeStats.Count > 0)
-            {
-                _writer.WriteLine($"\nTOP {TopTypeCount} OBJECT TYPES BY COUNT:");
-                _writer.WriteSeparator();
-                _writer.WriteLine($"{"Type",-60} {"Count",12} {"Size",12}");
-                _writer.WriteSeparator();
-
-                // Create list of types with gen2 objects (Count > LohCount)
-                var gen2Types = new List<TypeStatistics>(typeStats.Count);
-                foreach (var stat in typeStats.Values)
-                {
-                    if (stat.Count > stat.LohCount)
-                    {
-                        gen2Types.Add(stat);
-                    }
-                }
-
-                // Manual sorting by gen2 count - no LINQ allocations
-                gen2Types.Sort((a, b) =>
-                {
-                    int countA = a.Count - a.LohCount;
-                    int countB = b.Count - b.LohCount;
-                    return countB.CompareTo(countA);
-                });
-
-                int count = 0;
-                foreach (var stat in gen2Types)
-                {
-                    if (count >= TopTypeCount) break;
-                    int gen2Count = stat.Count - stat.LohCount;
-                    ulong gen2Size = stat.TotalSize - stat.LohSize;
-                    _writer.WriteLine($"{FormatHelper.TruncateString(stat.TypeName, 60),-60} {gen2Count,12:N0} {FormatHelper.FormatBytes(gen2Size),12}");
-                    count++;
-                }
-            }
         }
     }
 }

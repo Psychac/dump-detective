@@ -4,32 +4,21 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class HangAnalyzer
+    internal class HangAnalyzer : IAnalyzer
     {
-        private readonly OutputWriter _writer;
         private const int LongWaitThreshold = 5; // threads waiting
         private const int HighThreadPoolThreshold = 100;
         private const int MaxTasksToScan = 50000;
         private const int TopWaitingThreadsPerGroup = 5;
         private const int TopContinuationTypesToShow = 5;
 
-        public HangAnalyzer(OutputWriter writer)
-        {
-            _writer = writer;
-        }
+        public string Name => "Hang Analysis";
 
-        public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
-        {
-            _writer.WriteHeader("HANG ANALYSIS:");
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime, context.Heap);
 
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
+        {
             var hangInfo = AnalyzeForHang(runtime, heap);
-
-            PrintHangSummary(hangInfo);
-            PrintHealthScore(hangInfo);
-            PrintWaitingThreads(hangInfo.WaitingThreads);
-            PrintThreadPoolInfo(hangInfo);
-            PrintTaskInfo(hangInfo);
-            PrintDeadlockSuspicion(hangInfo);
 
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var wt in hangInfo.WaitingThreads)
@@ -42,8 +31,7 @@ namespace DumpDetective.Analyzers
             double waitingPct = hangInfo.TotalAliveThreads == 0 ? 0
                 : hangInfo.WaitingThreads.Count * 100.0 / hangInfo.TotalAliveThreads;
 
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 [CreateFinding(hangInfo)],
                 new HangDomainResult(
                     hangInfo.TotalAliveThreads,
@@ -195,13 +183,6 @@ namespace DumpDetective.Analyzers
             return Math.Max(0, Math.Min(100, score));
         }
 
-        private void PrintHealthScore(HangAnalysis analysis)
-        {
-            int score = analysis.HealthScore;
-            string icon  = score >= 80 ? "🟢" : score >= 60 ? "🟡" : score >= 40 ? "🟠" : "🔴";
-            string label = score >= 80 ? "Healthy" : score >= 60 ? "Degraded" : score >= 40 ? "Stressed" : "Critical";
-            _writer.WriteLine($"\nThread Health Score: {score}/100  {icon} {label}");
-        }
 
         private WaitingThreadInfo? DetectWaitPattern(ClrThread thread, ClrStackFrame topFrame)
         {
@@ -335,253 +316,6 @@ namespace DumpDetective.Analyzers
             analysis.ThreadPoolInfo = threadPool;
             analysis.TaskContinuations = taskContinuations;
             analysis.TotalContinuations = totalContinuations;
-        }
-
-        private void PrintHangSummary(HangAnalysis analysis)
-        {
-            _writer.WriteLine("HANG INDICATORS:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Total Alive Threads: {analysis.TotalAliveThreads}");
-            _writer.WriteLine($"Waiting/Blocked Threads: {analysis.WaitingThreads.Count}");
-            _writer.WriteLine($"Threads Holding Locks: {analysis.ThreadsHoldingLocks}");
-
-            if (analysis.TotalAliveThreads == 0)
-            {
-                _writer.WriteLine("No alive managed threads found.");
-                return;
-            }
-
-            double waitingPercentage = (analysis.WaitingThreads.Count / (double)analysis.TotalAliveThreads) * 100;
-
-            if (waitingPercentage > 80)
-            {
-                _writer.WriteLine($"\n⚠️  SEVERE HANG: {waitingPercentage:F1}% of threads are waiting!");
-                _writer.WriteLine($"    This indicates a likely application hang or deadlock.");
-            }
-            else if (waitingPercentage > 50)
-            {
-                _writer.WriteLine($"\n⚠️  POSSIBLE HANG: {waitingPercentage:F1}% of threads are waiting.");
-                _writer.WriteLine($"    Application may be experiencing performance issues.");
-            }
-            else
-            {
-                _writer.WriteLine($"\nWaiting Thread Percentage: {waitingPercentage:F1}%");
-            }
-        }
-
-        private void PrintWaitingThreads(List<WaitingThreadInfo> waitingThreads)
-        {
-            if (waitingThreads.Count == 0)
-            {
-                _writer.WriteLine("\nNo waiting threads detected.");
-                return;
-            }
-
-            _writer.WriteLine($"\n\nWAITING THREADS BREAKDOWN:");
-            _writer.WriteSeparator();
-
-            // Manual grouping - no LINQ allocations
-            var byWaitType = new Dictionary<WaitType, List<WaitingThreadInfo>>();
-            foreach (var thread in waitingThreads)
-            {
-                if (!byWaitType.TryGetValue(thread.WaitType, out var list))
-                {
-                    list = new List<WaitingThreadInfo>();
-                    byWaitType[thread.WaitType] = list;
-                }
-                list.Add(thread);
-            }
-
-            // Manual sorting by count
-            var sortedGroups = new List<KeyValuePair<WaitType, List<WaitingThreadInfo>>>(byWaitType);
-            sortedGroups.Sort((a, b) => b.Value.Count.CompareTo(a.Value.Count));
-
-            foreach (var group in sortedGroups)
-            {
-                _writer.WriteLine($"\n{group.Key} ({group.Value.Count} thread(s)):");
-
-                int threadCount = 0;
-                foreach (var waitThread in group.Value)
-                {
-                    if (threadCount >= TopWaitingThreadsPerGroup) break;
-                    _writer.WriteLine($"  Thread {waitThread.ThreadId} (OS: {waitThread.OSThreadId})");
-                    _writer.WriteLine($"    Reason: {waitThread.WaitReason}");
-                    _writer.WriteLine($"    Locks Held: {waitThread.LockCount}");
-
-                    _writer.WriteLine($"    Top Stack Frame:");
-                    _writer.WriteLine($"      {FormatHelper.TruncateString(waitThread.TopStackFrame, 65)}");
-                    threadCount++;
-                }
-
-                if (group.Value.Count > TopWaitingThreadsPerGroup)
-                {
-                    _writer.WriteLine($"  ... and {group.Value.Count - TopWaitingThreadsPerGroup} more");
-                }
-            }
-        }
-
-        private void PrintThreadPoolInfo(HangAnalysis analysis)
-        {
-            var tpInfo = analysis.ThreadPoolInfo;
-
-            _writer.WriteLine($"\n\nTHREAD POOL STATUS:");
-            _writer.WriteSeparator();
-
-            // Runtime counters (from ClrThreadPool — most reliable source)
-            if (tpInfo.RuntimeInitialized)
-            {
-                string impl = tpInfo.UsingPortableThreadPool ? "Portable (.NET)" :
-                              tpInfo.UsingWindowsThreadPool ? "Windows OS" : "Native CLR";
-                _writer.WriteLine($"Implementation: {impl}");
-                _writer.WriteLine($"Worker Threads: {tpInfo.RuntimeActiveWorkerThreads} active / {tpInfo.RuntimeIdleWorkerThreads} idle / {tpInfo.RuntimeMaxThreads} max (min {tpInfo.RuntimeMinThreads})");
-                _writer.WriteLine($"Retired Workers: {tpInfo.RuntimeRetiredWorkerThreads}");
-                _writer.WriteLine($"CPU Utilization: {tpInfo.RuntimeCpuUtilization}%");
-
-                bool workersSaturated = tpInfo.RuntimeMaxThreads > 0 &&
-                                        tpInfo.RuntimeActiveWorkerThreads >= tpInfo.RuntimeMaxThreads;
-                bool cpuIdle = tpInfo.RuntimeCpuUtilization < 20;
-                if (workersSaturated && cpuIdle)
-                {
-                    _writer.WriteLine($"\n⚠️  THREAD STARVATION: all {tpInfo.RuntimeMaxThreads} worker threads active at low CPU ({tpInfo.RuntimeCpuUtilization}%).");
-                    _writer.WriteLine($"    Threads are likely blocked (sync-over-async, I/O waits, or lock contention) — not CPU-bound.");
-                }
-                else if (workersSaturated)
-                {
-                    _writer.WriteLine($"\n⚠️  WORKER SATURATION: {tpInfo.RuntimeActiveWorkerThreads}/{tpInfo.RuntimeMaxThreads} workers active.");
-                    _writer.WriteLine($"    New work items will queue. Increase ThreadPool.SetMinThreads or switch to async I/O.");
-                }
-            }
-            else
-            {
-                _writer.WriteLine("Runtime ThreadPool data unavailable (dump may be from managed-only snapshot).");
-            }
-
-            // Heap-scan counters
-            _writer.WriteLine($"\nQueued Work Items (heap scan): {tpInfo.QueuedWorkItems:N0}");
-            _writer.WriteLine($"Total Tasks: {tpInfo.TotalTasks:N0}");
-            _writer.WriteLine($"Pending Tasks: {tpInfo.PendingTasks:N0}");
-            _writer.WriteLine($"Faulted Tasks: {tpInfo.FaultedTasks:N0}");
-            _writer.WriteLine($"Canceled Tasks: {tpInfo.CanceledTasks:N0}");
-
-            if (tpInfo.QueuedWorkItems > HighThreadPoolThreshold)
-            {
-                _writer.WriteLine($"\n⚠️  WARNING: {tpInfo.QueuedWorkItems} queued work items!");
-                _writer.WriteLine($"    ThreadPool may be saturated - consider increasing threads or async patterns.");
-            }
-
-            if (tpInfo.PendingTasks > HighThreadPoolThreshold)
-            {
-                _writer.WriteLine($"\n⚠️  WARNING: {tpInfo.PendingTasks} pending tasks!");
-                _writer.WriteLine($"    Many tasks waiting to execute - may indicate thread starvation.");
-            }
-
-            if (tpInfo.TaskScanLimited)
-            {
-                _writer.WriteLine($"\n📊 Note: Task scan limited to prevent memory issues (50,000 tasks analyzed).");
-            }
-        }
-
-        private void PrintTaskInfo(HangAnalysis analysis)
-        {
-            _writer.WriteLine($"\n\nASYNC TASK ANALYSIS:");
-            _writer.WriteSeparator();
-
-            if (analysis.TotalContinuations > 0)
-            {
-                _writer.WriteLine($"Total Task Continuations: {analysis.TotalContinuations:N0}");
-                
-                if (analysis.TotalContinuations > 1000)
-                {
-                    _writer.WriteLine($"⚠️  HIGH: Many continuations may indicate async over-use or hangs.");
-                }
-
-                _writer.WriteLine($"\nContinuation Types:");
-                var continuationTypes = new List<KeyValuePair<string, int>>(analysis.TaskContinuations);
-                continuationTypes.Sort((a, b) => b.Value.CompareTo(a.Value));
-
-                int shown = 0;
-                foreach (var kvp in continuationTypes)
-                {
-                    if (shown >= TopContinuationTypesToShow)
-                        break;
-
-                    _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0}");
-                    shown++;
-                }
-            }
-            else
-            {
-                _writer.WriteLine("No task continuations detected.");
-            }
-        }
-
-        private void PrintDeadlockSuspicion(HangAnalysis analysis)
-        {
-            _writer.WriteLine($"\n\nDEADLOCK DETECTION:");
-            _writer.WriteSeparator();
-
-            // Cross-correlate: threads waiting on a monitor WHILE holding a lock
-            // are the only true circular-wait candidates accessible without a full lock graph.
-            var circularWaitCandidates = new List<WaitingThreadInfo>();
-            int monitorWaitCount = 0;
-
-            foreach (var waiting in analysis.WaitingThreads)
-            {
-                if (waiting.WaitType == WaitType.MonitorWait)
-                {
-                    monitorWaitCount++;
-                    if (waiting.LockCount > 0)
-                        circularWaitCandidates.Add(waiting);
-                }
-            }
-
-            if (circularWaitCandidates.Count >= 2)
-            {
-                _writer.WriteLine($"⚠️  PROBABLE DEADLOCK: {circularWaitCandidates.Count} thread(s) waiting on a monitor while holding a lock.");
-                _writer.WriteLine($"    Each of these threads holds a lock it won't release until it acquires another.");
-
-                foreach (var t in circularWaitCandidates)
-                    _writer.WriteLine($"    Thread {t.ThreadId} (OS: {t.OSThreadId}) — locks held: {t.LockCount}, frame: {FormatHelper.TruncateString(t.TopStackFrame, 65)}");
-
-                _writer.WriteLine($"\n💡 INVESTIGATION STEPS:");
-                _writer.WriteLine($"    1. Run !syncblk in WinDbg/SOS to map lock addresses to owner threads");
-                _writer.WriteLine($"    2. Confirm these thread IDs form a wait cycle (A waits for B's lock, B waits for A's lock)");
-                _writer.WriteLine($"    3. Review lock acquisition order in source to identify the inversion point");
-            }
-            else if (circularWaitCandidates.Count == 1)
-            {
-                var t = circularWaitCandidates[0];
-                _writer.WriteLine($"⚠️  DEADLOCK CANDIDATE: Thread {t.ThreadId} (OS: {t.OSThreadId}) is waiting on a monitor while holding {t.LockCount} lock(s).");
-                _writer.WriteLine($"    A second thread holding the contested lock and waiting on this one would complete the cycle.");
-                _writer.WriteLine($"    Frame: {FormatHelper.TruncateString(t.TopStackFrame, 65)}");
-            }
-            else if (monitorWaitCount >= 2 && analysis.ThreadsHoldingLocks >= 2)
-            {
-                _writer.WriteLine($"⚠️  POSSIBLE DEADLOCK: {monitorWaitCount} thread(s) waiting on monitors; {analysis.ThreadsHoldingLocks} thread(s) holding locks.");
-                _writer.WriteLine($"    No thread was observed doing both simultaneously in this snapshot (top-frame only scan).");
-                _writer.WriteLine($"    Run !syncblk and cross-reference lock owners against the waiting thread list.");
-            }
-            else if (analysis.WaitingThreads.Count > analysis.TotalAliveThreads * 0.8)
-            {
-                _writer.WriteLine($"⚠️  APPLICATION APPEARS HUNG:");
-                _writer.WriteLine($"    - {analysis.WaitingThreads.Count}/{analysis.TotalAliveThreads} threads are waiting");
-                _writer.WriteLine($"    - Most threads blocked (hang or resource starvation)");
-                _writer.WriteLine($"\n💡 COMMON CAUSES:");
-                _writer.WriteLine($"    - Deadlock (check monitor waits)");
-                _writer.WriteLine($"    - Thread pool starvation (check ThreadPool status above)");
-                _writer.WriteLine($"    - Blocking I/O on UI/main thread");
-                _writer.WriteLine($"    - Synchronous wait on async code (Task.Wait/Result)");
-            }
-            else if (analysis.WaitingThreads.Count >= LongWaitThreshold)
-            {
-                _writer.WriteLine($"⚠️  Elevated wait activity detected ({analysis.WaitingThreads.Count} waiting threads).");
-                _writer.WriteLine("Review top waiting groups and thread pool pressure for early hang signals.");
-            }
-            else
-            {
-                _writer.WriteLine("No obvious deadlock patterns detected.");
-                _writer.WriteLine("Application may be functioning normally or experiencing other issues.");
-            }
         }
     }
 

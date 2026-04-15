@@ -5,19 +5,16 @@ using System.Reflection;
 
 namespace DumpDetective.Analyzers
 {
-    internal class DependentHandleAnalyzer
+    internal class DependentHandleAnalyzer : IAnalyzer
     {
         private const int TopCount = 15;
-        private readonly OutputWriter _writer;
 
-        public DependentHandleAnalyzer(OutputWriter writer)
-        {
-            _writer = writer;
-        }
+        public string Name => "Dependent Handle Analysis";
 
-        public AnalyzerOutput Analyze(ClrRuntime runtime)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {
-            _writer.WriteHeader("DEPENDENT HANDLE ANALYSIS:");
             var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
@@ -60,33 +57,34 @@ namespace DumpDetective.Analyzers
 
             scanCounter.Complete();
 
-            _writer.WriteLine("DEPENDENT HANDLE SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Dependent Handles Found: {dependentHandleCount:N0}");
-            _writer.WriteLine($"Resolved Source->Target Edges: {resolvedEdgeCount:N0}");
-            _writer.WriteLine($"Unresolved Targets: {unresolvedTargetCount:N0}");
-
             double unresolvedPct = dependentHandleCount == 0 ? 0
                 : unresolvedTargetCount * 100.0 / dependentHandleCount;
 
             if (dependentHandleCount == 0)
             {
-                _writer.WriteLine("\nNo dependent handles were found in this dump.");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [],
                     new DependentHandleDomainResult(0, 0, 0, 0));
             }
 
-            PrintTop("TOP SOURCE TYPES IN DEPENDENT HANDLES:", sourceTypeCounts);
-            PrintTop("TOP TARGET TYPES KEPT ALIVE BY DEPENDENT HANDLES:", targetTypeCounts);
-            PrintTop("TOP SOURCE -> TARGET RETENTION EDGES:", sourceTargetPairCounts);
+            static List<NameCountEntry> ToTopEntries(Dictionary<string, int> source, int take)
+            {
+                var list = new List<NameCountEntry>(Math.Min(source.Count, take));
+                foreach (var kvp in source.OrderByDescending(k => k.Value).Take(take))
+                    list.Add(new NameCountEntry(kvp.Key, kvp.Value));
+                return list;
+            }
 
-            _writer.WriteLine("\nNote: Some runtimes do not expose dependent targets via DAC. Unresolved targets are expected in that case.");
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 [CreateFinding(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount)],
-                new DependentHandleDomainResult(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount, unresolvedPct));
+                new DependentHandleDomainResult(
+                    dependentHandleCount,
+                    resolvedEdgeCount,
+                    unresolvedTargetCount,
+                    unresolvedPct,
+                    ToTopEntries(sourceTypeCounts, TopCount),
+                    ToTopEntries(targetTypeCounts, TopCount),
+                    ToTopEntries(sourceTargetPairCounts, TopCount)));
         }
 
         private static InsightFinding CreateFinding(int dependentHandleCount, int resolvedEdgeCount, int unresolvedTargetCount)
@@ -109,31 +107,6 @@ namespace DumpDetective.Analyzers
                 Tags: ["dependent-handle", "retention", "conditionalweaktable"],
                 MetricValue: unresolvedPct,
                 MetricUnit: "% unresolved-targets");
-        }
-
-        private void PrintTop(string title, Dictionary<string, int> counts)
-        {
-            _writer.WriteLine($"\n{title}");
-            _writer.WriteSeparator();
-
-            if (counts.Count == 0)
-            {
-                _writer.WriteLine("No data.");
-                return;
-            }
-
-            _writer.WriteLine($"{"Item",-90} {"Count",12}");
-            _writer.WriteSeparator();
-
-            int written = 0;
-            foreach ((string key, int count) in counts.OrderByDescending(c => c.Value))
-            {
-                if (written >= TopCount)
-                    break;
-
-                _writer.WriteLine($"{FormatHelper.TruncateString(key, 90),-90} {count,12:N0}");
-                written++;
-            }
         }
 
         private static bool TryGetDependentTargetObject(ClrHandle handle, ClrHeap heap, out ClrObject targetObj)

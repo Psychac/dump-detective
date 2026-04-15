@@ -5,20 +5,16 @@ using System.Reflection;
 
 namespace DumpDetective.Analyzers
 {
-    internal class LohFragmentationAnalyzer
+    internal class LohFragmentationAnalyzer : IAnalyzer
     {
         private const int TopSegments = 10;
-        private readonly OutputWriter _writer;
 
-        public LohFragmentationAnalyzer(OutputWriter writer)
+        public string Name => "LOH Fragmentation Analysis";
+
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrHeap heap)
-        {
-            _writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
-
             var segmentStats = new List<LohSegmentStats>();
             var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
@@ -66,9 +62,7 @@ namespace DumpDetective.Analyzers
 
             if (segmentStats.Count == 0)
             {
-                _writer.WriteLine("No LOH segments found.");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(LohFragmentationAnalyzer),
                         Category: "Performance",
@@ -91,12 +85,16 @@ namespace DumpDetective.Analyzers
                 if (s.LargestFreeBlock > maxFreeBlock) maxFreeBlock = s.LargestFreeBlock;
             }
 
-            PrintSummary(segmentStats);
-            PrintTopFragmentedSegments(segmentStats);
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            var topSegments = segmentStats
+                .OrderByDescending(s => s.FragmentationPercent)
+                .ThenByDescending(s => s.FreeBytes)
+                .Take(TopSegments)
+                .Select(s => new LohSegmentSnapshot(s.Address, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock))
+                .ToList();
+
+            return new AnalyzerExecutionResult(
                 [CreateFinding(overallFragmentation, segmentStats.Count)],
-                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, overallFragmentation, maxFreeBlock));
+                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, overallFragmentation, maxFreeBlock, topSegments));
         }
 
         private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)
@@ -178,59 +176,6 @@ namespace DumpDetective.Analyzers
             }
 
             return 0;
-        }
-
-        private void PrintSummary(List<LohSegmentStats> segmentStats)
-        {
-            ulong totalBytes = 0;
-            ulong usedBytes = 0;
-            ulong freeBytes = 0;
-            int totalObjects = 0;
-            int totalFreeObjects = 0;
-
-            foreach (var segment in segmentStats)
-            {
-                totalBytes += segment.TotalBytes;
-                usedBytes += segment.UsedBytes;
-                freeBytes += segment.FreeBytes;
-                totalObjects += segment.ObjectCount;
-                totalFreeObjects += segment.FreeObjectCount;
-            }
-
-            double fragmentationPercent = totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
-
-            _writer.WriteLine("LOH SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"LOH Segments: {segmentStats.Count:N0}");
-            _writer.WriteLine($"LOH Total Size: {FormatHelper.FormatBytes(totalBytes)}");
-            _writer.WriteLine($"LOH Used Size: {FormatHelper.FormatBytes(usedBytes)}");
-            _writer.WriteLine($"LOH Free Size: {FormatHelper.FormatBytes(freeBytes)} ({fragmentationPercent:F1}% fragmentation)");
-            _writer.WriteLine($"LOH Objects: {totalObjects:N0}");
-            _writer.WriteLine($"LOH Free Blocks: {totalFreeObjects:N0}");
-        }
-
-        private void PrintTopFragmentedSegments(List<LohSegmentStats> segmentStats)
-        {
-            _writer.WriteLine("\nTOP FRAGMENTED LOH SEGMENTS:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"{"Segment",-18} {"Total",12} {"Free",12} {"Frag%",8} {"Largest Free",14}");
-            _writer.WriteSeparator();
-
-            int written = 0;
-            foreach (var segment in segmentStats.OrderByDescending(s => s.FragmentationPercent))
-            {
-                if (written >= TopSegments)
-                    break;
-
-                _writer.WriteLine(
-                    $"0x{segment.Address:X16} " +
-                    $"{FormatHelper.FormatBytes(segment.TotalBytes),12} " +
-                    $"{FormatHelper.FormatBytes(segment.FreeBytes),12} " +
-                    $"{segment.FragmentationPercent,7:F1}% " +
-                    $"{FormatHelper.FormatBytes(segment.LargestFreeBlock),14}");
-
-                written++;
-            }
         }
 
         private sealed class LohSegmentStats

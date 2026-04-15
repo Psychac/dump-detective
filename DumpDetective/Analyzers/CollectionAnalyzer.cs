@@ -4,23 +4,17 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class CollectionAnalyzer
+    internal class CollectionAnalyzer : IAnalyzer
     {
         private const ulong WasteThresholdBytes = 10 * 1024;           // 10 KB per collection
         private const ulong SummaryWarnThresholdBytes = 10 * 1024 * 1024; // 10 MB total
-        private const int TopWastefulCount = 15;
 
-        private readonly OutputWriter _writer;
+        public string Name => "Collection Analysis";
 
-        public CollectionAnalyzer(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrHeap heap)
-        {
-            _writer.WriteHeader("COLLECTION EFFICIENCY ANALYSIS:");
-
             var collectionStats = AnalyzeCollections(heap);
             var domainResult = new CollectionDomainResult(
                 collectionStats.TotalCollections,
@@ -32,9 +26,7 @@ namespace DumpDetective.Analyzers
 
             if (collectionStats.TotalCollections == 0)
             {
-                _writer.WriteLine("No collections found for analysis.");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(CollectionAnalyzer),
                         Category: "Memory",
@@ -48,11 +40,7 @@ namespace DumpDetective.Analyzers
                     domainResult);
             }
 
-            PrintCollectionSummary(collectionStats);
-            PrintWastefulCollections(collectionStats);
-
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput([CreateFinding(collectionStats)], domainResult);
+            return new AnalyzerExecutionResult([CreateFinding(collectionStats)], domainResult);
         }
 
         private static InsightFinding CreateFinding(CollectionStatistics stats)
@@ -268,55 +256,6 @@ namespace DumpDetective.Analyzers
             return null;
         }
 
-        private void PrintCollectionSummary(CollectionStatistics stats)
-        {
-            _writer.WriteLine("COLLECTION SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Total Collections: {stats.TotalCollections:N0}");
-            _writer.WriteLine($"  Dictionaries: {stats.Dictionaries:N0}");
-            _writer.WriteLine($"  Lists: {stats.Lists:N0}");
-            _writer.WriteLine($"  HashSets: {stats.HashSets:N0}");
-            _writer.WriteLine($"  Queues: {stats.Queues:N0}");
-            _writer.WriteLine($"\nTotal Wasted Memory: {FormatHelper.FormatBytes(stats.TotalWastedMemory)}");
-
-            if (stats.TotalWastedMemory > SummaryWarnThresholdBytes)
-            {
-                _writer.WriteLine($"⚠️  Over 10 MB wasted in under-filled collections!");
-            }
-        }
-
-        private void PrintWastefulCollections(CollectionStatistics stats)
-        {
-            if (stats.WastefulCollections.Count == 0)
-            {
-                _writer.WriteLine("\n✅ No significantly wasteful collections detected.");
-                return;
-            }
-
-            _writer.WriteLine($"\n\nMOST WASTEFUL COLLECTIONS (Top {TopWastefulCount}):");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"{"Type",-50} {"Count/Capacity",-15} {"Fill Rate",10} {"Wasted",12}");
-            _writer.WriteSeparator();
-
-            foreach (var waste in stats.WastefulCollections.Take(TopWastefulCount))
-            {
-                string countCapacity = $"{waste.Count}/{waste.Capacity}";
-                _writer.WriteLine($"{FormatHelper.TruncateString(waste.Type, 50),-50} {countCapacity,-15} {waste.FillRate,9:F1}% {FormatHelper.FormatBytes(waste.WastedMemory),12}");
-                _writer.WriteLine($"  Address: 0x{waste.Address:X}");
-                
-                if (waste.FillRate < 25)
-                {
-                    _writer.WriteLine($"  ⚠️  Very low fill rate - consider using TrimExcess() or right-sizing capacity");
-                }
-                _writer.WriteLine(string.Empty);
-            }
-
-            _writer.WriteLine("💡 OPTIMIZATION TIPS:");
-            _writer.WriteLine("   - Use collection.TrimExcess() to reclaim unused capacity");
-            _writer.WriteLine("   - Initialize collections with appropriate capacity");
-            _writer.WriteLine("   - For dictionaries: new Dictionary<>(expectedCount)");
-            _writer.WriteLine("   - For lists: new List<>(expectedCount)");
-        }
     }
 
     internal class CollectionStatistics

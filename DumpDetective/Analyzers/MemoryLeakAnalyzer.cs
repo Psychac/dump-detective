@@ -5,36 +5,35 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class MemoryLeakAnalyzer
+    internal class MemoryLeakAnalyzer : IAnalyzer
     {
-        private readonly OutputWriter _writer;
         private readonly int _highReferenceThreshold;
         private readonly int _maxStringLength;
         private readonly int _minDuplicateCount;
         private readonly int _maxReferenceAddressesToTrack;
 
-        public MemoryLeakAnalyzer(OutputWriter writer, AnalysisConfiguration config)
+        public string Name => "Memory Leak Analysis";
+
+        public MemoryLeakAnalyzer(AnalysisConfiguration config)
         {
-            _writer = writer;
             _highReferenceThreshold = config.HighReferenceThreshold;
             _maxStringLength = config.MaxDuplicateStringLength;
             _minDuplicateCount = config.MinDuplicateStringCount;
             _maxReferenceAddressesToTrack = config.MaxReferenceAddressesToTrack;
         }
 
-        public AnalyzerOutput Analyze(ClrHeap heap, ClrRuntime runtime)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Runtime);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime)
         {
-            _writer.WriteHeader("MEMORY LEAK ANALYSIS:");
             var findings = new List<InsightFinding>(capacity: 4);
 
             int finalizerCount = AnalyzeFinalizerQueue(heap);
-            AnalyzeRootsPass(heap);
             LeakSignals signals = AnalyzeObjectsPass(heap);
 
             AddFindings(findings, finalizerCount, signals);
 
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 findings,
                 new MemoryLeakDomainResult(
                     finalizerCount,
@@ -47,7 +46,6 @@ namespace DumpDetective.Analyzers
         private int AnalyzeFinalizerQueue(ClrHeap heap)
         {
             // Single pass — no intermediate list allocation
-            var finalizerTypes = new Dictionary<string, int>();
             int finalizerCount = 0;
             var scanCounter = new ObjectScanCounter("Finalizer queue scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -55,131 +53,11 @@ namespace DumpDetective.Analyzers
             {
                 scanCounter.Tick();
                 finalizerCount++;
-                string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
-                finalizerTypes.TryGetValue(typeName, out int typeCount);
-                finalizerTypes[typeName] = typeCount + 1;
             }
 
             scanCounter.Complete();
-
-            if (finalizerCount > 0)
-            {
-                _writer.WriteLine("\nFINALIZER QUEUE:");
-                _writer.WriteSeparator();
-                _writer.WriteLine($"Objects waiting for finalization: {finalizerCount:N0}");
-
-                _writer.WriteLine("\nTop types in finalizer queue:");
-
-                // Manual sorting - no LINQ allocations
-                var sortedTypes = new List<KeyValuePair<string, int>>(finalizerTypes);
-                sortedTypes.Sort((a, b) => b.Value.CompareTo(a.Value));
-
-                int count = 0;
-                foreach (var kvp in sortedTypes)
-                {
-                    if (count >= 10) break;
-                    _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} object(s)");
-                    count++;
-                }
-            }
-            else
-            {
-                _writer.WriteLine("\nFINALIZER QUEUE: Empty (good!)");
-            }
 
             return finalizerCount;
-        }
-
-        private void AnalyzeRootsPass(ClrHeap heap)
-        {
-            // Single pass over roots — collects data for both static references and rooted objects
-            var staticRoots = new Dictionary<string, StaticRootTypeInfo>();
-            var rootedObjectsByType = new Dictionary<string, RootedTypeInfo>(capacity: 512);
-            var scanCounter = new ObjectScanCounter("GC root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-            foreach (ClrRoot root in heap.EnumerateRoots())
-            {
-                scanCounter.Tick();
-                ClrObject obj = root.Object;
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
-                string rootKind = root.RootKind.ToString(); // computed once, used for both checks below
-
-                if (rootKind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
-                {
-                    string rootName = root.ToString() ?? "Unknown Root";
-
-                    if (!staticRoots.TryGetValue(typeName, out var staticRootInfo))
-                    {
-                        staticRootInfo = new StaticRootTypeInfo();
-                        staticRoots[typeName] = staticRootInfo;
-                    }
-
-                    staticRootInfo.Count++;
-                    staticRootInfo.TotalSize += obj.Size;
-                    if (staticRootInfo.SampleRootNames.Count < 2)
-                    {
-                        staticRootInfo.SampleRootNames.Add(rootName);
-                    }
-                }
-
-                if (!rootedObjectsByType.TryGetValue(typeName, out var typeInfo))
-                {
-                    typeInfo = new RootedTypeInfo { TypeName = typeName };
-                    rootedObjectsByType[typeName] = typeInfo;
-                }
-
-                typeInfo.Count++;
-                typeInfo.TotalSize += obj.Size;
-                typeInfo.RootKinds.TryGetValue(rootKind, out int kindCount);
-                typeInfo.RootKinds[rootKind] = kindCount + 1;
-            }
-
-            scanCounter.Complete();
-
-            PrintStaticReferences(staticRoots);
-            PrintRootedObjects(rootedObjectsByType);
-        }
-
-        private void PrintStaticReferences(Dictionary<string, StaticRootTypeInfo> staticRoots)
-        {
-            _writer.WriteLine("\n\nSTATIC FIELD REFERENCES:");
-            _writer.WriteSeparator();
-
-            if (staticRoots.Count > 0)
-            {
-                _writer.WriteLine("Objects held by static fields (potential leak sources):");
-                _writer.WriteLine($"Total static-rooted object types: {staticRoots.Count:N0}");
-                _writer.WriteLine("\nTop types by count:");
-
-                // Manual sorting - no LINQ allocations
-                var sortedRoots = new List<KeyValuePair<string, StaticRootTypeInfo>>(staticRoots);
-                sortedRoots.Sort((a, b) => b.Value.Count.CompareTo(a.Value.Count));
-
-                int count = 0;
-                foreach (var kvp in sortedRoots)
-                {
-                    if (count >= 15) break;
-                    _writer.WriteLine($"  {FormatHelper.TruncateString(kvp.Key, 50),-50} {kvp.Value.Count,8:N0} instances  {FormatHelper.FormatBytes(kvp.Value.TotalSize),12}");
-
-                    int displayCount = kvp.Value.SampleRootNames.Count;
-                    for (int i = 0; i < displayCount; i++)
-                    {
-                        _writer.WriteLine($"    └─ {FormatHelper.TruncateString(kvp.Value.SampleRootNames[i], 70)}");
-                    }
-                    if (kvp.Value.Count > displayCount)
-                    {
-                        _writer.WriteLine($"    └─ ... and {kvp.Value.Count - displayCount} more");
-                    }
-                    count++;
-                }
-            }
-            else
-            {
-                _writer.WriteLine("No static field references found (or unable to enumerate)");
-            }
         }
 
         private LeakSignals AnalyzeObjectsPass(ClrHeap heap)
@@ -240,39 +118,18 @@ namespace DumpDetective.Analyzers
 
             scanCounter.Complete();
 
-            DuplicateStringResult duplicateResult = PrintDuplicateStrings(stringStats, totalStrings, totalStringMemory);
-            int highlyReferencedCount = PrintHighlyReferencedObjects(heap, referenceCount, skippedReferenceAddresses);
+            DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats);
+            int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount);
 
             return new LeakSignals(duplicateResult.DuplicateCount, duplicateResult.TotalWastedBytes, highlyReferencedCount, skippedReferenceAddresses);
         }
 
-        private DuplicateStringResult PrintDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, int totalStrings, ulong totalStringMemory)
+        private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats)
         {
-            _writer.WriteLine("\n\nDUPLICATE STRING ANALYSIS:");
-            _writer.WriteSeparator();
-
-            _writer.WriteLine($"Total strings: {totalStrings:N0}");
-            _writer.WriteLine($"Total string memory: {FormatHelper.FormatBytes(totalStringMemory)}");
-            _writer.WriteLine($"Unique strings: {stringStats.Count:N0}");
-
             var duplicates = stringStats.Values
                 .Where(s => s.Count > _minDuplicateCount)
                 .OrderByDescending(s => s.TotalSize)
-                .Take(20)
-                .ToList();
-
-            if (duplicates.Count > 0)
-            {
-                _writer.WriteLine("\nMost duplicated strings (potential string pooling opportunities):");
-                _writer.WriteLine($"{"String Preview",-50} {"Count",12} {"Wasted Memory",15}");
-                _writer.WriteSeparator();
-
-                foreach (var dup in duplicates)
-                {
-                    ulong wastedMemory = dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
-                    _writer.WriteLine($"{dup.Preview,-50} {dup.Count,12:N0} {FormatHelper.FormatBytes(wastedMemory),15}");
-                }
-            }
+                .Take(20);
 
             ulong totalWastedBytes = 0;
             foreach (var dup in duplicates)
@@ -280,49 +137,12 @@ namespace DumpDetective.Analyzers
                 totalWastedBytes += dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
             }
 
-            return new DuplicateStringResult(duplicates.Count, totalWastedBytes);
+            return new DuplicateStringResult(stringStats.Count(s => s.Value.Count > _minDuplicateCount), totalWastedBytes);
         }
 
-        private int PrintHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, long skippedReferenceAddresses)
+        private int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount)
         {
-            _writer.WriteLine("\n\nHIGHLY REFERENCED OBJECTS:");
-            _writer.WriteSeparator();
-            _writer.WriteLine("Objects with many incoming references (may indicate leaks):\n");
-
-            if (skippedReferenceAddresses > 0)
-            {
-                _writer.WriteLine($"⚠️  Reference tracking capped at {_maxReferenceAddressesToTrack:N0} unique addresses.");
-                _writer.WriteLine($"    Skipped {skippedReferenceAddresses:N0} additional references to new addresses. Results may be incomplete.\n");
-            }
-
-            var highlyReferenced = referenceCount
-                .Where(kvp => kvp.Value > _highReferenceThreshold)
-                .OrderByDescending(kvp => kvp.Value)
-                .Take(15);
-
-            bool foundHighlyReferenced = false;
-            foreach (var kvp in highlyReferenced)
-            {
-                ClrObject obj = heap.GetObject(kvp.Key);
-                if (obj.IsValid && obj.Type != null)
-                {
-                    foundHighlyReferenced = true;
-                    _writer.WriteLine($"  {obj.Type.Name ?? StringConstants.UnknownType}");
-                    _writer.WriteLine($"    Address: 0x{obj.Address:X}");
-                    _writer.WriteLine($"    Size: {FormatHelper.FormatBytes(obj.Size)}");
-                    _writer.WriteLine($"    Incoming references: {kvp.Value:N0}");
-                    _writer.WriteLine(string.Empty);
-                }
-            }
-
-            if (!foundHighlyReferenced)
-            {
-                _writer.WriteLine($"  ✅ No objects with more than {_highReferenceThreshold} incoming references found.");
-            }
-
-            return foundHighlyReferenced
-                ? referenceCount.Count(kvp => kvp.Value > _highReferenceThreshold)
-                : 0;
+            return referenceCount.Count(kvp => kvp.Value > _highReferenceThreshold);
         }
 
         private void AddFindings(List<InsightFinding> findings, int finalizerCount, LeakSignals signals)
@@ -398,44 +218,6 @@ namespace DumpDetective.Analyzers
             }
         }
 
-        private void PrintRootedObjects(Dictionary<string, RootedTypeInfo> rootedObjectsByType)
-        {
-            _writer.WriteLine("\n\nROOTED OBJECTS ANALYSIS:");
-            _writer.WriteSeparator();
-            _writer.WriteLine("Objects kept alive by GC roots:\n");
-            _writer.WriteLine($"Total rooted object types: {rootedObjectsByType.Count:N0}");
-            _writer.WriteLine("\nTop rooted types by count (these won't be garbage collected):");
-            _writer.WriteLine($"{"Type",-50} {"Count",10} {"Size",12} {"Primary Root Kind",-20}");
-            _writer.WriteSeparator();
-
-            // Manual sorting - no LINQ allocations
-            var sortedRooted = new List<RootedTypeInfo>(rootedObjectsByType.Values);
-            sortedRooted.Sort((a, b) => b.Count.CompareTo(a.Count));
-
-            int count = 0;
-            foreach (var typeInfo in sortedRooted)
-            {
-                if (count >= 20) break;
-
-                // Manual max-find — no LINQ allocations
-                string primaryRootKind = "";
-                int primaryRootKindCount = 0;
-                foreach (var rk in typeInfo.RootKinds)
-                {
-                    if (rk.Value > primaryRootKindCount)
-                    {
-                        primaryRootKindCount = rk.Value;
-                        primaryRootKind = rk.Key;
-                    }
-                }
-
-                _writer.WriteLine($"{FormatHelper.TruncateString(typeInfo.TypeName, 50),-50} {typeInfo.Count,10:N0} {FormatHelper.FormatBytes(typeInfo.TotalSize),12} {primaryRootKind,-20}");
-                count++;
-            }
-
-            _writer.WriteLine(StringConstants.Equals80);
-        }
-
         private static StringFingerprint CreateStringFingerprint(string value)
         {
             const ulong fnvOffset = 14695981039346656037UL;
@@ -460,12 +242,5 @@ namespace DumpDetective.Analyzers
         private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
         private readonly record struct DuplicateStringResult(int DuplicateCount, ulong TotalWastedBytes);
         private readonly record struct LeakSignals(int DuplicateStringCount, ulong DuplicateStringWastedBytes, int HighlyReferencedObjectCount, long SkippedReferenceAddresses);
-
-        private sealed class StaticRootTypeInfo
-        {
-            public int Count { get; set; }
-            public ulong TotalSize { get; set; }
-            public List<string> SampleRootNames { get; } = new(capacity: 2);
-        }
     }
 }

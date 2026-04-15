@@ -80,9 +80,15 @@ namespace DumpDetective.Services
             var context = new AnalysisContext { Runtime = runtime, Heap = heap, Cache = cache };
 
             var pipelineStopwatch = Stopwatch.StartNew();
-            var (findings, domainResults) = RunAnalysisPipeline(writer, context, previousSnapshot);
+            var (findings, domainResults) = RunAnalysisPipeline(context, previousSnapshot);
             pipelineStopwatch.Stop();
             dumpTimings?.Add(("Analyzer pipeline", pipelineStopwatch.Elapsed));
+
+            var renderStopwatch = Stopwatch.StartNew();
+            RenderAnalyzerSections(writer, domainResults);
+            RenderCorrelationInsights(writer, domainResults);
+            renderStopwatch.Stop();
+            dumpTimings?.Add(("Analyzer report rendering", renderStopwatch.Elapsed));
 
             var normalizedFindings = findings.ToList();
             var normalizeFindingsStopwatch = Stopwatch.StartNew();
@@ -176,39 +182,141 @@ namespace DumpDetective.Services
         }
 
         private (IReadOnlyList<InsightFinding> Findings, IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults) RunAnalysisPipeline(
-            OutputWriter writer, AnalysisContext context, MemorySnapshot? initialSnapshot)
+            AnalysisContext context, MemorySnapshot? initialSnapshot)
         {
             ConsoleUx.Header("Analysis Pipeline");
             ConsoleUx.Info("Starting analysis pipeline...");
 
             var pipeline = new AnalysisPipeline(initialSnapshot, config.EnableMemoryDiagnostics)
                 .AddStage("Running core memory analyzers",
-                    new FunctionalAnalyzer("Memory Analysis",        ctx => new MemoryAnalyzer(writer).Analyze(ctx.Heap, ctx.Cache)),
-                    new FunctionalAnalyzer("GC Generation Analysis", ctx => new GCGenerationAnalyzer(writer).Analyze(ctx.Heap, ctx.Cache)),
-                    new FunctionalAnalyzer("Module Analysis",        ctx => new ModuleAnalyzer(writer).Analyze(ctx.Runtime)))
+                    new MemoryAnalyzer(),
+                    new GCGenerationAnalyzer(),
+                    new ModuleAnalyzer())
                 .AddStage("Analyzing for crashes and hangs",
-                    new FunctionalAnalyzer("Crash Analysis", ctx => new CrashAnalyzer(writer).Analyze(ctx.Runtime, ctx.Heap)),
-                    new FunctionalAnalyzer("Hang Analysis",  ctx => new HangAnalyzer(writer).Analyze(ctx.Runtime, ctx.Heap)))
+                    new CrashAnalyzer(),
+                    new HangAnalyzer())
                 .AddStage("Detecting memory leaks",
-                    new FunctionalAnalyzer("Memory Leak Analysis", ctx => new MemoryLeakAnalyzer(writer, config).Analyze(ctx.Heap, ctx.Runtime)),
-                    new FunctionalAnalyzer("Collection Analysis",  ctx => new CollectionAnalyzer(writer).Analyze(ctx.Heap)))
+                    new MemoryLeakAnalyzer(config),
+                    new CollectionAnalyzer())
                 .AddStage("Analyzing static roots and event handlers",
-                    new FunctionalAnalyzer("Static Root Leak Detection", ctx => new StaticRootLeakDetector(writer).Analyze(ctx.Heap, ctx.Cache)),
-                    new FunctionalAnalyzer("Reference Chain Analysis",   ctx => new ReferenceChainAnalyzer(writer, config).AnalyzeTopTypes(ctx.Heap, ctx.Cache)))
+                    new StaticRootLeakDetector(),
+                    new ReferenceChainAnalyzer(config))
                 .AddStage("Performing ClrMD deep analysis",
-                    new FunctionalAnalyzer("GC Handle Analysis",                ctx => new GCHandleAnalyzer(writer).Analyze(ctx.Runtime)),
-                    new FunctionalAnalyzer("Dependent Handle Analysis",         ctx => new DependentHandleAnalyzer(writer).Analyze(ctx.Runtime)),
-                    new FunctionalAnalyzer("LOH Fragmentation Analysis",        ctx => new LohFragmentationAnalyzer(writer).Analyze(ctx.Heap)),
-                    new FunctionalAnalyzer("Thread Stack Signature Clustering", ctx => new ThreadStackClusterAnalyzer(writer).Analyze(ctx.Runtime)))
+                    new GCHandleAnalyzer(),
+                    new DependentHandleAnalyzer(),
+                    new LohFragmentationAnalyzer(),
+                    new ThreadStackClusterAnalyzer())
                 .AddStage("Analyzing threads and events",
-                    new FunctionalAnalyzer("Thread Analysis",     ctx => new ThreadAnalyzer(writer).Analyze(ctx.Runtime)),
-                    new FunctionalAnalyzer("Lock Graph Analysis", ctx => new LockGraphAnalyzer(writer).Analyze(ctx.Runtime, ctx.Heap)),
-                    new FunctionalAnalyzer("Event Leak Analysis", ctx => new EventLeakAnalyzer(writer, config).Analyze(ctx.Heap)));
+                    new ThreadAnalyzer(),
+                    new LockGraphAnalyzer(),
+                    new EventLeakAnalyzer(config));
 
             var (findings, domainResults) = pipeline.Execute(context);
 
             ConsoleUx.Success("Analysis pipeline complete.");
             return (findings, domainResults);
+        }
+
+        private static void RenderAnalyzerSections(OutputWriter writer, IReadOnlyDictionary<string, AnalyzerDomainResult> domainResults)
+        {
+            var renderer = new AnalyzerReportRenderer([
+                new MemoryPrinter(),
+                new GCGenerationPrinter(),
+                new ModulePrinter(),
+                new CrashPrinter(),
+                new HangPrinter(),
+                new MemoryLeakPrinter(),
+                new CollectionPrinter(),
+                new StaticRootPrinter(),
+                new ReferenceChainPrinter(),
+                new GCHandlePrinter(),
+                new DependentHandlePrinter(),
+                new LohFragmentationPrinter(),
+                new ThreadStackClusterPrinter(),
+                new ThreadPrinter(),
+                new LockGraphPrinter(),
+                new EventLeakPrinter()
+            ]);
+
+            renderer.Render(domainResults, writer);
+        }
+
+        private static void RenderCorrelationInsights(OutputWriter writer, IReadOnlyDictionary<string, AnalyzerDomainResult> domainResults)
+        {
+            writer.WriteLine("\n\nCROSS-ANALYZER CORRELATION INSIGHTS:");
+            writer.WriteSeparator();
+
+            var insights = new List<string>(capacity: 8);
+
+            if (domainResults.TryGetValue("Thread Analysis", out var threadResult)
+                && threadResult is ThreadDomainResult thread
+                && domainResults.TryGetValue("Lock Graph Analysis", out var lockResult)
+                && lockResult is LockGraphDomainResult lockGraph)
+            {
+                if (thread.BlockedThreadCount > 0 && lockGraph.ContestedLockCount > 0)
+                {
+                    string topLockType = lockGraph.TopContestedLockTypes?.Count > 0
+                        ? lockGraph.TopContestedLockTypes[0].Name
+                        : "unknown lock type";
+                    insights.Add($"[THREAD+LOCK] {thread.BlockedThreadCount:N0} blocked-pattern thread(s) overlap with {lockGraph.ContestedLockCount:N0} contested lock(s). Top hotspot: {FormatHelper.TruncateString(topLockType, 60)}.");
+                }
+
+                if (thread.WaitPatternBreakdown.TryGetValue("MonitorContention", out int monitorContention) && monitorContention > 0)
+                {
+                    insights.Add($"[LOCK CONTENTION SIGNAL] Monitor-contention signatures observed on {monitorContention:N0} thread(s); correlate with lock owners/hotspots first.");
+                }
+            }
+
+            if (domainResults.TryGetValue("Memory Analysis", out var memoryResult)
+                && memoryResult is MemoryDomainResult memory
+                && domainResults.TryGetValue("LOH Fragmentation Analysis", out var lohResult)
+                && lohResult is LohFragmentationDomainResult loh)
+            {
+                if (memory.LohPercent >= 35 || loh.FragmentationPercent >= 20)
+                {
+                    insights.Add($"[LOH PRESSURE] LOH share {memory.LohPercent:F1}% with fragmentation {loh.FragmentationPercent:F1}%. Prioritize large object churn and lifetime reduction.");
+                }
+
+                if (domainResults.TryGetValue("GC Handle Analysis", out var gcHandleResult)
+                    && gcHandleResult is GCHandleDomainResult gcHandles
+                    && gcHandles.PinnedHandleTargets > 0)
+                {
+                    insights.Add($"[PINNING+LOH] {gcHandles.PinnedHandleTargets:N0} pinned-handle target(s) detected. Combined with LOH stress this may reduce compaction effectiveness.");
+                }
+            }
+
+            if (domainResults.TryGetValue("Static Root Leak Detection", out var staticRootResult)
+                && staticRootResult is StaticRootDomainResult staticRoots
+                && domainResults.TryGetValue("Event Leak Analysis", out var eventResult)
+                && eventResult is EventLeakDomainResult events)
+            {
+                if (staticRoots.RootCount > 0 && events.TotalEventLeakInstances > 0)
+                {
+                    insights.Add($"[STATIC ROOT+EVENT RETENTION] {staticRoots.RootCount:N0} high-impact static root(s) and {events.TotalEventLeakInstances:N0} event-leak group(s) detected. Review publisher lifetime and unsubscribe discipline.");
+                }
+            }
+
+            if (domainResults.TryGetValue("Reference Chain Analysis", out var referenceResult)
+                && referenceResult is ReferenceChainDomainResult referenceChains
+                && domainResults.TryGetValue("Dependent Handle Analysis", out var dependentResult)
+                && dependentResult is DependentHandleDomainResult dependent)
+            {
+                if (referenceChains.RetainedPercent >= 60 || dependent.UnresolvedPercent >= 30)
+                {
+                    insights.Add($"[RETENTION GRAPH] Retained sample coverage {referenceChains.RetainedPercent:F1}% and dependent-handle unresolved ratio {dependent.UnresolvedPercent:F1}%. Validate hidden ownership edges and conditional retention paths.");
+                }
+            }
+
+            if (insights.Count == 0)
+            {
+                writer.WriteLine("No strong cross-analyzer correlation signals exceeded report thresholds in this dump.");
+                return;
+            }
+
+            for (int i = 0; i < insights.Count; i++)
+            {
+                writer.WriteLine($"{i + 1}. {insights[i]}");
+            }
         }
 
         private static void WriteFooter(OutputWriter writer)

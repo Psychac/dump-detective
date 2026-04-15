@@ -4,19 +4,16 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class GCHandleAnalyzer
+    internal class GCHandleAnalyzer : IAnalyzer
     {
         private const int TopTypeCount = 15;
-        private readonly OutputWriter _writer;
 
-        public GCHandleAnalyzer(OutputWriter writer)
-        {
-            _writer = writer;
-        }
+        public string Name => "GC Handle Analysis";
 
-        public AnalyzerOutput Analyze(ClrRuntime runtime)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {
-            _writer.WriteHeader("GC HANDLE ANALYSIS:");
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -52,15 +49,25 @@ namespace DumpDetective.Analyzers
 
             scanCounter.Complete();
 
-            PrintSummary(totalHandles, strongLikeHandles, weakLikeHandles, byKind);
-            PrintTopTypes("TOP TYPES REFERENCED BY HANDLES:", allTargetTypes, TopTypeCount);
-            PrintTopTypes("TOP TYPES REFERENCED BY PINNED HANDLES:", pinnedTypes, TopTypeCount);
-
             int pinnedHandleTargets = pinnedTypes.Values.Sum();
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            static List<NameCountEntry> ToTopEntries(Dictionary<string, int> source, int take)
+            {
+                var list = new List<NameCountEntry>(Math.Min(source.Count, take));
+                foreach (var kvp in source.OrderByDescending(k => k.Value).Take(take))
+                    list.Add(new NameCountEntry(kvp.Key, kvp.Value));
+                return list;
+            }
+
+            return new AnalyzerExecutionResult(
                 [CreateFinding(totalHandles, pinnedTypes)],
-                new GCHandleDomainResult(totalHandles, strongLikeHandles, weakLikeHandles, pinnedHandleTargets));
+                new GCHandleDomainResult(
+                    totalHandles,
+                    strongLikeHandles,
+                    weakLikeHandles,
+                    pinnedHandleTargets,
+                    ToTopEntries(byKind, TopTypeCount),
+                    ToTopEntries(allTargetTypes, TopTypeCount),
+                    ToTopEntries(pinnedTypes, TopTypeCount)));
         }
 
         private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)
@@ -87,54 +94,6 @@ namespace DumpDetective.Analyzers
                 Tags: ["gc-handle", "pinning", "retention"],
                 MetricValue: totalHandles,
                 MetricUnit: "total-handles");
-        }
-
-        private void PrintSummary(int total, int strongLike, int weakLike, Dictionary<string, int> byKind)
-        {
-            _writer.WriteLine("HANDLE SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Total Handles: {total:N0}");
-
-            if (total > 0)
-            {
-                _writer.WriteLine($"Strong-like Handles: {strongLike:N0} ({(strongLike * 100.0 / total):F1}%)");
-                _writer.WriteLine($"Weak-like Handles: {weakLike:N0} ({(weakLike * 100.0 / total):F1}%)");
-            }
-
-            _writer.WriteLine("\nHANDLES BY KIND:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"{"HandleKind",-30} {"Count",12}");
-            _writer.WriteSeparator();
-
-            foreach ((string kind, int count) in byKind.OrderByDescending(k => k.Value))
-            {
-                _writer.WriteLine($"{kind,-30} {count,12:N0}");
-            }
-        }
-
-        private void PrintTopTypes(string title, Dictionary<string, int> typeCounts, int topCount)
-        {
-            _writer.WriteLine($"\n{title}");
-            _writer.WriteSeparator();
-
-            if (typeCounts.Count == 0)
-            {
-                _writer.WriteLine("No typed handle targets found.");
-                return;
-            }
-
-            _writer.WriteLine($"{"Type",-70} {"Count",12}");
-            _writer.WriteSeparator();
-
-            int written = 0;
-            foreach ((string typeName, int count) in typeCounts.OrderByDescending(t => t.Value))
-            {
-                if (written >= topCount)
-                    break;
-
-                _writer.WriteLine($"{FormatHelper.TruncateString(typeName, 70),-70} {count,12:N0}");
-                written++;
-            }
         }
 
         private static bool IsWeakLike(string kind)

@@ -1,43 +1,27 @@
-using Microsoft.Diagnostics.Runtime;
+﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Models;
 using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class ModuleAnalyzer
+    internal class ModuleAnalyzer : IAnalyzer
     {
         private const int TopLoadedAssembliesCount = 30;
 
-        private readonly OutputWriter _writer;
+        public string Name => "Module Analysis";
 
-        public ModuleAnalyzer(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrRuntime runtime)
-        {
-            _writer.WriteHeader("MODULE/ASSEMBLY ANALYSIS:");
-
             var modules = AnalyzeModules(runtime);
-
-            PrintModuleSummary(modules);
-            PrintLoadedAssemblies(modules);
-            PrintVersionConflicts(modules);
-
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
-                [CreateFinding(modules)],
-                new ModuleDomainResult(
-                    modules.TotalModules,
-                    modules.DynamicModules,
-                    modules.VersionConflicts.Count,
-                    modules.VersionConflicts.Keys.ToList()));
+            var domainResult = BuildDomainResult(modules);
+            return new AnalyzerExecutionResult([CreateFinding(domainResult)], domainResult);
         }
 
-        private static InsightFinding CreateFinding(ModuleAnalysis analysis)
+        private static InsightFinding CreateFinding(ModuleDomainResult result)
         {
-            int conflicts = analysis.VersionConflicts.Count;
+            int conflicts = result.VersionConflictGroups;
             FindingSeverity severity = conflicts >= 3
                 ? FindingSeverity.Critical
                 : conflicts > 0
@@ -49,13 +33,57 @@ namespace DumpDetective.Analyzers
                 Category: "Dependency",
                 Severity: severity,
                 Title: conflicts > 0 ? "Module identity conflicts detected" : "Module dependency snapshot",
-                Evidence: $"{analysis.TotalModules:N0} modules loaded, {analysis.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).",
+                Evidence: $"{result.TotalModules:N0} modules loaded, {result.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).",
                 Recommendation: conflicts > 0
                     ? "Align dependency versions and verify binding redirects/deployment consistency."
                     : "No immediate module-version conflict action required.",
                 Tags: ["modules", "assemblies", "dependency"],
                 MetricValue: conflicts,
                 MetricUnit: "conflict-groups");
+        }
+
+        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis)
+        {
+            // Top modules by size — same selection logic as PrintLoadedAssemblies.
+            var candidates = new List<ModuleInfo>(analysis.ModulesByName.Count);
+            foreach (var group in analysis.ModulesByName.Values)
+            {
+                if (group.Count == 0) continue;
+                ModuleInfo largest = group[0];
+                for (int i = 1; i < group.Count; i++)
+                {
+                    if (group[i].Size > largest.Size)
+                        largest = group[i];
+                }
+                candidates.Add(largest);
+            }
+            candidates.Sort((a, b) => b.Size.CompareTo(a.Size));
+
+            var topModules = new List<LoadedModuleSnapshot>(TopLoadedAssembliesCount);
+            for (int i = 0; i < candidates.Count && i < TopLoadedAssembliesCount; i++)
+            {
+                var m = candidates[i];
+                topModules.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic));
+            }
+
+            // Conflict groups — preserve full per-instance detail for the printer.
+            var conflictDetails = new List<ModuleConflictGroup>(analysis.VersionConflicts.Count);
+            foreach (var kvp in analysis.VersionConflicts)
+            {
+                var instances = new List<LoadedModuleSnapshot>(kvp.Value.Count);
+                foreach (var m in kvp.Value)
+                    instances.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic));
+                conflictDetails.Add(new ModuleConflictGroup(kvp.Key, instances));
+            }
+
+            return new ModuleDomainResult(
+                analysis.TotalModules,
+                analysis.DynamicModules,
+                analysis.ModulesByName.Count,
+                analysis.VersionConflicts.Count,
+                analysis.VersionConflicts.Keys.ToList(),
+                topModules,
+                conflictDetails);
         }
 
         private ModuleAnalysis AnalyzeModules(ClrRuntime runtime)
@@ -125,84 +153,6 @@ namespace DumpDetective.Analyzers
             return analysis;
         }
 
-        private void PrintModuleSummary(ModuleAnalysis analysis)
-        {
-            _writer.WriteLine("MODULE SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Total Modules Loaded: {analysis.TotalModules:N0}");
-            _writer.WriteLine($"Unique Module Names: {analysis.ModulesByName.Count:N0}");
-            _writer.WriteLine($"Dynamic Modules: {analysis.DynamicModules:N0}");
-            
-            if (analysis.VersionConflicts.Count > 0)
-            {
-                _writer.WriteLine($"\n⚠️  VERSION CONFLICTS: {analysis.VersionConflicts.Count} module(s) loaded multiple times!");
-            }
-        }
-
-        private void PrintLoadedAssemblies(ModuleAnalysis analysis)
-        {
-            _writer.WriteLine($"\n\nLOADED ASSEMBLIES (Top {TopLoadedAssembliesCount}):");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"{"Module Name",-40} {"Version/Assembly Name",-45} {"Size",12}");
-            _writer.WriteSeparator();
-
-            var topModules = new List<ModuleInfo>(analysis.ModulesByName.Count);
-            foreach (var moduleGroup in analysis.ModulesByName.Values)
-            {
-                if (moduleGroup.Count == 0)
-                    continue;
-
-                // Pick the largest instance for this module name.
-                ModuleInfo selected = moduleGroup[0];
-                for (int i = 1; i < moduleGroup.Count; i++)
-                {
-                    if (moduleGroup[i].Size > selected.Size)
-                        selected = moduleGroup[i];
-                }
-
-                topModules.Add(selected);
-            }
-
-            topModules.Sort((a, b) => b.Size.CompareTo(a.Size));
-
-            int count = 0;
-            foreach (var module in topModules)
-            {
-                if (count >= TopLoadedAssembliesCount)
-                    break;
-
-                string dynamicMarker = module.IsDynamic ? " [Dynamic]" : "";
-                _writer.WriteLine($"{FormatHelper.TruncateString(module.Name, 40),-40} {FormatHelper.TruncateString(module.AssemblyName, 45),-45} {FormatHelper.FormatBytes(module.Size),12}{dynamicMarker}");
-                count++;
-            }
-        }
-
-        private void PrintVersionConflicts(ModuleAnalysis analysis)
-        {
-            if (analysis.VersionConflicts.Count == 0)
-            {
-                _writer.WriteLine("\n\n✅ No version conflicts detected.");
-                return;
-            }
-
-            _writer.WriteLine("\n\n⚠️  VERSION CONFLICTS DETECTED:");
-            _writer.WriteSeparator();
-            _writer.WriteLine("The following modules are loaded multiple times with different versions:\n");
-
-            foreach (var kvp in analysis.VersionConflicts)
-            {
-                _writer.WriteLine($"Module: {kvp.Key}");
-                foreach (var module in kvp.Value)
-                {
-                    _writer.WriteLine($"  - Version: {module.AssemblyName}");
-                    _writer.WriteLine($"    Path: {FormatHelper.TruncateString(module.FullPath, 70)}");
-                    _writer.WriteLine($"    Address: 0x{module.Address:X}, Size: {FormatHelper.FormatBytes(module.Size)}");
-                }
-                _writer.WriteLine($"\n  💡 RECOMMENDATION:");
-                _writer.WriteLine($"     Ensure binding redirects are configured correctly.");
-                _writer.WriteLine($"     Check for dependency conflicts in your project.\n");
-            }
-        }
     }
 
     internal class ModuleAnalysis

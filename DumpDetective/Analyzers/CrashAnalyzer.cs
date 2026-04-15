@@ -4,7 +4,7 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class CrashAnalyzer
+    internal class CrashAnalyzer : IAnalyzer
     {
         private const int MaxExceptionsPerType = 10;
         private const int TopExceptionTypesCount = 10;
@@ -13,17 +13,12 @@ namespace DumpDetective.Analyzers
         private const int MaxCurrentThreadFramesToPrint = 5;
         private const int TopCrashThreadCandidates = 5;
 
-        private readonly OutputWriter _writer;
+        public string Name => "Crash Analysis";
 
-        public CrashAnalyzer(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime, context.Heap);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
-        {
-            _writer.WriteHeader("CRASH ANALYSIS:");
-
             var exceptionInfo = AnalyzeExceptions(heap, runtime);
 
             var domainResult = new CrashDomainResult(
@@ -34,9 +29,7 @@ namespace DumpDetective.Analyzers
 
             if (exceptionInfo.TotalExceptions == 0)
             {
-                _writer.WriteLine("No exceptions detected in dump (likely not a crash dump).");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(CrashAnalyzer),
                         Category: "Stability",
@@ -50,12 +43,7 @@ namespace DumpDetective.Analyzers
                     domainResult);
             }
 
-            PrintExceptionSummary(exceptionInfo);
-            PrintLikelyCrashThreads(exceptionInfo);
-            PrintExceptionDetails(exceptionInfo);
-
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput([CreateFinding(exceptionInfo)], domainResult);
+            return new AnalyzerExecutionResult([CreateFinding(exceptionInfo)], domainResult);
         }
 
         private static InsightFinding CreateFinding(ExceptionAnalysis analysis)
@@ -349,133 +337,6 @@ namespace DumpDetective.Analyzers
             return stackFrames;
         }
 
-        private void PrintExceptionSummary(ExceptionAnalysis analysis)
-        {
-            _writer.WriteLine("EXCEPTION SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Total Exception Objects: {analysis.TotalExceptions:N0}");
-            _writer.WriteLine($"Active Exceptions (on threads): {analysis.ActiveExceptions}");
-            _writer.WriteLine($"Unique Exception Types: {analysis.ExceptionTypeCounts.Count}");
-
-            if (analysis.ActiveExceptions > 0)
-            {
-                _writer.WriteLine($"\n⚠️  CRASH DETECTED: {analysis.ActiveExceptions} active exception(s) found!");
-            }
-
-            _writer.WriteLine($"\nTop Exception Types:");
-            foreach (var kvp in analysis.ExceptionTypeCounts.Take(TopExceptionTypesCount))
-            {
-                analysis.ActiveExceptionTypeCounts.TryGetValue(kvp.Key, out int activeCount);
-                string activeMarker = activeCount > 0 ? $" ({activeCount} active ⚠️)" : "";
-                _writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} instance(s){activeMarker}");
-            }
-        }
-
-        private void PrintLikelyCrashThreads(ExceptionAnalysis analysis)
-        {
-            _writer.WriteLine("\nLIKELY CRASH THREADS:");
-            _writer.WriteSeparator();
-
-            if (analysis.CrashThreadCandidates.Count == 0)
-            {
-                _writer.WriteLine("No active exception thread candidates found.");
-                return;
-            }
-
-            int rank = 1;
-            foreach (var candidate in analysis.CrashThreadCandidates.Take(TopCrashThreadCandidates))
-            {
-                string confidence = candidate.ActiveExceptionCount > 1 ? "High" : "Medium";
-                _writer.WriteLine($"[{rank}] Thread {candidate.ThreadId} (OS: {candidate.OSThreadId}) - Confidence: {confidence}");
-                _writer.WriteLine($"    Active exceptions on thread: {candidate.ActiveExceptionCount}");
-                _writer.WriteLine($"    Primary exception type: {candidate.PrimaryExceptionType}");
-
-                if (candidate.CurrentThreadStack.Count > 0)
-                {
-                    var topFrame = candidate.CurrentThreadStack[0];
-                    string method = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown";
-                    _writer.WriteLine($"    Top frame: {FormatHelper.TruncateString(method, 100)}");
-                }
-
-                rank++;
-            }
-        }
-
-        private void PrintExceptionDetails(ExceptionAnalysis analysis)
-        {
-            _writer.WriteLine($"\n\nDETAILED EXCEPTION INFORMATION:");
-            _writer.WriteSeparator();
-
-            int exNum = 1;
-            foreach (var kvp in analysis.ExceptionsByType)
-            {
-                // Prioritize active exceptions
-                var activeExceptions = kvp.Value.Where(e => e.ThreadId.HasValue).ToList();
-                var inactiveExceptions = kvp.Value.Where(e => !e.ThreadId.HasValue).Take(2).ToList();
-
-                foreach (var ex in activeExceptions.Concat(inactiveExceptions).Take(MaxDetailedExceptionsPerType))
-                {
-                    _writer.WriteLine($"\n[{exNum++}] {ex.Type}");
-                    _writer.WriteLine($"    Address: 0x{ex.Address:X}");
-
-                    if (!string.IsNullOrEmpty(ex.Message))
-                    {
-                        string truncated = FormatHelper.TruncateString(ex.Message, 200);
-                        _writer.WriteLine($"    Message: {truncated}");
-                    }
-
-                    if (ex.HResult != 0)
-                    {
-                        _writer.WriteLine($"    HRESULT: 0x{ex.HResult:X8}");
-                    }
-
-                    if (ex.InnerExceptionType != null)
-                    {
-                        _writer.WriteLine($"    Inner Exception: {ex.InnerExceptionType}");
-                    }
-
-                    if (ex.ThreadId.HasValue)
-                    {
-                        _writer.WriteLine($"    ⚠️  ACTIVE on Thread: {ex.ThreadId} (OS: {ex.OSThreadId})");
-                    }
-                    else
-                    {
-                        _writer.WriteLine($"    Status: Inactive (collected exception object)");
-                    }
-
-                    // Print ORIGINAL exception stack trace (where it was thrown)
-                    if (ex.OriginalStackTrace.Count > 0)
-                    {
-                        _writer.WriteLine($"\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
-                        foreach (var frame in ex.OriginalStackTrace.Take(MaxOriginalStackFramesToPrint))
-                        {
-                            _writer.WriteLine($"      {frame}");
-                        }
-                        if (ex.OriginalStackTrace.Count > MaxOriginalStackFramesToPrint)
-                        {
-                            _writer.WriteLine($"      ... and {ex.OriginalStackTrace.Count - MaxOriginalStackFramesToPrint} more frames");
-                        }
-                    }
-
-                    // Show current thread position (if different)
-                    if (ex.CurrentThreadStack.Count > 0 && ex.ThreadId.HasValue)
-                    {
-                        _writer.WriteLine($"\n    Current Thread Position (exception handling):");
-                        foreach (var frame in ex.CurrentThreadStack.Take(MaxCurrentThreadFramesToPrint))
-                        {
-                            string method = frame.Method?.Signature ?? frame.ToString() ?? "Unknown";
-                            _writer.WriteLine($"      {FormatHelper.TruncateString(method, 70)}");
-                        }
-                    }
-                }
-
-                analysis.ExceptionTypeCounts.TryGetValue(kvp.Key, out int totalTypeCount);
-                if (totalTypeCount > MaxDetailedExceptionsPerType)
-                {
-                    _writer.WriteLine($"\n    ... and {totalTypeCount - MaxDetailedExceptionsPerType} more {kvp.Key} instance(s)");
-                }
-            }
-        }
     }
 
     internal class ExceptionAnalysis

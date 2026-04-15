@@ -4,36 +4,33 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class LockGraphAnalyzer
+    internal class LockGraphAnalyzer : IAnalyzer
     {
         private const int MaxContestedLocksToShow = 15;
-        private const int MaxCausalityNodesToShow = 20;
 
-        private readonly OutputWriter _writer;
+        public string Name => "Lock Graph Analysis";
 
-        public LockGraphAnalyzer(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime, context.Heap);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrRuntime runtime, ClrHeap heap)
-        {
-            _writer.WriteHeader("LOCK GRAPH ANALYSIS:");
-
             var graph = BuildLockGraph(runtime, heap);
 
-            PrintContestedLocks(graph);
-            PrintDeadlockCandidates(graph);
-            PrintCausalityChain(graph);
+            var topContestedTypes = graph.ContestedLocks
+                .GroupBy(c => c.ObjectTypeName, StringComparer.Ordinal)
+                .Select(g => new NameCountEntry(g.Key, g.Sum(x => x.WaitingThreadCount)))
+                .OrderByDescending(x => x.Count)
+                .Take(MaxContestedLocksToShow)
+                .ToList();
 
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 [CreateFinding(graph)],
                 new LockGraphDomainResult(
                     graph.AllHeldLocks.Count,
                     graph.ContestedLocks.Count,
                     graph.ContestedLocks.Count > 0 ? graph.ContestedLocks[0].WaitingThreadCount : 0,
-                    graph.DeadlockCandidates.Count));
+                    graph.DeadlockCandidates.Count,
+                    topContestedTypes));
         }
 
         private static InsightFinding CreateFinding(LockGraphAnalysis graph)
@@ -143,151 +140,6 @@ namespace DumpDetective.Analyzers
             }
 
             return result;
-        }
-
-        private void PrintContestedLocks(LockGraphAnalysis graph)
-        {
-            _writer.WriteLine("LOCK CONTENTION HOTSPOTS:");
-            _writer.WriteSeparator();
-
-            if (graph.AllHeldLocks.Count == 0)
-            {
-                _writer.WriteLine("No inflated monitor locks found in this dump.");
-                _writer.WriteLine("Uncontested locks held via thin-lock encoding in object headers are not shown here.");
-                return;
-            }
-
-            _writer.WriteLine($"Inflated locks held: {graph.AllHeldLocks.Count}");
-            _writer.WriteLine($"Contested locks:     {graph.ContestedLocks.Count}");
-
-            if (graph.ContestedLocks.Count == 0)
-            {
-                _writer.WriteLine("\nNo contested monitor locks detected.");
-                return;
-            }
-
-            _writer.WriteLine(string.Empty);
-            foreach (var entry in graph.ContestedLocks.Take(MaxContestedLocksToShow))
-            {
-                string owner = entry.OwnerThread != null
-                    ? $"Thread {entry.OwnerThread.ManagedThreadId} (OS: {entry.OwnerThread.OSThreadId})"
-                    : $"0x{entry.HoldingThreadAddress:X} (unresolved)";
-
-                _writer.WriteLine($"🔒 {FormatHelper.TruncateString(entry.ObjectTypeName, 62)}");
-                _writer.WriteLine($"   Address:  0x{entry.ObjectAddress:X}");
-                _writer.WriteLine($"   Owner:    {owner}  (recursion: {entry.RecursionCount})");
-
-                string waiterSuffix = entry.WaitingThreadCount >= 5 ? "  ⚠️  HIGH CONTENTION" : string.Empty;
-                _writer.WriteLine($"   Waiters:  {entry.WaitingThreadCount} thread(s){waiterSuffix}");
-                _writer.WriteLine(string.Empty);
-            }
-        }
-
-        private void PrintDeadlockCandidates(LockGraphAnalysis graph)
-        {
-            _writer.WriteLine("DEADLOCK CANDIDATES:");
-            _writer.WriteSeparator();
-
-            if (graph.DeadlockCandidates.Count == 0)
-            {
-                _writer.WriteLine("No threads detected both holding an inflated lock and waiting on a monitor.");
-                return;
-            }
-
-            if (graph.DeadlockCandidates.Count >= 2)
-            {
-                _writer.WriteLine($"🔴 PROBABLE DEADLOCK: {graph.DeadlockCandidates.Count} thread(s) each hold a lock while waiting on a monitor.");
-                _writer.WriteLine(string.Empty);
-            }
-            else
-            {
-                _writer.WriteLine($"⚠️  DEADLOCK CANDIDATE: Thread {graph.DeadlockCandidates[0].Thread.ManagedThreadId} holds a lock while waiting on a monitor.");
-                _writer.WriteLine($"    A second thread contesting this thread's lock would complete the cycle.");
-                _writer.WriteLine(string.Empty);
-            }
-
-            foreach (var candidate in graph.DeadlockCandidates)
-            {
-                var t = candidate.Thread;
-                _writer.WriteLine($"Thread {t.ManagedThreadId} (OS: {t.OSThreadId}):");
-                _writer.WriteLine($"  Waiting at: {FormatHelper.TruncateString(candidate.TopFrame, 75)}");
-
-                if (candidate.LocksHeld.Count > 0)
-                {
-                    _writer.WriteLine($"  Holding {candidate.LocksHeld.Count} lock(s):");
-                    foreach (var held in candidate.LocksHeld)
-                        _writer.WriteLine($"    → {FormatHelper.TruncateString(held.ObjectTypeName, 55)}  @ 0x{held.ObjectAddress:X}  ({held.WaitingThreadCount} waiter(s))");
-                }
-
-                _writer.WriteLine(string.Empty);
-            }
-
-            if (graph.DeadlockCandidates.Count >= 2)
-            {
-                _writer.WriteLine("💡 INVESTIGATION STEPS:");
-                _writer.WriteLine("   1. Each thread above holds an object lock it won't release until it acquires another.");
-                _writer.WriteLine("   2. If Thread A holds what Thread B wants, and Thread B holds what Thread A wants → deadlock.");
-                _writer.WriteLine("   3. Compare each thread's 'Holding' list against the contested lock owners above.");
-                _writer.WriteLine("   4. Fix: enforce a consistent global lock acquisition order across all code paths.");
-            }
-        }
-
-        private void PrintCausalityChain(LockGraphAnalysis graph)
-        {
-            _writer.WriteLine("LOCK CAUSALITY CHAIN:");
-            _writer.WriteSeparator();
-
-            if (graph.AllHeldLocks.Count == 0)
-            {
-                _writer.WriteLine("No inflated locks available for causality chain.");
-                return;
-            }
-
-            // Group by owner thread, sort by total downstream thread pressure
-            var byOwner = new Dictionary<int, List<LockContention>>();
-            foreach (var entry in graph.AllHeldLocks)
-            {
-                if (entry.OwnerThread == null) continue;
-                int id = entry.OwnerThread.ManagedThreadId;
-                if (!byOwner.TryGetValue(id, out var list))
-                {
-                    list = new List<LockContention>();
-                    byOwner[id] = list;
-                }
-                list.Add(entry);
-            }
-
-            if (byOwner.Count == 0)
-            {
-                _writer.WriteLine("Could not resolve any lock owners to managed threads.");
-                return;
-            }
-
-            var deadlockIds = new HashSet<int>(graph.DeadlockCandidates.Select(d => d.Thread.ManagedThreadId));
-
-            int shown = 0;
-            foreach (var kvp in byOwner.OrderByDescending(k => k.Value.Sum(l => l.WaitingThreadCount)))
-            {
-                if (shown >= MaxCausalityNodesToShow) break;
-
-                int tid = kvp.Key;
-                var locks = kvp.Value;
-                int totalWaiters = locks.Sum(l => l.WaitingThreadCount);
-                bool isCandidate = deadlockIds.Contains(tid);
-
-                string prefix = isCandidate ? "⚠️ " : "   ";
-                string suffix = isCandidate ? "  ← also waiting on a monitor" : string.Empty;
-                _writer.WriteLine($"{prefix}Thread {tid}{suffix}");
-
-                foreach (var l in locks)
-                    _writer.WriteLine($"     → holds: {FormatHelper.TruncateString(l.ObjectTypeName, 55)}  ({l.WaitingThreadCount} thread(s) waiting)");
-
-                if (totalWaiters > 0)
-                    _writer.WriteLine($"     Total downstream pressure: {totalWaiters} thread(s) blocked by this thread");
-
-                _writer.WriteLine(string.Empty);
-                shown++;
-            }
         }
     }
 

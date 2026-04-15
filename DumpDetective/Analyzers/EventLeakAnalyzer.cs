@@ -5,7 +5,7 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class EventLeakAnalyzer
+    internal class EventLeakAnalyzer : IAnalyzer
     {
         private const int TopSubscriberTypesToShow = 5;
         private const int TopDetailedInstancesPerGroup = 5;
@@ -14,28 +14,28 @@ namespace DumpDetective.Analyzers
         private const int SeverityStaticPublisherBonus = 10;
         private const int SeverityRootHintBonus = 5;
 
-        private readonly OutputWriter _writer;
         private readonly AnalysisConfiguration _config;
         private static readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
         private static readonly object _eventNameCacheLock = new();
 
-        public EventLeakAnalyzer(OutputWriter writer, AnalysisConfiguration config)
+        public string Name => "Event Leak Analysis";
+
+        public EventLeakAnalyzer(AnalysisConfiguration config)
         {
-            _writer = writer;
             _config = config;
         }
 
-        public AnalyzerOutput Analyze(ClrHeap heap)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {
             int minSubscribers = _config.EventLeakMinSubscribers;
-            _writer.WriteHeader("EVENT LEAK ANALYSIS:");
             var eventLeaks = FindEventLeaks(heap, minSubscribers);
             var findings = new List<InsightFinding>(capacity: 5);
 
             if (eventLeaks.Count == 0)
             {
-                _writer.WriteLine("No event leaks detected!");
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(EventLeakAnalyzer),
                         Category: "Leak",
@@ -50,17 +50,20 @@ namespace DumpDetective.Analyzers
             }
 
             var groupedLeaks = GroupEventLeaks(eventLeaks);
-            PrintSummary(eventLeaks, groupedLeaks);
-            PrintDetailedInstances(groupedLeaks);
             AddFindings(findings, groupedLeaks);
 
             int totalSubscribers = groupedLeaks.Sum(g => g.TotalSubscribers);
             int staticLeaks = groupedLeaks.Count(g => g.IsStatic);
             int instanceLeaks = groupedLeaks.Count(g => !g.IsStatic);
+            var topPublisherEvents = groupedLeaks
+                .OrderByDescending(g => g.TotalSubscribers)
+                .Take(10)
+                .Select(g => new NameCountEntry($"{g.PublisherType}.{g.EventFieldName}", g.TotalSubscribers))
+                .ToList();
 
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 findings,
-                new EventLeakDomainResult(groupedLeaks.Count, totalSubscribers, staticLeaks, instanceLeaks));
+                new EventLeakDomainResult(groupedLeaks.Count, totalSubscribers, staticLeaks, instanceLeaks, topPublisherEvents));
         }
 
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)
@@ -226,122 +229,6 @@ namespace DumpDetective.Analyzers
             return result;
         }
 
-        private void PrintSummary(List<EventLeakInfo> eventLeaks, List<EventGroupInfo> groupedLeaks)
-        {
-            _writer.WriteLine($"\nFound {eventLeaks.Count} event instance(s) across {groupedLeaks.Count} event type(s):\n");
-            _writer.WriteLine("SUMMARY BY EVENT TYPE:");
-            _writer.WriteLine(new string('=', 80));
-
-            int groupCount = 1;
-            foreach (var group in groupedLeaks)
-            {
-                _writer.WriteLine($"\n[{groupCount++}] {(group.IsStatic ? "[STATIC] " : "[INSTANCE] ")}{group.PublisherType}.{group.EventFieldName} (Severity: {group.SeverityScore})");
-                _writer.WriteLine($"  Instance Count: {group.InstanceCount}");
-                _writer.WriteLine($"  Total Subscribers: {group.TotalSubscribers}");
-                _writer.WriteLine($"  Severity Score: {group.SeverityScore}");
-                _writer.WriteLine($"  Average Subscribers: {group.AverageSubscribers:F2}");
-                _writer.WriteLine($"  Min/Max Subscribers: {group.MinSubscribers}/{group.MaxSubscribers}");
-
-                // Optimized subscriber type grouping
-                var subscriberTypeCounts = GetTopSubscriberTypes(group.Instances, topCount: TopSubscriberTypesToShow);
-
-                if (subscriberTypeCounts.Count > 0)
-                {
-                    _writer.WriteLine($"  Top Subscriber Types:");
-                    foreach (var (type, count) in subscriberTypeCounts)
-                    {
-                        _writer.WriteLine($"    - {type} ({count} instance(s))");
-                    }
-                }
-            }
-        }
-
-        private List<(string Type, int Count)> GetTopSubscriberTypes(List<EventLeakInfo> instances, int topCount)
-        {
-            var typeCounts = new Dictionary<string, int>();
-
-            foreach (var instance in instances)
-            {
-                foreach (var subscriber in instance.Subscribers)
-                {
-                    if (!typeCounts.TryGetValue(subscriber.Type, out int count))
-                    {
-                        typeCounts[subscriber.Type] = 1;
-                    }
-                    else
-                    {
-                        typeCounts[subscriber.Type] = count + 1;
-                    }
-                }
-            }
-
-            // Convert to list and sort
-            var result = new List<(string Type, int Count)>(typeCounts.Count);
-            foreach (var kvp in typeCounts)
-            {
-                result.Add((kvp.Key, kvp.Value));
-            }
-
-            result.Sort((a, b) => b.Count.CompareTo(a.Count));
-
-            return result.Count > topCount ? result.GetRange(0, topCount) : result;
-        }
-
-        private void PrintDetailedInstances(List<EventGroupInfo> groupedLeaks)
-        {
-            _writer.WriteLine(StringConstants.Equals80);
-            _writer.WriteLine("\nDETAILED INSTANCES:");
-            _writer.WriteLine(StringConstants.Equals80);
-
-            int detailCount = 1;
-            foreach (var group in groupedLeaks)
-            {
-                _writer.WriteLine($"\n[{(group.IsStatic ? "STATIC" : "INSTANCE")}] {group.PublisherType}.{group.EventFieldName} - {group.InstanceCount} instance(s)");
-                _writer.WriteSeparator();
-
-                // Sort instances and take top 5
-                var topInstances = group.Instances
-                    .OrderByDescending(l => l.SubscriberCount)
-                    .Take(TopDetailedInstancesPerGroup)
-                    .ToList();
-
-                foreach (var leak in topInstances)
-                {
-                    _writer.WriteLine($"  Instance #{detailCount++} (Severity: {leak.SeverityScore})");
-                    _writer.WriteLine(leak.IsStatic
-                        ? "    Address: (static)"
-                        : $"    Address: 0x{leak.PublisherAddress:X}");
-                    _writer.WriteLine($"    Severity Score: {leak.SeverityScore}");
-                    if (!string.IsNullOrEmpty(leak.RootHint))
-                        _writer.WriteLine($"    Root Hint: {leak.RootHint}");
-                    _writer.WriteLine($"    Subscribers: {leak.SubscriberCount}");
-
-                    if (leak.Subscribers.Count > 0)
-                    {
-                        _writer.WriteLine($"    Subscriber Types:");
-
-                        int displayCount = Math.Min(TopSubscriberTypesToShow, leak.Subscribers.Count);
-                        for (int i = 0; i < displayCount; i++)
-                        {
-                            var subscriber = leak.Subscribers[i];
-                            _writer.WriteLine($"      - {subscriber.Type} (0x{subscriber.Address:X})");
-                        }
-
-                        if (leak.Subscribers.Count > TopSubscriberTypesToShow)
-                        {
-                            _writer.WriteLine($"      ... and {leak.Subscribers.Count - TopSubscriberTypesToShow} more");
-                        }
-                    }
-                    _writer.WriteLine(string.Empty);
-                }
-
-                if (group.InstanceCount > TopDetailedInstancesPerGroup)
-                {
-                    _writer.WriteLine($"  ... and {group.InstanceCount - TopDetailedInstancesPerGroup} more instance(s)");
-                    _writer.WriteLine(string.Empty);
-                }
-            }
-        }
 
         private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField)
         {

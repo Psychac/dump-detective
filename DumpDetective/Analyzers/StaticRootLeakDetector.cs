@@ -4,7 +4,7 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class StaticRootLeakDetector
+    internal class StaticRootLeakDetector : IAnalyzer
     {
         private const int MaxRootsToReport = 15;
         private const int TopRetainedTypesToReport = 5;
@@ -13,24 +13,17 @@ namespace DumpDetective.Analyzers
         private const int SignificantObjectCountThreshold = 100;
         private const int MaxRetainedObjectsToScan = 10000;
 
-        private readonly OutputWriter _writer;
+        public string Name => "Static Root Leak Detection";
 
-        public StaticRootLeakDetector(OutputWriter writer)
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
+
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrHeap heap, HeapAnalysisCache cache)
-        {
-            _writer.WriteHeader("STATIC ROOT LEAK DETECTION:");
-
             var staticRootAnalysis = AnalyzeStaticRoots(heap, cache);
 
             if (staticRootAnalysis.Count == 0)
             {
-                _writer.WriteLine("No concerning static roots found.");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(StaticRootLeakDetector),
                         Category: "Leak",
@@ -44,58 +37,19 @@ namespace DumpDetective.Analyzers
                     new StaticRootDomainResult(0, 0));
             }
 
-            _writer.WriteLine($"Found {staticRootAnalysis.Count} static root(s) with significant memory impact:\n");
-
-            // Manual sorting - no LINQ allocations
-            staticRootAnalysis.Sort((a, b) => b.TotalMemoryImpact.CompareTo(a.TotalMemoryImpact));
-
-            int rootNum = 1;
-            int rootCount = 0;
-            foreach (var analysis in staticRootAnalysis)
-            {
-                if (rootCount >= MaxRootsToReport) break;
-                _writer.WriteLine($"[{rootNum++}] STATIC ROOT LEAK");
-                _writer.WriteSeparator();
-                _writer.WriteLine($"  Root: {analysis.RootDescription}");
-                _writer.WriteLine($"  Direct Object: {analysis.DirectObjectType} @ 0x{analysis.DirectObjectAddress:X}");
-                _writer.WriteLine($"  Direct Size: {FormatHelper.FormatBytes(analysis.DirectObjectSize)}");
-                _writer.WriteLine($"  Total Retained Memory: {FormatHelper.FormatBytes(analysis.TotalMemoryImpact)}");
-                _writer.WriteLine($"  Objects Kept Alive: {analysis.ObjectsKeptAlive:N0}");
-
-                if (analysis.TopRetainedTypes.Count > 0)
-                {
-                    _writer.WriteLine($"\n  Top Types Kept Alive:");
-                    int typeCount = 0;
-                    foreach (var typeInfo in analysis.TopRetainedTypes)
-                    {
-                        if (typeCount >= TopRetainedTypesToReport) break;
-                        _writer.WriteLine($"    - {typeInfo.TypeName}: {typeInfo.Count:N0} instance(s), {FormatHelper.FormatBytes(typeInfo.TotalSize)}");
-                        typeCount++;
-                    }
-                }
-
-                _writer.WriteLine($"\n  💡 RECOMMENDATION:");
-                _writer.WriteLine($"     Consider if this static field needs to hold references indefinitely.");
-                _writer.WriteLine($"     Options: Use WeakReference, implement IDisposable pattern, or clear collections.");
-
-                if (analysis.ContainsCollections)
-                    _writer.WriteLine($"     ⚠️  Contains collections - ensure they're being cleared when done.");
-
-                if (analysis.ContainsEventHandlers)
-                    _writer.WriteLine($"     ⚠️  Contains event handlers - ensure proper unsubscription.");
-
-                _writer.WriteLine(string.Empty);
-                rootCount++;
-            }
-
             ulong totalImpact = 0;
             foreach (var item in staticRootAnalysis)
                 totalImpact += item.TotalMemoryImpact;
 
-            _writer.WriteLine(StringConstants.Equals80);
-            return new AnalyzerOutput(
+            var topRoots = staticRootAnalysis
+                .OrderByDescending(r => r.TotalMemoryImpact)
+                .Take(MaxRootsToReport)
+                .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
+                .ToList();
+
+            return new AnalyzerExecutionResult(
                 [CreateFinding(staticRootAnalysis)],
-                new StaticRootDomainResult(staticRootAnalysis.Count, totalImpact));
+                new StaticRootDomainResult(staticRootAnalysis.Count, totalImpact, topRoots));
         }
 
         private static InsightFinding CreateFinding(List<StaticRootAnalysis> staticRootAnalysis)

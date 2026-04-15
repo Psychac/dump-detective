@@ -4,22 +4,17 @@ using DumpDetective.Utilities;
 
 namespace DumpDetective.Analyzers
 {
-    internal class ThreadStackClusterAnalyzer
+    internal class ThreadStackClusterAnalyzer : IAnalyzer
     {
         private const int MaxFramesPerSignature = 6;
-        private const int MaxClustersToDisplay = 12;
         private const int MaxThreadIdsPerCluster = 8;
-        private readonly OutputWriter _writer;
 
-        public ThreadStackClusterAnalyzer(OutputWriter writer)
+        public string Name => "Thread Stack Signature Clustering";
+
+        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime);
+
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {
-            _writer = writer;
-        }
-
-        public AnalyzerOutput Analyze(ClrRuntime runtime)
-        {
-            _writer.WriteHeader("THREAD STACK SIGNATURE CLUSTERING:");
-
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;
             var scanCounter = new ObjectScanCounter("Thread clustering scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
@@ -47,17 +42,9 @@ namespace DumpDetective.Analyzers
 
             scanCounter.Complete();
 
-            _writer.WriteLine("CLUSTER SUMMARY:");
-            _writer.WriteSeparator();
-            _writer.WriteLine($"Alive Threads: {aliveThreads:N0}");
-            _writer.WriteLine($"Unique Stack Signatures: {clusters.Count:N0}");
-            _writer.WriteLine($"Singleton Signatures: {clusters.Values.Count(c => c.Count == 1):N0}");
-
             if (clusters.Count == 0)
             {
-                _writer.WriteLine("\nNo alive managed threads were available for clustering.");
-                _writer.WriteLine(StringConstants.Equals80);
-                return new AnalyzerOutput(
+                return new AnalyzerExecutionResult(
                     [new InsightFinding(
                         Analyzer: nameof(ThreadStackClusterAnalyzer),
                         Category: "Threading",
@@ -71,32 +58,14 @@ namespace DumpDetective.Analyzers
                     new ThreadStackClusterDomainResult(aliveThreads, 0, 0, []));
             }
 
-            _writer.WriteLine("\nTOP THREAD CLUSTERS:");
-            _writer.WriteSeparator();
-
             var topClusters = clusters.Values
                 .OrderByDescending(c => c.Count)
                 .ThenBy(c => c.Signature, StringComparer.Ordinal)
                 .ToList();
 
-            int shown = 0;
-            foreach (StackCluster cluster in topClusters)
-            {
-                if (shown >= MaxClustersToDisplay)
-                    break;
-
-                string sampleThreadIds = string.Join(", ", cluster.SampleThreadIds.Select(id => $"0x{id:X}"));
-                _writer.WriteLine($"\n[{cluster.Count,4} threads] Sample OSThreadIds: {sampleThreadIds}");
-                _writer.WriteLine($"Signature: {FormatHelper.TruncateString(cluster.Signature, 180)}");
-                shown++;
-            }
-
-            _writer.WriteLine("\nTip: Large clusters with wait-related signatures often indicate contention bottlenecks or hangs.");
-            _writer.WriteLine(StringConstants.Equals80);
-
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             var topSignatures = topClusters.Take(5).Select(c => c.Signature).ToList();
-            return new AnalyzerOutput(
+            return new AnalyzerExecutionResult(
                 [CreateFinding(aliveThreads, clusters.Count)],
                 new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, diversity, topSignatures));
         }

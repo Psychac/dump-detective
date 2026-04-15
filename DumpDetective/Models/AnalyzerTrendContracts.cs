@@ -63,10 +63,6 @@ namespace DumpDetective.Models
         public bool HasRegressions => Deltas.Any(d => d.IsRegression);
     }
 
-    internal sealed record AnalyzerOutput(
-        IReadOnlyList<InsightFinding> Findings,
-        AnalyzerDomainResult DomainResult);
-
     /// <summary>
     /// A single metric's value at every snapshot in the trend sequence (one value per dump, in order).
     /// </summary>

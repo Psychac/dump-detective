@@ -5,7 +5,7 @@ namespace DumpDetective.Analyzers
 {
     internal sealed class MemoryPrinter : IAnalyzerReporter
     {
-        private const int TopItemsToShow = 10;
+        private const int TopItemsToShow = 20;
 
         public string AnalyzerName => "Memory Analysis";
 
@@ -20,7 +20,10 @@ namespace DumpDetective.Analyzers
             writer.WriteLine("OVERALL SUMMARY:");
             writer.WriteSeparator();
             writer.WriteLine($"Total Memory: {FormatHelper.FormatBytes(domain.TotalBytes)}");
+            writer.WriteLine($"Total Objects: {domain.TotalObjects:N0}");
             writer.WriteLine($"LOH Memory: {FormatHelper.FormatBytes(domain.LohBytes)} ({domain.LohPercent:F1}%)");
+            writer.WriteLine($"LOH Objects: {domain.LohObjects:N0} ({domain.LohPercent:F1}% of total memory)");
+            writer.WriteLine($"LOH Threshold: {domain.LohThresholdBytes:N0} bytes");
             writer.WriteLine($"Unique Types: {domain.UniqueTypes:N0}");
 
             writer.WriteLine("\nHEAP COMPOSITION SIGNALS:");
@@ -30,31 +33,72 @@ namespace DumpDetective.Analyzers
             else
                 writer.WriteLine("✅ LOH share appears within expected range for this snapshot.");
 
-            writer.WriteLine("\nTOP TYPES BY MEMORY SIZE:");
+            writer.WriteLine("\nTOP 20 OBJECT TYPES BY MEMORY SIZE:");
             writer.WriteSeparator();
-            int shown = 0;
-            foreach (var type in domain.TopTypesBySize)
+            writer.WriteLine($"{"Type",-80} {"Count",12} {"Total Size",12}");
+            foreach (var type in domain.TopTypesBySize.Take(TopItemsToShow))
             {
-                if (shown >= TopItemsToShow)
-                    break;
+                var wrappedTypeLines = WrapText(type.TypeName, 80).ToList();
+                if (wrappedTypeLines.Count == 0)
+                    wrappedTypeLines.Add(string.Empty);
 
-                writer.WriteLine($"  • {FormatHelper.TruncateString(type.TypeName, 80)} — {FormatHelper.FormatBytes(type.TotalBytes)} across {type.Count:N0} objects");
-                shown++;
+                writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
+                for (int i = 1; i < wrappedTypeLines.Count; i++)
+                    writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
             }
 
-            writer.WriteLine("\nTOP TYPES BY OBJECT COUNT:");
+            writer.WriteLine("\nTOP 20 OBJECT TYPES BY COUNT:");
             writer.WriteSeparator();
-            shown = 0;
-            foreach (var type in domain.TopTypesByCount)
+            writer.WriteLine($"{"Type",-80} {"Count",12} {"Total Size",12}");
+            foreach (var type in domain.TopTypesByCount.Take(TopItemsToShow))
             {
-                if (shown >= TopItemsToShow)
-                    break;
+                var wrappedTypeLines = WrapText(type.TypeName, 80).ToList();
+                if (wrappedTypeLines.Count == 0)
+                    wrappedTypeLines.Add(string.Empty);
 
-                writer.WriteLine($"  • {FormatHelper.TruncateString(type.TypeName, 80)} — {type.Count:N0} objects, {FormatHelper.FormatBytes(type.TotalBytes)}");
-                shown++;
+                writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
+                for (int i = 1; i < wrappedTypeLines.Count; i++)
+                    writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
             }
 
             writer.WriteLine(StringConstants.Equals80);
+        }
+
+        private static IEnumerable<string> WrapText(string? value, int width)
+        {
+            if (string.IsNullOrWhiteSpace(value) || width <= 0)
+            {
+                yield return string.Empty;
+                yield break;
+            }
+
+            var text = value.Trim();
+            int index = 0;
+
+            while (index < text.Length)
+            {
+                int remaining = text.Length - index;
+                if (remaining <= width)
+                {
+                    yield return text[index..];
+                    yield break;
+                }
+
+                int lastSpace = text.LastIndexOf(' ', index + width, width);
+                if (lastSpace <= index)
+                {
+                    yield return text.Substring(index, width);
+                    index += width;
+                }
+                else
+                {
+                    yield return text.Substring(index, lastSpace - index).TrimEnd();
+                    index = lastSpace + 1;
+                }
+
+                while (index < text.Length && text[index] == ' ')
+                    index++;
+            }
         }
     }
 }

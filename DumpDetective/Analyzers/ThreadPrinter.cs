@@ -119,8 +119,16 @@ namespace DumpDetective.Analyzers
 
             writer.WriteLine("\nGC MODE DISTRIBUTION:");
             writer.WriteSeparator();
-            foreach (var kvp in (domain.GcModeDistribution ?? new Dictionary<string, int>()).OrderByDescending(k => k.Value))
-                writer.WriteLine($"{kvp.Key}: {kvp.Value:N0}");
+            var gcModeDistribution = domain.GcModeDistribution ?? new Dictionary<string, int>();
+            if (gcModeDistribution.Count == 0)
+            {
+                writer.WriteLine("No GC mode distribution available.");
+            }
+            else
+            {
+                foreach (var kvp in gcModeDistribution.OrderByDescending(k => k.Value))
+                    writer.WriteLine($"{kvp.Key}: {kvp.Value:N0}");
+            }
 
             writer.WriteLine("\nASYNC THREAD ISSUES:");
             writer.WriteSeparator();

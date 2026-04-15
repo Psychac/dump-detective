@@ -15,11 +15,13 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
-            writer.WriteLine("LOH SEGMENT SUMMARY:");
+            writer.WriteLine("LOH SUMMARY:");
             writer.WriteSeparator();
             writer.WriteLine($"LOH segments: {domain.SegmentCount:N0}");
             writer.WriteLine($"Total LOH bytes: {FormatHelper.FormatBytes(domain.TotalBytes)}");
+            writer.WriteLine($"LOH used size: {FormatHelper.FormatBytes(domain.UsedBytes)}");
             writer.WriteLine($"Free LOH bytes: {FormatHelper.FormatBytes(domain.FreeBytes)}");
+            writer.WriteLine($"LOH free blocks: {domain.FreeBlockCount:N0}");
 
             writer.WriteLine("\nFRAGMENTATION SIGNAL:");
             writer.WriteSeparator();

@@ -73,15 +73,18 @@ namespace DumpDetective.Analyzers
                         Tags: ["loh", "fragmentation"],
                         MetricValue: 0,
                         MetricUnit: "% fragmentation")],
-                    new LohFragmentationDomainResult(0, 0, 0, 0, 0));
+                    new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0));
             }
 
             double overallFragmentation = CalculateOverallFragmentationPercent(segmentStats);
-            ulong totalAllBytes = 0, totalFreeBytes = 0, maxFreeBlock = 0;
+            ulong totalAllBytes = 0, totalUsedBytes = 0, totalFreeBytes = 0, maxFreeBlock = 0;
+            int totalFreeBlocks = 0;
             foreach (var s in segmentStats)
             {
                 totalAllBytes += s.TotalBytes;
+                totalUsedBytes += s.UsedBytes;
                 totalFreeBytes += s.FreeBytes;
+                totalFreeBlocks += s.FreeObjectCount;
                 if (s.LargestFreeBlock > maxFreeBlock) maxFreeBlock = s.LargestFreeBlock;
             }
 
@@ -94,7 +97,7 @@ namespace DumpDetective.Analyzers
 
             return new AnalyzerExecutionResult(
                 [CreateFinding(overallFragmentation, segmentStats.Count)],
-                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, overallFragmentation, maxFreeBlock, topSegments));
+                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments));
         }
 
         private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)

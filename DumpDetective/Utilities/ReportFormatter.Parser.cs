@@ -203,7 +203,7 @@ namespace DumpDetective.Utilities
 
             MergeSectionInto(normalized, "HEAP COMPOSITION SIGNALS", "OVERALL SUMMARY", "Heap Signal");
             MergeSectionInto(normalized, "LOH RISK SIGNAL", "HEAP SUMMARY", "LOH Signal");
-            MergeSectionInto(normalized, "FRAGMENTATION SIGNAL", "LOH SEGMENT SUMMARY", "Fragmentation Signal");
+            MergeSectionInto(normalized, "FRAGMENTATION SIGNAL", "LOH SUMMARY", "Fragmentation Signal");
             MergeSectionInto(normalized, "HANDLE PRESSURE SIGNAL", "HANDLE SUMMARY", "Handle Signal");
             MergeSectionInto(normalized, "EVENT LEAK SIGNAL", "EVENT LEAK ANALYSIS", "Event Signal");
             MergeSectionInto(normalized, "THREAD HEALTH SIGNAL", "THREAD TRIAGE SUMMARY", "Thread Health Signal");
@@ -215,13 +215,8 @@ namespace DumpDetective.Utilities
             AddAlias(normalized, "HIGH-REFERENCE SIGNAL", "HIGHLY REFERENCED OBJECTS");
             AddAlias(normalized, "THREAD TRIAGE SUMMARY", "THREAD ANALYSIS");
             AddAlias(normalized, "WAIT CATEGORY BREAKDOWN", "WAIT CATEGORY DISTRIBUTION");
-            AddAlias(normalized, "LOH SEGMENT SUMMARY", "LOH SUMMARY");
-            AddAlias(normalized, "LOH SEGMENT SUMMARY", "LARGE OBJECT HEAP (LOH) USAGE");
             AddAlias(normalized, "TOP FRAGMENTED SEGMENTS", "TOP FRAGMENTED LOH SEGMENTS");
             AddAlias(normalized, "REFERENCE RETENTION SUMMARY", "REFERENCE CHAIN ANALYSIS");
-            AddAlias(normalized, "TOP TYPES BY MEMORY SIZE", "TOP 20 OBJECT TYPES BY MEMORY SIZE");
-            AddAlias(normalized, "TOP TYPES BY OBJECT COUNT", "TOP 20 OBJECT TYPES BY COUNT");
-            AddAlias(normalized, "TOP TYPES BY OBJECT COUNT", "TOP 15 OBJECT TYPES BY COUNT");
             AddAlias(normalized, "CROSS-ANALYZER CORRELATION INSIGHTS", "💡 OPTIMIZATION TIPS");
 
             SynthesizeActiveExceptionTypesOnThreads(normalized);

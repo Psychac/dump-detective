@@ -19,16 +19,25 @@ namespace DumpDetective.Models
         ulong TotalBytes,
         ulong LohBytes,
         double LohPercent,
+        int TotalObjects,
+        int LohObjects,
+        ulong LohThresholdBytes,
         int UniqueTypes,
         IReadOnlyList<TypeSnapshot> TopTypesBySize,
         IReadOnlyList<TypeSnapshot> TopTypesByCount) : AnalyzerDomainResult;
 
     internal sealed record GCGenerationDomainResult(
+        ulong Gen0Bytes,
+        int Gen0Objects,
+        ulong Gen1Bytes,
+        int Gen1Objects,
         ulong Gen2Bytes,
+        int Gen2Objects,
         ulong LohBytes,
         double LohPercent,
         int TotalObjects,
-        int LohObjects) : AnalyzerDomainResult;
+        int LohObjects,
+        IReadOnlyList<TypeSnapshot>? TopLohTypes = null) : AnalyzerDomainResult;
 
     internal sealed record LoadedModuleSnapshot(
         string Name,
@@ -217,6 +226,8 @@ namespace DumpDetective.Models
         int SegmentCount,
         ulong TotalBytes,
         ulong FreeBytes,
+        ulong UsedBytes,
+        int FreeBlockCount,
         double FragmentationPercent,
         ulong LargestFreeBlock,
         IReadOnlyList<LohSegmentSnapshot>? TopFragmentedSegments = null) : AnalyzerDomainResult;

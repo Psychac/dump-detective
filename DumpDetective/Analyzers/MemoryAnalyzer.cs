@@ -6,6 +6,8 @@ namespace DumpDetective.Analyzers
 {
     internal class MemoryAnalyzer : IAnalyzer
     {
+        private const ulong LohThresholdBytes = 85000;
+
         public string Name => "Memory Analysis";
 
         public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
@@ -24,10 +26,14 @@ namespace DumpDetective.Analyzers
         {
             ulong totalMemory = 0;
             ulong totalLohMemory = 0;
+            int totalObjects = 0;
+            int lohObjects = 0;
             foreach (var stat in typeStats.Values)
             {
                 totalMemory += stat.TotalSize;
                 totalLohMemory += stat.LohSize;
+                totalObjects += stat.Count;
+                lohObjects += stat.LohCount;
             }
 
             double lohPct = totalMemory == 0 ? 0 : totalLohMemory * 100.0 / totalMemory;
@@ -44,6 +50,9 @@ namespace DumpDetective.Analyzers
                 totalMemory,
                 totalLohMemory,
                 lohPct,
+                totalObjects,
+                lohObjects,
+                LohThresholdBytes,
                 typeStats.Count,
                 bySize.Take(20).Select(ToSnapshot).ToList(),
                 byCount.Take(20).Select(ToSnapshot).ToList());

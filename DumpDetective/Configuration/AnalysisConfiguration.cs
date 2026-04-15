@@ -268,9 +268,9 @@ namespace DumpDetective.Configuration
             {
                 PropertyNameCaseInsensitive = true,
                 ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true
+                AllowTrailingCommas = true,
+                TypeInfoResolver = AnalysisConfigurationJsonSerializerContext.Default
             };
-            options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
 
             string json = File.ReadAllText(configPath);
             AnalysisConfigurationFileModel? config = JsonSerializer.Deserialize<AnalysisConfigurationFileModel>(json, options);
@@ -416,22 +416,6 @@ namespace DumpDetective.Configuration
             Console.WriteLine();
         }
 
-        private sealed class AnalysisConfigurationFileModel
-        {
-            public int? ReferenceChainTopCount { get; init; }
-            public int? EventLeakMinSubscribers { get; init; }
-            public bool? EnableMemoryDiagnostics { get; init; }
-            public bool? EnablePerformanceDiagnostics { get; init; }
-            public bool? WaitForKeyPressOnComplete { get; init; }
-            public bool? ForceGCBetweenStages { get; init; }
-            public int? HighReferenceThreshold { get; init; }
-            public int? MaxDuplicateStringLength { get; init; }
-            public int? MinDuplicateStringCount { get; init; }
-            public int? MaxReferenceAddressesToTrack { get; init; }
-            public string[]? SymbolPaths { get; init; }
-            public string? SymbolCachePath { get; init; }
-        }
-
         private static List<string> ParseDumpListOption(string arg, string optionName)
         {
             string value = ParseStringOption(arg, optionName);
@@ -448,5 +432,30 @@ namespace DumpDetective.Configuration
 
             return result;
         }
+    }
+
+    internal sealed class AnalysisConfigurationFileModel
+    {
+        public int? ReferenceChainTopCount { get; init; }
+        public int? EventLeakMinSubscribers { get; init; }
+        public bool? EnableMemoryDiagnostics { get; init; }
+        public bool? EnablePerformanceDiagnostics { get; init; }
+        public bool? WaitForKeyPressOnComplete { get; init; }
+        public bool? ForceGCBetweenStages { get; init; }
+        public int? HighReferenceThreshold { get; init; }
+        public int? MaxDuplicateStringLength { get; init; }
+        public int? MinDuplicateStringCount { get; init; }
+        public int? MaxReferenceAddressesToTrack { get; init; }
+        public string[]? SymbolPaths { get; init; }
+        public string? SymbolCachePath { get; init; }
+    }
+
+    [JsonSourceGenerationOptions(
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true)]
+    [JsonSerializable(typeof(AnalysisConfigurationFileModel))]
+    internal partial class AnalysisConfigurationJsonSerializerContext : JsonSerializerContext
+    {
     }
 }

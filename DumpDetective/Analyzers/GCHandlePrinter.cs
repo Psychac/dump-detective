@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("GC HANDLE ANALYSIS:");
-            writer.WriteLine("HANDLE MIX:");
+            writer.WriteLine("HANDLE SUMMARY:");
             writer.WriteSeparator();
             writer.WriteLine($"Total handles: {domain.TotalHandles:N0}");
             writer.WriteLine($"Strong-like handles: {domain.StrongLikeHandles:N0}");
@@ -30,11 +30,11 @@ namespace DumpDetective.Analyzers
             }
             else
             {
-                foreach (var entry in byKind.Take(8))
+                foreach (var entry in byKind)
                     writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 50)}: {entry.Count:N0}");
             }
 
-            writer.WriteLine("\nTOP TARGET TYPES:");
+            writer.WriteLine("\nTOP TYPES REFERENCED BY HANDLES:");
             writer.WriteSeparator();
             var topTargets = domain.TopTargetTypes ?? [];
             if (topTargets.Count == 0)
@@ -43,23 +43,27 @@ namespace DumpDetective.Analyzers
             }
             else
             {
-                foreach (var entry in topTargets.Take(8))
+                foreach (var entry in topTargets)
                     writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
             }
 
-            writer.WriteLine("\nPINNING SIGNAL:");
+            writer.WriteLine("\nTOP TYPES REFERENCED BY PINNED HANDLES:");
             writer.WriteSeparator();
-            writer.WriteLine($"Pinned handle targets: {domain.PinnedHandleTargets:N0}");
             var topPinned = domain.TopPinnedTargetTypes ?? [];
-            if (topPinned.Count > 0)
+            if (topPinned.Count == 0)
             {
-                writer.WriteLine("Top pinned target types:");
-                foreach (var entry in topPinned.Take(5))
+                writer.WriteLine("No pinned-handle target type details available.");
+            }
+            else
+            {
+                foreach (var entry in topPinned)
                     writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
             }
 
             writer.WriteLine("\nHANDLE PRESSURE SIGNAL:");
             writer.WriteSeparator();
+            writer.WriteLine($"Pinned handle targets: {domain.PinnedHandleTargets:N0}");
+
             writer.WriteLine(domain.TotalHandles >= 10_000 || domain.PinnedHandleTargets >= 1_000
                 ? "⚠️  Elevated handle pressure detected."
                 : "✅ Handle pressure appears within expected range.");

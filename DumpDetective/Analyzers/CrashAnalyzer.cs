@@ -12,6 +12,7 @@ namespace DumpDetective.Analyzers
         private const int MaxOriginalStackFramesToPrint = 20;
         private const int MaxCurrentThreadFramesToPrint = 5;
         private const int TopCrashThreadCandidates = 5;
+        private const int TopDetailedExceptionInstances = 25;
 
         public string Name => "Crash Analysis";
 
@@ -25,7 +26,9 @@ namespace DumpDetective.Analyzers
                 exceptionInfo.TotalExceptions,
                 exceptionInfo.ActiveExceptions,
                 new Dictionary<string, int>(exceptionInfo.ExceptionTypeCounts),
-                new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts));
+                new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts),
+                BuildCrashThreadSnapshots(exceptionInfo),
+                BuildExceptionInstanceSnapshots(exceptionInfo));
 
             if (exceptionInfo.TotalExceptions == 0)
             {
@@ -44,6 +47,53 @@ namespace DumpDetective.Analyzers
             }
 
             return new AnalyzerExecutionResult([CreateFinding(exceptionInfo)], domainResult);
+        }
+
+        private static IReadOnlyList<CrashThreadCandidateSnapshot> BuildCrashThreadSnapshots(ExceptionAnalysis analysis)
+        {
+            return analysis.CrashThreadCandidates
+                .Take(TopCrashThreadCandidates)
+                .Select(c => new CrashThreadCandidateSnapshot(
+                    c.ThreadId,
+                    c.OSThreadId,
+                    c.ActiveExceptionCount,
+                    c.PrimaryExceptionType,
+                    c.CurrentThreadStack
+                        .Take(MaxCurrentThreadFramesToPrint)
+                        .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
+                        .ToList()))
+                .ToList();
+        }
+
+        private static IReadOnlyList<ExceptionInstanceSnapshot> BuildExceptionInstanceSnapshots(ExceptionAnalysis analysis)
+        {
+            var instances = analysis.ExceptionsByType
+                .SelectMany(kvp => kvp.Value.Select(v => new { Type = kvp.Key, Instance = v }))
+                .OrderByDescending(x => x.Instance.ThreadId.HasValue)
+                .ThenByDescending(x => x.Instance.OriginalStackTrace.Count)
+                .ThenByDescending(x => !string.IsNullOrWhiteSpace(x.Instance.Message))
+                .Take(TopDetailedExceptionInstances)
+                .Select(x => new ExceptionInstanceSnapshot(
+                    x.Type,
+                    x.Instance.Address,
+                    string.IsNullOrWhiteSpace(x.Instance.Message) ? null : x.Instance.Message,
+                    x.Instance.HResult == 0 ? null : x.Instance.HResult,
+                    x.Instance.InnerExceptionType,
+                    x.Instance.ThreadId.HasValue,
+                    x.Instance.ThreadId,
+                    x.Instance.OSThreadId,
+                    x.Instance.CurrentThreadStack.Count == 0
+                        ? null
+                        : x.Instance.CurrentThreadStack
+                            .Take(MaxCurrentThreadFramesToPrint)
+                            .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
+                            .ToList(),
+                    x.Instance.OriginalStackTrace.Count == 0
+                        ? null
+                        : x.Instance.OriginalStackTrace.Take(MaxOriginalStackFramesToPrint).ToList()))
+                .ToList();
+
+            return instances;
         }
 
         private static InsightFinding CreateFinding(ExceptionAnalysis analysis)

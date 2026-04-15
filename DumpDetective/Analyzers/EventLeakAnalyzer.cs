@@ -61,9 +61,55 @@ namespace DumpDetective.Analyzers
                 .Select(g => new NameCountEntry($"{g.PublisherType}.{g.EventFieldName}", g.TotalSubscribers))
                 .ToList();
 
+            var topLeakGroups = groupedLeaks
+                .Select(g => new EventLeakGroupSnapshot(
+                    g.PublisherType,
+                    g.EventFieldName,
+                    g.IsStatic,
+                    g.SeverityScore,
+                    g.InstanceCount,
+                    g.TotalSubscribers,
+                    g.AverageSubscribers,
+                    g.MinSubscribers,
+                    g.MaxSubscribers,
+                    g.Instances
+                        .SelectMany(i => i.Subscribers)
+                        .GroupBy(s => s.Type)
+                        .OrderByDescending(x => x.Count())
+                        .Take(TopSubscriberTypesToShow)
+                        .Select(x => new NameCountEntry(x.Key, x.Count()))
+                        .ToList()))
+                .ToList();
+
+            var topLeakInstances = groupedLeaks
+                .SelectMany(g => g.Instances.Select(i => new EventLeakInstanceSnapshot(
+                    g.PublisherType,
+                    g.EventFieldName,
+                    g.IsStatic,
+                    i.PublisherAddress,
+                    i.SeverityScore,
+                    i.SubscriberCount,
+                    string.IsNullOrWhiteSpace(i.RootHint) ? null : i.RootHint,
+                    i.Subscribers
+                        .GroupBy(s => s.Type)
+                        .OrderByDescending(x => x.Count())
+                        .Take(TopSubscriberTypesToShow)
+                        .Select(x => $"{x.Key} ({x.Count():N0})")
+                        .ToList())))
+                .OrderByDescending(i => i.SeverityScore)
+                .ThenByDescending(i => i.SubscriberCount)
+                .ToList();
+
             return new AnalyzerExecutionResult(
                 findings,
-                new EventLeakDomainResult(groupedLeaks.Count, totalSubscribers, staticLeaks, instanceLeaks, topPublisherEvents));
+                new EventLeakDomainResult(
+                    groupedLeaks.Count,
+                    totalSubscribers,
+                    staticLeaks,
+                    instanceLeaks,
+                    topPublisherEvents,
+                    topLeakGroups,
+                    topLeakInstances));
         }
 
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)

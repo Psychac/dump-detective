@@ -43,11 +43,80 @@ namespace DumpDetective.Analyzers
 
             writer.WriteLine("\nLIKELY CRASH THREADS:");
             writer.WriteSeparator();
-            writer.WriteLine("Detailed thread candidate ranking is omitted in this mode.");
+            var candidates = domain.TopCrashThreadCandidates ?? [];
+            if (candidates.Count == 0)
+            {
+                writer.WriteLine("No active crash-thread candidates were detected.");
+            }
+            else
+            {
+                int rank = 1;
+                foreach (var candidate in candidates)
+                {
+                    writer.WriteLine($"[{rank}] Thread {candidate.ThreadId:N0} (OS: {candidate.OSThreadId:N0})");
+                    writer.WriteLine($"    Active exceptions on thread: {candidate.ActiveExceptionCount:N0}");
+                    writer.WriteLine($"    Primary exception type: {candidate.PrimaryExceptionType}");
+
+                    if (candidate.TopFrames.Count > 0)
+                    {
+                        writer.WriteLine("    Top frames:");
+                        foreach (var frame in candidate.TopFrames)
+                            writer.WriteLine($"      {frame}");
+                    }
+
+                    writer.WriteLine(string.Empty);
+                    rank++;
+                }
+            }
 
             writer.WriteLine("\nDETAILED EXCEPTION INFORMATION:");
             writer.WriteSeparator();
-            writer.WriteLine("Detailed per-instance exception stack information is omitted in this mode.");
+            var instances = domain.TopExceptionInstances ?? [];
+            if (instances.Count == 0)
+            {
+                writer.WriteLine("No sampled exception instances available.");
+            }
+            else
+            {
+                int idx = 1;
+                foreach (var ex in instances)
+                {
+                    writer.WriteLine($"[{idx}] {ex.Type}");
+                    writer.WriteLine($"    Address: 0x{ex.Address:X}");
+                    if (!string.IsNullOrWhiteSpace(ex.Message))
+                        writer.WriteLine($"    Message: {ex.Message}");
+                    if (ex.HResult.HasValue)
+                        writer.WriteLine($"    HRESULT: 0x{ex.HResult.Value:X8}");
+                    if (!string.IsNullOrWhiteSpace(ex.InnerExceptionType))
+                        writer.WriteLine($"    Inner Exception: {ex.InnerExceptionType}");
+
+                    if (ex.IsActive && ex.ThreadId.HasValue && ex.OSThreadId.HasValue)
+                    {
+                        writer.WriteLine($"    ⚠️  ACTIVE on Thread: {ex.ThreadId.Value:N0} (OS: {ex.OSThreadId.Value:N0})");
+                    }
+                    else
+                    {
+                        writer.WriteLine("    Status: Inactive (collected exception object)");
+                    }
+
+                    if (ex.CurrentThreadFrames is { Count: > 0 })
+                    {
+                        writer.WriteLine("    Current Thread Position (exception handling):");
+                        foreach (var frame in ex.CurrentThreadFrames)
+                            writer.WriteLine($"      {frame}");
+                    }
+
+                    if (ex.OriginalStackTrace is { Count: > 0 })
+                    {
+                        writer.WriteLine("\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
+                        foreach (var frame in ex.OriginalStackTrace)
+                            writer.WriteLine($"      {frame}");
+                    }
+
+                    writer.WriteLine(string.Empty);
+                    idx++;
+                }
+            }
 
             writer.WriteLine(StringConstants.Equals80);
         }

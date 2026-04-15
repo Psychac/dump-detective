@@ -34,6 +34,7 @@ namespace DumpDetective.Analyzers
             int retainedSamples = 0;
             int analyzedSamples = 0;
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var sampleReferenceChains = new List<string>(capacity: 5);
 
             foreach (var typeKvp in topTypes)
             {
@@ -49,13 +50,17 @@ namespace DumpDetective.Analyzers
                 if (sampleAddress.HasValue)
                 {
                     analyzedSamples++;
-                    if (AnalyzeObject(heap, sampleAddress.Value))
+
+                    if (TryFindAnyRootPath(heap, sampleAddress.Value, out string? path))
                     {
                         retainedSamples++;
                         if (retainedTypeCounts.TryGetValue(typeName, out int current))
                             retainedTypeCounts[typeName] = current + 1;
                         else
                             retainedTypeCounts[typeName] = 1;
+
+                        if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
+                            sampleReferenceChains.Add($"{typeName}: {path}");
                     }
                 }
             }
@@ -70,13 +75,19 @@ namespace DumpDetective.Analyzers
 
             return new AnalyzerExecutionResult(
                 [CreateFinding(analyzedSamples, retainedSamples)],
-                new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes));
+                new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains));
         }
 
         public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
-            ClrObject obj = heap.GetObject(objectAddress);
+            return TryFindAnyRootPath(heap, objectAddress, out _);
+        }
 
+        private bool TryFindAnyRootPath(ClrHeap heap, ulong objectAddress, out string? path)
+        {
+            path = null;
+
+            ClrObject obj = heap.GetObject(objectAddress);
             if (!obj.IsValid)
                 return false;
 
@@ -84,9 +95,14 @@ namespace DumpDetective.Analyzers
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 scanCounter.Tick();
-                if (CanReachTarget(heap, root.Object.Address, objectAddress))
+                ulong rootAddress = root.Object.Address;
+                if (rootAddress == 0)
+                    continue;
+
+                if (TryBuildPath(heap, rootAddress, objectAddress, out List<ulong>? addresses))
                 {
                     scanCounter.Complete();
+                    path = FormatPath(heap, root, addresses);
                     return true;
                 }
             }
@@ -159,6 +175,83 @@ namespace DumpDetective.Analyzers
             }
 
             return false;
+        }
+
+        private static bool TryBuildPath(ClrHeap heap, ulong startAddress, ulong targetAddress, out List<ulong>? path)
+        {
+            path = null;
+
+            if (startAddress == targetAddress)
+            {
+                path = [startAddress];
+                return true;
+            }
+
+            var visited = new HashSet<ulong>(capacity: 1024) { startAddress };
+            var previous = new Dictionary<ulong, ulong>(capacity: 1024);
+            var queue = new Queue<ulong>(capacity: 256);
+            queue.Enqueue(startAddress);
+
+            int maxSearch = 5000;
+            int searched = 0;
+
+            while (queue.Count > 0 && searched++ < maxSearch)
+            {
+                ulong current = queue.Dequeue();
+                ClrObject currentObj = heap.GetObject(current);
+                if (!currentObj.IsValid)
+                    continue;
+
+                foreach (ClrObject reference in currentObj.EnumerateReferences(carefully: true))
+                {
+                    if (!reference.IsValid)
+                        continue;
+
+                    ulong refAddress = reference.Address;
+                    if (refAddress == targetAddress)
+                    {
+                        previous[targetAddress] = current;
+                        path = ReconstructPath(previous, startAddress, targetAddress);
+                        return true;
+                    }
+
+                    if (visited.Add(refAddress))
+                    {
+                        previous[refAddress] = current;
+                        queue.Enqueue(refAddress);
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static List<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress)
+        {
+            var reversed = new List<ulong>(capacity: 16) { targetAddress };
+            ulong cursor = targetAddress;
+
+            while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
+            {
+                reversed.Add(parent);
+                cursor = parent;
+            }
+
+            reversed.Reverse();
+            return reversed;
+        }
+
+        private static string FormatPath(ClrHeap heap, ClrRoot root, IReadOnlyList<ulong> addresses)
+        {
+            static string FormatNode(ClrHeap heap, ulong address)
+            {
+                ClrObject obj = heap.GetObject(address);
+                string typeName = obj.IsValid ? (obj.Type?.Name ?? StringConstants.UnknownType) : "<invalid>";
+                return $"{typeName}@0x{address:X}";
+            }
+
+            string chain = string.Join(" -> ", addresses.Select(a => FormatNode(heap, a)));
+            return $"{root.RootKind}: {chain}";
         }
     }
 }

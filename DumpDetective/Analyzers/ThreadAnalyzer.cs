@@ -43,7 +43,76 @@ namespace DumpDetective.Analyzers
                     threadInfo.PotentiallyBlockedThreads.Count,
                     threadInfo.ThreadsWithLocks.Count,
                     threadInfo.ThreadsWithActiveExceptionsCount,
-                    new Dictionary<string, int>(threadInfo.WaitCategoryDistribution)));
+                    new Dictionary<string, int>(threadInfo.WaitCategoryDistribution),
+                    new Dictionary<string, int>(threadInfo.StateDistribution),
+                    new Dictionary<string, int>(threadInfo.AppDomainDistribution),
+                    new Dictionary<string, int>(threadInfo.GcModeDistribution),
+                    threadInfo.ThreadsWithLocks
+                        .Take(10)
+                        .Select(ToThreadStateSnapshot)
+                        .ToList(),
+                    threadInfo.PotentiallyBlockedThreads
+                        .Take(10)
+                        .Select(ToThreadStateSnapshot)
+                        .ToList(),
+                    threadInfo.ThreadsWithExceptions
+                        .Take(10)
+                        .Select(ToThreadExceptionSnapshot)
+                        .ToList(),
+                    threadInfo.TopFrameHotspots
+                        .OrderByDescending(k => k.Value)
+                        .Take(10)
+                        .Select(k => new NameCountEntry(k.Key, k.Value))
+                        .ToList(),
+                    threadInfo.ActiveThreadHotspots
+                        .OrderByDescending(k => k.Value)
+                        .Take(10)
+                        .Select(k => new NameCountEntry(k.Key, k.Value))
+                        .ToList(),
+                    threadInfo.ThreadPoolCount,
+                    threadInfo.FinalizerCount,
+                    threadInfo.FinalizerIsBlocked,
+                    threadInfo.FinalizerThread != null ? (uint?)threadInfo.FinalizerThread.ManagedThreadId : null,
+                    threadInfo.FinalizerThread?.OSThreadId,
+                    threadInfo.FinalizerThread != null ? (int)threadInfo.FinalizerThread.LockCount : 0,
+                    threadInfo.FinalizerFrames
+                        .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
+                        .Take(MaxFramesForThreadScan)
+                        .ToList(),
+                    threadInfo.AsyncChainThreadCount,
+                    threadInfo.MaxAsyncChainDepth));
+        }
+
+        private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source)
+        {
+            return new ThreadStateSnapshot(
+                (uint)source.Thread.ManagedThreadId,
+                source.Thread.OSThreadId,
+                (int)source.Thread.LockCount,
+                source.WaitCategory,
+                source.WaitReason,
+                source.TopFrames
+                    .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
+                    .Take(MaxFramesForThreadScan)
+                    .ToList(),
+                source.StackRootCount);
+        }
+
+        private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source)
+        {
+            return new ThreadExceptionSnapshot(
+                (uint)source.Thread.ManagedThreadId,
+                source.Thread.OSThreadId,
+                source.ExceptionType ?? StringConstants.UnknownType,
+                source.ExceptionMessage,
+                FormatThreadState(source.Thread.State),
+                source.Thread.GCMode.ToString(),
+                (int)source.Thread.LockCount,
+                source.TopFrames
+                    .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
+                    .Take(MaxFramesForThreadScan)
+                    .ToList(),
+                source.StackRootCount);
         }
 
         private static InsightFinding CreateFinding(ThreadCategorization info)
@@ -78,7 +147,7 @@ namespace DumpDetective.Analyzers
                 scanCounter.Tick();
 
                 result.TotalCount++;
-                IncrementCount(result.StateDistribution, thread.State.ToString());
+                IncrementCount(result.StateDistribution, FormatThreadState(thread.State));
                 IncrementCount(result.GcModeDistribution, thread.GCMode.ToString());
 
                 string appDomain = thread.CurrentAppDomain?.Name ?? "<No AppDomain>";
@@ -258,6 +327,37 @@ namespace DumpDetective.Analyzers
                     depth++;
             }
             return depth;
+        }
+
+        private static string FormatThreadState(ClrThreadState state)
+        {
+            ulong raw = Convert.ToUInt64(state);
+            if (raw == 0)
+                return "0";
+
+            var parts = new List<string>(capacity: 4);
+            ulong remaining = raw;
+
+            foreach (ClrThreadState flag in Enum.GetValues<ClrThreadState>())
+            {
+                ulong flagValue = Convert.ToUInt64(flag);
+                if (flagValue == 0)
+                    continue;
+
+                if ((remaining & flagValue) == flagValue)
+                {
+                    parts.Add(flag.ToString());
+                    remaining &= ~flagValue;
+                }
+            }
+
+            if (parts.Count == 0)
+                return $"0x{raw:X}";
+
+            if (remaining != 0)
+                parts.Add($"0x{remaining:X}");
+
+            return string.Join(" | ", parts);
         }
 
         private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, List<ClrStackFrame> frames)

@@ -101,11 +101,12 @@ namespace DumpDetective.Utilities
 
             if (u.Contains("MEMORY") || u.Contains("HEAP")  || u.Contains("LOH") ||
                 u.Contains("GC GENERATION") || u.Contains("OVERALL") || u.Contains("TOP TYPES") ||
-                u.Contains("OBJECT TYPES")  || u.Contains("GC MODE"))
+                u.Contains("OBJECT TYPES"))
                 return ("Memory Health", "🧠");
 
             if (u.Contains("THREAD") || u.Contains("WAIT CATEGORY") ||
-                u.Contains("APP DOMAIN") || u.Contains("HOTSPOT") || u.Contains("CLUSTER"))
+                u.Contains("APP DOMAIN") || u.Contains("HOTSPOT") || u.Contains("CLUSTER") ||
+                u.Contains("GC MODE"))
                 return ("Threading", "🧵");
 
             if (u.Contains("MODULE") || u.Contains("ASSEMBLY") ||

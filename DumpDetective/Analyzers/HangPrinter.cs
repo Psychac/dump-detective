@@ -19,8 +19,17 @@ namespace DumpDetective.Analyzers
             writer.WriteSeparator();
             writer.WriteLine($"Total Alive Threads: {domain.TotalAliveThreads:N0}");
             writer.WriteLine($"Waiting/Blocked Threads: {domain.WaitingThreadCount:N0}");
+            writer.WriteLine($"Threads Holding Locks: {domain.ThreadsHoldingLocks:N0}");
+            writer.WriteLine(string.Empty);
             writer.WriteLine($"Waiting Thread Percentage: {domain.WaitingPercent:F1}%");
-            writer.WriteLine($"Thread Health Score: {domain.HealthScore}/100");
+            writer.WriteLine(string.Empty);
+
+            string healthState = domain.HealthScore >= 90
+                ? "🟢 Healthy"
+                : domain.HealthScore >= 70
+                    ? "🟡 Watch"
+                    : "🔴 At Risk";
+            writer.WriteLine($"Thread Health Score: {domain.HealthScore}/100  {healthState}");
 
             if (domain.WaitingPercent >= 80)
                 writer.WriteLine("\n⚠️  SEVERE HANG risk detected.");
@@ -46,15 +55,45 @@ namespace DumpDetective.Analyzers
             writer.WriteLine($"Faulted Tasks: {domain.FaultedTasks:N0}");
             writer.WriteLine($"Canceled Tasks: {domain.CanceledTasks:N0}");
 
+            writer.WriteLine("\nWAITING THREADS BREAKDOWN:");
+            writer.WriteSeparator();
+            var waitingThreads = domain.TopWaitingThreads ?? [];
+            if (waitingThreads.Count == 0)
+            {
+                writer.WriteLine("No waiting-thread details available.");
+            }
+            else
+            {
+                foreach (var wt in waitingThreads)
+                {
+                    writer.WriteLine($"Thread {wt.ThreadId:N0} (OS: {wt.OSThreadId:N0})");
+                    writer.WriteLine($"  Category: {wt.WaitType}");
+                    writer.WriteLine($"  Reason: {wt.WaitReason}");
+                    writer.WriteLine($"  Locks: {wt.LockCount:N0}");
+                    writer.WriteLine($"  Top frame: {wt.TopStackFrame}");
+                    writer.WriteLine(string.Empty);
+                }
+            }
+
             writer.WriteLine("\nASYNC TASK ANALYSIS:");
             writer.WriteSeparator();
-            writer.WriteLine("Detailed continuation-type breakdown is omitted in this mode.");
+            writer.WriteLine($"Total Task Continuations: {domain.TotalTaskContinuations:N0}");
+            var continuationTypes = domain.TopContinuationTypes ?? [];
+            if (continuationTypes.Count == 0)
+            {
+                writer.WriteLine("No continuation-type signatures detected.");
+            }
+            else
+            {
+                foreach (var type in continuationTypes)
+                    writer.WriteLine($"  {type.Name}: {type.Count:N0}");
+            }
 
-            writer.WriteLine("\nDEADLOCK SUSPICION:");
+            writer.WriteLine("\nDEADLOCK DETECTION:");
             writer.WriteSeparator();
             writer.WriteLine(domain.WaitingPercent >= 80
                 ? "⚠️  Severe wait saturation suggests potential deadlock/contention storm."
-                : "ℹ️  No severe deadlock suspicion signal detected from headline metrics.");
+                : "No obvious deadlock patterns detected.\nApplication may be functioning normally or experiencing other issues.");
 
             writer.WriteLine(StringConstants.Equals80);
         }

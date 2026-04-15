@@ -80,6 +80,44 @@ namespace DumpDetective.Configuration
 
         public static AnalysisConfiguration FromCommandLineArgs(string[] args)
         {
+            ParsedCliInputs cliInputs = ParseCoreCliInputs(args);
+            string dumpPath = ResolveEffectiveDumpPath(cliInputs.DumpPathFromCli, cliInputs.TrendDumpPaths);
+
+            AnalysisConfigurationFileModel? fileConfig = LoadEffectiveFileConfig(cliInputs.ConfigPath);
+            bool hasFileConfig = fileConfig != null;
+
+            ValidateInputFiles(dumpPath, cliInputs.BaselineDumpPath, cliInputs.TrendDumpPaths);
+            ValidateBaselineTrendExclusivity(cliInputs.BaselineDumpPath, cliInputs.TrendDumpPaths);
+
+            MutableSettings settings = BuildSettingsSeed(fileConfig);
+            ApplyCliOverrides(args, hasFileConfig, settings);
+
+            string outputPath = BuildOutputPath(dumpPath, settings.ReportFormat);
+
+            return new AnalysisConfiguration
+            {
+                DumpPath = dumpPath,
+                OutputPath = outputPath,
+                BaselineDumpPath = cliInputs.BaselineDumpPath,
+                TrendDumpPaths = cliInputs.TrendDumpPaths,
+                HighReferenceThreshold = settings.HighReferenceThreshold,
+                MaxDuplicateStringLength = settings.MaxDuplicateStringLength,
+                MinDuplicateStringCount = settings.MinDuplicateStringCount,
+                MaxReferenceAddressesToTrack = settings.MaxReferenceAddressesToTrack,
+                ReferenceChainTopCount = settings.ReferenceChainTopCount,
+                EventLeakMinSubscribers = settings.EventLeakMinSubscribers,
+                EnableMemoryDiagnostics = settings.EnableMemoryDiagnostics,
+                EnablePerformanceDiagnostics = settings.EnablePerformanceDiagnostics,
+                ReportFormat = settings.ReportFormat,
+                WaitForKeyPressOnComplete = settings.WaitForKeyPressOnComplete,
+                ForceGCBetweenStages = settings.ForceGCBetweenStages,
+                SymbolPaths = settings.SymbolPaths,
+                SymbolCachePath = settings.SymbolCachePath
+            };
+        }
+
+        private static ParsedCliInputs ParseCoreCliInputs(string[] args)
+        {
             string? configPath = null;
             string? dumpPathFromCli = null;
             string? baselineDumpPath = null;
@@ -111,26 +149,34 @@ namespace DumpDetective.Configuration
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(dumpPathFromCli))
+            return new ParsedCliInputs(configPath, dumpPathFromCli, baselineDumpPath, trendDumpPaths);
+        }
+
+        private static string ResolveEffectiveDumpPath(string? dumpPathFromCli, List<string>? trendDumpPaths)
+        {
+            if (!string.IsNullOrWhiteSpace(dumpPathFromCli))
             {
-                if (trendDumpPaths is { Count: > 0 })
-                {
-                    dumpPathFromCli = trendDumpPaths[^1];
-                }
-                else
-                {
-                    throw new ArgumentException("Dump file path is required as first command-line argument (or implicitly from the last --trend entry).");
-                }
+                return dumpPathFromCli;
             }
 
-            string? resolvedConfigPath = ResolveConfigPath(configPath);
-            AnalysisConfigurationFileModel? fileConfig = resolvedConfigPath != null
+            if (trendDumpPaths is { Count: > 0 })
+            {
+                return trendDumpPaths[^1];
+            }
+
+            throw new ArgumentException("Dump file path is required as first command-line argument (or implicitly from the last --trend entry).");
+        }
+
+        private static AnalysisConfigurationFileModel? LoadEffectiveFileConfig(string? cliConfigPath)
+        {
+            string? resolvedConfigPath = ResolveConfigPath(cliConfigPath);
+            return resolvedConfigPath != null
                 ? LoadConfigurationFile(resolvedConfigPath)
                 : null;
-            bool hasFileConfig = fileConfig != null;
+        }
 
-            string dumpPath = dumpPathFromCli;
-
+        private static void ValidateInputFiles(string dumpPath, string? baselineDumpPath, List<string>? trendDumpPaths)
+        {
             if (!File.Exists(dumpPath))
             {
                 throw new FileNotFoundException($"Dump file not found at '{dumpPath}'", dumpPath);
@@ -141,52 +187,60 @@ namespace DumpDetective.Configuration
                 throw new FileNotFoundException($"Baseline dump file not found at '{baselineDumpPath}'", baselineDumpPath);
             }
 
-            if (trendDumpPaths != null)
+            if (trendDumpPaths == null)
             {
-                foreach (string trendDumpPath in trendDumpPaths)
-                {
-                    if (!File.Exists(trendDumpPath))
-                    {
-                        throw new FileNotFoundException($"Trend dump file not found at '{trendDumpPath}'", trendDumpPath);
-                    }
-                }
+                return;
             }
 
+            foreach (string trendDumpPath in trendDumpPaths)
+            {
+                if (!File.Exists(trendDumpPath))
+                {
+                    throw new FileNotFoundException($"Trend dump file not found at '{trendDumpPath}'", trendDumpPath);
+                }
+            }
+        }
+
+        private static void ValidateBaselineTrendExclusivity(string? baselineDumpPath, List<string>? trendDumpPaths)
+        {
             if (!string.IsNullOrWhiteSpace(baselineDumpPath) && trendDumpPaths is { Count: > 0 })
             {
                 throw new ArgumentException("Options '--baseline' and '--trend' are mutually exclusive. Use only one.");
             }
+        }
 
-            int highReferenceThreshold = fileConfig?.HighReferenceThreshold ?? DefaultHighReferenceThreshold;
-            int maxDuplicateStringLength = fileConfig?.MaxDuplicateStringLength ?? DefaultMaxDuplicateStringLength;
-            int minDuplicateStringCount = fileConfig?.MinDuplicateStringCount ?? DefaultMinDuplicateStringCount;
-            int maxReferenceAddressesToTrack = fileConfig?.MaxReferenceAddressesToTrack ?? DefaultMaxReferenceAddressesToTrack;
-            int referenceChainTopCount = fileConfig?.ReferenceChainTopCount ?? DefaultReferenceChainTopCount;
-            int eventLeakMinSubscribers = fileConfig?.EventLeakMinSubscribers ?? DefaultEventLeakMinSubscribers;
-            bool enableMemoryDiagnostics = fileConfig?.EnableMemoryDiagnostics ?? false;
-            bool enablePerformanceDiagnostics = fileConfig?.EnablePerformanceDiagnostics ?? false;
-            ReportFormat reportFormat = ReportFormat.Html;
-            bool waitForKeyPressOnComplete = fileConfig?.WaitForKeyPressOnComplete ?? true;
-            bool forceGCBetweenStages = fileConfig?.ForceGCBetweenStages ?? false;
-            string[]? symbolPaths = fileConfig?.SymbolPaths;
-            string? symbolCachePath = fileConfig?.SymbolCachePath;
-
-            // CLI options are considered for report format always and for analyzer settings when config is missing.
-            for (int i = 0; i < args.Length; i++)
+        private static MutableSettings BuildSettingsSeed(AnalysisConfigurationFileModel? fileConfig)
+        {
+            return new MutableSettings
             {
-                string arg = args[i];
+                HighReferenceThreshold = fileConfig?.HighReferenceThreshold ?? DefaultHighReferenceThreshold,
+                MaxDuplicateStringLength = fileConfig?.MaxDuplicateStringLength ?? DefaultMaxDuplicateStringLength,
+                MinDuplicateStringCount = fileConfig?.MinDuplicateStringCount ?? DefaultMinDuplicateStringCount,
+                MaxReferenceAddressesToTrack = fileConfig?.MaxReferenceAddressesToTrack ?? DefaultMaxReferenceAddressesToTrack,
+                ReferenceChainTopCount = fileConfig?.ReferenceChainTopCount ?? DefaultReferenceChainTopCount,
+                EventLeakMinSubscribers = fileConfig?.EventLeakMinSubscribers ?? DefaultEventLeakMinSubscribers,
+                EnableMemoryDiagnostics = fileConfig?.EnableMemoryDiagnostics ?? false,
+                EnablePerformanceDiagnostics = fileConfig?.EnablePerformanceDiagnostics ?? false,
+                ReportFormat = ReportFormat.Html,
+                WaitForKeyPressOnComplete = fileConfig?.WaitForKeyPressOnComplete ?? true,
+                ForceGCBetweenStages = fileConfig?.ForceGCBetweenStages ?? false,
+                SymbolPaths = fileConfig?.SymbolPaths,
+                SymbolCachePath = fileConfig?.SymbolCachePath
+            };
+        }
 
-                if (!arg.StartsWith("--", StringComparison.Ordinal) ||
-                    arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase) ||
-                    arg.StartsWith(BaselineDumpOption, StringComparison.OrdinalIgnoreCase) ||
-                    arg.StartsWith(TrendDumpsOption, StringComparison.OrdinalIgnoreCase))
+        private static void ApplyCliOverrides(string[] args, bool hasFileConfig, MutableSettings settings)
+        {
+            foreach (string arg in args)
+            {
+                if (!arg.StartsWith("--", StringComparison.Ordinal) || IsReservedCoreOption(arg))
                 {
                     continue;
                 }
 
                 if (arg.StartsWith(ReportFormatOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    reportFormat = ParseReportFormatOption(arg, ReportFormatOption.TrimEnd('='));
+                    settings.ReportFormat = ParseReportFormatOption(arg, ReportFormatOption.TrimEnd('='));
                     continue;
                 }
 
@@ -197,64 +251,48 @@ namespace DumpDetective.Configuration
 
                 if (arg.StartsWith(HighReferenceThresholdOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    highReferenceThreshold = ParsePositiveIntOption(arg, HighReferenceThresholdOption.TrimEnd('='));
+                    settings.HighReferenceThreshold = ParsePositiveIntOption(arg, HighReferenceThresholdOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(MaxDuplicateStringLengthOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    maxDuplicateStringLength = ParsePositiveIntOption(arg, MaxDuplicateStringLengthOption.TrimEnd('='));
+                    settings.MaxDuplicateStringLength = ParsePositiveIntOption(arg, MaxDuplicateStringLengthOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(MinDuplicateStringCountOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    minDuplicateStringCount = ParsePositiveIntOption(arg, MinDuplicateStringCountOption.TrimEnd('='));
+                    settings.MinDuplicateStringCount = ParsePositiveIntOption(arg, MinDuplicateStringCountOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(MaxReferenceAddressesOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    maxReferenceAddressesToTrack = ParsePositiveIntOption(arg, MaxReferenceAddressesOption.TrimEnd('='));
+                    settings.MaxReferenceAddressesToTrack = ParsePositiveIntOption(arg, MaxReferenceAddressesOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(ReferenceChainTopCountOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    referenceChainTopCount = ParsePositiveIntOption(arg, ReferenceChainTopCountOption.TrimEnd('='));
+                    settings.ReferenceChainTopCount = ParsePositiveIntOption(arg, ReferenceChainTopCountOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(EventLeakMinSubscribersOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    eventLeakMinSubscribers = ParseNonNegativeIntOption(arg, EventLeakMinSubscribersOption.TrimEnd('='));
+                    settings.EventLeakMinSubscribers = ParseNonNegativeIntOption(arg, EventLeakMinSubscribersOption.TrimEnd('='));
                 }
                 else if (arg.Equals(EnableMemoryDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    enableMemoryDiagnostics = true;
+                    settings.EnableMemoryDiagnostics = true;
                 }
                 else if (arg.Equals(EnablePerformanceDiagnosticsOption, StringComparison.OrdinalIgnoreCase))
                 {
-                    enablePerformanceDiagnostics = true;
+                    settings.EnablePerformanceDiagnostics = true;
                 }
                 else
                 {
                     throw new ArgumentException($"Unknown option '{arg}'.");
                 }
             }
+        }
 
-            string outputPath = BuildOutputPath(dumpPath, reportFormat);
-
-            return new AnalysisConfiguration
-            {
-                DumpPath = dumpPath,
-                OutputPath = outputPath,
-                BaselineDumpPath = baselineDumpPath,
-                TrendDumpPaths = trendDumpPaths,
-                HighReferenceThreshold = highReferenceThreshold,
-                MaxDuplicateStringLength = maxDuplicateStringLength,
-                MinDuplicateStringCount = minDuplicateStringCount,
-                MaxReferenceAddressesToTrack = maxReferenceAddressesToTrack,
-                ReferenceChainTopCount = referenceChainTopCount,
-                EventLeakMinSubscribers = eventLeakMinSubscribers,
-                EnableMemoryDiagnostics = enableMemoryDiagnostics,
-                EnablePerformanceDiagnostics = enablePerformanceDiagnostics,
-                ReportFormat = reportFormat,
-                WaitForKeyPressOnComplete = waitForKeyPressOnComplete,
-                ForceGCBetweenStages = forceGCBetweenStages,
-                SymbolPaths = symbolPaths,
-                SymbolCachePath = symbolCachePath
-            };
+        private static bool IsReservedCoreOption(string arg)
+        {
+            return arg.StartsWith(ConfigFileOption, StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith(BaselineDumpOption, StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith(TrendDumpsOption, StringComparison.OrdinalIgnoreCase);
         }
 
         private static AnalysisConfigurationFileModel LoadConfigurationFile(string configPath)
@@ -328,17 +366,6 @@ namespace DumpDetective.Configuration
             }
 
             return arg[(separatorIndex + 1)..].Trim();
-        }
-
-        private static ReportFormat InferReportFormatFromOutputPath(string outputPath)
-        {
-            string extension = Path.GetExtension(outputPath);
-            return extension.ToLowerInvariant() switch
-            {
-                ".md" or ".markdown" => ReportFormat.Markdown,
-                ".html" or ".htm" => ReportFormat.Html,
-                _ => ReportFormat.Text
-            };
         }
 
         private static string BuildOutputPath(string dumpPath, ReportFormat reportFormat)
@@ -431,6 +458,29 @@ namespace DumpDetective.Configuration
             }
 
             return result;
+        }
+
+        private sealed record ParsedCliInputs(
+            string? ConfigPath,
+            string? DumpPathFromCli,
+            string? BaselineDumpPath,
+            List<string>? TrendDumpPaths);
+
+        private sealed class MutableSettings
+        {
+            public int HighReferenceThreshold { get; set; }
+            public int MaxDuplicateStringLength { get; set; }
+            public int MinDuplicateStringCount { get; set; }
+            public int MaxReferenceAddressesToTrack { get; set; }
+            public int ReferenceChainTopCount { get; set; }
+            public int EventLeakMinSubscribers { get; set; }
+            public bool EnableMemoryDiagnostics { get; set; }
+            public bool EnablePerformanceDiagnostics { get; set; }
+            public ReportFormat ReportFormat { get; set; }
+            public bool WaitForKeyPressOnComplete { get; set; }
+            public bool ForceGCBetweenStages { get; set; }
+            public string[]? SymbolPaths { get; set; }
+            public string? SymbolCachePath { get; set; }
         }
     }
 

@@ -34,8 +34,72 @@ namespace DumpDetective.Analyzers
             }
             else
             {
-                foreach (var entry in topGroups.Take(8))
+                foreach (var entry in topGroups)
                     writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 90)}: {entry.Count:N0} subscriber(s)");
+            }
+
+            writer.WriteLine("\nSUMMARY BY EVENT TYPE:");
+            writer.WriteSeparator();
+            var leakGroups = domain.TopLeakGroups ?? [];
+            if (leakGroups.Count == 0)
+            {
+                writer.WriteLine("No event-group summaries available.");
+            }
+            else
+            {
+                int idx = 1;
+                foreach (var group in leakGroups)
+                {
+                    string shape = group.IsStatic ? "STATIC" : "INSTANCE";
+                    writer.WriteLine($"[{idx}] [{shape}] {group.PublisherType}.{group.EventFieldName} (Severity: {group.SeverityScore:N0})");
+                    writer.WriteLine($"  Instance Count: {group.InstanceCount:N0}");
+                    writer.WriteLine($"  Total Subscribers: {group.TotalSubscribers:N0}");
+                    writer.WriteLine($"  Average Subscribers: {group.AverageSubscribers:F2}");
+                    writer.WriteLine($"  Min/Max Subscribers: {group.MinSubscribers:N0}/{group.MaxSubscribers:N0}");
+
+                    if (group.TopSubscriberTypes is { Count: > 0 })
+                    {
+                        writer.WriteLine("  Top Subscriber Types:");
+                        foreach (var type in group.TopSubscriberTypes)
+                            writer.WriteLine($"    - {type.Name} ({type.Count:N0} instance(s))");
+                    }
+
+                    writer.WriteLine(string.Empty);
+                    idx++;
+                }
+            }
+
+            writer.WriteLine("\nTOP LEAK INSTANCES:");
+            writer.WriteSeparator();
+            var leakInstances = domain.TopLeakInstances ?? [];
+            if (leakInstances.Count == 0)
+            {
+                writer.WriteLine("No per-instance leak details available.");
+            }
+            else
+            {
+                int idx = 1;
+                foreach (var instance in leakInstances)
+                {
+                    string shape = instance.IsStatic ? "STATIC" : "INSTANCE";
+                    string address = instance.IsStatic ? "(static)" : $"0x{instance.PublisherAddress:X}";
+                    writer.WriteLine($"[{idx}] [{shape}] {instance.PublisherType}.{instance.EventFieldName}");
+                    writer.WriteLine($"  Address: {address}");
+                    writer.WriteLine($"  Severity Score: {instance.SeverityScore:N0}");
+                    writer.WriteLine($"  Subscribers: {instance.SubscriberCount:N0}");
+                    if (!string.IsNullOrWhiteSpace(instance.RootHint))
+                        writer.WriteLine($"  Root Hint: {instance.RootHint}");
+
+                    if (instance.SubscriberTypes is { Count: > 0 })
+                    {
+                        writer.WriteLine("  Top Subscriber Types:");
+                        foreach (var type in instance.SubscriberTypes)
+                            writer.WriteLine($"    - {type}");
+                    }
+
+                    writer.WriteLine(string.Empty);
+                    idx++;
+                }
             }
 
             writer.WriteLine("\nEVENT LEAK SIGNAL:");

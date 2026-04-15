@@ -36,7 +36,16 @@ namespace DumpDetective.Analyzers
 
             writer.WriteLine("\nREFERENCE CHAINS (showing up to 5):");
             writer.WriteSeparator();
-            writer.WriteLine("Path graph details are condensed in this mode; prioritize types with repeated retained samples first.");
+            var chains = domain.SampleReferenceChains ?? [];
+            if (chains.Count == 0)
+            {
+                writer.WriteLine("No sampled GC-root chain paths were captured.");
+            }
+            else
+            {
+                foreach (string chain in chains.Take(5))
+                    writer.WriteLine($"  • {chain}");
+            }
 
             writer.WriteLine("\nGC-ROOT COVERAGE SIGNAL:");
             writer.WriteSeparator();

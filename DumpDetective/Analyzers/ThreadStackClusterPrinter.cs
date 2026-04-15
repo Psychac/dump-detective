@@ -35,6 +35,26 @@ namespace DumpDetective.Analyzers
                 shown++;
             }
 
+            writer.WriteLine("\nTOP THREAD CLUSTERS:");
+            writer.WriteSeparator();
+            var clusters = domain.TopClusters ?? [];
+            if (clusters.Count == 0)
+            {
+                writer.WriteLine("No cluster detail entries available.");
+            }
+            else
+            {
+                foreach (var cluster in clusters)
+                {
+                    string osIds = cluster.SampleOsThreadIds.Count == 0
+                        ? "none"
+                        : string.Join(", ", cluster.SampleOsThreadIds.Select(id => $"0x{id:X}"));
+                    writer.WriteLine($"[{cluster.Count,4} threads] Sample OSThreadIds: {osIds}");
+                    writer.WriteLine($"Signature: {FormatHelper.TruncateString(cluster.Signature, 220)}");
+                    writer.WriteLine(string.Empty);
+                }
+            }
+
             writer.WriteLine("\nDIVERSITY SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.DiversityPercent < 20

@@ -65,9 +65,13 @@ namespace DumpDetective.Analyzers
 
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             var topSignatures = topClusters.Take(5).Select(c => c.Signature).ToList();
+            var topClusterSnapshots = topClusters
+                .Take(12)
+                .Select(c => new ThreadClusterSnapshot(c.Count, c.SampleThreadIds.ToList(), c.Signature))
+                .ToList();
             return new AnalyzerExecutionResult(
                 [CreateFinding(aliveThreads, clusters.Count)],
-                new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, diversity, topSignatures));
+                new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, diversity, topSignatures, topClusterSnapshots));
         }
 
         private static InsightFinding CreateFinding(int aliveThreads, int uniqueClusters)

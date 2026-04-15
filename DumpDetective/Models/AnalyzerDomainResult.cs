@@ -57,25 +57,64 @@ namespace DumpDetective.Models
         int TotalExceptions,
         int ActiveExceptions,
         IReadOnlyDictionary<string, int> ExceptionTypeCounts,
-        IReadOnlyDictionary<string, int> ActiveExceptionTypeCounts) : AnalyzerDomainResult;
+        IReadOnlyDictionary<string, int> ActiveExceptionTypeCounts,
+        IReadOnlyList<CrashThreadCandidateSnapshot>? TopCrashThreadCandidates = null,
+        IReadOnlyList<ExceptionInstanceSnapshot>? TopExceptionInstances = null) : AnalyzerDomainResult;
+
+    internal sealed record CrashThreadCandidateSnapshot(
+        uint ThreadId,
+        uint OSThreadId,
+        int ActiveExceptionCount,
+        string PrimaryExceptionType,
+        IReadOnlyList<string> TopFrames);
+
+    internal sealed record ExceptionInstanceSnapshot(
+        string Type,
+        ulong Address,
+        string? Message,
+        int? HResult,
+        string? InnerExceptionType,
+        bool IsActive,
+        uint? ThreadId,
+        uint? OSThreadId,
+        IReadOnlyList<string>? CurrentThreadFrames,
+        IReadOnlyList<string>? OriginalStackTrace);
 
     internal sealed record HangDomainResult(
         int TotalAliveThreads,
         int WaitingThreadCount,
+        int ThreadsHoldingLocks,
         double WaitingPercent,
         IReadOnlyDictionary<string, int> WaitCategoryBreakdown,
+        int TotalTaskContinuations,
         int QueuedWorkItems,
         int PendingTasks,
         int FaultedTasks,
         int CanceledTasks,
-        int HealthScore) : AnalyzerDomainResult;
+        int HealthScore,
+        IReadOnlyList<WaitingThreadSnapshot>? TopWaitingThreads = null,
+        IReadOnlyList<NameCountEntry>? TopContinuationTypes = null) : AnalyzerDomainResult;
+
+    internal sealed record WaitingThreadSnapshot(
+        uint ThreadId,
+        uint OSThreadId,
+        string WaitType,
+        string WaitReason,
+        int LockCount,
+        string TopStackFrame);
 
     internal sealed record MemoryLeakDomainResult(
         int FinalizerQueueCount,
         int DuplicateStringPatternCount,
         ulong DuplicateStringWastedBytes,
         int HighlyReferencedObjectCount,
-        long SkippedReferenceAddresses) : AnalyzerDomainResult;
+        long SkippedReferenceAddresses,
+        IReadOnlyList<NameCountEntry>? TopFinalizerTypes = null,
+        IReadOnlyList<DuplicateStringSnapshot>? TopDuplicateStrings = null,
+        IReadOnlyList<HighlyReferencedObjectSnapshot>? TopHighlyReferencedObjects = null) : AnalyzerDomainResult;
+
+    internal sealed record DuplicateStringSnapshot(string Preview, int Count, ulong WastedBytes);
+    internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences);
 
     internal sealed record CollectionDomainResult(
         int TotalCollections,
@@ -94,14 +133,52 @@ namespace DumpDetective.Models
         int AnalyzedSamples,
         int RetainedSamples,
         double RetainedPercent,
-        IReadOnlyList<NameCountEntry>? TopRetainedTypes = null) : AnalyzerDomainResult;
+        IReadOnlyList<NameCountEntry>? TopRetainedTypes = null,
+        IReadOnlyList<string>? SampleReferenceChains = null) : AnalyzerDomainResult;
 
     internal sealed record ThreadDomainResult(
         int AliveThreadCount,
         int BlockedThreadCount,
         int LockHoldingThreadCount,
         int ThreadsWithActiveExceptionsCount,
-        IReadOnlyDictionary<string, int> WaitPatternBreakdown) : AnalyzerDomainResult;
+        IReadOnlyDictionary<string, int> WaitPatternBreakdown,
+        IReadOnlyDictionary<string, int>? ThreadStateDistribution = null,
+        IReadOnlyDictionary<string, int>? AppDomainDistribution = null,
+        IReadOnlyDictionary<string, int>? GcModeDistribution = null,
+        IReadOnlyList<ThreadStateSnapshot>? TopLockedThreads = null,
+        IReadOnlyList<ThreadStateSnapshot>? TopBlockedThreads = null,
+        IReadOnlyList<ThreadExceptionSnapshot>? ThreadsWithActiveExceptions = null,
+        IReadOnlyList<NameCountEntry>? TopStackHotspots = null,
+        IReadOnlyList<NameCountEntry>? TopActiveThreadHotspots = null,
+        int ThreadPoolWorkerCount = 0,
+        int FinalizerThreadCount = 0,
+        bool FinalizerThreadBlocked = false,
+        uint? FinalizerManagedThreadId = null,
+        uint? FinalizerOsThreadId = null,
+        int FinalizerLockCount = 0,
+        IReadOnlyList<string>? FinalizerFrames = null,
+        int AsyncChainThreadCount = 0,
+        int MaxAsyncChainDepth = 0) : AnalyzerDomainResult;
+
+    internal sealed record ThreadStateSnapshot(
+        uint ThreadId,
+        uint OSThreadId,
+        int LockCount,
+        string? WaitCategory,
+        string? WaitReason,
+        IReadOnlyList<string> TopFrames,
+        int StackRootCount);
+
+    internal sealed record ThreadExceptionSnapshot(
+        uint ThreadId,
+        uint OSThreadId,
+        string ExceptionType,
+        string? ExceptionMessage,
+        string ThreadState,
+        string GcMode,
+        int LockCount,
+        IReadOnlyList<string> TopFrames,
+        int StackRootCount);
 
     internal sealed record GCHandleDomainResult(
         int TotalHandles,
@@ -133,14 +210,44 @@ namespace DumpDetective.Models
         int AliveThreadCount,
         int UniqueClusters,
         double DiversityPercent,
-        IReadOnlyList<string> TopClusterSignatures) : AnalyzerDomainResult;
+        IReadOnlyList<string> TopClusterSignatures,
+        IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null) : AnalyzerDomainResult;
+
+    internal sealed record ThreadClusterSnapshot(
+        int Count,
+        IReadOnlyList<uint> SampleOsThreadIds,
+        string Signature);
 
     internal sealed record EventLeakDomainResult(
         int TotalEventLeakInstances,
         int TotalSubscribers,
         int StaticEventLeakCount,
         int InstanceEventLeakCount,
-        IReadOnlyList<NameCountEntry>? TopPublisherEventsBySubscribers = null) : AnalyzerDomainResult;
+        IReadOnlyList<NameCountEntry>? TopPublisherEventsBySubscribers = null,
+        IReadOnlyList<EventLeakGroupSnapshot>? TopLeakGroups = null,
+        IReadOnlyList<EventLeakInstanceSnapshot>? TopLeakInstances = null) : AnalyzerDomainResult;
+
+    internal sealed record EventLeakGroupSnapshot(
+        string PublisherType,
+        string EventFieldName,
+        bool IsStatic,
+        int SeverityScore,
+        int InstanceCount,
+        int TotalSubscribers,
+        double AverageSubscribers,
+        int MinSubscribers,
+        int MaxSubscribers,
+        IReadOnlyList<NameCountEntry>? TopSubscriberTypes = null);
+
+    internal sealed record EventLeakInstanceSnapshot(
+        string PublisherType,
+        string EventFieldName,
+        bool IsStatic,
+        ulong PublisherAddress,
+        int SeverityScore,
+        int SubscriberCount,
+        string? RootHint,
+        IReadOnlyList<string>? SubscriberTypes = null);
 
     internal sealed record LockGraphDomainResult(
         int TotalHeldLocks,

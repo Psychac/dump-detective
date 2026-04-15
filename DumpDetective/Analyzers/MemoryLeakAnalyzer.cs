@@ -7,6 +7,10 @@ namespace DumpDetective.Analyzers
 {
     internal class MemoryLeakAnalyzer : IAnalyzer
     {
+        private const int TopFinalizerTypesToShow = 10;
+        private const int TopDuplicateStringsToShow = 20;
+        private const int TopHighlyReferencedObjectsToShow = 15;
+
         private readonly int _highReferenceThreshold;
         private readonly int _maxStringLength;
         private readonly int _minDuplicateCount;
@@ -28,36 +32,50 @@ namespace DumpDetective.Analyzers
         {
             var findings = new List<InsightFinding>(capacity: 4);
 
-            int finalizerCount = AnalyzeFinalizerQueue(heap);
+            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap);
             LeakSignals signals = AnalyzeObjectsPass(heap);
 
-            AddFindings(findings, finalizerCount, signals);
+            AddFindings(findings, finalizerResult.TotalCount, signals);
 
             return new AnalyzerExecutionResult(
                 findings,
                 new MemoryLeakDomainResult(
-                    finalizerCount,
+                    finalizerResult.TotalCount,
                     signals.DuplicateStringCount,
                     signals.DuplicateStringWastedBytes,
                     signals.HighlyReferencedObjectCount,
-                    signals.SkippedReferenceAddresses));
+                    signals.SkippedReferenceAddresses,
+                    finalizerResult.TopTypes,
+                    signals.TopDuplicateStrings,
+                    signals.TopHighlyReferencedObjects));
         }
 
-        private int AnalyzeFinalizerQueue(ClrHeap heap)
+        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap)
         {
             // Single pass — no intermediate list allocation
             int finalizerCount = 0;
+            var topTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var scanCounter = new ObjectScanCounter("Finalizer queue scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var obj in heap.EnumerateFinalizableObjects())
             {
                 scanCounter.Tick();
                 finalizerCount++;
+
+                string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
+                topTypes.TryGetValue(typeName, out int count);
+                topTypes[typeName] = count + 1;
             }
 
             scanCounter.Complete();
 
-            return finalizerCount;
+            return new FinalizerQueueResult(
+                finalizerCount,
+                topTypes
+                    .OrderByDescending(k => k.Value)
+                    .Take(TopFinalizerTypesToShow)
+                    .Select(k => new NameCountEntry(k.Key, k.Value))
+                    .ToList());
         }
 
         private LeakSignals AnalyzeObjectsPass(ClrHeap heap)
@@ -119,9 +137,16 @@ namespace DumpDetective.Analyzers
             scanCounter.Complete();
 
             DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats);
+            IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount);
             int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount);
 
-            return new LeakSignals(duplicateResult.DuplicateCount, duplicateResult.TotalWastedBytes, highlyReferencedCount, skippedReferenceAddresses);
+            return new LeakSignals(
+                duplicateResult.DuplicateCount,
+                duplicateResult.TotalWastedBytes,
+                highlyReferencedCount,
+                skippedReferenceAddresses,
+                duplicateResult.TopDuplicates,
+                topHighlyReferencedObjects);
         }
 
         private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats)
@@ -129,7 +154,8 @@ namespace DumpDetective.Analyzers
             var duplicates = stringStats.Values
                 .Where(s => s.Count > _minDuplicateCount)
                 .OrderByDescending(s => s.TotalSize)
-                .Take(20);
+                .Take(TopDuplicateStringsToShow)
+                .ToList();
 
             ulong totalWastedBytes = 0;
             foreach (var dup in duplicates)
@@ -137,7 +163,14 @@ namespace DumpDetective.Analyzers
                 totalWastedBytes += dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
             }
 
-            return new DuplicateStringResult(stringStats.Count(s => s.Value.Count > _minDuplicateCount), totalWastedBytes);
+            var topDuplicates = duplicates
+                .Select(dup => new DuplicateStringSnapshot(
+                    dup.Preview,
+                    dup.Count,
+                    dup.TotalSize - (dup.TotalSize / (ulong)dup.Count)))
+                .ToList();
+
+            return new DuplicateStringResult(topDuplicates.Count, totalWastedBytes, topDuplicates);
         }
 
         private int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount)
@@ -239,8 +272,51 @@ namespace DumpDetective.Analyzers
             return preview.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
         }
 
+        private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount)
+        {
+            var topAddresses = referenceCount
+                .Where(kvp => kvp.Value > _highReferenceThreshold)
+                .OrderByDescending(kvp => kvp.Value)
+                .Take(TopHighlyReferencedObjectsToShow)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+            if (topAddresses.Count == 0)
+                return [];
+
+            var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Count);
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid)
+                    continue;
+
+                if (!topAddresses.TryGetValue(obj.Address, out int incomingReferences))
+                    continue;
+
+                results.Add(new HighlyReferencedObjectSnapshot(
+                    obj.Address,
+                    obj.Type?.Name ?? StringConstants.UnknownType,
+                    obj.Size,
+                    incomingReferences));
+
+                if (results.Count == topAddresses.Count)
+                    break;
+            }
+
+            return results
+                .OrderByDescending(r => r.IncomingReferences)
+                .ToList();
+        }
+
         private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
-        private readonly record struct DuplicateStringResult(int DuplicateCount, ulong TotalWastedBytes);
-        private readonly record struct LeakSignals(int DuplicateStringCount, ulong DuplicateStringWastedBytes, int HighlyReferencedObjectCount, long SkippedReferenceAddresses);
+        private readonly record struct DuplicateStringResult(int DuplicateCount, ulong TotalWastedBytes, IReadOnlyList<DuplicateStringSnapshot> TopDuplicates);
+        private readonly record struct LeakSignals(
+            int DuplicateStringCount,
+            ulong DuplicateStringWastedBytes,
+            int HighlyReferencedObjectCount,
+            long SkippedReferenceAddresses,
+            IReadOnlyList<DuplicateStringSnapshot> TopDuplicateStrings,
+            IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects);
+        private readonly record struct FinalizerQueueResult(int TotalCount, IReadOnlyList<NameCountEntry> TopTypes);
     }
 }

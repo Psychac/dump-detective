@@ -34,14 +34,14 @@ namespace DumpDetective.Analyzers
                     writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0} cumulative waiter(s)");
             }
 
-            writer.WriteLine("\nDEADLOCK SIGNAL:");
+            writer.WriteLine("\nDEADLOCK CANDIDATES:");
             writer.WriteSeparator();
             writer.WriteLine($"Deadlock candidates: {domain.DeadlockCandidateCount:N0}");
             writer.WriteLine(domain.DeadlockCandidateCount >= 2
                 ? "⚠️  Probable deadlock pattern detected."
                 : domain.ContestedLockCount > 0
                     ? "⚠️  Lock contention present; monitor lock acquisition order."
-                    : "✅ No lock contention/deadlock signal detected.");
+                    : "✅ No lock contention/deadlock candidates detected.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

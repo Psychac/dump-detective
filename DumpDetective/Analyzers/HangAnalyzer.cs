@@ -36,13 +36,32 @@ namespace DumpDetective.Analyzers
                 new HangDomainResult(
                     hangInfo.TotalAliveThreads,
                     hangInfo.WaitingThreads.Count,
+                    hangInfo.ThreadsHoldingLocks,
                     waitingPct,
                     waitCategoryBreakdown,
+                    hangInfo.TotalContinuations,
                     hangInfo.ThreadPoolInfo.QueuedWorkItems,
                     hangInfo.ThreadPoolInfo.PendingTasks,
                     hangInfo.ThreadPoolInfo.FaultedTasks,
                     hangInfo.ThreadPoolInfo.CanceledTasks,
-                    hangInfo.HealthScore));
+                    hangInfo.HealthScore,
+                    hangInfo.WaitingThreads
+                        .OrderByDescending(w => w.LockCount)
+                        .ThenByDescending(w => w.WaitType)
+                        .Take(10)
+                        .Select(w => new WaitingThreadSnapshot(
+                            w.ThreadId,
+                            w.OSThreadId,
+                            w.WaitType.ToString(),
+                            w.WaitReason,
+                            w.LockCount,
+                            w.TopStackFrame))
+                        .ToList(),
+                    hangInfo.TaskContinuations
+                        .OrderByDescending(k => k.Value)
+                        .Take(TopContinuationTypesToShow)
+                        .Select(k => new NameCountEntry(k.Key, k.Value))
+                        .ToList()));
         }
 
         private static InsightFinding CreateFinding(HangAnalysis analysis)

@@ -48,17 +48,35 @@ namespace DumpDetective.Analyzers
                     var analyzer = stage.Analyzers[analyzerIndex];
                     ConsoleUx.AnalyzerStart(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name);
                     var analyzerStopwatch = Stopwatch.StartNew();
-                    AnalyzerExecutionResult result = analyzer.Execute(context);
-                    analyzerStopwatch.Stop();
-                    if (result.Findings.Count > 0)
+                    bool succeeded = false;
+                    try
                     {
-                        findings.AddRange(result.Findings);
+                        AnalyzerExecutionResult result = analyzer.Execute(context);
+                        if (result.Findings.Count > 0)
+                        {
+                            findings.AddRange(result.Findings);
+                        }
+                        if (result.DomainResult != null)
+                        {
+                            domainResults[analyzer.Name] = result.DomainResult;
+                        }
+
+                        succeeded = true;
                     }
-                    if (result.DomainResult != null)
+                    catch (Exception ex)
                     {
-                        domainResults[analyzer.Name] = result.DomainResult;
+                        findings.Add(CreateAnalyzerFailureFinding(stage.Name, analyzer.Name, ex));
+                        ConsoleUx.Error($"Analyzer {analyzerIndex + 1}/{stage.Analyzers.Length} failed: {analyzer.Name} ({ex.GetType().Name}: {ex.Message})");
                     }
-                    ConsoleUx.AnalyzerComplete(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name, analyzerStopwatch);
+                    finally
+                    {
+                        analyzerStopwatch.Stop();
+                    }
+
+                    if (succeeded)
+                    {
+                        ConsoleUx.AnalyzerComplete(analyzerIndex + 1, stage.Analyzers.Length, analyzer.Name, analyzerStopwatch);
+                    }
                 }
 
                 stageStopwatch.Stop();
@@ -88,6 +106,21 @@ namespace DumpDetective.Analyzers
             pipelineStopwatch.Stop();
             ConsoleUx.PipelineSummary(stageResults);
             return (findings, domainResults);
+        }
+
+        private static InsightFinding CreateAnalyzerFailureFinding(string stageName, string analyzerName, Exception exception)
+        {
+            string exceptionType = exception.GetType().Name;
+            string message = string.IsNullOrWhiteSpace(exception.Message) ? "No exception message provided." : exception.Message;
+
+            return new InsightFinding(
+                Analyzer: analyzerName,
+                Category: "Pipeline",
+                Severity: FindingSeverity.Warning,
+                Title: "Analyzer execution failed",
+                Evidence: $"Stage '{stageName}' analyzer '{analyzerName}' threw {exceptionType}: {message}",
+                Recommendation: "Inspect analyzer logic and dump compatibility, then re-run analysis to recover full report coverage.",
+                Tags: ["pipeline", "analyzer-failure", "resilience"]);
         }
 
         private record AnalysisStage(string Name, IAnalyzer[] Analyzers);

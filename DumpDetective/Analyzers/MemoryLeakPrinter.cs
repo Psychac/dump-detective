@@ -56,7 +56,7 @@ namespace DumpDetective.Analyzers
                     writer.WriteLine($"{FormatHelper.TruncateString(dup.Preview, 50),-50} {dup.Count,10:N0} {FormatHelper.FormatBytes(dup.WastedBytes),12}");
             }
 
-            writer.WriteLine("\nHIGH-REFERENCE SIGNAL:");
+            writer.WriteLine("\nHIGHLY REFERENCED OBJECTS:");
             writer.WriteSeparator();
             writer.WriteLine($"Highly referenced objects: {domain.HighlyReferencedObjectCount:N0}");
             var topHighRefs = domain.TopHighlyReferencedObjects ?? [];

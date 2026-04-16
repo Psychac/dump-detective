@@ -70,8 +70,7 @@ namespace DumpDetective.Utilities
                     if (idx >= 0) { trendSection = sections[idx]; sections.RemoveAt(idx); }
                 }
 
-                // Skip "General" — dump path is already shown in the report meta card
-                sections.RemoveAll(s => s.Title.Equals("General", StringComparison.Ordinal));
+                TrimGeneralDumpFileMetadata(sections);
 
                 if (sections.Count > 0)
                     dumpBlocks.Add(new ParsedDumpBlock(label, sections));
@@ -195,6 +194,32 @@ namespace DumpDetective.Utilities
             return line.Length >= 8;
         }
 
+        private static void TrimGeneralDumpFileMetadata(List<ReportSection> sections)
+        {
+            int generalIndex = FindSectionIndex(sections, "General");
+            if (generalIndex < 0)
+                return;
+
+            ReportSection general = sections[generalIndex];
+            var filtered = general.Lines
+                .Where(line => !line.StartsWith("Dump file:", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            while (filtered.Count > 0 && string.IsNullOrWhiteSpace(filtered[0]))
+                filtered.RemoveAt(0);
+
+            while (filtered.Count > 0 && string.IsNullOrWhiteSpace(filtered[^1]))
+                filtered.RemoveAt(filtered.Count - 1);
+
+            if (filtered.Count == 0)
+            {
+                sections.RemoveAt(generalIndex);
+                return;
+            }
+
+            sections[generalIndex] = new ReportSection("RUN CONTEXT", filtered);
+        }
+
         private static List<ReportSection> NormalizeSectionsForParity(List<ReportSection> sections)
         {
             var normalized = sections
@@ -208,19 +233,13 @@ namespace DumpDetective.Utilities
             MergeSectionInto(normalized, "EVENT LEAK SIGNAL", "EVENT LEAK ANALYSIS", "Event Signal");
             MergeSectionInto(normalized, "THREAD HEALTH SIGNAL", "THREAD ANALYSIS", "Thread Health Signal");
             MergeSectionInto(normalized, "DIVERSITY SIGNAL", "CLUSTER SUMMARY", "Diversity Signal");
-            MergeSectionInto(normalized, "GC-ROOT COVERAGE SIGNAL", "REFERENCE RETENTION SUMMARY", "Retention Signal");
+            MergeSectionInto(normalized, "GC-ROOT COVERAGE SIGNAL", "REFERENCE CHAIN ANALYSIS", "Retention Signal");
             MergeSectionInto(normalized, "CAPACITY RECOMMENDATION", "WASTE SIGNAL", "Capacity Recommendation");
             MergeSectionInto(normalized, "RESOLUTION QUALITY SIGNAL", "DEPENDENT HANDLE SUMMARY", "Resolution Signal");
-
-            AddAlias(normalized, "HIGH-REFERENCE SIGNAL", "HIGHLY REFERENCED OBJECTS");
-            AddAlias(normalized, "TOP FRAGMENTED SEGMENTS", "TOP FRAGMENTED LOH SEGMENTS");
-            AddAlias(normalized, "REFERENCE RETENTION SUMMARY", "REFERENCE CHAIN ANALYSIS");
-            AddAlias(normalized, "CROSS-ANALYZER CORRELATION INSIGHTS", "💡 OPTIMIZATION TIPS");
 
             SynthesizeActiveExceptionTypesOnThreads(normalized);
             SynthesizeThreadGroups(normalized);
             SynthesizeLockCausalityChain(normalized);
-            SynthesizeRootAndStaticSections(normalized);
 
             EnsureDistinctSectionTitles(normalized);
             return normalized;
@@ -247,19 +266,6 @@ namespace DumpDetective.Utilities
             }
 
             sections.RemoveAt(sourceIndex);
-        }
-
-        private static void AddAlias(List<ReportSection> sections, string sourceTitle, string aliasTitle)
-        {
-            if (FindSectionIndex(sections, aliasTitle) >= 0)
-                return;
-
-            int sourceIndex = FindSectionIndex(sections, sourceTitle);
-            if (sourceIndex < 0)
-                return;
-
-            var source = sections[sourceIndex];
-            sections.Insert(sourceIndex + 1, new ReportSection(aliasTitle, [.. source.Lines]));
         }
 
         private static void SynthesizeActiveExceptionTypesOnThreads(List<ReportSection> sections)
@@ -336,12 +342,6 @@ namespace DumpDetective.Utilities
             };
 
             sections.Insert(hotspotsIndex + 1, new ReportSection("LOCK CAUSALITY CHAIN", lines));
-        }
-
-        private static void SynthesizeRootAndStaticSections(List<ReportSection> sections)
-        {
-            AddAlias(sections, "TOP TYPES KEPT ALIVE", "ROOTED OBJECTS ANALYSIS");
-            AddAlias(sections, "STATIC ROOT LEAK DETECTION", "STATIC FIELD REFERENCES");
         }
 
         private static int FindSectionIndex(List<ReportSection> sections, string title)

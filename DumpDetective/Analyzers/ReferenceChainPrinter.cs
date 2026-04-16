@@ -15,7 +15,7 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("REFERENCE CHAIN ANALYSIS:");
-            writer.WriteLine("REFERENCE RETENTION SUMMARY:");
+            writer.WriteLine("REFERENCE CHAIN ANALYSIS:");
             writer.WriteSeparator();
             writer.WriteLine($"Analyzed samples: {domain.AnalyzedSamples:N0}");
             writer.WriteLine($"Retained samples: {domain.RetainedSamples:N0}");

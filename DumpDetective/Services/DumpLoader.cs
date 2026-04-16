@@ -243,7 +243,7 @@ namespace DumpDetective.Services
 
         private static void RenderCorrelationInsights(OutputWriter writer, IReadOnlyDictionary<string, AnalyzerDomainResult> domainResults)
         {
-            writer.WriteLine("\n\nCROSS-ANALYZER CORRELATION INSIGHTS:");
+            writer.WriteLine("\n\n💡 OPTIMIZATION TIPS:");
             writer.WriteSeparator();
 
             var insights = new List<string>(capacity: 8);

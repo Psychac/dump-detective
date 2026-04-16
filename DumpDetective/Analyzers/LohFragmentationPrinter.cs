@@ -31,7 +31,7 @@ namespace DumpDetective.Analyzers
                 ? "⚠️  LOH fragmentation appears elevated."
                 : "✅ LOH fragmentation appears acceptable.");
 
-            writer.WriteLine("\nTOP FRAGMENTED SEGMENTS:");
+            writer.WriteLine("\nTOP FRAGMENTED LOH SEGMENTS:");
             writer.WriteSeparator();
             var segments = domain.TopFragmentedSegments ?? [];
             if (segments.Count == 0)

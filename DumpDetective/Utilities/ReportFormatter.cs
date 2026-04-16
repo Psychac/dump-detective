@@ -44,12 +44,14 @@ namespace DumpDetective.Utilities
 
         private static string SectionIcon(string title)
         {
-            string u = title.ToUpperInvariant();
+            string u = CanonicalizeSectionTitle(title);
             if (u.Contains("MEMORY LEAK"))                       return "💧";
             if (u.Contains("FINALIZER") && !u.Contains("THREAD")) return "💧";
             if (u.Contains("HIGHLY REFERENCED"))                 return "📎";
             if (u.Contains("ROOTED OBJECTS"))                    return "⚓";
             if (u.Contains("STATIC FIELD"))                      return "🌱";
+            if (u.Contains("OPTIMIZATION TIPS") || u.Contains("CORRELATION")) return "💡";
+            if (u.Contains("RUN CONTEXT") || u == "GENERAL")    return "🧭";
             if (u.Contains("DEADLOCK"))                          return "🔴";
             if (u.Contains("LOCK GRAPH") || u.Contains("LOCK CONTENTION") || u.Contains("CAUSALITY")) return "🔒";
             if (u.Contains("ASYNC TASK"))                        return "⏳";
@@ -82,59 +84,202 @@ namespace DumpDetective.Utilities
 
         private static (string Name, string Icon) SectionGroupInfo(string title)
         {
-            string u = title.ToUpperInvariant();
-            if (u.Contains("MEMORY LEAK") || (u.Contains("FINALIZER") && !u.Contains("THREAD")) || u.Contains("DUPLICATE") ||
-                u.Contains("STATIC ROOT")  || u.Contains("REFERENCE CHAIN") ||
-                u.Contains("COLLECTION")   || u.Contains("EVENT LEAK") ||
-                u.Contains("HIGHLY REFERENCED") || u.Contains("ROOTED OBJECTS") || u.Contains("STATIC FIELD") ||
-                u.Contains("EVENT")        || u.Contains("INSTANCES"))
-                return ("Leak Detection", "💧");
+            string u = CanonicalizeSectionTitle(title);
 
-            if (u.Contains("CRASH") || u.Contains("EXCEPTION") || u.Contains("HANG") ||
-                u.Contains("DEADLOCK") || u.Contains("ASYNC TASK") ||
-                u.Contains("LOCK GRAPH") || u.Contains("LOCK CONTENTION") || u.Contains("CAUSALITY"))
-                return ("Stability", "🩺");
+            return u switch
+            {
+                "RUN CONTEXT" or "GENERAL" or "CLR VERSION INFORMATION" or "MODULE SUMMARY" or "LOADED ASSEMBLIES (TOP 30)" or "VERSION CONFLICTS DETECTED"
+                    => ("Run Context", "🧭"),
 
-            if (u.Contains("GC HANDLE") || u.Contains("DEPENDENT HANDLE") ||
-                u.Contains("HANDLE")    || u.Contains("RETENTION"))
-                return ("Handles & Roots", "🔗");
+                "EXCEPTION SUMMARY" or "LIKELY CRASH THREADS" or "DETAILED EXCEPTION INFORMATION" or
+                "HANG INDICATORS" or "HANG WAIT CATEGORY BREAKDOWN" or "WAITING THREADS BREAKDOWN" or
+                "DEADLOCK DETECTION" or "DEADLOCK CANDIDATES" or
+                "LOCK CONTENTION SUMMARY" or "LOCK CONTENTION HOTSPOTS" or "LOCK CAUSALITY CHAIN"
+                    => ("Stability", "🩺"),
 
-            if (u.Contains("MEMORY") || u.Contains("HEAP")  || u.Contains("LOH") ||
-                u.Contains("GC GENERATION") || u.Contains("OVERALL") || u.Contains("TOP TYPES") ||
-                u.Contains("OBJECT TYPES"))
-                return ("Memory Health", "🧠");
+                "OVERALL SUMMARY" or "HEAP SUMMARY" or "LARGE OBJECT HEAP (LOH) USAGE" or
+                "LOH SUMMARY" or "TOP FRAGMENTED LOH SEGMENTS" or
+                "GENERATION SPLIT" or "TOP LOH OBJECT TYPES" or
+                "TOP 20 OBJECT TYPES BY MEMORY SIZE" or "TOP 20 OBJECT TYPES BY COUNT"
+                    => ("Memory Health", "🧠"),
 
-            if (u.Contains("THREAD") || u.Contains("WAIT CATEGORY") ||
-                u.Contains("APP DOMAIN") || u.Contains("HOTSPOT") || u.Contains("CLUSTER") ||
-                u.Contains("GC MODE"))
-                return ("Threading", "🧵");
+                "FINALIZER QUEUE" or "DUPLICATE STRING ANALYSIS" or "HIGHLY REFERENCED OBJECTS" or
+                "COLLECTION SUMMARY" or "MOST WASTEFUL COLLECTIONS (TOP 15)" or "WASTE SIGNAL" or
+                "EVENT LEAK ANALYSIS" or "SUMMARY BY EVENT TYPE" or "DETAILED INSTANCES" or
+                "STATIC FIELD REFERENCES" or "ROOTED OBJECTS ANALYSIS" or "RETENTION PRESSURE SIGNAL" or
+                "REFERENCE CHAIN ANALYSIS" or "TOP TYPE SAMPLE TRACE RESULTS" or "REFERENCE CHAINS (SHOWING UP TO 5)"
+                    => ("Leak & Retention", "💧"),
 
-            if (u.Contains("MODULE") || u.Contains("ASSEMBLY") ||
-                u.Contains("CLR VERSION") || u.Contains("VERSION CONFLICT"))
-                return ("Infrastructure", "🏗️");
+                "HANDLE SUMMARY" or "HANDLES BY KIND" or "TOP TYPES REFERENCED BY HANDLES" or
+                "TOP TYPES REFERENCED BY PINNED HANDLES" or "HANDLE PRESSURE SIGNAL" or
+                "DEPENDENT HANDLE SUMMARY" or "TOP SOURCE TYPES" or "TOP TARGET TYPES" or
+                "TOP SOURCE -> TARGET EDGES" or "RESOLUTION QUALITY SIGNAL"
+                    => ("Handles & Roots", "🔗"),
 
-            return ("General", "📋");
+                "THREAD ANALYSIS" or "THREAD STATE DISTRIBUTION" or "APP DOMAIN DISTRIBUTION" or
+                "GC MODE DISTRIBUTION" or "THREADS WITH LOCKS" or "POTENTIALLY BLOCKED THREADS" or
+                "THREADS WITH ACTIVE EXCEPTIONS" or "ACTIVE EXCEPTION TYPES ON THREADS" or
+                "TOP STACK HOTSPOTS (TOP FRAME)" or "THREAD POOL STATUS" or "FINALIZER THREAD" or
+                "ASYNC TASK ANALYSIS" or "ASYNC THREAD ISSUES" or "THREAD GROUPS" or
+                "CLUSTER SUMMARY" or "TOP SIGNATURES" or "TOP THREAD CLUSTERS"
+                    => ("Threading & Concurrency", "🧵"),
+
+                "💡 OPTIMIZATION TIPS" or "CROSS-ANALYZER CORRELATION INSIGHTS"
+                    => ("Optimization Guidance", "💡"),
+
+                _ when u.Contains("OPTIMIZATION TIPS") || u.Contains("CORRELATION")
+                    => ("Optimization Guidance", "💡"),
+                _ when u.Contains("THREAD") || u.Contains("WAIT CATEGORY") || u.Contains("HOTSPOT") || u.Contains("CLUSTER") || u.Contains("GC MODE")
+                    => ("Threading & Concurrency", "🧵"),
+                _ when u.Contains("HANDLE") || u.Contains("RETENTION")
+                    => ("Handles & Roots", "🔗"),
+                _ when u.Contains("LOH") || u.Contains("MEMORY") || u.Contains("HEAP") || u.Contains("GC GENERATION") || u.Contains("OBJECT TYPES")
+                    => ("Memory Health", "🧠"),
+                _ when u.Contains("LEAK") || u.Contains("FINALIZER") || u.Contains("DUPLICATE") || u.Contains("EVENT") || u.Contains("ROOTED") || u.Contains("STATIC FIELD")
+                    => ("Leak & Retention", "💧"),
+                _ when u.Contains("EXCEPTION") || u.Contains("HANG") || u.Contains("DEADLOCK") || u.Contains("LOCK CONTENTION")
+                    => ("Stability", "🩺"),
+                _ => ("General", "📋")
+            };
         }
 
         private static int GroupSortOrder(string groupName) => groupName switch
         {
+            "Run Context"     => 0,
             "Stability"       => 0,
-            "Leak Detection"  => 1,
-            "Memory Health"   => 2,
+            "Memory Health"   => 1,
+            "Leak & Retention"=> 2,
             "Handles & Roots" => 3,
-            "Threading"       => 4,
-            "Infrastructure"  => 5,
+            "Threading & Concurrency" => 4,
+            "Optimization Guidance" => 5,
             _                 => 6
         };
+
+        private static int SectionSortOrder(string title)
+        {
+            string u = CanonicalizeSectionTitle(title);
+            return u switch
+            {
+                "RUN CONTEXT" => 0,
+                "CLR VERSION INFORMATION" => 1,
+                "MODULE SUMMARY" => 2,
+                "LOADED ASSEMBLIES (TOP 30)" => 3,
+                "VERSION CONFLICTS DETECTED" => 4,
+
+                "EXCEPTION SUMMARY" => 10,
+                "LIKELY CRASH THREADS" => 11,
+                "DETAILED EXCEPTION INFORMATION" => 12,
+                "HANG INDICATORS" => 13,
+                "HANG WAIT CATEGORY BREAKDOWN" => 14,
+                "WAITING THREADS BREAKDOWN" => 15,
+                "DEADLOCK DETECTION" => 16,
+                "DEADLOCK CANDIDATES" => 17,
+                "LOCK CONTENTION SUMMARY" => 18,
+                "LOCK CONTENTION HOTSPOTS" => 19,
+                "LOCK CAUSALITY CHAIN" => 20,
+
+                "OVERALL SUMMARY" => 30,
+                "HEAP SUMMARY" => 31,
+                "LARGE OBJECT HEAP (LOH) USAGE" => 32,
+                "LOH SUMMARY" => 33,
+                "TOP FRAGMENTED LOH SEGMENTS" => 34,
+                "GENERATION SPLIT" => 35,
+                "TOP LOH OBJECT TYPES" => 36,
+                "TOP 20 OBJECT TYPES BY MEMORY SIZE" => 37,
+                "TOP 20 OBJECT TYPES BY COUNT" => 38,
+
+                "FINALIZER QUEUE" => 40,
+                "DUPLICATE STRING ANALYSIS" => 41,
+                "HIGHLY REFERENCED OBJECTS" => 42,
+                "COLLECTION SUMMARY" => 43,
+                "MOST WASTEFUL COLLECTIONS (TOP 15)" => 44,
+                "WASTE SIGNAL" => 45,
+                "EVENT LEAK ANALYSIS" => 46,
+                "SUMMARY BY EVENT TYPE" => 47,
+                "DETAILED INSTANCES" => 48,
+                "STATIC FIELD REFERENCES" => 49,
+                "ROOTED OBJECTS ANALYSIS" => 50,
+                "RETENTION PRESSURE SIGNAL" => 51,
+                "REFERENCE CHAIN ANALYSIS" => 52,
+                "TOP TYPE SAMPLE TRACE RESULTS" => 53,
+                "REFERENCE CHAINS (SHOWING UP TO 5)" => 54,
+
+                "HANDLE SUMMARY" => 60,
+                "HANDLES BY KIND" => 61,
+                "TOP TYPES REFERENCED BY HANDLES" => 62,
+                "TOP TYPES REFERENCED BY PINNED HANDLES" => 63,
+                "HANDLE PRESSURE SIGNAL" => 64,
+                "DEPENDENT HANDLE SUMMARY" => 65,
+                "TOP SOURCE TYPES" => 66,
+                "TOP TARGET TYPES" => 67,
+                "TOP SOURCE -> TARGET EDGES" => 68,
+                "RESOLUTION QUALITY SIGNAL" => 69,
+
+                "THREAD ANALYSIS" => 70,
+                "THREAD STATE DISTRIBUTION" => 71,
+                "APP DOMAIN DISTRIBUTION" => 72,
+                "GC MODE DISTRIBUTION" => 73,
+                "THREADS WITH LOCKS" => 74,
+                "POTENTIALLY BLOCKED THREADS" => 75,
+                "THREADS WITH ACTIVE EXCEPTIONS" => 76,
+                "ACTIVE EXCEPTION TYPES ON THREADS" => 77,
+                "TOP STACK HOTSPOTS (TOP FRAME)" => 78,
+                "THREAD POOL STATUS" => 79,
+                "FINALIZER THREAD" => 80,
+                "ASYNC TASK ANALYSIS" => 81,
+                "ASYNC THREAD ISSUES" => 82,
+                "THREAD GROUPS" => 83,
+                "CLUSTER SUMMARY" => 84,
+                "TOP SIGNATURES" => 85,
+                "TOP THREAD CLUSTERS" => 86,
+
+                "💡 OPTIMIZATION TIPS" => 90,
+                "CROSS-ANALYZER CORRELATION INSIGHTS" => 90,
+                _ => 200
+            };
+        }
+
+        private static string CanonicalizeSectionTitle(string title)
+        {
+            string normalized = title.Trim().ToUpperInvariant();
+
+            if (normalized.EndsWith(")", StringComparison.Ordinal))
+            {
+                int lastOpen = normalized.LastIndexOf(" (", StringComparison.Ordinal);
+                if (lastOpen > 0)
+                {
+                    ReadOnlySpan<char> suffix = normalized.AsSpan(lastOpen + 2, normalized.Length - lastOpen - 3);
+                    bool isNumericSuffix = suffix.Length > 0;
+                    for (int i = 0; i < suffix.Length; i++)
+                    {
+                        if (!char.IsDigit(suffix[i]))
+                        {
+                            isNumericSuffix = false;
+                            break;
+                        }
+                    }
+
+                    if (isNumericSuffix)
+                    {
+                        normalized = normalized[..lastOpen];
+                    }
+                }
+            }
+
+            return normalized;
+        }
 
         private static IEnumerable<(string Name, string Icon, IEnumerable<ReportSection> Sections)> GroupSections(
             IReadOnlyList<ReportSection> sections)
         {
             return sections
-                .Select(s => (Section: s, Info: SectionGroupInfo(s.Title)))
+                .Select((s, index) => (Section: s, Index: index, Info: SectionGroupInfo(s.Title)))
                 .GroupBy(x => x.Info)
                 .OrderBy(g => GroupSortOrder(g.Key.Name))
-                .Select(g => (g.Key.Name, g.Key.Icon, g.Select(x => x.Section)));
+                .Select(g => (g.Key.Name, g.Key.Icon, g
+                    .OrderBy(x => SectionSortOrder(x.Section.Title))
+                    .ThenBy(x => x.Index)
+                    .Select(x => x.Section)));
         }
 
         // ── Shared utilities ───────────────────────────────────────────────────

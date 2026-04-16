@@ -25,7 +25,7 @@ namespace DumpDetective.Services
                 : null;
 
             List<string> dumpSequence = BuildDumpSequence();
-            var runs = new List<AnalysisRunResult>(dumpSequence.Count);
+            var analysisRunResults = new List<AnalysisRunResult>(dumpSequence.Count);
             var loader = new DumpLoader(_config);
 
             for (int i = 0; i < dumpSequence.Count; i++)
@@ -33,23 +33,22 @@ namespace DumpDetective.Services
                 string dumpPath = dumpSequence[i];
                 ConsoleUx.Info($"Analyzing dump [{i + 1}/{dumpSequence.Count}]: {Path.GetFileName(dumpPath)}");
                 var dumpStopwatch = Stopwatch.StartNew();
-                runs.Add(loader.Load(dumpPath, i));
+                analysisRunResults.Add(loader.Load(dumpPath, i));
                 dumpStopwatch.Stop();
                 runTimings?.Add(($"Dump {i + 1}/{dumpSequence.Count} ({Path.GetFileName(dumpPath)})", dumpStopwatch.Elapsed));
 
-                //if (_config.ForceGCBetweenStages)
                     ForceFullCollection();
             }
 
-            AnalysisRunResult currentRun = runs[^1];
+            AnalysisRunResult currentRun = analysisRunResults[^1];
             var reportFindings = currentRun.Snapshot.Findings.ToList();
             var reportMergeStopwatch = Stopwatch.StartNew();
-            string detailedReport = ReportBuilder.BuildCombinedDetailedReport(runs);
+            string detailedReport = ReportBuilder.BuildCombinedDetailedReport(analysisRunResults);
             reportMergeStopwatch.Stop();
             runTimings?.Add(("Detailed report merge", reportMergeStopwatch.Elapsed));
 
-            var snapshots = runs.Select(r => r.Snapshot).ToList();
-            runs.Clear();
+            var snapshots = analysisRunResults.Select(r => r.Snapshot).ToList();
+            analysisRunResults.Clear();
 
             var additionalInsights = new List<string>();
 

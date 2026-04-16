@@ -8,8 +8,15 @@ using System.Text;
 
 namespace DumpDetective.Services
 {
-    internal sealed class DumpLoader(AnalysisConfiguration config)
+    internal sealed class DumpLoader
     {
+        private readonly AnalysisConfiguration config;
+
+        public DumpLoader(AnalysisConfiguration config)
+        {
+            this.config = config;
+        }
+
         public AnalysisRunResult Load(string dumpPath, int snapshotIndex)
         {
             var dumpStopwatch = Stopwatch.StartNew();
@@ -187,7 +194,7 @@ namespace DumpDetective.Services
             ConsoleUx.Header("Analysis Pipeline");
             ConsoleUx.Info("Starting analysis pipeline...");
 
-            var pipeline = new AnalysisPipeline(initialSnapshot, config.EnableMemoryDiagnostics)
+            var pipeline = new AnalysisPipeline(initialSnapshot, config.EnableMemoryDiagnostics, config.ForceGCBetweenStages)
                 .AddStage("Running core memory analyzers",
                     new MemoryAnalyzer(),
                     new GCGenerationAnalyzer(),

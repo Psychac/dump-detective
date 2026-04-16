@@ -8,12 +8,14 @@ namespace DumpDetective.Analyzers
     {
         private readonly List<AnalysisStage> _stages = new();
         private readonly bool _enableMemoryDiagnostics;
+        private readonly bool _forceGCBetweenStages;
         private MemorySnapshot? _previousSnapshot;
 
-        public AnalysisPipeline(MemorySnapshot? initialSnapshot, bool enableMemoryDiagnostics)
+        public AnalysisPipeline(MemorySnapshot? initialSnapshot, bool enableMemoryDiagnostics, bool forceGCBetweenStages = false)
         {
             _previousSnapshot = initialSnapshot;
             _enableMemoryDiagnostics = enableMemoryDiagnostics;
+            _forceGCBetweenStages = forceGCBetweenStages;
         }
 
         public AnalysisPipeline AddStage(string name, params IAnalyzer[] analyzers)
@@ -86,6 +88,12 @@ namespace DumpDetective.Analyzers
                     var snapshot = MemoryDiagnostic.TakeSnapshot($"{i + 1}. After {stage.Name}");
                     MemoryDiagnostic.PrintDeltaToConsole(_previousSnapshot, snapshot);
                     _previousSnapshot = snapshot;
+                }
+
+                if (_forceGCBetweenStages)
+                {
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                    GC.WaitForPendingFinalizers();
                 }
 
                 ConsoleUx.StageComplete(stage.Name, stageStopwatch);

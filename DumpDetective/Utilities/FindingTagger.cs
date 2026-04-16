@@ -12,7 +12,7 @@ namespace DumpDetective.Utilities
             }
 
             var normalized = findings
-                .DistinctBy(f => (f.Analyzer, f.Title, f.Evidence))
+                .DistinctBy(f => f.EffectiveFingerprint)
                 .OrderByDescending(f => f.Severity)
                 .ThenBy(f => f.Analyzer, StringComparer.Ordinal)
                 .ToList();

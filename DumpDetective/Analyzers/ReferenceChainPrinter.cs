@@ -45,7 +45,9 @@ namespace DumpDetective.Analyzers
                         writer.WriteLine($"    Size: {FormatHelper.FormatBytes(trace.SampleObjectSize)}");
                         writer.WriteLine(trace.HasGcRoot
                             ? "    Status: GC root path found"
-                            : "    Status: No GC root found (may be eligible for collection)");
+                            : trace.TraversalLimited
+                                ? "    Status: No GC root found (search limit reached; result inconclusive)"
+                                : "    Status: No GC root found (may be eligible for collection)");
 
                         if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
                             writer.WriteLine($"    Root Path: {trace.RootPath}");

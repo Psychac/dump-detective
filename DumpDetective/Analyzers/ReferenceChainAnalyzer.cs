@@ -9,6 +9,9 @@ namespace DumpDetective.Analyzers
     {
         private readonly AnalysisConfiguration _config;
         private const int DefaultTopTypeCount = 10;
+        private const int MaxPathSearchObjects = 5000;
+
+        private readonly record struct RootCandidate(string RootKind, ulong Address);
 
         public string Name => "Reference Chain Analysis";
 
@@ -22,6 +25,9 @@ namespace DumpDetective.Analyzers
         public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
         {
             int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
+            int maxPathSearchObjects = _config.ReferenceChainMaxPathSearchObjects > 0
+                ? _config.ReferenceChainMaxPathSearchObjects
+                : MaxPathSearchObjects;
 
             // Use cached type statistics instead of re-enumerating
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
@@ -33,9 +39,11 @@ namespace DumpDetective.Analyzers
 
             int retainedSamples = 0;
             int analyzedSamples = 0;
+            int traversalLimitedSamples = 0;
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
             var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Count);
+            List<RootCandidate> roots = GetValidRoots(heap);
 
             foreach (var typeKvp in topTypes)
             {
@@ -48,6 +56,7 @@ namespace DumpDetective.Analyzers
                 ulong sampleSize = 0;
                 bool hasGcRoot = false;
                 string? path = null;
+                bool searchTruncated = false;
 
                 if (sampleAddress.HasValue)
                 {
@@ -58,7 +67,7 @@ namespace DumpDetective.Analyzers
                         sampleType = sampleObj.Type?.Name ?? StringConstants.UnknownType;
                         sampleSize = sampleObj.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, sampleAddress.Value, out path);
+                        hasGcRoot = TryFindAnyRootPath(heap, roots, sampleAddress.Value, maxPathSearchObjects, out path, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -69,6 +78,10 @@ namespace DumpDetective.Analyzers
 
                             if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
                                 sampleReferenceChains.Add($"{typeName}: {path}");
+                        }
+                        else if (searchTruncated)
+                        {
+                            traversalLimitedSamples++;
                         }
                     }
                 }
@@ -81,7 +94,8 @@ namespace DumpDetective.Analyzers
                     sampleType,
                     sampleSize,
                     hasGcRoot,
-                    path));
+                    path,
+                    searchTruncated));
             }
 
             double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
@@ -92,42 +106,86 @@ namespace DumpDetective.Analyzers
                 .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
                 .ToList();
 
+            var findings = new List<InsightFinding>(capacity: 2)
+            {
+                CreateFinding(analyzedSamples, retainedSamples)
+            };
+
+            if (traversalLimitedSamples > 0)
+            {
+                findings.Add(CreateTraversalLimitFinding(analyzedSamples, traversalLimitedSamples));
+            }
+
             return new AnalyzerExecutionResult(
-                [CreateFinding(analyzedSamples, retainedSamples)],
+                findings,
                 new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces));
         }
 
         public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
-            return TryFindAnyRootPath(heap, objectAddress, out _);
+            List<RootCandidate> roots = GetValidRoots(heap);
+            int maxPathSearchObjects = _config.ReferenceChainMaxPathSearchObjects > 0
+                ? _config.ReferenceChainMaxPathSearchObjects
+                : MaxPathSearchObjects;
+            return TryFindAnyRootPath(heap, roots, objectAddress, maxPathSearchObjects, out _, out _);
         }
 
-        private bool TryFindAnyRootPath(ClrHeap heap, ulong objectAddress, out string? path)
+        private static List<RootCandidate> GetValidRoots(ClrHeap heap)
+        {
+            var roots = new List<RootCandidate>(capacity: 1024);
+            foreach (ClrRoot root in heap.EnumerateRoots())
+            {
+                ulong rootAddress = root.Object.Address;
+                if (rootAddress == 0)
+                    continue;
+
+                roots.Add(new RootCandidate(root.RootKind.ToString(), rootAddress));
+            }
+
+            return roots;
+        }
+
+        private bool TryFindAnyRootPath(ClrHeap heap, IReadOnlyList<RootCandidate> roots, ulong objectAddress, int maxPathSearchObjects, out string? path, out bool searchTruncated)
         {
             path = null;
+            searchTruncated = false;
 
             ClrObject obj = heap.GetObject(objectAddress);
             if (!obj.IsValid)
                 return false;
 
             var scanCounter = new ObjectScanCounter("Reference chain root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-            foreach (ClrRoot root in heap.EnumerateRoots())
+            foreach (RootCandidate root in roots)
             {
                 scanCounter.Tick();
-                ulong rootAddress = root.Object.Address;
-                if (rootAddress == 0)
-                    continue;
-
-                if (TryBuildPath(heap, rootAddress, objectAddress, out List<ulong>? addresses))
+                if (TryBuildPath(heap, root.Address, objectAddress, maxPathSearchObjects, out List<ulong>? addresses, out bool pathSearchLimited))
                 {
                     scanCounter.Complete();
-                    path = FormatPath(heap, root, addresses);
+                    path = FormatPath(heap, root.RootKind, addresses);
                     return true;
                 }
+
+                if (pathSearchLimited)
+                    searchTruncated = true;
             }
 
             scanCounter.Complete();
             return false;
+        }
+
+        private static InsightFinding CreateTraversalLimitFinding(int analyzedSamples, int traversalLimitedSamples)
+        {
+            double limitedPct = analyzedSamples == 0 ? 0 : traversalLimitedSamples * 100.0 / analyzedSamples;
+            return new InsightFinding(
+                Analyzer: nameof(ReferenceChainAnalyzer),
+                Category: "Retention",
+                Severity: limitedPct >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Reference-chain traversal limit reached",
+                Evidence: $"{traversalLimitedSamples:N0}/{analyzedSamples:N0} sampled type(s) hit traversal limits before a conclusive root-path result ({limitedPct:F1}%).",
+                Recommendation: "Increase sampling depth/path budget for inconclusive types and validate with targeted object tracing.",
+                Tags: ["reference-chain", "traversal-limit", "retention"],
+                MetricValue: limitedPct,
+                MetricUnit: "% traversal-limited-samples");
         }
 
         private static InsightFinding CreateFinding(int analyzedSamples, int retainedSamples)
@@ -160,45 +218,10 @@ namespace DumpDetective.Analyzers
                 MetricUnit: "% retained-samples");
         }
 
-        private static bool CanReachTarget(ClrHeap heap, ulong startAddress, ulong targetAddress)
-        {
-            if (startAddress == targetAddress)
-                return true;
-
-            var visited = new HashSet<ulong>(capacity: 1024) { startAddress };
-            var queue = new Queue<ulong>(capacity: 256);
-            queue.Enqueue(startAddress);
-
-            int maxSearch = 5000;
-            int searched = 0;
-
-            while (queue.Count > 0 && searched++ < maxSearch)
-            {
-                var current = queue.Dequeue();
-                var obj = heap.GetObject(current);
-
-                if (!obj.IsValid) continue;
-
-                foreach (var reference in obj.EnumerateReferences(carefully: true))
-                {
-                    if (!reference.IsValid) continue;
-
-                    if (reference.Address == targetAddress)
-                        return true;
-
-                    if (visited.Add(reference.Address))
-                    {
-                        queue.Enqueue(reference.Address);
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryBuildPath(ClrHeap heap, ulong startAddress, ulong targetAddress, out List<ulong>? path)
+        private static bool TryBuildPath(ClrHeap heap, ulong startAddress, ulong targetAddress, int maxPathSearchObjects, out List<ulong>? path, out bool searchLimitReached)
         {
             path = null;
+            searchLimitReached = false;
 
             if (startAddress == targetAddress)
             {
@@ -206,15 +229,17 @@ namespace DumpDetective.Analyzers
                 return true;
             }
 
+            if (startAddress == 0 || targetAddress == 0)
+                return false;
+
             var visited = new HashSet<ulong>(capacity: 1024) { startAddress };
             var previous = new Dictionary<ulong, ulong>(capacity: 1024);
             var queue = new Queue<ulong>(capacity: 256);
             queue.Enqueue(startAddress);
 
-            int maxSearch = 5000;
             int searched = 0;
 
-            while (queue.Count > 0 && searched++ < maxSearch)
+            while (queue.Count > 0 && searched++ < maxPathSearchObjects)
             {
                 ulong current = queue.Dequeue();
                 ClrObject currentObj = heap.GetObject(current);
@@ -229,8 +254,7 @@ namespace DumpDetective.Analyzers
                     ulong refAddress = reference.Address;
                     if (refAddress == targetAddress)
                     {
-                        previous[targetAddress] = current;
-                        path = ReconstructPath(previous, startAddress, targetAddress);
+                        path = ReconstructPath(previous, startAddress, targetAddress, current);
                         return true;
                     }
 
@@ -242,13 +266,21 @@ namespace DumpDetective.Analyzers
                 }
             }
 
+            searchLimitReached = queue.Count > 0 && searched >= maxPathSearchObjects;
+
             return false;
         }
 
-        private static List<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress)
+        private static List<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress, ulong? targetParent = null)
         {
             var reversed = new List<ulong>(capacity: 16) { targetAddress };
+
             ulong cursor = targetAddress;
+            if (targetParent.HasValue)
+            {
+                reversed.Add(targetParent.Value);
+                cursor = targetParent.Value;
+            }
 
             while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
             {
@@ -260,7 +292,7 @@ namespace DumpDetective.Analyzers
             return reversed;
         }
 
-        private static string FormatPath(ClrHeap heap, ClrRoot root, IReadOnlyList<ulong> addresses)
+        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)
         {
             static string FormatNode(ClrHeap heap, ulong address)
             {
@@ -270,7 +302,7 @@ namespace DumpDetective.Analyzers
             }
 
             string chain = string.Join(" -> ", addresses.Select(a => FormatNode(heap, a)));
-            return $"{root.RootKind}: {chain}";
+            return $"{rootKind}: {chain}";
         }
     }
 }

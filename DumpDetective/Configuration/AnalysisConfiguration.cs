@@ -6,6 +6,7 @@ namespace DumpDetective.Configuration
     internal class AnalysisConfiguration
     {
         private const int DefaultReferenceChainTopCount = 5;
+        private const int DefaultReferenceChainMaxPathSearchObjects = 5000;
         private const int DefaultEventLeakMinSubscribers = 0;
         private const int DefaultHighReferenceThreshold = 50;
         private const int DefaultMaxDuplicateStringLength = 500;
@@ -17,6 +18,7 @@ namespace DumpDetective.Configuration
         private const string MinDuplicateStringCountOption = "--min-duplicate-string-count=";
         private const string MaxReferenceAddressesOption = "--max-reference-addresses=";
         private const string ReferenceChainTopCountOption = "--reference-chain-top-count=";
+        private const string ReferenceChainMaxPathSearchObjectsOption = "--reference-chain-max-path-search-objects=";
         private const string EventLeakMinSubscribersOption = "--event-leak-min-subscribers=";
         private const string EnableMemoryDiagnosticsOption = "--memory-diagnostics";
         private const string EnablePerformanceDiagnosticsOption = "--performance-diagnostics";
@@ -44,6 +46,11 @@ namespace DumpDetective.Configuration
         /// Reference chain analyzer: number of top memory-consuming types to analyze.
         /// </summary>
         public int ReferenceChainTopCount { get; init; } = DefaultReferenceChainTopCount;
+
+        /// <summary>
+        /// Reference chain analyzer: maximum objects to visit per root-to-target path search.
+        /// </summary>
+        public int ReferenceChainMaxPathSearchObjects { get; init; } = DefaultReferenceChainMaxPathSearchObjects;
 
         /// <summary>
         /// Event leak analyzer: minimum subscriber count to report a leak candidate.
@@ -105,6 +112,7 @@ namespace DumpDetective.Configuration
                 MinDuplicateStringCount = settings.MinDuplicateStringCount,
                 MaxReferenceAddressesToTrack = settings.MaxReferenceAddressesToTrack,
                 ReferenceChainTopCount = settings.ReferenceChainTopCount,
+                ReferenceChainMaxPathSearchObjects = settings.ReferenceChainMaxPathSearchObjects,
                 EventLeakMinSubscribers = settings.EventLeakMinSubscribers,
                 EnableMemoryDiagnostics = settings.EnableMemoryDiagnostics,
                 EnablePerformanceDiagnostics = settings.EnablePerformanceDiagnostics,
@@ -218,6 +226,7 @@ namespace DumpDetective.Configuration
                 MinDuplicateStringCount = fileConfig?.MinDuplicateStringCount ?? DefaultMinDuplicateStringCount,
                 MaxReferenceAddressesToTrack = fileConfig?.MaxReferenceAddressesToTrack ?? DefaultMaxReferenceAddressesToTrack,
                 ReferenceChainTopCount = fileConfig?.ReferenceChainTopCount ?? DefaultReferenceChainTopCount,
+                ReferenceChainMaxPathSearchObjects = fileConfig?.ReferenceChainMaxPathSearchObjects ?? DefaultReferenceChainMaxPathSearchObjects,
                 EventLeakMinSubscribers = fileConfig?.EventLeakMinSubscribers ?? DefaultEventLeakMinSubscribers,
                 EnableMemoryDiagnostics = fileConfig?.EnableMemoryDiagnostics ?? false,
                 EnablePerformanceDiagnostics = fileConfig?.EnablePerformanceDiagnostics ?? false,
@@ -268,6 +277,10 @@ namespace DumpDetective.Configuration
                 else if (arg.StartsWith(ReferenceChainTopCountOption, StringComparison.OrdinalIgnoreCase))
                 {
                     settings.ReferenceChainTopCount = ParsePositiveIntOption(arg, ReferenceChainTopCountOption.TrimEnd('='));
+                }
+                else if (arg.StartsWith(ReferenceChainMaxPathSearchObjectsOption, StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.ReferenceChainMaxPathSearchObjects = ParsePositiveIntOption(arg, ReferenceChainMaxPathSearchObjectsOption.TrimEnd('='));
                 }
                 else if (arg.StartsWith(EventLeakMinSubscribersOption, StringComparison.OrdinalIgnoreCase))
                 {
@@ -436,6 +449,7 @@ namespace DumpDetective.Configuration
             Console.WriteLine($"  MaxReferenceAddressesToTrack: {MaxReferenceAddressesToTrack:N0}");
             Console.WriteLine("General analyzer settings:");
             Console.WriteLine($"  ReferenceChainTopCount: {ReferenceChainTopCount:N0}");
+            Console.WriteLine($"  ReferenceChainMaxPathSearchObjects: {ReferenceChainMaxPathSearchObjects:N0}");
             Console.WriteLine($"  EventLeakMinSubscribers: {EventLeakMinSubscribers:N0}");
             Console.WriteLine($"  MemoryDiagnostics: {(EnableMemoryDiagnostics ? "Enabled" : "Disabled (default)")}");
             Console.WriteLine($"  PerformanceDiagnostics: {(EnablePerformanceDiagnostics ? "Enabled" : "Disabled (default)")}");
@@ -473,6 +487,7 @@ namespace DumpDetective.Configuration
             public int MinDuplicateStringCount { get; set; }
             public int MaxReferenceAddressesToTrack { get; set; }
             public int ReferenceChainTopCount { get; set; }
+            public int ReferenceChainMaxPathSearchObjects { get; set; }
             public int EventLeakMinSubscribers { get; set; }
             public bool EnableMemoryDiagnostics { get; set; }
             public bool EnablePerformanceDiagnostics { get; set; }
@@ -487,6 +502,7 @@ namespace DumpDetective.Configuration
     internal sealed class AnalysisConfigurationFileModel
     {
         public int? ReferenceChainTopCount { get; init; }
+        public int? ReferenceChainMaxPathSearchObjects { get; init; }
         public int? EventLeakMinSubscribers { get; init; }
         public bool? EnableMemoryDiagnostics { get; init; }
         public bool? EnablePerformanceDiagnostics { get; init; }

@@ -55,6 +55,7 @@ namespace DumpDetective
             Console.WriteLine("  --baseline=<baseline-dump-path>       Compare current dump against a baseline dump");
             Console.WriteLine("  --trend=<dump1;dump2;...>             Analyze a series of dumps (ordered oldest to newest); last entry is treated as current");
             Console.WriteLine("  --reference-chain-top-count=<int>     Default: 5");
+            Console.WriteLine("  --reference-chain-max-path-search-objects=<int>  Default: 5000");
             Console.WriteLine("  --event-leak-min-subscribers=<int>    Default: 0");
             Console.WriteLine("  --memory-diagnostics                  Enable stage-by-stage memory snapshots/deltas (Default: Off)");
             Console.WriteLine("  --performance-diagnostics             Enable timing breakdowns per dump/phase and report normalization (Default: Off)");

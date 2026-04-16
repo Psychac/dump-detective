@@ -5,6 +5,7 @@
   "MaxReferenceAddressesToTrack": 1000000,
 
   "ReferenceChainTopCount": 5,
+  "ReferenceChainMaxPathSearchObjects": 5000,
   "EventLeakMinSubscribers": 0,
   "EnableMemoryDiagnostics": false,
 

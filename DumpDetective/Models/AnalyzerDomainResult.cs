@@ -170,7 +170,8 @@ namespace DumpDetective.Models
         string? SampleObjectType,
         ulong SampleObjectSize,
         bool HasGcRoot,
-        string? RootPath);
+        string? RootPath,
+        bool TraversalLimited);
 
     internal sealed record ThreadDomainResult(
         int TotalThreadCount,

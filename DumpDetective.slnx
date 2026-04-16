@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="DumpDetective.Analysis/DumpDetective.Analysis.csproj" Id="3dabe98a-8b00-4173-ae9c-7b05466ecee8" />
+    <Project Path="DumpDetective.Cli/DumpDetective.Cli.csproj" Id="b1617e7f-e8a1-44c6-b53b-f769a76d3538" />
+    <Project Path="DumpDetective.Core/DumpDetective.Core.csproj" Id="5180d7cf-9bb3-472b-a800-1c25e0a45ac4" />
+    <Project Path="DumpDetective.Reporting/DumpDetective.Reporting.csproj" Id="2c8ded00-4d2d-4021-940d-4d6b4216d223" />
+  </Folder>
   <Project Path="BenchmarkSuite1/BenchmarkSuite1.csproj" />
+  <Project Path="DumpDetective.Tests/DumpDetective.Tests.csproj" />
   <Project Path="DumpDetective/DumpDetective.csproj" />
 </Solution>

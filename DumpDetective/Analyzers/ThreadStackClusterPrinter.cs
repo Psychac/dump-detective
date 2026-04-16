@@ -21,6 +21,7 @@ namespace DumpDetective.Analyzers
             writer.WriteSeparator();
             writer.WriteLine($"Alive threads: {domain.AliveThreadCount:N0}");
             writer.WriteLine($"Unique stack signatures: {domain.UniqueClusters:N0}");
+            writer.WriteLine($"Singleton signatures: {domain.SingletonSignatures:N0}");
             writer.WriteLine($"Signature diversity: {domain.DiversityPercent:F1}%");
 
             writer.WriteLine("\nTOP SIGNATURES:");

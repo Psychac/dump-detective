@@ -206,15 +206,13 @@ namespace DumpDetective.Utilities
             MergeSectionInto(normalized, "FRAGMENTATION SIGNAL", "LOH SUMMARY", "Fragmentation Signal");
             MergeSectionInto(normalized, "HANDLE PRESSURE SIGNAL", "HANDLE SUMMARY", "Handle Signal");
             MergeSectionInto(normalized, "EVENT LEAK SIGNAL", "EVENT LEAK ANALYSIS", "Event Signal");
-            MergeSectionInto(normalized, "THREAD HEALTH SIGNAL", "THREAD TRIAGE SUMMARY", "Thread Health Signal");
+            MergeSectionInto(normalized, "THREAD HEALTH SIGNAL", "THREAD ANALYSIS", "Thread Health Signal");
             MergeSectionInto(normalized, "DIVERSITY SIGNAL", "CLUSTER SUMMARY", "Diversity Signal");
             MergeSectionInto(normalized, "GC-ROOT COVERAGE SIGNAL", "REFERENCE RETENTION SUMMARY", "Retention Signal");
             MergeSectionInto(normalized, "CAPACITY RECOMMENDATION", "WASTE SIGNAL", "Capacity Recommendation");
             MergeSectionInto(normalized, "RESOLUTION QUALITY SIGNAL", "DEPENDENT HANDLE SUMMARY", "Resolution Signal");
 
             AddAlias(normalized, "HIGH-REFERENCE SIGNAL", "HIGHLY REFERENCED OBJECTS");
-            AddAlias(normalized, "THREAD TRIAGE SUMMARY", "THREAD ANALYSIS");
-            AddAlias(normalized, "WAIT CATEGORY BREAKDOWN", "WAIT CATEGORY DISTRIBUTION");
             AddAlias(normalized, "TOP FRAGMENTED SEGMENTS", "TOP FRAGMENTED LOH SEGMENTS");
             AddAlias(normalized, "REFERENCE RETENTION SUMMARY", "REFERENCE CHAIN ANALYSIS");
             AddAlias(normalized, "CROSS-ANALYZER CORRELATION INSIGHTS", "💡 OPTIMIZATION TIPS");
@@ -302,7 +300,7 @@ namespace DumpDetective.Utilities
             if (FindSectionIndex(sections, "THREAD GROUPS") >= 0)
                 return;
 
-            int triageIndex = FindSectionIndex(sections, "THREAD TRIAGE SUMMARY");
+            int triageIndex = FindSectionIndex(sections, "THREAD ANALYSIS");
             if (triageIndex < 0)
                 return;
 

@@ -55,7 +55,7 @@ namespace DumpDetective.Analyzers
                         Tags: ["thread-cluster", "threads", "diagnostics"],
                         MetricValue: 0,
                         MetricUnit: "% signature-diversity")],
-                    new ThreadStackClusterDomainResult(aliveThreads, 0, 0, []));
+                    new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, []));
             }
 
             var topClusters = clusters.Values
@@ -64,6 +64,7 @@ namespace DumpDetective.Analyzers
                 .ToList();
 
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
+            int singletonSignatures = topClusters.Count(c => c.Count == 1);
             var topSignatures = topClusters.Take(5).Select(c => c.Signature).ToList();
             var topClusterSnapshots = topClusters
                 .Take(12)
@@ -71,7 +72,7 @@ namespace DumpDetective.Analyzers
                 .ToList();
             return new AnalyzerExecutionResult(
                 [CreateFinding(aliveThreads, clusters.Count)],
-                new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, diversity, topSignatures, topClusterSnapshots));
+                new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots));
         }
 
         private static InsightFinding CreateFinding(int aliveThreads, int uniqueClusters)

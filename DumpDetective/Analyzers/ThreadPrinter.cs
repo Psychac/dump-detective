@@ -15,13 +15,19 @@ namespace DumpDetective.Analyzers
                 return;
 
             writer.WriteHeader("THREAD ANALYSIS:");
-            writer.WriteLine("THREAD TRIAGE SUMMARY:");
+            writer.WriteLine("THREAD ANALYSIS:");
             writer.WriteSeparator();
+            writer.WriteLine($"Total threads: {domain.TotalThreadCount:N0}");
             writer.WriteLine($"Alive threads: {domain.AliveThreadCount:N0}");
+            writer.WriteLine($"Inactive threads: {domain.InactiveThreadCount:N0}");
+            writer.WriteLine($"GC threads: {domain.GcThreadCount:N0}");
+            writer.WriteLine($"Finalizer threads: {domain.FinalizerThreadCount:N0}");
+            writer.WriteLine($"Background threads: {domain.BackgroundThreadCount:N0}");
             writer.WriteLine($"Blocked-pattern threads: {domain.BlockedThreadCount:N0}");
             writer.WriteLine($"Lock-holding threads: {domain.LockHoldingThreadCount:N0}");
             writer.WriteLine($"Threads with active exceptions: {domain.ThreadsWithActiveExceptionsCount:N0}");
             writer.WriteLine($"ThreadPool worker threads (alive): {domain.ThreadPoolWorkerCount:N0}");
+            writer.WriteLine($"Threads with async chains (MoveNext): {domain.AsyncChainThreadCount:N0}  max depth: {domain.MaxAsyncChainDepth:N0}");
 
             writer.WriteLine("\nWAIT CATEGORY BREAKDOWN:");
             writer.WriteSeparator();
@@ -34,6 +40,58 @@ namespace DumpDetective.Analyzers
                 foreach (var kvp in domain.WaitPatternBreakdown.OrderByDescending(k => k.Value))
                     writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0}");
             }
+
+            writer.WriteLine("\nTHREAD GROUPS:");
+            writer.WriteSeparator();
+            int activeThreads = Math.Max(0, domain.AliveThreadCount - domain.BlockedThreadCount);
+            int gcOrSystemThreads = domain.GcThreadCount + domain.FinalizerThreadCount;
+            writer.WriteLine($"Alive: {domain.AliveThreadCount:N0}  |  Blocked/Waiting: {domain.BlockedThreadCount:N0}  |  Active: {activeThreads:N0}  |  GC/System: {gcOrSystemThreads:N0}");
+
+            double activePct = domain.AliveThreadCount == 0 ? 0 : activeThreads * 100.0 / domain.AliveThreadCount;
+            writer.WriteLine(string.Empty);
+            writer.WriteLine($"⚙️  Active Processing                      {activeThreads,4:N0} threads ({activePct:F1}%)");
+            writer.WriteLine("    Top frames:");
+            var activeHotspots = domain.TopActiveThreadHotspots ?? [];
+            if (activeHotspots.Count == 0)
+            {
+                writer.WriteLine("        No active-processing hotspot frames available.");
+            }
+            else
+            {
+                foreach (var hotspot in activeHotspots.Take(5))
+                    writer.WriteLine($"        {hotspot.Count,2}  {hotspot.Name}");
+            }
+
+            var blockedThreads = domain.TopBlockedThreads ?? [];
+            foreach (var group in blockedThreads
+                .GroupBy(t => t.WaitCategory ?? "Unknown")
+                .OrderByDescending(g => g.Count()))
+            {
+                int groupCount = group.Count();
+                double pct = domain.AliveThreadCount == 0 ? 0 : groupCount * 100.0 / domain.AliveThreadCount;
+                int lockHolding = group.Count(t => t.LockCount > 0);
+                string reason = group.Select(t => t.WaitReason).FirstOrDefault(r => !string.IsNullOrWhiteSpace(r)) ?? "Wait-pattern details unavailable.";
+                string topFrame = group.SelectMany(t => t.TopFrames).FirstOrDefault(f => !string.IsNullOrWhiteSpace(f)) ?? "<unknown>";
+
+                writer.WriteLine(string.Empty);
+                writer.WriteLine($"⌛  {group.Key,-36} {groupCount,4:N0} threads ({pct:F1}%)");
+                writer.WriteLine($"    Pattern: {reason}");
+                writer.WriteLine(lockHolding > 0
+                    ? $"    Threads also holding locks: {lockHolding:N0}  ⚠️  cross-lock / escalation risk"
+                    : "    Threads also holding locks: 0");
+                writer.WriteLine($"    Top frame: {topFrame}");
+            }
+
+            writer.WriteLine(string.Empty);
+            writer.WriteLine($"🧵  ThreadPool Workers                     {domain.ThreadPoolWorkerCount:N0} threads (identified by flag or dispatch frame)");
+
+            writer.WriteLine(string.Empty);
+            writer.WriteLine("♻️  GC / System Threads");
+            writer.WriteLine(domain.FinalizerThreadCount == 0
+                ? "    Finalizer Thread: Not observed"
+                : domain.FinalizerThreadBlocked
+                    ? "    Finalizer Thread: Potentially blocked ⚠️"
+                    : "    Finalizer Thread: Running ✅");
 
             writer.WriteLine("\nTHREADS WITH ACTIVE EXCEPTIONS:");
             writer.WriteSeparator();
@@ -82,7 +140,7 @@ namespace DumpDetective.Analyzers
 
             writer.WriteLine("\nPOTENTIALLY BLOCKED THREADS:");
             writer.WriteSeparator();
-            var blockedThreads = domain.TopBlockedThreads ?? [];
+            blockedThreads = domain.TopBlockedThreads ?? [];
             if (blockedThreads.Count == 0)
             {
                 writer.WriteLine("No blocked-thread signatures detected.");
@@ -94,6 +152,8 @@ namespace DumpDetective.Analyzers
                     writer.WriteLine($"Thread {thread.OSThreadId:N0} (Managed: {thread.ThreadId:N0}):");
                     writer.WriteLine($"  Category: {thread.WaitCategory ?? "Unknown"}");
                     writer.WriteLine($"  Reason: {thread.WaitReason ?? "Unknown wait pattern"}");
+                    writer.WriteLine($"  State: {thread.ThreadState}");
+                    writer.WriteLine($"  GC Mode: {thread.GcMode}");
                     writer.WriteLine($"  Locks: {thread.LockCount:N0} | Stack Roots: {thread.StackRootCount:N0}");
                     writer.WriteLine("  Top frames:");
                     foreach (var frame in thread.TopFrames.Take(8))

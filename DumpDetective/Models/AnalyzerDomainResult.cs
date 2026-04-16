@@ -97,9 +97,12 @@ namespace DumpDetective.Models
         IReadOnlyDictionary<string, int> WaitCategoryBreakdown,
         int TotalTaskContinuations,
         int QueuedWorkItems,
+        int TotalTasks,
         int PendingTasks,
         int FaultedTasks,
         int CanceledTasks,
+        bool RuntimeThreadPoolDataAvailable,
+        bool TaskScanLimited,
         int HealthScore,
         IReadOnlyList<WaitingThreadSnapshot>? TopWaitingThreads = null,
         IReadOnlyList<NameCountEntry>? TopContinuationTypes = null) : AnalyzerDomainResult;
@@ -170,10 +173,14 @@ namespace DumpDetective.Models
         string? RootPath);
 
     internal sealed record ThreadDomainResult(
+        int TotalThreadCount,
         int AliveThreadCount,
+        int InactiveThreadCount,
+        int GcThreadCount,
         int BlockedThreadCount,
         int LockHoldingThreadCount,
         int ThreadsWithActiveExceptionsCount,
+        int BackgroundThreadCount,
         IReadOnlyDictionary<string, int> WaitPatternBreakdown,
         IReadOnlyDictionary<string, int>? ThreadStateDistribution = null,
         IReadOnlyDictionary<string, int>? AppDomainDistribution = null,
@@ -197,6 +204,8 @@ namespace DumpDetective.Models
         uint ThreadId,
         uint OSThreadId,
         int LockCount,
+        string ThreadState,
+        string GcMode,
         string? WaitCategory,
         string? WaitReason,
         IReadOnlyList<string> TopFrames,
@@ -244,6 +253,7 @@ namespace DumpDetective.Models
     internal sealed record ThreadStackClusterDomainResult(
         int AliveThreadCount,
         int UniqueClusters,
+        int SingletonSignatures,
         double DiversityPercent,
         IReadOnlyList<string> TopClusterSignatures,
         IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null) : AnalyzerDomainResult;

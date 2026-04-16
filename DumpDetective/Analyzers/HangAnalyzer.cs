@@ -41,9 +41,12 @@ namespace DumpDetective.Analyzers
                     waitCategoryBreakdown,
                     hangInfo.TotalContinuations,
                     hangInfo.ThreadPoolInfo.QueuedWorkItems,
+                    hangInfo.ThreadPoolInfo.TotalTasks,
                     hangInfo.ThreadPoolInfo.PendingTasks,
                     hangInfo.ThreadPoolInfo.FaultedTasks,
                     hangInfo.ThreadPoolInfo.CanceledTasks,
+                    hangInfo.ThreadPoolInfo.RuntimeInitialized,
+                    hangInfo.ThreadPoolInfo.TaskScanLimited,
                     hangInfo.HealthScore,
                     hangInfo.WaitingThreads
                         .OrderByDescending(w => w.LockCount)

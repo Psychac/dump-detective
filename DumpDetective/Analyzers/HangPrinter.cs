@@ -36,7 +36,7 @@ namespace DumpDetective.Analyzers
             else if (domain.WaitingPercent >= 50)
                 writer.WriteLine("\n⚠️  POSSIBLE HANG risk detected.");
 
-            writer.WriteLine("\nWAIT CATEGORY BREAKDOWN:");
+            writer.WriteLine("\nHANG WAIT CATEGORY BREAKDOWN:");
             writer.WriteSeparator();
             if (domain.WaitCategoryBreakdown.Count == 0)
             {
@@ -50,10 +50,24 @@ namespace DumpDetective.Analyzers
 
             writer.WriteLine("\nTHREAD POOL STATUS:");
             writer.WriteSeparator();
-            writer.WriteLine($"Queued Work Items: {domain.QueuedWorkItems:N0}");
+            if (!domain.RuntimeThreadPoolDataAvailable)
+                writer.WriteLine("Runtime ThreadPool data unavailable (dump may be from managed-only snapshot).");
+
+            writer.WriteLine(string.Empty);
+            writer.WriteLine($"Queued Work Items (heap scan): {domain.QueuedWorkItems:N0}");
+            writer.WriteLine($"Total Tasks: {domain.TotalTasks:N0}");
             writer.WriteLine($"Pending Tasks: {domain.PendingTasks:N0}");
             writer.WriteLine($"Faulted Tasks: {domain.FaultedTasks:N0}");
             writer.WriteLine($"Canceled Tasks: {domain.CanceledTasks:N0}");
+            if (domain.TaskScanLimited)
+                writer.WriteLine("Task scan limited due to heap size; totals may be partial.");
+
+            if (domain.QueuedWorkItems > 100)
+            {
+                writer.WriteLine(string.Empty);
+                writer.WriteLine($"⚠️  WARNING: {domain.QueuedWorkItems:N0} queued work items!");
+                writer.WriteLine("    ThreadPool may be saturated - consider increasing threads or async patterns.");
+            }
 
             writer.WriteLine("\nWAITING THREADS BREAKDOWN:");
             writer.WriteSeparator();

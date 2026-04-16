@@ -39,10 +39,14 @@ namespace DumpDetective.Analyzers
             return new AnalyzerExecutionResult(
                 [CreateFinding(threadInfo)],
                 new ThreadDomainResult(
+                    threadInfo.TotalCount,
                     threadInfo.AliveCount,
+                    Math.Max(0, threadInfo.TotalCount - threadInfo.AliveCount),
+                    threadInfo.GcCount,
                     threadInfo.PotentiallyBlockedThreads.Count,
                     threadInfo.ThreadsWithLocks.Count,
                     threadInfo.ThreadsWithActiveExceptionsCount,
+                    threadInfo.BackgroundCount,
                     new Dictionary<string, int>(threadInfo.WaitCategoryDistribution),
                     new Dictionary<string, int>(threadInfo.StateDistribution),
                     new Dictionary<string, int>(threadInfo.AppDomainDistribution),
@@ -89,6 +93,8 @@ namespace DumpDetective.Analyzers
                 (uint)source.Thread.ManagedThreadId,
                 source.Thread.OSThreadId,
                 (int)source.Thread.LockCount,
+                FormatThreadState(source.Thread.State),
+                source.Thread.GCMode.ToString(),
                 source.WaitCategory,
                 source.WaitReason,
                 source.TopFrames

@@ -28,7 +28,12 @@ namespace DumpDetective.Analysis.Analyzers
             _maxReferenceAddressesToTrack = config.MaxReferenceAddressesToTrack;
         }
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Runtime);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime)
         {

@@ -1,11 +1,13 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Cache
 {
-    internal class HeapAnalysisCache
+    internal class HeapAnalysisCache : IHeapAnalysisCache
     {
         private HashSet<ulong>? _staticRootedAddresses;
-        private Dictionary<string, TypeStatistics>? _typeStats;
+        private Dictionary<string, CachedTypeStatistics>? _typeStats;
         private Dictionary<string, ulong>? _sampleInstances;
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)
@@ -29,12 +31,12 @@ namespace DumpDetective.Analysis.Cache
             return _staticRootedAddresses;
         }
 
-        public Dictionary<string, TypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
+        public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
         {
             if (_typeStats != null)
                 return _typeStats;
 
-            _typeStats = new Dictionary<string, TypeStatistics>(capacity: 1024);
+            _typeStats = new Dictionary<string, CachedTypeStatistics>(capacity: 1024);
             _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
             var scanCounter = new ObjectScanCounter("Type statistics scan");
 
@@ -51,7 +53,7 @@ namespace DumpDetective.Analysis.Cache
 
                 if (!_typeStats.TryGetValue(typeName, out var stats))
                 {
-                    stats = new TypeStatistics { TypeName = typeName };
+                    stats = new CachedTypeStatistics { TypeName = typeName };
                     _typeStats[typeName] = stats;
                     _sampleInstances[typeName] = obj.Address; // Cache first instance
                 }
@@ -117,14 +119,6 @@ namespace DumpDetective.Analysis.Cache
         public bool TaskScanLimited { get; set; }
     }
 
-    internal class TypeStatistics
-    {
-        public string TypeName { get; set; } = string.Empty;
-        public int Count { get; set; }
-        public ulong TotalSize { get; set; }
-        public int LohCount { get; set; }
-        public ulong LohSize { get; set; }
-    }
 }
 
 

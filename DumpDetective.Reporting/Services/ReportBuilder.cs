@@ -8,16 +8,29 @@ namespace DumpDetective.Reporting.Services
     {
         public static string BuildCombinedDetailedReport(IReadOnlyList<AnalyzerRunResult> runs)
         {
-            if (runs.Count == 1)
-                return runs[0].DetailedReport;
-
-            var builder = new StringBuilder(capacity: runs.Sum(r => r.DetailedReport.Length) + 2048);
+            var builder = new StringBuilder(capacity: 16 * 1024);
             for (int i = 0; i < runs.Count; i++)
             {
                 var run = runs[i];
-                builder.AppendLine($"ANALYSIS SNAPSHOT {i + 1}/{runs.Count}: {run.Snapshot.DumpPath}");
+                builder.AppendLine($"ANALYZER RUN {i + 1}/{runs.Count}: {run.AnalyzerName}");
                 builder.AppendLine(StringConstants.Separator80);
-                builder.AppendLine(run.DetailedReport);
+                builder.AppendLine($"Status: {run.Status}");
+                builder.AppendLine($"Duration: {run.Duration.TotalMilliseconds:F0} ms");
+
+                if (!string.IsNullOrWhiteSpace(run.ErrorMessage))
+                {
+                    builder.AppendLine($"Error: {run.ErrorType}: {run.ErrorMessage}");
+                }
+
+                if (run.Result?.Findings is { Count: > 0 })
+                {
+                    builder.AppendLine("Findings:");
+                    foreach (InsightFinding finding in run.Result.Findings)
+                    {
+                        builder.AppendLine($"  - [{finding.Severity}] {finding.Title}: {finding.Evidence}");
+                    }
+                }
+
                 builder.AppendLine();
             }
 

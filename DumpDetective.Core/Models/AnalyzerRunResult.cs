@@ -1,6 +1,17 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
 namespace DumpDetective.Core.Models;
-internal sealed record AnalyzerRunResult(string DetailedReport, AnalysisSnapshot Snapshot);
+
+internal enum AnalyzerExecutionStatus
+{
+    Success,
+    Failed,
+    Skipped,
+    Canceled
+}
+
+internal sealed record AnalyzerRunResult(
+    string AnalyzerName,
+    AnalyzerExecutionStatus Status,
+    TimeSpan Duration,
+    AnalyzerDomainResult? Result,
+    string? ErrorMessage,
+    string? ErrorType);

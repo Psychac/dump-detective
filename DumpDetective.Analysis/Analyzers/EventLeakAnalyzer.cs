@@ -26,7 +26,12 @@ namespace DumpDetective.Analysis.Analyzers
             _config = config;
         }
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {

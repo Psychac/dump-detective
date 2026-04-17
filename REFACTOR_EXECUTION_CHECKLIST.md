@@ -21,13 +21,17 @@
 ## Iteration 0 — Baseline and Guardrails
 
 ### Tasks
-- [ ] Capture baseline build/test status.
+- [x] Capture baseline build/test status.
 - [ ] Document current behavior snapshots for pipeline + reporting outputs.
 - [ ] Add ADRs for dependency direction and reporting boundary.
 
 ### Exit Criteria
 - [ ] Baseline documented.
-- [ ] Green build.
+- [x] Green build.
+
+### Current Status Notes (Iteration 0)
+- Baseline rebuild captured in Visual Studio: `6 succeeded, 0 failed`.
+- Baseline test status captured as environment-constrained (restore/execution blocked by private feed auth in current environment).
 
 ---
 
@@ -81,20 +85,27 @@
 ## Iteration 3 — Analyzer Contracts + Async Pipeline (Spec 03)
 
 ### Tasks
-- [ ] Finalize `IAnalyzer` contract in `Core`.
-- [ ] Finalize `AnalyzerDomainResult`, `AnalyzerRunResult`, `AnalyzerExecutionStatus`.
-- [ ] Extract/finalize `AnalysisContext`.
-- [ ] Implement deterministic async `AnalysisPipeline`.
-- [ ] Add failure policy + cancellation behavior.
-- [ ] Migrate analyzers to async contract.
+- [x] Finalize `IAnalyzer` contract in `Core`.
+- [x] Finalize `AnalyzerDomainResult`, `AnalyzerRunResult`, `AnalyzerExecutionStatus`.
+- [x] Extract/finalize `AnalysisContext`.
+- [x] Implement deterministic async `AnalysisPipeline`.
+- [x] Add failure policy + cancellation behavior.
+- [x] Migrate analyzers to async contract.
 
 ### Validation
-- [ ] Order is deterministic (`Order`, then `Name`).
+- [x] Order is deterministic (`Order`, then `Name`).
 - [ ] `ContinueOnAnalyzerFailure` behavior tested.
 - [ ] Cancellation status handling tested.
 
 ### Exit Criteria
 - [ ] Pipeline deterministic and policy-compliant.
+
+### Current Status Notes (Spec 03)
+- `IAnalyzer` now exposes async `AnalyzeAsync(...)` with metadata (`Category`, `Order`, `Tags`) and a temporary sync adapter bridge.
+- `AnalyzerDomainResult` now includes analyzer identity/findings/metrics/warnings contract fields.
+- `AnalyzerRunResult` now uses explicit `AnalyzerExecutionStatus` (`Success`, `Failed`, `Skipped`, `Canceled`).
+- `AnalysisPipeline` now executes asynchronously with deterministic ordering and failure/cancellation mapping.
+- Final analyzer-by-analyzer native async migration remains pending; currently bridged via `TEMP-REFRACTOR-BRIDGE` markers.
 
 ---
 

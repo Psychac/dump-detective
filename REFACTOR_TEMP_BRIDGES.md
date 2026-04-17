@@ -5,12 +5,9 @@ Tracking file for `TEMP-REFRACTOR-BRIDGE` markers introduced during staged migra
 ## Current Marked Bridges
 
 - `DumpDetective.Core/Abstractions/IAnalyzer.cs`
-  - `AnalysisContext.Cache` dynamic bridge property.
-  - Remove when Spec 03 async contracts and enriched context are fully implemented.
+  - `AnalysisContext.Cache` now uses typed cache abstraction (`IHeapAnalysisCache`).
+  - Dynamic cache bridge has been removed.
 
-- `DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs`
-  - Adapter mapping `DumpDetective.Analysis.Pipeline.AnalysisContext` to `DumpDetective.Core.Abstractions.AnalysisContext`.
-  - Remove when analyzers use final async contract directly.
 
 - `DumpDetective.Analysis/Configuration/AnalysisConfiguration.cs`
   - Temporary shim for analyzer constructor compatibility.
@@ -39,3 +36,4 @@ Tracking file for `TEMP-REFRACTOR-BRIDGE` markers introduced during staged migra
 - `DumpDetective.Cli/Hosting/ServiceRegistration.cs`
   - Temporary manual factory wiring.
   - Replace with full `IHostBuilder`/DI registration model in Spec 04.
+

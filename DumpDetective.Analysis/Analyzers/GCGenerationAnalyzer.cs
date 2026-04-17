@@ -3,7 +3,6 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using System.Reflection;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -13,9 +12,14 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "GC Generation Analysis";
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
             var cachedStats = cache.GetOrBuildTypeStatistics(heap);
@@ -25,7 +29,7 @@ namespace DumpDetective.Analysis.Analyzers
                 BuildDomainResult(heap, cachedStats));
         }
 
-        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, Dictionary<string, TypeStatistics> typeStats)
+        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, Dictionary<string, CachedTypeStatistics> typeStats)
         {
             ulong gen0Bytes = 0;
             ulong gen1Bytes = 0;
@@ -144,7 +148,7 @@ namespace DumpDetective.Analysis.Analyzers
             return 2;
         }
 
-        private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)
+        private static InsightFinding CreateFinding(Dictionary<string, CachedTypeStatistics> typeStats)
         {
             ulong total = 0;
             ulong loh = 0;

@@ -2,7 +2,6 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -17,9 +16,14 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "Static Root Leak Detection";
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache);
             var significantStaticRoots = allStaticRootAnalysis
@@ -87,7 +91,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "retained-bytes");
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, HeapAnalysisCache cache)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();

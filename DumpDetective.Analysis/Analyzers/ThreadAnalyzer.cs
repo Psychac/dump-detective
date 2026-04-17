@@ -32,7 +32,12 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "Thread Analysis";
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
         public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {

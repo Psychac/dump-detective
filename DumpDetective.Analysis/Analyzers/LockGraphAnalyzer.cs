@@ -12,7 +12,12 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "Lock Graph Analysis";
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Runtime, context.Heap);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
         public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {

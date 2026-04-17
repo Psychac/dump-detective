@@ -2,7 +2,6 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -12,9 +11,14 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "Memory Analysis";
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => Analyze(context.Heap, context.Cache);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
@@ -24,7 +28,7 @@ namespace DumpDetective.Analysis.Analyzers
                 BuildDomainResult(typeStats));
         }
 
-        private static MemoryDomainResult BuildDomainResult(Dictionary<string, TypeStatistics> typeStats)
+        private static MemoryDomainResult BuildDomainResult(Dictionary<string, CachedTypeStatistics> typeStats)
         {
             ulong totalMemory = 0;
             ulong totalLohMemory = 0;
@@ -40,12 +44,12 @@ namespace DumpDetective.Analysis.Analyzers
 
             double lohPct = totalMemory == 0 ? 0 : totalLohMemory * 100.0 / totalMemory;
 
-            var bySize = new List<TypeStatistics>(typeStats.Values);
+            var bySize = new List<CachedTypeStatistics>(typeStats.Values);
             bySize.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-            var byCount = new List<TypeStatistics>(typeStats.Values);
+            var byCount = new List<CachedTypeStatistics>(typeStats.Values);
             byCount.Sort((a, b) => b.Count.CompareTo(a.Count));
 
-            static TypeSnapshot ToSnapshot(TypeStatistics s) =>
+            static TypeSnapshot ToSnapshot(CachedTypeStatistics s) =>
                 new(s.TypeName, s.Count, s.TotalSize, s.LohSize);
 
             return new MemoryDomainResult(
@@ -60,7 +64,7 @@ namespace DumpDetective.Analysis.Analyzers
                 byCount.Take(20).Select(ToSnapshot).ToList());
         }
 
-        private static InsightFinding CreateFinding(Dictionary<string, TypeStatistics> typeStats)
+        private static InsightFinding CreateFinding(Dictionary<string, CachedTypeStatistics> typeStats)
         {
             ulong totalMemory = 0;
             ulong totalLohMemory = 0;

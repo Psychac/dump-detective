@@ -3,7 +3,6 @@ using DumpDetective.Analysis.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -22,9 +21,14 @@ namespace DumpDetective.Analysis.Analyzers
             _config = config;
         }
 
-        public AnalyzerExecutionResult Execute(AnalysisContext context) => AnalyzeTopTypes(context.Heap, context.Cache);
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AnalyzerExecutionResult executionResult = AnalyzeTopTypes(context.Heap, context.Cache);
+            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+        }
 
-        public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, HeapAnalysisCache cache)
+        public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache)
         {
             int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
             int maxPathSearchObjects = _config.ReferenceChainMaxPathSearchObjects > 0

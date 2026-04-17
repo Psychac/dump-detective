@@ -1,7 +1,16 @@
 ﻿using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Core.Models;
-internal abstract record AnalyzerDomainResult;
+internal abstract record AnalyzerDomainResult
+{
+    public string AnalyzerName { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public IReadOnlyCollection<InsightFinding> Findings { get; init; } = [];
+    public IReadOnlyDictionary<string, object?> Metrics { get; init; } = new Dictionary<string, object?>();
+    public IReadOnlyCollection<string> Warnings { get; init; } = [];
+}
+
+internal sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
 
 internal sealed record TypeSnapshot(string TypeName, int Count, ulong TotalBytes, ulong LohBytes);
 

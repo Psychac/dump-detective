@@ -1,6 +1,8 @@
 ﻿using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Models;
 using System.Diagnostics;
+using DumpDetective.Analysis.Diagnostics;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Pipeline
 {
@@ -53,7 +55,15 @@ namespace DumpDetective.Analysis.Pipeline
                     bool succeeded = false;
                     try
                     {
-                        AnalyzerExecutionResult result = analyzer.Execute(context);
+                        // TEMP-REFRACTOR-BRIDGE: Remove this context adapter after IAnalyzer moves to async Analysis contracts (Spec 03).
+                        var coreContext = new DumpDetective.Core.Abstractions.AnalysisContext
+                        {
+                            Runtime = context.Runtime,
+                            Heap = context.Heap,
+                            Cache = context.Cache
+                        };
+
+                        var result = analyzer.Execute(coreContext);
                         if (result.Findings.Count > 0)
                         {
                             findings.AddRange(result.Findings);

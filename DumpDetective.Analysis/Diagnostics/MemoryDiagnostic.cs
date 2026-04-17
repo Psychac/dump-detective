@@ -1,4 +1,6 @@
-﻿using System;
+﻿using DumpDetective.Core.Utilities;
+
+using System;
 using System.Diagnostics;
 using System.IO;
 

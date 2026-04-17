@@ -21,4 +21,6 @@ internal class AnalysisContext
 {
 public required ClrRuntime Runtime { get; init; }
 public required ClrHeap Heap { get; init; }
+// TEMP-REFRACTOR-BRIDGE: Remove after Spec 03 when AnalysisContext is owned/enriched by final async contracts.
+public dynamic? Cache { get; init; }
 }

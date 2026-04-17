@@ -2,6 +2,8 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using System.Reflection;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {

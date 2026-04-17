@@ -1,4 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using System.Threading;
 
 namespace DumpDetective.Analysis.Utilities
 {
@@ -6,7 +7,7 @@ namespace DumpDetective.Analysis.Utilities
     {
         // Cache for field lookups to avoid repeated GetFieldByName calls
         private static readonly Dictionary<string, ClrInstanceField?> _fieldCache = new();
-        private static readonly object _cacheLock = new();
+        private static readonly Lock _cacheLock = new();
 
         public static ClrInstanceField? GetCachedField(ClrType? type, string fieldName)
         {

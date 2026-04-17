@@ -1,10 +1,9 @@
-﻿namespace DumpDetective.Cli
+﻿namespace DumpDetective.Cli;
+
+internal class Program
 {
-    internal class Program
+    static void Main(string[] args)
     {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Hello, World!");
-        }
+        System.Console.WriteLine("DumpDetective.Cli scaffold is ready.");
     }
 }

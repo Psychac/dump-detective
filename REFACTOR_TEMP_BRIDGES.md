@@ -30,10 +30,14 @@ Tracking file for `TEMP-REFRACTOR-BRIDGE` markers introduced during staged migra
   - Remove if/when concrete reporting writer contract is restored.
 
 - `DumpDetective.Cli/Services/DumpAnalysisService.cs`
-  - Temporary execution bridge that resolves/validates config and prints startup summary only.
-  - Replace with full pipeline + reporting orchestration in Spec 03/04.
+  - Uses DI-registered analyzer factory, but analyzer creation remains runtime-option mapped via legacy `AnalysisConfiguration` shim.
+  - Replace with fully option-bound DI analyzer registration once Spec 04/05 option binding is finalized.
 
 - `DumpDetective.Cli/Hosting/ServiceRegistration.cs`
-  - Temporary manual factory wiring.
-  - Replace with full `IHostBuilder`/DI registration model in Spec 04.
+  - Host/DI is implemented with centralized registration and analyzer factory wiring.
+  - Finalize with fully option-aware DI analyzer registration (remove factory bridge if no longer needed).
+
+- `DumpDetective.Cli/Services/DefaultAnalyzerFactory.cs`
+  - Transitional analyzer construction maps `ResolvedExecutionOptions` into legacy `AnalysisConfiguration` for three analyzers.
+  - Remove when analyzers consume typed options directly from `AnalysisContext`.
 

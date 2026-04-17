@@ -13,4 +13,7 @@ internal sealed record ResolvedExecutionOptions(
     DiagnosticsOptions Diagnostics,
     ReportOptions Report,
     string? ConfigPath,
-    bool UsedConfigFile);
+    bool UsedConfigFile,
+    IReadOnlyCollection<string> IncludeAnalyzers,
+    IReadOnlyCollection<string> ExcludeAnalyzers,
+    bool DiagnosticMode);

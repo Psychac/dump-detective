@@ -1,14 +1,28 @@
+using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace DumpDetective.Cli.Hosting;
 
 internal static class ServiceRegistration
 {
-    // TEMP-REFRACTOR-BRIDGE: Replace factory wiring with IHost/DI registrations in Spec 04.
-    public static DumpAnalysisService CreateDumpAnalysisService()
+    public static IHost BuildHost(string[] args)
     {
-        ConfigurationResolver configurationResolver = new();
-        StartupValidator startupValidator = new();
-        return new DumpAnalysisService(configurationResolver, startupValidator);
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
+        IServiceCollection services = builder.Services;
+
+        services.AddSingleton<RootCommandBuilder>();
+
+        services.AddSingleton<ConfigurationResolver>();
+        services.AddSingleton<StartupValidator>();
+        services.AddSingleton<DumpLoader>();
+        services.AddSingleton<DumpAnalysisService>();
+        services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
+
+        services.AddSingleton<ReportBuilderFacade>();
+
+        return builder.Build();
     }
 }

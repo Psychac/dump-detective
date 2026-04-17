@@ -42,6 +42,14 @@ internal sealed class StartupValidator
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
         ValidateEventLeakOptions(options.EventLeak, errors);
 
+        var overlap = options.IncludeAnalyzers
+            .Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (overlap.Count > 0)
+        {
+            errors.Add($"IncludeAnalyzers and ExcludeAnalyzers overlap: {string.Join(", ", overlap)}");
+        }
+
         if (errors.Count > 0)
         {
             throw new ArgumentException(string.Join(Environment.NewLine, errors));

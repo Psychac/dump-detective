@@ -11,59 +11,62 @@ internal sealed class ConfigurationResolver
     private const string DefaultConfigFileName = "config.json";
     private const string FallbackSampleConfigFileName = "config.sample.json";
 
-    public ResolvedExecutionOptions Resolve(CliArguments cliArguments)
+    public ResolvedExecutionOptions Resolve(AnalysisCommandRequest request)
     {
-        string? configPath = ResolveConfigPath(cliArguments.ConfigPath);
+        string? configPath = ResolveConfigPath(request.ConfigPath);
         CliConfigurationFileModel? fileModel = configPath is null ? null : LoadConfigurationFile(configPath);
 
         bool usedConfigFile = fileModel is not null;
 
         MemoryLeakOptions memoryLeak = usedConfigFile
             ? BuildMemoryLeakFromConfig(fileModel!)
-            : BuildMemoryLeakFromCli(cliArguments);
+            : BuildMemoryLeakFromCli(request);
 
         ReferenceChainOptions referenceChain = usedConfigFile
             ? BuildReferenceChainFromConfig(fileModel!)
-            : BuildReferenceChainFromCli(cliArguments);
+            : BuildReferenceChainFromCli(request);
 
         EventLeakOptions eventLeak = usedConfigFile
             ? BuildEventLeakFromConfig(fileModel!)
-            : BuildEventLeakFromCli(cliArguments);
+            : BuildEventLeakFromCli(request);
 
         DiagnosticsOptions diagnostics = usedConfigFile
             ? BuildDiagnosticsFromConfig(fileModel!)
-            : BuildDiagnosticsFromCli(cliArguments);
+            : BuildDiagnosticsFromCli(request);
 
         ReportOptions report = usedConfigFile
             ? BuildReportFromConfig(fileModel!)
-            : BuildReportFromCli(cliArguments);
+            : BuildReportFromCli(request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
         IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
 
-        string? effectiveDumpPath = configuredDumpPath ?? cliArguments.DumpPath ?? configuredTrend?.LastOrDefault();
+        string? effectiveDumpPath = configuredDumpPath ?? request.DumpPath ?? configuredTrend?.LastOrDefault();
         if (string.IsNullOrWhiteSpace(effectiveDumpPath))
         {
             throw new ArgumentException("Dump path is required. Provide positional dump-path, --trend, or DumpPath in config.");
         }
 
-        string outputPath = !string.IsNullOrWhiteSpace(cliArguments.OutputPath)
-            ? cliArguments.OutputPath!
+        string outputPath = !string.IsNullOrWhiteSpace(request.OutputPath)
+            ? request.OutputPath!
             : BuildOutputPath(effectiveDumpPath!, report.Format);
 
         return new ResolvedExecutionOptions(
             effectiveDumpPath!,
             outputPath,
-            configuredBaseline ?? cliArguments.BaselineDumpPath,
-            configuredTrend ?? cliArguments.TrendDumpPaths,
+            configuredBaseline ?? request.BaselineDumpPath,
+            configuredTrend ?? request.TrendDumpPaths,
             memoryLeak,
             referenceChain,
             eventLeak,
             diagnostics,
             report,
             configPath,
-            usedConfigFile);
+            usedConfigFile,
+            request.IncludeAnalyzers,
+            request.ExcludeAnalyzers,
+            request.DiagnosticMode);
     }
 
     private static string? ResolveConfigPath(string? cliConfigPath)
@@ -136,14 +139,14 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static MemoryLeakOptions BuildMemoryLeakFromCli(CliArguments cli)
+    private static MemoryLeakOptions BuildMemoryLeakFromCli(AnalysisCommandRequest request)
     {
         return new MemoryLeakOptions
         {
-            HighReferenceThreshold = cli.HighReferenceThreshold ?? 50,
-            MaxDuplicateStringLength = cli.MaxDuplicateStringLength ?? 500,
-            MinDuplicateStringCount = cli.MinDuplicateStringCount ?? 10,
-            MaxReferenceAddresses = cli.MaxReferenceAddresses ?? 1_000_000
+            HighReferenceThreshold = request.HighReferenceThreshold ?? 50,
+            MaxDuplicateStringLength = request.MaxDuplicateStringLength ?? 500,
+            MinDuplicateStringCount = request.MinDuplicateStringCount ?? 10,
+            MaxReferenceAddresses = request.MaxReferenceAddresses ?? 1_000_000
         };
     }
 
@@ -164,12 +167,12 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static ReferenceChainOptions BuildReferenceChainFromCli(CliArguments cli)
+    private static ReferenceChainOptions BuildReferenceChainFromCli(AnalysisCommandRequest request)
     {
         return new ReferenceChainOptions
         {
-            TopCount = cli.ReferenceChainTopCount ?? 5,
-            MaxPathSearchObjects = cli.ReferenceChainMaxPathSearchObjects ?? 5_000
+            TopCount = request.ReferenceChainTopCount ?? 5,
+            MaxPathSearchObjects = request.ReferenceChainMaxPathSearchObjects ?? 5_000
         };
     }
 
@@ -185,11 +188,11 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static EventLeakOptions BuildEventLeakFromCli(CliArguments cli)
+    private static EventLeakOptions BuildEventLeakFromCli(AnalysisCommandRequest request)
     {
         return new EventLeakOptions
         {
-            MinSubscribers = cli.EventLeakMinSubscribers ?? 0
+            MinSubscribers = request.EventLeakMinSubscribers ?? 0
         };
     }
 
@@ -210,12 +213,12 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static DiagnosticsOptions BuildDiagnosticsFromCli(CliArguments cli)
+    private static DiagnosticsOptions BuildDiagnosticsFromCli(AnalysisCommandRequest request)
     {
         return new DiagnosticsOptions
         {
-            EnableMemoryDiagnostics = cli.EnableMemoryDiagnostics,
-            EnablePerformanceDiagnostics = cli.EnablePerformanceDiagnostics
+            EnableMemoryDiagnostics = request.EnableMemoryDiagnostics,
+            EnablePerformanceDiagnostics = request.EnablePerformanceDiagnostics
         };
     }
 
@@ -227,11 +230,11 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static ReportOptions BuildReportFromCli(CliArguments cli)
+    private static ReportOptions BuildReportFromCli(AnalysisCommandRequest request)
     {
         return new ReportOptions
         {
-            Format = cli.ReportFormat ?? ReportFormat.Html
+            Format = request.OutputFormat ?? ReportFormat.Html
         };
     }
 

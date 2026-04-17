@@ -101,22 +101,22 @@
 - [ ] Pipeline deterministic and policy-compliant.
 
 ### Current Status Notes (Spec 03)
-- `IAnalyzer` now exposes async `AnalyzeAsync(...)` with metadata (`Category`, `Order`, `Tags`) and a temporary sync adapter bridge.
+- `IAnalyzer` now exposes async `AnalyzeAsync(...)` with metadata (`Category`, `Order`, `Tags`).
 - `AnalyzerDomainResult` now includes analyzer identity/findings/metrics/warnings contract fields.
 - `AnalyzerRunResult` now uses explicit `AnalyzerExecutionStatus` (`Success`, `Failed`, `Skipped`, `Canceled`).
 - `AnalysisPipeline` now executes asynchronously with deterministic ordering and failure/cancellation mapping.
-- Final analyzer-by-analyzer native async migration remains pending; currently bridged via `TEMP-REFRACTOR-BRIDGE` markers.
+- Analyzer native async migration is complete; remaining bridge items are tracked in `REFACTOR_TEMP_BRIDGES.md`.
 
 ---
 
 ## Iteration 4 — CLI Hosting + Command Model (Spec 04)
 
 ### Tasks
-- [ ] Stabilize `Program.cs` bootstrapping.
-- [ ] Implement `RootCommandBuilder` request mapping.
-- [ ] Centralize DI in `ServiceRegistration`.
-- [ ] Wire config merge + validation before execution.
-- [ ] Standardize exit codes.
+- [x] Stabilize `Program.cs` bootstrapping.
+- [x] Implement `RootCommandBuilder` request mapping.
+- [x] Centralize DI in `ServiceRegistration`.
+- [x] Wire config merge + validation before execution.
+- [x] Standardize exit codes.
 
 ### Validation
 - [ ] End-to-end CLI flow works with and without config.
@@ -124,6 +124,13 @@
 
 ### Exit Criteria
 - [ ] CLI architecture stable and predictable.
+
+### Current Status Notes (Spec 04)
+- Host-driven bootstrapping is in place (`Program` + `ServiceRegistration.BuildHost`).
+- Root command maps parser output into immutable `AnalysisCommandRequest`.
+- Config merge/validation executes before dump loading and analysis.
+- Exit-code mapping is standardized (`0,1,2,3,4,130`) with typed CLI exceptions.
+- Analyzer construction is still partially transitional and tracked in `REFACTOR_TEMP_BRIDGES.md`.
 
 ---
 

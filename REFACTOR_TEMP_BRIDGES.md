@@ -29,6 +29,10 @@ Tracking file for `TEMP-REFRACTOR-BRIDGE` markers introduced during staged migra
   - Bridge extension methods for `TextWriter` while `OutputWriter` boundary is in flux.
   - Remove if/when concrete reporting writer contract is restored.
 
+- `DumpDetective.Reporting/Formatters/ReportFormatter` (legacy static partial files)
+  - Legacy static formatter stack remains in repo for staged migration safety.
+  - New canonical formatter pipeline uses `IReportFormatter` implementations; remove legacy static formatter stack after parity is fully validated.
+
 - `DumpDetective.Cli/Services/DumpAnalysisService.cs`
   - Uses DI-registered analyzer factory, but analyzer creation remains runtime-option mapped via legacy `AnalysisConfiguration` shim.
   - Replace with fully option-bound DI analyzer registration once Spec 04/05 option binding is finalized.

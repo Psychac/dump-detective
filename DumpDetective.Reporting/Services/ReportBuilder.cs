@@ -1,11 +1,132 @@
 ﻿using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Models;
 using System.Text;
 
 namespace DumpDetective.Reporting.Services
 {
     internal static class ReportBuilder
     {
+        public static ComposedReport ComposeCanonicalReport(string dumpPath, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed)
+        {
+            List<ReportSection> sections = [];
+            int evidenceBeforeMerge = 0;
+
+            foreach (AnalyzerRunResult run in runs)
+            {
+                if (run.Result?.Findings is { Count: > 0 })
+                {
+                    foreach (InsightFinding finding in run.Result.Findings)
+                    {
+                        evidenceBeforeMerge += 2;
+                        sections.Add(new ReportSection(
+                            SectionKey: finding.EffectiveFingerprint,
+                            Title: finding.Title,
+                            Category: finding.Category,
+                            Severity: finding.Severity,
+                            NarrativeSummary: finding.Evidence,
+                            EvidenceRows:
+                            [
+                                new ReportEvidenceRow("Analyzer", run.AnalyzerName),
+                                new ReportEvidenceRow("Evidence", finding.Evidence)
+                            ],
+                            RemediationHints: [finding.Recommendation],
+                            Fingerprints: [finding.EffectiveFingerprint]));
+                    }
+                }
+
+                if (run.Status == AnalyzerExecutionStatus.Failed)
+                {
+                    evidenceBeforeMerge += 2;
+                    sections.Add(new ReportSection(
+                        SectionKey: $"analyzer-failure:{run.AnalyzerName}",
+                        Title: $"Analyzer failed: {run.AnalyzerName}",
+                        Category: "Pipeline",
+                        Severity: FindingSeverity.Warning,
+                        NarrativeSummary: run.ErrorMessage ?? "Analyzer failed without error details.",
+                        EvidenceRows:
+                        [
+                            new ReportEvidenceRow("ErrorType", run.ErrorType ?? "Unknown"),
+                            new ReportEvidenceRow("ErrorMessage", run.ErrorMessage ?? "Unknown")
+                        ],
+                        RemediationHints: ["Inspect analyzer failure details and re-run analysis."],
+                        Fingerprints: [$"analyzer-failure:{run.AnalyzerName}"]));
+                }
+            }
+
+            List<ReportSection> deduped = DeduplicateSections(sections, out DedupDiagnostics dedupDiagnostics);
+
+            deduped = deduped
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .ThenBy(s => s.SectionKey, StringComparer.Ordinal)
+                .ToList();
+
+            DedupDiagnostics normalizedDiagnostics = dedupDiagnostics with
+            {
+                EvidenceBeforeMerge = evidenceBeforeMerge
+            };
+
+            return new ComposedReport(dumpPath, DateTime.UtcNow, elapsed, deduped, normalizedDiagnostics);
+        }
+
+        private static List<ReportSection> DeduplicateSections(IReadOnlyList<ReportSection> sections, out DedupDiagnostics diagnostics)
+        {
+            Dictionary<string, ReportSection> dedupMap = new(StringComparer.Ordinal);
+            List<string> mergedKeys = [];
+            int duplicateCandidates = 0;
+            int evidenceAfter = 0;
+
+            foreach (ReportSection section in sections)
+            {
+                if (!dedupMap.TryGetValue(section.SectionKey, out ReportSection? existing))
+                {
+                    dedupMap[section.SectionKey] = section;
+                    continue;
+                }
+
+                duplicateCandidates++;
+                mergedKeys.Add(section.SectionKey);
+
+                dedupMap[section.SectionKey] = existing with
+                {
+                    Severity = (FindingSeverity)Math.Max((int)existing.Severity, (int)section.Severity),
+                    NarrativeSummary = string.Join(Environment.NewLine,
+                        new[] { existing.NarrativeSummary, section.NarrativeSummary }
+                            .Where(v => !string.IsNullOrWhiteSpace(v))
+                            .Distinct(StringComparer.Ordinal)),
+                    EvidenceRows = existing.EvidenceRows
+                        .Concat(section.EvidenceRows)
+                        .DistinctBy(r => (r.Label, r.Value))
+                        .ToList(),
+                    RemediationHints = existing.RemediationHints
+                        .Concat(section.RemediationHints)
+                        .Where(v => !string.IsNullOrWhiteSpace(v))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList(),
+                    Fingerprints = existing.Fingerprints
+                        .Concat(section.Fingerprints)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList()
+                };
+            }
+
+            foreach (ReportSection section in dedupMap.Values)
+            {
+                evidenceAfter += section.EvidenceRows.Count;
+            }
+
+            diagnostics = new DedupDiagnostics(
+                DuplicateCandidates: duplicateCandidates,
+                MergedSections: mergedKeys.Count,
+                EvidenceBeforeMerge: 0,
+                EvidenceAfterMerge: evidenceAfter,
+                MergedKeys: mergedKeys.Distinct(StringComparer.Ordinal).ToList());
+
+            return dedupMap.Values.ToList();
+        }
+
         public static string BuildCombinedDetailedReport(IReadOnlyList<AnalyzerRunResult> runs)
         {
             var builder = new StringBuilder(capacity: 16 * 1024);

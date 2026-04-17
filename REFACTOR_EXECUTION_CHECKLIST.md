@@ -137,19 +137,27 @@
 ## Iteration 5 — Reporting Boundary + Formatters (Spec 05)
 
 ### Tasks
-- [ ] Refactor `ReportBuilder` to composition-only.
-- [ ] Define canonical section model + stable `SectionKey`.
-- [ ] Implement source-level dedup merge logic.
-- [ ] Align `IReportFormatter` implementations (`md/txt/html`) to render-only behavior.
-- [ ] Centralize wrapping/table helpers.
+- [x] Refactor `ReportBuilder` to composition-only.
+- [x] Define canonical section model + stable `SectionKey`.
+- [x] Implement source-level dedup merge logic.
+- [x] Align `IReportFormatter` implementations (`md/txt/html`) to render-only behavior.
+- [x] Centralize wrapping/table helpers.
 
 ### Validation
-- [ ] Same composed sections rendered across all formats.
-- [ ] No formatter-side dedup behavior remains.
-- [ ] No truncation of long values.
+- [x] Same composed sections rendered across all formats.
+- [x] No formatter-side dedup behavior remains.
+- [x] No truncation of long values.
 
 ### Exit Criteria
 - [ ] Reporting boundary enforced.
+
+### Current Status Notes (Spec 05)
+- Canonical report model (`ComposedReport`/`ReportSection`) is implemented and used for rendering.
+- Source-level deduplication now runs inside `ReportBuilder` with deterministic merge behavior.
+- Canonical `IReportFormatter` implementations (`Text`, `Markdown`, `Html`) render from composed model only.
+- Shared wrapping helper (`TableWrapHelper`) is used to wrap long values without truncation.
+- Reporting-focused tests added in `DumpDetective.Tests/ReportingCompositionTests.cs` for dedup, wrapping, and formatter parity.
+- Legacy static formatter stack remains in repo for staged migration safety and is tracked in `REFACTOR_TEMP_BRIDGES.md`.
 
 ---
 

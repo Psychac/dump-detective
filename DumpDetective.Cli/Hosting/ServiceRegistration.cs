@@ -1,5 +1,6 @@
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
+using DumpDetective.Reporting.Formatters;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,6 +23,9 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
 
         services.AddSingleton<ReportBuilderFacade>();
+        services.AddSingleton<IReportFormatter, TextCanonicalReportFormatter>();
+        services.AddSingleton<IReportFormatter, MarkdownCanonicalReportFormatter>();
+        services.AddSingleton<IReportFormatter, HtmlCanonicalReportFormatter>();
 
         return builder.Build();
     }

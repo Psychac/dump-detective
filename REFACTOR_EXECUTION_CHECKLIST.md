@@ -8,9 +8,9 @@
 
 ## Global Quality Gates (apply to every iteration)
 
-- [ ] Build passes.
+- [x] Build passes.
 - [ ] Relevant tests pass.
-- [ ] File config precedence preserved (`config` first, CLI fallback only if config missing).
+- [x] File config precedence preserved (`config` first, CLI fallback only if config missing).
 - [ ] Report detail preserved (no evidence/remediation loss).
 - [ ] Duplicate report sections removed at source.
 - [ ] Long table values wrapped (no truncation).
@@ -35,27 +35,33 @@
 
 ### Tasks
 - [ ] Ensure project layout matches `src/` + `tests/` structure.
-- [ ] Ensure all projects target `.NET 10`.
-- [ ] Move `Core` models/interfaces/utilities into `DumpDetective.Core`.
-- [ ] Normalize namespaces and project references.
+- [x] Ensure all projects target `.NET 10`.
+- [x] Move `Core` models/interfaces/utilities into `DumpDetective.Core`.
+- [x] Normalize namespaces and project references.
 
 ### Validation
-- [ ] Build passes after each move batch.
-- [ ] No forbidden dependency direction introduced.
+- [x] Build passes after each move batch.
+- [x] No forbidden dependency direction introduced.
 
 ### Exit Criteria
 - [ ] Structure aligned with Spec 01.
 - [ ] No behavior regression.
+
+### Current Status Notes (Spec 01)
+- Multi-project structure (`Core`, `Analysis`, `Reporting`, `Cli`) is in place and compiles.
+- `DumpDetective.Tests` project exists, but test restore/execution is currently blocked by feed auth in this environment.
+- Temporary migration bridges were explicitly marked with `TEMP-REFRACTOR-BRIDGE` and tracked in `REFACTOR_TEMP_BRIDGES.md`.
+- Full `src/` + `tests/` physical directory alignment is still pending.
 
 ---
 
 ## Iteration 2 — Options + Config Precedence (Spec 02)
 
 ### Tasks
-- [ ] Finalize strongly typed option classes.
-- [ ] Implement config-first resolution flow.
-- [ ] Implement CLI fallback only when config is not found.
-- [ ] Add startup validation with actionable field-level errors.
+- [x] Finalize strongly typed option classes.
+- [x] Implement config-first resolution flow.
+- [x] Implement CLI fallback only when config is not found.
+- [x] Add startup validation with actionable field-level errors.
 
 ### Validation
 - [ ] Tests for precedence matrix pass.
@@ -63,6 +69,12 @@
 
 ### Exit Criteria
 - [ ] Precedence rule enforced and tested.
+
+### Current Status Notes (Spec 02)
+- `RootCommandBuilder` now maps typed CLI arguments via `System.CommandLine`.
+- `ConfigurationResolver` enforces config-first behavior and uses CLI only when config is not found.
+- `StartupValidator` performs field-level path/range checks and returns actionable validation errors.
+- Full end-to-end execution is still under temporary bridge flow (`TEMP-REFRACTOR-BRIDGE`) until Spec 03/04 orchestration is completed.
 
 ---
 

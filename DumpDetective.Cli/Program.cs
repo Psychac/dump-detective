@@ -1,9 +1,43 @@
-﻿namespace DumpDetective.Cli;
+﻿using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Console;
+using DumpDetective.Cli.Hosting;
 
-internal class Program
+namespace DumpDetective.Cli;
+
+internal static class Program
 {
-    static void Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
-        System.Console.WriteLine("DumpDetective.Cli scaffold is ready.");
+        RootCommandBuilder commandBuilder = new();
+        var rootCommand = commandBuilder.Build();
+
+        if (args.Any(a => string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(a, "-h", StringComparison.OrdinalIgnoreCase)))
+        {
+            return await rootCommand.InvokeAsync(args);
+        }
+
+        var parseResult = rootCommand.Parse(args);
+        if (parseResult.Errors.Count > 0)
+        {
+            foreach (var error in parseResult.Errors)
+            {
+                ConsoleUx.Error(error.Message);
+            }
+
+            return 2;
+        }
+
+        try
+        {
+            var cliArguments = commandBuilder.Map(parseResult);
+            var service = ServiceRegistration.CreateDumpAnalysisService();
+            return await service.ExecuteAsync(cliArguments, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            ConsoleUx.Error(ex.Message);
+            return 1;
+        }
     }
 }

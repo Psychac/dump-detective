@@ -1,0 +1,16 @@
+using DumpDetective.Core.Options;
+
+namespace DumpDetective.Cli.Services;
+
+internal sealed record ResolvedExecutionOptions(
+    string DumpPath,
+    string OutputPath,
+    string? BaselineDumpPath,
+    IReadOnlyList<string>? TrendDumpPaths,
+    MemoryLeakOptions MemoryLeak,
+    ReferenceChainOptions ReferenceChain,
+    EventLeakOptions EventLeak,
+    DiagnosticsOptions Diagnostics,
+    ReportOptions Report,
+    string? ConfigPath,
+    bool UsedConfigFile);

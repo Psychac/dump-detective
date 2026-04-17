@@ -31,3 +31,11 @@ Tracking file for `TEMP-REFRACTOR-BRIDGE` markers introduced during staged migra
 - `DumpDetective.Reporting/Output/TextWriterExtensions.cs`
   - Bridge extension methods for `TextWriter` while `OutputWriter` boundary is in flux.
   - Remove if/when concrete reporting writer contract is restored.
+
+- `DumpDetective.Cli/Services/DumpAnalysisService.cs`
+  - Temporary execution bridge that resolves/validates config and prints startup summary only.
+  - Replace with full pipeline + reporting orchestration in Spec 03/04.
+
+- `DumpDetective.Cli/Hosting/ServiceRegistration.cs`
+  - Temporary manual factory wiring.
+  - Replace with full `IHostBuilder`/DI registration model in Spec 04.

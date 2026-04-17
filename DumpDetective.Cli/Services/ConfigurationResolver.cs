@@ -1,0 +1,303 @@
+using DumpDetective.Cli.Commands;
+using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Options;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace DumpDetective.Cli.Services;
+
+internal sealed class ConfigurationResolver
+{
+    private const string DefaultConfigFileName = "config.json";
+    private const string FallbackSampleConfigFileName = "config.sample.json";
+
+    public ResolvedExecutionOptions Resolve(CliArguments cliArguments)
+    {
+        string? configPath = ResolveConfigPath(cliArguments.ConfigPath);
+        CliConfigurationFileModel? fileModel = configPath is null ? null : LoadConfigurationFile(configPath);
+
+        bool usedConfigFile = fileModel is not null;
+
+        MemoryLeakOptions memoryLeak = usedConfigFile
+            ? BuildMemoryLeakFromConfig(fileModel!)
+            : BuildMemoryLeakFromCli(cliArguments);
+
+        ReferenceChainOptions referenceChain = usedConfigFile
+            ? BuildReferenceChainFromConfig(fileModel!)
+            : BuildReferenceChainFromCli(cliArguments);
+
+        EventLeakOptions eventLeak = usedConfigFile
+            ? BuildEventLeakFromConfig(fileModel!)
+            : BuildEventLeakFromCli(cliArguments);
+
+        DiagnosticsOptions diagnostics = usedConfigFile
+            ? BuildDiagnosticsFromConfig(fileModel!)
+            : BuildDiagnosticsFromCli(cliArguments);
+
+        ReportOptions report = usedConfigFile
+            ? BuildReportFromConfig(fileModel!)
+            : BuildReportFromCli(cliArguments);
+
+        string? configuredDumpPath = fileModel?.DumpPath;
+        string? configuredBaseline = fileModel?.BaselineDumpPath;
+        IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
+
+        string? effectiveDumpPath = configuredDumpPath ?? cliArguments.DumpPath ?? configuredTrend?.LastOrDefault();
+        if (string.IsNullOrWhiteSpace(effectiveDumpPath))
+        {
+            throw new ArgumentException("Dump path is required. Provide positional dump-path, --trend, or DumpPath in config.");
+        }
+
+        string outputPath = !string.IsNullOrWhiteSpace(cliArguments.OutputPath)
+            ? cliArguments.OutputPath!
+            : BuildOutputPath(effectiveDumpPath!, report.Format);
+
+        return new ResolvedExecutionOptions(
+            effectiveDumpPath!,
+            outputPath,
+            configuredBaseline ?? cliArguments.BaselineDumpPath,
+            configuredTrend ?? cliArguments.TrendDumpPaths,
+            memoryLeak,
+            referenceChain,
+            eventLeak,
+            diagnostics,
+            report,
+            configPath,
+            usedConfigFile);
+    }
+
+    private static string? ResolveConfigPath(string? cliConfigPath)
+    {
+        if (!string.IsNullOrWhiteSpace(cliConfigPath))
+        {
+            return File.Exists(cliConfigPath) ? cliConfigPath : null;
+        }
+
+        string baseDirectory = AppContext.BaseDirectory;
+        string primaryPath = Path.Combine(baseDirectory, DefaultConfigFileName);
+        if (File.Exists(primaryPath))
+        {
+            return primaryPath;
+        }
+
+        string samplePath = Path.Combine(baseDirectory, FallbackSampleConfigFileName);
+        return File.Exists(samplePath) ? samplePath : null;
+    }
+
+    private static CliConfigurationFileModel LoadConfigurationFile(string configPath)
+    {
+        if (!File.Exists(configPath))
+        {
+            throw new FileNotFoundException($"Config file not found at '{configPath}'.", configPath);
+        }
+
+        var serializerOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+            TypeInfoResolver = CliConfigurationJsonSerializerContext.Default
+        };
+
+        string json = File.ReadAllText(configPath);
+        CliConfigurationFileModel? model = JsonSerializer.Deserialize<CliConfigurationFileModel>(json, serializerOptions);
+        if (model is null)
+        {
+            throw new ArgumentException($"Config file '{configPath}' is empty or invalid.");
+        }
+
+        return model;
+    }
+
+    private static MemoryLeakOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config)
+    {
+        int highReferenceThreshold = config.MemoryLeak?.HighReferenceThreshold
+            ?? config.HighReferenceThreshold
+            ?? 50;
+
+        int maxDuplicateStringLength = config.MemoryLeak?.MaxDuplicateStringLength
+            ?? config.MaxDuplicateStringLength
+            ?? 500;
+
+        int minDuplicateStringCount = config.MemoryLeak?.MinDuplicateStringCount
+            ?? config.MinDuplicateStringCount
+            ?? 10;
+
+        int maxReferenceAddresses = config.MemoryLeak?.MaxReferenceAddresses
+            ?? config.MaxReferenceAddressesToTrack
+            ?? 1_000_000;
+
+        return new MemoryLeakOptions
+        {
+            HighReferenceThreshold = highReferenceThreshold,
+            MaxDuplicateStringLength = maxDuplicateStringLength,
+            MinDuplicateStringCount = minDuplicateStringCount,
+            MaxReferenceAddresses = maxReferenceAddresses
+        };
+    }
+
+    private static MemoryLeakOptions BuildMemoryLeakFromCli(CliArguments cli)
+    {
+        return new MemoryLeakOptions
+        {
+            HighReferenceThreshold = cli.HighReferenceThreshold ?? 50,
+            MaxDuplicateStringLength = cli.MaxDuplicateStringLength ?? 500,
+            MinDuplicateStringCount = cli.MinDuplicateStringCount ?? 10,
+            MaxReferenceAddresses = cli.MaxReferenceAddresses ?? 1_000_000
+        };
+    }
+
+    private static ReferenceChainOptions BuildReferenceChainFromConfig(CliConfigurationFileModel config)
+    {
+        int topCount = config.ReferenceChain?.TopCount
+            ?? config.ReferenceChainTopCount
+            ?? 5;
+
+        int maxPathSearchObjects = config.ReferenceChain?.MaxPathSearchObjects
+            ?? config.ReferenceChainMaxPathSearchObjects
+            ?? 5_000;
+
+        return new ReferenceChainOptions
+        {
+            TopCount = topCount,
+            MaxPathSearchObjects = maxPathSearchObjects
+        };
+    }
+
+    private static ReferenceChainOptions BuildReferenceChainFromCli(CliArguments cli)
+    {
+        return new ReferenceChainOptions
+        {
+            TopCount = cli.ReferenceChainTopCount ?? 5,
+            MaxPathSearchObjects = cli.ReferenceChainMaxPathSearchObjects ?? 5_000
+        };
+    }
+
+    private static EventLeakOptions BuildEventLeakFromConfig(CliConfigurationFileModel config)
+    {
+        int minSubscribers = config.EventLeak?.MinSubscribers
+            ?? config.EventLeakMinSubscribers
+            ?? 0;
+
+        return new EventLeakOptions
+        {
+            MinSubscribers = minSubscribers
+        };
+    }
+
+    private static EventLeakOptions BuildEventLeakFromCli(CliArguments cli)
+    {
+        return new EventLeakOptions
+        {
+            MinSubscribers = cli.EventLeakMinSubscribers ?? 0
+        };
+    }
+
+    private static DiagnosticsOptions BuildDiagnosticsFromConfig(CliConfigurationFileModel config)
+    {
+        bool enableMemoryDiagnostics = config.Diagnostics?.EnableMemoryDiagnostics
+            ?? config.EnableMemoryDiagnostics
+            ?? false;
+
+        bool enablePerformanceDiagnostics = config.Diagnostics?.EnablePerformanceDiagnostics
+            ?? config.EnablePerformanceDiagnostics
+            ?? false;
+
+        return new DiagnosticsOptions
+        {
+            EnableMemoryDiagnostics = enableMemoryDiagnostics,
+            EnablePerformanceDiagnostics = enablePerformanceDiagnostics
+        };
+    }
+
+    private static DiagnosticsOptions BuildDiagnosticsFromCli(CliArguments cli)
+    {
+        return new DiagnosticsOptions
+        {
+            EnableMemoryDiagnostics = cli.EnableMemoryDiagnostics,
+            EnablePerformanceDiagnostics = cli.EnablePerformanceDiagnostics
+        };
+    }
+
+    private static ReportOptions BuildReportFromConfig(CliConfigurationFileModel config)
+    {
+        return new ReportOptions
+        {
+            Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? ReportFormat.Html
+        };
+    }
+
+    private static ReportOptions BuildReportFromCli(CliArguments cli)
+    {
+        return new ReportOptions
+        {
+            Format = cli.ReportFormat ?? ReportFormat.Html
+        };
+    }
+
+    private static string BuildOutputPath(string dumpPath, ReportFormat format)
+    {
+        string extension = format switch
+        {
+            ReportFormat.Markdown => ".md",
+            ReportFormat.Text => ".txt",
+            _ => ".html"
+        };
+
+        return Path.ChangeExtension(dumpPath, extension);
+    }
+
+    private static ReportFormat? ParseReportFormat(string? format)
+    {
+        if (string.IsNullOrWhiteSpace(format))
+        {
+            return null;
+        }
+
+        return format.Trim().ToLowerInvariant() switch
+        {
+            "text" or "txt" => ReportFormat.Text,
+            "markdown" or "md" => ReportFormat.Markdown,
+            "html" or "htm" => ReportFormat.Html,
+            _ => throw new ArgumentException($"Invalid ReportFormat value '{format}' in config.")
+        };
+    }
+}
+
+internal sealed class CliConfigurationFileModel
+{
+    public string? DumpPath { get; init; }
+    public string? BaselineDumpPath { get; init; }
+    public List<string>? TrendDumpPaths { get; init; }
+
+    public MemoryLeakOptions? MemoryLeak { get; init; }
+    public ReferenceChainOptions? ReferenceChain { get; init; }
+    public EventLeakOptions? EventLeak { get; init; }
+    public DiagnosticsOptions? Diagnostics { get; init; }
+    public ReportOptionsModel? Report { get; init; }
+
+    public int? HighReferenceThreshold { get; init; }
+    public int? MaxDuplicateStringLength { get; init; }
+    public int? MinDuplicateStringCount { get; init; }
+    public int? MaxReferenceAddressesToTrack { get; init; }
+    public int? ReferenceChainTopCount { get; init; }
+    public int? ReferenceChainMaxPathSearchObjects { get; init; }
+    public int? EventLeakMinSubscribers { get; init; }
+    public bool? EnableMemoryDiagnostics { get; init; }
+    public bool? EnablePerformanceDiagnostics { get; init; }
+    public string? ReportFormat { get; init; }
+}
+
+internal sealed class ReportOptionsModel
+{
+    public ReportFormat Format { get; init; } = ReportFormat.Html;
+}
+
+[JsonSourceGenerationOptions(
+    PropertyNameCaseInsensitive = true,
+    ReadCommentHandling = JsonCommentHandling.Skip,
+    AllowTrailingCommas = true)]
+[JsonSerializable(typeof(CliConfigurationFileModel))]
+internal partial class CliConfigurationJsonSerializerContext : JsonSerializerContext
+{
+}

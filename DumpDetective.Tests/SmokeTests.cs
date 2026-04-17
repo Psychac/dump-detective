@@ -1,3 +1,5 @@
+using Xunit;
+
 namespace DumpDetective.Tests;
 
 public class SmokeTests

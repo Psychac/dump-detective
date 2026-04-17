@@ -11,12 +11,6 @@ internal static class Program
         RootCommandBuilder commandBuilder = new();
         var rootCommand = commandBuilder.Build();
 
-        if (args.Any(a => string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(a, "-h", StringComparison.OrdinalIgnoreCase)))
-        {
-            return await rootCommand.InvokeAsync(args);
-        }
-
         var parseResult = rootCommand.Parse(args);
         if (parseResult.Errors.Count > 0)
         {

@@ -42,8 +42,6 @@ internal sealed class RootCommandBuilder
 
     public RootCommand Build()
     {
-        _configPathOption.AddAlias("-c");
-
         var command = new RootCommand("DumpDetective dump analyzer")
         {
             _dumpPathArgument,

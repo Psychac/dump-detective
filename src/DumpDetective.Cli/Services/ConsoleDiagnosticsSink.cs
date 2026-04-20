@@ -61,19 +61,17 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             case AnalysisDiagnosticsEventType.AnalyzerCompleted:
                 if (!string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
                 {
+                    long cacheTotal = diagnosticsEvent.CacheHits + diagnosticsEvent.CacheMisses;
+                    double cacheHitRatio = cacheTotal == 0 ? 0 : diagnosticsEvent.CacheHits * 100.0 / cacheTotal;
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
-                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed);
 
-                    string durationSegment = diagnosticsEvent.DurationMs.HasValue
-                        ? $" ({diagnosticsEvent.DurationMs.Value:F0} ms)"
-                        : string.Empty;
-
-                    long cacheTotal = diagnosticsEvent.CacheHits + diagnosticsEvent.CacheMisses;
-                    double cacheHitRatio = cacheTotal == 0 ? 0 : diagnosticsEvent.CacheHits * 100.0 / cacheTotal;
-
-                    ConsoleUx.Success($"{diagnosticsEvent.AnalyzerName} completed{durationSegment} · scans {diagnosticsEvent.ObjectScanCount:N0} · cache-hit {cacheHitRatio:F1}%");
+                    ConsoleUx.ObjectScanComplete(
+                        diagnosticsEvent.AnalyzerName,
+                        diagnosticsEvent.ObjectScanCount,
+                        elapsed,
+                        $"cache-hit {cacheHitRatio:F1}%");
                 }
 
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
@@ -85,7 +83,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
-                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed);
+                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed, "status failed");
                     ConsoleUx.Error($"Analyzer failed: {diagnosticsEvent.AnalyzerName} ({diagnosticsEvent.ExceptionType}: {diagnosticsEvent.ExceptionMessage})");
                 }
 
@@ -98,7 +96,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
-                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed);
+                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed, "status canceled");
                     ConsoleUx.Warning($"Analyzer canceled: {diagnosticsEvent.AnalyzerName}");
                 }
 
@@ -235,7 +233,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
             _startedAnalyzersInCurrentStage++;
             AnalyzerStage stage = _stages[_currentStageIndex];
-            ConsoleUx.Info($"Analyzer {_startedAnalyzersInCurrentStage}/{stage.AnalyzerCount}: {analyzerName}");
+            ConsoleUx.Info($"[{_startedAnalyzersInCurrentStage}/{stage.AnalyzerCount}] {analyzerName}");
         }
     }
 

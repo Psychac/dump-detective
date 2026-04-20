@@ -100,10 +100,11 @@ internal static class ConsoleUx
         }
     }
 
-    public static void ObjectScanComplete(string operation, long scannedCount, TimeSpan elapsed)
+    public static void ObjectScanComplete(string operation, long scannedCount, TimeSpan elapsed, string? details = null)
     {
         double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
-        string text = $"[{DateTime.Now:HH:mm:ss}] ✓ scanned {operation} | {scannedCount:N0} objs | {FormatElapsed(elapsed)} | {perSecond:N0}/s";
+        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}";
+        string text = $"[{DateTime.Now:HH:mm:ss}] ✓ scanned {operation} | {scannedCount:N0} objs | {FormatElapsed(elapsed)} | {perSecond:N0}/s{detailsSegment}";
 
         lock (_consoleGate)
         {

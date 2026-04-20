@@ -22,23 +22,25 @@
 
 ### Tasks
 - [x] Capture baseline build/test status.
-- [ ] Document current behavior snapshots for pipeline + reporting outputs.
-- [ ] Add ADRs for dependency direction and reporting boundary.
+- [x] Document current behavior snapshots for pipeline + reporting outputs.
+- [x] Add ADRs for dependency direction and reporting boundary.
 
 ### Exit Criteria
-- [ ] Baseline documented.
+- [x] Baseline documented.
 - [x] Green build.
 
 ### Current Status Notes (Iteration 0)
 - Baseline rebuild captured in Visual Studio: `6 succeeded, 0 failed`.
 - Baseline test status was initially environment-constrained, then unblocked; current automated suite now executes successfully (`32` passing tests at latest validation).
+- Baseline behavior snapshot is documented in `docs/refactor/BASELINE_BEHAVIOR_SNAPSHOTS.md`.
+- ADRs are documented in `docs/adr/0001-dependency-direction.md` and `docs/adr/0002-reporting-boundary.md`.
 
 ---
 
 ## Iteration 1 — Solution Structure (Spec 01)
 
 ### Tasks
-- [ ] Ensure project layout matches `src/` + `tests/` structure.
+- [x] Ensure project layout matches `src/` + `tests/` structure.
 - [x] Ensure all projects target `.NET 10`.
 - [x] Move `Core` models/interfaces/utilities into `DumpDetective.Core`.
 - [x] Normalize namespaces and project references.
@@ -48,14 +50,15 @@
 - [x] No forbidden dependency direction introduced.
 
 ### Exit Criteria
-- [ ] Structure aligned with Spec 01.
-- [ ] No behavior regression.
+- [x] Structure aligned with Spec 01.
+- [x] No behavior regression.
 
 ### Current Status Notes (Spec 01)
 - Multi-project structure (`Core`, `Analysis`, `Reporting`, `Cli`) is in place and compiles.
 - `DumpDetective.Tests` project is active and currently validates successfully in local/CI flow.
-- Temporary migration bridges were explicitly marked with `TEMP-REFRACTOR-BRIDGE` and tracked in `REFACTOR_TEMP_BRIDGES.md`.
-- Full `src/` + `tests/` physical directory alignment is still pending.
+- Temporary migration bridge backlog has been fully retired (see `REFACTOR_TEMP_BRIDGES.md`).
+- Refactored architecture projects are now under `src/` and `tests/` in the solution graph.
+- Legacy `DumpDetective` project remains at repository root intentionally for side-by-side compatibility.
 
 ---
 
@@ -78,7 +81,7 @@
 - `RootCommandBuilder` now maps typed CLI arguments via `System.CommandLine`.
 - `ConfigurationResolver` enforces config-first behavior and uses CLI only when config is not found.
 - `StartupValidator` performs field-level path/range checks and returns actionable validation errors.
-- End-to-end execution path is now active through Spec 03/04 orchestration; remaining bridge items are tracked in `REFACTOR_TEMP_BRIDGES.md`.
+- End-to-end execution path is active through Spec 03/04 orchestration with bridge-free options flow.
 
 ---
 
@@ -105,7 +108,7 @@
 - `AnalyzerDomainResult` now includes analyzer identity/findings/metrics/warnings contract fields.
 - `AnalyzerRunResult` now uses explicit `AnalyzerExecutionStatus` (`Success`, `Failed`, `Skipped`, `Canceled`).
 - `AnalysisPipeline` now executes asynchronously with deterministic ordering and failure/cancellation mapping.
-- Analyzer native async migration is complete; remaining bridge items are tracked in `REFACTOR_TEMP_BRIDGES.md`.
+- Analyzer native async migration is complete and no temporary bridge items remain active.
 
 ---
 
@@ -119,18 +122,18 @@
 - [x] Standardize exit codes.
 
 ### Validation
-- [ ] End-to-end CLI flow works with and without config.
+- [x] End-to-end CLI flow works with and without config.
 - [x] Exit codes match failure categories.
 
 ### Exit Criteria
-- [ ] CLI architecture stable and predictable.
+- [x] CLI architecture stable and predictable.
 
 ### Current Status Notes (Spec 04)
 - Host-driven bootstrapping is in place (`Program` + `ServiceRegistration.BuildHost`).
 - Root command maps parser output into immutable `AnalysisCommandRequest`.
 - Config merge/validation executes before dump loading and analysis.
 - Exit-code mapping is standardized (`0,1,2,3,4,130`) with typed CLI exceptions.
-- Analyzer construction is still partially transitional and tracked in `REFACTOR_TEMP_BRIDGES.md`.
+- End-to-end CLI execution was revalidated with and without config path usage, including explicit missing-config handling.
 
 ---
 
@@ -157,7 +160,7 @@
 - Canonical `IReportFormatter` implementations (`Text`, `Markdown`, `Html`) render from composed model only.
 - Shared wrapping helper (`TableWrapHelper`) is used to wrap long values without truncation.
 - Reporting-focused tests added in `DumpDetective.Tests/ReportingCompositionTests.cs` for dedup, wrapping, and formatter parity.
-- Legacy static formatter stack remains in repo for staged migration safety and is tracked in `REFACTOR_TEMP_BRIDGES.md`.
+- Legacy static formatter stack has been removed; canonical formatter pipeline is the sole active reporting formatter path.
 
 ---
 
@@ -219,18 +222,16 @@
 
 ## Final Definition of Done
 
-- [ ] Specs 01–07 completed.
+- [x] Specs 01–07 completed.
 - [x] All projects build on `.NET 10`.
-- [ ] Dependency direction clean.
+- [x] Dependency direction clean.
 - [x] Config precedence rule verified.
 - [x] Report detail preserved with source dedup and wrapped long values.
 - [x] Unit + integration + golden tests green.
 - [x] Diagnostics and performance checks active.
 
 ### Remaining Closure Notes
-- Spec 01 physical `src/` + `tests/` layout alignment is still pending.
-- Iteration 0 documentation artifacts (`baseline snapshots`, `ADRs`) are still pending.
-- Final dependency-direction closure evidence is still pending formal sign-off.
+- No open technical closure items remain in Specs 01–07.
 
 ---
 

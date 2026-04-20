@@ -12,10 +12,10 @@
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
     <PackageReference Include="FluentAssertions" Version="7.*" />
-    <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
-    <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
-    <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
-    <ProjectReference Include="..\DumpDetective.Cli\DumpDetective.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Core\DumpDetective.Core.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Cli\DumpDetective.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

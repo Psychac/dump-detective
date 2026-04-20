@@ -7,7 +7,8 @@ internal sealed record ComposedReport(
     DateTime GeneratedAtUtc,
     TimeSpan Elapsed,
     IReadOnlyList<ReportSection> Sections,
-    DedupDiagnostics DedupDiagnostics);
+    DedupDiagnostics DedupDiagnostics,
+    string DetailedAnalyzerReport);
 
 internal sealed record ReportSection(
     string SectionKey,

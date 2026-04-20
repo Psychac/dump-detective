@@ -21,6 +21,7 @@ internal static class ServiceRegistration
         services.AddSingleton<DumpLoader>();
         services.AddSingleton<DumpAnalysisService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
+        services.AddSingleton<IAnalyzerReporterFactory, DefaultAnalyzerReporterFactory>();
 
         services.AddSingleton<ReportBuilderFacade>();
         services.AddSingleton<IReportFormatter, TextCanonicalReportFormatter>();

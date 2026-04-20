@@ -1,5 +1,7 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 using DumpDetective.Reporting.Models;
 using System.Text;
 
@@ -9,8 +11,18 @@ namespace DumpDetective.Reporting.Services
     {
         public static ComposedReport ComposeCanonicalReport(string dumpPath, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed)
         {
+            return ComposeCanonicalReport(dumpPath, runs, elapsed, []);
+        }
+
+        public static ComposedReport ComposeCanonicalReport(
+            string dumpPath,
+            IReadOnlyList<AnalyzerRunResult> runs,
+            TimeSpan elapsed,
+            IReadOnlyList<IAnalyzerReporter> reporters)
+        {
             List<ReportSection> sections = [];
             int evidenceBeforeMerge = 0;
+            string detailedAnalyzerReport = RenderDetailedAnalyzerSections(runs, reporters);
 
             foreach (AnalyzerRunResult run in runs)
             {
@@ -68,7 +80,41 @@ namespace DumpDetective.Reporting.Services
                 EvidenceBeforeMerge = evidenceBeforeMerge
             };
 
-            return new ComposedReport(dumpPath, DateTime.UtcNow, elapsed, deduped, normalizedDiagnostics);
+            return new ComposedReport(dumpPath, DateTime.UtcNow, elapsed, deduped, normalizedDiagnostics, detailedAnalyzerReport);
+        }
+
+        private static string RenderDetailedAnalyzerSections(IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<IAnalyzerReporter> reporters)
+        {
+            if (reporters.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            Dictionary<string, AnalyzerDomainResult> domainResults = new(StringComparer.Ordinal);
+
+            foreach (AnalyzerRunResult run in runs)
+            {
+                if (run.Status != AnalyzerExecutionStatus.Success || run.Result is null)
+                {
+                    continue;
+                }
+
+                domainResults[run.AnalyzerName] = run.Result;
+            }
+
+            if (domainResults.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder buffer = new(capacity: 8 * 1024);
+            using StringWriter textWriter = new(buffer);
+            OutputWriter writer = new(textWriter, writeToConsoleWhenNoWriter: false);
+
+            AnalyzerReportRenderer renderer = new(reporters);
+            renderer.Render(domainResults, writer);
+
+            return buffer.ToString().Trim();
         }
 
         private static List<ReportSection> DeduplicateSections(IReadOnlyList<ReportSection> sections, out DedupDiagnostics diagnostics)

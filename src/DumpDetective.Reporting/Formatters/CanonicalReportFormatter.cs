@@ -58,6 +58,14 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
+        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        {
+            lines.Add("DETAILED ANALYZER SECTIONS");
+            lines.Add(new string('=', 100));
+            lines.Add(report.DetailedAnalyzerReport);
+            lines.Add(string.Empty);
+        }
+
         return string.Join(Environment.NewLine, lines);
     }
 }
@@ -110,6 +118,16 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
+        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        {
+            lines.Add("## Detailed analyzer sections");
+            lines.Add(string.Empty);
+            lines.Add("```text");
+            lines.Add(report.DetailedAnalyzerReport);
+            lines.Add("```");
+            lines.Add(string.Empty);
+        }
+
         return string.Join(Environment.NewLine, lines);
     }
 }
@@ -159,6 +177,12 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 }
                 lines.Add("</ul>");
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        {
+            lines.Add("<h2>Detailed analyzer sections</h2>");
+            lines.Add($"<pre>{System.Net.WebUtility.HtmlEncode(report.DetailedAnalyzerReport)}</pre>");
         }
 
         lines.Add("</body></html>");

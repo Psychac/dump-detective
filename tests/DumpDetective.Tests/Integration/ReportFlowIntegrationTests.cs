@@ -53,7 +53,8 @@ public sealed class ReportFlowIntegrationTests
             new TextCanonicalReportFormatter(),
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
-        ]);
+        ],
+        new DefaultAnalyzerReporterFactory());
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",

@@ -6,10 +6,7 @@ namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 {
-    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers
-        .OrderBy(a => a.Order)
-        .ThenBy(a => a.Name, StringComparer.Ordinal)
-        .ToList();
+    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
 
     public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
@@ -78,7 +75,12 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 
             try
             {
-                AnalyzerDomainResult analyzerResult = await analyzer.AnalyzeAsync(context, cancellationToken);
+                AnalyzerDomainResult analyzerResult = await ExecuteAnalyzerWithProgressAsync(
+                    runId,
+                    analyzer,
+                    context,
+                    stopwatch,
+                    cancellationToken);
 
                 long objectScans = ExtractLongMetric(analyzerResult.Metrics, "objectScans") ?? context.Cache.ObjectScanCount;
                 long cacheHits = ExtractLongMetric(analyzerResult.Metrics, "cacheHits") ?? context.Cache.CacheHits;
@@ -204,6 +206,45 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             ExceptionMessage: null));
 
         return runResults;
+    }
+
+    private static async Task<AnalyzerDomainResult> ExecuteAnalyzerWithProgressAsync(
+        Guid runId,
+        IAnalyzer analyzer,
+        AnalysisContext context,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        const int progressTickMs = 300;
+
+        Task<AnalyzerDomainResult> analyzeTask = Task.Run(
+            async () => await analyzer.AnalyzeAsync(context, cancellationToken),
+            cancellationToken);
+
+        while (true)
+        {
+            Task completedTask = await Task.WhenAny(analyzeTask, Task.Delay(progressTickMs, cancellationToken));
+            if (completedTask == analyzeTask)
+            {
+                break;
+            }
+
+            PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                RunId: runId,
+                EventType: AnalysisDiagnosticsEventType.AnalyzerProgress,
+                TimestampUtc: DateTime.UtcNow,
+                AnalyzerName: analyzer.Name,
+                Category: analyzer.Category,
+                DurationMs: stopwatch.Elapsed.TotalMilliseconds,
+                ObjectScanCount: context.Cache.ObjectScanCount,
+                CacheHits: context.Cache.CacheHits,
+                CacheMisses: context.Cache.CacheMisses,
+                Message: $"Analyzer '{analyzer.Name}' is scanning heap objects.",
+                ExceptionType: null,
+                ExceptionMessage: null));
+        }
+
+        return await analyzeTask;
     }
 
     private static void PublishSafe(IAnalysisDiagnosticsSink diagnosticsSink, AnalysisDiagnosticsEvent diagnosticsEvent)

@@ -4,6 +4,7 @@ internal enum AnalysisDiagnosticsEventType
 {
     RunStarted,
     AnalyzerStarted,
+    AnalyzerProgress,
     AnalyzerCompleted,
     AnalyzerFailed,
     AnalyzerCanceled,

@@ -27,6 +27,7 @@ internal sealed class DumpAnalysisService(
     public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        Stopwatch totalStopwatch = Stopwatch.StartNew();
 
         ResolvedExecutionOptions resolved;
         try
@@ -41,16 +42,29 @@ internal sealed class DumpAnalysisService(
 
         IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
         ValidateAnalyzerFilters(resolved, analyzers);
-        IReadOnlyList<IAnalyzer> activeAnalyzers = ApplyAnalyzerFilters(resolved, analyzers);
+        IReadOnlyList<IAnalyzer> activeAnalyzers = OrderAnalyzersForPipeline(ApplyAnalyzerFilters(resolved, analyzers));
+
+        ConsoleUx.Header("DumpDetective Analysis");
 
         if (resolved.DiagnosticMode)
         {
             ConsoleUx.Info($"Config source: {(resolved.UsedConfigFile ? $"file ({resolved.ConfigPath})" : "CLI fallback")}");
             ConsoleUx.Info($"Active analyzers ({activeAnalyzers.Count}): {string.Join(", ", activeAnalyzers.Select(a => a.Name))}");
         }
+        else
+        {
+            ConsoleUx.Info($"Analyzing dump: {Path.GetFileName(resolved.DumpPath)}");
+            ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers...");
+        }
+
+        const int totalStages = 4;
+        Stopwatch stageStopwatch = Stopwatch.StartNew();
 
         Stopwatch stopwatch = Stopwatch.StartNew();
+        ConsoleUx.StageStart(1, totalStages, "Load dump");
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(resolved.DumpPath, cancellationToken);
+        stageStopwatch.Stop();
+        ConsoleUx.StageComplete(1, totalStages, "Load dump", stageStopwatch.Elapsed);
 
         PipelineAnalysisContext context = new()
         {
@@ -69,15 +83,19 @@ internal sealed class DumpAnalysisService(
             ReferenceChainOptions = resolved.ReferenceChain,
             EventLeakOptions = resolved.EventLeak,
             DiagnosticsOptions = resolved.Diagnostics,
-            DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode)
+            DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };
 
         AnalysisPipeline pipeline = new(activeAnalyzers);
 
         IReadOnlyList<AnalyzerRunResult> runs;
+        stageStopwatch.Restart();
+        ConsoleUx.StageStart(2, totalStages, $"Run analyzers ({activeAnalyzers.Count})");
         try
         {
             runs = await pipeline.ExecuteAsync(context, cancellationToken);
+            stageStopwatch.Stop();
+            ConsoleUx.StageComplete(2, totalStages, "Run analyzers", stageStopwatch.Elapsed);
         }
         catch (OperationCanceledException)
         {
@@ -95,12 +113,18 @@ internal sealed class DumpAnalysisService(
 
         stopwatch.Stop();
 
+        stageStopwatch.Restart();
+        ConsoleUx.StageStart(3, totalStages, $"Build {resolved.Report.Format} report");
         string renderedReport = _reportBuilderFacade.BuildRenderedReport(
             resolved.DumpPath,
             resolved.Report.Format,
             runs,
             stopwatch.Elapsed);
+        stageStopwatch.Stop();
+        ConsoleUx.StageComplete(3, totalStages, "Build report", stageStopwatch.Elapsed);
 
+        stageStopwatch.Restart();
+        ConsoleUx.StageStart(4, totalStages, "Write output");
         try
         {
             if (!string.IsNullOrWhiteSpace(resolved.OutputPath))
@@ -115,11 +139,17 @@ internal sealed class DumpAnalysisService(
                 ConsoleUx.Info($"Run summary: {runs.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
                 PrintDiagnosticsSummary(runs);
             }
+
+            stageStopwatch.Stop();
+            ConsoleUx.StageComplete(4, totalStages, "Write output", stageStopwatch.Elapsed);
         }
         catch (Exception ex)
         {
             throw new OutputWriteException("Failed while writing analysis output.", ex);
         }
+
+        totalStopwatch.Stop();
+        ConsoleUx.Success($"Total analysis time: {totalStopwatch.Elapsed.TotalSeconds:F1}s");
 
         return runs.Any(r => r.Status == AnalyzerExecutionStatus.Failed)
             ? ExitCodes.AnalysisFailure
@@ -166,6 +196,52 @@ internal sealed class DumpAnalysisService(
         }
 
         return filtered.ToList();
+    }
+
+    private static IReadOnlyList<IAnalyzer> OrderAnalyzersForPipeline(IReadOnlyList<IAnalyzer> analyzers)
+    {
+        return analyzers
+            .OrderBy(GetStageRank)
+            .ThenBy(a => a.Order)
+            .ThenBy(a => a.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static int GetStageRank(IAnalyzer analyzer)
+    {
+        string typeName = analyzer.GetType().Name;
+        return typeName switch
+        {
+            nameof(DumpDetective.Analysis.Analyzers.MemoryAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.GCGenerationAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.ModuleAnalyzer)
+                => 0,
+
+            nameof(DumpDetective.Analysis.Analyzers.CrashAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.HangAnalyzer)
+                => 1,
+
+            nameof(DumpDetective.Analysis.Analyzers.MemoryLeakAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.CollectionAnalyzer)
+                => 2,
+
+            nameof(DumpDetective.Analysis.Analyzers.StaticRootLeakDetector)
+            or nameof(DumpDetective.Analysis.Analyzers.ReferenceChainAnalyzer)
+                => 3,
+
+            nameof(DumpDetective.Analysis.Analyzers.GCHandleAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.DependentHandleAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.LohFragmentationAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.ThreadStackClusterAnalyzer)
+                => 4,
+
+            nameof(DumpDetective.Analysis.Analyzers.ThreadAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.LockGraphAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.EventLeakAnalyzer)
+                => 5,
+
+            _ => 99
+        };
     }
 
     private static void PrintDiagnosticsSummary(IReadOnlyList<AnalyzerRunResult> runs)

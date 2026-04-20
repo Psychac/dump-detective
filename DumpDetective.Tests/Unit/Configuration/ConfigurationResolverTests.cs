@@ -1,0 +1,132 @@
+using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Services;
+using DumpDetective.Core.Configuration;
+
+using FluentAssertions;
+
+using Xunit;
+
+namespace DumpDetective.Tests.Unit.Configuration;
+
+public sealed class ConfigurationResolverTests
+{
+    [Fact]
+    public void Resolve_ShouldUseConfigValues_WhenConfigProvidesField()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "MemoryLeak": {
+                "HighReferenceThreshold": 123
+              }
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.UsedConfigFile.Should().BeTrue();
+            resolved.DumpPath.Should().Be("C:/dumps/from-config.dmp");
+            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(123);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldUseCliValue_WhenConfigMissingThatField()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "MemoryLeak": {
+                "HighReferenceThreshold": 123
+              }
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.MemoryLeak.MaxDuplicateStringLength.Should().Be(222);
+            resolved.ReferenceChain.TopCount.Should().Be(6);
+            resolved.Report.Format.Should().Be(ReportFormat.Text);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldFallbackToCli_WhenConfigMissing()
+    {
+        AnalysisCommandRequest request = CreateRequest(configPath: null);
+        ConfigurationResolver resolver = new();
+
+        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+        resolved.UsedConfigFile.Should().BeFalse();
+        resolved.DumpPath.Should().Be(request.DumpPath);
+        resolved.MemoryLeak.HighReferenceThreshold.Should().Be(111);
+        resolved.ReferenceChain.TopCount.Should().Be(6);
+        resolved.EventLeak.MinSubscribers.Should().Be(3);
+        resolved.Report.Format.Should().Be(ReportFormat.Text);
+    }
+
+    [Fact]
+    public void Resolve_ShouldThrow_WhenExplicitConfigPathMissing()
+    {
+        AnalysisCommandRequest request = CreateRequest(configPath: "C:/missing/does-not-exist.json");
+        ConfigurationResolver resolver = new();
+
+        Action act = () => resolver.Resolve(request);
+
+        act.Should().Throw<FileNotFoundException>()
+            .WithMessage("*does-not-exist.json*");
+    }
+
+    private static string CreateTempDirectory()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"dumpdetective-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        return tempDirectory;
+    }
+
+    private static AnalysisCommandRequest CreateRequest(string? configPath)
+    {
+        return new AnalysisCommandRequest(
+            DumpPath: "C:/dumps/from-cli.dmp",
+            OutputPath: null,
+            OutputFormat: ReportFormat.Text,
+            ConfigPath: configPath,
+            IncludeAnalyzers: Array.Empty<string>(),
+            ExcludeAnalyzers: Array.Empty<string>(),
+            DiagnosticMode: false,
+            BaselineDumpPath: null,
+            TrendDumpPaths: null,
+            HighReferenceThreshold: 111,
+            MaxDuplicateStringLength: 222,
+            MinDuplicateStringCount: 9,
+            MaxReferenceAddresses: 333,
+            ReferenceChainTopCount: 6,
+            ReferenceChainMaxPathSearchObjects: 444,
+            EventLeakMinSubscribers: 3,
+            EnableMemoryDiagnostics: false,
+            EnablePerformanceDiagnostics: true);
+    }
+}

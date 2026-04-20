@@ -1,0 +1,16 @@
+DumpDetective Analysis Report
+====================================================================================================
+Dump: C:/fixtures/DuplicateHeavy.dmp
+Generated (UTC): 2026-01-01 12:00:00
+Elapsed: 8.1s
+
+Dedup: merged 3/3 candidate duplicates
+
+[Critical] Duplicate-heavy merged section (Leak)
+----------------------------------------------------------------------------------------------------
+Merged duplicate leak evidence from multiple analyzers.
+- EvidenceA: A repeated payload instance
+- EvidenceB: Another repeated payload instance
+Remediation:
+  - Deduplicate payload cache keys.
+  - Review object retention roots.

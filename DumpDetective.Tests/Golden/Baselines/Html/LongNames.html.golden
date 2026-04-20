@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>body{font-family:Segoe UI,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ddd;padding:6px;vertical-align:top;} .wrap{overflow-wrap:anywhere;word-break:break-word;} </style>
+</head>
+<body>
+<h1>DumpDetective Analysis Report</h1>
+<p><strong>Dump:</strong> C:/fixtures/LongNames.dmp<br/><strong>Generated (UTC):</strong> 2026-01-01 12:00:00<br/><strong>Elapsed:</strong> 4.2s</p>
+<p><strong>Dedup:</strong> merged 0/0</p>
+<h2>[Warning] Long member/type names</h2>
+<p>Long identifiers are preserved end-to-end.</p>
+<table>
+<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Type</td><td class="wrap">VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP</td></tr>
+<tr><td>Member</td><td class="wrap">VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN</td></tr>
+</tbody>
+</table>
+<h3>Remediation</h3><ul>
+<li class="wrap">Keep full value visibility; do not truncate.</li>
+</ul>
+</body></html>

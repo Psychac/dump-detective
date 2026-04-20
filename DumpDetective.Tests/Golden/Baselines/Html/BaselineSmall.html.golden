@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>body{font-family:Segoe UI,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ddd;padding:6px;vertical-align:top;} .wrap{overflow-wrap:anywhere;word-break:break-word;} </style>
+</head>
+<body>
+<h1>DumpDetective Analysis Report</h1>
+<p><strong>Dump:</strong> C:/fixtures/BaselineSmall.dmp<br/><strong>Generated (UTC):</strong> 2026-01-01 12:00:00<br/><strong>Elapsed:</strong> 12.3s</p>
+<p><strong>Dedup:</strong> merged 0/0</p>
+<h2>[Warning] Leak pressure</h2>
+<p>Detected duplicate strings.</p>
+<table>
+<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Analyzer</td><td class="wrap">MemoryLeakAnalyzer</td></tr>
+<tr><td>Value</td><td class="wrap">System.String duplicated</td></tr>
+</tbody>
+</table>
+<h3>Remediation</h3><ul>
+<li class="wrap">Pool repeated string payloads.</li>
+</ul>
+</body></html>

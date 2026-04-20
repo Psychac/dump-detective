@@ -15,5 +15,12 @@
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
     <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
+    <ProjectReference Include="..\DumpDetective.Cli\DumpDetective.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Golden\Baselines\**\*.golden">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

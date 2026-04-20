@@ -164,17 +164,26 @@
 ## Iteration 6 — Tests + Golden Files (Spec 06)
 
 ### Tasks
-- [ ] Expand unit test coverage (pipeline, precedence, dedup, wrapping).
-- [ ] Add integration scenarios for composed reporting flow.
-- [ ] Add golden fixtures and baselines (`md/txt/html`).
-- [ ] Add deterministic normalization in tests (time, paths, line endings).
+- [x] Expand unit test coverage (pipeline, precedence, dedup, wrapping).
+- [x] Add integration scenarios for composed reporting flow.
+- [x] Add golden fixtures and baselines (`md/txt/html`).
+- [x] Add deterministic normalization in tests (time, paths, line endings).
 
 ### Validation
-- [ ] Golden tests fail with readable diffs on drift.
+- [x] Golden tests fail with readable diffs on drift.
 - [ ] CI requires all test categories.
 
 ### Exit Criteria
 - [ ] Regression guardrails active for behavior + output contracts.
+
+### Current Status Notes (Spec 06)
+- Added unit coverage for async pipeline ordering/failure/cancellation (`Unit/Analysis/AnalysisPipelineTests.cs`).
+- Added config precedence coverage including config-first, CLI gap-fill, CLI fallback, and explicit missing-config failure (`Unit/Configuration/ConfigurationResolverTests.cs`).
+- Added reporting golden infrastructure (`Golden/GoldenFileAssert.cs`, `Golden/GoldenFileTests.cs`) and committed formatter baselines for `BaselineSmall` across `text/markdown/html`.
+- Expanded golden fixture matrix to `BaselineSmall`, `DuplicateHeavy`, `LongNames`, `RichEvidence`, and `MixedSeverity` across `text/markdown/html`.
+- Added integration coverage for composed report flow and dedup through facade rendering (`Integration/ReportFlowIntegrationTests.cs`).
+- Added deterministic normalization in golden assert helper (line-ending normalization) and fixed fixture timestamp/path determinism.
+- Added baseline copy-to-output wiring in `DumpDetective.Tests.csproj` and validated via `dotnet test` (30 passed).
 
 ---
 

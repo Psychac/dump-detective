@@ -16,4 +16,8 @@
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
     <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DumpDetective.Tests" />
+  </ItemGroup>
 </Project>

@@ -19,23 +19,23 @@ internal sealed class ConfigurationResolver
         bool usedConfigFile = fileModel is not null;
 
         MemoryLeakOptions memoryLeak = usedConfigFile
-            ? BuildMemoryLeakFromConfig(fileModel!)
+            ? BuildMemoryLeakFromConfig(fileModel!, request)
             : BuildMemoryLeakFromCli(request);
 
         ReferenceChainOptions referenceChain = usedConfigFile
-            ? BuildReferenceChainFromConfig(fileModel!)
+            ? BuildReferenceChainFromConfig(fileModel!, request)
             : BuildReferenceChainFromCli(request);
 
         EventLeakOptions eventLeak = usedConfigFile
-            ? BuildEventLeakFromConfig(fileModel!)
+            ? BuildEventLeakFromConfig(fileModel!, request)
             : BuildEventLeakFromCli(request);
 
         DiagnosticsOptions diagnostics = usedConfigFile
-            ? BuildDiagnosticsFromConfig(fileModel!)
+            ? BuildDiagnosticsFromConfig(fileModel!, request)
             : BuildDiagnosticsFromCli(request);
 
         ReportOptions report = usedConfigFile
-            ? BuildReportFromConfig(fileModel!)
+            ? BuildReportFromConfig(fileModel!, request)
             : BuildReportFromCli(request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
@@ -73,7 +73,12 @@ internal sealed class ConfigurationResolver
     {
         if (!string.IsNullOrWhiteSpace(cliConfigPath))
         {
-            return File.Exists(cliConfigPath) ? cliConfigPath : null;
+            if (!File.Exists(cliConfigPath))
+            {
+                throw new FileNotFoundException($"Config file not found at '{cliConfigPath}'.", cliConfigPath);
+            }
+
+            return cliConfigPath;
         }
 
         string baseDirectory = AppContext.BaseDirectory;
@@ -112,22 +117,26 @@ internal sealed class ConfigurationResolver
         return model;
     }
 
-    private static MemoryLeakOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config)
+    private static MemoryLeakOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        int highReferenceThreshold = config.MemoryLeak?.HighReferenceThreshold
-            ?? config.HighReferenceThreshold
+        int highReferenceThreshold = PositiveOrNull(config.MemoryLeak?.HighReferenceThreshold)
+            ?? PositiveOrNull(config.HighReferenceThreshold)
+            ?? request.HighReferenceThreshold
             ?? 50;
 
-        int maxDuplicateStringLength = config.MemoryLeak?.MaxDuplicateStringLength
-            ?? config.MaxDuplicateStringLength
+        int maxDuplicateStringLength = PositiveOrNull(config.MemoryLeak?.MaxDuplicateStringLength)
+            ?? PositiveOrNull(config.MaxDuplicateStringLength)
+            ?? request.MaxDuplicateStringLength
             ?? 500;
 
-        int minDuplicateStringCount = config.MemoryLeak?.MinDuplicateStringCount
-            ?? config.MinDuplicateStringCount
+        int minDuplicateStringCount = PositiveOrNull(config.MemoryLeak?.MinDuplicateStringCount)
+            ?? PositiveOrNull(config.MinDuplicateStringCount)
+            ?? request.MinDuplicateStringCount
             ?? 10;
 
-        int maxReferenceAddresses = config.MemoryLeak?.MaxReferenceAddresses
-            ?? config.MaxReferenceAddressesToTrack
+        int maxReferenceAddresses = PositiveOrNull(config.MemoryLeak?.MaxReferenceAddresses)
+            ?? PositiveOrNull(config.MaxReferenceAddressesToTrack)
+            ?? request.MaxReferenceAddresses
             ?? 1_000_000;
 
         return new MemoryLeakOptions
@@ -150,14 +159,16 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static ReferenceChainOptions BuildReferenceChainFromConfig(CliConfigurationFileModel config)
+    private static ReferenceChainOptions BuildReferenceChainFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        int topCount = config.ReferenceChain?.TopCount
-            ?? config.ReferenceChainTopCount
+        int topCount = PositiveOrNull(config.ReferenceChain?.TopCount)
+            ?? PositiveOrNull(config.ReferenceChainTopCount)
+            ?? request.ReferenceChainTopCount
             ?? 5;
 
-        int maxPathSearchObjects = config.ReferenceChain?.MaxPathSearchObjects
-            ?? config.ReferenceChainMaxPathSearchObjects
+        int maxPathSearchObjects = PositiveOrNull(config.ReferenceChain?.MaxPathSearchObjects)
+            ?? PositiveOrNull(config.ReferenceChainMaxPathSearchObjects)
+            ?? request.ReferenceChainMaxPathSearchObjects
             ?? 5_000;
 
         return new ReferenceChainOptions
@@ -176,10 +187,11 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static EventLeakOptions BuildEventLeakFromConfig(CliConfigurationFileModel config)
+    private static EventLeakOptions BuildEventLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        int minSubscribers = config.EventLeak?.MinSubscribers
-            ?? config.EventLeakMinSubscribers
+        int minSubscribers = NonNegativeOrNull(config.EventLeak?.MinSubscribers)
+            ?? NonNegativeOrNull(config.EventLeakMinSubscribers)
+            ?? request.EventLeakMinSubscribers
             ?? 0;
 
         return new EventLeakOptions
@@ -196,15 +208,15 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static DiagnosticsOptions BuildDiagnosticsFromConfig(CliConfigurationFileModel config)
+    private static DiagnosticsOptions BuildDiagnosticsFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
         bool enableMemoryDiagnostics = config.Diagnostics?.EnableMemoryDiagnostics
             ?? config.EnableMemoryDiagnostics
-            ?? false;
+            ?? request.EnableMemoryDiagnostics;
 
         bool enablePerformanceDiagnostics = config.Diagnostics?.EnablePerformanceDiagnostics
             ?? config.EnablePerformanceDiagnostics
-            ?? false;
+            ?? request.EnablePerformanceDiagnostics;
 
         return new DiagnosticsOptions
         {
@@ -222,11 +234,11 @@ internal sealed class ConfigurationResolver
         };
     }
 
-    private static ReportOptions BuildReportFromConfig(CliConfigurationFileModel config)
+    private static ReportOptions BuildReportFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
         return new ReportOptions
         {
-            Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? ReportFormat.Html
+            Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html
         };
     }
 
@@ -265,6 +277,10 @@ internal sealed class ConfigurationResolver
             _ => throw new ArgumentException($"Invalid ReportFormat value '{format}' in config.")
         };
     }
+
+    private static int? PositiveOrNull(int? value) => value is > 0 ? value : null;
+
+    private static int? NonNegativeOrNull(int? value) => value is >= 0 ? value : null;
 }
 
 internal sealed class CliConfigurationFileModel

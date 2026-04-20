@@ -1,0 +1,19 @@
+# DumpDetective Analysis Report
+
+> Dump: `C:/fixtures/BaselineSmall.dmp`  
+> Generated (UTC): `2026-01-01 12:00:00`  
+> Elapsed: `12.3s`
+
+> Dedup merged **0** section(s) from **0** candidate duplicate(s).
+
+## [Warning] Leak pressure
+
+Detected duplicate strings.
+
+| Label | Value | 
+|---|---|
+| Analyzer | MemoryLeakAnalyzer |
+| Value | System.String duplicated |
+
+**Remediation**
+- Pool repeated string payloads.

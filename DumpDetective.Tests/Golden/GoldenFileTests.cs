@@ -1,0 +1,42 @@
+using DumpDetective.Core.Configuration;
+using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
+using DumpDetective.Tests.Golden.Fixtures;
+
+using Xunit;
+
+namespace DumpDetective.Tests.Golden;
+
+public sealed class GoldenFileTests
+{
+    public static IEnumerable<object[]> GoldenCases()
+    {
+        string[] fixtures = ["BaselineSmall", "DuplicateHeavy", "LongNames", "RichEvidence", "MixedSeverity"];
+        foreach (string fixture in fixtures)
+        {
+            yield return [fixture, 0, "Text", $"{fixture}.text.golden"];
+            yield return [fixture, 1, "Markdown", $"{fixture}.markdown.golden"];
+            yield return [fixture, 2, "Html", $"{fixture}.html.golden"];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(GoldenCases))]
+    public void Fixture_ShouldMatchGolden(string fixtureName, int formatCode, string folder, string fileName)
+    {
+        ComposedReport fixture = GoldenReportFixtures.Build(fixtureName);
+        IReportFormatter formatter = formatCode switch
+        {
+            0 => new TextCanonicalReportFormatter(),
+            1 => new MarkdownCanonicalReportFormatter(),
+            2 => new HtmlCanonicalReportFormatter(),
+            _ => throw new NotSupportedException($"Unsupported format code {formatCode}")
+        };
+
+        string actual = formatter.Render(fixture);
+        string baselinePath = Path.Combine(AppContext.BaseDirectory, "Golden", "Baselines", folder, fileName);
+        string expected = File.ReadAllText(baselinePath);
+
+        GoldenFileAssert.AssertMatches(expected, actual);
+    }
+}

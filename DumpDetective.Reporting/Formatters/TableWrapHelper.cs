@@ -23,10 +23,15 @@ internal static class TableWrapHelper
             while (index < rawLine.Length)
             {
                 int take = Math.Min(width, rawLine.Length - index);
-                int breakIndex = rawLine.LastIndexOf(' ', index + take - 1, take);
-                if (breakIndex <= index)
+                int breakIndex = index + take;
+
+                if (index + take < rawLine.Length)
                 {
-                    breakIndex = index + take;
+                    int candidate = rawLine.LastIndexOf(' ', index + take - 1, take);
+                    if (candidate > index)
+                    {
+                        breakIndex = candidate;
+                    }
                 }
 
                 string chunk = rawLine[index..breakIndex].TrimEnd();

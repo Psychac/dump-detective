@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>body{font-family:Segoe UI,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ddd;padding:6px;vertical-align:top;} .wrap{overflow-wrap:anywhere;word-break:break-word;} </style>
+</head>
+<body>
+<h1>DumpDetective Analysis Report</h1>
+<p><strong>Dump:</strong> C:/fixtures/MixedSeverity.dmp<br/><strong>Generated (UTC):</strong> 2026-01-01 12:00:00<br/><strong>Elapsed:</strong> 6.6s</p>
+<p><strong>Dedup:</strong> merged 0/0</p>
+<h2>[Critical] Critical leak</h2>
+<p>Critical item</p>
+<table>
+<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Item</td><td class="wrap">Critical</td></tr>
+</tbody>
+</table>
+<h3>Remediation</h3><ul>
+<li class="wrap">Handle now</li>
+</ul>
+<h2>[Warning] Warning leak</h2>
+<p>Warning item</p>
+<table>
+<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Item</td><td class="wrap">Warning</td></tr>
+</tbody>
+</table>
+<h3>Remediation</h3><ul>
+<li class="wrap">Plan remediation</li>
+</ul>
+<h2>[Info] Info signal</h2>
+<p>Informational item</p>
+<table>
+<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Item</td><td class="wrap">Info</td></tr>
+</tbody>
+</table>
+<h3>Remediation</h3><ul>
+<li class="wrap">Observe</li>
+</ul>
+</body></html>

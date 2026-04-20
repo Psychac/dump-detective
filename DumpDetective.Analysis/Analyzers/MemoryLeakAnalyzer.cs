@@ -1,5 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Configuration;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -13,36 +13,29 @@ namespace DumpDetective.Analysis.Analyzers
         private const int TopDuplicateStringsToShow = 20;
         private const int TopHighlyReferencedObjectsToShow = 15;
 
-        private readonly int _highReferenceThreshold;
-        private readonly int _maxStringLength;
-        private readonly int _minDuplicateCount;
-        private readonly int _maxReferenceAddressesToTrack;
-
         public string Name => "Memory Leak Analysis";
-
-        public MemoryLeakAnalyzer(AnalysisConfiguration config)
-        {
-            _highReferenceThreshold = config.HighReferenceThreshold;
-            _maxStringLength = config.MaxDuplicateStringLength;
-            _minDuplicateCount = config.MinDuplicateStringCount;
-            _maxReferenceAddressesToTrack = config.MaxReferenceAddressesToTrack;
-        }
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime);
+
+            MemoryLeakOptions options = context.Options.TryGetValue(nameof(MemoryLeakOptions), out object? configured)
+                && configured is MemoryLeakOptions typed
+                ? typed
+                : new MemoryLeakOptions();
+
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime, options);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime)
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
         {
             var findings = new List<InsightFinding>(capacity: 4);
 
             FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap);
-            LeakSignals signals = AnalyzeObjectsPass(heap);
+            LeakSignals signals = AnalyzeObjectsPass(heap, options);
 
-            AddFindings(findings, finalizerResult.TotalCount, signals);
+            AddFindings(findings, finalizerResult.TotalCount, signals, options);
 
             return new AnalyzerExecutionResult(
                 findings,
@@ -88,7 +81,7 @@ namespace DumpDetective.Analysis.Analyzers
                     .ToList());
         }
 
-        private LeakSignals AnalyzeObjectsPass(ClrHeap heap)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, MemoryLeakOptions options)
         {
             // Single pass over heap objects â€” collects data for both string analysis and reference counting
             var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
@@ -110,7 +103,7 @@ namespace DumpDetective.Analysis.Analyzers
                     totalStringMemory += obj.Size;
 
                     string? value = obj.AsString();
-                    if (value != null && value.Length > 0 && value.Length < _maxStringLength)
+                    if (value != null && value.Length > 0 && value.Length < options.MaxDuplicateStringLength)
                     {
                         var fingerprint = CreateStringFingerprint(value);
 
@@ -132,7 +125,7 @@ namespace DumpDetective.Analysis.Analyzers
                         {
                             referenceCount[reference.Address] = count + 1;
                         }
-                        else if (referenceCount.Count < _maxReferenceAddressesToTrack)
+                        else if (referenceCount.Count < options.MaxReferenceAddresses)
                         {
                             referenceCount[reference.Address] = 1;
                         }
@@ -146,9 +139,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             scanCounter.Complete();
 
-            DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats);
-            IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount);
-            int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount);
+            DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats, options);
+            IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);
+            int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
 
             return new LeakSignals(
                 duplicateResult.DuplicateCount,
@@ -162,10 +155,10 @@ namespace DumpDetective.Analysis.Analyzers
                 topHighlyReferencedObjects);
         }
 
-        private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats)
+        private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, MemoryLeakOptions options)
         {
             var duplicates = stringStats.Values
-                .Where(s => s.Count > _minDuplicateCount)
+                .Where(s => s.Count > options.MinDuplicateStringCount)
                 .OrderByDescending(s => s.TotalSize)
                 .Take(TopDuplicateStringsToShow)
                 .ToList();
@@ -186,12 +179,12 @@ namespace DumpDetective.Analysis.Analyzers
             return new DuplicateStringResult(topDuplicates.Count, totalWastedBytes, topDuplicates);
         }
 
-        private int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount)
+        private int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
         {
-            return referenceCount.Count(kvp => kvp.Value > _highReferenceThreshold);
+            return referenceCount.Count(kvp => kvp.Value > options.HighReferenceThreshold);
         }
 
-        private void AddFindings(List<InsightFinding> findings, int finalizerCount, LeakSignals signals)
+        private void AddFindings(List<InsightFinding> findings, int finalizerCount, LeakSignals signals, MemoryLeakOptions options)
         {
             if (finalizerCount >= 1000)
             {
@@ -242,7 +235,7 @@ namespace DumpDetective.Analysis.Analyzers
                     Category: "Leak",
                     Severity: severity,
                     Title: "Highly referenced objects detected",
-                    Evidence: $"{signals.HighlyReferencedObjectCount:N0} objects exceeded {_highReferenceThreshold:N0} incoming references.",
+                    Evidence: $"{signals.HighlyReferencedObjectCount:N0} objects exceeded {options.HighReferenceThreshold:N0} incoming references.",
                     Recommendation: "Inspect root paths and long-lived graphs retaining these objects.",
                     Tags: ["retention", "references", "memory-leak"],
                     MetricValue: signals.HighlyReferencedObjectCount,
@@ -256,7 +249,7 @@ namespace DumpDetective.Analysis.Analyzers
                     Category: "Diagnostics",
                     Severity: FindingSeverity.Info,
                     Title: "Reference tracking was capped",
-                    Evidence: $"Skipped {signals.SkippedReferenceAddresses:N0} references after hitting {_maxReferenceAddressesToTrack:N0} tracked addresses.",
+                    Evidence: $"Skipped {signals.SkippedReferenceAddresses:N0} references after hitting {options.MaxReferenceAddresses:N0} tracked addresses.",
                     Recommendation: "Increase MaxReferenceAddressesToTrack for deeper incoming-reference coverage.",
                     Tags: ["analysis-quality", "references"],
                     MetricValue: signals.SkippedReferenceAddresses,
@@ -285,10 +278,10 @@ namespace DumpDetective.Analysis.Analyzers
             return preview.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
         }
 
-        private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount)
+        private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
         {
             var topAddresses = referenceCount
-                .Where(kvp => kvp.Value > _highReferenceThreshold)
+                .Where(kvp => kvp.Value > options.HighReferenceThreshold)
                 .OrderByDescending(kvp => kvp.Value)
                 .Take(TopHighlyReferencedObjectsToShow)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);

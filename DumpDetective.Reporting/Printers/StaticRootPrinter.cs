@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is StaticRootDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not StaticRootDomainResult domain)
                 return;
@@ -31,14 +31,14 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var root in roots.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(root.Name, 90)}: {FormatHelper.FormatBytes(root.Bytes)} retained");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(root.Name, 90)}: {FormatHelper.FormatBytes(root.Bytes)} retained");
             }
 
             writer.WriteLine("\nRETENTION PRESSURE SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.RootCount >= 10
-                ? "âš ï¸  High static-root pressure detected; review long-lived static ownership."
-                : "â„¹ï¸  Static-root pressure appears moderate in this dump.");
+                ? "⚠️  High static-root pressure detected; review long-lived static ownership."
+                : "ℹ️  Static-root pressure appears moderate in this dump.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

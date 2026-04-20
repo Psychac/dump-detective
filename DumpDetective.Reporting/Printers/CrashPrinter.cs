@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -12,7 +12,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is CrashDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not CrashDomainResult domain)
                 return;
@@ -25,7 +25,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine($"Unique Exception Types: {domain.ExceptionTypeCounts.Count:N0}");
 
             if (domain.ActiveExceptions > 0)
-                writer.WriteLine($"\nâš ï¸  CRASH DETECTED: {domain.ActiveExceptions:N0} active exception(s) found!");
+                writer.WriteLine($"\n⚠️  CRASH DETECTED: {domain.ActiveExceptions:N0} active exception(s) found!");
             else if (domain.TotalExceptions == 0)
                 writer.WriteLine("\nNo exceptions detected in dump (likely not a crash dump).");
 
@@ -37,7 +37,7 @@ namespace DumpDetective.Reporting.Printers
                     break;
 
                 domain.ActiveExceptionTypeCounts.TryGetValue(kvp.Key, out int activeCount);
-                string activeMarker = activeCount > 0 ? $" ({activeCount:N0} active âš ï¸)" : string.Empty;
+                string activeMarker = activeCount > 0 ? $" ({activeCount:N0} active ⚠️)" : string.Empty;
                 writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} instance(s){activeMarker}");
                 shown++;
             }
@@ -93,7 +93,7 @@ namespace DumpDetective.Reporting.Printers
 
                     if (ex.IsActive && ex.ThreadId.HasValue && ex.OSThreadId.HasValue)
                     {
-                        writer.WriteLine($"    âš ï¸  ACTIVE on Thread: {ex.ThreadId.Value:N0} (OS: {ex.OSThreadId.Value:N0})");
+                        writer.WriteLine($"    ⚠️  ACTIVE on Thread: {ex.ThreadId.Value:N0} (OS: {ex.OSThreadId.Value:N0})");
                     }
                     else
                     {
@@ -109,7 +109,7 @@ namespace DumpDetective.Reporting.Printers
 
                     if (ex.OriginalStackTrace is { Count: > 0 })
                     {
-                        writer.WriteLine("\n    ðŸ”¥ ORIGINAL EXCEPTION STACK TRACE (where thrown):");
+                        writer.WriteLine("\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
                         foreach (var frame in ex.OriginalStackTrace)
                             writer.WriteLine($"      {frame}");
                     }

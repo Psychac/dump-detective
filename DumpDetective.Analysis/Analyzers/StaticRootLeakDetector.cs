@@ -1,4 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;

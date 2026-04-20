@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ThreadDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not ThreadDomainResult domain)
                 return;
@@ -50,7 +50,7 @@ namespace DumpDetective.Reporting.Printers
 
             double activePct = domain.AliveThreadCount == 0 ? 0 : activeThreads * 100.0 / domain.AliveThreadCount;
             writer.WriteLine(string.Empty);
-            writer.WriteLine($"âš™ï¸  Active Processing                      {activeThreads,4:N0} threads ({activePct:F1}%)");
+            writer.WriteLine($"⚙️  Active Processing                      {activeThreads,4:N0} threads ({activePct:F1}%)");
             writer.WriteLine("    Top frames:");
             var activeHotspots = domain.TopActiveThreadHotspots ?? [];
             if (activeHotspots.Count == 0)
@@ -75,24 +75,24 @@ namespace DumpDetective.Reporting.Printers
                 string topFrame = group.SelectMany(t => t.TopFrames).FirstOrDefault(f => !string.IsNullOrWhiteSpace(f)) ?? "<unknown>";
 
                 writer.WriteLine(string.Empty);
-                writer.WriteLine($"âŒ›  {group.Key,-36} {groupCount,4:N0} threads ({pct:F1}%)");
+                writer.WriteLine($"⌛  {group.Key,-36} {groupCount,4:N0} threads ({pct:F1}%)");
                 writer.WriteLine($"    Pattern: {reason}");
                 writer.WriteLine(lockHolding > 0
-                    ? $"    Threads also holding locks: {lockHolding:N0}  âš ï¸  cross-lock / escalation risk"
+                    ? $"    Threads also holding locks: {lockHolding:N0}  ⚠️  cross-lock / escalation risk"
                     : "    Threads also holding locks: 0");
                 writer.WriteLine($"    Top frame: {topFrame}");
             }
 
             writer.WriteLine(string.Empty);
-            writer.WriteLine($"ðŸ§µ  ThreadPool Workers                     {domain.ThreadPoolWorkerCount:N0} threads (identified by flag or dispatch frame)");
+            writer.WriteLine($"🧵  ThreadPool Workers                     {domain.ThreadPoolWorkerCount:N0} threads (identified by flag or dispatch frame)");
 
             writer.WriteLine(string.Empty);
-            writer.WriteLine("â™»ï¸  GC / System Threads");
+            writer.WriteLine("♻️  GC / System Threads");
             writer.WriteLine(domain.FinalizerThreadCount == 0
                 ? "    Finalizer Thread: Not observed"
                 : domain.FinalizerThreadBlocked
-                    ? "    Finalizer Thread: Potentially blocked âš ï¸"
-                    : "    Finalizer Thread: Running âœ…");
+                    ? "    Finalizer Thread: Potentially blocked ⚠️"
+                    : "    Finalizer Thread: Running ✅");
 
             writer.WriteLine("\nTHREADS WITH ACTIVE EXCEPTIONS:");
             writer.WriteSeparator();
@@ -208,8 +208,8 @@ namespace DumpDetective.Reporting.Printers
             {
                 writer.WriteLine($"Finalizer thread count: {domain.FinalizerThreadCount:N0}");
                 writer.WriteLine(domain.FinalizerThreadBlocked
-                    ? "Status: âš ï¸ Potentially blocked"
-                    : "Status: âœ… Running");
+                    ? "Status: ⚠️ Potentially blocked"
+                    : "Status: ✅ Running");
                 if (domain.FinalizerOsThreadId.HasValue && domain.FinalizerManagedThreadId.HasValue)
                     writer.WriteLine($"OS Thread: {domain.FinalizerOsThreadId.Value:N0}  Managed: {domain.FinalizerManagedThreadId.Value:N0}");
                 writer.WriteLine($"Lock Count: {domain.FinalizerLockCount:N0}");
@@ -224,8 +224,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nTHREAD HEALTH SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.BlockedThreadCount >= 10 || domain.ThreadsWithActiveExceptionsCount > 0
-                ? "âš ï¸  Thread-state triage indicates elevated hang/contention risk."
-                : "âœ… Thread-state profile appears stable for this snapshot.");
+                ? "⚠️  Thread-state triage indicates elevated hang/contention risk."
+                : "✅ Thread-state profile appears stable for this snapshot.");
 
             writer.WriteLine(StringConstants.Equals80);
         }

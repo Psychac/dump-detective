@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ReferenceChainDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not ReferenceChainDomainResult domain)
                 return;
@@ -68,7 +68,7 @@ namespace DumpDetective.Reporting.Printers
             {
                 writer.WriteLine("Top retained sampled types:");
                 foreach (var entry in topRetainedTypes.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 80)}: {entry.Count:N0} retained sample(s)");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 80)}: {entry.Count:N0} retained sample(s)");
             }
 
             writer.WriteLine("\nREFERENCE CHAINS (showing up to 5):");
@@ -81,16 +81,16 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (string chain in chains.Take(5))
-                    writer.WriteLine($"  â€¢ {chain}");
+                    writer.WriteLine($"  • {chain}");
             }
 
             writer.WriteLine("\nGC-ROOT COVERAGE SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.AnalyzedSamples == 0
-                ? "â„¹ï¸  No sample instances were available for root-path tracing."
+                ? "ℹ️  No sample instances were available for root-path tracing."
                 : domain.RetainedPercent >= 70
-                    ? "âš ï¸  High retention coverage across sampled top types."
-                    : "âœ… Retention coverage is not elevated across sampled top types.");
+                    ? "⚠️  High retention coverage across sampled top types."
+                    : "✅ Retention coverage is not elevated across sampled top types.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

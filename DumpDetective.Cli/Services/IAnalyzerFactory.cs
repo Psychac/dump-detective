@@ -4,5 +4,5 @@ namespace DumpDetective.Cli.Services;
 
 internal interface IAnalyzerFactory
 {
-    IReadOnlyList<IAnalyzer> CreateAnalyzers(ResolvedExecutionOptions resolved);
+    IReadOnlyList<IAnalyzer> CreateAnalyzers();
 }

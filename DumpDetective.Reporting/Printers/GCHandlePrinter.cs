@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -13,7 +13,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is GCHandleDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not GCHandleDomainResult domain)
                 return;
@@ -101,8 +101,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine($"Pinned handle targets: {domain.PinnedHandleTargets:N0}");
 
             writer.WriteLine(domain.TotalHandles >= 10_000 || domain.PinnedHandleTargets >= 1_000
-                ? "âš ï¸  Elevated handle pressure detected."
-                : "âœ… Handle pressure appears within expected range.");
+                ? "⚠️  Elevated handle pressure detected."
+                : "✅ Handle pressure appears within expected range.");
             writer.WriteLine(StringConstants.Equals80);
         }
 

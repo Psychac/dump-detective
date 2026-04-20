@@ -1,14 +1,14 @@
 ﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Configuration;
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     internal class ReferenceChainAnalyzer : IAnalyzer
     {
-        private readonly AnalysisConfiguration _config;
         private const int DefaultTopTypeCount = 10;
         private const int MaxPathSearchObjects = 5000;
 
@@ -16,23 +16,24 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "Reference Chain Analysis";
 
-        public ReferenceChainAnalyzer(AnalysisConfiguration config)
-        {
-            _config = config;
-        }
-
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = AnalyzeTopTypes(context.Heap, context.Cache);
+
+            ReferenceChainOptions options = context.Options.TryGetValue(nameof(ReferenceChainOptions), out object? configured)
+                && configured is ReferenceChainOptions typed
+                ? typed
+                : new ReferenceChainOptions();
+
+            AnalyzerExecutionResult executionResult = AnalyzeTopTypes(context.Heap, context.Cache, options);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache)
+        public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
-            int topCount = _config.ReferenceChainTopCount > 0 ? _config.ReferenceChainTopCount : DefaultTopTypeCount;
-            int maxPathSearchObjects = _config.ReferenceChainMaxPathSearchObjects > 0
-                ? _config.ReferenceChainMaxPathSearchObjects
+            int topCount = options.TopCount > 0 ? options.TopCount : DefaultTopTypeCount;
+            int maxPathSearchObjects = options.MaxPathSearchObjects > 0
+                ? options.MaxPathSearchObjects
                 : MaxPathSearchObjects;
 
             // Use cached type statistics instead of re-enumerating
@@ -130,9 +131,7 @@ namespace DumpDetective.Analysis.Analyzers
         public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)
         {
             List<RootCandidate> roots = GetValidRoots(heap);
-            int maxPathSearchObjects = _config.ReferenceChainMaxPathSearchObjects > 0
-                ? _config.ReferenceChainMaxPathSearchObjects
-                : MaxPathSearchObjects;
+            int maxPathSearchObjects = MaxPathSearchObjects;
             return TryFindAnyRootPath(heap, roots, objectAddress, maxPathSearchObjects, out _, out _);
         }
 

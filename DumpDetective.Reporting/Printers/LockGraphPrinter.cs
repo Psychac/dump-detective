@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not LockGraphDomainResult domain)
                 return;
@@ -32,17 +32,17 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in topTypes.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0} cumulative waiter(s)");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0} cumulative waiter(s)");
             }
 
             writer.WriteLine("\nDEADLOCK CANDIDATES:");
             writer.WriteSeparator();
             writer.WriteLine($"Deadlock candidates: {domain.DeadlockCandidateCount:N0}");
             writer.WriteLine(domain.DeadlockCandidateCount >= 2
-                ? "âš ï¸  Probable deadlock pattern detected."
+                ? "⚠️  Probable deadlock pattern detected."
                 : domain.ContestedLockCount > 0
-                    ? "âš ï¸  Lock contention present; monitor lock acquisition order."
-                    : "âœ… No lock contention/deadlock candidates detected.");
+                    ? "⚠️  Lock contention present; monitor lock acquisition order."
+                    : "✅ No lock contention/deadlock candidates detected.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

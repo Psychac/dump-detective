@@ -36,8 +36,6 @@ namespace DumpDetective.Analysis.Cache
 
             if (!reportByCount && !reportByTime)
                 return;
-
-            ConsoleUx.ObjectScanProgress(_operation, _scanned, elapsed);
             _lastElapsedReport = elapsed;
 
             while (_nextCountReport <= _scanned)
@@ -49,7 +47,6 @@ namespace DumpDetective.Analysis.Cache
         public void Complete()
         {
             _stopwatch.Stop();
-            ConsoleUx.ObjectScanComplete(_operation, _scanned, _stopwatch.Elapsed);
         }
     }
 }

@@ -31,7 +31,7 @@
 
 ### Current Status Notes (Iteration 0)
 - Baseline rebuild captured in Visual Studio: `6 succeeded, 0 failed`.
-- Baseline test status captured as environment-constrained (restore/execution blocked by private feed auth in current environment).
+- Baseline test status was initially environment-constrained, then unblocked; current automated suite now executes successfully (`32` passing tests at latest validation).
 
 ---
 
@@ -53,7 +53,7 @@
 
 ### Current Status Notes (Spec 01)
 - Multi-project structure (`Core`, `Analysis`, `Reporting`, `Cli`) is in place and compiles.
-- `DumpDetective.Tests` project exists, but test restore/execution is currently blocked by feed auth in this environment.
+- `DumpDetective.Tests` project is active and currently validates successfully in local/CI flow.
 - Temporary migration bridges were explicitly marked with `TEMP-REFRACTOR-BRIDGE` and tracked in `REFACTOR_TEMP_BRIDGES.md`.
 - Full `src/` + `tests/` physical directory alignment is still pending.
 
@@ -78,7 +78,7 @@
 - `RootCommandBuilder` now maps typed CLI arguments via `System.CommandLine`.
 - `ConfigurationResolver` enforces config-first behavior and uses CLI only when config is not found.
 - `StartupValidator` performs field-level path/range checks and returns actionable validation errors.
-- Full end-to-end execution is still under temporary bridge flow (`TEMP-REFRACTOR-BRIDGE`) until Spec 03/04 orchestration is completed.
+- End-to-end execution path is now active through Spec 03/04 orchestration; remaining bridge items are tracked in `REFACTOR_TEMP_BRIDGES.md`.
 
 ---
 
@@ -120,7 +120,7 @@
 
 ### Validation
 - [ ] End-to-end CLI flow works with and without config.
-- [ ] Exit codes match failure categories.
+- [x] Exit codes match failure categories.
 
 ### Exit Criteria
 - [ ] CLI architecture stable and predictable.
@@ -149,7 +149,7 @@
 - [x] No truncation of long values.
 
 ### Exit Criteria
-- [ ] Reporting boundary enforced.
+- [x] Reporting boundary enforced.
 
 ### Current Status Notes (Spec 05)
 - Canonical report model (`ComposedReport`/`ReportSection`) is implemented and used for rendering.
@@ -220,12 +220,17 @@
 ## Final Definition of Done
 
 - [ ] Specs 01–07 completed.
-- [ ] All projects build on `.NET 10`.
+- [x] All projects build on `.NET 10`.
 - [ ] Dependency direction clean.
-- [ ] Config precedence rule verified.
-- [ ] Report detail preserved with source dedup and wrapped long values.
-- [ ] Unit + integration + golden tests green.
-- [ ] Diagnostics and performance checks active.
+- [x] Config precedence rule verified.
+- [x] Report detail preserved with source dedup and wrapped long values.
+- [x] Unit + integration + golden tests green.
+- [x] Diagnostics and performance checks active.
+
+### Remaining Closure Notes
+- Spec 01 physical `src/` + `tests/` layout alignment is still pending.
+- Iteration 0 documentation artifacts (`baseline snapshots`, `ADRs`) are still pending.
+- Final dependency-direction closure evidence is still pending formal sign-off.
 
 ---
 

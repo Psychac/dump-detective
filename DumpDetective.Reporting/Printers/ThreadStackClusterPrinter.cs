@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -12,7 +12,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ThreadStackClusterDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not ThreadStackClusterDomainResult domain)
                 return;
@@ -33,7 +33,7 @@ namespace DumpDetective.Reporting.Printers
                 if (shown >= TopSignaturesToShow)
                     break;
 
-                writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(signature, 120)}");
+                writer.WriteLine($"  • {FormatHelper.TruncateString(signature, 120)}");
                 shown++;
             }
 
@@ -60,8 +60,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nDIVERSITY SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.DiversityPercent < 20
-                ? "âš ï¸  Low signature diversity; large clusters may indicate coordinated blocking/contention."
-                : "âœ… Signature diversity suggests varied active work.");
+                ? "⚠️  Low signature diversity; large clusters may indicate coordinated blocking/contention."
+                : "✅ Signature diversity suggests varied active work.");
 
             writer.WriteLine(StringConstants.Equals80);
         }

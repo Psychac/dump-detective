@@ -1,8 +1,10 @@
 ﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Configuration;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -15,27 +17,27 @@ namespace DumpDetective.Analysis.Analyzers
         private const int SeverityStaticPublisherBonus = 10;
         private const int SeverityRootHintBonus = 5;
 
-        private readonly AnalysisConfiguration _config;
         private static readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
         private static readonly object _eventNameCacheLock = new();
 
         public string Name => "Event Leak Analysis";
 
-        public EventLeakAnalyzer(AnalysisConfiguration config)
-        {
-            _config = config;
-        }
-
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap);
+
+            EventLeakOptions options = context.Options.TryGetValue(nameof(EventLeakOptions), out object? configured)
+                && configured is EventLeakOptions typed
+                ? typed
+                : new EventLeakOptions();
+
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, options);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap)
+        public AnalyzerExecutionResult Analyze(ClrHeap heap, EventLeakOptions options)
         {
-            int minSubscribers = _config.EventLeakMinSubscribers;
+            int minSubscribers = options.MinSubscribers;
             var eventLeaks = FindEventLeaks(heap, minSubscribers);
             var findings = new List<InsightFinding>(capacity: 5);
 

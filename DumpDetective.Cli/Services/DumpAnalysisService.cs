@@ -39,7 +39,7 @@ internal sealed class DumpAnalysisService(
             throw new ConfigurationException(ex.Message, ex);
         }
 
-        IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers(resolved);
+        IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
         ValidateAnalyzerFilters(resolved, analyzers);
         IReadOnlyList<IAnalyzer> activeAnalyzers = ApplyAnalyzerFilters(resolved, analyzers);
 
@@ -58,6 +58,13 @@ internal sealed class DumpAnalysisService(
             Heap = loadContext.Heap,
             Cache = new HeapAnalysisCache(),
             Diagnostics = resolved.Diagnostics,
+            Options = new Dictionary<string, object?>
+            {
+                [nameof(Core.Options.MemoryLeakOptions)] = resolved.MemoryLeak,
+                [nameof(Core.Options.ReferenceChainOptions)] = resolved.ReferenceChain,
+                [nameof(Core.Options.EventLeakOptions)] = resolved.EventLeak,
+                [nameof(Core.Options.DiagnosticsOptions)] = resolved.Diagnostics
+            },
             MemoryLeakOptions = resolved.MemoryLeak,
             ReferenceChainOptions = resolved.ReferenceChain,
             EventLeakOptions = resolved.EventLeak,

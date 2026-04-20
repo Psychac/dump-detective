@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not EventLeakDomainResult domain)
                 return;
@@ -36,7 +36,7 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in topGroups)
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 90)}: {entry.Count:N0} subscriber(s)");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 90)}: {entry.Count:N0} subscriber(s)");
             }
 
             writer.WriteLine("\nSUMMARY BY EVENT TYPE:");
@@ -106,8 +106,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nEVENT LEAK SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.TotalEventLeakInstances > 0
-                ? "âš ï¸  Event retention candidates detected; verify unsubscribe discipline and publisher lifetime."
-                : "âœ… No event retention candidates detected.");
+                ? "⚠️  Event retention candidates detected; verify unsubscribe discipline and publisher lifetime."
+                : "✅ No event retention candidates detected.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

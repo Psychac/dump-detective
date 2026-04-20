@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -12,7 +12,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is GCGenerationDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not GCGenerationDomainResult domain)
                 return;
@@ -60,8 +60,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nLOH RISK SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine(domain.LohPercent >= 35
-                ? "âš ï¸  LOH footprint is elevated for this dump."
-                : "âœ… LOH footprint is not elevated.");
+                ? "⚠️  LOH footprint is elevated for this dump."
+                : "✅ LOH footprint is not elevated.");
 
             writer.WriteLine(StringConstants.Equals80);
         }

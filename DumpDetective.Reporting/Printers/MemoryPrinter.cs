@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -12,7 +12,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is MemoryDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not MemoryDomainResult domain)
                 return;
@@ -30,9 +30,9 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nHEAP COMPOSITION SIGNALS:");
             writer.WriteSeparator();
             if (domain.LohPercent >= 40)
-                writer.WriteLine("âš ï¸  LOH share is elevated; review large-object allocation and retention patterns.");
+                writer.WriteLine("⚠️  LOH share is elevated; review large-object allocation and retention patterns.");
             else
-                writer.WriteLine("âœ… LOH share appears within expected range for this snapshot.");
+                writer.WriteLine("✅ LOH share appears within expected range for this snapshot.");
 
             writer.WriteLine("\nTOP 20 OBJECT TYPES BY MEMORY SIZE:");
             writer.WriteSeparator();

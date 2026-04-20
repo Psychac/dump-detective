@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is DependentHandleDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not DependentHandleDomainResult domain)
                 return;
@@ -31,7 +31,7 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in sources.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
             }
 
             writer.WriteLine("\nTOP TARGET TYPES:");
@@ -44,7 +44,7 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in targets.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0}");
             }
 
             writer.WriteLine("\nTOP SOURCE -> TARGET EDGES:");
@@ -57,15 +57,15 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in edges.Take(8))
-                    writer.WriteLine($"  â€¢ {FormatHelper.TruncateString(entry.Name, 90)}: {entry.Count:N0}");
+                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 90)}: {entry.Count:N0}");
             }
 
             writer.WriteLine("\nRESOLUTION QUALITY SIGNAL:");
             writer.WriteSeparator();
             writer.WriteLine($"Unresolved targets: {domain.UnresolvedTargetCount:N0} ({domain.UnresolvedPercent:F1}%)");
             writer.WriteLine(domain.UnresolvedPercent >= 50
-                ? "âš ï¸  High unresolved-target ratio; DAC/runtime visibility may be limited."
-                : "âœ… Unresolved-target ratio is within expected bounds.");
+                ? "⚠️  High unresolved-target ratio; DAC/runtime visibility may be limited."
+                : "✅ Unresolved-target ratio is within expected bounds.");
             writer.WriteLine(StringConstants.Equals80);
         }
     }

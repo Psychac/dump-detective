@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is HangDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not HangDomainResult domain)
                 return;
@@ -26,16 +26,16 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine(string.Empty);
 
             string healthState = domain.HealthScore >= 90
-                ? "ðŸŸ¢ Healthy"
+                ? "🟢 Healthy"
                 : domain.HealthScore >= 70
-                    ? "ðŸŸ¡ Watch"
-                    : "ðŸ”´ At Risk";
+                    ? "🟡 Watch"
+                    : "🔴 At Risk";
             writer.WriteLine($"Thread Health Score: {domain.HealthScore}/100  {healthState}");
 
             if (domain.WaitingPercent >= 80)
-                writer.WriteLine("\nâš ï¸  SEVERE HANG risk detected.");
+                writer.WriteLine("\n⚠️  SEVERE HANG risk detected.");
             else if (domain.WaitingPercent >= 50)
-                writer.WriteLine("\nâš ï¸  POSSIBLE HANG risk detected.");
+                writer.WriteLine("\n⚠️  POSSIBLE HANG risk detected.");
 
             writer.WriteLine("\nHANG WAIT CATEGORY BREAKDOWN:");
             writer.WriteSeparator();
@@ -66,7 +66,7 @@ namespace DumpDetective.Reporting.Printers
             if (domain.QueuedWorkItems > 100)
             {
                 writer.WriteLine(string.Empty);
-                writer.WriteLine($"âš ï¸  WARNING: {domain.QueuedWorkItems:N0} queued work items!");
+                writer.WriteLine($"⚠️  WARNING: {domain.QueuedWorkItems:N0} queued work items!");
                 writer.WriteLine("    ThreadPool may be saturated - consider increasing threads or async patterns.");
             }
 
@@ -107,7 +107,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine("\nDEADLOCK DETECTION:");
             writer.WriteSeparator();
             writer.WriteLine(domain.WaitingPercent >= 80
-                ? "âš ï¸  Severe wait saturation suggests potential deadlock/contention storm."
+                ? "⚠️  Severe wait saturation suggests potential deadlock/contention storm."
                 : "No obvious deadlock patterns detected.\nApplication may be functioning normally or experiencing other issues.");
 
             writer.WriteLine(StringConstants.Equals80);

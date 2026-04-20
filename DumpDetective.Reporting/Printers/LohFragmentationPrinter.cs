@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not LohFragmentationDomainResult domain)
                 return;
@@ -29,8 +29,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine($"Fragmentation: {domain.FragmentationPercent:F1}%");
             writer.WriteLine($"Largest free block: {FormatHelper.FormatBytes(domain.LargestFreeBlock)}");
             writer.WriteLine(domain.FragmentationPercent >= 35
-                ? "âš ï¸  LOH fragmentation appears elevated."
-                : "âœ… LOH fragmentation appears acceptable.");
+                ? "⚠️  LOH fragmentation appears elevated."
+                : "✅ LOH fragmentation appears acceptable.");
 
             writer.WriteLine("\nTOP FRAGMENTED LOH SEGMENTS:");
             writer.WriteSeparator();
@@ -43,7 +43,7 @@ namespace DumpDetective.Reporting.Printers
             {
                 foreach (var seg in segments.Take(8))
                 {
-                    writer.WriteLine($"  â€¢ 0x{seg.Address:X}: {seg.FragmentationPercent:F1}% frag, free {FormatHelper.FormatBytes(seg.FreeBytes)}, largest hole {FormatHelper.FormatBytes(seg.LargestFreeBlock)}");
+                    writer.WriteLine($"  • 0x{seg.Address:X}: {seg.FragmentationPercent:F1}% frag, free {FormatHelper.FormatBytes(seg.FreeBytes)}, largest hole {FormatHelper.FormatBytes(seg.LargestFreeBlock)}");
                 }
             }
             writer.WriteLine(StringConstants.Equals80);

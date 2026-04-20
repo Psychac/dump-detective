@@ -76,12 +76,16 @@ namespace DumpDetective.Analysis.Diagnostics
 
         public static void PrintSnapshotToConsole(MemorySnapshot snapshot)
         {
-            ConsoleUx.MemorySnapshot(snapshot);
+            Console.WriteLine($"[MEMORY] {snapshot.Label}: Managed={FormatHelper.FormatBytes((ulong)snapshot.ManagedMemory)}, WorkingSet={FormatHelper.FormatBytes((ulong)snapshot.WorkingSet)}, Private={FormatHelper.FormatBytes((ulong)snapshot.PrivateMemory)}");
         }
 
         public static void PrintDeltaToConsole(MemorySnapshot before, MemorySnapshot after)
         {
-            ConsoleUx.MemoryDelta(before, after);
+            long managedDelta = after.ManagedMemory - before.ManagedMemory;
+            long workingSetDelta = after.WorkingSet - before.WorkingSet;
+            long privateDelta = after.PrivateMemory - before.PrivateMemory;
+
+            Console.WriteLine($"[MEMORY DELTA] {before.Label} -> {after.Label}: Managed={FormatHelper.FormatBytes((ulong)Math.Abs(managedDelta))} {(managedDelta >= 0 ? "increase" : "decrease")}, WorkingSet={FormatHelper.FormatBytes((ulong)Math.Abs(workingSetDelta))} {(workingSetDelta >= 0 ? "increase" : "decrease")}, Private={FormatHelper.FormatBytes((ulong)Math.Abs(privateDelta))} {(privateDelta >= 0 ? "increase" : "decrease")}");
         }
     }
 

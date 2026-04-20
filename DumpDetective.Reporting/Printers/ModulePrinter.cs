@@ -1,5 +1,5 @@
-﻿using System.IO;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.Printers
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ModuleDomainResult;
 
-        public void Render(AnalyzerDomainResult result, TextWriter writer)
+        public void Render(AnalyzerDomainResult result, IReportWriter writer)
         {
             if (result is not ModuleDomainResult domain)
                 return;
@@ -24,7 +24,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteLine($"Dynamic Modules: {domain.DynamicModules:N0}");
 
             if (domain.VersionConflictGroups > 0)
-                writer.WriteLine($"\nâš ï¸  VERSION CONFLICTS: {domain.VersionConflictGroups:N0} module(s) loaded multiple times!");
+                writer.WriteLine($"\n⚠️  VERSION CONFLICTS: {domain.VersionConflictGroups:N0} module(s) loaded multiple times!");
 
             writer.WriteLine("\n\nLOADED ASSEMBLIES (Top 30):");
             writer.WriteSeparator();
@@ -39,12 +39,12 @@ namespace DumpDetective.Reporting.Printers
 
             if (domain.ConflictDetails.Count == 0)
             {
-                writer.WriteLine("\n\nâœ… No version conflicts detected.");
+                writer.WriteLine("\n\n✅ No version conflicts detected.");
                 writer.WriteLine(StringConstants.Equals80);
                 return;
             }
 
-            writer.WriteLine("\n\nâš ï¸  VERSION CONFLICTS DETECTED:");
+            writer.WriteLine("\n\n⚠️  VERSION CONFLICTS DETECTED:");
             writer.WriteSeparator();
             writer.WriteLine("The following modules are loaded multiple times with different versions:\n");
 
@@ -57,7 +57,7 @@ namespace DumpDetective.Reporting.Printers
                     writer.WriteLine($"    Path: {FormatHelper.TruncateString(module.FullPath, 70)}");
                     writer.WriteLine($"    Address: 0x{module.Address:X}, Size: {FormatHelper.FormatBytes(module.Size)}");
                 }
-                writer.WriteLine("\n  ðŸ’¡ RECOMMENDATION:");
+                writer.WriteLine("\n  💡 RECOMMENDATION:");
                 writer.WriteLine("     Ensure binding redirects are configured correctly.");
                 writer.WriteLine("     Check for dependency conflicts in your project.\n");
             }

@@ -1,9 +1,10 @@
-﻿using DumpDetective.Core.Utilities;
+﻿using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Utilities;
 using System.Text;
 
 namespace DumpDetective.Reporting.Output;
 
-internal sealed class OutputWriter(TextWriter? writer, bool writeToConsoleWhenNoWriter = true) : TextWriter
+internal sealed class OutputWriter(TextWriter? writer, bool writeToConsoleWhenNoWriter = true) : TextWriter, IReportWriter
 {
     private readonly TextWriter? _writer = writer;
     private readonly bool _writeToConsoleWhenNoWriter = writeToConsoleWhenNoWriter;

@@ -9,12 +9,12 @@
 ## Global Quality Gates (apply to every iteration)
 
 - [x] Build passes.
-- [ ] Relevant tests pass.
+- [x] Relevant tests pass.
 - [x] File config precedence preserved (`config` first, CLI fallback only if config missing).
-- [ ] Report detail preserved (no evidence/remediation loss).
-- [ ] Duplicate report sections removed at source.
-- [ ] Long table values wrapped (no truncation).
-- [ ] Deterministic behavior preserved.
+- [x] Report detail preserved (no evidence/remediation loss).
+- [x] Duplicate report sections removed at source.
+- [x] Long table values wrapped (no truncation).
+- [x] Deterministic behavior preserved.
 
 ---
 
@@ -68,11 +68,11 @@
 - [x] Add startup validation with actionable field-level errors.
 
 ### Validation
-- [ ] Tests for precedence matrix pass.
-- [ ] Invalid config path/shape fails clearly.
+- [x] Tests for precedence matrix pass.
+- [x] Invalid config path/shape fails clearly.
 
 ### Exit Criteria
-- [ ] Precedence rule enforced and tested.
+- [x] Precedence rule enforced and tested.
 
 ### Current Status Notes (Spec 02)
 - `RootCommandBuilder` now maps typed CLI arguments via `System.CommandLine`.
@@ -94,11 +94,11 @@
 
 ### Validation
 - [x] Order is deterministic (`Order`, then `Name`).
-- [ ] `ContinueOnAnalyzerFailure` behavior tested.
-- [ ] Cancellation status handling tested.
+- [x] `ContinueOnAnalyzerFailure` behavior tested.
+- [x] Cancellation status handling tested.
 
 ### Exit Criteria
-- [ ] Pipeline deterministic and policy-compliant.
+- [x] Pipeline deterministic and policy-compliant.
 
 ### Current Status Notes (Spec 03)
 - `IAnalyzer` now exposes async `AnalyzeAsync(...)` with metadata (`Category`, `Order`, `Tags`).
@@ -171,10 +171,10 @@
 
 ### Validation
 - [x] Golden tests fail with readable diffs on drift.
-- [ ] CI requires all test categories.
+- [x] CI requires all test categories.
 
 ### Exit Criteria
-- [ ] Regression guardrails active for behavior + output contracts.
+- [x] Regression guardrails active for behavior + output contracts.
 
 ### Current Status Notes (Spec 06)
 - Added unit coverage for async pipeline ordering/failure/cancellation (`Unit/Analysis/AnalysisPipelineTests.cs`).
@@ -183,25 +183,37 @@
 - Expanded golden fixture matrix to `BaselineSmall`, `DuplicateHeavy`, `LongNames`, `RichEvidence`, and `MixedSeverity` across `text/markdown/html`.
 - Added integration coverage for composed report flow and dedup through facade rendering (`Integration/ReportFlowIntegrationTests.cs`).
 - Added deterministic normalization in golden assert helper (line-ending normalization) and fixed fixture timestamp/path determinism.
-- Added baseline copy-to-output wiring in `DumpDetective.Tests.csproj` and validated via `dotnet test` (30 passed).
+- Added baseline copy-to-output wiring in `DumpDetective.Tests.csproj` and validated via `dotnet test` (32 passed).
+- Added CI workflow (`.github/workflows/ci.yml`) running restore/build/test and benchmark smoke.
 
 ---
 
 ## Iteration 7 — Observability + Performance Guardrails (Spec 07)
 
 ### Tasks
-- [ ] Implement normalized diagnostics event model.
-- [ ] Add analyzer/run-level metrics (timing, scans, cache hit/miss).
-- [ ] Add diagnostics sinks and summary output.
-- [ ] Expand benchmark coverage for hotspots.
-- [ ] Add CI baseline comparison thresholds.
+- [x] Implement normalized diagnostics event model.
+- [x] Add analyzer/run-level metrics (timing, scans, cache hit/miss).
+- [x] Add diagnostics sinks and summary output.
+- [x] Expand benchmark coverage for hotspots.
+- [x] Add CI baseline comparison thresholds.
 
 ### Validation
-- [ ] Diagnostics mode provides actionable timing and cache/scan summaries.
-- [ ] Performance regressions are detectable in CI.
+- [x] Diagnostics mode provides actionable timing and cache/scan summaries.
+- [x] Performance regressions are detectable in CI.
 
 ### Exit Criteria
-- [ ] Observability and perf guardrails operational.
+- [x] Observability and perf guardrails operational.
+
+### Current Status Notes (Spec 07)
+- Added normalized diagnostics event contract (`AnalysisDiagnosticsEvent`) and event type taxonomy in `Core`.
+- `AnalysisPipeline` now emits run-level and analyzer-level lifecycle diagnostics (`RunStarted`, `AnalyzerStarted`, `AnalyzerCompleted`, `AnalyzerFailed`, `AnalyzerCanceled`, `RunCompleted`).
+- Added per-analyzer metric capture in `AnalyzerRunResult` (finding/warning counts, object scans, cache hits/misses).
+- Added cache/scan counters in `IHeapAnalysisCache` + `HeapAnalysisCache` implementation.
+- Added sink support for null, in-memory (tests), console, and optional file diagnostics sinks.
+- Added diagnostics unit coverage (`Unit/Analysis/AnalysisDiagnosticsTests.cs`) and validated full test run (`32 passed`).
+- Expanded `BenchmarkSuite1` with pipeline and reporting hotspot benchmarks (`PipelineHotspotBenchmark`, `ReportingHotspotBenchmark`).
+- Added benchmark baseline threshold scaffolding (`BenchmarkSuite1/perf-baselines.json`, `BenchmarkSuite1/compare-benchmarks.ps1`).
+- CI workflow now executes benchmark smoke and baseline comparison to detect threshold regressions.
 
 ---
 

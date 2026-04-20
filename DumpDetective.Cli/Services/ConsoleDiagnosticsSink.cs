@@ -1,4 +1,5 @@
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Cli.Services;
 
@@ -6,35 +7,26 @@ internal sealed class ConsoleDiagnosticsSink(bool enabled) : IAnalysisDiagnostic
 {
     private readonly bool _enabled = enabled;
 
-    public void AnalyzerStarted(string analyzerName, string category)
+    public void Publish(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
-        if (_enabled)
+        if (!_enabled)
         {
-            System.Console.WriteLine($"[DIAG] Started: {analyzerName} ({category})");
+            return;
         }
-    }
 
-    public void AnalyzerCompleted(string analyzerName, string category, TimeSpan duration, IReadOnlyDictionary<string, object?>? metrics = null)
-    {
-        if (_enabled)
-        {
-            System.Console.WriteLine($"[DIAG] Completed: {analyzerName} ({category}) in {duration.TotalMilliseconds:F0} ms");
-        }
-    }
+        string analyzerSegment = string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName)
+            ? string.Empty
+            : $" {diagnosticsEvent.AnalyzerName}";
 
-    public void AnalyzerFailed(string analyzerName, string category, TimeSpan duration, string errorType, string errorMessage)
-    {
-        if (_enabled)
-        {
-            System.Console.WriteLine($"[DIAG] Failed: {analyzerName} ({category}) in {duration.TotalMilliseconds:F0} ms - {errorType}: {errorMessage}");
-        }
-    }
+        string durationSegment = diagnosticsEvent.DurationMs.HasValue
+            ? $", duration={diagnosticsEvent.DurationMs.Value:F0}ms"
+            : string.Empty;
 
-    public void AnalyzerCanceled(string analyzerName, string category, TimeSpan duration)
-    {
-        if (_enabled)
-        {
-            System.Console.WriteLine($"[DIAG] Canceled: {analyzerName} ({category}) after {duration.TotalMilliseconds:F0} ms");
-        }
+        string exceptionSegment = !string.IsNullOrWhiteSpace(diagnosticsEvent.ExceptionType)
+            ? $", ex={diagnosticsEvent.ExceptionType}: {diagnosticsEvent.ExceptionMessage}"
+            : string.Empty;
+
+        System.Console.WriteLine(
+            $"[DIAG] {diagnosticsEvent.EventType}{analyzerSegment} | category={diagnosticsEvent.Category}{durationSegment}, scans={diagnosticsEvent.ObjectScanCount}, cacheHits={diagnosticsEvent.CacheHits}, cacheMisses={diagnosticsEvent.CacheMisses}{exceptionSegment} | {diagnosticsEvent.Message}");
     }
 }

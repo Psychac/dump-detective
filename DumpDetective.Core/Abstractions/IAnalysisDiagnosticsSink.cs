@@ -1,22 +1,40 @@
+using DumpDetective.Core.Models;
+
 namespace DumpDetective.Core.Abstractions;
 
 internal interface IAnalysisDiagnosticsSink
 {
-    void AnalyzerStarted(string analyzerName, string category);
-    void AnalyzerCompleted(string analyzerName, string category, TimeSpan duration, IReadOnlyDictionary<string, object?>? metrics = null);
-    void AnalyzerFailed(string analyzerName, string category, TimeSpan duration, string errorType, string errorMessage);
-    void AnalyzerCanceled(string analyzerName, string category, TimeSpan duration);
+    void Publish(AnalysisDiagnosticsEvent diagnosticsEvent);
 }
 
 internal sealed class NullAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
 {
     public static NullAnalysisDiagnosticsSink Instance { get; } = new();
 
-    public void AnalyzerStarted(string analyzerName, string category) { }
+    public void Publish(AnalysisDiagnosticsEvent diagnosticsEvent) { }
+}
 
-    public void AnalyzerCompleted(string analyzerName, string category, TimeSpan duration, IReadOnlyDictionary<string, object?>? metrics = null) { }
+internal sealed class InMemoryAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
+{
+    private readonly List<AnalysisDiagnosticsEvent> _events = [];
+    private readonly Lock _gate = new();
 
-    public void AnalyzerFailed(string analyzerName, string category, TimeSpan duration, string errorType, string errorMessage) { }
+    public IReadOnlyList<AnalysisDiagnosticsEvent> Events
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _events.ToList();
+            }
+        }
+    }
 
-    public void AnalyzerCanceled(string analyzerName, string category, TimeSpan duration) { }
+    public void Publish(AnalysisDiagnosticsEvent diagnosticsEvent)
+    {
+        lock (_gate)
+        {
+            _events.Add(diagnosticsEvent);
+        }
+    }
 }

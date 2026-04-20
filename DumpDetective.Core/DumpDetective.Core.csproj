@@ -12,6 +12,9 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="BenchmarkSuite1" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Analysis" />
     <InternalsVisibleTo Include="DumpDetective.Reporting" />
     <InternalsVisibleTo Include="DumpDetective.Cli" />

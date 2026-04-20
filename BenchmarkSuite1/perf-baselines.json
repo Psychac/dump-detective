@@ -1,0 +1,21 @@
+{
+  "ThresholdPercent": 10,
+  "Benchmarks": {
+    "ExecutePipeline_AllSuccess": {
+      "MeanNs": 7000,
+      "AllocatedBytes": 20000
+    },
+    "ComposeCanonical_DuplicateHeavy": {
+      "MeanNs": 500000,
+      "AllocatedBytes": 750000
+    },
+    "RenderMarkdown_LargeSections": {
+      "MeanNs": 800000,
+      "AllocatedBytes": 1300000
+    },
+    "RenderHtml_LongValues": {
+      "MeanNs": 850000,
+      "AllocatedBytes": 1450000
+    }
+  }
+}

@@ -15,5 +15,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Cli" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
+    <InternalsVisibleTo Include="BenchmarkSuite1" />
   </ItemGroup>
 </Project>

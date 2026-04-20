@@ -106,6 +106,7 @@ internal sealed class DumpAnalysisService(
             {
                 ConsoleUx.Info($"Pipeline completed in {stopwatch.Elapsed.TotalSeconds:F1}s");
                 ConsoleUx.Info($"Run summary: {runs.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
+                PrintDiagnosticsSummary(runs);
             }
         }
         catch (Exception ex)
@@ -158,5 +159,32 @@ internal sealed class DumpAnalysisService(
         }
 
         return filtered.ToList();
+    }
+
+    private static void PrintDiagnosticsSummary(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        if (runs.Count == 0)
+        {
+            return;
+        }
+
+        long totalScans = runs.Sum(r => r.ObjectScanCount);
+        long totalCacheHits = runs.Sum(r => r.CacheHits);
+        long totalCacheMisses = runs.Sum(r => r.CacheMisses);
+        long cacheTotal = totalCacheHits + totalCacheMisses;
+        double cacheHitRatio = cacheTotal == 0 ? 0 : totalCacheHits * 100.0 / cacheTotal;
+
+        ConsoleUx.Info($"Scan summary: object-scans={totalScans:N0}, cache-hits={totalCacheHits:N0}, cache-misses={totalCacheMisses:N0}, hit-ratio={cacheHitRatio:F1}%");
+
+        IReadOnlyList<AnalyzerRunResult> topSlow = runs
+            .OrderByDescending(r => r.Duration)
+            .Take(5)
+            .ToList();
+
+        ConsoleUx.Info("Top slow analyzers:");
+        foreach (AnalyzerRunResult run in topSlow)
+        {
+            ConsoleUx.Info($"  - {run.AnalyzerName}: {run.Duration.TotalMilliseconds:F0} ms, findings={run.FindingCount}, warnings={run.WarningCount}, scans={run.ObjectScanCount:N0}");
+        }
     }
 }

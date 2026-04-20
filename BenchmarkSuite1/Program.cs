@@ -1,3 +1,6 @@
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Running;
 
 namespace BenchmarkSuite1
@@ -6,7 +9,12 @@ namespace BenchmarkSuite1
     {
         static void Main(string[] args)
         {
-            var _ = BenchmarkRunner.Run(typeof(Program).Assembly);
+            var config = DefaultConfig.Instance
+                .AddExporter(JsonExporter.Full);
+
+            _ = BenchmarkSwitcher
+                .FromAssembly(typeof(Program).Assembly)
+                .Run(args, config);
         }
     }
 }

@@ -14,4 +14,9 @@ internal sealed record AnalyzerRunResult(
     TimeSpan Duration,
     AnalyzerDomainResult? Result,
     string? ErrorMessage,
-    string? ErrorType);
+    string? ErrorType,
+    int FindingCount = 0,
+    int WarningCount = 0,
+    long ObjectScanCount = 0,
+    long CacheHits = 0,
+    long CacheMisses = 0);

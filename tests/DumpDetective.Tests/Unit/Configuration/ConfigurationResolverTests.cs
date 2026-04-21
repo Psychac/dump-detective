@@ -100,6 +100,23 @@ public sealed class ConfigurationResolverTests
             .WithMessage("*does-not-exist.json*");
     }
 
+    [Fact]
+    public void Resolve_ShouldUseLastTrendDump_AsEffectiveDump_WhenOnlyTrendProvidedFromCli()
+    {
+        AnalysisCommandRequest request = CreateRequest(configPath: null) with
+        {
+            DumpPath = null,
+            TrendDumpPaths = ["C:/dumps/t1.dmp", "C:/dumps/t2.dmp", "C:/dumps/t3.dmp"]
+        };
+
+        ConfigurationResolver resolver = new();
+
+        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+        resolved.DumpPath.Should().Be("C:/dumps/t3.dmp");
+        resolved.TrendDumpPaths.Should().Equal("C:/dumps/t1.dmp", "C:/dumps/t2.dmp", "C:/dumps/t3.dmp");
+    }
+
     private static string CreateTempDirectory()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"dumpdetective-tests-{Guid.NewGuid():N}");

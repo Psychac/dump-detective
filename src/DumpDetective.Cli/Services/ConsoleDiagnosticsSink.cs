@@ -89,7 +89,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                     {
                         details.Add("no heap walk");
                     }
-                    if (cacheTotal > 0 && analyzerScanCount > 0)
+                    if (cacheTotal >= 3 && analyzerScanCount > 0)
                     {
                         details.Add($"cache-hit {cacheHitRatio:F1}% ({cacheHits:N0}/{cacheMisses:N0})");
                     }
@@ -350,24 +350,6 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             _currentSubmodule = submodule;
             ConsoleUx.AnalyzerPhase(submodule);
         }
-
-        TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
-            ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
-            : TimeSpan.Zero;
-
-        long analyzerScans = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
-        double displayRate = _currentAnalyzerLastNonZeroRate;
-        if (displayRate <= 0 && elapsed.TotalSeconds > 0)
-        {
-            displayRate = analyzerScans / elapsed.TotalSeconds;
-        }
-
-        ConsoleUx.ObjectScanProgress(
-            diagnosticsEvent.AnalyzerName,
-            analyzerScans,
-            elapsed,
-            submodule,
-            displayRate > 0 ? displayRate : null);
     }
 
     private void StartAnalyzerTracking(AnalysisDiagnosticsEvent diagnosticsEvent)

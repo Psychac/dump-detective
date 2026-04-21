@@ -78,14 +78,8 @@ internal sealed class RootCommandBuilder
 
     public AnalysisCommandRequest Map(ParseResult parseResult)
     {
-        string? dumpPath = parseResult.GetValue(_dumpPathArgument);
-        if (string.IsNullOrWhiteSpace(dumpPath))
-        {
-            throw new ArgumentException("Dump path is required.");
-        }
-
         return new AnalysisCommandRequest(
-            dumpPath,
+            parseResult.GetValue(_dumpPathArgument),
             parseResult.GetValue(_outputPathOption),
             ParseReportFormat(parseResult.GetValue(_reportFormatOption)),
             parseResult.GetValue(_configPathOption),

@@ -20,6 +20,27 @@ internal static class ConsoleUx
         }
     }
 
+    public static void DumpStart(int current, int total, string dumpName)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"{Timestamp()} [mediumpurple2]📦[/] [bold]Dump {current}/{total}[/]");
+            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(dumpName)}[/]");
+        }
+    }
+
+    public static void DumpComplete(int current, int total, string dumpName, TimeSpan duration)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] Dump {current}/{total} complete [silver]({Escape(FormatElapsed(duration))})[/]");
+            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(dumpName)}[/]");
+        }
+    }
+
     public static void Info(string message)
     {
         lock (_consoleGate)

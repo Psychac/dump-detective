@@ -7,16 +7,44 @@ using DumpDetective.Reporting.Services;
 
 namespace DumpDetective.Cli.Services;
 
-internal sealed class ReportBuilderFacade(IEnumerable<IReportFormatter> formatters, IAnalyzerReporterFactory reporterFactory)
+internal sealed class ReportBuilderFacade(
+    IEnumerable<IReportFormatter> formatters,
+    IAnalyzerReporterFactory reporterFactory,
+    TrendReportComposer trendReportComposer)
 {
     private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToList();
     private readonly IReadOnlyList<IAnalyzerReporter> _reporters = reporterFactory.CreateReporters();
+    private readonly TrendReportComposer _trendReportComposer = trendReportComposer;
 
     public string BuildRenderedReport(string dumpPath, ReportFormat format, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         ComposedReport report = ReportBuilder.ComposeCanonicalReport(dumpPath, runs, elapsed, _reporters);
+        IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
+            ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return formatter.Render(report);
+    }
+
+    public string BuildRenderedTrendReport(
+        string dumpPath,
+        ReportFormat format,
+        IReadOnlyList<AnalyzerRunResult> currentRuns,
+        TimeSpan elapsed,
+        TrendReportData trendData,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ComposedReport report = _trendReportComposer.ComposeCanonicalTrendReport(
+            dumpPath,
+            currentRuns,
+            elapsed,
+            _reporters,
+            trendData);
+
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 

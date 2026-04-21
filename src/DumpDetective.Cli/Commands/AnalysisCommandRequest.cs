@@ -3,7 +3,7 @@ using DumpDetective.Core.Configuration;
 namespace DumpDetective.Cli.Commands;
 
 internal sealed record AnalysisCommandRequest(
-    string DumpPath,
+    string? DumpPath,
     string? OutputPath,
     ReportFormat? OutputFormat,
     string? ConfigPath,

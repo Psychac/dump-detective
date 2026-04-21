@@ -15,17 +15,34 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
 
     public string Render(ComposedReport report)
     {
+        string reportTitle = report.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string dumpLabel = report.IsTrendReport ? "Latest dump" : "Dump";
+
         List<string> lines =
         [
-            "DumpDetective Analysis Report",
+            reportTitle,
             new string('=', 100),
-            $"Dump: {report.DumpPath}",
+            $"{dumpLabel}: {report.DumpPath}",
             $"Generated (UTC): {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}",
             $"Elapsed: {report.Elapsed.TotalSeconds:F1}s",
             string.Empty,
             $"Dedup: merged {report.DedupDiagnostics.MergedSections}/{report.DedupDiagnostics.DuplicateCandidates} candidate duplicates",
             string.Empty
         ];
+
+        if (report.IsTrendReport)
+        {
+            lines.Add($"Dumps analyzed: {report.TrendDumpCount}");
+            if (report.TrendDumpPaths is { Count: > 0 })
+            {
+                lines.Add("Analyzed dumps:");
+                foreach (string dumpPath in report.TrendDumpPaths)
+                {
+                    lines.Add($"  - {dumpPath}");
+                }
+            }
+            lines.Add(string.Empty);
+        }
 
         foreach (ReportSection section in report.Sections)
         {
@@ -83,17 +100,34 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
 
     public string Render(ComposedReport report)
     {
+        string reportTitle = report.IsTrendReport ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
+        string dumpLabel = report.IsTrendReport ? "Latest dump" : "Dump";
+
         List<string> lines =
         [
-            "# DumpDetective Analysis Report",
+            reportTitle,
             string.Empty,
-            $"> Dump: `{report.DumpPath}`  ",
+            $"> {dumpLabel}: `{report.DumpPath}`  ",
             $"> Generated (UTC): `{report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}`  ",
             $"> Elapsed: `{report.Elapsed.TotalSeconds:F1}s`",
             string.Empty,
             $"> Dedup merged **{report.DedupDiagnostics.MergedSections}** section(s) from **{report.DedupDiagnostics.DuplicateCandidates}** candidate duplicate(s).",
             string.Empty
         ];
+
+        if (report.IsTrendReport)
+        {
+            lines.Add($"> Dumps analyzed: **{report.TrendDumpCount}**");
+            if (report.TrendDumpPaths is { Count: > 0 })
+            {
+                lines.Add("> Analyzed dumps:");
+                foreach (string dumpPath in report.TrendDumpPaths)
+                {
+                    lines.Add($"> - `{dumpPath}`");
+                }
+            }
+            lines.Add(string.Empty);
+        }
 
         foreach (ReportSection section in report.Sections)
         {
@@ -218,6 +252,9 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             return string.Join(Environment.NewLine, rendered);
         }
 
+        string reportTitle = report.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string dumpLabel = report.IsTrendReport ? "Latest dump" : "Dump";
+
         List<string> lines =
         [
             "<!DOCTYPE html>",
@@ -225,7 +262,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             "<head>",
             "<meta charset=\"utf-8\" />",
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
-            "<title>DumpDetective Analysis Report</title>",
+            $"<title>{Encode(reportTitle)}</title>",
             "<style>",
             "body{margin:0;padding:0;background:#f5f7fb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif;line-height:1.45;}",
             ".container{max-width:1200px;margin:0 auto;padding:24px;}",
@@ -270,15 +307,25 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             "<body>",
             "<main class=\"container\">",
             "<section class=\"header-card\">",
-            "<h1>DumpDetective Analysis Report</h1>",
+            $"<h1>{Encode(reportTitle)}</h1>",
             "<div class=\"meta-grid\">",
-            $"<div class=\"meta-item\"><span class=\"meta-label\">Dump:</span> <span class=\"wrap\">{Encode(report.DumpPath)}</span></div>",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">{Encode(dumpLabel)}:</span> <span class=\"wrap\">{Encode(report.DumpPath)}</span></div>",
             $"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</div>",
             $"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> {report.Elapsed.TotalSeconds:F1}s</div>",
             "</div>",
             $"<div class=\"dedup-note\"><strong>Dedup:</strong> merged {report.DedupDiagnostics.MergedSections}/{report.DedupDiagnostics.DuplicateCandidates}</div>",
             "</section>"
         ];
+
+        if (report.IsTrendReport)
+        {
+            lines.Insert(lines.Count - 1, $"<div class=\"dedup-note\"><strong>Dumps analyzed:</strong> {report.TrendDumpCount}</div>");
+            if (report.TrendDumpPaths is { Count: > 0 })
+            {
+                string dumpList = string.Join("<br/>", report.TrendDumpPaths.Select(p => $"• {Encode(p)}"));
+                lines.Insert(lines.Count - 1, $"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
+            }
+        }
 
         foreach (ReportSection section in report.Sections)
         {

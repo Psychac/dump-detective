@@ -10,7 +10,10 @@ internal sealed record ComposedReport(
     DedupDiagnostics DedupDiagnostics,
     string ReportSchemaVersion = ReportContractVersions.ReportSchemaV1,
     string SectionSchemaVersion = ReportContractVersions.SectionSchemaV1,
-    IReadOnlyList<DetailedAnalyzerSection>? DetailedAnalyzerSections = null);
+    IReadOnlyList<DetailedAnalyzerSection>? DetailedAnalyzerSections = null,
+    bool IsTrendReport = false,
+    int TrendDumpCount = 0,
+    IReadOnlyList<string>? TrendDumpPaths = null);
 
 internal static class ReportContractVersions
 {

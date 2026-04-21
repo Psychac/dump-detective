@@ -2,6 +2,7 @@ using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Services;
 
 using FluentAssertions;
 
@@ -54,7 +55,8 @@ public sealed class ReportFlowIntegrationTests
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
         ],
-        new DefaultAnalyzerReporterFactory());
+        new DefaultAnalyzerReporterFactory(),
+        new TrendReportComposer());
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
@@ -90,7 +92,8 @@ public sealed class ReportFlowIntegrationTests
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
         ],
-        new DefaultAnalyzerReporterFactory());
+        new DefaultAnalyzerReporterFactory(),
+        new TrendReportComposer());
 
         using CancellationTokenSource cts = new();
         cts.Cancel();
@@ -103,6 +106,81 @@ public sealed class ReportFlowIntegrationTests
             cancellationToken: cts.Token);
 
         act.Should().Throw<OperationCanceledException>();
+    }
+
+    [Fact]
+    public void BuildRenderedTrendReport_ShouldIncludeTrendComparisonContent()
+    {
+        InsightFinding finding = new(
+            Analyzer: "CrashAnalyzer",
+            Category: "Crash",
+            Severity: FindingSeverity.Warning,
+            Title: "Current snapshot finding",
+            Evidence: "Unhandled exception",
+            Recommendation: "Inspect crash thread",
+            Tags: ["crash"],
+            Fingerprint: "crash-1");
+
+        AnalyzerRunResult currentRun = CreateRun("CrashAnalyzer", finding);
+
+        AnalysisSnapshot baseline = new(
+            Index: 0,
+            DumpPath: "C:/dumps/base.dmp",
+            Findings: [],
+            DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
+            GeneratedAtUtc: DateTime.UtcNow.AddMinutes(-5));
+
+        AnalysisSnapshot current = new(
+            Index: 1,
+            DumpPath: "C:/dumps/current.dmp",
+            Findings: [finding],
+            DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
+            GeneratedAtUtc: DateTime.UtcNow);
+
+        TrendReportData trendData = new(
+            Steps: [],
+            Overall: [],
+            Timeline: [],
+            Snapshots: [baseline, current],
+            NewFindings: [finding],
+            PersistentFindings: [],
+            ResolvedFindings: []);
+
+        ReportBuilderFacade facade = new(
+        [
+            new TextCanonicalReportFormatter(),
+            new MarkdownCanonicalReportFormatter(),
+            new HtmlCanonicalReportFormatter()
+        ],
+        new DefaultAnalyzerReporterFactory(),
+        new TrendReportComposer());
+
+        string output = facade.BuildRenderedTrendReport(
+            dumpPath: "C:/dumps/current.dmp",
+            format: ReportFormat.Text,
+            currentRuns: [currentRun],
+            elapsed: TimeSpan.FromSeconds(2),
+            trendData: trendData,
+            cancellationToken: CancellationToken.None);
+
+        output.Should().Contain("DumpDetective Trend Analysis Report");
+        output.Should().Contain("Dumps analyzed: 2");
+        output.Should().Contain("Analyzed dumps:");
+        output.Should().Contain("C:/dumps/base.dmp");
+        output.Should().Contain("C:/dumps/current.dmp");
+        output.Should().Contain("Trend metric regression summary");
+        output.Should().NotContain("[Warning] Current snapshot finding (Crash)");
+        output.Should().Contain("[Dump 1: base.dmp - Full Report]");
+        output.Should().Contain("[Dump 2: current.dmp - Full Report]");
+        output.Should().Contain("DUMP FULL REPORT");
+        output.Should().Contain("TREND COMPARISON:");
+        output.Should().Contain("Trend finding lifecycle summary");
+
+        int trendComparisonIndex = output.IndexOf("[Trend Comparison]", StringComparison.Ordinal);
+        int dumpOneIndex = output.IndexOf("[Dump 1: base.dmp - Full Report]", StringComparison.Ordinal);
+        trendComparisonIndex.Should().BeGreaterThan(-1);
+        dumpOneIndex.Should().BeGreaterThan(-1);
+        trendComparisonIndex.Should().BeLessThan(dumpOneIndex);
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

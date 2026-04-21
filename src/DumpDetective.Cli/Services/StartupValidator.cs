@@ -29,6 +29,11 @@ internal sealed class StartupValidator
 
         if (options.TrendDumpPaths is { Count: > 0 })
         {
+            if (options.TrendDumpPaths.Count < 2)
+            {
+                errors.Add("TrendDumpPaths must contain at least two dump paths.");
+            }
+
             foreach (string trendPath in options.TrendDumpPaths)
             {
                 if (!File.Exists(trendPath))

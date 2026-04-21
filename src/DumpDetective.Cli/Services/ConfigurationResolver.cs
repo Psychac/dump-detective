@@ -41,8 +41,13 @@ internal sealed class ConfigurationResolver
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
         IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
+        IReadOnlyList<string>? effectiveTrend = configuredTrend ?? request.TrendDumpPaths;
 
-        string? effectiveDumpPath = configuredDumpPath ?? request.DumpPath ?? configuredTrend?.LastOrDefault();
+        string? effectiveDumpPath = !string.IsNullOrWhiteSpace(configuredDumpPath)
+            ? configuredDumpPath
+            : !string.IsNullOrWhiteSpace(request.DumpPath)
+                ? request.DumpPath
+                : effectiveTrend?.LastOrDefault();
         if (string.IsNullOrWhiteSpace(effectiveDumpPath))
         {
             throw new ArgumentException("Dump path is required. Provide positional dump-path, --trend, or DumpPath in config.");
@@ -56,7 +61,7 @@ internal sealed class ConfigurationResolver
             effectiveDumpPath!,
             outputPath,
             configuredBaseline ?? request.BaselineDumpPath,
-            configuredTrend ?? request.TrendDumpPaths,
+            effectiveTrend,
             memoryLeak,
             referenceChain,
             eventLeak,

@@ -5,6 +5,7 @@ internal enum AnalysisDiagnosticsEventType
     RunStarted,
     AnalyzerStarted,
     AnalyzerProgress,
+    AnalyzerSubmoduleProgress,
     AnalyzerCompleted,
     AnalyzerFailed,
     AnalyzerCanceled,

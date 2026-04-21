@@ -1,6 +1,7 @@
 ﻿using DumpDetective.Core.Models;
 using System.Diagnostics;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Pipeline;
 
@@ -72,6 +73,26 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 Message: $"Analyzer '{analyzer.Name}' started.",
                 ExceptionType: null,
                 ExceptionMessage: null));
+
+            if (context.Cache is HeapAnalysisCache cacheWithProgress)
+            {
+                cacheWithProgress.SetProgressReporter((operation, objectScanCount) =>
+                {
+                    PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                        RunId: runId,
+                        EventType: AnalysisDiagnosticsEventType.AnalyzerSubmoduleProgress,
+                        TimestampUtc: DateTime.UtcNow,
+                        AnalyzerName: analyzer.Name,
+                        Category: analyzer.Category,
+                        DurationMs: stopwatch.Elapsed.TotalMilliseconds,
+                        ObjectScanCount: objectScanCount,
+                        CacheHits: context.Cache.CacheHits,
+                        CacheMisses: context.Cache.CacheMisses,
+                        Message: operation,
+                        ExceptionType: null,
+                        ExceptionMessage: null));
+                });
+            }
 
             try
             {
@@ -185,6 +206,13 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 if (!context.DiagnosticsOptions.ContinueOnAnalyzerFailure)
                 {
                     break;
+                }
+            }
+            finally
+            {
+                if (context.Cache is HeapAnalysisCache cacheWithProgressCleanup)
+                {
+                    cacheWithProgressCleanup.SetProgressReporter(null);
                 }
             }
         }

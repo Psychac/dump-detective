@@ -17,6 +17,16 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     private int _completedAnalyzersInCurrentStage;
     private Stopwatch? _currentStageStopwatch;
     private DateTime _lastScanRenderUtc = DateTime.MinValue;
+    private string? _currentAnalyzerName;
+    private long _currentAnalyzerStartScanCount;
+    private long _currentAnalyzerStartCacheHits;
+    private long _currentAnalyzerStartCacheMisses;
+    private long _currentAnalyzerLastScanCount;
+    private double _currentAnalyzerLastElapsedMs;
+    private double _currentAnalyzerLastNonZeroRate;
+    private int _currentAnalyzerNoGrowthTicks;
+    private string _currentAnalyzerPhase = "scanning";
+    private string? _currentSubmodule;
 
     public ConsoleDiagnosticsSink(bool enabled, IReadOnlyList<IAnalyzer> analyzers)
     {
@@ -51,6 +61,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
             case AnalysisDiagnosticsEventType.AnalyzerStarted:
                 StartStageIfNeeded(diagnosticsEvent.AnalyzerName);
+                StartAnalyzerTracking(diagnosticsEvent);
                 PrintAnalyzerStart(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -58,22 +69,39 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                 PrintAnalyzerProgress(diagnosticsEvent);
                 break;
 
+            case AnalysisDiagnosticsEventType.AnalyzerSubmoduleProgress:
+                PrintAnalyzerSubmoduleProgress(diagnosticsEvent);
+                break;
+
             case AnalysisDiagnosticsEventType.AnalyzerCompleted:
                 if (!string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
                 {
-                    long cacheTotal = diagnosticsEvent.CacheHits + diagnosticsEvent.CacheMisses;
-                    double cacheHitRatio = cacheTotal == 0 ? 0 : diagnosticsEvent.CacheHits * 100.0 / cacheTotal;
+                    (long cacheHits, long cacheMisses) = GetAnalyzerCacheDelta(diagnosticsEvent);
+                    long cacheTotal = cacheHits + cacheMisses;
+                    double cacheHitRatio = cacheTotal == 0 ? 0 : cacheHits * 100.0 / cacheTotal;
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
+                    long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+
+                    List<string> details = [];
+                    if (analyzerScanCount == 0)
+                    {
+                        details.Add("no heap walk");
+                    }
+                    if (cacheTotal > 0 && analyzerScanCount > 0)
+                    {
+                        details.Add($"cache-hit {cacheHitRatio:F1}% ({cacheHits:N0}/{cacheMisses:N0})");
+                    }
 
                     ConsoleUx.ObjectScanComplete(
                         diagnosticsEvent.AnalyzerName,
-                        diagnosticsEvent.ObjectScanCount,
+                        analyzerScanCount,
                         elapsed,
-                        $"cache-hit {cacheHitRatio:F1}%");
+                        details.Count == 0 ? null : string.Join(" • ", details));
                 }
 
+                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -83,10 +111,13 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
-                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed, "status failed");
+                    long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+                    string details = analyzerScanCount == 0 ? "no heap walk • status failed" : "status failed";
+                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Error($"Analyzer failed: {diagnosticsEvent.AnalyzerName} ({diagnosticsEvent.ExceptionType}: {diagnosticsEvent.ExceptionMessage})");
                 }
 
+                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -96,10 +127,13 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                         : TimeSpan.Zero;
-                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount, elapsed, "status canceled");
+                    long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+                    string details = analyzerScanCount == 0 ? "no heap walk • status canceled" : "status canceled";
+                    ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Warning($"Analyzer canceled: {diagnosticsEvent.AnalyzerName}");
                 }
 
+                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -233,7 +267,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
             _startedAnalyzersInCurrentStage++;
             AnalyzerStage stage = _stages[_currentStageIndex];
-            ConsoleUx.Info($"[{_startedAnalyzersInCurrentStage}/{stage.AnalyzerCount}] {analyzerName}");
+            ConsoleUx.AnalyzerStart(_startedAnalyzersInCurrentStage, stage.AnalyzerCount, analyzerName);
         }
     }
 
@@ -255,7 +289,142 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
             : TimeSpan.Zero;
 
-        ConsoleUx.ObjectScanProgress($"{diagnosticsEvent.AnalyzerName}", diagnosticsEvent.ObjectScanCount, elapsed);
+        long analyzerScans = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+        long tickDelta = Math.Max(0, diagnosticsEvent.ObjectScanCount - _currentAnalyzerLastScanCount);
+        _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
+
+        double elapsedMs = elapsed.TotalMilliseconds;
+        double deltaMs = Math.Max(0, elapsedMs - _currentAnalyzerLastElapsedMs);
+        if (tickDelta > 0 && deltaMs > 0)
+        {
+            _currentAnalyzerLastNonZeroRate = tickDelta / (deltaMs / 1000.0);
+        }
+
+        _currentAnalyzerLastElapsedMs = elapsedMs;
+
+        if (tickDelta == 0)
+        {
+            _currentAnalyzerNoGrowthTicks++;
+        }
+        else
+        {
+            _currentAnalyzerNoGrowthTicks = 0;
+        }
+
+        string phase = _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : "scanning heap";
+        if (!string.Equals(_currentAnalyzerPhase, phase, StringComparison.Ordinal))
+        {
+            _currentAnalyzerPhase = phase;
+            ConsoleUx.AnalyzerPhase(phase);
+        }
+
+        double displayRate = _currentAnalyzerLastNonZeroRate;
+        if (displayRate <= 0 && elapsed.TotalSeconds > 0)
+        {
+            displayRate = analyzerScans / elapsed.TotalSeconds;
+        }
+
+        ConsoleUx.ObjectScanProgress(
+            diagnosticsEvent.AnalyzerName,
+            analyzerScans,
+            elapsed,
+            null,
+            displayRate > 0 ? displayRate : null);
+    }
+
+    private void PrintAnalyzerSubmoduleProgress(AnalysisDiagnosticsEvent diagnosticsEvent)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+        {
+            return;
+        }
+
+        if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string submodule = string.IsNullOrWhiteSpace(diagnosticsEvent.Message) ? "background walk" : diagnosticsEvent.Message;
+        if (!string.Equals(_currentSubmodule, submodule, StringComparison.Ordinal))
+        {
+            _currentSubmodule = submodule;
+            ConsoleUx.AnalyzerPhase(submodule);
+        }
+
+        TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
+            ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
+            : TimeSpan.Zero;
+
+        long analyzerScans = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+        double displayRate = _currentAnalyzerLastNonZeroRate;
+        if (displayRate <= 0 && elapsed.TotalSeconds > 0)
+        {
+            displayRate = analyzerScans / elapsed.TotalSeconds;
+        }
+
+        ConsoleUx.ObjectScanProgress(
+            diagnosticsEvent.AnalyzerName,
+            analyzerScans,
+            elapsed,
+            submodule,
+            displayRate > 0 ? displayRate : null);
+    }
+
+    private void StartAnalyzerTracking(AnalysisDiagnosticsEvent diagnosticsEvent)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+        {
+            return;
+        }
+
+        _currentAnalyzerName = diagnosticsEvent.AnalyzerName;
+        _currentAnalyzerStartScanCount = diagnosticsEvent.ObjectScanCount;
+        _currentAnalyzerStartCacheHits = diagnosticsEvent.CacheHits;
+        _currentAnalyzerStartCacheMisses = diagnosticsEvent.CacheMisses;
+        _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
+        _currentAnalyzerLastElapsedMs = 0;
+        _currentAnalyzerLastNonZeroRate = 0;
+        _currentAnalyzerNoGrowthTicks = 0;
+        _currentAnalyzerPhase = "scanning heap";
+        _currentSubmodule = null;
+    }
+
+    private long GetAnalyzerScanCount(string? analyzerName, long totalScanCount)
+    {
+        if (string.IsNullOrWhiteSpace(analyzerName) || !string.Equals(analyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+        {
+            return totalScanCount;
+        }
+
+        long delta = totalScanCount - _currentAnalyzerStartScanCount;
+        return Math.Max(0, delta);
+    }
+
+    private void ResetAnalyzerTracking()
+    {
+        _currentAnalyzerName = null;
+        _currentAnalyzerStartScanCount = 0;
+        _currentAnalyzerStartCacheHits = 0;
+        _currentAnalyzerStartCacheMisses = 0;
+        _currentAnalyzerLastScanCount = 0;
+        _currentAnalyzerLastElapsedMs = 0;
+        _currentAnalyzerLastNonZeroRate = 0;
+        _currentAnalyzerNoGrowthTicks = 0;
+        _currentAnalyzerPhase = "scanning";
+        _currentSubmodule = null;
+    }
+
+    private (long CacheHits, long CacheMisses) GetAnalyzerCacheDelta(AnalysisDiagnosticsEvent diagnosticsEvent)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName) ||
+            !string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+        {
+            return (diagnosticsEvent.CacheHits, diagnosticsEvent.CacheMisses);
+        }
+
+        long hitDelta = Math.Max(0, diagnosticsEvent.CacheHits - _currentAnalyzerStartCacheHits);
+        long missDelta = Math.Max(0, diagnosticsEvent.CacheMisses - _currentAnalyzerStartCacheMisses);
+        return (hitDelta, missDelta);
     }
 
     private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string, int> analyzerStageByName)

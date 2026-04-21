@@ -63,7 +63,8 @@ internal static class ConsoleUx
         {
             FlushScanLineIfNeeded_NoLock();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"{Timestamp()} [yellow]▶[/] [bold]Stage {current}/{total}[/] ([silver]{percent:F0}%[/]): {Escape(stageName)}");
+            AnsiConsole.MarkupLine($"{Timestamp()} [yellow]▶[/] [bold]Stage {current}/{total}[/] ([silver]{percent:F0}%[/])");
+            AnsiConsole.MarkupLine($"           [grey]└─[/] [deepskyblue1]{Escape(stageName)}[/]");
         }
     }
 
@@ -72,7 +73,26 @@ internal static class ConsoleUx
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] Stage complete: {Escape(stageName)} [silver]({Escape(FormatElapsed(duration))})[/]");
+            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] Stage complete [silver]({Escape(FormatElapsed(duration))})[/]");
+            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(stageName)}[/]");
+        }
+    }
+
+    public static void AnalyzerStart(int current, int total, string analyzerName)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]•[/] [bold][{current}/{total}][/]: [silver]{Escape(analyzerName)}[/]");
+        }
+    }
+
+    public static void AnalyzerPhase(string phase)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"           [grey]↳[/] [silver]{Escape(phase)}[/]");
         }
     }
 
@@ -85,11 +105,15 @@ internal static class ConsoleUx
         }
     }
 
-    public static void ObjectScanProgress(string operation, long scannedCount, TimeSpan elapsed)
+    public static void ObjectScanProgress(string operation, long scannedCount, TimeSpan elapsed, string? details = null, double? perSecondOverride = null)
     {
-        double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
+        double perSecond = perSecondOverride ?? (elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0);
+        string perSecondText = perSecond > 0 ? $"{perSecond:N0}/s" : string.Empty;
+        string scanSegment = scannedCount > 0 ? $" • scan {scannedCount:N0}" : string.Empty;
+        string rateSegment = string.IsNullOrWhiteSpace(perSecondText) ? string.Empty : $" • {perSecondText}";
         string spinner = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
-        string text = $"[{DateTime.Now:HH:mm:ss}] {spinner} scanning {operation} | {scannedCount:N0} objs | {FormatElapsed(elapsed)} | {perSecond:N0}/s";
+        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" • {details}";
+        string text = $"[{DateTime.Now:HH:mm:ss}] {spinner} {operation}{scanSegment} • {FormatElapsed(elapsed)}{rateSegment}{detailsSegment}";
 
         lock (_consoleGate)
         {
@@ -103,8 +127,11 @@ internal static class ConsoleUx
     public static void ObjectScanComplete(string operation, long scannedCount, TimeSpan elapsed, string? details = null)
     {
         double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
-        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}";
-        string text = $"[{DateTime.Now:HH:mm:ss}] ✓ scanned {operation} | {scannedCount:N0} objs | {FormatElapsed(elapsed)} | {perSecond:N0}/s{detailsSegment}";
+        string perSecondText = perSecond > 0 ? $"{perSecond:N0}/s" : string.Empty;
+        string scanSegment = scannedCount > 0 ? $" • scan {scannedCount:N0}" : string.Empty;
+        string rateSegment = string.IsNullOrWhiteSpace(perSecondText) ? string.Empty : $" • {perSecondText}";
+        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" • {details}";
+        string text = $"[{DateTime.Now:HH:mm:ss}] ✓ {operation}{scanSegment} • {FormatElapsed(elapsed)}{rateSegment}{detailsSegment}";
 
         lock (_consoleGate)
         {

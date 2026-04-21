@@ -7,6 +7,8 @@ namespace DumpDetective.Analysis.Cache
 {
     internal class HeapAnalysisCache : IHeapAnalysisCache
     {
+        private const int ProgressReportEveryScans = 25_000;
+
         private HashSet<ulong>? _staticRootedAddresses;
         private Dictionary<string, CachedTypeStatistics>? _typeStats;
         private Dictionary<string, ulong>? _sampleInstances;
@@ -14,10 +16,16 @@ namespace DumpDetective.Analysis.Cache
         private long _objectScanCount;
         private long _cacheHits;
         private long _cacheMisses;
+        private Action<string, long>? _progressReporter;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
         public long CacheMisses => Interlocked.Read(ref _cacheMisses);
+
+        public void SetProgressReporter(Action<string, long>? progressReporter)
+        {
+            _progressReporter = progressReporter;
+        }
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)
         {
@@ -33,7 +41,8 @@ namespace DumpDetective.Analysis.Cache
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
-                Interlocked.Increment(ref _objectScanCount);
+                long scans = Interlocked.Increment(ref _objectScanCount);
+                ReportProgress("Static root walk", scans);
                 if (root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
                 {
                     if (root.Object.IsValid)
@@ -63,7 +72,8 @@ namespace DumpDetective.Analysis.Cache
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
                 scanCounter.Tick();
-                Interlocked.Increment(ref _objectScanCount);
+                long scans = Interlocked.Increment(ref _objectScanCount);
+                ReportProgress("Type statistics scan", scans);
 
                 if (!obj.IsValid || obj.Type == null)
                     continue;
@@ -117,7 +127,8 @@ namespace DumpDetective.Analysis.Cache
             while (queue.Count > 0 && retained.Count < maxObjects)
             {
                 var current = queue.Dequeue();
-                Interlocked.Increment(ref _objectScanCount);
+                long scans = Interlocked.Increment(ref _objectScanCount);
+                ReportProgress("Retained graph walk", scans);
                 var obj = heap.GetObject(current);
 
                 if (!obj.IsValid)
@@ -133,6 +144,22 @@ namespace DumpDetective.Analysis.Cache
             }
 
             return retained;
+        }
+
+        private void ReportProgress(string operation, long totalScans)
+        {
+            Action<string, long>? reporter = _progressReporter;
+            if (reporter is null)
+            {
+                return;
+            }
+
+            if (totalScans % ProgressReportEveryScans != 0)
+            {
+                return;
+            }
+
+            reporter(operation, totalScans);
         }
     }
 

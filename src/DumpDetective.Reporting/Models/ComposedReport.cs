@@ -8,7 +8,6 @@ internal sealed record ComposedReport(
     TimeSpan Elapsed,
     IReadOnlyList<ReportSection> Sections,
     DedupDiagnostics DedupDiagnostics,
-    string DetailedAnalyzerReport,
     string ReportSchemaVersion = ReportContractVersions.ReportSchemaV1,
     string SectionSchemaVersion = ReportContractVersions.SectionSchemaV1,
     IReadOnlyList<DetailedAnalyzerSection>? DetailedAnalyzerSections = null);
@@ -31,7 +30,28 @@ internal sealed record ReportSection(
 
 internal sealed record ReportEvidenceRow(string Label, string Value);
 
-internal sealed record DetailedAnalyzerSection(string Title, string Content);
+internal sealed record DetailedAnalyzerSection(
+    string Title,
+    string Content,
+    IReadOnlyList<DetailedAnalyzerSubmodule>? Submodules = null);
+
+internal enum DetailedAnalyzerSubmoduleKind
+{
+    Heading,
+    Metric,
+    Path,
+    Text,
+    ListItem,
+    Divider,
+    Empty
+}
+
+internal sealed record DetailedAnalyzerSubmodule(
+    DetailedAnalyzerSubmoduleKind Kind,
+    string? Label,
+    string? Value,
+    string? Text,
+    int IndentLevel = 0);
 
 internal sealed record DedupDiagnostics(
     int DuplicateCandidates,

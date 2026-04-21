@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -19,17 +20,18 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("GC HANDLE ANALYSIS:");
-            writer.WriteLine("HANDLE SUMMARY:");
+            writer.WriteSubHeading("HANDLE SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total handles: {domain.TotalHandles:N0}");
+            writer.WriteMetric("Total handles", $"{domain.TotalHandles:N0}");
             double strongPct = domain.TotalHandles == 0 ? 0 : domain.StrongLikeHandles * 100.0 / domain.TotalHandles;
             double weakPct = domain.TotalHandles == 0 ? 0 : domain.WeakLikeHandles * 100.0 / domain.TotalHandles;
             double pinnedPct = domain.TotalHandles == 0 ? 0 : domain.PinnedHandleTargets * 100.0 / domain.TotalHandles;
-            writer.WriteLine($"Strong-like handles: {domain.StrongLikeHandles:N0} ({strongPct:F1}%)");
-            writer.WriteLine($"Weak-like handles: {domain.WeakLikeHandles:N0} ({weakPct:F1}%)");
-            writer.WriteLine($"Pinned-handle targets: {domain.PinnedHandleTargets:N0} ({pinnedPct:F1}%)");
+            writer.WriteMetric("Strong-like handles", $"{domain.StrongLikeHandles:N0} ({strongPct:F1}%)");
+            writer.WriteMetric("Weak-like handles", $"{domain.WeakLikeHandles:N0} ({weakPct:F1}%)");
+            writer.WriteMetric("Pinned-handle targets", $"{domain.PinnedHandleTargets:N0} ({pinnedPct:F1}%)");
 
-            writer.WriteLine("\nHANDLES BY KIND:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("HANDLES BY KIND:");
             writer.WriteSeparator();
             var byKind = domain.HandlesByKind ?? [];
             if (byKind.Count == 0)
@@ -38,7 +40,7 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteLine($"{"Kind",-50} {"Count",12} {"% Total",8}");
+                writer.WriteDetailText($"{"Kind",-50} {"Count",12} {"% Total",8}");
                 foreach (var entry in byKind)
                 {
                     double pct = domain.TotalHandles == 0 ? 0 : entry.Count * 100.0 / domain.TotalHandles;
@@ -46,13 +48,14 @@ namespace DumpDetective.Reporting.Printers
                     if (wrappedLines.Count == 0)
                         wrappedLines.Add(string.Empty);
 
-                    writer.WriteLine($"{wrappedLines[0],-50} {entry.Count,12:N0} {pct,7:F1}%");
+                    writer.WriteDetailText($"{wrappedLines[0],-50} {entry.Count,12:N0} {pct,7:F1}%");
                     for (int i = 1; i < wrappedLines.Count; i++)
-                        writer.WriteLine($"{wrappedLines[i],-50} {string.Empty,12} {string.Empty,8}");
+                        writer.WriteDetailText($"{wrappedLines[i],-50} {string.Empty,12} {string.Empty,8}");
                 }
             }
 
-            writer.WriteLine("\nTOP TYPES REFERENCED BY HANDLES:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP TYPES REFERENCED BY HANDLES:");
             writer.WriteSeparator();
             var topTargets = domain.TopTargetTypes ?? [];
             if (topTargets.Count == 0)
@@ -61,20 +64,21 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteLine($"{"Type",-70} {"Count",12}");
+                writer.WriteDetailText($"{"Type",-70} {"Count",12}");
                 foreach (var entry in topTargets)
                 {
                     var wrappedLines = WrapText(entry.Name, TypeColumnWidth).ToList();
                     if (wrappedLines.Count == 0)
                         wrappedLines.Add(string.Empty);
 
-                    writer.WriteLine($"{wrappedLines[0],-70} {entry.Count,12:N0}");
+                    writer.WriteDetailText($"{wrappedLines[0],-70} {entry.Count,12:N0}");
                     for (int i = 1; i < wrappedLines.Count; i++)
-                        writer.WriteLine($"{wrappedLines[i],-70} {string.Empty,12}");
+                        writer.WriteDetailText($"{wrappedLines[i],-70} {string.Empty,12}");
                 }
             }
 
-            writer.WriteLine("\nTOP TYPES REFERENCED BY PINNED HANDLES:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP TYPES REFERENCED BY PINNED HANDLES:");
             writer.WriteSeparator();
             var topPinned = domain.TopPinnedTargetTypes ?? [];
             if (topPinned.Count == 0)
@@ -83,27 +87,28 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteLine($"{"Type",-70} {"Count",12}");
+                writer.WriteDetailText($"{"Type",-70} {"Count",12}");
                 foreach (var entry in topPinned)
                 {
                     var wrappedLines = WrapText(entry.Name, TypeColumnWidth).ToList();
                     if (wrappedLines.Count == 0)
                         wrappedLines.Add(string.Empty);
 
-                    writer.WriteLine($"{wrappedLines[0],-70} {entry.Count,12:N0}");
+                    writer.WriteDetailText($"{wrappedLines[0],-70} {entry.Count,12:N0}");
                     for (int i = 1; i < wrappedLines.Count; i++)
-                        writer.WriteLine($"{wrappedLines[i],-70} {string.Empty,12}");
+                        writer.WriteDetailText($"{wrappedLines[i],-70} {string.Empty,12}");
                 }
             }
 
-            writer.WriteLine("\nHANDLE PRESSURE SIGNAL:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("HANDLE PRESSURE SIGNAL:");
             writer.WriteSeparator();
-            writer.WriteLine($"Pinned handle targets: {domain.PinnedHandleTargets:N0}");
+            writer.WriteMetric("Pinned handle targets", $"{domain.PinnedHandleTargets:N0}");
 
-            writer.WriteLine(domain.TotalHandles >= 10_000 || domain.PinnedHandleTargets >= 1_000
+            writer.WriteDetailText(domain.TotalHandles >= 10_000 || domain.PinnedHandleTargets >= 1_000
                 ? "⚠️  Elevated handle pressure detected."
                 : "✅ Handle pressure appears within expected range.");
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
 
         private static IEnumerable<string> WrapText(string? value, int width)

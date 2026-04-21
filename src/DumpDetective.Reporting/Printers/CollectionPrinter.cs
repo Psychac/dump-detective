@@ -1,6 +1,7 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -16,39 +17,42 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("COLLECTION EFFICIENCY ANALYSIS:");
-            writer.WriteLine("COLLECTION SUMMARY:");
+            writer.WriteSubHeading("COLLECTION SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total Collections: {domain.TotalCollections:N0}");
-            writer.WriteLine($"  Dictionaries: {domain.Dictionaries:N0}");
-            writer.WriteLine($"  Lists: {domain.Lists:N0}");
-            writer.WriteLine($"  HashSets: {domain.HashSets:N0}");
-            writer.WriteLine($"  Queues: {domain.Queues:N0}");
-            writer.WriteLine(string.Empty);
-            writer.WriteLine($"Total Wasted Memory: {FormatHelper.FormatBytes(domain.TotalWastedMemory)}");
+            writer.WriteMetric("Total Collections", $"{domain.TotalCollections:N0}");
+            writer.WriteMetric("Dictionaries", $"{domain.Dictionaries:N0}", indentLevel: 1);
+            writer.WriteMetric("Lists", $"{domain.Lists:N0}", indentLevel: 1);
+            writer.WriteMetric("HashSets", $"{domain.HashSets:N0}", indentLevel: 1);
+            writer.WriteMetric("Queues", $"{domain.Queues:N0}", indentLevel: 1);
+            writer.WriteDetailBlank();
+            writer.WriteMetric("Total Wasted Memory", FormatHelper.FormatBytes(domain.TotalWastedMemory));
 
             var topWasteful = domain.TopWastefulCollections ?? [];
             if (topWasteful.Count > 0)
             {
-                writer.WriteLine("\nMOST WASTEFUL COLLECTIONS (Top 15):");
-                writer.WriteLine($"{"Type",-50} {"Count/Capacity",15} {"Fill Rate",10} {"Wasted",12}");
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("MOST WASTEFUL COLLECTIONS (Top 15):");
+                writer.WriteDetailText($"{"Type",-50} {"Count/Capacity",15} {"Fill Rate",10} {"Wasted",12}");
                 foreach (var entry in topWasteful)
                 {
-                    writer.WriteLine($"{FormatHelper.TruncateString(entry.Type, 50),-50} {($"{entry.Count}/{entry.Capacity}"),15} {($"{entry.FillRate:F1}%"),10} {FormatHelper.FormatBytes(entry.WastedMemory),12}");
-                    writer.WriteLine($"  Address: 0x{entry.Address:X}");
+                    writer.WriteDetailText($"{FormatHelper.TruncateString(entry.Type, 50),-50} {($"{entry.Count}/{entry.Capacity}"),15} {($"{entry.FillRate:F1}%"),10} {FormatHelper.FormatBytes(entry.WastedMemory),12}");
+                    writer.WriteMetric("Address", $"0x{entry.Address:X}", indentLevel: 1);
                 }
             }
 
-            writer.WriteLine("\nWASTE SIGNAL:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("WASTE SIGNAL:");
             writer.WriteSeparator();
-            writer.WriteLine($"Wasteful collections: {domain.WastefulCollectionCount:N0}");
-            writer.WriteLine($"Estimated unused capacity: {FormatHelper.FormatBytes(domain.TotalWastedMemory)}");
+            writer.WriteMetric("Wasteful collections", $"{domain.WastefulCollectionCount:N0}");
+            writer.WriteMetric("Estimated unused capacity", FormatHelper.FormatBytes(domain.TotalWastedMemory));
 
-            writer.WriteLine("\nCAPACITY RECOMMENDATION:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("CAPACITY RECOMMENDATION:");
             writer.WriteSeparator();
-            writer.WriteLine(domain.TotalWastedMemory >= 10UL * 1024 * 1024
+            writer.WriteDetailText(domain.TotalWastedMemory >= 10UL * 1024 * 1024
                 ? "⚠️  Consider trimming long-lived collections or setting more accurate initial capacities."
                 : "✅ Collection sizing appears acceptable for this snapshot.");
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
     }
 }

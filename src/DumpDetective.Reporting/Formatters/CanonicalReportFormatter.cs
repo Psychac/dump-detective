@@ -153,6 +153,70 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
     public string Render(ComposedReport report)
     {
         static string Encode(string value) => System.Net.WebUtility.HtmlEncode(value);
+        static string RenderDetailedContentHtml(DetailedAnalyzerSection section)
+        {
+            List<string> rendered = [];
+
+            if (section.Submodules is { Count: > 0 })
+            {
+                foreach (DetailedAnalyzerSubmodule submodule in section.Submodules)
+                {
+                    string indentClass = submodule.IndentLevel >= 2
+                        ? " detail-indent-2"
+                        : submodule.IndentLevel == 1
+                            ? " detail-indent-1"
+                            : string.Empty;
+
+                    switch (submodule.Kind)
+                    {
+                        case DetailedAnalyzerSubmoduleKind.Heading:
+                            rendered.Add($"<div class=\"detail-subheading{indentClass}\">{Encode(submodule.Text ?? string.Empty)}</div>");
+                            break;
+                        case DetailedAnalyzerSubmoduleKind.Metric:
+                            rendered.Add($"<div class=\"detail-line{indentClass}\"><span class=\"detail-key\">{Encode(submodule.Label ?? string.Empty)}:</span> <span class=\"detail-value wrap\">{Encode(submodule.Value ?? string.Empty)}</span></div>");
+                            break;
+                        case DetailedAnalyzerSubmoduleKind.Path:
+                            rendered.Add($"<div class=\"detail-line{indentClass}\"><span class=\"detail-key\">{Encode(submodule.Label ?? string.Empty)}:</span> <span class=\"detail-path wrap\">{Encode(submodule.Value ?? string.Empty)}</span></div>");
+                            break;
+                        case DetailedAnalyzerSubmoduleKind.ListItem:
+                            rendered.Add($"<div class=\"detail-line{indentClass}\">• {Encode(submodule.Text ?? string.Empty)}</div>");
+                            break;
+                        case DetailedAnalyzerSubmoduleKind.Divider:
+                            rendered.Add("<div class=\"detail-divider\"></div>");
+                            break;
+                        case DetailedAnalyzerSubmoduleKind.Empty:
+                            rendered.Add("<div class=\"detail-gap\"></div>");
+                            break;
+                        default:
+                            rendered.Add($"<div class=\"detail-line{indentClass}\">{Encode(submodule.Text ?? string.Empty)}</div>");
+                            break;
+                    }
+                }
+            }
+            else
+            {
+                string[] lines = section.Content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+                foreach (string line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        rendered.Add("<div class=\"detail-gap\"></div>");
+                        continue;
+                    }
+
+                    int leadingWhitespace = line.TakeWhile(char.IsWhiteSpace).Count();
+                    string indentClass = leadingWhitespace >= 4
+                        ? " detail-indent-2"
+                        : leadingWhitespace >= 2
+                            ? " detail-indent-1"
+                            : string.Empty;
+
+                    rendered.Add($"<div class=\"detail-line{indentClass}\">{Encode(line.TrimStart())}</div>");
+                }
+            }
+
+            return string.Join(Environment.NewLine, rendered);
+        }
 
         List<string> lines =
         [
@@ -191,7 +255,16 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             ".detail-item>summary::-webkit-details-marker{display:none;}",
             ".detail-item>summary::after{content:'▸';float:right;color:#64748b;}",
             ".detail-item[open]>summary::after{content:'▾';}",
-            ".detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;}",
+            ".detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;font-family:Consolas,\"Cascadia Mono\",monospace;font-size:13px;line-height:1.5;}",
+            ".detail-subheading{font-weight:700;color:#93c5fd;margin:8px 0 4px 0;}",
+            ".detail-divider{height:1px;background:#334155;margin:6px 0;}",
+            ".detail-line{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}",
+            ".detail-key{color:#a7f3d0;font-weight:600;}",
+            ".detail-value{color:#e5e7eb;}",
+            ".detail-path{color:#fde68a;font-weight:600;}",
+            ".detail-gap{height:8px;}",
+            ".detail-indent-1{padding-left:12px;}",
+            ".detail-indent-2{padding-left:24px;}",
             "</style>",
             "</head>",
             "<body>",
@@ -261,7 +334,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 string openAttribute = i == 0 ? " open" : string.Empty;
                 lines.Add($"<details class=\"detail-item\"{openAttribute}>");
                 lines.Add($"<summary>{Encode(detail.Title)}</summary>");
-                lines.Add($"<pre class=\"detail-block\">{Encode(detail.Content)}</pre>");
+                lines.Add($"<div class=\"detail-block\">{RenderDetailedContentHtml(detail)}</div>");
                 lines.Add("</details>");
             }
 

@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -18,51 +19,54 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("MEMORY ANALYSIS:");
-            writer.WriteLine("OVERALL SUMMARY:");
+            writer.WriteSubHeading("OVERALL SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total Memory: {FormatHelper.FormatBytes(domain.TotalBytes)}");
-            writer.WriteLine($"Total Objects: {domain.TotalObjects:N0}");
-            writer.WriteLine($"LOH Memory: {FormatHelper.FormatBytes(domain.LohBytes)} ({domain.LohPercent:F1}%)");
-            writer.WriteLine($"LOH Objects: {domain.LohObjects:N0} ({domain.LohPercent:F1}% of total memory)");
-            writer.WriteLine($"LOH Threshold: {domain.LohThresholdBytes:N0} bytes");
-            writer.WriteLine($"Unique Types: {domain.UniqueTypes:N0}");
+            writer.WriteMetric("Total Memory", FormatHelper.FormatBytes(domain.TotalBytes));
+            writer.WriteMetric("Total Objects", $"{domain.TotalObjects:N0}");
+            writer.WriteMetric("LOH Memory", $"{FormatHelper.FormatBytes(domain.LohBytes)} ({domain.LohPercent:F1}%)");
+            writer.WriteMetric("LOH Objects", $"{domain.LohObjects:N0} ({domain.LohPercent:F1}% of total memory)");
+            writer.WriteMetric("LOH Threshold", $"{domain.LohThresholdBytes:N0} bytes");
+            writer.WriteMetric("Unique Types", $"{domain.UniqueTypes:N0}");
 
-            writer.WriteLine("\nHEAP COMPOSITION SIGNALS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("HEAP COMPOSITION SIGNALS:");
             writer.WriteSeparator();
             if (domain.LohPercent >= 40)
-                writer.WriteLine("⚠️  LOH share is elevated; review large-object allocation and retention patterns.");
+                writer.WriteDetailText("⚠️  LOH share is elevated; review large-object allocation and retention patterns.");
             else
-                writer.WriteLine("✅ LOH share appears within expected range for this snapshot.");
+                writer.WriteDetailText("✅ LOH share appears within expected range for this snapshot.");
 
-            writer.WriteLine("\nTOP 20 OBJECT TYPES BY MEMORY SIZE:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP 20 OBJECT TYPES BY MEMORY SIZE:");
             writer.WriteSeparator();
-            writer.WriteLine($"{"Type",-80} {"Count",12} {"Total Size",12}");
+            writer.WriteDetailText($"{"Type",-80} {"Count",12} {"Total Size",12}");
             foreach (var type in domain.TopTypesBySize.Take(TopItemsToShow))
             {
                 var wrappedTypeLines = WrapText(type.TypeName, 80).ToList();
                 if (wrappedTypeLines.Count == 0)
                     wrappedTypeLines.Add(string.Empty);
 
-                writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
+                writer.WriteDetailText($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
                 for (int i = 1; i < wrappedTypeLines.Count; i++)
-                    writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
+                    writer.WriteDetailText($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
             }
 
-            writer.WriteLine("\nTOP 20 OBJECT TYPES BY COUNT:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP 20 OBJECT TYPES BY COUNT:");
             writer.WriteSeparator();
-            writer.WriteLine($"{"Type",-80} {"Count",12} {"Total Size",12}");
+            writer.WriteDetailText($"{"Type",-80} {"Count",12} {"Total Size",12}");
             foreach (var type in domain.TopTypesByCount.Take(TopItemsToShow))
             {
                 var wrappedTypeLines = WrapText(type.TypeName, 80).ToList();
                 if (wrappedTypeLines.Count == 0)
                     wrappedTypeLines.Add(string.Empty);
 
-                writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
+                writer.WriteDetailText($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
                 for (int i = 1; i < wrappedTypeLines.Count; i++)
-                    writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
+                    writer.WriteDetailText($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,12}");
             }
 
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
 
         private static IEnumerable<string> WrapText(string? value, int width)

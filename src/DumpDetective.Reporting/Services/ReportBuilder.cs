@@ -23,9 +23,6 @@ namespace DumpDetective.Reporting.Services
             List<ReportSection> sections = [];
             int evidenceBeforeMerge = 0;
             IReadOnlyList<DetailedAnalyzerSection> detailedAnalyzerSections = BuildDetailedAnalyzerSections(runs, reporters);
-            string detailedAnalyzerReport = string.Join(
-                Environment.NewLine + Environment.NewLine,
-                detailedAnalyzerSections.Select(s => s.Content));
 
             foreach (AnalyzerRunResult run in runs)
             {
@@ -89,7 +86,6 @@ namespace DumpDetective.Reporting.Services
                 elapsed,
                 deduped,
                 normalizedDiagnostics,
-                detailedAnalyzerReport,
                 ReportContractVersions.ReportSchemaV1,
                 ReportContractVersions.SectionSchemaV1,
                 detailedAnalyzerSections);
@@ -133,18 +129,19 @@ namespace DumpDetective.Reporting.Services
                     continue;
                 }
 
-                StringBuilder buffer = new(capacity: 4 * 1024);
-                using StringWriter textWriter = new(buffer);
-                OutputWriter writer = new(textWriter, writeToConsoleWhenNoWriter: false);
+                StructuredCaptureReportWriter writer = new();
                 reporter.Render(result, writer);
 
-                string content = buffer.ToString().Trim();
+                string content = writer.GetContent();
                 if (string.IsNullOrWhiteSpace(content))
                 {
                     continue;
                 }
 
-                sections.Add(new DetailedAnalyzerSection(reporter.AnalyzerName, content));
+                sections.Add(new DetailedAnalyzerSection(
+                    reporter.AnalyzerName,
+                    content,
+                    writer.GetSubmodules()));
             }
 
             return sections;
@@ -204,37 +201,6 @@ namespace DumpDetective.Reporting.Services
                 MergedKeys: mergedKeys.Distinct(StringComparer.Ordinal).ToList());
 
             return dedupMap.Values.ToList();
-        }
-
-        public static string BuildCombinedDetailedReport(IReadOnlyList<AnalyzerRunResult> runs)
-        {
-            var builder = new StringBuilder(capacity: 16 * 1024);
-            for (int i = 0; i < runs.Count; i++)
-            {
-                var run = runs[i];
-                builder.AppendLine($"ANALYZER RUN {i + 1}/{runs.Count}: {run.AnalyzerName}");
-                builder.AppendLine(StringConstants.Separator80);
-                builder.AppendLine($"Status: {run.Status}");
-                builder.AppendLine($"Duration: {run.Duration.TotalMilliseconds:F0} ms");
-
-                if (!string.IsNullOrWhiteSpace(run.ErrorMessage))
-                {
-                    builder.AppendLine($"Error: {run.ErrorType}: {run.ErrorMessage}");
-                }
-
-                if (run.Result?.Findings is { Count: > 0 })
-                {
-                    builder.AppendLine("Findings:");
-                    foreach (InsightFinding finding in run.Result.Findings)
-                    {
-                        builder.AppendLine($"  - [{finding.Severity}] {finding.Title}: {finding.Evidence}");
-                    }
-                }
-
-                builder.AppendLine();
-            }
-
-            return builder.ToString();
         }
 
         public static List<string> BuildReportInsights(

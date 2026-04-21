@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -18,18 +19,25 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("CRASH ANALYSIS:");
-            writer.WriteLine("EXCEPTION SUMMARY:");
+            writer.WriteSubHeading("EXCEPTION SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total Exception Objects: {domain.TotalExceptions:N0}");
-            writer.WriteLine($"Active Exceptions (on threads): {domain.ActiveExceptions:N0}");
-            writer.WriteLine($"Unique Exception Types: {domain.ExceptionTypeCounts.Count:N0}");
+            writer.WriteMetric("Total Exception Objects", $"{domain.TotalExceptions:N0}");
+            writer.WriteMetric("Active Exceptions (on threads)", $"{domain.ActiveExceptions:N0}");
+            writer.WriteMetric("Unique Exception Types", $"{domain.ExceptionTypeCounts.Count:N0}");
 
             if (domain.ActiveExceptions > 0)
-                writer.WriteLine($"\n⚠️  CRASH DETECTED: {domain.ActiveExceptions:N0} active exception(s) found!");
+            {
+                writer.WriteDetailBlank();
+                writer.WriteDetailText($"⚠️  CRASH DETECTED: {domain.ActiveExceptions:N0} active exception(s) found!");
+            }
             else if (domain.TotalExceptions == 0)
-                writer.WriteLine("\nNo exceptions detected in dump (likely not a crash dump).");
+            {
+                writer.WriteDetailBlank();
+                writer.WriteDetailText("No exceptions detected in dump (likely not a crash dump).");
+            }
 
-            writer.WriteLine("\nTop Exception Types:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("Top Exception Types:");
             int shown = 0;
             foreach (var kvp in domain.ExceptionTypeCounts.OrderByDescending(k => k.Value))
             {
@@ -38,11 +46,12 @@ namespace DumpDetective.Reporting.Printers
 
                 domain.ActiveExceptionTypeCounts.TryGetValue(kvp.Key, out int activeCount);
                 string activeMarker = activeCount > 0 ? $" ({activeCount:N0} active ⚠️)" : string.Empty;
-                writer.WriteLine($"  {kvp.Key}: {kvp.Value:N0} instance(s){activeMarker}");
+                writer.WriteMetric(kvp.Key, $"{kvp.Value:N0} instance(s){activeMarker}", indentLevel: 1);
                 shown++;
             }
 
-            writer.WriteLine("\nLIKELY CRASH THREADS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("LIKELY CRASH THREADS:");
             writer.WriteSeparator();
             var candidates = domain.TopCrashThreadCandidates ?? [];
             if (candidates.Count == 0)
@@ -54,23 +63,24 @@ namespace DumpDetective.Reporting.Printers
                 int rank = 1;
                 foreach (var candidate in candidates)
                 {
-                    writer.WriteLine($"[{rank}] Thread {candidate.ThreadId:N0} (OS: {candidate.OSThreadId:N0})");
-                    writer.WriteLine($"    Active exceptions on thread: {candidate.ActiveExceptionCount:N0}");
-                    writer.WriteLine($"    Primary exception type: {candidate.PrimaryExceptionType}");
+                    writer.WriteDetailText($"[{rank}] Thread {candidate.ThreadId:N0} (OS: {candidate.OSThreadId:N0})");
+                    writer.WriteMetric("Active exceptions on thread", $"{candidate.ActiveExceptionCount:N0}", indentLevel: 2);
+                    writer.WriteMetric("Primary exception type", candidate.PrimaryExceptionType, indentLevel: 2);
 
                     if (candidate.TopFrames.Count > 0)
                     {
-                        writer.WriteLine("    Top frames:");
+                        writer.WriteSubHeading("Top frames:", indentLevel: 2);
                         foreach (var frame in candidate.TopFrames)
-                            writer.WriteLine($"      {frame}");
+                            writer.WriteDetailText(frame, indentLevel: 3);
                     }
 
-                    writer.WriteLine(string.Empty);
+                    writer.WriteDetailBlank();
                     rank++;
                 }
             }
 
-            writer.WriteLine("\nDETAILED EXCEPTION INFORMATION:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("DETAILED EXCEPTION INFORMATION:");
             writer.WriteSeparator();
             var instances = domain.TopExceptionInstances ?? [];
             if (instances.Count == 0)
@@ -82,44 +92,45 @@ namespace DumpDetective.Reporting.Printers
                 int idx = 1;
                 foreach (var ex in instances)
                 {
-                    writer.WriteLine($"[{idx}] {ex.Type}");
-                    writer.WriteLine($"    Address: 0x{ex.Address:X}");
+                    writer.WriteDetailText($"[{idx}] {ex.Type}");
+                    writer.WriteMetric("Address", $"0x{ex.Address:X}", indentLevel: 2);
                     if (!string.IsNullOrWhiteSpace(ex.Message))
-                        writer.WriteLine($"    Message: {ex.Message}");
+                        writer.WriteMetric("Message", ex.Message, indentLevel: 2);
                     if (ex.HResult.HasValue)
-                        writer.WriteLine($"    HRESULT: 0x{ex.HResult.Value:X8}");
+                        writer.WriteMetric("HRESULT", $"0x{ex.HResult.Value:X8}", indentLevel: 2);
                     if (!string.IsNullOrWhiteSpace(ex.InnerExceptionType))
-                        writer.WriteLine($"    Inner Exception: {ex.InnerExceptionType}");
+                        writer.WriteMetric("Inner Exception", ex.InnerExceptionType, indentLevel: 2);
 
                     if (ex.IsActive && ex.ThreadId.HasValue && ex.OSThreadId.HasValue)
                     {
-                        writer.WriteLine($"    ⚠️  ACTIVE on Thread: {ex.ThreadId.Value:N0} (OS: {ex.OSThreadId.Value:N0})");
+                        writer.WriteDetailText($"⚠️  ACTIVE on Thread: {ex.ThreadId.Value:N0} (OS: {ex.OSThreadId.Value:N0})", indentLevel: 2);
                     }
                     else
                     {
-                        writer.WriteLine("    Status: Inactive (collected exception object)");
+                        writer.WriteMetric("Status", "Inactive (collected exception object)", indentLevel: 2);
                     }
 
                     if (ex.CurrentThreadFrames is { Count: > 0 })
                     {
-                        writer.WriteLine("    Current Thread Position (exception handling):");
+                        writer.WriteSubHeading("Current Thread Position (exception handling):", indentLevel: 2);
                         foreach (var frame in ex.CurrentThreadFrames)
-                            writer.WriteLine($"      {frame}");
+                            writer.WriteDetailText(frame, indentLevel: 3);
                     }
 
                     if (ex.OriginalStackTrace is { Count: > 0 })
                     {
-                        writer.WriteLine("\n    🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):");
+                        writer.WriteDetailBlank();
+                        writer.WriteSubHeading("🔥 ORIGINAL EXCEPTION STACK TRACE (where thrown):", indentLevel: 2);
                         foreach (var frame in ex.OriginalStackTrace)
-                            writer.WriteLine($"      {frame}");
+                            writer.WriteDetailText(frame, indentLevel: 3);
                     }
 
-                    writer.WriteLine(string.Empty);
+                    writer.WriteDetailBlank();
                     idx++;
                 }
             }
 
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
     }
 }

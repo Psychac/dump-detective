@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -18,52 +19,56 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("GC GENERATIONS BREAKDOWN:");
-            writer.WriteLine("HEAP SUMMARY:");
+            writer.WriteSubHeading("HEAP SUMMARY:");
             writer.WriteSeparator();
 
-            writer.WriteLine($"Gen0 objects: {domain.Gen0Objects:N0}, {FormatHelper.FormatBytes(domain.Gen0Bytes)}");
-            writer.WriteLine($"Gen1 objects: {domain.Gen1Objects:N0}, {FormatHelper.FormatBytes(domain.Gen1Bytes)}");
-            writer.WriteLine($"Gen2 objects: {domain.Gen2Objects:N0}, {FormatHelper.FormatBytes(domain.Gen2Bytes)}");
-            writer.WriteLine($"LOH objects: {domain.LohObjects:N0}, {FormatHelper.FormatBytes(domain.LohBytes)}");
-            writer.WriteLine($"Total objects: {domain.TotalObjects:N0}");
-            writer.WriteLine($"LOH percentage: {domain.LohPercent:F1}%");
+            writer.WriteMetric("Gen0 objects", $"{domain.Gen0Objects:N0}, {FormatHelper.FormatBytes(domain.Gen0Bytes)}");
+            writer.WriteMetric("Gen1 objects", $"{domain.Gen1Objects:N0}, {FormatHelper.FormatBytes(domain.Gen1Bytes)}");
+            writer.WriteMetric("Gen2 objects", $"{domain.Gen2Objects:N0}, {FormatHelper.FormatBytes(domain.Gen2Bytes)}");
+            writer.WriteMetric("LOH objects", $"{domain.LohObjects:N0}, {FormatHelper.FormatBytes(domain.LohBytes)}");
+            writer.WriteMetric("Total objects", $"{domain.TotalObjects:N0}");
+            writer.WriteMetric("LOH percentage", $"{domain.LohPercent:F1}%");
 
-            writer.WriteLine("\nGENERATION SPLIT:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("GENERATION SPLIT:");
             writer.WriteSeparator();
-            writer.WriteLine($"Gen0 bytes: {FormatHelper.FormatBytes(domain.Gen0Bytes)}");
-            writer.WriteLine($"Gen1 bytes: {FormatHelper.FormatBytes(domain.Gen1Bytes)}");
-            writer.WriteLine($"Gen2 bytes: {FormatHelper.FormatBytes(domain.Gen2Bytes)}");
-            writer.WriteLine($"Large object heap bytes: {FormatHelper.FormatBytes(domain.LohBytes)}");
+            writer.WriteMetric("Gen0 bytes", FormatHelper.FormatBytes(domain.Gen0Bytes));
+            writer.WriteMetric("Gen1 bytes", FormatHelper.FormatBytes(domain.Gen1Bytes));
+            writer.WriteMetric("Gen2 bytes", FormatHelper.FormatBytes(domain.Gen2Bytes));
+            writer.WriteMetric("Large object heap bytes", FormatHelper.FormatBytes(domain.LohBytes));
 
-            writer.WriteLine("\nLARGE OBJECT HEAP (LOH) USAGE:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("LARGE OBJECT HEAP (LOH) USAGE:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total LOH Objects: {domain.LohObjects:N0}");
-            writer.WriteLine($"Total LOH Size: {FormatHelper.FormatBytes(domain.LohBytes)}");
+            writer.WriteMetric("Total LOH Objects", $"{domain.LohObjects:N0}");
+            writer.WriteMetric("Total LOH Size", FormatHelper.FormatBytes(domain.LohBytes));
 
             var topLohTypes = domain.TopLohTypes ?? [];
             if (topLohTypes.Count > 0)
             {
-                writer.WriteLine("\nTop LOH Object Types:");
-                writer.WriteLine($"{"Type",-68} {"Count",10} {"Total Size",14}");
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("Top LOH Object Types:");
+                writer.WriteDetailText($"{"Type",-68} {"Count",10} {"Total Size",14}");
                 foreach (var type in topLohTypes.Take(TopLohTypesToShow))
                 {
                     var wrappedTypeLines = WrapText(type.TypeName, 68).ToList();
                     if (wrappedTypeLines.Count == 0)
                         wrappedTypeLines.Add(string.Empty);
 
-                    writer.WriteLine($"{wrappedTypeLines[0],-68} {type.Count,10:N0} {FormatHelper.FormatBytes(type.TotalBytes),14}");
+                    writer.WriteDetailText($"{wrappedTypeLines[0],-68} {type.Count,10:N0} {FormatHelper.FormatBytes(type.TotalBytes),14}");
                     for (int i = 1; i < wrappedTypeLines.Count; i++)
-                        writer.WriteLine($"{wrappedTypeLines[i],-68} {string.Empty,10} {string.Empty,14}");
+                        writer.WriteDetailText($"{wrappedTypeLines[i],-68} {string.Empty,10} {string.Empty,14}");
                 }
             }
 
-            writer.WriteLine("\nLOH RISK SIGNAL:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("LOH RISK SIGNAL:");
             writer.WriteSeparator();
-            writer.WriteLine(domain.LohPercent >= 35
+            writer.WriteDetailText(domain.LohPercent >= 35
                 ? "⚠️  LOH footprint is elevated for this dump."
                 : "✅ LOH footprint is not elevated.");
 
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
 
         private static IEnumerable<string> WrapText(string? value, int width)

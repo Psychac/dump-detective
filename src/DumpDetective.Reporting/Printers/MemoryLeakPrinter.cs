@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -16,14 +17,15 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("MEMORY LEAK ANALYSIS:");
-            writer.WriteLine("FINALIZER QUEUE:");
+            writer.WriteSubHeading("FINALIZER QUEUE:");
             writer.WriteSeparator();
-            writer.WriteLine($"Finalizer queue objects: {domain.FinalizerQueueCount:N0}");
+            writer.WriteMetric("Finalizer queue objects", $"{domain.FinalizerQueueCount:N0}");
             var finalizerTypes = domain.TopFinalizerTypes ?? [];
             if (finalizerTypes.Count > 0)
             {
-                writer.WriteLine("\nTop types in finalizer queue:");
-                writer.WriteLine($"{"Type",-80} {"Count",12} {"% Queue",8}");
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("Top types in finalizer queue:");
+                writer.WriteDetailText($"{"Type",-80} {"Count",12} {"% Queue",8}");
                 foreach (var type in finalizerTypes)
                 {
                     double pct = domain.FinalizerQueueCount == 0
@@ -34,50 +36,54 @@ namespace DumpDetective.Reporting.Printers
                     if (wrappedTypeLines.Count == 0)
                         wrappedTypeLines.Add(string.Empty);
 
-                    writer.WriteLine($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {pct,7:F1}%");
+                    writer.WriteDetailText($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {pct,7:F1}%");
                     for (int i = 1; i < wrappedTypeLines.Count; i++)
-                        writer.WriteLine($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,8}");
+                        writer.WriteDetailText($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,8}");
                 }
             }
 
-            writer.WriteLine("\nDUPLICATE STRING ANALYSIS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("DUPLICATE STRING ANALYSIS:");
             writer.WriteSeparator();
-            writer.WriteLine($"Total strings: {domain.TotalStrings:N0}");
-            writer.WriteLine($"Total string memory: {FormatHelper.FormatBytes(domain.TotalStringMemoryBytes)}");
-            writer.WriteLine($"Unique strings: {domain.UniqueStrings:N0}");
-            writer.WriteLine(string.Empty);
-            writer.WriteLine($"Duplicate string patterns: {domain.DuplicateStringPatternCount:N0}");
-            writer.WriteLine($"Estimated duplicate-string waste: {FormatHelper.FormatBytes(domain.DuplicateStringWastedBytes)}");
+            writer.WriteMetric("Total strings", $"{domain.TotalStrings:N0}");
+            writer.WriteMetric("Total string memory", FormatHelper.FormatBytes(domain.TotalStringMemoryBytes));
+            writer.WriteMetric("Unique strings", $"{domain.UniqueStrings:N0}");
+            writer.WriteDetailBlank();
+            writer.WriteMetric("Duplicate string patterns", $"{domain.DuplicateStringPatternCount:N0}");
+            writer.WriteMetric("Estimated duplicate-string waste", FormatHelper.FormatBytes(domain.DuplicateStringWastedBytes));
             var duplicateStrings = domain.TopDuplicateStrings ?? [];
             if (duplicateStrings.Count > 0)
             {
-                writer.WriteLine("\nMost duplicated strings (potential string pooling opportunities):");
-                writer.WriteLine($"{"String Preview",-50} {"Count",10} {"Wasted",12}");
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("Most duplicated strings (potential string pooling opportunities):");
+                writer.WriteDetailText($"{"String Preview",-50} {"Count",10} {"Wasted",12}");
                 foreach (var dup in duplicateStrings)
-                    writer.WriteLine($"{FormatHelper.TruncateString(dup.Preview, 50),-50} {dup.Count,10:N0} {FormatHelper.FormatBytes(dup.WastedBytes),12}");
+                    writer.WriteDetailText($"{FormatHelper.TruncateString(dup.Preview, 50),-50} {dup.Count,10:N0} {FormatHelper.FormatBytes(dup.WastedBytes),12}");
             }
 
-            writer.WriteLine("\nHIGHLY REFERENCED OBJECTS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("HIGHLY REFERENCED OBJECTS:");
             writer.WriteSeparator();
-            writer.WriteLine($"Highly referenced objects: {domain.HighlyReferencedObjectCount:N0}");
+            writer.WriteMetric("Highly referenced objects", $"{domain.HighlyReferencedObjectCount:N0}");
             var topHighRefs = domain.TopHighlyReferencedObjects ?? [];
             if (topHighRefs.Count > 0)
             {
-                writer.WriteLine("\nTop highly referenced objects:");
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("Top highly referenced objects:");
                 foreach (var obj in topHighRefs)
                 {
-                    writer.WriteLine($"  {obj.TypeName}");
-                    writer.WriteLine($"    Address: 0x{obj.Address:X}");
-                    writer.WriteLine($"    Size: {FormatHelper.FormatBytes(obj.Size)}");
-                    writer.WriteLine($"    Incoming references: {obj.IncomingReferences:N0}");
-                    writer.WriteLine(string.Empty);
+                    writer.WriteDetailText(obj.TypeName, indentLevel: 1);
+                    writer.WriteMetric("Address", $"0x{obj.Address:X}", indentLevel: 2);
+                    writer.WriteMetric("Size", FormatHelper.FormatBytes(obj.Size), indentLevel: 2);
+                    writer.WriteMetric("Incoming references", $"{obj.IncomingReferences:N0}", indentLevel: 2);
+                    writer.WriteDetailBlank();
                 }
             }
 
             if (domain.SkippedReferenceAddresses > 0)
-                writer.WriteLine($"Reference tracking cap hit; skipped addresses: {domain.SkippedReferenceAddresses:N0}");
+                writer.WriteMetric("Reference tracking cap hit; skipped addresses", $"{domain.SkippedReferenceAddresses:N0}");
 
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
 
         private static IEnumerable<string> WrapText(string? value, int width)

@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -18,14 +19,15 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("THREAD STACK SIGNATURE CLUSTERING:");
-            writer.WriteLine("CLUSTER SUMMARY:");
+            writer.WriteSubHeading("CLUSTER SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Alive threads: {domain.AliveThreadCount:N0}");
-            writer.WriteLine($"Unique stack signatures: {domain.UniqueClusters:N0}");
-            writer.WriteLine($"Singleton signatures: {domain.SingletonSignatures:N0}");
-            writer.WriteLine($"Signature diversity: {domain.DiversityPercent:F1}%");
+            writer.WriteMetric("Alive threads", $"{domain.AliveThreadCount:N0}");
+            writer.WriteMetric("Unique stack signatures", $"{domain.UniqueClusters:N0}");
+            writer.WriteMetric("Singleton signatures", $"{domain.SingletonSignatures:N0}");
+            writer.WriteMetric("Signature diversity", $"{domain.DiversityPercent:F1}%");
 
-            writer.WriteLine("\nTOP SIGNATURES:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP SIGNATURES:");
             writer.WriteSeparator();
             int shown = 0;
             foreach (var signature in domain.TopClusterSignatures)
@@ -33,11 +35,12 @@ namespace DumpDetective.Reporting.Printers
                 if (shown >= TopSignaturesToShow)
                     break;
 
-                writer.WriteLine($"  • {FormatHelper.TruncateString(signature, 120)}");
+                writer.WriteDetailBullet(FormatHelper.TruncateString(signature, 120), indentLevel: 1);
                 shown++;
             }
 
-            writer.WriteLine("\nTOP THREAD CLUSTERS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP THREAD CLUSTERS:");
             writer.WriteSeparator();
             var clusters = domain.TopClusters ?? [];
             if (clusters.Count == 0)
@@ -51,19 +54,20 @@ namespace DumpDetective.Reporting.Printers
                     string osIds = cluster.SampleOsThreadIds.Count == 0
                         ? "none"
                         : string.Join(", ", cluster.SampleOsThreadIds.Select(id => $"0x{id:X}"));
-                    writer.WriteLine($"[{cluster.Count,4} threads] Sample OSThreadIds: {osIds}");
-                    writer.WriteLine($"Signature: {FormatHelper.TruncateString(cluster.Signature, 220)}");
-                    writer.WriteLine(string.Empty);
+                    writer.WriteDetailText($"[{cluster.Count,4} threads] Sample OSThreadIds: {osIds}");
+                    writer.WriteMetric("Signature", FormatHelper.TruncateString(cluster.Signature, 220));
+                    writer.WriteDetailBlank();
                 }
             }
 
-            writer.WriteLine("\nDIVERSITY SIGNAL:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("DIVERSITY SIGNAL:");
             writer.WriteSeparator();
-            writer.WriteLine(domain.DiversityPercent < 20
+            writer.WriteDetailText(domain.DiversityPercent < 20
                 ? "⚠️  Low signature diversity; large clusters may indicate coordinated blocking/contention."
                 : "✅ Signature diversity suggests varied active work.");
 
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
     }
 }

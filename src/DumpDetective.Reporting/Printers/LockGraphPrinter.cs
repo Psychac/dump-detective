@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -16,13 +17,14 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("LOCK GRAPH ANALYSIS:");
-            writer.WriteLine("LOCK CONTENTION SUMMARY:");
+            writer.WriteSubHeading("LOCK CONTENTION SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"Held locks: {domain.TotalHeldLocks:N0}");
-            writer.WriteLine($"Contested locks: {domain.ContestedLockCount:N0}");
-            writer.WriteLine($"Max waiters on single lock: {domain.MaxWaitersOnSingleLock:N0}");
+            writer.WriteMetric("Held locks", $"{domain.TotalHeldLocks:N0}");
+            writer.WriteMetric("Contested locks", $"{domain.ContestedLockCount:N0}");
+            writer.WriteMetric("Max waiters on single lock", $"{domain.MaxWaitersOnSingleLock:N0}");
 
-            writer.WriteLine("\nLOCK CONTENTION HOTSPOTS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("LOCK CONTENTION HOTSPOTS:");
             writer.WriteSeparator();
             var topTypes = domain.TopContestedLockTypes ?? [];
             if (topTypes.Count == 0)
@@ -32,18 +34,19 @@ namespace DumpDetective.Reporting.Printers
             else
             {
                 foreach (var entry in topTypes.Take(8))
-                    writer.WriteLine($"  • {FormatHelper.TruncateString(entry.Name, 70)}: {entry.Count:N0} cumulative waiter(s)");
+                    writer.WriteMetric(FormatHelper.TruncateString(entry.Name, 70), $"{entry.Count:N0} cumulative waiter(s)", indentLevel: 1);
             }
 
-            writer.WriteLine("\nDEADLOCK CANDIDATES:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("DEADLOCK CANDIDATES:");
             writer.WriteSeparator();
-            writer.WriteLine($"Deadlock candidates: {domain.DeadlockCandidateCount:N0}");
-            writer.WriteLine(domain.DeadlockCandidateCount >= 2
+            writer.WriteMetric("Deadlock candidates", $"{domain.DeadlockCandidateCount:N0}");
+            writer.WriteDetailText(domain.DeadlockCandidateCount >= 2
                 ? "⚠️  Probable deadlock pattern detected."
                 : domain.ContestedLockCount > 0
                     ? "⚠️  Lock contention present; monitor lock acquisition order."
                     : "✅ No lock contention/deadlock candidates detected.");
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
     }
 }

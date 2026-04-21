@@ -33,7 +33,16 @@ tbody tr:nth-child(even){background:#fcfcfd;}
 .detail-item>summary::-webkit-details-marker{display:none;}
 .detail-item>summary::after{content:'▸';float:right;color:#64748b;}
 .detail-item[open]>summary::after{content:'▾';}
-.detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;}
+.detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;line-height:1.5;}
+.detail-subheading{font-weight:700;color:#93c5fd;margin:8px 0 4px 0;}
+.detail-divider{height:1px;background:#334155;margin:6px 0;}
+.detail-line{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
+.detail-key{color:#a7f3d0;font-weight:600;}
+.detail-value{color:#e5e7eb;}
+.detail-path{color:#fde68a;font-weight:600;}
+.detail-gap{height:8px;}
+.detail-indent-1{padding-left:12px;}
+.detail-indent-2{padding-left:24px;}
 </style>
 </head>
 <body>

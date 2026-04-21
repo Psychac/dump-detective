@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -16,23 +17,25 @@ namespace DumpDetective.Reporting.Printers
                 return;
 
             writer.WriteHeader("LOH FRAGMENTATION ANALYSIS:");
-            writer.WriteLine("LOH SUMMARY:");
+            writer.WriteSubHeading("LOH SUMMARY:");
             writer.WriteSeparator();
-            writer.WriteLine($"LOH segments: {domain.SegmentCount:N0}");
-            writer.WriteLine($"Total LOH bytes: {FormatHelper.FormatBytes(domain.TotalBytes)}");
-            writer.WriteLine($"LOH used size: {FormatHelper.FormatBytes(domain.UsedBytes)}");
-            writer.WriteLine($"Free LOH bytes: {FormatHelper.FormatBytes(domain.FreeBytes)}");
-            writer.WriteLine($"LOH free blocks: {domain.FreeBlockCount:N0}");
+            writer.WriteMetric("LOH segments", $"{domain.SegmentCount:N0}");
+            writer.WriteMetric("Total LOH bytes", FormatHelper.FormatBytes(domain.TotalBytes));
+            writer.WriteMetric("LOH used size", FormatHelper.FormatBytes(domain.UsedBytes));
+            writer.WriteMetric("Free LOH bytes", FormatHelper.FormatBytes(domain.FreeBytes));
+            writer.WriteMetric("LOH free blocks", $"{domain.FreeBlockCount:N0}");
 
-            writer.WriteLine("\nFRAGMENTATION SIGNAL:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("FRAGMENTATION SIGNAL:");
             writer.WriteSeparator();
-            writer.WriteLine($"Fragmentation: {domain.FragmentationPercent:F1}%");
-            writer.WriteLine($"Largest free block: {FormatHelper.FormatBytes(domain.LargestFreeBlock)}");
-            writer.WriteLine(domain.FragmentationPercent >= 35
+            writer.WriteMetric("Fragmentation", $"{domain.FragmentationPercent:F1}%");
+            writer.WriteMetric("Largest free block", FormatHelper.FormatBytes(domain.LargestFreeBlock));
+            writer.WriteDetailText(domain.FragmentationPercent >= 35
                 ? "⚠️  LOH fragmentation appears elevated."
                 : "✅ LOH fragmentation appears acceptable.");
 
-            writer.WriteLine("\nTOP FRAGMENTED LOH SEGMENTS:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("TOP FRAGMENTED LOH SEGMENTS:");
             writer.WriteSeparator();
             var segments = domain.TopFragmentedSegments ?? [];
             if (segments.Count == 0)
@@ -43,10 +46,10 @@ namespace DumpDetective.Reporting.Printers
             {
                 foreach (var seg in segments.Take(8))
                 {
-                    writer.WriteLine($"  • 0x{seg.Address:X}: {seg.FragmentationPercent:F1}% frag, free {FormatHelper.FormatBytes(seg.FreeBytes)}, largest hole {FormatHelper.FormatBytes(seg.LargestFreeBlock)}");
+                    writer.WriteDetailText($"• 0x{seg.Address:X}: {seg.FragmentationPercent:F1}% frag, free {FormatHelper.FormatBytes(seg.FreeBytes)}, largest hole {FormatHelper.FormatBytes(seg.LargestFreeBlock)}", indentLevel: 1);
                 }
             }
-            writer.WriteLine(StringConstants.Equals80);
+            writer.WriteDetailDivider();
         }
     }
 }

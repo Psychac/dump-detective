@@ -146,11 +146,22 @@ public sealed class ReportingCompositionTests
             Elapsed: TimeSpan.FromSeconds(1),
             Sections: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 0, 0, []),
-            DetailedAnalyzerReport: string.Empty,
             DetailedAnalyzerSections:
             [
-                new DetailedAnalyzerSection("Memory Leak Analyzer", "Top type: System.String\nRetained MB: 123"),
-                new DetailedAnalyzerSection("Thread Analyzer", "Blocked threads: 4\nWait chains: 2")
+                new DetailedAnalyzerSection(
+                    "Memory Leak Analyzer",
+                    "Top type: System.String\nRetained MB: 123",
+                    [
+                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Top type", "System.String", null),
+                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Retained MB", "123", null)
+                    ]),
+                new DetailedAnalyzerSection(
+                    "Thread Analyzer",
+                    "Blocked threads: 4\nWait chains: 2",
+                    [
+                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Blocked threads", "4", null),
+                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Wait chains", "2", null)
+                    ])
             ]);
 
         IReportFormatter formatter = new HtmlCanonicalReportFormatter();
@@ -160,8 +171,10 @@ public sealed class ReportingCompositionTests
         output.Should().Contain("<details class=\"detail-item\" open>");
         output.Should().Contain("<summary>Memory Leak Analyzer</summary>");
         output.Should().Contain("<summary>Thread Analyzer</summary>");
-        output.Should().Contain("Top type: System.String");
-        output.Should().Contain("Blocked threads: 4");
+        output.Should().Contain("<span class=\"detail-key\">Top type:</span>");
+        output.Should().Contain("<span class=\"detail-value wrap\">System.String</span>");
+        output.Should().Contain("<span class=\"detail-key\">Blocked threads:</span>");
+        output.Should().Contain("<span class=\"detail-value wrap\">4</span>");
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

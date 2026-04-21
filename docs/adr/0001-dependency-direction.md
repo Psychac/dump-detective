@@ -10,7 +10,7 @@ The refactor introduced a layered architecture (`Core`, `Analysis`, `Reporting`,
 Enforce directional dependencies:
 - `DumpDetective.Core` -> no project references to higher layers.
 - `DumpDetective.Analysis` -> references `DumpDetective.Core` only.
-- `DumpDetective.Reporting` -> references `DumpDetective.Core` and `DumpDetective.Analysis`.
+- `DumpDetective.Reporting` -> references `DumpDetective.Core` only.
 - `DumpDetective.Cli` -> references `DumpDetective.Core`, `DumpDetective.Analysis`, and `DumpDetective.Reporting`.
 - `BenchmarkSuite1` -> may reference all layers for hotspot measurement.
 - Legacy `DumpDetective` project remains side-by-side for compatibility and migration continuity.

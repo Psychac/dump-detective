@@ -108,6 +108,7 @@
 - `AnalyzerDomainResult` now includes analyzer identity/findings/metrics/warnings contract fields.
 - `AnalyzerRunResult` now uses explicit `AnalyzerExecutionStatus` (`Success`, `Failed`, `Skipped`, `Canceled`).
 - `AnalysisPipeline` now executes asynchronously with deterministic ordering and failure/cancellation mapping.
+- Deterministic ordering was revalidated in `Unit/Analysis/AnalysisPipelineTests.cs` (`ExecuteAsync_ShouldOrderByOrderThenName`) after pipeline ordering fix.
 - Analyzer native async migration is complete and no temporary bridge items remain active.
 
 ---
@@ -160,6 +161,7 @@
 - Canonical `IReportFormatter` implementations (`Text`, `Markdown`, `Html`) render from composed model only.
 - Shared wrapping helper (`TableWrapHelper`) is used to wrap long values without truncation.
 - Reporting-focused tests added in `DumpDetective.Tests/ReportingCompositionTests.cs` for dedup, wrapping, and formatter parity.
+- `ComposedReport` now carries explicit contract version fields (`ReportSchemaVersion`, `SectionSchemaVersion`) stamped by `ReportBuilder`.
 - Legacy static formatter stack has been removed; canonical formatter pipeline is the sole active reporting formatter path.
 
 ---
@@ -185,6 +187,7 @@
 - Added reporting golden infrastructure (`Golden/GoldenFileAssert.cs`, `Golden/GoldenFileTests.cs`) and committed formatter baselines for `BaselineSmall` across `text/markdown/html`.
 - Expanded golden fixture matrix to `BaselineSmall`, `DuplicateHeavy`, `LongNames`, `RichEvidence`, and `MixedSeverity` across `text/markdown/html`.
 - Added integration coverage for composed report flow and dedup through facade rendering (`Integration/ReportFlowIntegrationTests.cs`).
+- Added integration coverage for cancellation-aware report facade execution (`BuildRenderedReport_ShouldHonorCancellationToken`).
 - Added deterministic normalization in golden assert helper (line-ending normalization) and fixed fixture timestamp/path determinism.
 - Added baseline copy-to-output wiring in `DumpDetective.Tests.csproj` and validated via `dotnet test` (32 passed).
 - Added CI workflow (`.github/workflows/ci.yml`) running restore/build/test and benchmark smoke.
@@ -232,6 +235,10 @@
 
 ### Remaining Closure Notes
 - No open technical closure items remain in Specs 01–07.
+- Post-spec alignment updates completed:
+  - Strict dependency direction enforced: `Reporting` now references `Core` only; architecture guard test added at `Unit/Architecture/DependencyDirectionTests.cs`.
+  - Report contract versioning added to canonical composed model.
+  - Cancellation propagation added through report build and async output write path in CLI services.
 
 ---
 

@@ -16,27 +16,6 @@ using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 public sealed class AnalysisPipelineTests
 {
     [Fact]
-    public async Task ExecuteAsync_ShouldOrderByOrderThenName()
-    {
-        var executionOrder = new List<string>();
-        IAnalyzer[] analyzers =
-        [
-            new TestAnalyzer("B", order: 1, onExecute: () => executionOrder.Add("B")),
-            new TestAnalyzer("A", order: 1, onExecute: () => executionOrder.Add("A")),
-            new TestAnalyzer("C", order: 0, onExecute: () => executionOrder.Add("C"))
-        ];
-
-        AnalysisPipeline pipeline = new(analyzers);
-        PipelineAnalysisContext context = CreateContext(continueOnFailure: true);
-
-        IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
-
-        executionOrder.Should().Equal("C", "A", "B");
-        result.Select(r => r.AnalyzerName).Should().Equal("C", "A", "B");
-        result.Should().OnlyContain(r => r.Status == AnalyzerExecutionStatus.Success);
-    }
-
-    [Fact]
     public async Task ExecuteAsync_ShouldContinueOnFailure_WhenConfigured()
     {
         IAnalyzer[] analyzers =

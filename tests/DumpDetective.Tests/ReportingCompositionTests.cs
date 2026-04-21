@@ -115,6 +115,28 @@ public sealed class ReportingCompositionTests
         }
     }
 
+    [Fact]
+    public void ComposeCanonicalReport_ShouldStampContractVersions()
+    {
+        InsightFinding finding = new(
+            Analyzer: "CrashAnalyzer",
+            Category: "Crash",
+            Severity: FindingSeverity.Warning,
+            Title: "Contract versioning",
+            Evidence: "Version metadata should be stamped.",
+            Recommendation: "Keep schema changes backward-compatible.",
+            Tags: ["contract"],
+            Fingerprint: "contract-ver");
+
+        ComposedReport report = ReportBuilder.ComposeCanonicalReport(
+            dumpPath: "C:/dumps/contract.dmp",
+            runs: [CreateRun("CrashAnalyzer", finding)],
+            elapsed: TimeSpan.FromSeconds(1));
+
+        report.ReportSchemaVersion.Should().Be(ReportContractVersions.ReportSchemaV1);
+        report.SectionSchemaVersion.Should().Be(ReportContractVersions.SectionSchemaV1);
+    }
+
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
     {
         GenericAnalyzerDomainResult result = new()

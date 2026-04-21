@@ -60,13 +60,49 @@ public sealed class ReportFlowIntegrationTests
             dumpPath: "C:/dumps/int-test.dmp",
             format: format,
             runs: [runA, runB],
-            elapsed: TimeSpan.FromSeconds(1));
+            elapsed: TimeSpan.FromSeconds(1),
+            cancellationToken: CancellationToken.None);
 
         CountOccurrences(output, "UNIQUE_DUP_TITLE").Should().Be(1);
         output.Should().Contain("Evidence A");
         output.Should().Contain("Evidence B");
         output.Should().Contain("Remediation A");
         output.Should().Contain("Remediation B");
+    }
+
+    [Fact]
+    public void BuildRenderedReport_ShouldHonorCancellationToken()
+    {
+        InsightFinding finding = new(
+            Analyzer: "MemoryLeakAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Canceled",
+            Evidence: "Should not render",
+            Recommendation: "n/a",
+            Tags: ["cancel"],
+            Fingerprint: "cancel");
+
+        AnalyzerRunResult run = CreateRun("MemoryLeakAnalyzer", finding);
+        ReportBuilderFacade facade = new(
+        [
+            new TextCanonicalReportFormatter(),
+            new MarkdownCanonicalReportFormatter(),
+            new HtmlCanonicalReportFormatter()
+        ],
+        new DefaultAnalyzerReporterFactory());
+
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        Action act = () => facade.BuildRenderedReport(
+            dumpPath: "C:/dumps/int-test.dmp",
+            format: ReportFormat.Text,
+            runs: [run],
+            elapsed: TimeSpan.FromSeconds(1),
+            cancellationToken: cts.Token);
+
+        act.Should().Throw<OperationCanceledException>();
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

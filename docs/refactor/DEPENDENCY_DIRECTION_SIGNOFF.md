@@ -11,7 +11,7 @@ Refactored architecture projects in `DumpDetective.slnx`:
 From current project references:
 - `Core`: no project references.
 - `Analysis` -> `Core`.
-- `Reporting` -> `Core`, `Analysis`.
+- `Reporting` -> `Core`.
 - `Cli` -> `Core`, `Analysis`, `Reporting`.
 
 This confirms one-way layering from foundation to host.

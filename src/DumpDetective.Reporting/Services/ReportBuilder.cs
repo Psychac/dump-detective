@@ -80,7 +80,15 @@ namespace DumpDetective.Reporting.Services
                 EvidenceBeforeMerge = evidenceBeforeMerge
             };
 
-            return new ComposedReport(dumpPath, DateTime.UtcNow, elapsed, deduped, normalizedDiagnostics, detailedAnalyzerReport);
+            return new ComposedReport(
+                dumpPath,
+                DateTime.UtcNow,
+                elapsed,
+                deduped,
+                normalizedDiagnostics,
+                detailedAnalyzerReport,
+                ReportContractVersions.ReportSchemaV1,
+                ReportContractVersions.SectionSchemaV1);
         }
 
         private static string RenderDetailedAnalyzerSections(IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<IAnalyzerReporter> reporters)

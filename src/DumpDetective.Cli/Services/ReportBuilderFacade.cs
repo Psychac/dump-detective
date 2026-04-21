@@ -12,12 +12,15 @@ internal sealed class ReportBuilderFacade(IEnumerable<IReportFormatter> formatte
     private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToList();
     private readonly IReadOnlyList<IAnalyzerReporter> _reporters = reporterFactory.CreateReporters();
 
-    public string BuildRenderedReport(string dumpPath, ReportFormat format, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed)
+    public string BuildRenderedReport(string dumpPath, ReportFormat format, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         ComposedReport report = ReportBuilder.ComposeCanonicalReport(dumpPath, runs, elapsed, _reporters);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 
+        cancellationToken.ThrowIfCancellationRequested();
         return formatter.Render(report);
     }
 }

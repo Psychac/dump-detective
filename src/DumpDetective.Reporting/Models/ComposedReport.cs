@@ -8,7 +8,15 @@ internal sealed record ComposedReport(
     TimeSpan Elapsed,
     IReadOnlyList<ReportSection> Sections,
     DedupDiagnostics DedupDiagnostics,
-    string DetailedAnalyzerReport);
+    string DetailedAnalyzerReport,
+    string ReportSchemaVersion = ReportContractVersions.ReportSchemaV1,
+    string SectionSchemaVersion = ReportContractVersions.SectionSchemaV1);
+
+internal static class ReportContractVersions
+{
+    public const string ReportSchemaV1 = "1.0";
+    public const string SectionSchemaV1 = "1.0";
+}
 
 internal sealed record ReportSection(
     string SectionKey,

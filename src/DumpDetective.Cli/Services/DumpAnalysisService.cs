@@ -115,11 +115,13 @@ internal sealed class DumpAnalysisService(
 
         stageStopwatch.Restart();
         ConsoleUx.StageStart(3, totalStages, $"Build {resolved.Report.Format} report");
+        cancellationToken.ThrowIfCancellationRequested();
         string renderedReport = _reportBuilderFacade.BuildRenderedReport(
             resolved.DumpPath,
             resolved.Report.Format,
             runs,
-            stopwatch.Elapsed);
+            stopwatch.Elapsed,
+            cancellationToken);
         stageStopwatch.Stop();
         ConsoleUx.StageComplete(3, totalStages, "Build report", stageStopwatch.Elapsed);
 
@@ -127,9 +129,11 @@ internal sealed class DumpAnalysisService(
         ConsoleUx.StageStart(4, totalStages, "Write output");
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (!string.IsNullOrWhiteSpace(resolved.OutputPath))
             {
-                File.WriteAllText(resolved.OutputPath, renderedReport);
+                await File.WriteAllTextAsync(resolved.OutputPath, renderedReport, cancellationToken);
                 ConsoleUx.Success($"Report written to: {resolved.OutputPath}");
             }
 
@@ -142,6 +146,10 @@ internal sealed class DumpAnalysisService(
 
             stageStopwatch.Stop();
             ConsoleUx.StageComplete(4, totalStages, "Write output", stageStopwatch.Elapsed);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

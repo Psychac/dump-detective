@@ -9,7 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
-    <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
   </ItemGroup>
 
   <ItemGroup>

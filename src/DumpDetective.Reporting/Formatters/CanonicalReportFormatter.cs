@@ -58,11 +58,18 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
-        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        if (report.DetailedAnalyzerSections is { Count: > 0 })
         {
+            IReadOnlyList<DetailedAnalyzerSection> detailedSections = report.DetailedAnalyzerSections;
+
             lines.Add("DETAILED ANALYZER SECTIONS");
             lines.Add(new string('=', 100));
-            lines.Add(report.DetailedAnalyzerReport);
+            foreach (DetailedAnalyzerSection detail in detailedSections)
+            {
+                lines.Add($"[{detail.Title}]");
+                lines.Add(detail.Content);
+                lines.Add(string.Empty);
+            }
             lines.Add(string.Empty);
         }
 
@@ -118,14 +125,21 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
-        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        if (report.DetailedAnalyzerSections is { Count: > 0 })
         {
+            IReadOnlyList<DetailedAnalyzerSection> detailedSections = report.DetailedAnalyzerSections;
+
             lines.Add("## Detailed analyzer sections");
             lines.Add(string.Empty);
-            lines.Add("```text");
-            lines.Add(report.DetailedAnalyzerReport);
-            lines.Add("```");
-            lines.Add(string.Empty);
+            foreach (DetailedAnalyzerSection detail in detailedSections)
+            {
+                lines.Add($"### {detail.Title}");
+                lines.Add(string.Empty);
+                lines.Add("```text");
+                lines.Add(detail.Content);
+                lines.Add("```");
+                lines.Add(string.Empty);
+            }
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -138,53 +152,123 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
 
     public string Render(ComposedReport report)
     {
+        static string Encode(string value) => System.Net.WebUtility.HtmlEncode(value);
+
         List<string> lines =
         [
             "<!DOCTYPE html>",
             "<html>",
             "<head>",
             "<meta charset=\"utf-8\" />",
-            "<style>body{font-family:Segoe UI,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ddd;padding:6px;vertical-align:top;} .wrap{overflow-wrap:anywhere;word-break:break-word;} </style>",
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+            "<title>DumpDetective Analysis Report</title>",
+            "<style>",
+            "body{margin:0;padding:0;background:#f5f7fb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif;line-height:1.45;}",
+            ".container{max-width:1200px;margin:0 auto;padding:24px;}",
+            ".header-card,.section-card{background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05);}",
+            ".header-card{padding:16px 18px;margin-bottom:16px;}",
+            ".meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 16px;margin-top:10px;}",
+            ".meta-item{font-size:14px;}",
+            ".meta-label{font-weight:600;color:#374151;}",
+            ".dedup-note{margin-top:10px;padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:14px;}",
+            ".section-card{padding:14px 16px;margin-bottom:14px;}",
+            ".section-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;}",
+            ".severity-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}",
+            ".severity-critical{background:#fee2e2;color:#b91c1c;}",
+            ".severity-warning{background:#fef3c7;color:#92400e;}",
+            ".severity-info{background:#dbeafe;color:#1e3a8a;}",
+            ".category{font-size:12px;color:#6b7280;background:#f3f4f6;padding:2px 8px;border-radius:999px;}",
+            ".summary{margin:8px 0 10px 0;}",
+            "table{border-collapse:collapse;width:100%;background:#ffffff;}",
+            "thead th{background:#f9fafb;font-weight:600;border:1px solid #e5e7eb;padding:8px;text-align:left;}",
+            "tbody td{border:1px solid #e5e7eb;padding:8px;vertical-align:top;}",
+            "tbody tr:nth-child(even){background:#fcfcfd;}",
+            ".wrap{overflow-wrap:anywhere;word-break:break-word;}",
+            ".remediation-title{margin:12px 0 6px 0;font-size:15px;}",
+            ".remediation-list{margin:0;padding-left:20px;}",
+            ".detail-item{margin-bottom:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;}",
+            ".detail-item>summary{cursor:pointer;padding:10px 12px;font-weight:600;color:#0f172a;list-style:none;}",
+            ".detail-item>summary::-webkit-details-marker{display:none;}",
+            ".detail-item>summary::after{content:'▸';float:right;color:#64748b;}",
+            ".detail-item[open]>summary::after{content:'▾';}",
+            ".detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;}",
+            "</style>",
             "</head>",
             "<body>",
-            $"<h1>DumpDetective Analysis Report</h1>",
-            $"<p><strong>Dump:</strong> {System.Net.WebUtility.HtmlEncode(report.DumpPath)}<br/><strong>Generated (UTC):</strong> {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}<br/><strong>Elapsed:</strong> {report.Elapsed.TotalSeconds:F1}s</p>",
-            $"<p><strong>Dedup:</strong> merged {report.DedupDiagnostics.MergedSections}/{report.DedupDiagnostics.DuplicateCandidates}</p>"
+            "<main class=\"container\">",
+            "<section class=\"header-card\">",
+            "<h1>DumpDetective Analysis Report</h1>",
+            "<div class=\"meta-grid\">",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">Dump:</span> <span class=\"wrap\">{Encode(report.DumpPath)}</span></div>",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</div>",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> {report.Elapsed.TotalSeconds:F1}s</div>",
+            "</div>",
+            $"<div class=\"dedup-note\"><strong>Dedup:</strong> merged {report.DedupDiagnostics.MergedSections}/{report.DedupDiagnostics.DuplicateCandidates}</div>",
+            "</section>"
         ];
 
         foreach (ReportSection section in report.Sections)
         {
-            lines.Add($"<h2>[{section.Severity}] {System.Net.WebUtility.HtmlEncode(section.Title)}</h2>");
-            lines.Add($"<p>{System.Net.WebUtility.HtmlEncode(section.NarrativeSummary)}</p>");
+            string severityCss = section.Severity switch
+            {
+                Core.Models.FindingSeverity.Critical => "severity-critical",
+                Core.Models.FindingSeverity.Warning => "severity-warning",
+                _ => "severity-info"
+            };
+
+            lines.Add("<section class=\"section-card\">");
+            lines.Add("<div class=\"section-header\">");
+            lines.Add($"<span class=\"severity-badge {severityCss}\">{Encode(section.Severity.ToString())}</span>");
+            lines.Add($"<h2>{Encode(section.Title)}</h2>");
+            lines.Add($"<span class=\"category\">{Encode(section.Category)}</span>");
+            lines.Add("</div>");
+            lines.Add($"<p class=\"summary\">{Encode(section.NarrativeSummary)}</p>");
             lines.Add("<table>");
             lines.Add("<thead><tr><th>Label</th><th>Value</th></tr></thead>");
             lines.Add("<tbody>");
             foreach (ReportEvidenceRow row in section.EvidenceRows)
             {
-                string wrapped = string.Join("<br/>", TableWrapHelper.Wrap(row.Value, 90).Select(System.Net.WebUtility.HtmlEncode));
-                lines.Add($"<tr><td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td><td class=\"wrap\">{wrapped}</td></tr>");
+                string wrapped = string.Join("<br/>", TableWrapHelper.Wrap(row.Value, 90).Select(Encode));
+                lines.Add($"<tr><td>{Encode(row.Label)}</td><td class=\"wrap\">{wrapped}</td></tr>");
             }
             lines.Add("</tbody>");
             lines.Add("</table>");
 
             if (section.RemediationHints.Count > 0)
             {
-                lines.Add("<h3>Remediation</h3><ul>");
+                lines.Add("<h3 class=\"remediation-title\">Remediation</h3><ul class=\"remediation-list\">");
                 foreach (string hint in section.RemediationHints)
                 {
-                    string wrapped = string.Join("<br/>", TableWrapHelper.Wrap(hint, 96).Select(System.Net.WebUtility.HtmlEncode));
+                    string wrapped = string.Join("<br/>", TableWrapHelper.Wrap(hint, 96).Select(Encode));
                     lines.Add($"<li class=\"wrap\">{wrapped}</li>");
                 }
                 lines.Add("</ul>");
             }
+
+            lines.Add("</section>");
         }
 
-        if (!string.IsNullOrWhiteSpace(report.DetailedAnalyzerReport))
+        if (report.DetailedAnalyzerSections is { Count: > 0 })
         {
+            IReadOnlyList<DetailedAnalyzerSection> detailedSections = report.DetailedAnalyzerSections;
+
+            lines.Add("<section class=\"section-card\">");
             lines.Add("<h2>Detailed analyzer sections</h2>");
-            lines.Add($"<pre>{System.Net.WebUtility.HtmlEncode(report.DetailedAnalyzerReport)}</pre>");
+
+            for (int i = 0; i < detailedSections.Count; i++)
+            {
+                DetailedAnalyzerSection detail = detailedSections[i];
+                string openAttribute = i == 0 ? " open" : string.Empty;
+                lines.Add($"<details class=\"detail-item\"{openAttribute}>");
+                lines.Add($"<summary>{Encode(detail.Title)}</summary>");
+                lines.Add($"<pre class=\"detail-block\">{Encode(detail.Content)}</pre>");
+                lines.Add("</details>");
+            }
+
+            lines.Add("</section>");
         }
 
+        lines.Add("</main>");
         lines.Add("</body></html>");
         return string.Join(Environment.NewLine, lines);
     }

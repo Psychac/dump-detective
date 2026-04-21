@@ -22,7 +22,10 @@ namespace DumpDetective.Reporting.Services
         {
             List<ReportSection> sections = [];
             int evidenceBeforeMerge = 0;
-            string detailedAnalyzerReport = RenderDetailedAnalyzerSections(runs, reporters);
+            IReadOnlyList<DetailedAnalyzerSection> detailedAnalyzerSections = BuildDetailedAnalyzerSections(runs, reporters);
+            string detailedAnalyzerReport = string.Join(
+                Environment.NewLine + Environment.NewLine,
+                detailedAnalyzerSections.Select(s => s.Content));
 
             foreach (AnalyzerRunResult run in runs)
             {
@@ -88,14 +91,15 @@ namespace DumpDetective.Reporting.Services
                 normalizedDiagnostics,
                 detailedAnalyzerReport,
                 ReportContractVersions.ReportSchemaV1,
-                ReportContractVersions.SectionSchemaV1);
+                ReportContractVersions.SectionSchemaV1,
+                detailedAnalyzerSections);
         }
 
-        private static string RenderDetailedAnalyzerSections(IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<IAnalyzerReporter> reporters)
+        private static IReadOnlyList<DetailedAnalyzerSection> BuildDetailedAnalyzerSections(IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<IAnalyzerReporter> reporters)
         {
             if (reporters.Count == 0)
             {
-                return string.Empty;
+                return [];
             }
 
             Dictionary<string, AnalyzerDomainResult> domainResults = new(StringComparer.Ordinal);
@@ -112,17 +116,38 @@ namespace DumpDetective.Reporting.Services
 
             if (domainResults.Count == 0)
             {
-                return string.Empty;
+                return [];
             }
 
-            StringBuilder buffer = new(capacity: 8 * 1024);
-            using StringWriter textWriter = new(buffer);
-            OutputWriter writer = new(textWriter, writeToConsoleWhenNoWriter: false);
+            List<DetailedAnalyzerSection> sections = [];
 
-            AnalyzerReportRenderer renderer = new(reporters);
-            renderer.Render(domainResults, writer);
+            foreach (IAnalyzerReporter reporter in reporters)
+            {
+                if (!domainResults.TryGetValue(reporter.AnalyzerName, out AnalyzerDomainResult? result))
+                {
+                    continue;
+                }
 
-            return buffer.ToString().Trim();
+                if (!reporter.CanHandle(result))
+                {
+                    continue;
+                }
+
+                StringBuilder buffer = new(capacity: 4 * 1024);
+                using StringWriter textWriter = new(buffer);
+                OutputWriter writer = new(textWriter, writeToConsoleWhenNoWriter: false);
+                reporter.Render(result, writer);
+
+                string content = buffer.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    continue;
+                }
+
+                sections.Add(new DetailedAnalyzerSection(reporter.AnalyzerName, content));
+            }
+
+            return sections;
         }
 
         private static List<ReportSection> DeduplicateSections(IReadOnlyList<ReportSection> sections, out DedupDiagnostics diagnostics)

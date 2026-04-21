@@ -137,6 +137,33 @@ public sealed class ReportingCompositionTests
         report.SectionSchemaVersion.Should().Be(ReportContractVersions.SectionSchemaV1);
     }
 
+    [Fact]
+    public void HtmlFormatter_ShouldRenderDetailedAnalyzerSections_AsCollapsibleBlocks()
+    {
+        ComposedReport report = new(
+            DumpPath: "C:/dumps/detailed.dmp",
+            GeneratedAtUtc: DateTime.UtcNow,
+            Elapsed: TimeSpan.FromSeconds(1),
+            Sections: [],
+            DedupDiagnostics: new DedupDiagnostics(0, 0, 0, 0, []),
+            DetailedAnalyzerReport: string.Empty,
+            DetailedAnalyzerSections:
+            [
+                new DetailedAnalyzerSection("Memory Leak Analyzer", "Top type: System.String\nRetained MB: 123"),
+                new DetailedAnalyzerSection("Thread Analyzer", "Blocked threads: 4\nWait chains: 2")
+            ]);
+
+        IReportFormatter formatter = new HtmlCanonicalReportFormatter();
+
+        string output = formatter.Render(report);
+
+        output.Should().Contain("<details class=\"detail-item\" open>");
+        output.Should().Contain("<summary>Memory Leak Analyzer</summary>");
+        output.Should().Contain("<summary>Thread Analyzer</summary>");
+        output.Should().Contain("Top type: System.String");
+        output.Should().Contain("Blocked threads: 4");
+    }
+
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
     {
         GenericAnalyzerDomainResult result = new()

@@ -2,43 +2,101 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<style>body{font-family:Segoe UI,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ddd;padding:6px;vertical-align:top;} .wrap{overflow-wrap:anywhere;word-break:break-word;} </style>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DumpDetective Analysis Report</title>
+<style>
+body{margin:0;padding:0;background:#f5f7fb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif;line-height:1.45;}
+.container{max-width:1200px;margin:0 auto;padding:24px;}
+.header-card,.section-card{background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05);}
+.header-card{padding:16px 18px;margin-bottom:16px;}
+.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 16px;margin-top:10px;}
+.meta-item{font-size:14px;}
+.meta-label{font-weight:600;color:#374151;}
+.dedup-note{margin-top:10px;padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:14px;}
+.section-card{padding:14px 16px;margin-bottom:14px;}
+.section-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+.severity-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
+.severity-critical{background:#fee2e2;color:#b91c1c;}
+.severity-warning{background:#fef3c7;color:#92400e;}
+.severity-info{background:#dbeafe;color:#1e3a8a;}
+.category{font-size:12px;color:#6b7280;background:#f3f4f6;padding:2px 8px;border-radius:999px;}
+.summary{margin:8px 0 10px 0;}
+table{border-collapse:collapse;width:100%;background:#ffffff;}
+thead th{background:#f9fafb;font-weight:600;border:1px solid #e5e7eb;padding:8px;text-align:left;}
+tbody td{border:1px solid #e5e7eb;padding:8px;vertical-align:top;}
+tbody tr:nth-child(even){background:#fcfcfd;}
+.wrap{overflow-wrap:anywhere;word-break:break-word;}
+.remediation-title{margin:12px 0 6px 0;font-size:15px;}
+.remediation-list{margin:0;padding-left:20px;}
+.detail-item{margin-bottom:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;}
+.detail-item>summary{cursor:pointer;padding:10px 12px;font-weight:600;color:#0f172a;list-style:none;}
+.detail-item>summary::-webkit-details-marker{display:none;}
+.detail-item>summary::after{content:'▸';float:right;color:#64748b;}
+.detail-item[open]>summary::after{content:'▾';}
+.detail-block{background:#0f172a;color:#e5e7eb;border-radius:8px;padding:12px;overflow:auto;}
+</style>
 </head>
 <body>
+<main class="container">
+<section class="header-card">
 <h1>DumpDetective Analysis Report</h1>
-<p><strong>Dump:</strong> C:/fixtures/MixedSeverity.dmp<br/><strong>Generated (UTC):</strong> 2026-01-01 12:00:00<br/><strong>Elapsed:</strong> 6.6s</p>
-<p><strong>Dedup:</strong> merged 0/0</p>
-<h2>[Critical] Critical leak</h2>
-<p>Critical item</p>
+<div class="meta-grid">
+<div class="meta-item"><span class="meta-label">Dump:</span> <span class="wrap">C:/fixtures/MixedSeverity.dmp</span></div>
+<div class="meta-item"><span class="meta-label">Generated (UTC):</span> 2026-01-01 12:00:00</div>
+<div class="meta-item"><span class="meta-label">Elapsed:</span> 6.6s</div>
+</div>
+<div class="dedup-note"><strong>Dedup:</strong> merged 0/0</div>
+</section>
+<section class="section-card">
+<div class="section-header">
+<span class="severity-badge severity-critical">Critical</span>
+<h2>Critical leak</h2>
+<span class="category">Leak</span>
+</div>
+<p class="summary">Critical item</p>
 <table>
 <thead><tr><th>Label</th><th>Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Critical</td></tr>
 </tbody>
 </table>
-<h3>Remediation</h3><ul>
+<h3 class="remediation-title">Remediation</h3><ul class="remediation-list">
 <li class="wrap">Handle now</li>
 </ul>
-<h2>[Warning] Warning leak</h2>
-<p>Warning item</p>
+</section>
+<section class="section-card">
+<div class="section-header">
+<span class="severity-badge severity-warning">Warning</span>
+<h2>Warning leak</h2>
+<span class="category">Leak</span>
+</div>
+<p class="summary">Warning item</p>
 <table>
 <thead><tr><th>Label</th><th>Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Warning</td></tr>
 </tbody>
 </table>
-<h3>Remediation</h3><ul>
+<h3 class="remediation-title">Remediation</h3><ul class="remediation-list">
 <li class="wrap">Plan remediation</li>
 </ul>
-<h2>[Info] Info signal</h2>
-<p>Informational item</p>
+</section>
+<section class="section-card">
+<div class="section-header">
+<span class="severity-badge severity-info">Info</span>
+<h2>Info signal</h2>
+<span class="category">Info</span>
+</div>
+<p class="summary">Informational item</p>
 <table>
 <thead><tr><th>Label</th><th>Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Info</td></tr>
 </tbody>
 </table>
-<h3>Remediation</h3><ul>
+<h3 class="remediation-title">Remediation</h3><ul class="remediation-list">
 <li class="wrap">Observe</li>
 </ul>
+</section>
+</main>
 </body></html>

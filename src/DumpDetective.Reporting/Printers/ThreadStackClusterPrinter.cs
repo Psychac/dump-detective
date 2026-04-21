@@ -45,7 +45,7 @@ namespace DumpDetective.Reporting.Printers
             var clusters = domain.TopClusters ?? [];
             if (clusters.Count == 0)
             {
-                writer.WriteLine("No cluster detail entries available.");
+                writer.WriteDetailText("No cluster detail entries available.");
             }
             else
             {

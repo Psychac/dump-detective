@@ -36,7 +36,7 @@ namespace DumpDetective.Reporting.Printers
             var byKind = domain.HandlesByKind ?? [];
             if (byKind.Count == 0)
             {
-                writer.WriteLine("No handle-kind distribution available.");
+                writer.WriteDetailText("No handle-kind distribution available.");
             }
             else
             {
@@ -60,7 +60,7 @@ namespace DumpDetective.Reporting.Printers
             var topTargets = domain.TopTargetTypes ?? [];
             if (topTargets.Count == 0)
             {
-                writer.WriteLine("No resolved handle target types available.");
+                writer.WriteDetailText("No resolved handle target types available.");
             }
             else
             {
@@ -83,7 +83,7 @@ namespace DumpDetective.Reporting.Printers
             var topPinned = domain.TopPinnedTargetTypes ?? [];
             if (topPinned.Count == 0)
             {
-                writer.WriteLine("No pinned-handle target type details available.");
+                writer.WriteDetailText("No pinned-handle target type details available.");
             }
             else
             {

@@ -37,7 +37,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteSeparator();
             if (domain.WaitPatternBreakdown.Count == 0)
             {
-                writer.WriteLine("No wait categories detected.");
+                writer.WriteDetailText("No wait categories detected.");
             }
             else
             {
@@ -59,7 +59,7 @@ namespace DumpDetective.Reporting.Printers
             var activeHotspots = domain.TopActiveThreadHotspots ?? [];
             if (activeHotspots.Count == 0)
             {
-                writer.WriteLine("        No active-processing hotspot frames available.");
+                writer.WriteDetailText("No active-processing hotspot frames available.", indentLevel: 4);
             }
             else
             {
@@ -104,7 +104,7 @@ namespace DumpDetective.Reporting.Printers
             var threadsWithExceptions = domain.ThreadsWithActiveExceptions ?? [];
             if (threadsWithExceptions.Count == 0)
             {
-                writer.WriteLine("No active thread exceptions detected.");
+                writer.WriteDetailText("No active thread exceptions detected.");
             }
             else
             {
@@ -130,7 +130,7 @@ namespace DumpDetective.Reporting.Printers
             var lockedThreads = domain.TopLockedThreads ?? [];
             if (lockedThreads.Count == 0)
             {
-                writer.WriteLine("No lock-holding threads detected.");
+                writer.WriteDetailText("No lock-holding threads detected.");
             }
             else
             {
@@ -151,7 +151,7 @@ namespace DumpDetective.Reporting.Printers
             blockedThreads = domain.TopBlockedThreads ?? [];
             if (blockedThreads.Count == 0)
             {
-                writer.WriteLine("No blocked-thread signatures detected.");
+                writer.WriteDetailText("No blocked-thread signatures detected.");
             }
             else
             {
@@ -194,7 +194,7 @@ namespace DumpDetective.Reporting.Printers
             var gcModeDistribution = domain.GcModeDistribution ?? new Dictionary<string, int>();
             if (gcModeDistribution.Count == 0)
             {
-                writer.WriteLine("No GC mode distribution available.");
+                writer.WriteDetailText("No GC mode distribution available.");
             }
             else
             {
@@ -215,7 +215,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteSeparator();
             if (domain.FinalizerThreadCount == 0)
             {
-                writer.WriteLine("No finalizer thread observed.");
+                writer.WriteDetailText("No finalizer thread observed.");
             }
             else
             {

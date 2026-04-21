@@ -43,25 +43,25 @@ namespace DumpDetective.Reporting.Printers
 
                     if (trace.SampleAddress.HasValue)
                     {
-                        writer.WriteLine($"    Sample Instance: 0x{trace.SampleAddress.Value:X}");
-                        writer.WriteLine($"    Type: {trace.SampleObjectType ?? StringConstants.UnknownType}");
-                        writer.WriteLine($"    Size: {FormatHelper.FormatBytes(trace.SampleObjectSize)}");
-                        writer.WriteLine(trace.HasGcRoot
-                            ? "    Status: GC root path found"
+                        writer.WriteMetric("Sample Instance", $"0x{trace.SampleAddress.Value:X}", indentLevel: 2);
+                        writer.WriteMetric("Type", trace.SampleObjectType ?? StringConstants.UnknownType, indentLevel: 2);
+                        writer.WriteMetric("Size", FormatHelper.FormatBytes(trace.SampleObjectSize), indentLevel: 2);
+                        writer.WriteMetric("Status", trace.HasGcRoot
+                            ? "GC root path found"
                             : trace.TraversalLimited
-                                ? "    Status: No GC root found (search limit reached; result inconclusive)"
-                                : "    Status: No GC root found (may be eligible for collection)");
+                                ? "No GC root found (search limit reached; result inconclusive)"
+                                : "No GC root found (may be eligible for collection)", indentLevel: 2);
 
                         if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
-                            writer.WriteLine($"    Root Path: {trace.RootPath}");
+                            writer.WritePathMetric("Root Path", trace.RootPath, indentLevel: 2);
                     }
                     else
                     {
-                        writer.WriteLine("    Sample Instance: not available");
-                        writer.WriteLine("    Status: Sample instance unavailable for tracing");
+                        writer.WriteMetric("Sample Instance", "not available", indentLevel: 2);
+                        writer.WriteMetric("Status", "Sample instance unavailable for tracing", indentLevel: 2);
                     }
 
-                    writer.WriteLine(string.Empty);
+                    writer.WriteDetailBlank();
                 }
             }
 
@@ -79,7 +79,7 @@ namespace DumpDetective.Reporting.Printers
             var chains = domain.SampleReferenceChains ?? [];
             if (chains.Count == 0)
             {
-                writer.WriteLine("No sampled GC-root chain paths were captured.");
+                writer.WriteDetailText("No sampled GC-root chain paths were captured.");
             }
             else
             {

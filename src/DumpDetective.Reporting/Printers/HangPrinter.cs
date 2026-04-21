@@ -44,7 +44,7 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteSeparator();
             if (domain.WaitCategoryBreakdown.Count == 0)
             {
-                writer.WriteLine("No waiting categories detected.");
+                writer.WriteDetailText("No waiting categories detected.");
             }
             else
             {
@@ -80,7 +80,7 @@ namespace DumpDetective.Reporting.Printers
             var waitingThreads = domain.TopWaitingThreads ?? [];
             if (waitingThreads.Count == 0)
             {
-                writer.WriteLine("No waiting-thread details available.");
+                writer.WriteDetailText("No waiting-thread details available.");
             }
             else
             {
@@ -102,7 +102,7 @@ namespace DumpDetective.Reporting.Printers
             var continuationTypes = domain.TopContinuationTypes ?? [];
             if (continuationTypes.Count == 0)
             {
-                writer.WriteLine("No continuation-type signatures detected.");
+                writer.WriteDetailText("No continuation-type signatures detected.");
             }
             else
             {

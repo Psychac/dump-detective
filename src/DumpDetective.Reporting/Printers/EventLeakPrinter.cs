@@ -34,7 +34,7 @@ namespace DumpDetective.Reporting.Printers
             var topGroups = domain.TopPublisherEventsBySubscribers ?? [];
             if (topGroups.Count == 0)
             {
-                writer.WriteLine("No publisher/event detail groups available.");
+                writer.WriteDetailText("No publisher/event detail groups available.");
             }
             else
             {
@@ -48,7 +48,7 @@ namespace DumpDetective.Reporting.Printers
             var leakGroups = domain.TopLeakGroups ?? [];
             if (leakGroups.Count == 0)
             {
-                writer.WriteLine("No event-group summaries available.");
+                writer.WriteDetailText("No event-group summaries available.");
             }
             else
             {
@@ -80,7 +80,7 @@ namespace DumpDetective.Reporting.Printers
             var leakInstances = domain.TopLeakInstances ?? [];
             if (leakInstances.Count == 0)
             {
-                writer.WriteLine("No per-instance leak details available.");
+                writer.WriteDetailText("No per-instance leak details available.");
             }
             else
             {

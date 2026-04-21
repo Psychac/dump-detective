@@ -28,7 +28,7 @@ namespace DumpDetective.Reporting.Printers
             var roots = domain.TopRootsByRetainedBytes ?? [];
             if (roots.Count == 0)
             {
-                writer.WriteLine("No root-level retained-byte breakdown available.");
+                writer.WriteDetailText("No root-level retained-byte breakdown available.");
             }
             else
             {

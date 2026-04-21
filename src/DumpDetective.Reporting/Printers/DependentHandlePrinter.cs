@@ -28,7 +28,7 @@ namespace DumpDetective.Reporting.Printers
             var sources = domain.TopSourceTypes ?? [];
             if (sources.Count == 0)
             {
-                writer.WriteLine("No source-type distribution available.");
+                writer.WriteDetailText("No source-type distribution available.");
             }
             else
             {
@@ -42,7 +42,7 @@ namespace DumpDetective.Reporting.Printers
             var targets = domain.TopTargetTypes ?? [];
             if (targets.Count == 0)
             {
-                writer.WriteLine("No target-type distribution available.");
+                writer.WriteDetailText("No target-type distribution available.");
             }
             else
             {
@@ -56,7 +56,7 @@ namespace DumpDetective.Reporting.Printers
             var edges = domain.TopSourceTargetEdges ?? [];
             if (edges.Count == 0)
             {
-                writer.WriteLine("No source-target edge breakdown available.");
+                writer.WriteDetailText("No source-target edge breakdown available.");
             }
             else
             {

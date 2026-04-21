@@ -56,7 +56,7 @@ namespace DumpDetective.Reporting.Printers
             var candidates = domain.TopCrashThreadCandidates ?? [];
             if (candidates.Count == 0)
             {
-                writer.WriteLine("No active crash-thread candidates were detected.");
+                writer.WriteDetailText("No active crash-thread candidates were detected.");
             }
             else
             {
@@ -85,7 +85,7 @@ namespace DumpDetective.Reporting.Printers
             var instances = domain.TopExceptionInstances ?? [];
             if (instances.Count == 0)
             {
-                writer.WriteLine("No sampled exception instances available.");
+                writer.WriteDetailText("No sampled exception instances available.");
             }
             else
             {

@@ -29,7 +29,7 @@ namespace DumpDetective.Reporting.Printers
             var topTypes = domain.TopContestedLockTypes ?? [];
             if (topTypes.Count == 0)
             {
-                writer.WriteLine("No contested lock hotspot details available.");
+                writer.WriteDetailText("No contested lock hotspot details available.");
             }
             else
             {

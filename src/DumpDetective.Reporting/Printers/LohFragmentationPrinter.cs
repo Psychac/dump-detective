@@ -40,7 +40,7 @@ namespace DumpDetective.Reporting.Printers
             var segments = domain.TopFragmentedSegments ?? [];
             if (segments.Count == 0)
             {
-                writer.WriteLine("No segment-level fragmentation details available.");
+                writer.WriteDetailText("No segment-level fragmentation details available.");
             }
             else
             {

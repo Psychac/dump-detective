@@ -145,6 +145,8 @@ public sealed class ReportingCompositionTests
             GeneratedAtUtc: DateTime.UtcNow,
             Elapsed: TimeSpan.FromSeconds(1),
             Sections: [],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 0, 0, []),
             DetailedAnalyzerSections:
             [

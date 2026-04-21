@@ -16,11 +16,12 @@ internal sealed class ReportBuilderFacade(
     private readonly IReadOnlyList<IAnalyzerReporter> _reporters = reporterFactory.CreateReporters();
     private readonly TrendReportComposer _trendReportComposer = trendReportComposer;
 
-    public string BuildRenderedReport(string dumpPath, ReportFormat format, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed, CancellationToken cancellationToken)
+    public string BuildRenderedReport(string dumpPath, ReportFormat format, ReportAudience audience, IReadOnlyList<AnalyzerRunResult> runs, TimeSpan elapsed, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         ComposedReport report = ReportBuilder.ComposeCanonicalReport(dumpPath, runs, elapsed, _reporters);
+        report = ApplyAudience(report, audience);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 
@@ -31,6 +32,7 @@ internal sealed class ReportBuilderFacade(
     public string BuildRenderedTrendReport(
         string dumpPath,
         ReportFormat format,
+        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
         TrendReportData trendData,
@@ -44,11 +46,30 @@ internal sealed class ReportBuilderFacade(
             elapsed,
             _reporters,
             trendData);
+        report = ApplyAudience(report, audience);
 
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 
         cancellationToken.ThrowIfCancellationRequested();
         return formatter.Render(report);
+    }
+
+    private static ComposedReport ApplyAudience(ComposedReport report, ReportAudience audience)
+    {
+        return audience switch
+        {
+            ReportAudience.Executive => report with
+            {
+                DeveloperActionPlan = [],
+                Sections = [],
+                DetailedAnalyzerSections = []
+            },
+            ReportAudience.Developer => report with
+            {
+                DetailedAnalyzerSections = []
+            },
+            _ => report
+        };
     }
 }

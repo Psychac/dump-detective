@@ -243,7 +243,8 @@ internal sealed class ConfigurationResolver
     {
         return new ReportOptions
         {
-            Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html
+            Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html,
+            Audience = config.Report?.Audience ?? ParseReportAudience(config.ReportAudience) ?? request.ReportAudience ?? ReportAudience.All
         };
     }
 
@@ -251,7 +252,8 @@ internal sealed class ConfigurationResolver
     {
         return new ReportOptions
         {
-            Format = request.OutputFormat ?? ReportFormat.Html
+            Format = request.OutputFormat ?? ReportFormat.Html,
+            Audience = request.ReportAudience ?? ReportAudience.All
         };
     }
 
@@ -265,6 +267,23 @@ internal sealed class ConfigurationResolver
         };
 
         return Path.ChangeExtension(dumpPath, extension);
+    }
+
+    private static ReportAudience? ParseReportAudience(string? audience)
+    {
+        if (string.IsNullOrWhiteSpace(audience))
+        {
+            return null;
+        }
+
+        return audience.Trim().ToLowerInvariant() switch
+        {
+            "all" => ReportAudience.All,
+            "executive" or "exec" => ReportAudience.Executive,
+            "developer" or "dev" => ReportAudience.Developer,
+            "deep" or "full" => ReportAudience.Deep,
+            _ => throw new ArgumentException($"Invalid ReportAudience value '{audience}' in config.")
+        };
     }
 
     private static ReportFormat? ParseReportFormat(string? format)
@@ -310,11 +329,13 @@ internal sealed class CliConfigurationFileModel
     public bool? EnableMemoryDiagnostics { get; init; }
     public bool? EnablePerformanceDiagnostics { get; init; }
     public string? ReportFormat { get; init; }
+    public string? ReportAudience { get; init; }
 }
 
 internal sealed class ReportOptionsModel
 {
     public ReportFormat Format { get; init; } = ReportFormat.Html;
+    public ReportAudience Audience { get; init; } = ReportAudience.All;
 }
 
 [JsonSourceGenerationOptions(

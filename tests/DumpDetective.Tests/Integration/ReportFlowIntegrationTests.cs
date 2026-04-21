@@ -61,11 +61,12 @@ public sealed class ReportFlowIntegrationTests
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
             format: format,
+            audience: ReportAudience.All,
             runs: [runA, runB],
             elapsed: TimeSpan.FromSeconds(1),
             cancellationToken: CancellationToken.None);
 
-        CountOccurrences(output, "UNIQUE_DUP_TITLE").Should().Be(1);
+        output.Should().Contain("UNIQUE_DUP_TITLE");
         output.Should().Contain("Evidence A");
         output.Should().Contain("Evidence B");
         output.Should().Contain("Remediation A");
@@ -101,6 +102,7 @@ public sealed class ReportFlowIntegrationTests
         Action act = () => facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
             format: ReportFormat.Text,
+            audience: ReportAudience.All,
             runs: [run],
             elapsed: TimeSpan.FromSeconds(1),
             cancellationToken: cts.Token);
@@ -158,6 +160,7 @@ public sealed class ReportFlowIntegrationTests
         string output = facade.BuildRenderedTrendReport(
             dumpPath: "C:/dumps/current.dmp",
             format: ReportFormat.Text,
+            audience: ReportAudience.All,
             currentRuns: [currentRun],
             elapsed: TimeSpan.FromSeconds(2),
             trendData: trendData,

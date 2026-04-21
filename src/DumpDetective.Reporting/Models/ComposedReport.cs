@@ -7,6 +7,8 @@ internal sealed record ComposedReport(
     DateTime GeneratedAtUtc,
     TimeSpan Elapsed,
     IReadOnlyList<ReportSection> Sections,
+    IReadOnlyList<ExecutiveSummaryItem> ExecutiveSummary,
+    IReadOnlyList<DeveloperActionItem> DeveloperActionPlan,
     DedupDiagnostics DedupDiagnostics,
     string ReportSchemaVersion = ReportContractVersions.ReportSchemaV1,
     string SectionSchemaVersion = ReportContractVersions.SectionSchemaV1,
@@ -32,6 +34,14 @@ internal sealed record ReportSection(
     IReadOnlyList<string> Fingerprints);
 
 internal sealed record ReportEvidenceRow(string Label, string Value);
+
+internal sealed record ExecutiveSummaryItem(string Label, string Value);
+
+internal sealed record DeveloperActionItem(
+    string Priority,
+    string Title,
+    string Action,
+    string Impact);
 
 internal sealed record DetailedAnalyzerSection(
     string Title,

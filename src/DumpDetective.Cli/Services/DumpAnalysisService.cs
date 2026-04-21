@@ -126,6 +126,7 @@ internal sealed class DumpAnalysisService(
         string renderedReport = _reportBuilderFacade.BuildRenderedReport(
             resolved.DumpPath,
             resolved.Report.Format,
+            resolved.Report.Audience,
             runs,
             stopwatch.Elapsed,
             cancellationToken);
@@ -248,6 +249,7 @@ internal sealed class DumpAnalysisService(
         string renderedReport = _reportBuilderFacade.BuildRenderedTrendReport(
             trendDumpPaths[^1],
             resolved.Report.Format,
+            resolved.Report.Audience,
             currentRuns,
             totalStopwatch.Elapsed,
             trendData,

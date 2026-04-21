@@ -44,6 +44,30 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
+        if (report.ExecutiveSummary.Count > 0)
+        {
+            lines.Add("EXECUTIVE SUMMARY");
+            lines.Add(new string('=', 100));
+            foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
+            {
+                lines.Add($"- {item.Label}: {item.Value}");
+            }
+            lines.Add(string.Empty);
+        }
+
+        if (report.DeveloperActionPlan.Count > 0)
+        {
+            lines.Add("DEVELOPER ACTION PLAN");
+            lines.Add(new string('=', 100));
+            foreach (DeveloperActionItem action in report.DeveloperActionPlan)
+            {
+                lines.Add($"[{action.Priority}] {action.Title}");
+                lines.Add($"  Action: {action.Action}");
+                lines.Add($"  Impact: {action.Impact}");
+                lines.Add(string.Empty);
+            }
+        }
+
         foreach (ReportSection section in report.Sections)
         {
             lines.Add($"[{section.Severity}] {section.Title} ({section.Category})");
@@ -72,6 +96,30 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                 }
             }
 
+            lines.Add(string.Empty);
+        }
+
+        if (report.ExecutiveSummary.Count > 0)
+        {
+            lines.Add("## Executive summary");
+            lines.Add(string.Empty);
+            foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
+            {
+                lines.Add($"- **{item.Label}:** {item.Value}");
+            }
+            lines.Add(string.Empty);
+        }
+
+        if (report.DeveloperActionPlan.Count > 0)
+        {
+            lines.Add("## Developer action plan");
+            lines.Add(string.Empty);
+            foreach (DeveloperActionItem action in report.DeveloperActionPlan)
+            {
+                lines.Add($"- **{action.Priority}** {action.Title}");
+                lines.Add($"  - Action: {action.Action}");
+                lines.Add($"  - Impact: {action.Impact}");
+            }
             lines.Add(string.Empty);
         }
 
@@ -325,6 +373,32 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 string dumpList = string.Join("<br/>", report.TrendDumpPaths.Select(p => $"• {Encode(p)}"));
                 lines.Insert(lines.Count - 1, $"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
             }
+        }
+
+        if (report.ExecutiveSummary.Count > 0)
+        {
+            lines.Add("<section class=\"section-card\">");
+            lines.Add("<h2>Executive summary</h2>");
+            lines.Add("<table><thead><tr><th>Signal</th><th>Value</th></tr></thead><tbody>");
+            foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
+            {
+                lines.Add($"<tr><td>{Encode(item.Label)}</td><td class=\"wrap\">{Encode(item.Value)}</td></tr>");
+            }
+            lines.Add("</tbody></table>");
+            lines.Add("</section>");
+        }
+
+        if (report.DeveloperActionPlan.Count > 0)
+        {
+            lines.Add("<section class=\"section-card\">");
+            lines.Add("<h2>Developer action plan</h2>");
+            lines.Add("<table><thead><tr><th>Priority</th><th>Title</th><th>Action</th><th>Impact</th></tr></thead><tbody>");
+            foreach (DeveloperActionItem action in report.DeveloperActionPlan)
+            {
+                lines.Add($"<tr><td>{Encode(action.Priority)}</td><td>{Encode(action.Title)}</td><td class=\"wrap\">{Encode(action.Action)}</td><td class=\"wrap\">{Encode(action.Impact)}</td></tr>");
+            }
+            lines.Add("</tbody></table>");
+            lines.Add("</section>");
         }
 
         foreach (ReportSection section in report.Sections)

@@ -47,6 +47,10 @@ internal sealed class RootCommandBuilder
         Description = "Comma-separated analyzer names to exclude."
     };
     private readonly Option<string?> _reportFormatOption = new("--report-format");
+    private readonly Option<string?> _reportAudienceOption = new("--report-audience")
+    {
+        Description = "Audience tier: all, executive, developer, or deep."
+    };
     private readonly Option<string?> _outputPathOption = new("--output");
 
     public RootCommand Build()
@@ -70,6 +74,7 @@ internal sealed class RootCommandBuilder
             _includeAnalyzersOption,
             _excludeAnalyzersOption,
             _reportFormatOption,
+            _reportAudienceOption,
             _outputPathOption
         };
 
@@ -96,7 +101,8 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_referenceChainMaxPathSearchObjectsOption),
             parseResult.GetValue(_eventLeakMinSubscribersOption),
             parseResult.GetValue(_memoryDiagnosticsOption),
-            parseResult.GetValue(_performanceDiagnosticsOption));
+            parseResult.GetValue(_performanceDiagnosticsOption),
+            ParseReportAudience(parseResult.GetValue(_reportAudienceOption)));
     }
 
     private static IReadOnlyList<string>? ParseTrend(string? value)
@@ -138,6 +144,23 @@ internal sealed class RootCommandBuilder
             "markdown" or "md" => ReportFormat.Markdown,
             "html" or "htm" => ReportFormat.Html,
             _ => throw new ArgumentException($"Invalid report format '{value}'. Expected text, markdown, or html.")
+        };
+    }
+
+    private static ReportAudience? ParseReportAudience(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "all" => ReportAudience.All,
+            "executive" or "exec" => ReportAudience.Executive,
+            "developer" or "dev" => ReportAudience.Developer,
+            "deep" or "full" => ReportAudience.Deep,
+            _ => throw new ArgumentException($"Invalid report audience '{value}'. Expected all, executive, developer, or deep.")
         };
     }
 }

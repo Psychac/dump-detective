@@ -20,4 +20,5 @@ internal sealed record AnalysisCommandRequest(
     int? ReferenceChainMaxPathSearchObjects,
     int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
-    bool EnablePerformanceDiagnostics);
+    bool EnablePerformanceDiagnostics,
+    ReportAudience? ReportAudience = null);

@@ -80,15 +80,172 @@ namespace DumpDetective.Reporting.Services
                 EvidenceBeforeMerge = evidenceBeforeMerge
             };
 
+            IReadOnlyList<ExecutiveSummaryItem> executiveSummary = BuildExecutiveSummary(deduped);
+            IReadOnlyList<DeveloperActionItem> developerActions = BuildDeveloperActionPlan(deduped);
+
             return new ComposedReport(
                 dumpPath,
                 DateTime.UtcNow,
                 elapsed,
                 deduped,
+                executiveSummary,
+                developerActions,
                 normalizedDiagnostics,
                 ReportContractVersions.ReportSchemaV1,
                 ReportContractVersions.SectionSchemaV1,
                 detailedAnalyzerSections);
+        }
+
+        private static IReadOnlyList<ExecutiveSummaryItem> BuildExecutiveSummary(IReadOnlyList<ReportSection> sections)
+        {
+            int critical = sections.Count(s => s.Severity == FindingSeverity.Critical);
+            int warning = sections.Count(s => s.Severity == FindingSeverity.Warning);
+            int info = sections.Count(s => s.Severity == FindingSeverity.Info);
+            int total = sections.Count;
+
+            string overallHealth = critical > 0
+                ? "Critical - production risk is currently elevated"
+                : warning > 0
+                    ? "Watch - degrading signals detected"
+                    : "Stable - no immediate high-risk signal";
+
+            ReportSection? topRiskSection = sections
+                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            IReadOnlyList<ReportSection> topRisks = sections
+                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .Take(3)
+                .ToList();
+
+            IReadOnlyList<ReportSection> actionQueue = sections
+                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .Take(5)
+                .ToList();
+
+            string topRisk = topRiskSection is null
+                ? "No high-severity issues were found."
+                : $"Most urgent issue: [{topRiskSection.Severity}] {topRiskSection.Title} ({topRiskSection.Category}).";
+
+            string topRiskEvidence = topRiskSection is null
+                ? "No critical/warning evidence requires immediate escalation."
+                : $"Signal: {topRiskSection.NarrativeSummary}";
+
+            string businessImpact = topRiskSection is null
+                ? "Current dump does not show immediate service disruption risks."
+                : topRiskSection.Category switch
+                {
+                    "Leak" or "Memory" or "Fragmentation" => "Potential stability and performance degradation due to memory pressure.",
+                    "Crash" or "Stability" => "Potential user-facing failures and service interruptions.",
+                    "Hang" or "Threading" or "Retention" => "Potential response-time degradation and request processing delays.",
+                    _ => "Potential reliability degradation if highlighted issues are not addressed."
+                };
+
+            string primaryRisks = topRisks.Count == 0
+                ? "No critical/warning risks identified."
+                : string.Join("; ", topRisks.Select(s => $"[{s.Severity}] {s.Title}"));
+
+            var topCategoryGroup = sections
+                .GroupBy(s => s.Category, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            string riskConcentration = topCategoryGroup is null
+                ? "No risk concentration detected."
+                : $"{topCategoryGroup.Key} contributes {topCategoryGroup.Count():N0}/{total:N0} findings ({(topCategoryGroup.Count() * 100.0 / total):F1}%).";
+
+            string urgencyWindow = critical > 0
+                ? "Action window: immediate (same day) for critical items."
+                : warning >= 3
+                    ? "Action window: next sprint to prevent escalation."
+                    : warning > 0
+                        ? "Action window: planned remediation cycle."
+                        : "Action window: monitor via regular health checks.";
+
+            string keyThemes = sections
+                .GroupBy(s => s.Category, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.Ordinal)
+                .Take(3)
+                .Select(g => $"{g.Key} ({g.Count()})")
+                .DefaultIfEmpty("No dominant risk themes")
+                .Aggregate((a, b) => $"{a}, {b}");
+
+            string severityMix = total == 0
+                ? "No findings generated."
+                : $"High-severity share: {critical + warning:N0}/{total:N0} ({((critical + warning) * 100.0 / total):F1}%).";
+
+            string actionQueueSummary = actionQueue.Count == 0
+                ? "No immediate remediation queue."
+                : string.Join(" | ", actionQueue.Select(s => $"{(s.Severity == FindingSeverity.Critical ? "P0" : "P1")}: {s.Title}"));
+
+            string nextStep = critical > 0
+                ? "Address critical items first, then re-run analysis to confirm risk reduction."
+                : warning > 0
+                    ? "Triage warning items by business impact and schedule remediation."
+                    : "Maintain current safeguards and continue periodic monitoring.";
+
+            string leadershipDecision = critical > 0
+                ? "Recommended leadership decision: prioritize reliability stabilization over feature throughput until P0 risks are reduced."
+                : warning >= 3
+                    ? "Recommended leadership decision: allocate focused engineering capacity in the next sprint for risk burn-down."
+                    : "Recommended leadership decision: continue planned delivery while monitoring current risk profile.";
+
+            return
+            [
+                new ExecutiveSummaryItem("Overall health", overallHealth),
+                new ExecutiveSummaryItem("What this means", businessImpact),
+                new ExecutiveSummaryItem("Risk counts", $"Critical: {critical:N0}, Warning: {warning:N0}, Info: {info:N0}"),
+                new ExecutiveSummaryItem("Severity mix", severityMix),
+                new ExecutiveSummaryItem("Top risk", topRisk),
+                new ExecutiveSummaryItem("Top risk signal", topRiskEvidence),
+                new ExecutiveSummaryItem("Primary risks", primaryRisks),
+                new ExecutiveSummaryItem("Risk concentration", riskConcentration),
+                new ExecutiveSummaryItem("Key themes", keyThemes),
+                new ExecutiveSummaryItem("Immediate action queue", actionQueueSummary),
+                new ExecutiveSummaryItem("Urgency", urgencyWindow),
+                new ExecutiveSummaryItem("Recommended next step", nextStep),
+                new ExecutiveSummaryItem("Decision guidance", leadershipDecision)
+            ];
+        }
+
+        private static IReadOnlyList<DeveloperActionItem> BuildDeveloperActionPlan(IReadOnlyList<ReportSection> sections)
+        {
+            var prioritized = sections
+                .Where(s => s.RemediationHints.Count > 0)
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .Take(10)
+                .ToList();
+
+            List<DeveloperActionItem> actions = new(prioritized.Count);
+            foreach (ReportSection section in prioritized)
+            {
+                string priority = section.Severity switch
+                {
+                    FindingSeverity.Critical => "P0",
+                    FindingSeverity.Warning => "P1",
+                    _ => "P2"
+                };
+
+                actions.Add(new DeveloperActionItem(
+                    Priority: priority,
+                    Title: section.Title,
+                    Action: section.RemediationHints[0],
+                    Impact: section.NarrativeSummary));
+            }
+
+            return actions;
         }
 
         private static IReadOnlyList<DetailedAnalyzerSection> BuildDetailedAnalyzerSections(IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<IAnalyzerReporter> reporters)

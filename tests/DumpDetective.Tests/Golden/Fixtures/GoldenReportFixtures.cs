@@ -39,6 +39,8 @@ internal static class GoldenReportFixtures
                     RemediationHints: ["Pool repeated string payloads."],
                     Fingerprints: ["baseline-small"])
             ],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 2, 2, []));
 
     private static ComposedReport DuplicateHeavy() =>
@@ -62,6 +64,8 @@ internal static class GoldenReportFixtures
                     RemediationHints: ["Deduplicate payload cache keys.", "Review object retention roots."],
                     Fingerprints: ["dup-heavy"])
             ],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(3, 3, 8, 2, ["dup-heavy"]));
 
     private static ComposedReport LongNames() =>
@@ -85,6 +89,8 @@ internal static class GoldenReportFixtures
                     RemediationHints: ["Keep full value visibility; do not truncate."],
                     Fingerprints: ["long-names"])
             ],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 2, 2, []));
 
     private static ComposedReport RichEvidence() =>
@@ -109,6 +115,8 @@ internal static class GoldenReportFixtures
                     RemediationHints: ["Guard null dereferences.", "Add targeted telemetry around request processing."],
                     Fingerprints: ["rich-evidence"])
             ],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 3, 3, []));
 
     private static ComposedReport MixedSeverity() =>
@@ -122,5 +130,7 @@ internal static class GoldenReportFixtures
                 new ReportSection("sev-warning", "Warning leak", "Leak", FindingSeverity.Warning, "Warning item", [new ReportEvidenceRow("Item", "Warning")], ["Plan remediation"], ["sev-warning"]),
                 new ReportSection("sev-info", "Info signal", "Info", FindingSeverity.Info, "Informational item", [new ReportEvidenceRow("Item", "Info")], ["Observe"], ["sev-info"])
             ],
+            ExecutiveSummary: [],
+            DeveloperActionPlan: [],
             DedupDiagnostics: new DedupDiagnostics(0, 0, 3, 3, []));
 }

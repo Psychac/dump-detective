@@ -5,6 +5,8 @@ namespace DumpDetective.Analyzers
 {
     internal sealed class EventLeakPrinter : IAnalyzerReporter
     {
+        private const int MaxEventTypeSummaryGroups = 10;
+
         public string AnalyzerName => "Event Leak Analysis";
 
         public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;
@@ -47,9 +49,11 @@ namespace DumpDetective.Analyzers
             }
             else
             {
+                int groupsToShow = Math.Min(MaxEventTypeSummaryGroups, leakGroups.Count);
                 int idx = 1;
-                foreach (var group in leakGroups)
+                for (int i = 0; i < groupsToShow; i++)
                 {
+                    var group = leakGroups[i];
                     string shape = group.IsStatic ? "STATIC" : "INSTANCE";
                     writer.WriteLine($"[{idx}] [{shape}] {group.PublisherType}.{group.EventFieldName} (Severity: {group.SeverityScore:N0})");
                     writer.WriteLine($"  Instance Count: {group.InstanceCount:N0}");
@@ -66,6 +70,11 @@ namespace DumpDetective.Analyzers
 
                     writer.WriteLine(string.Empty);
                     idx++;
+                }
+
+                if (leakGroups.Count > groupsToShow)
+                {
+                    writer.WriteLine($"Showing top {groupsToShow:N0} event types by leak severity. {leakGroups.Count - groupsToShow:N0} additional event type(s) omitted.");
                 }
             }
 

@@ -8,6 +8,7 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class EventLeakPrinter : IAnalyzerReporter
     {
         private const int MaxEventTypeSummaryGroups = 10;
+        private const int MaxTopLeakInstances = 10;
 
         public string AnalyzerName => "Event Leak Analysis";
 
@@ -93,9 +94,11 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
+                int instancesToShow = Math.Min(MaxTopLeakInstances, leakInstances.Count);
                 int idx = 1;
-                foreach (var instance in leakInstances)
+                for (int i = 0; i < instancesToShow; i++)
                 {
+                    var instance = leakInstances[i];
                     string shape = instance.IsStatic ? "STATIC" : "INSTANCE";
                     string address = instance.IsStatic ? "(static)" : $"0x{instance.PublisherAddress:X}";
                     writer.WriteDetailText($"[{idx}] [{shape}] {instance.PublisherType}.{instance.EventFieldName}");
@@ -114,6 +117,11 @@ namespace DumpDetective.Reporting.Printers
 
                     writer.WriteDetailBlank();
                     idx++;
+                }
+
+                if (leakInstances.Count > instancesToShow)
+                {
+                    writer.WriteDetailText($"Showing top {instancesToShow:N0} leak instance(s) by severity. {leakInstances.Count - instancesToShow:N0} additional leak instance(s) omitted.");
                 }
             }
 

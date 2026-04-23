@@ -1,6 +1,6 @@
 namespace DumpDetective.Core.Models;
 
-internal sealed class CachedTypeStatistics
+public sealed class CachedTypeStatistics
 {
     public string TypeName { get; set; } = string.Empty;
     public int Count { get; set; }

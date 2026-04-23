@@ -2,19 +2,19 @@ using DumpDetective.Core.Models;
 
 namespace DumpDetective.Core.Abstractions;
 
-internal interface IAnalysisDiagnosticsSink
+public interface IAnalysisDiagnosticsSink
 {
     void Publish(AnalysisDiagnosticsEvent diagnosticsEvent);
 }
 
-internal sealed class NullAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
+public sealed class NullAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
 {
     public static NullAnalysisDiagnosticsSink Instance { get; } = new();
 
     public void Publish(AnalysisDiagnosticsEvent diagnosticsEvent) { }
 }
 
-internal sealed class InMemoryAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
+public sealed class InMemoryAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
 {
     private readonly List<AnalysisDiagnosticsEvent> _events = [];
     private readonly Lock _gate = new();

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -6,7 +7,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class CrashAnalyzer : IAnalyzer
+public class CrashAnalyzer : IAnalyzer
     {
         private const int MaxExceptionsPerType = 10;
         private const int TopExceptionTypesCount = 10;
@@ -21,13 +22,18 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
         public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            var exceptionInfo = AnalyzeExceptions(heap, runtime);
+            return Analyze(runtime, heap, cache: null);
+        }
+
+        private AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            var exceptionInfo = AnalyzeExceptions(heap, runtime, cache);
 
             var domainResult = new CrashDomainResult(
                 exceptionInfo.TotalExceptions,
@@ -125,32 +131,37 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "active-exceptions");
         }
 
-        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime)
+        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache)
         {
             var analysis = new ExceptionAnalysis();
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
             var exceptionTypeCounts = new Dictionary<string, int>();
             var activeExceptionTypeCounts = new Dictionary<string, int>();
+            var exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
             var activeExceptions = BuildActiveExceptionLookup(runtime);
             var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
             var scanCounter = new ObjectScanCounter("Crash exception scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (HeapEntry entry in EnumerateCrashEntries(heap, cache))
             {
                 scanCounter.Tick();
 
-                if (!obj.IsValid || obj.Type == null)
+                ulong exceptionAddress = entry.Address;
+                if (exceptionAddress == 0)
                     continue;
 
                 // Check if object is an exception
-                string? typeName = obj.Type.Name;
+                if (!IsExceptionEntry(heap, entry, exceptionMethodTables))
+                    continue;
+
+                string? typeName = heap.GetObject(exceptionAddress).Type?.Name;
                 if (typeName?.Contains("Exception", StringComparison.Ordinal) == true)
                 {
                     analysis.TotalExceptions++;
                     exceptionTypeCounts.TryGetValue(typeName, out int typeCount);
                     exceptionTypeCounts[typeName] = typeCount + 1;
 
-                    bool isActive = activeExceptions.TryGetValue(obj.Address, out var activeExceptionContext);
+                    bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeExceptionContext);
                     if (isActive)
                     {
                         analysis.ActiveExceptions++;
@@ -183,7 +194,7 @@ namespace DumpDetective.Analysis.Analyzers
                     // Always include active exceptions, even beyond the cap.
                     if (list.Count < MaxExceptionsPerType || isActive)
                     {
-                        var exceptionInstance = ExtractExceptionInfo(obj, activeExceptionContext);
+                        var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, activeExceptionContext);
                         list.Add(exceptionInstance);
                     }
                 }
@@ -214,6 +225,44 @@ namespace DumpDetective.Analysis.Analyzers
             return analysis;
         }
 
+        private static IEnumerable<HeapEntry> EnumerateCrashEntries(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+            {
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
+            }
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
+        }
+
+        private static bool IsExceptionEntry(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, bool> exceptionMethodTables)
+        {
+            if (entry.MethodTable == 0)
+                return false;
+
+            if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
+                return isException;
+
+            ClrObject obj = heap.GetObject(entry.Address);
+            string? typeName = obj.IsValid ? obj.Type?.Name : null;
+            isException = typeName?.Contains("Exception", StringComparison.Ordinal) == true;
+            exceptionMethodTables[entry.MethodTable] = isException;
+            return isException;
+        }
+
         private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)
         {
             var lookup = new Dictionary<ulong, ActiveExceptionContext>();
@@ -239,13 +288,18 @@ namespace DumpDetective.Analysis.Analyzers
             return lookup;
         }
 
-        private ExceptionInstance ExtractExceptionInfo(ClrObject exceptionObj, ActiveExceptionContext? activeContext)
+        private ExceptionInstance ExtractExceptionInfo(ClrHeap heap, ulong exceptionAddress, ActiveExceptionContext? activeContext)
         {
+            ClrObject exceptionObj = heap.GetObject(exceptionAddress);
+
             var instance = new ExceptionInstance
             {
-                Address = exceptionObj.Address,
+                Address = exceptionAddress,
                 Type = exceptionObj.Type?.Name ?? StringConstants.UnknownType
             };
+
+            if (!exceptionObj.IsValid || exceptionObj.Type == null)
+                return instance;
 
             try
             {
@@ -279,7 +333,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 // Get the ORIGINAL stack trace from exception object (not thread stack)
-                instance.OriginalStackTrace = ExtractExceptionStackTrace(exceptionObj);
+                instance.OriginalStackTrace = ExtractExceptionStackTrace(heap, exceptionAddress);
 
                 if (activeContext != null)
                 {
@@ -296,9 +350,13 @@ namespace DumpDetective.Analysis.Analyzers
             return instance;
         }
 
-        private List<string> ExtractExceptionStackTrace(ClrObject exceptionObj)
+        private List<string> ExtractExceptionStackTrace(ClrHeap heap, ulong exceptionAddress)
         {
             var stackFrames = new List<string>();
+
+            ClrObject exceptionObj = heap.GetObject(exceptionAddress);
+            if (!exceptionObj.IsValid || exceptionObj.Type == null)
+                return stackFrames;
 
             try
             {

@@ -1,4 +1,5 @@
 using DumpDetective.Core.Configuration;
+using DumpDetective.Analysis.Indexing;
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
@@ -51,6 +52,10 @@ internal sealed class RootCommandBuilder
     {
         Description = "Audience tier: all, executive, developer, or deep."
     };
+    private readonly Option<string?> _indexModeOption = new("--index-mode")
+    {
+        Description = "Indexing mode: auto, memory, or disk."
+    };
     private readonly Option<string?> _outputPathOption = new("--output");
 
     public RootCommand Build()
@@ -75,6 +80,7 @@ internal sealed class RootCommandBuilder
             _excludeAnalyzersOption,
             _reportFormatOption,
             _reportAudienceOption,
+            _indexModeOption,
             _outputPathOption
         };
 
@@ -102,7 +108,8 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_eventLeakMinSubscribersOption),
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
-            ParseReportAudience(parseResult.GetValue(_reportAudienceOption)));
+            ParseReportAudience(parseResult.GetValue(_reportAudienceOption)),
+            ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)));
     }
 
     private static IReadOnlyList<string>? ParseTrend(string? value)
@@ -161,6 +168,22 @@ internal sealed class RootCommandBuilder
             "developer" or "dev" => ReportAudience.Developer,
             "deep" or "full" => ReportAudience.Deep,
             _ => throw new ArgumentException($"Invalid report audience '{value}'. Expected all, executive, developer, or deep.")
+        };
+    }
+
+    private static HeapIndexPrebuildMode? ParseHeapIndexMode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "auto" => HeapIndexPrebuildMode.Auto,
+            "memory" or "mem" => HeapIndexPrebuildMode.Memory,
+            "disk" => HeapIndexPrebuildMode.Disk,
+            _ => throw new ArgumentException($"Invalid index mode '{value}'. Expected auto, memory, or disk.")
         };
     }
 }

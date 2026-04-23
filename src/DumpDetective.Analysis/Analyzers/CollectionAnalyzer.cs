@@ -1,4 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -6,7 +7,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class CollectionAnalyzer : IAnalyzer
+public class CollectionAnalyzer : IAnalyzer
     {
         private const ulong WasteThresholdBytes = 10 * 1024;           // 10 KB per collection
         private const ulong SummaryWarnThresholdBytes = 10 * 1024 * 1024; // 10 MB total
@@ -17,13 +18,18 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap);
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {
-            var collectionStats = AnalyzeCollections(heap);
+            return Analyze(heap, cache: null);
+        }
+
+        private AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            var collectionStats = AnalyzeCollections(heap, cache);
             var domainResult = new CollectionDomainResult(
                 collectionStats.TotalCollections,
                 collectionStats.Dictionaries,
@@ -82,59 +88,61 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "wasted-bytes");
         }
 
-        private CollectionStatistics AnalyzeCollections(ClrHeap heap)
+        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var stats = new CollectionStatistics();
             var wasteful = new List<WastefulCollection>();
+            var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
             var scanCounter = new ObjectScanCounter("Collection scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (HeapEntry entry in EnumerateCollectionEntries(heap, cache))
             {
                 scanCounter.Tick();
 
-                if (!obj.IsValid || obj.Type == null)
+                ulong objectAddress = entry.Address;
+                if (objectAddress == 0)
                     continue;
 
-                string typeName = obj.Type.Name ?? "";
+                CollectionKind kind = ResolveCollectionKind(heap, entry, methodTableKinds);
 
                 // Analyze Dictionary
-                if (typeName.StartsWith("System.Collections.Generic.Dictionary", StringComparison.Ordinal))
+                if (kind == CollectionKind.Dictionary)
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
 
-                    var waste = AnalyzeDictionary(obj);
+                    var waste = AnalyzeDictionary(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {
                         wasteful.Add(waste);
                     }
                 }
                 // Analyze List
-                else if (typeName.StartsWith("System.Collections.Generic.List", StringComparison.Ordinal))
+                else if (kind == CollectionKind.List)
                 {
                     stats.TotalCollections++;
                     stats.Lists++;
                     
-                    var waste = AnalyzeList(obj);
+                    var waste = AnalyzeList(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {
                         wasteful.Add(waste);
                     }
                 }
                 // Analyze HashSet
-                else if (typeName.StartsWith("System.Collections.Generic.HashSet", StringComparison.Ordinal))
+                else if (kind == CollectionKind.HashSet)
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
 
-                    var waste = AnalyzeHashSet(obj);
+                    var waste = AnalyzeHashSet(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
                     {
                         wasteful.Add(waste);
                     }
                 }
                 // Analyze Queue
-                else if (typeName.StartsWith("System.Collections.Generic.Queue", StringComparison.Ordinal))
+                else if (kind == CollectionKind.Queue)
                 {
                     stats.TotalCollections++;
                     stats.Queues++;
@@ -149,10 +157,71 @@ namespace DumpDetective.Analysis.Analyzers
             return stats;
         }
 
-        private WastefulCollection? AnalyzeDictionary(ClrObject dictObj)
+        private static IEnumerable<HeapEntry> EnumerateCollectionEntries(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+            {
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
+            }
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
+        }
+
+        private static CollectionKind ResolveCollectionKind(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, CollectionKind> methodTableKinds)
+        {
+            if (entry.MethodTable == 0)
+                return CollectionKind.None;
+
+            if (methodTableKinds.TryGetValue(entry.MethodTable, out CollectionKind existing))
+                return existing;
+
+            ClrObject obj = heap.GetObject(entry.Address);
+            string typeName = obj.IsValid ? (obj.Type?.Name ?? string.Empty) : string.Empty;
+
+            CollectionKind resolved = CollectionKind.None;
+            if (typeName.StartsWith("System.Collections.Generic.Dictionary", StringComparison.Ordinal))
+                resolved = CollectionKind.Dictionary;
+            else if (typeName.StartsWith("System.Collections.Generic.List", StringComparison.Ordinal))
+                resolved = CollectionKind.List;
+            else if (typeName.StartsWith("System.Collections.Generic.HashSet", StringComparison.Ordinal))
+                resolved = CollectionKind.HashSet;
+            else if (typeName.StartsWith("System.Collections.Generic.Queue", StringComparison.Ordinal))
+                resolved = CollectionKind.Queue;
+
+            methodTableKinds[entry.MethodTable] = resolved;
+            return resolved;
+        }
+
+        private enum CollectionKind
+        {
+            None,
+            Dictionary,
+            List,
+            HashSet,
+            Queue
+        }
+
+        private WastefulCollection? AnalyzeDictionary(ClrHeap heap, ulong dictionaryAddress)
         {
             try
             {
+                ClrObject dictObj = heap.GetObject(dictionaryAddress);
+                if (!dictObj.IsValid || dictObj.Type == null)
+                    return null;
+
                 var countField = dictObj.Type?.GetFieldByName("_count");
                 var entriesField = dictObj.Type?.GetFieldByName("_entries");
 
@@ -191,10 +260,14 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
-        private WastefulCollection? AnalyzeList(ClrObject listObj)
+        private WastefulCollection? AnalyzeList(ClrHeap heap, ulong listAddress)
         {
             try
             {
+                ClrObject listObj = heap.GetObject(listAddress);
+                if (!listObj.IsValid || listObj.Type == null)
+                    return null;
+
                 var sizeField = listObj.Type?.GetFieldByName("_size");
                 var itemsField = listObj.Type?.GetFieldByName("_items");
 
@@ -233,10 +306,14 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
-        private WastefulCollection? AnalyzeHashSet(ClrObject hashSetObj)
+        private WastefulCollection? AnalyzeHashSet(ClrHeap heap, ulong hashSetAddress)
         {
             try
             {
+                ClrObject hashSetObj = heap.GetObject(hashSetAddress);
+                if (!hashSetObj.IsValid || hashSetObj.Type == null)
+                    return null;
+
                 var countField = hashSetObj.Type?.GetFieldByName("_count");
                 var entriesField = hashSetObj.Type?.GetFieldByName("_entries");
 

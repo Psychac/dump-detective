@@ -1,7 +1,7 @@
 ﻿using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Core.Models;
-internal abstract record AnalyzerDomainResult
+public abstract record AnalyzerDomainResult
 {
     public string AnalyzerName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
@@ -10,20 +10,20 @@ internal abstract record AnalyzerDomainResult
     public IReadOnlyCollection<string> Warnings { get; init; } = [];
 }
 
-internal sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
+public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
 
-internal sealed record TypeSnapshot(string TypeName, int Count, ulong TotalBytes, ulong LohBytes);
+public sealed record TypeSnapshot(string TypeName, int Count, ulong TotalBytes, ulong LohBytes);
 
 // Shared across multiple domain results: a name paired with a count.
-internal sealed record NameCountEntry(string Name, int Count);
-internal sealed record NameBytesEntry(string Name, ulong Bytes);
-internal sealed record LohSegmentSnapshot(
+public sealed record NameCountEntry(string Name, int Count);
+public sealed record NameBytesEntry(string Name, ulong Bytes);
+public sealed record LohSegmentSnapshot(
     ulong Address,
     double FragmentationPercent,
     ulong FreeBytes,
     ulong LargestFreeBlock);
 
-internal sealed record MemoryDomainResult(
+public sealed record MemoryDomainResult(
     ulong TotalBytes,
     ulong LohBytes,
     double LohPercent,
@@ -34,7 +34,7 @@ internal sealed record MemoryDomainResult(
     IReadOnlyList<TypeSnapshot> TopTypesBySize,
     IReadOnlyList<TypeSnapshot> TopTypesByCount) : AnalyzerDomainResult;
 
-internal sealed record GCGenerationDomainResult(
+public sealed record GCGenerationDomainResult(
     ulong Gen0Bytes,
     int Gen0Objects,
     ulong Gen1Bytes,
@@ -47,7 +47,7 @@ internal sealed record GCGenerationDomainResult(
     int LohObjects,
     IReadOnlyList<TypeSnapshot>? TopLohTypes = null) : AnalyzerDomainResult;
 
-internal sealed record LoadedModuleSnapshot(
+public sealed record LoadedModuleSnapshot(
     string Name,
     string AssemblyName,
     string FullPath,
@@ -55,7 +55,7 @@ internal sealed record LoadedModuleSnapshot(
     ulong Size,
     bool IsDynamic);
 
-internal sealed record ModuleConflictGroup(
+public sealed record ModuleConflictGroup(
     string ModuleName,
     IReadOnlyList<LoadedModuleSnapshot> Instances);
 

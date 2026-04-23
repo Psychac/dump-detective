@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class ThreadStackClusterAnalyzer : IAnalyzer
+    public class ThreadStackClusterAnalyzer : IAnalyzer
     {
         private const int MaxFramesPerSignature = 6;
         private const int MaxThreadIdsPerCluster = 8;
@@ -22,11 +22,19 @@ namespace DumpDetective.Analysis.Analyzers
 
         public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
         {
+            var threads = runtime.Threads.ToList();
+            var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Count);
+            foreach (ClrThread thread in threads)
+            {
+                if (thread.Address != 0)
+                    osThreadIdByAddress[thread.Address] = thread.OSThreadId;
+            }
+
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;
             var scanCounter = new ObjectScanCounter("Thread clustering scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-            foreach (ClrThread thread in runtime.Threads)
+            foreach (ClrThread thread in threads)
             {
                 scanCounter.Tick();
 
@@ -43,8 +51,8 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 cluster.Count++;
-                if (cluster.SampleThreadIds.Count < MaxThreadIdsPerCluster)
-                    cluster.SampleThreadIds.Add(thread.OSThreadId);
+                if (cluster.SampleThreadAddresses.Count < MaxThreadIdsPerCluster && thread.Address != 0)
+                    cluster.SampleThreadAddresses.Add(thread.Address);
             }
 
             scanCounter.Complete();
@@ -75,11 +83,23 @@ namespace DumpDetective.Analysis.Analyzers
             var topSignatures = topClusters.Take(5).Select(c => c.Signature).ToList();
             var topClusterSnapshots = topClusters
                 .Take(12)
-                .Select(c => new ThreadClusterSnapshot(c.Count, c.SampleThreadIds.ToList(), c.Signature))
+                .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
                 .ToList();
             return new AnalyzerExecutionResult(
                 [CreateFinding(aliveThreads, clusters.Count)],
                 new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots));
+        }
+
+        private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
+        {
+            var sampleIds = new List<uint>(sampleThreadAddresses.Count);
+            foreach (ulong threadAddress in sampleThreadAddresses)
+            {
+                if (osThreadIdByAddress.TryGetValue(threadAddress, out uint osThreadId))
+                    sampleIds.Add(osThreadId);
+            }
+
+            return sampleIds;
         }
 
         private static InsightFinding CreateFinding(int aliveThreads, int uniqueClusters)
@@ -129,7 +149,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             public string Signature { get; }
             public int Count { get; set; }
-            public List<uint> SampleThreadIds { get; } = new(capacity: MaxThreadIdsPerCluster);
+            public List<ulong> SampleThreadAddresses { get; } = new(capacity: MaxThreadIdsPerCluster);
 
             public StackCluster(string signature)
             {

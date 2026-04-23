@@ -1,4 +1,5 @@
 using DumpDetective.Core.Configuration;
+using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Cli.Commands;
 
@@ -21,4 +22,5 @@ internal sealed record AnalysisCommandRequest(
     int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
-    ReportAudience? ReportAudience = null);
+    ReportAudience? ReportAudience = null,
+    HeapIndexPrebuildMode? IndexPrebuildMode = null);

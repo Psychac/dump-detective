@@ -1,6 +1,6 @@
 namespace DumpDetective.Core.Options;
 
-internal sealed class MemoryLeakOptions
+public sealed class MemoryLeakOptions
 {
     public int HighReferenceThreshold { get; init; } = 50;
     public int MaxDuplicateStringLength { get; init; } = 500;

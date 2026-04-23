@@ -1,13 +1,15 @@
-﻿using Microsoft.Diagnostics.Runtime;
+using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using System.Runtime.InteropServices;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class MemoryLeakAnalyzer : IAnalyzer
+    public class MemoryLeakAnalyzer : IAnalyzer
     {
         private const int TopFinalizerTypesToShow = 10;
         private const int TopDuplicateStringsToShow = 20;
@@ -24,16 +26,21 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new MemoryLeakOptions();
 
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime, options);
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime, context.Cache, options);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
         {
+            return Analyze(heap, runtime, cache: null, options);
+        }
+
+        private AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options)
+        {
             var findings = new List<InsightFinding>(capacity: 4);
 
             FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap);
-            LeakSignals signals = AnalyzeObjectsPass(heap, options);
+            LeakSignals signals = AnalyzeObjectsPass(heap, cache, options);
 
             AddFindings(findings, finalizerResult.TotalCount, signals, options);
 
@@ -55,7 +62,6 @@ namespace DumpDetective.Analysis.Analyzers
 
         private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap)
         {
-            // Single pass â€” no intermediate list allocation
             int finalizerCount = 0;
             var topTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var scanCounter = new ObjectScanCounter("Finalizer queue scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
@@ -81,63 +87,51 @@ namespace DumpDetective.Analysis.Analyzers
                     .ToList());
         }
 
-        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, MemoryLeakOptions options)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options)
         {
-            // Single pass over heap objects â€” collects data for both string analysis and reference counting
+            // Pass 1: index-driven — string dedup stats only. Non-string/ref-capable addresses are NOT
+            // materialized into a list anymore (OPT-#6): pass 2 re-streams from the same index source,
+            // eliminating the intermediate List<ulong> (~tens of MB on large dumps) entirely.
             var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
+            var stringMethodTables = new Dictionary<ulong, bool>(capacity: 64);
+            var methodTableHasRefs = new Dictionary<ulong, bool>(capacity: 64);
             int totalStrings = 0;
             ulong totalStringMemory = 0;
-            var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
-            long skippedReferenceAddresses = 0;
-            var scanCounter = new ObjectScanCounter("Memory leak object scan");
+            var scanCounter = new ObjectScanCounter("Memory leak index scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
             {
                 scanCounter.Tick();
 
-                if (!obj.IsValid) continue;
+                ulong objectAddress = entry.Address;
+                if (objectAddress == 0) continue;
 
-                if (obj.Type?.Name == "System.String")
+                if (IsStringEntry(heap, entry, stringMethodTables))
                 {
-                    totalStrings++;
-                    totalStringMemory += obj.Size;
-
-                    string? value = obj.AsString();
-                    if (value != null && value.Length > 0 && value.Length < options.MaxDuplicateStringLength)
-                    {
-                        var fingerprint = CreateStringFingerprint(value);
-
-                        if (!stringStats.TryGetValue(fingerprint, out var info))
-                        {
-                            info = new StringLeakInfo { Preview = CreateStringPreview(value) };
-                            stringStats[fingerprint] = info;
-                        }
-                        info.Count++;
-                        info.TotalSize += obj.Size;
-                    }
-                }
-
-                foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
-                {
-                    if (reference.IsValid)
-                    {
-                        if (referenceCount.TryGetValue(reference.Address, out int count))
-                        {
-                            referenceCount[reference.Address] = count + 1;
-                        }
-                        else if (referenceCount.Count < options.MaxReferenceAddresses)
-                        {
-                            referenceCount[reference.Address] = 1;
-                        }
-                        else
-                        {
-                            skippedReferenceAddresses++;
-                        }
-                    }
+                    ProcessStringObjectByAddress(heap, objectAddress, entry.Size, options, stringStats, ref totalStrings, ref totalStringMemory);
                 }
             }
 
             scanCounter.Complete();
+
+            // Pass 2: targeted — outgoing reference enumeration on non-string objects only.
+            // Streams directly from the index using the same MethodTableHasOutgoingRefs filter,
+            // avoiding the intermediate address list that pass 1 previously built.
+            var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
+            long skippedReferenceAddresses = 0;
+            var refScanCounter = new ObjectScanCounter("Memory leak reference scan");
+
+            foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
+            {
+                if (entry.Address == 0) continue;
+                if (IsStringEntry(heap, entry, stringMethodTables)) continue;
+                if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs)) continue;
+
+                refScanCounter.Tick();
+                CountIncomingReferencesByAddress(heap, entry.Address, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+            }
+
+            refScanCounter.Complete();
 
             DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats, options);
             IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);
@@ -155,33 +149,90 @@ namespace DumpDetective.Analysis.Analyzers
                 topHighlyReferencedObjects);
         }
 
-        private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, MemoryLeakOptions options)
+        private static IEnumerable<HeapEntry> EnumerateLeakEntries(ClrHeap heap, IHeapAnalysisCache? cache)
         {
-            var duplicates = stringStats.Values
-                .Where(s => s.Count > options.MinDuplicateStringCount)
-                .OrderByDescending(s => s.TotalSize)
-                .Take(TopDuplicateStringsToShow)
-                .ToList();
-
-            ulong totalWastedBytes = 0;
-            foreach (var dup in duplicates)
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
             {
-                totalWastedBytes += dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
             }
 
-            var topDuplicates = duplicates
-                .Select(dup => new DuplicateStringSnapshot(
-                    dup.Preview,
-                    dup.Count,
-                    dup.TotalSize - (dup.TotalSize / (ulong)dup.Count)))
-                .ToList();
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
+        }
+
+        private static bool IsStringEntry(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, bool> stringMethodTables)
+        {
+            if (entry.MethodTable == 0)
+                return false;
+
+            if (stringMethodTables.TryGetValue(entry.MethodTable, out bool isString))
+                return isString;
+
+            ClrObject obj = heap.GetObject(entry.Address);
+            isString = obj.IsValid && string.Equals(obj.Type?.Name, "System.String", StringComparison.Ordinal);
+            stringMethodTables[entry.MethodTable] = isString;
+            return isString;
+        }
+
+        private DuplicateStringResult ComputeDuplicateStrings(Dictionary<StringFingerprint, StringLeakInfo> stringStats, MemoryLeakOptions options)
+        {
+            // OPT-#10: Replace full O(N log N) sort+take with O(N log K) partial extraction using
+            // PriorityQueue<,> as a fixed-size min-heap. On string-heavy dumps N can be hundreds of
+            // thousands of unique fingerprints while K=TopDuplicateStringsToShow=20.
+            int minCount = options.MinDuplicateStringCount;
+            var heap = new PriorityQueue<StringLeakInfo, ulong>(TopDuplicateStringsToShow + 1);
+
+            foreach (StringLeakInfo info in stringStats.Values)
+            {
+                if (info.Count <= minCount)
+                    continue;
+
+                heap.Enqueue(info, info.TotalSize);
+                if (heap.Count > TopDuplicateStringsToShow)
+                    heap.Dequeue(); // evict smallest
+            }
+
+            // Drain min-heap into descending list
+            var duplicates = new List<StringLeakInfo>(heap.Count);
+            while (heap.Count > 0)
+                duplicates.Add(heap.Dequeue());
+            duplicates.Reverse(); // ascending -> descending by TotalSize
+
+            ulong totalWastedBytes = 0;
+            var topDuplicates = new List<DuplicateStringSnapshot>(duplicates.Count);
+            foreach (StringLeakInfo dup in duplicates)
+            {
+                ulong wasted = dup.TotalSize - (dup.TotalSize / (ulong)dup.Count);
+                totalWastedBytes += wasted;
+                topDuplicates.Add(new DuplicateStringSnapshot(dup.Preview ?? string.Empty, dup.Count, wasted));
+            }
 
             return new DuplicateStringResult(topDuplicates.Count, totalWastedBytes, topDuplicates);
         }
 
-        private int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
+        private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
         {
-            return referenceCount.Count(kvp => kvp.Value > options.HighReferenceThreshold);
+            // OPT-#8: Replace LINQ .Count(predicate) with a plain foreach to avoid boxed IEnumerator allocation.
+            int threshold = options.HighReferenceThreshold;
+            int count = 0;
+            foreach (KeyValuePair<ulong, int> kvp in referenceCount)
+            {
+                if (kvp.Value > threshold)
+                    count++;
+            }
+            return count;
         }
 
         private void AddFindings(List<InsightFinding> findings, int finalizerCount, LeakSignals signals, MemoryLeakOptions options)
@@ -278,40 +329,191 @@ namespace DumpDetective.Analysis.Analyzers
             return preview.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
         }
 
+        private static void ProcessStringObjectByAddress(
+            ClrHeap heap,
+            ulong objectAddress,
+            ulong objectSize,
+            MemoryLeakOptions options,
+            Dictionary<StringFingerprint, StringLeakInfo> stringStats,
+            ref int totalStrings,
+            ref ulong totalStringMemory)
+        {
+            if (objectAddress == 0)
+                return;
+
+            totalStrings++;
+            totalStringMemory += objectSize;
+
+            // OPT-#13: Approximate string char-length from objectSize before calling heap.GetObject.
+            // .NET string layout: 8 (obj header) + 8 (MT ptr) + 4 (length) + 2*N (chars) + 2 (null) ≈ 26 + 2N
+            // so N ≈ (size - 26) / 2. If the estimate already exceeds MaxDuplicateStringLength we can
+            // skip the heap dereference entirely for strings that would be filtered anyway.
+            if (objectSize > 26)
+            {
+                ulong estimatedLength = (objectSize - 26) / 2;
+                if (estimatedLength >= (ulong)options.MaxDuplicateStringLength)
+                    return;
+            }
+
+            ClrObject stringObject = heap.GetObject(objectAddress);
+            if (!stringObject.IsValid)
+                return;
+
+            string? value = stringObject.AsString();
+            if (value == null || value.Length == 0 || value.Length >= options.MaxDuplicateStringLength)
+                return;
+
+            var fingerprint = CreateStringFingerprint(value);
+
+            // OPT-#12: StringLeakInfo is now a struct. Use GetValueRefOrAddDefault for a single
+            // ref-returning probe — no copy-out, no copy-back, no heap allocation per unique string.
+            ref StringLeakInfo info = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                stringStats, fingerprint, out bool existed);
+
+            if (!existed)
+                info.Preview = CreateStringPreview(value);
+
+            info.Count++;
+            info.TotalSize += objectSize;
+        }
+
+        private static void CountIncomingReferencesByAddress(
+            ClrHeap heap,
+            ulong sourceAddress,
+            Dictionary<ulong, int> referenceCount,
+            int maxReferenceAddresses,
+            ref long skippedReferenceAddresses)
+        {
+            if (sourceAddress == 0)
+                return;
+
+            ClrObject sourceObject = heap.GetObject(sourceAddress);
+            if (!sourceObject.IsValid)
+                return;
+
+            foreach (ulong referenceAddress in EnumerateOutgoingReferenceAddresses(sourceObject))
+            {
+                if (referenceCount.TryGetValue(referenceAddress, out int count))
+                {
+                    referenceCount[referenceAddress] = count + 1;
+                }
+                else if (referenceCount.Count < maxReferenceAddresses)
+                {
+                    referenceCount[referenceAddress] = 1;
+                }
+                else
+                {
+                    skippedReferenceAddresses++;
+                }
+            }
+        }
+
+        private static IEnumerable<ulong> EnumerateOutgoingReferenceAddresses(ClrObject sourceObject)
+        {
+            ClrType? type = sourceObject.Type;
+            if (type is null)
+                yield break;
+
+            // Reference-type arrays: enumerate elements directly instead of full EnumerateReferences
+            if (type.IsArray)
+            {
+                if (type.ComponentType?.IsObjectReference == true && sourceObject.AsArray().Rank == 1)
+                {
+                    ClrArray arr = sourceObject.AsArray();
+                    int len = arr.Length;
+                    for (int i = 0; i < len; i++)
+                    {
+                        ClrObject element = arr.GetObjectValue(i);
+                        if (element.IsValid && element.Address != 0)
+                            yield return element.Address;
+                    }
+                }
+                yield break;
+            }
+
+            // Regular objects: iterate reference-type fields only (lazy — skips value-type-only objects)
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                if (!field.IsObjectReference)
+                    continue;
+
+                ClrObject value = field.ReadObject(sourceObject.Address, interior: false);
+                if (value.IsValid && value.Address != 0)
+                    yield return value.Address;
+            }
+        }
+
         private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
         {
             var topAddresses = referenceCount
                 .Where(kvp => kvp.Value > options.HighReferenceThreshold)
                 .OrderByDescending(kvp => kvp.Value)
                 .Take(TopHighlyReferencedObjectsToShow)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                .ToList();
 
             if (topAddresses.Count == 0)
                 return [];
 
             var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Count);
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (var topAddress in topAddresses)
             {
-                if (!obj.IsValid)
+                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, topAddress.Key, topAddress.Value);
+                if (snapshot == null)
                     continue;
 
-                if (!topAddresses.TryGetValue(obj.Address, out int incomingReferences))
-                    continue;
-
-                results.Add(new HighlyReferencedObjectSnapshot(
-                    obj.Address,
-                    obj.Type?.Name ?? StringConstants.UnknownType,
-                    obj.Size,
-                    incomingReferences));
-
-                if (results.Count == topAddresses.Count)
-                    break;
+                results.Add(snapshot);
             }
 
             return results
                 .OrderByDescending(r => r.IncomingReferences)
                 .ToList();
+        }
+
+        private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(ClrHeap heap, ulong objectAddress, int incomingReferences)
+        {
+            if (objectAddress == 0)
+                return null;
+
+            ClrObject obj = heap.GetObject(objectAddress);
+            if (!obj.IsValid)
+                return null;
+
+            return new HighlyReferencedObjectSnapshot(
+                objectAddress,
+                obj.Type?.Name ?? StringConstants.UnknownType,
+                obj.Size,
+                incomingReferences);
+        }
+
+        private static bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable, Dictionary<ulong, bool> cache)
+        {
+            if (methodTable == 0)
+                return false;
+
+            if (cache.TryGetValue(methodTable, out bool cached))
+                return cached;
+
+            bool result = TypeHasOutgoingRefs(heap.GetTypeByMethodTable(methodTable));
+            cache[methodTable] = result;
+            return result;
+        }
+
+        private static bool TypeHasOutgoingRefs(ClrType? type)
+        {
+            if (type is null)
+                return false;
+
+            if (type.IsArray)
+                return type.ComponentType?.IsObjectReference == true;
+
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                if (field.IsObjectReference)
+                    return true;
+            }
+
+            return false;
         }
 
         private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
@@ -329,5 +531,3 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly record struct FinalizerQueueResult(int TotalCount, IReadOnlyList<NameCountEntry> TopTypes);
     }
 }
-
-

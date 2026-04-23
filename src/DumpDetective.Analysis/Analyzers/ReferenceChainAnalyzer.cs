@@ -7,12 +7,13 @@ using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class ReferenceChainAnalyzer : IAnalyzer
+    public class ReferenceChainAnalyzer : IAnalyzer
     {
         private const int DefaultTopTypeCount = 10;
         private const int MaxPathSearchObjects = 5000;
+        private const int DefaultMaxPathDepth = 25;
 
-        private readonly record struct RootCandidate(string RootKind, ulong Address);
+        private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size);
 
         public string Name => "Reference Chain Analysis";
 
@@ -50,7 +51,10 @@ namespace DumpDetective.Analysis.Analyzers
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
             var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Count);
-            List<RootCandidate> roots = GetValidRoots(heap);
+            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+            // Sort retaining roots by likelihood of early hit (Stack first) and drop weak/dependent roots
+            // that can never prevent GC collection. Sorted once, reused for all top-N type samples.
+            List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
 
             foreach (var typeKvp in topTypes)
             {
@@ -67,14 +71,14 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (sampleAddress.HasValue)
                 {
-                    ClrObject sampleObj = heap.GetObject(sampleAddress.Value);
-                    if (sampleObj.IsValid)
+                    ObjectMetadata sampleMetadata = GetObjectMetadata(heap, sampleAddress.Value);
+                    if (sampleMetadata.IsValid)
                     {
                         analyzedSamples++;
-                        sampleType = sampleObj.Type?.Name ?? StringConstants.UnknownType;
-                        sampleSize = sampleObj.Size;
+                        sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
+                        sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, roots, sampleAddress.Value, maxPathSearchObjects, out path, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, prioritizedRoots, sampleAddress.Value, maxPathSearchObjects, out path, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -128,45 +132,35 @@ namespace DumpDetective.Analysis.Analyzers
                 new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces));
         }
 
-        public bool AnalyzeObject(ClrHeap heap, ulong objectAddress)
+        public bool AnalyzeObject(ClrHeap heap, IHeapAnalysisCache cache, ulong objectAddress)
         {
-            List<RootCandidate> roots = GetValidRoots(heap);
-            int maxPathSearchObjects = MaxPathSearchObjects;
-            return TryFindAnyRootPath(heap, roots, objectAddress, maxPathSearchObjects, out _, out _);
+            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+            List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
+            return TryFindAnyRootPath(heap, prioritizedRoots, objectAddress, MaxPathSearchObjects, out _, out _);
         }
 
-        private static List<RootCandidate> GetValidRoots(ClrHeap heap)
-        {
-            var roots = new List<RootCandidate>(capacity: 1024);
-            foreach (ClrRoot root in heap.EnumerateRoots())
-            {
-                ulong rootAddress = root.Object.Address;
-                if (rootAddress == 0)
-                    continue;
-
-                roots.Add(new RootCandidate(root.RootKind.ToString(), rootAddress));
-            }
-
-            return roots;
-        }
-
-        private bool TryFindAnyRootPath(ClrHeap heap, IReadOnlyList<RootCandidate> roots, ulong objectAddress, int maxPathSearchObjects, out string? path, out bool searchTruncated)
+        private bool TryFindAnyRootPath(ClrHeap heap, IReadOnlyList<(string RootKind, ulong Address)> roots, ulong objectAddress, int maxPathSearchObjects, out string? path, out bool searchTruncated)
         {
             path = null;
             searchTruncated = false;
 
-            ClrObject obj = heap.GetObject(objectAddress);
-            if (!obj.IsValid)
+            if (!TryGetValidObject(heap, objectAddress, out _))
                 return false;
 
+            // Preallocate once and reuse across all root iterations to avoid repeated allocation
+            // of large HashSet/Dictionary/Queue per root (N_roots × maxPathSearchObjects entries each).
+            var visited = new HashSet<ulong>(capacity: 1024);
+            var previous = new Dictionary<ulong, ulong>(capacity: 1024);
+            var queue = new Queue<(ulong Address, int Depth)>(capacity: 256);
+
             var scanCounter = new ObjectScanCounter("Reference chain root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-            foreach (RootCandidate root in roots)
+            foreach ((string rootKind, ulong rootAddress) in roots)
             {
                 scanCounter.Tick();
-                if (TryBuildPath(heap, root.Address, objectAddress, maxPathSearchObjects, out List<ulong>? addresses, out bool pathSearchLimited))
+                if (TryBuildPath(heap, rootAddress, objectAddress, maxPathSearchObjects, visited, previous, queue, out List<ulong>? addresses, out bool pathSearchLimited))
                 {
                     scanCounter.Complete();
-                    path = FormatPath(heap, root.RootKind, addresses);
+                    path = FormatPath(heap, rootKind, addresses);
                     return true;
                 }
 
@@ -223,7 +217,16 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "% retained-samples");
         }
 
-        private static bool TryBuildPath(ClrHeap heap, ulong startAddress, ulong targetAddress, int maxPathSearchObjects, out List<ulong>? path, out bool searchLimitReached)
+        private static bool TryBuildPath(
+            ClrHeap heap,
+            ulong startAddress,
+            ulong targetAddress,
+            int maxPathSearchObjects,
+            HashSet<ulong> visited,
+            Dictionary<ulong, ulong> previous,
+            Queue<(ulong Address, int Depth)> queue,
+            out List<ulong>? path,
+            out bool searchLimitReached)
         {
             path = null;
             searchLimitReached = false;
@@ -237,26 +240,23 @@ namespace DumpDetective.Analysis.Analyzers
             if (startAddress == 0 || targetAddress == 0)
                 return false;
 
-            var visited = new HashSet<ulong>(capacity: 1024) { startAddress };
-            var previous = new Dictionary<ulong, ulong>(capacity: 1024);
-            var queue = new Queue<ulong>(capacity: 256);
-            queue.Enqueue(startAddress);
+            visited.Clear();
+            visited.Add(startAddress);
+            previous.Clear();
+            queue.Clear();
+            queue.Enqueue((startAddress, 0));
 
             int searched = 0;
 
             while (queue.Count > 0 && searched++ < maxPathSearchObjects)
             {
-                ulong current = queue.Dequeue();
-                ClrObject currentObj = heap.GetObject(current);
-                if (!currentObj.IsValid)
+                (ulong current, int depth) = queue.Dequeue();
+
+                if (depth >= DefaultMaxPathDepth)
                     continue;
 
-                foreach (ClrObject reference in currentObj.EnumerateReferences(carefully: true))
+                foreach (ulong refAddress in EnumerateReferenceAddresses(heap, current))
                 {
-                    if (!reference.IsValid)
-                        continue;
-
-                    ulong refAddress = reference.Address;
                     if (refAddress == targetAddress)
                     {
                         path = ReconstructPath(previous, startAddress, targetAddress, current);
@@ -266,7 +266,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (visited.Add(refAddress))
                     {
                         previous[refAddress] = current;
-                        queue.Enqueue(refAddress);
+                        queue.Enqueue((refAddress, depth + 1));
                     }
                 }
             }
@@ -299,15 +299,90 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)
         {
-            static string FormatNode(ClrHeap heap, ulong address)
+            string chain = string.Join(" -> ", addresses.Select(address => FormatNodeByAddress(heap, address)));
+            return $"{rootKind}: {chain}";
+        }
+
+        private static ObjectMetadata GetObjectMetadata(ClrHeap heap, ulong address)
+        {
+            if (!TryGetValidObject(heap, address, out ClrObject obj))
+                return new ObjectMetadata(false, null, 0);
+
+            return new ObjectMetadata(true, obj.Type?.Name, obj.Size);
+        }
+
+        private static IEnumerable<ulong> EnumerateReferenceAddresses(ClrHeap heap, ulong sourceAddress)
+        {
+            if (!TryGetValidObject(heap, sourceAddress, out ClrObject sourceObject))
+                yield break;
+
+            // Use ClrMD's GC-descriptor-based reference walk — faster than field iteration for targeted BFS
+            // since it jumps directly to reference slots without checking all fields.
+            foreach (ClrObject reference in sourceObject.EnumerateReferences(carefully: true))
             {
-                ClrObject obj = heap.GetObject(address);
-                string typeName = obj.IsValid ? (obj.Type?.Name ?? StringConstants.UnknownType) : "<invalid>";
-                return $"{typeName}@0x{address:X}";
+                if (!reference.IsValid)
+                    continue;
+
+                ulong referenceAddress = reference.Address;
+                if (referenceAddress == 0)
+                    continue;
+
+                yield return referenceAddress;
+            }
+        }
+
+        private static string FormatNodeByAddress(ClrHeap heap, ulong address)
+        {
+            ObjectMetadata metadata = GetObjectMetadata(heap, address);
+            string typeName = metadata.IsValid ? (metadata.TypeName ?? StringConstants.UnknownType) : "<invalid>";
+            return $"{typeName}@0x{address:X}";
+        }
+
+        private static List<(string RootKind, ulong Address)> SortAndFilterRoots(
+            IReadOnlyList<(string RootKind, ulong Address)> roots)
+        {
+            var result = new List<(string RootKind, ulong Address)>(roots.Count);
+            foreach ((string rootKind, ulong address) in roots)
+            {
+                // Weak and dependent roots never prevent collection — skip them entirely.
+                if (rootKind.Contains("Weak", StringComparison.OrdinalIgnoreCase) ||
+                    rootKind.Contains("Dependent", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                result.Add((rootKind, address));
             }
 
-            string chain = string.Join(" -> ", addresses.Select(a => FormatNode(heap, a)));
-            return $"{rootKind}: {chain}";
+            result.Sort(static (a, b) => GetRootSearchPriority(a.RootKind).CompareTo(GetRootSearchPriority(b.RootKind)));
+            return result;
+        }
+
+        private static int GetRootSearchPriority(string rootKind) => rootKind switch
+        {
+            // Stack locals are the most direct retainers and resolve fastest.
+            "Stack" => 0,
+            // Thread-static and static variables are the next most likely long-lived retainers.
+            "ThreadStaticVar" => 1,
+            "StaticVar" => 2,
+            // Strong and pinned GC handles are explicit long-term roots.
+            "Strong" => 3,
+            "Pinned" => 4,
+            "AsyncPinnedHandle" => 4,
+            "RefCountedHandle" => 5,
+            // Finalizer roots are already reported by MemoryLeakAnalyzer — deprioritize.
+            "Finalizer" => 10,
+            // Unknown kinds go last.
+            _ => 6
+        };
+
+        private static bool TryGetValidObject(ClrHeap heap, ulong address, out ClrObject obj)
+        {
+            obj = default;
+
+            if (address == 0)
+                return false;
+
+            obj = heap.GetObject(address);
+            return obj.IsValid;
         }
     }
 }

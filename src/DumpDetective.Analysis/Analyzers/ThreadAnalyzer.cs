@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class ThreadAnalyzer : IAnalyzer
+    public class ThreadAnalyzer : IAnalyzer
     {
         private const int MaxFramesForThreadScan = 8;
         private const int MaxStackRootsToCount = 256;
@@ -148,6 +148,14 @@ namespace DumpDetective.Analysis.Analyzers
 
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)
         {
+            var threadList = threads as IList<ClrThread> ?? threads.ToList();
+            var threadByAddress = new Dictionary<ulong, ClrThread>(threadList.Count);
+            foreach (ClrThread thread in threadList)
+            {
+                if (thread.Address != 0)
+                    threadByAddress[thread.Address] = thread;
+            }
+
             var result = new ThreadCategorization();
             var threadsWithLocks = new List<ThreadWithStackTrace>();
             var blockedThreads = new List<ThreadWithStackTrace>();
@@ -155,7 +163,7 @@ namespace DumpDetective.Analysis.Analyzers
             var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
             var scanCounter = new ObjectScanCounter("Thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-            foreach (var thread in threads)
+            foreach (var thread in threadList)
             {
                 scanCounter.Tick();
 
@@ -190,7 +198,7 @@ namespace DumpDetective.Analysis.Analyzers
                             TopFrames = stackFrames,
                             ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
                             ExceptionMessage = currentException.Message,
-                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
+                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress)
                         });
                     }
 
@@ -202,7 +210,7 @@ namespace DumpDetective.Analysis.Analyzers
                             Thread = thread,
                             TopFrames = stackFrames,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
+                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress)
                         });
                     }
 
@@ -218,7 +226,7 @@ namespace DumpDetective.Analysis.Analyzers
                             WaitCategory = waitDetection.Category,
                             WaitReason = waitDetection.Reason,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress)
+                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress)
                         });
                     }
                     else if (!thread.IsGc && !thread.IsFinalizer)
@@ -278,16 +286,22 @@ namespace DumpDetective.Analysis.Analyzers
             return result;
         }
 
-        private static int GetOrCountStackRoots(ClrThread thread, Dictionary<ulong, int> cache)
+        private static int GetOrCountStackRootsByAddress(ulong threadAddress, IReadOnlyDictionary<ulong, ClrThread> threadByAddress, Dictionary<ulong, int> cache)
         {
-            if (cache.TryGetValue(thread.Address, out int existing))
+            if (threadAddress == 0)
+                return 0;
+
+            if (cache.TryGetValue(threadAddress, out int existing))
                 return existing;
+
+            if (!threadByAddress.TryGetValue(threadAddress, out ClrThread? thread))
+                return 0;
 
             int count = 0;
             foreach (var _ in thread.EnumerateStackRoots().Take(MaxStackRootsToCount))
                 count++;
 
-            cache[thread.Address] = count;
+            cache[threadAddress] = count;
             return count;
         }
 

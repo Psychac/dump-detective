@@ -5,7 +5,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Core.Abstractions;
 
-internal interface IAnalyzer
+public interface IAnalyzer
 {
     string Name { get; }
     string Category => AnalyzerCategory.Infer(Name);
@@ -14,7 +14,7 @@ internal interface IAnalyzer
     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
 }
 
-internal sealed record AnalyzerExecutionResult(
+public sealed record AnalyzerExecutionResult(
     IReadOnlyList<InsightFinding> Findings,
     AnalyzerDomainResult? DomainResult = null,
     IReadOnlyDictionary<string, object?>? Metrics = null,
@@ -23,7 +23,7 @@ internal sealed record AnalyzerExecutionResult(
     public static AnalyzerExecutionResult Empty { get; } = new([]);
 }
 
-internal class AnalysisContext
+public class AnalysisContext
 {
     public required ClrRuntime Runtime { get; init; }
     public required ClrHeap Heap { get; init; }

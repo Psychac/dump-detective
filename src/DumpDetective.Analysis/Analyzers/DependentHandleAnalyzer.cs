@@ -7,7 +7,7 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class DependentHandleAnalyzer : IAnalyzer
+    public class DependentHandleAnalyzer : IAnalyzer
     {
         private const int TopCount = 15;
 
@@ -16,12 +16,14 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
         {
+            heap ??= runtime.Heap;
+
             var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
@@ -41,23 +43,23 @@ namespace DumpDetective.Analysis.Analyzers
 
                 dependentHandleCount++;
 
-                if (!TryGetHandleObject(handle.Object, runtime.Heap, out ClrObject sourceObj))
+                if (!TryGetHandleAddress(handle.Object, out ulong sourceAddress)
+                    || !TryResolveTypeName(heap, sourceAddress, out string sourceType))
                 {
                     unresolvedTargetCount++;
                     continue;
                 }
 
-                string sourceType = sourceObj.Type?.Name ?? StringConstants.UnknownType;
                 Increment(sourceTypeCounts, sourceType);
 
-                if (!TryGetDependentTargetObject(handle, runtime.Heap, out ClrObject targetObj))
+                if (!TryGetDependentTargetAddress(handle, out ulong targetAddress)
+                    || !TryResolveTypeName(heap, targetAddress, out string targetType))
                 {
                     unresolvedTargetCount++;
                     continue;
                 }
 
                 resolvedEdgeCount++;
-                string targetType = targetObj.Type?.Name ?? StringConstants.UnknownType;
                 Increment(targetTypeCounts, targetType);
                 Increment(sourceTargetPairCounts, $"{sourceType} -> {targetType}");
             }
@@ -116,9 +118,9 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "% unresolved-targets");
         }
 
-        private static bool TryGetDependentTargetObject(ClrHandle handle, ClrHeap heap, out ClrObject targetObj)
+        private static bool TryGetDependentTargetAddress(ClrHandle handle, out ulong targetAddress)
         {
-            targetObj = default;
+            targetAddress = 0;
 
             string[] propertyCandidates =
             [
@@ -140,37 +142,48 @@ namespace DumpDetective.Analysis.Analyzers
                 if (value == null)
                     continue;
 
-                if (TryGetHandleObject(value, heap, out targetObj))
+                if (TryGetHandleAddress(value, out targetAddress))
                     return true;
             }
 
             return false;
         }
 
-        private static bool TryGetHandleObject(object value, ClrHeap heap, out ClrObject obj)
+        private static bool TryGetHandleAddress(object value, out ulong address)
         {
-            obj = default;
+            address = 0;
 
             if (value is ClrObject clrObject)
             {
-                if (!clrObject.IsValid || clrObject.Type == null)
+                if (!clrObject.IsValid)
                     return false;
 
-                obj = clrObject;
+                address = clrObject.Address;
                 return true;
             }
 
-            if (value is ulong address && address != 0)
+            if (value is ulong targetAddress && targetAddress != 0)
             {
-                ClrObject fromAddress = heap.GetObject(address);
-                if (fromAddress.IsValid && fromAddress.Type != null)
-                {
-                    obj = fromAddress;
-                    return true;
-                }
+                address = targetAddress;
+                return true;
             }
 
             return false;
+        }
+
+        private static bool TryResolveTypeName(ClrHeap heap, ulong address, out string typeName)
+        {
+            typeName = StringConstants.UnknownType;
+
+            if (address == 0)
+                return false;
+
+            ClrObject obj = heap.GetObject(address);
+            if (!obj.IsValid || obj.Type == null)
+                return false;
+
+            typeName = obj.Type.Name ?? StringConstants.UnknownType;
+            return true;
         }
 
         private static void Increment(Dictionary<string, int> counts, string key)

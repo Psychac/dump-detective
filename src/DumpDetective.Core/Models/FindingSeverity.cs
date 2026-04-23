@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 
 namespace DumpDetective.Core.Models;
-internal enum FindingSeverity
+public enum FindingSeverity
 {
     Info,
     Warning,

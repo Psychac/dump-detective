@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Services;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 
@@ -78,7 +79,8 @@ public sealed class StartupValidatorTests
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),
             ExcludeAnalyzers: Array.Empty<string>(),
-            DiagnosticMode: false);
+            DiagnosticMode: false,
+            IndexPrebuildMode: HeapIndexPrebuildMode.Auto);
     }
 
     private static string CreateTempDirectory()

@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Commands;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 using System.Text.Json;
@@ -38,6 +39,10 @@ internal sealed class ConfigurationResolver
             ? BuildReportFromConfig(fileModel!, request)
             : BuildReportFromCli(request);
 
+        HeapIndexPrebuildMode indexPrebuildMode = usedConfigFile
+            ? BuildIndexPrebuildModeFromConfig(fileModel!, request)
+            : BuildIndexPrebuildModeFromCli(request);
+
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
         IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
@@ -71,7 +76,8 @@ internal sealed class ConfigurationResolver
             usedConfigFile,
             request.IncludeAnalyzers,
             request.ExcludeAnalyzers,
-            request.DiagnosticMode);
+            request.DiagnosticMode,
+            indexPrebuildMode);
     }
 
     private static string? ResolveConfigPath(string? cliConfigPath)
@@ -257,6 +263,19 @@ internal sealed class ConfigurationResolver
         };
     }
 
+    private static HeapIndexPrebuildMode BuildIndexPrebuildModeFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+    {
+        return ParseHeapIndexMode(config.Indexing?.Mode)
+            ?? ParseHeapIndexMode(config.IndexMode)
+            ?? request.IndexPrebuildMode
+            ?? HeapIndexPrebuildMode.Auto;
+    }
+
+    private static HeapIndexPrebuildMode BuildIndexPrebuildModeFromCli(AnalysisCommandRequest request)
+    {
+        return request.IndexPrebuildMode ?? HeapIndexPrebuildMode.Auto;
+    }
+
     private static string BuildOutputPath(string dumpPath, ReportFormat format)
     {
         string extension = format switch
@@ -267,6 +286,22 @@ internal sealed class ConfigurationResolver
         };
 
         return Path.ChangeExtension(dumpPath, extension);
+    }
+
+    private static HeapIndexPrebuildMode? ParseHeapIndexMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            return null;
+        }
+
+        return mode.Trim().ToLowerInvariant() switch
+        {
+            "auto" => HeapIndexPrebuildMode.Auto,
+            "memory" or "mem" => HeapIndexPrebuildMode.Memory,
+            "disk" => HeapIndexPrebuildMode.Disk,
+            _ => throw new ArgumentException($"Invalid IndexMode value '{mode}' in config.")
+        };
     }
 
     private static ReportAudience? ParseReportAudience(string? audience)
@@ -330,12 +365,19 @@ internal sealed class CliConfigurationFileModel
     public bool? EnablePerformanceDiagnostics { get; init; }
     public string? ReportFormat { get; init; }
     public string? ReportAudience { get; init; }
+    public IndexingOptionsModel? Indexing { get; init; }
+    public string? IndexMode { get; init; }
 }
 
 internal sealed class ReportOptionsModel
 {
     public ReportFormat Format { get; init; } = ReportFormat.Html;
     public ReportAudience Audience { get; init; } = ReportAudience.All;
+}
+
+internal sealed class IndexingOptionsModel
+{
+    public string? Mode { get; init; }
 }
 
 [JsonSourceGenerationOptions(

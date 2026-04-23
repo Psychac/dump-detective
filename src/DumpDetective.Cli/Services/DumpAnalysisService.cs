@@ -25,6 +25,7 @@ internal sealed class DumpAnalysisService(
     private readonly DumpLoader _dumpLoader = dumpLoader;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly IAnalyzerFactory _analyzerFactory = analyzerFactory;
+    private const string TemporaryAdaptiveIndexingNotice = "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
 
     public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
     {
@@ -52,6 +53,7 @@ internal sealed class DumpAnalysisService(
         }
 
         ConsoleUx.Header("DumpDetective Analysis");
+        ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
 
         if (resolved.DiagnosticMode)
         {
@@ -64,7 +66,7 @@ internal sealed class DumpAnalysisService(
             ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers...");
         }
 
-        const int totalStages = 4;
+        const int totalStages = 5;
         Stopwatch stageStopwatch = Stopwatch.StartNew();
 
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -73,11 +75,30 @@ internal sealed class DumpAnalysisService(
         stageStopwatch.Stop();
         ConsoleUx.StageComplete(1, totalStages, "Load dump", stageStopwatch.Elapsed);
 
+        HeapAnalysisCache heapCache = new();
+
+        stageStopwatch.Restart();
+        ConsoleUx.StageStart(2, totalStages, "Scan + Index heap");
+        var heapIndex = heapCache.PrebuildHeapIndex(
+            loadContext.Heap,
+            resolved.DumpPath,
+            cancellationToken,
+            progress: (scanned, elapsed) => ConsoleUx.ObjectScanProgress("Scan + Index heap", scanned, elapsed, "streaming objects to index"),
+            mode: resolved.IndexPrebuildMode);
+        ConsoleUx.ObjectScanComplete("Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
+        stageStopwatch.Stop();
+        ConsoleUx.StageComplete(2, totalStages, "Scan + Index heap", stageStopwatch.Elapsed);
+
+        if (resolved.DiagnosticMode)
+        {
+            ConsoleUx.Info($"Index built: requested={resolved.IndexPrebuildMode}, selected={heapIndex.StorageKind}, objects={heapIndex.ObjectCount:N0}, elapsed={heapIndex.Elapsed.TotalSeconds:F1}s");
+        }
+
         PipelineAnalysisContext context = new()
         {
             Runtime = loadContext.Runtime,
             Heap = loadContext.Heap,
-            Cache = new HeapAnalysisCache(),
+            Cache = heapCache,
             Diagnostics = resolved.Diagnostics,
             Options = new Dictionary<string, object?>
             {
@@ -97,12 +118,12 @@ internal sealed class DumpAnalysisService(
 
         IReadOnlyList<AnalyzerRunResult> runs;
         stageStopwatch.Restart();
-        ConsoleUx.StageStart(2, totalStages, $"Run analyzers ({activeAnalyzers.Count})");
+        ConsoleUx.StageStart(3, totalStages, $"Run analyzers ({activeAnalyzers.Count})");
         try
         {
             runs = await pipeline.ExecuteAsync(context, cancellationToken);
             stageStopwatch.Stop();
-            ConsoleUx.StageComplete(2, totalStages, "Run analyzers", stageStopwatch.Elapsed);
+            ConsoleUx.StageComplete(3, totalStages, "Run analyzers", stageStopwatch.Elapsed);
         }
         catch (OperationCanceledException)
         {
@@ -121,7 +142,7 @@ internal sealed class DumpAnalysisService(
         stopwatch.Stop();
 
         stageStopwatch.Restart();
-        ConsoleUx.StageStart(3, totalStages, $"Build {resolved.Report.Format} report");
+        ConsoleUx.StageStart(4, totalStages, $"Build {resolved.Report.Format} report");
         cancellationToken.ThrowIfCancellationRequested();
         string renderedReport = _reportBuilderFacade.BuildRenderedReport(
             resolved.DumpPath,
@@ -131,10 +152,10 @@ internal sealed class DumpAnalysisService(
             stopwatch.Elapsed,
             cancellationToken);
         stageStopwatch.Stop();
-        ConsoleUx.StageComplete(3, totalStages, "Build report", stageStopwatch.Elapsed);
+        ConsoleUx.StageComplete(4, totalStages, "Build report", stageStopwatch.Elapsed);
 
         stageStopwatch.Restart();
-        ConsoleUx.StageStart(4, totalStages, "Write output");
+        ConsoleUx.StageStart(5, totalStages, "Write output");
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -153,7 +174,7 @@ internal sealed class DumpAnalysisService(
             }
 
             stageStopwatch.Stop();
-            ConsoleUx.StageComplete(4, totalStages, "Write output", stageStopwatch.Elapsed);
+            ConsoleUx.StageComplete(5, totalStages, "Write output", stageStopwatch.Elapsed);
         }
         catch (OperationCanceledException)
         {
@@ -188,6 +209,7 @@ internal sealed class DumpAnalysisService(
         TimeSpan writeOutputElapsed = TimeSpan.Zero;
 
         ConsoleUx.Header("DumpDetective Trend Analysis");
+        ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
         ConsoleUx.Info($"Trend dumps ({trendDumpPaths.Count}): {string.Join(" -> ", trendDumpPaths.Select(Path.GetFileName))}");
         ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers per dump...");
 
@@ -316,12 +338,23 @@ internal sealed class DumpAnalysisService(
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
+        HeapAnalysisCache heapCache = new();
+        var heapIndex = heapCache.PrebuildHeapIndex(
+            loadContext.Heap,
+            dumpPath,
+            cancellationToken,
+            progress: (scanned, elapsed) => ConsoleUx.ObjectScanProgress($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", scanned, elapsed, "streaming objects to index"),
+            mode: resolved.IndexPrebuildMode);
+        string indexTarget = heapIndex.StorageKind == DumpDetective.Analysis.Indexing.HeapIndexStorageKind.Memory
+            ? "in-memory"
+            : Path.GetFileName(heapIndex.IndexPath);
+        ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, $"{heapIndex.StorageKind} • {indexTarget}");
 
         PipelineAnalysisContext context = new()
         {
             Runtime = loadContext.Runtime,
             Heap = loadContext.Heap,
-            Cache = new HeapAnalysisCache(),
+            Cache = heapCache,
             Diagnostics = resolved.Diagnostics,
             Options = new Dictionary<string, object?>
             {

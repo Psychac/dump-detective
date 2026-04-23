@@ -1,7 +1,11 @@
 ﻿namespace DumpDetective.Core.Models;
-internal class StringLeakInfo
+
+// OPT-#12: Converted from class to struct to improve dictionary locality and eliminate per-entry
+// heap allocation + object header overhead. Use CollectionsMarshal.GetValueRefOrAddDefault for
+// in-place mutation to avoid the struct-copy-on-update issue.
+internal struct StringLeakInfo
 {
-public string Preview { get; set; } = string.Empty;
-public int Count { get; set; }
-public ulong TotalSize { get; set; }
+    public string? Preview;
+    public int Count;
+    public ulong TotalSize;
 }

@@ -7,9 +7,31 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class LohFragmentationAnalyzer : IAnalyzer
+    public class LohFragmentationAnalyzer : IAnalyzer
     {
         private const int TopSegments = 10;
+
+        // OPT-#4: Cache resolved PropertyInfo/MethodInfo per ClrSegment concrete type to avoid
+        // repeated reflection lookups (GetProperty calls) inside the per-segment hot loop.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, SegmentReflectionCache> s_segmentReflectionCache = new();
+
+        private sealed class SegmentReflectionCache
+        {
+            public PropertyInfo? IsLargeObjectSegment { get; init; }
+            public PropertyInfo? Kind { get; init; }
+            public PropertyInfo? IsLarge { get; init; }
+            public PropertyInfo? Address { get; init; }
+            public PropertyInfo? ObjectRange { get; init; }
+
+            public static SegmentReflectionCache Build(Type type) => new()
+            {
+                IsLargeObjectSegment = type.GetProperty("IsLargeObjectSegment", BindingFlags.Instance | BindingFlags.Public),
+                Kind = type.GetProperty("Kind", BindingFlags.Instance | BindingFlags.Public),
+                IsLarge = type.GetProperty("IsLarge", BindingFlags.Instance | BindingFlags.Public),
+                Address = type.GetProperty("Address", BindingFlags.Instance | BindingFlags.Public),
+                ObjectRange = type.GetProperty("ObjectRange", BindingFlags.Instance | BindingFlags.Public),
+            };
+        }
 
         public string Name => "LOH Fragmentation Analysis";
 
@@ -44,21 +66,19 @@ namespace DumpDetective.Analysis.Analyzers
                     if (!obj.IsValid)
                         continue;
 
-                    ulong size = obj.Size;
-                    totalBytes += size;
+                    ulong objectAddress = obj.Address;
+                    if (objectAddress == 0)
+                        continue;
 
-                    if (obj.IsFree)
-                    {
-                        freeObjectCount++;
-                        freeBytes += size;
-                        if (size > largestFreeBlock)
-                            largestFreeBlock = size;
-                    }
-                    else
-                    {
-                        objectCount++;
-                        usedBytes += size;
-                    }
+                    AccumulateSegmentObjectByAddress(
+                        heap,
+                        objectAddress,
+                        ref totalBytes,
+                        ref freeBytes,
+                        ref usedBytes,
+                        ref largestFreeBlock,
+                        ref objectCount,
+                        ref freeObjectCount);
                 }
 
                 double fragmentationPercent = totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
@@ -148,21 +168,19 @@ namespace DumpDetective.Analysis.Analyzers
         private static bool IsLohSegment(ClrSegment segment)
         {
             Type type = segment.GetType();
+            SegmentReflectionCache rc = s_segmentReflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
 
-            var largeFlag = type.GetProperty("IsLargeObjectSegment", BindingFlags.Instance | BindingFlags.Public);
-            if (largeFlag?.GetValue(segment) is bool isLargeObjectSegment)
+            if (rc.IsLargeObjectSegment?.GetValue(segment) is bool isLargeObjectSegment)
                 return isLargeObjectSegment;
 
-            var kindProp = type.GetProperty("Kind", BindingFlags.Instance | BindingFlags.Public);
-            if (kindProp?.GetValue(segment) is not null)
+            if (rc.Kind?.GetValue(segment) is not null)
             {
-                string kindName = kindProp.GetValue(segment)!.ToString() ?? string.Empty;
+                string kindName = rc.Kind.GetValue(segment)!.ToString() ?? string.Empty;
                 if (kindName.Contains("Large", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
 
-            var isLarge = type.GetProperty("IsLarge", BindingFlags.Instance | BindingFlags.Public);
-            if (isLarge?.GetValue(segment) is bool isLargeValue)
+            if (rc.IsLarge?.GetValue(segment) is bool isLargeValue)
                 return isLargeValue;
 
             return false;
@@ -171,21 +189,54 @@ namespace DumpDetective.Analysis.Analyzers
         private static ulong GetSegmentAddress(ClrSegment segment)
         {
             Type type = segment.GetType();
+            SegmentReflectionCache rc = s_segmentReflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
 
-            var addressProp = type.GetProperty("Address", BindingFlags.Instance | BindingFlags.Public);
-            if (addressProp?.GetValue(segment) is ulong address)
+            if (rc.Address?.GetValue(segment) is ulong address)
                 return address;
 
-            var objectRangeProp = type.GetProperty("ObjectRange", BindingFlags.Instance | BindingFlags.Public);
-            if (objectRangeProp?.GetValue(segment) is not null)
+            if (rc.ObjectRange?.GetValue(segment) is not null)
             {
-                object range = objectRangeProp.GetValue(segment)!;
+                object range = rc.ObjectRange.GetValue(segment)!;
                 var startProp = range.GetType().GetProperty("Start", BindingFlags.Instance | BindingFlags.Public);
                 if (startProp?.GetValue(range) is ulong start)
                     return start;
             }
 
             return 0;
+        }
+
+        private static void AccumulateSegmentObjectByAddress(
+            ClrHeap heap,
+            ulong objectAddress,
+            ref ulong totalBytes,
+            ref ulong freeBytes,
+            ref ulong usedBytes,
+            ref ulong largestFreeBlock,
+            ref int objectCount,
+            ref int freeObjectCount)
+        {
+            if (objectAddress == 0)
+                return;
+
+            ClrObject obj = heap.GetObject(objectAddress);
+            if (!obj.IsValid)
+                return;
+
+            ulong size = obj.Size;
+            totalBytes += size;
+
+            if (obj.IsFree)
+            {
+                freeObjectCount++;
+                freeBytes += size;
+                if (size > largestFreeBlock)
+                    largestFreeBlock = size;
+            }
+            else
+            {
+                objectCount++;
+                usedBytes += size;
+            }
         }
 
         private sealed class LohSegmentStats

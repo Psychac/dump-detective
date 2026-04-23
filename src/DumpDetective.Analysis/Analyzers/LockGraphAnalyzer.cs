@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class LockGraphAnalyzer : IAnalyzer
+    public class LockGraphAnalyzer : IAnalyzer
     {
         private const int MaxContestedLocksToShow = 15;
 
@@ -86,10 +86,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!sb.IsMonitorHeld || sb.Object == 0)
                     continue;
 
-                var obj = heap.GetObject(sb.Object);
-                string typeName = obj.IsValid && obj.Type != null
-                    ? (obj.Type.Name ?? StringConstants.UnknownType)
-                    : StringConstants.UnknownType;
+                string typeName = ResolveTypeNameByAddress(heap, sb.Object);
 
                 threadByAddress.TryGetValue(sb.HoldingThreadAddress, out ClrThread? ownerThread);
 
@@ -147,6 +144,18 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return result;
+        }
+
+        private static string ResolveTypeNameByAddress(ClrHeap heap, ulong objectAddress)
+        {
+            if (objectAddress == 0)
+                return StringConstants.UnknownType;
+
+            ClrObject obj = heap.GetObject(objectAddress);
+            if (!obj.IsValid || obj.Type == null)
+                return StringConstants.UnknownType;
+
+            return obj.Type.Name ?? StringConstants.UnknownType;
         }
     }
 

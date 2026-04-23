@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class ModuleAnalyzer : IAnalyzer
+public class ModuleAnalyzer : IAnalyzer
     {
         private const int TopLoadedAssembliesCount = 30;
 
@@ -97,6 +97,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             var analysis = new ModuleAnalysis();
             var modulesByName = new Dictionary<string, List<ModuleInfo>>();
+            var processedModuleAddresses = new HashSet<ulong>();
             var scanCounter = new ObjectScanCounter("Module scan");
 
             foreach (var module in runtime.EnumerateModules())
@@ -104,6 +105,9 @@ namespace DumpDetective.Analysis.Analyzers
                 scanCounter.Tick();
 
                 if (module.Name == null)
+                    continue;
+
+                if (module.Address == 0 || !processedModuleAddresses.Add(module.Address))
                     continue;
 
                 string moduleName = Path.GetFileName(module.Name);

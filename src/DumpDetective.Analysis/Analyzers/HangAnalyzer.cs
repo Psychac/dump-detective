@@ -1,4 +1,5 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -6,7 +7,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class HangAnalyzer : IAnalyzer
+public class HangAnalyzer : IAnalyzer
     {
         private const int LongWaitThreshold = 5; // threads waiting
         private const int HighThreadPoolThreshold = 100;
@@ -19,13 +20,18 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
         public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            var hangInfo = AnalyzeForHang(runtime, heap);
+            return Analyze(runtime, heap, cache: null);
+        }
+
+        private AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            var hangInfo = AnalyzeForHang(runtime, heap, cache);
 
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var wt in hangInfo.WaitingThreads)
@@ -100,7 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "% waiting threads");
         }
 
-        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap)
+        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var analysis = new HangAnalysis();
             var waitingThreads = new List<WaitingThreadInfo>();
@@ -143,7 +149,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             analysis.WaitingThreads = waitingThreads;
             ReadRuntimeThreadPool(runtime, analysis);
-            AnalyzeAsyncWork(heap, analysis);
+            AnalyzeAsyncWork(heap, cache, analysis);
 
             analysis.HealthScore = ComputeHealthScore(analysis);
 
@@ -275,63 +281,35 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
-        private void AnalyzeAsyncWork(ClrHeap heap, HangAnalysis analysis)
+        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis)
         {
             var threadPool = new ThreadPoolAnalysis();
             var taskContinuations = new Dictionary<string, int>();
+            var profileByMethodTable = new Dictionary<ulong, AsyncTypeProfile>(capacity: 64);
             int tasksScanned = 0;
             int totalContinuations = 0;
             var objectScanCounter = new ObjectScanCounter("Hang async object scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (HeapEntry entry in EnumerateAsyncEntries(heap, cache))
             {
                 objectScanCounter.Tick();
 
-                if (!obj.IsValid || obj.Type == null)
+                ulong objectAddress = entry.Address;
+                if (objectAddress == 0)
                     continue;
 
-                string typeName = obj.Type.Name ?? "";
+                AsyncTypeProfile profile = ResolveAsyncTypeProfile(heap, entry, profileByMethodTable);
+                if (!profile.IsPotentiallyRelevant)
+                    continue;
 
-                // Count queued work items
-                if (typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal) ||
-                    typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal))
-                {
-                    threadPool.QueuedWorkItems++;
-                }
-
-                // Count tasks
-                if (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
-                {
-                    tasksScanned++;
-                    threadPool.TotalTasks++;
-
-                    if (tasksScanned <= MaxTasksToScan)
-                    {
-                        var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                        if (stateField != null)
-                        {
-                            int stateFlags = stateField.Read<int>(obj, interior: false);
-                            bool isCompleted = (stateFlags & 0x1000000) != 0;
-                            bool isFaulted = (stateFlags & 0x200000) != 0;
-                            bool isCanceled = (stateFlags & 0x400000) != 0;
-
-                            if (isFaulted)
-                                threadPool.FaultedTasks++;
-                            else if (isCanceled)
-                                threadPool.CanceledTasks++;
-                            else if (!isCompleted)
-                                threadPool.PendingTasks++;
-                        }
-                    }
-                }
-
-                if (typeName.Contains("ContinuationTask", StringComparison.Ordinal) ||
-                    typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal))
-                {
-                    totalContinuations++;
-                    taskContinuations.TryGetValue(typeName, out int count);
-                    taskContinuations[typeName] = count + 1;
-                }
+                AnalyzeHeapObjectByAddress(
+                    heap,
+                    objectAddress,
+                    profile,
+                    threadPool,
+                    taskContinuations,
+                    ref tasksScanned,
+                    ref totalContinuations);
 
                 if (tasksScanned > MaxTasksToScan && threadPool.QueuedWorkItems > 1000)
                 {
@@ -345,6 +323,120 @@ namespace DumpDetective.Analysis.Analyzers
             analysis.ThreadPoolInfo = threadPool;
             analysis.TaskContinuations = taskContinuations;
             analysis.TotalContinuations = totalContinuations;
+        }
+
+        private static IEnumerable<HeapEntry> EnumerateAsyncEntries(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+            {
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
+            }
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
+        }
+
+        private static AsyncTypeProfile ResolveAsyncTypeProfile(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, AsyncTypeProfile> profileByMethodTable)
+        {
+            if (entry.MethodTable == 0)
+                return AsyncTypeProfile.None;
+
+            if (profileByMethodTable.TryGetValue(entry.MethodTable, out AsyncTypeProfile existing))
+                return existing;
+
+            ClrObject obj = heap.GetObject(entry.Address);
+            if (!obj.IsValid || obj.Type == null)
+            {
+                profileByMethodTable[entry.MethodTable] = AsyncTypeProfile.None;
+                return AsyncTypeProfile.None;
+            }
+
+            string typeName = obj.Type.Name ?? string.Empty;
+            AsyncTypeProfile profile = AsyncTypeProfile.FromTypeName(typeName);
+            profileByMethodTable[entry.MethodTable] = profile;
+            return profile;
+        }
+
+        private static void AnalyzeHeapObjectByAddress(
+            ClrHeap heap,
+            ulong objectAddress,
+            AsyncTypeProfile profile,
+            ThreadPoolAnalysis threadPool,
+            Dictionary<string, int> taskContinuations,
+            ref int tasksScanned,
+            ref int totalContinuations)
+        {
+            ClrObject obj = heap.GetObject(objectAddress);
+            if (!obj.IsValid || obj.Type == null)
+                return;
+
+            if (profile.IsQueuedWorkItem)
+            {
+                threadPool.QueuedWorkItems++;
+            }
+
+            if (profile.IsTask)
+            {
+                tasksScanned++;
+                threadPool.TotalTasks++;
+
+                if (tasksScanned <= MaxTasksToScan)
+                {
+                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                    if (stateField != null)
+                    {
+                        int stateFlags = stateField.Read<int>(obj, interior: false);
+                        bool isCompleted = (stateFlags & 0x1000000) != 0;
+                        bool isFaulted = (stateFlags & 0x200000) != 0;
+                        bool isCanceled = (stateFlags & 0x400000) != 0;
+
+                        if (isFaulted)
+                            threadPool.FaultedTasks++;
+                        else if (isCanceled)
+                            threadPool.CanceledTasks++;
+                        else if (!isCompleted)
+                            threadPool.PendingTasks++;
+                    }
+                }
+            }
+
+            if (profile.IsContinuation)
+            {
+                totalContinuations++;
+                string typeName = profile.TypeName;
+                taskContinuations.TryGetValue(typeName, out int count);
+                taskContinuations[typeName] = count + 1;
+            }
+        }
+
+        private readonly record struct AsyncTypeProfile(string TypeName, bool IsTask, bool IsQueuedWorkItem, bool IsContinuation)
+        {
+            public static AsyncTypeProfile None => new(string.Empty, false, false, false);
+
+            public bool IsPotentiallyRelevant => IsTask || IsQueuedWorkItem || IsContinuation;
+
+            public static AsyncTypeProfile FromTypeName(string typeName)
+            {
+                bool isQueuedWorkItem = typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal)
+                    || typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal);
+                bool isTask = typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal);
+                bool isContinuation = typeName.Contains("ContinuationTask", StringComparison.Ordinal)
+                    || typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal);
+
+                return new AsyncTypeProfile(typeName, isTask, isQueuedWorkItem, isContinuation);
+            }
         }
     }
 

@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class GCHandleAnalyzer : IAnalyzer
+    public class GCHandleAnalyzer : IAnalyzer
     {
         private const int TopTypeCount = 15;
 
@@ -15,17 +15,21 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
         {
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var allTargetTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
+            // for handles whose target type has already been resolved. Collapses N handles of the
+            // same type to a single heap dereference — same pattern as stringMethodTables in MemoryLeakAnalyzer.
+            var methodTableNameCache = new Dictionary<ulong, string>(capacity: 128);
 
             int totalHandles = 0;
             int strongLikeHandles = 0;
@@ -44,7 +48,8 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                     strongLikeHandles++;
 
-                string? typeName = TryGetTargetTypeName(handle);
+                ulong targetAddress = GetTargetAddress(handle);
+                string? typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
                 if (typeName == null)
                     continue;
 
@@ -117,24 +122,44 @@ namespace DumpDetective.Analysis.Analyzers
                 counts[key] = 1;
         }
 
-        private static string? TryGetTargetTypeName(ClrHandle handle)
+        private static ulong GetTargetAddress(ClrHandle handle)
         {
             object boxedTarget = handle.Object;
 
             if (boxedTarget is ClrObject clrObject)
             {
-                if (!clrObject.IsValid || clrObject.Type == null)
-                    return null;
-
-                return clrObject.Type.Name ?? StringConstants.UnknownType;
+                return clrObject.IsValid ? clrObject.Address : 0;
             }
 
             if (boxedTarget is ulong address)
             {
-                return address == 0 ? null : $"Object@0x{address:X}";
+                return address;
             }
 
-            return null;
+            return 0;
+        }
+
+        private static string? ResolveTargetTypeName(ClrHeap? heap, ulong targetAddress, Dictionary<ulong, string> methodTableNameCache)
+        {
+            if (targetAddress == 0)
+                return null;
+
+            if (heap == null)
+                return $"Object@0x{targetAddress:X}";
+
+            ClrObject targetObject = heap.GetObject(targetAddress);
+            if (!targetObject.IsValid)
+                return $"Object@0x{targetAddress:X}";
+
+            ulong methodTable = targetObject.Type?.MethodTable ?? 0;
+            if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cached))
+                return cached;
+
+            string name = targetObject.Type?.Name ?? StringConstants.UnknownType;
+            if (methodTable != 0)
+                methodTableNameCache[methodTable] = name;
+
+            return name;
         }
     }
 }

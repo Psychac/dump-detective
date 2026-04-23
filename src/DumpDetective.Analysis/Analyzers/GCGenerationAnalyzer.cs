@@ -1,4 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using System.Reflection;
@@ -6,9 +8,16 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class GCGenerationAnalyzer : IAnalyzer
+    public class GCGenerationAnalyzer : IAnalyzer
     {
         private const ulong LohThresholdBytes = 85000;
+
+        // OPT-#3: Resolve reflection members once at class initialization instead of per-call inside
+        // BuildDomainResult, which hit internal type-cache locks on every Analyze() invocation.
+        private static readonly PropertyInfo? s_generationProperty =
+            typeof(ClrObject).GetProperty("Generation");
+        private static readonly MethodInfo? s_getGenerationMethod =
+            typeof(ClrHeap).GetMethod("GetGeneration", [typeof(ulong)]);
 
         public string Name => "GC Generation Analysis";
 
@@ -26,10 +35,10 @@ namespace DumpDetective.Analysis.Analyzers
 
             return new AnalyzerExecutionResult(
                 [CreateFinding(cachedStats)],
-                BuildDomainResult(heap, cachedStats));
+                BuildDomainResult(heap, cache, cachedStats));
         }
 
-        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, Dictionary<string, CachedTypeStatistics> typeStats)
+        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> typeStats)
         {
             ulong gen0Bytes = 0;
             ulong gen1Bytes = 0;
@@ -53,21 +62,22 @@ namespace DumpDetective.Analysis.Analyzers
                 gen2Bytes += nonLohBytes;
             }
 
-            PropertyInfo? generationProperty = typeof(ClrObject).GetProperty("Generation");
-            MethodInfo? getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", [typeof(ulong)]);
+            PropertyInfo? generationProperty = s_generationProperty;
+            MethodInfo? getGenerationMethod = s_getGenerationMethod;
 
             try
             {
-                foreach (ClrObject obj in heap.EnumerateObjects())
+                foreach (HeapEntry entry in EnumerateGenerationEntries(heap, cache))
                 {
-                    if (!obj.IsValid)
+                    ulong objectAddress = entry.Address;
+                    if (objectAddress == 0)
                         continue;
 
-                    ulong size = obj.Size;
+                    ulong size = entry.Size;
                     if (size >= LohThresholdBytes)
                         continue;
 
-                    int generation = ResolveGeneration(heap, obj, generationProperty, getGenerationMethod);
+                    int generation = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
 
                     if (generation == 0)
                     {
@@ -114,12 +124,42 @@ namespace DumpDetective.Analysis.Analyzers
                 topLohTypes);
         }
 
-        private static int ResolveGeneration(ClrHeap heap, ClrObject obj, PropertyInfo? generationProperty, MethodInfo? getGenerationMethod)
+        private static IEnumerable<HeapEntry> EnumerateGenerationEntries(ClrHeap heap, IHeapAnalysisCache cache)
         {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+            {
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
+            }
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
+        }
+
+        private static int ResolveGeneration(ClrHeap heap, ulong objectAddress, PropertyInfo? generationProperty, MethodInfo? getGenerationMethod)
+        {
+            if (objectAddress == 0)
+                return 2;
+
             try
             {
                 if (generationProperty != null)
                 {
+                    ClrObject obj = heap.GetObject(objectAddress);
+                    if (!obj.IsValid)
+                        return 2;
+
                     object boxed = obj;
                     object? value = generationProperty.GetValue(boxed);
                     if (value is int gen)
@@ -135,7 +175,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (getGenerationMethod != null)
                 {
-                    object? value = getGenerationMethod.Invoke(heap, [obj.Address]);
+                    object? value = getGenerationMethod.Invoke(heap, [objectAddress]);
                     if (value is int gen)
                         return gen;
                 }

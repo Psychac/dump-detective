@@ -1,5 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -8,7 +9,7 @@ using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class EventLeakAnalyzer : IAnalyzer
+    public class EventLeakAnalyzer : IAnalyzer
     {
         private const int TopSubscriberTypesToShow = 5;
         private const int TopDetailedInstancesPerGroup = 5;
@@ -31,14 +32,19 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new EventLeakOptions();
 
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, options);
+            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache, options);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap, EventLeakOptions options)
         {
+            return Analyze(heap, cache: null, options);
+        }
+
+        private AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options)
+        {
             int minSubscribers = options.MinSubscribers;
-            var eventLeaks = FindEventLeaks(heap, minSubscribers);
+            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers);
             var findings = new List<InsightFinding>(capacity: 5);
 
             if (eventLeaks.Count == 0)
@@ -147,21 +153,26 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, int minSubscribers)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers)
         {
             var leaks = new List<EventLeakInfo>();
             var processedObjects = new HashSet<ulong>();
-            var processedStaticTypes = new HashSet<string>();
+            var processedStaticMethodTables = new HashSet<ulong>();
             var processedStaticDelegates = new HashSet<ulong>();
             var appDomains = heap.Runtime.AppDomains;
             var rootHints = BuildRootHintMap(heap);
             var scanCounter = new ObjectScanCounter("Event leak object scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            foreach (HeapEntry entry in EnumerateEventEntries(heap, cache))
             {
                 scanCounter.Tick();
 
-                if (!obj.IsValid || !processedObjects.Add(obj.Address))
+                ulong objectAddress = entry.Address;
+                if (objectAddress == 0 || !processedObjects.Add(objectAddress))
+                    continue;
+
+                ClrObject obj = heap.GetObject(objectAddress);
+                if (!obj.IsValid)
                     continue;
 
                 if (obj.Type == null || TypeFilterHelper.IsSystemType(obj.Type.Name)
@@ -175,7 +186,7 @@ namespace DumpDetective.Analysis.Analyzers
                         && IsLikelyEventField(obj.Type, field.Name)
                         && !TypeFilterHelper.IsCompilerGenerated(field.Name))
                     {
-                        var subscribers = GetEventSubscribers(obj, field);
+                        var subscribers = GetEventSubscribers(heap, obj.Address, field);
 
                         if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                         {
@@ -191,7 +202,8 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 // Process static event fields once per unique type
-                if (processedStaticTypes.Add(obj.Type.Name ?? string.Empty))
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable != 0 && processedStaticMethodTables.Add(methodTable))
                 {
                     foreach (ClrStaticField field in obj.Type.StaticFields)
                     {
@@ -199,7 +211,7 @@ namespace DumpDetective.Analysis.Analyzers
                             && IsLikelyEventField(obj.Type, field.Name)
                             && !TypeFilterHelper.IsCompilerGenerated(field.Name))
                         {
-                            var subscribers = GetStaticEventSubscribers(field, appDomains, processedStaticDelegates);
+                            var subscribers = GetStaticEventSubscribers(heap, field, appDomains, processedStaticDelegates);
 
                             if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
                             {
@@ -222,6 +234,29 @@ namespace DumpDetective.Analysis.Analyzers
             scanCounter.Complete();
 
             return leaks;
+        }
+
+        private static IEnumerable<HeapEntry> EnumerateEventEntries(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+            {
+                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                    yield return entry;
+
+                yield break;
+            }
+
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
+                    continue;
+
+                ulong methodTable = obj.Type.MethodTable;
+                if (methodTable == 0)
+                    continue;
+
+                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+            }
         }
 
         private List<EventGroupInfo> GroupEventLeaks(List<EventLeakInfo> eventLeaks)
@@ -284,23 +319,33 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
 
-        private static List<SubscriberInfo> GetEventSubscribers(ClrObject obj, ClrInstanceField eventField)
+        private static List<SubscriberInfo> GetEventSubscribers(ClrHeap heap, ulong publisherAddress, ClrInstanceField eventField)
         {
             try
             {
-                ClrObject eventDelegate = eventField.ReadObject(obj, interior: false);
-                return ExtractSubscribersFromDelegate(eventDelegate);
+                if (publisherAddress == 0)
+                    return [];
+
+                ClrObject publisher = heap.GetObject(publisherAddress);
+                if (!publisher.IsValid)
+                    return [];
+
+                ClrObject eventDelegate = eventField.ReadObject(publisher, interior: false);
+                if (!eventDelegate.IsValid)
+                    return [];
+
+                return ExtractSubscribersFromDelegateAddress(heap, eventDelegate.Address);
             }
             catch
             {
-                return new List<SubscriberInfo>();
+                return [];
             }
         }
 
-        private static List<SubscriberInfo> GetStaticEventSubscribers(ClrStaticField field, IReadOnlyList<ClrAppDomain> appDomains, HashSet<ulong>? processedStaticDelegates = null)
+        private static List<SubscriberInfo> GetStaticEventSubscribers(ClrHeap heap, ClrStaticField field, IReadOnlyList<ClrAppDomain> appDomains, HashSet<ulong>? processedStaticDelegates = null)
         {
             var subscribers = new List<SubscriberInfo>();
-            var seen = new HashSet<(ulong Address, string Type)>();
+            var seen = new HashSet<ulong>();
 
             foreach (var appDomain in appDomains)
             {
@@ -310,11 +355,11 @@ namespace DumpDetective.Analysis.Analyzers
                     if (eventDelegate.IsValid)
                         processedStaticDelegates?.Add(eventDelegate.Address);
 
-                    var domainSubscribers = ExtractSubscribersFromDelegate(eventDelegate);
+                    var domainSubscribers = ExtractSubscribersFromDelegateAddress(heap, eventDelegate.Address);
 
                     foreach (var subscriber in domainSubscribers)
                     {
-                        if (seen.Add((subscriber.Address, subscriber.Type)))
+                        if (subscriber.Address != 0 && seen.Add(subscriber.Address))
                         {
                             subscribers.Add(subscriber);
                         }
@@ -422,7 +467,7 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
                 }
 
-                var subscribers = ExtractSubscribersFromDelegate(rootObj);
+                var subscribers = ExtractSubscribersFromDelegateAddress(heap, rootObj.Address);
                 if (subscribers.Count == 0 || subscribers.Count < minSubscribers)
                     continue;
 
@@ -503,7 +548,16 @@ namespace DumpDetective.Analysis.Analyzers
 
         // All C# delegates derive from MulticastDelegate. Dispatch is based on
         // whether _invocationList is a non-null array (multiple subscribers) vs null (single subscriber).
-        private static List<SubscriberInfo> ExtractSubscribersFromDelegate(ClrObject eventDelegate)
+        private static List<SubscriberInfo> ExtractSubscribersFromDelegateAddress(ClrHeap heap, ulong delegateAddress)
+        {
+            if (delegateAddress == 0)
+                return [];
+
+            ClrObject eventDelegate = heap.GetObject(delegateAddress);
+            return ExtractSubscribersFromDelegateObject(eventDelegate);
+        }
+
+        private static List<SubscriberInfo> ExtractSubscribersFromDelegateObject(ClrObject eventDelegate)
         {
             var subscribers = new List<SubscriberInfo>();
 
@@ -549,6 +603,9 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static void ExtractSingleSubscriber(ClrObject delegateObj, List<SubscriberInfo> subscribers)
         {
+            if (delegateObj.Type == null)
+                return;
+
             var targetField = DelegateHelper.GetCachedField(delegateObj.Type, StringConstants.DelegateTargetField);
             if (targetField == null)
                 return;

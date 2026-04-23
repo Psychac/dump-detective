@@ -1,6 +1,6 @@
 namespace DumpDetective.Core.Models;
 
-internal enum AnalysisDiagnosticsEventType
+public enum AnalysisDiagnosticsEventType
 {
     RunStarted,
     AnalyzerStarted,
@@ -12,7 +12,7 @@ internal enum AnalysisDiagnosticsEventType
     RunCompleted
 }
 
-internal sealed record AnalysisDiagnosticsEvent(
+public sealed record AnalysisDiagnosticsEvent(
     Guid RunId,
     AnalysisDiagnosticsEventType EventType,
     DateTime TimestampUtc,

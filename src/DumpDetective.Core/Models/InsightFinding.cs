@@ -1,5 +1,5 @@
 ﻿namespace DumpDetective.Core.Models;
-internal sealed record InsightFinding(
+public sealed record InsightFinding(
 string Analyzer,
 string Category,
 FindingSeverity Severity,

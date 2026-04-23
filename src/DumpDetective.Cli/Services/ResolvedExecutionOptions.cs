@@ -1,4 +1,5 @@
 using DumpDetective.Core.Options;
+using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Cli.Services;
 
@@ -16,4 +17,5 @@ internal sealed record ResolvedExecutionOptions(
     bool UsedConfigFile,
     IReadOnlyCollection<string> IncludeAnalyzers,
     IReadOnlyCollection<string> ExcludeAnalyzers,
-    bool DiagnosticMode);
+    bool DiagnosticMode,
+    HeapIndexPrebuildMode IndexPrebuildMode);

@@ -10,6 +10,17 @@ internal static class ConsoleUx
     private static int _lastScanLineLength;
     private static int _spinnerIndex;
 
+    // Visual hierarchy indentation:
+    //   Level 1 – Dump      (no indent)
+    //   Level 2 – Stage     (IndentStage)
+    //   Level 3 – Analyzer  (IndentAnalyzer)
+    //   Level 4 – Phase / progress  (IndentSub)
+    private const string IndentStage    = "  ";
+    private const string IndentAnalyzer = "    ";
+    private const string IndentSub      = "      ";
+
+    // ── Level 0: global headers ─────────────────────────────────────────────
+
     public static void Header(string title)
     {
         lock (_consoleGate)
@@ -20,14 +31,16 @@ internal static class ConsoleUx
         }
     }
 
+    // ── Level 1: Dump ───────────────────────────────────────────────────────
+
     public static void DumpStart(int current, int total, string dumpName)
     {
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"{Timestamp()} [mediumpurple2]📦[/] [bold]Dump {current}/{total}[/]");
-            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(dumpName)}[/]");
+            AnsiConsole.MarkupLine($"{Timestamp()} [mediumpurple2]📦[/]  [bold]Dump {current}/{total}[/]");
+            AnsiConsole.MarkupLine($"           [grey]└─[/]  [silver]{Escape(dumpName)}[/]");
         }
     }
 
@@ -36,46 +49,13 @@ internal static class ConsoleUx
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] Dump {current}/{total} complete [silver]({Escape(FormatElapsed(duration))})[/]");
-            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(dumpName)}[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"{Timestamp()} [green]✔[/]  [bold]Dump {current}/{total} complete[/]  [grey]·[/]  [silver]{Escape(FormatElapsed(duration))}[/]");
+            AnsiConsole.MarkupLine($"           [grey]└─[/]  [silver]{Escape(dumpName)}[/]");
         }
     }
 
-    public static void Info(string message)
-    {
-        lock (_consoleGate)
-        {
-            FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]ℹ[/] {Escape(message)}");
-        }
-    }
-
-    public static void Warning(string message)
-    {
-        lock (_consoleGate)
-        {
-            FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [yellow]⚠[/] {Escape(message)}");
-        }
-    }
-
-    public static void Error(string message)
-    {
-        lock (_consoleGate)
-        {
-            FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [red]❌[/] {Escape(message)}");
-        }
-    }
-
-    public static void Success(string message)
-    {
-        lock (_consoleGate)
-        {
-            FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] {Escape(message)}");
-        }
-    }
+    // ── Level 2: Stage ──────────────────────────────────────────────────────
 
     public static void StageStart(int current, int total, string stageName)
     {
@@ -84,8 +64,7 @@ internal static class ConsoleUx
         {
             FlushScanLineIfNeeded_NoLock();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"{Timestamp()} [yellow]▶[/] [bold]Stage {current}/{total}[/] ([silver]{percent:F0}%[/])");
-            AnsiConsole.MarkupLine($"           [grey]└─[/] [deepskyblue1]{Escape(stageName)}[/]");
+            AnsiConsole.MarkupLine($"{IndentStage}{Timestamp()} [orange1]▸[/]  [bold]Stage {current}/{total}[/]  [grey]·[/]  [deepskyblue1]{Escape(stageName)}[/]  [grey]({percent:F0}%)[/]");
         }
     }
 
@@ -94,47 +73,46 @@ internal static class ConsoleUx
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [green]✅[/] Stage complete [silver]({Escape(FormatElapsed(duration))})[/]");
-            AnsiConsole.MarkupLine($"           [grey]└─[/] [silver]{Escape(stageName)}[/]");
+            AnsiConsole.MarkupLine($"{IndentStage}{Timestamp()} [green]✔[/]  [bold]Stage {current}/{total} done[/]  [grey]·[/]  [silver]{Escape(stageName)}[/]  [grey]([/][silver]{Escape(FormatElapsed(duration))}[/][grey])[/]");
         }
     }
+
+    // ── Level 3: Analyzer ───────────────────────────────────────────────────
 
     public static void AnalyzerStart(int current, int total, string analyzerName)
     {
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]•[/] [bold][{current}/{total}][/]: [silver]{Escape(analyzerName)}[/]");
+            AnsiConsole.MarkupLine($"{IndentAnalyzer}{Timestamp()} [deepskyblue1]◆[/]  [grey][[{current}/{total}]][/]  [bold white]{Escape(analyzerName)}[/]");
         }
     }
+
+    // ── Level 4: Phase / sub-module / progress ──────────────────────────────
 
     public static void AnalyzerPhase(string phase)
     {
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"           [grey]↳[/] [silver]{Escape(phase)}[/]");
+            AnsiConsole.MarkupLine($"{IndentSub}[grey]↳  {Escape(phase)}[/]");
         }
     }
 
-    public static void WriteVerbose(string message)
-    {
-        lock (_consoleGate)
-        {
-            FlushScanLineIfNeeded_NoLock();
-            AnsiConsole.MarkupLine($"{Timestamp()} [grey][DIAG][/] {Escape(message)}");
-        }
-    }
-
+    /// <summary>
+    /// Overwrites the current terminal line with a live scan progress indicator.
+    /// <paramref name="operation"/> is used only in the completion summary; the rolling
+    /// line intentionally omits it to reduce clutter (the analyzer name was just printed).
+    /// </summary>
     public static void ObjectScanProgress(string operation, long scannedCount, TimeSpan elapsed, string? details = null, double? perSecondOverride = null)
     {
         double perSecond = perSecondOverride ?? (elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0);
-        string perSecondText = perSecond > 0 ? $"{perSecond:N0}/s" : string.Empty;
-        string scanSegment = scannedCount > 0 ? $" • scan {scannedCount:N0}" : string.Empty;
-        string rateSegment = string.IsNullOrWhiteSpace(perSecondText) ? string.Empty : $" • {perSecondText}";
-        string spinner = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
-        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" • {details}";
-        string text = $"[{DateTime.Now:HH:mm:ss}] {spinner} {operation}{scanSegment} • {FormatElapsed(elapsed)}{rateSegment}{detailsSegment}";
+        string spinner    = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
+        string scanPart   = scannedCount > 0 ? $"{scannedCount:N0} obj" : string.Empty;
+        string ratePart   = perSecond > 0 ? $"  ·  {perSecond:N0}/s" : string.Empty;
+        string detailsPart = string.IsNullOrWhiteSpace(details) ? string.Empty : $"  ·  {details}";
+        string sep        = string.IsNullOrEmpty(scanPart) ? string.Empty : "  ·  ";
+        string text       = $"{IndentSub}{spinner}  {scanPart}{sep}{FormatElapsed(elapsed)}{ratePart}{detailsPart}";
 
         lock (_consoleGate)
         {
@@ -145,14 +123,15 @@ internal static class ConsoleUx
         }
     }
 
+    /// <summary>
+    /// Replaces the live progress line with a final one-line completion summary and advances to the next line.
+    /// </summary>
     public static void ObjectScanComplete(string operation, long scannedCount, TimeSpan elapsed, string? details = null)
     {
-        double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
-        string perSecondText = perSecond > 0 ? $"{perSecond:N0}/s" : string.Empty;
-        string scanSegment = scannedCount > 0 ? $" • scan {scannedCount:N0}" : string.Empty;
-        string rateSegment = string.IsNullOrWhiteSpace(perSecondText) ? string.Empty : $" • {perSecondText}";
-        string detailsSegment = string.IsNullOrWhiteSpace(details) ? string.Empty : $" • {details}";
-        string text = $"[{DateTime.Now:HH:mm:ss}] ✓ {operation}{scanSegment} • {FormatElapsed(elapsed)}{rateSegment}{detailsSegment}";
+        double perSecond   = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
+        string scanPart    = scannedCount > 0 ? $"  ·  {scannedCount:N0} obj  ·  {perSecond:N0}/s" : string.Empty;
+        string detailsPart = string.IsNullOrWhiteSpace(details) ? string.Empty : $"  ·  {details}";
+        string text        = $"{IndentAnalyzer}  ✔  {operation}{scanPart}  ·  {FormatElapsed(elapsed)}{detailsPart}";
 
         lock (_consoleGate)
         {
@@ -165,15 +144,58 @@ internal static class ConsoleUx
         }
     }
 
-    private static string Timestamp()
+    // ── Utility messages ────────────────────────────────────────────────────
+
+    public static void Info(string message)
     {
-        return $"[grey][[{DateTime.Now:HH:mm:ss}]][/]";
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]ℹ[/]  {Escape(message)}");
+        }
     }
 
-    private static string Escape(string value)
+    public static void Warning(string message)
     {
-        return Markup.Escape(value);
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [yellow]⚠[/]  {Escape(message)}");
+        }
     }
+
+    public static void Error(string message)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [red]✖[/]  {Escape(message)}");
+        }
+    }
+
+    public static void Success(string message)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [green]✔[/]  {Escape(message)}");
+        }
+    }
+
+    public static void WriteVerbose(string message)
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{Timestamp()} [grey][DIAG][/]  {Escape(message)}");
+        }
+    }
+
+    // ── Private helpers ─────────────────────────────────────────────────────
+
+    private static string Timestamp() => $"[grey][[{DateTime.Now:HH:mm:ss}]][/]";
+
+    private static string Escape(string value) => Markup.Escape(value);
 
     private static void FlushScanLineIfNeeded_NoLock()
     {

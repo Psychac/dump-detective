@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Options;
@@ -393,6 +396,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             foreach (ulong referenceAddress in EnumerateOutgoingReferenceAddresses(sourceObject))
             {
+                if (referenceAddress == 0)
+                    continue;
+
                 if (referenceCount.TryGetValue(referenceAddress, out int count))
                 {
                     referenceCount[referenceAddress] = count + 1;
@@ -445,29 +451,67 @@ namespace DumpDetective.Analysis.Analyzers
 
         private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
         {
-            var topAddresses = referenceCount
-                .Where(kvp => kvp.Value > options.HighReferenceThreshold)
-                .OrderByDescending(kvp => kvp.Value)
-                .Take(TopHighlyReferencedObjectsToShow)
-                .ToList();
-
-            if (topAddresses.Count == 0)
-                return [];
-
-            var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Count);
-
-            foreach (var topAddress in topAddresses)
+            int threshold = options.HighReferenceThreshold;
+            // Heuristic: for small dictionaries the LINQ-based path is faster (no heap overhead).
+            const int LinqFastPathThreshold = 50_000;
+            if (referenceCount.Count <= LinqFastPathThreshold)
             {
-                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, topAddress.Key, topAddress.Value);
-                if (snapshot == null)
-                    continue;
+                var topAddresses = referenceCount
+                    .Where(kvp => kvp.Value > threshold)
+                    .OrderByDescending(kvp => kvp.Value)
+                    .Take(TopHighlyReferencedObjectsToShow)
+                    .ToList();
 
-                results.Add(snapshot);
+                if (topAddresses.Count == 0)
+                    return Array.Empty<HighlyReferencedObjectSnapshot>();
+
+                var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Count);
+                foreach (var top in topAddresses)
+                {
+                    HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, top.Key, top.Value);
+                    if (snapshot is null)
+                        continue;
+
+                    results.Add(snapshot);
+                }
+
+                return results;
             }
 
-            return results
-                .OrderByDescending(r => r.IncomingReferences)
-                .ToList();
+            // Use a fixed-size min-heap (PriorityQueue) to track top K addresses by incoming reference count for large inputs.
+            var pq = new PriorityQueue<KeyValuePair<ulong, int>, int>(TopHighlyReferencedObjectsToShow + 1);
+
+            foreach (KeyValuePair<ulong, int> kvp in referenceCount)
+            {
+                if (kvp.Value <= threshold)
+                    continue;
+
+                pq.Enqueue(kvp, kvp.Value);
+                if (pq.Count > TopHighlyReferencedObjectsToShow)
+                    pq.Dequeue(); // evict smallest
+            }
+
+            if (pq.Count == 0)
+                return Array.Empty<HighlyReferencedObjectSnapshot>();
+
+            // Drain pq into a list (ascending), then build snapshots and reverse to descending.
+            var buffer = new List<KeyValuePair<ulong, int>>(pq.Count);
+            while (pq.Count > 0)
+                buffer.Add(pq.Dequeue());
+
+            // buffer currently ascending by count; iterate reverse to produce descending order.
+            var final = new List<HighlyReferencedObjectSnapshot>(buffer.Count);
+            for (int i = buffer.Count - 1; i >= 0; i--)
+            {
+                var kvp = buffer[i];
+                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, kvp.Key, kvp.Value);
+                if (snapshot is null)
+                    continue;
+
+                final.Add(snapshot);
+            }
+
+            return final;
         }
 
         private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(ClrHeap heap, ulong objectAddress, int incomingReferences)

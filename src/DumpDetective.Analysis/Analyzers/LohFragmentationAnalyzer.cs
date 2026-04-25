@@ -44,6 +44,11 @@ namespace DumpDetective.Analysis.Analyzers
 
         public AnalyzerExecutionResult Analyze(ClrHeap heap)
         {
+            // NOTE: Intentionally does not use IHeapAnalysisCache / heap index here.
+            // Fragmentation analysis requires per-segment object ordering and contiguous
+            // free-block detection — a flat address/MT/size index cannot express this.
+            // The segment-level scan is the correct and only viable approach.
+
             var segmentStats = new List<LohSegmentStats>();
             var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 

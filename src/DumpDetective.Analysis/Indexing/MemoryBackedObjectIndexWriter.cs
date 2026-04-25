@@ -15,7 +15,15 @@ internal sealed class MemoryBackedObjectIndexWriter
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
         TypeAggregateIndexBuilder aggregateBuilder = new();
-        var entries = new List<HeapEntry>(capacity: 1024);
+        // Seed list capacity from heap segment sizes to avoid repeated doublings on large heaps.
+        // Heuristic average object size: ~128 bytes. Cap to a reasonable max to avoid OOM.
+        ulong totalBytes = 0;
+        foreach (var seg in heap.Segments)
+        {
+            totalBytes += seg.Length;
+        }
+        int estimatedCount = (int)Math.Min(totalBytes / 128, 20_000_000);
+        var entries = new List<HeapEntry>(capacity: Math.Max(estimatedCount, 1024));
         long objectCount = 0;
 
         foreach (HeapEntry entry in HeapStreamer.Stream(heap))

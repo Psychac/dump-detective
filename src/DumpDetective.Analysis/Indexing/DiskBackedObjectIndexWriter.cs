@@ -17,7 +17,8 @@ internal sealed class DiskBackedObjectIndexWriter
         ClrHeap heap,
         string dumpPath,
         CancellationToken cancellationToken,
-        Action<long, TimeSpan>? progress = null)
+        Action<long, TimeSpan>? progress = null,
+        DumpDetective.Core.Models.DumpSizeTier sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
         string indexPath = CreateIndexPath(dumpPath);
@@ -27,7 +28,14 @@ internal sealed class DiskBackedObjectIndexWriter
         TypeAggregateIndexBuilder aggregateBuilder = new();
         long objectCount = 0;
 
-        using (FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan))
+        int writeBuffer = sizeTier switch
+        {
+            DumpDetective.Core.Models.DumpSizeTier.Large => 4 * 1024 * 1024,
+            DumpDetective.Core.Models.DumpSizeTier.Medium => 1 * 1024 * 1024,
+            _ => 128 * 1024,
+        };
+
+        using (FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: writeBuffer, FileOptions.SequentialScan))
         {
             WriteHeader(stream, recordCount: 0);
 

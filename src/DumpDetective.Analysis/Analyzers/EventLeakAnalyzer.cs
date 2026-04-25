@@ -18,8 +18,8 @@ namespace DumpDetective.Analysis.Analyzers
         private const int SeverityStaticPublisherBonus = 10;
         private const int SeverityRootHintBonus = 5;
 
-        private static readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
-        private static readonly object _eventNameCacheLock = new();
+        private readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
+        private readonly object _eventNameCacheLock = new();
 
         public string Name => "Event Leak Analysis";
 
@@ -160,7 +160,7 @@ namespace DumpDetective.Analysis.Analyzers
             var processedStaticMethodTables = new HashSet<ulong>();
             var processedStaticDelegates = new HashSet<ulong>();
             var appDomains = heap.Runtime.AppDomains;
-            var rootHints = BuildRootHintMap(heap);
+            var rootHints = BuildRootHintMap(heap, cache);
             var scanCounter = new ObjectScanCounter("Event leak object scan");
 
             foreach (HeapEntry entry in EnumerateEventEntries(heap, cache))
@@ -229,7 +229,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Cover static-only publisher types by reading static roots directly.
-            FindStaticRootOnlyEventLeaks(heap, processedStaticDelegates, rootHints, minSubscribers, leaks);
+            FindStaticRootOnlyEventLeaks(heap, cache, processedStaticDelegates, rootHints, minSubscribers, leaks);
 
             scanCounter.Complete();
 
@@ -423,9 +423,20 @@ namespace DumpDetective.Analysis.Analyzers
             return score;
         }
 
-        private static Dictionary<ulong, string> BuildRootHintMap(ClrHeap heap)
+        private static Dictionary<ulong, string> BuildRootHintMap(ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var map = new Dictionary<ulong, string>();
+
+            if (cache is not null)
+            {
+                var roots = cache.GetOrBuildValidRoots(heap);
+                foreach ((string kind, ulong address) in roots)
+                {
+                    if (address == 0) continue;
+                    map.TryAdd(address, kind);
+                }
+                return map;
+            }
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
@@ -441,24 +452,45 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static void FindStaticRootOnlyEventLeaks(
             ClrHeap heap,
+            IHeapAnalysisCache? cache,
             HashSet<ulong> processedStaticDelegates,
             Dictionary<ulong, string> rootHints,
             int minSubscribers,
             List<EventLeakInfo> leaks)
         {
-            foreach (ClrRoot root in heap.EnumerateRoots())
+            IReadOnlyList<(string RootKind, ulong Address)> roots;
+            if (cache is not null)
             {
-                if (!root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
+                roots = cache.GetOrBuildValidRoots(heap);
+            }
+            else
+            {
+                var tmp = new List<(string RootKind, ulong Address)>();
+                foreach (ClrRoot r in heap.EnumerateRoots())
+                {
+                    tmp.Add((r.RootKind.ToString(), r.Object.Address));
+                }
+                roots = tmp;
+            }
+
+            foreach (var root in roots)
+            {
+                string rootKind = root.RootKind ?? string.Empty;
+                if (!rootKind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                ClrObject rootObj = root.Object;
+                ulong rootAddress = root.Address;
+                if (rootAddress == 0)
+                    continue;
+
+                ClrObject rootObj = heap.GetObject(rootAddress);
                 if (!rootObj.IsValid || rootObj.Type == null || !TypeFilterHelper.IsDelegateType(rootObj.Type))
                     continue;
 
                 if (!processedStaticDelegates.Add(rootObj.Address))
                     continue;
 
-                string rootDescription = root.ToString() ?? StringConstants.UnknownType;
+                string rootDescription = cache?.GetRootDescription(rootAddress) ?? (rootKind + " @ 0x" + rootAddress.ToString("X"));
                 ParseRootPublisher(rootDescription, out string publisherType, out string eventFieldName);
 
                 if (TypeFilterHelper.IsCompilerGenerated(publisherType)
@@ -495,7 +527,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private static bool IsLikelyEventField(ClrType ownerType, string? fieldName)
+        private bool IsLikelyEventField(ClrType ownerType, string? fieldName)
         {
             if (string.IsNullOrEmpty(fieldName))
                 return false;
@@ -510,7 +542,7 @@ namespace DumpDetective.Analysis.Analyzers
             return eventNames.Contains(fieldName);
         }
 
-        private static HashSet<string> GetEventNames(ClrType type)
+        private HashSet<string> GetEventNames(ClrType type)
         {
             string cacheKey = type.Name ?? StringConstants.UnknownType;
 

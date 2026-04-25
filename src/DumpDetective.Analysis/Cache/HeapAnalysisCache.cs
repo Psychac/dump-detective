@@ -21,6 +21,9 @@ namespace DumpDetective.Analysis.Cache
         private long _cacheHits;
         private long _cacheMisses;
         private Action<string, long>? _progressReporter;
+        private DumpDetective.Core.Models.DumpSizeTier _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
+        private Dictionary<ulong, HashSet<ulong>>? _retainedObjectsCache;
+        private Dictionary<ulong, bool>? _methodTableHasRefs;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -53,6 +56,26 @@ namespace DumpDetective.Analysis.Cache
                 yield return entry;
         }
 
+        public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
+        {
+            if (_heapIndex is null)
+                yield break;
+
+            if (_heapIndex.StorageKind == HeapIndexStorageKind.Memory)
+            {
+                if (_heapIndex.InMemoryEntries is null)
+                    yield break;
+
+                foreach (HeapEntry entry in _heapIndex.InMemoryEntries)
+                    yield return (entry.Address, entry.MethodTable, entry.Size);
+
+                yield break;
+            }
+
+            foreach (HeapEntry entry in HeapIndexEntryReader.ReadDiskEntries(_heapIndex.IndexPath))
+                yield return (entry.Address, entry.MethodTable, entry.Size);
+        }
+
         public void SetProgressReporter(Action<string, long>? progressReporter)
         {
             _progressReporter = progressReporter;
@@ -74,6 +97,18 @@ namespace DumpDetective.Analysis.Cache
             Interlocked.Increment(ref _cacheMisses);
 
             HeapIndexPrebuildMode selectedMode = SelectPrebuildMode(mode, dumpPath);
+            // Determine dump size tier once and cache it for adaptive decisions
+            try
+            {
+                long dumpBytes = new FileInfo(dumpPath).Length;
+                _sizeTier = dumpBytes > 4L * 1024 * 1024 * 1024 ? DumpDetective.Core.Models.DumpSizeTier.Large :
+                            dumpBytes > 512L * 1024 * 1024 ? DumpDetective.Core.Models.DumpSizeTier.Medium :
+                            DumpDetective.Core.Models.DumpSizeTier.Small;
+            }
+            catch
+            {
+                _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
+            }
             if (selectedMode == HeapIndexPrebuildMode.Memory)
             {
                 var memoryWriter = new MemoryBackedObjectIndexWriter();
@@ -82,8 +117,76 @@ namespace DumpDetective.Analysis.Cache
             }
 
             var diskWriter = new DiskBackedObjectIndexWriter();
-            _heapIndex = diskWriter.Build(heap, dumpPath, cancellationToken, progress);
+            _heapIndex = diskWriter.Build(heap, dumpPath, cancellationToken, progress, _sizeTier);
             return _heapIndex;
+        }
+
+        public DumpDetective.Core.Models.DumpSizeTier SizeTier => _sizeTier;
+
+        public bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable)
+        {
+            if (methodTable == 0)
+                return false;
+
+            _methodTableHasRefs ??= new Dictionary<ulong, bool>(capacity: 512);
+            if (_methodTableHasRefs.TryGetValue(methodTable, out var cached))
+                return cached;
+
+            // Fast path: if we have a prebuilt index, hydrate from the index sample address.
+            if (_heapIndex?.TypeAggregates is IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates
+                && aggregates.TryGetValue(methodTable, out var aggregate))
+            {
+                if (aggregate.SampleAddress != 0)
+                {
+                    try
+                    {
+                        ClrObject sample = heap.GetObject(aggregate.SampleAddress);
+                        bool has = sample.IsValid && sample.Type is not null && sample.Type.ContainsPointers;
+                        _methodTableHasRefs[methodTable] = has;
+                        return has;
+                    }
+                    catch
+                    {
+                        // fallthrough to conservative default below
+                    }
+                }
+            }
+
+            // Fallback: ask ClrHeap for the type by method-table (fast) and inspect fields.
+            try
+            {
+                ClrType? type = heap.GetTypeByMethodTable(methodTable);
+                if (type is not null)
+                {
+                    bool has = false;
+                    if (type.IsArray)
+                    {
+                        has = type.ComponentType?.IsObjectReference == true;
+                    }
+                    else
+                    {
+                        foreach (ClrInstanceField field in type.Fields)
+                        {
+                            if (field.IsObjectReference)
+                            {
+                                has = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    _methodTableHasRefs[methodTable] = has;
+                    return has;
+                }
+            }
+            catch
+            {
+                // ignore and fall through to conservative default
+            }
+
+            // Conservative default: assume method-table has outgoing refs to avoid missing referents.
+            _methodTableHasRefs[methodTable] = true;
+            return true;
         }
 
         private static HeapIndexPrebuildMode SelectPrebuildMode(HeapIndexPrebuildMode requestedMode, string dumpPath)
@@ -106,7 +209,7 @@ namespace DumpDetective.Analysis.Cache
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)
         {
-            if (_staticRootedAddresses != null)
+            if (_staticRootedAddresses is not null)
             {
                 Interlocked.Increment(ref _cacheHits);
                 return _staticRootedAddresses;
@@ -114,23 +217,8 @@ namespace DumpDetective.Analysis.Cache
 
             Interlocked.Increment(ref _cacheMisses);
 
-            _staticRootedAddresses = new HashSet<ulong>();
-
-            foreach (ClrRoot root in heap.EnumerateRoots())
-            {
-                // OPT-#11: Plain increment in single-threaded scan loop; Interlocked fence unnecessary here.
-                long scans = ++_objectScanCount;
-                ReportProgress("Static root walk", scans);
-                if (root.RootKind.ToString().Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (root.Object.IsValid)
-                    {
-                        _staticRootedAddresses.Add(root.Object.Address);
-                    }
-                }
-            }
-
-            return _staticRootedAddresses;
+            EnsureRootCaches(heap);
+            return _staticRootedAddresses ?? new HashSet<ulong>();
         }
 
         public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
@@ -264,6 +352,15 @@ namespace DumpDetective.Analysis.Cache
 
         public HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
         {
+            // Check cache first
+            if (_retainedObjectsCache != null && _retainedObjectsCache.TryGetValue(rootAddress, out var cached))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cached;
+            }
+
+            Interlocked.Increment(ref _cacheMisses);
+
             var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
             var queue = new Queue<ulong>(capacity: 256);
 
@@ -289,6 +386,9 @@ namespace DumpDetective.Analysis.Cache
                 }
             }
 
+            _retainedObjectsCache ??= new Dictionary<ulong, HashSet<ulong>>();
+            _retainedObjectsCache[rootAddress] = retained;
+
             return retained;
         }
 
@@ -301,25 +401,57 @@ namespace DumpDetective.Analysis.Cache
             }
 
             Interlocked.Increment(ref _cacheMisses);
+            EnsureRootCaches(heap);
+            return _validRoots ?? Array.Empty<(string RootKind, ulong Address)>();
+        }
 
-            var roots = new List<(string RootKind, ulong Address)>(capacity: 1024);
+        private void EnsureRootCaches(ClrHeap heap)
+        {
+            if (_staticRootedAddresses is not null && _validRoots is not null)
+                return;
+
+            // Initialize if needed with a reasonable capacity to avoid repeated resizes
+            _staticRootedAddresses ??= new HashSet<ulong>(capacity: 4096);
+            var roots = new List<(string RootKind, ulong Address)>(capacity: 4096);
+
             var scanCounter = new ObjectScanCounter("Root enumeration", reportEveryObjects: 10_000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 scanCounter.Tick();
-                ++_objectScanCount; // OPT-#11
+                // OPT-#11: Plain increment in single-threaded scan loop; Interlocked fence unnecessary here.
+                ++_objectScanCount;
+                ReportProgress("Static root walk", _objectScanCount);
 
                 ulong address = root.Object.Address;
                 if (address == 0)
                     continue;
 
-                roots.Add((root.RootKind.ToString(), address));
+                string kind = root.RootKind.ToString();
+                roots.Add((kind, address));
+
+                if (kind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase) && root.Object.IsValid)
+                {
+                    _staticRootedAddresses.Add(address);
+                }
             }
 
             scanCounter.Complete();
             _validRoots = roots;
-            return _validRoots;
+        }
+
+        public string? GetRootDescription(ulong address)
+        {
+            if (_validRoots is null)
+                return null;
+
+            foreach (var (kind, addr) in _validRoots)
+            {
+                if (addr == address)
+                    return kind;
+            }
+
+            return null;
         }
 
         private void ReportProgress(string operation, long totalScans)

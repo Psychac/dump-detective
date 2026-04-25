@@ -138,6 +138,7 @@ public class CrashAnalyzer : IAnalyzer
             var exceptionTypeCounts = new Dictionary<string, int>();
             var activeExceptionTypeCounts = new Dictionary<string, int>();
             var exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
+            var methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
             var activeExceptions = BuildActiveExceptionLookup(runtime);
             var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
             var scanCounter = new ObjectScanCounter("Crash exception scan");
@@ -154,7 +155,27 @@ public class CrashAnalyzer : IAnalyzer
                 if (!IsExceptionEntry(heap, entry, exceptionMethodTables))
                     continue;
 
-                string? typeName = heap.GetObject(exceptionAddress).Type?.Name;
+                string? typeName;
+                ulong mt = entry.MethodTable;
+                    if (mt != 0 && methodTableNameCache.TryGetValue(mt, out var cachedName))
+                {
+                    typeName = cachedName;
+                }
+                else
+                {
+                    if (mt != 0 && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build) && build.TypeAggregates.TryGetValue(mt, out var agg) && agg.SampleAddress != 0)
+                    {
+                        ClrObject sample = heap.GetObject(agg.SampleAddress);
+                        typeName = sample.IsValid && sample.Type != null ? sample.Type.Name : null;
+                    }
+                    else
+                    {
+                        typeName = heap.GetObject(exceptionAddress).Type?.Name;
+                    }
+
+                    if (mt != 0 && typeName != null)
+                        methodTableNameCache[mt] = typeName;
+                }
                 if (typeName?.Contains("Exception", StringComparison.Ordinal) == true)
                 {
                     analysis.TotalExceptions++;

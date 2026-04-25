@@ -15,11 +15,11 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
+            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
             return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
+        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
         {
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -30,6 +30,7 @@ namespace DumpDetective.Analysis.Analyzers
             // for handles whose target type has already been resolved. Collapses N handles of the
             // same type to a single heap dereference — same pattern as stringMethodTables in MemoryLeakAnalyzer.
             var methodTableNameCache = new Dictionary<ulong, string>(capacity: 128);
+            // use passed-in cache when available
 
             int totalHandles = 0;
             int strongLikeHandles = 0;
@@ -49,7 +50,41 @@ namespace DumpDetective.Analysis.Analyzers
                     strongLikeHandles++;
 
                 ulong targetAddress = GetTargetAddress(handle);
-                string? typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                string? typeName;
+                if (heap is not null && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build))
+                {
+                    // Fast-path: resolve type name from index's TypeAggregates by method-table if possible
+                    ClrObject targetObject = heap.GetObject(targetAddress);
+                    if (targetObject.IsValid)
+                    {
+                        ulong mt = targetObject.Type?.MethodTable ?? 0;
+                        if (mt != 0 && build.TypeAggregates.TryGetValue(mt, out var agg))
+                        {
+                            // Resolve sample-based type name from heap when available
+                            if (agg.SampleAddress != 0)
+                            {
+                                ClrObject sample = heap.GetObject(agg.SampleAddress);
+                                typeName = sample.IsValid && sample.Type != null ? sample.Type.Name : ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                            }
+                            else
+                            {
+                                typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                            }
+                        }
+                        else
+                        {
+                            typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                        }
+                    }
+                    else
+                    {
+                        typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                    }
+                }
+                else
+                {
+                    typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
+                }
                 if (typeName == null)
                     continue;
 

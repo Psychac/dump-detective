@@ -92,49 +92,83 @@ namespace DumpDetective.Analysis.Analyzers
 
         private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options)
         {
-            // Pass 1: index-driven — string dedup stats only. Non-string/ref-capable addresses are NOT
-            // materialized into a list anymore (OPT-#6): pass 2 re-streams from the same index source,
-            // eliminating the intermediate List<ulong> (~tens of MB on large dumps) entirely.
+            // Single-pass: enumerate the index (or heap) once and fan-out work to string
+            // deduplication and reference counting to avoid two full heap enumerations.
             var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
             var stringMethodTables = new Dictionary<ulong, bool>(capacity: 64);
-            var methodTableHasRefs = new Dictionary<ulong, bool>(capacity: 64);
+            Dictionary<ulong, bool>? methodTableHasRefs = null;
+            if (cache is not null)
+            {
+                // analyzers will delegate MT->has-refs checks to the cache
+                methodTableHasRefs = null;
+            }
+            else
+            {
+                methodTableHasRefs = new Dictionary<ulong, bool>(capacity: 64);
+            }
             int totalStrings = 0;
             ulong totalStringMemory = 0;
-            var scanCounter = new ObjectScanCounter("Memory leak index scan");
 
-            foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
+            var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
+            long skippedReferenceAddresses = 0;
+
+            var scanCounter = new ObjectScanCounter("Memory leak single-pass scan");
+
+            // Use heap index tuples when available for slightly cheaper enumeration path.
+            if (cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out _))
             {
-                scanCounter.Tick();
-
-                ulong objectAddress = entry.Address;
-                if (objectAddress == 0) continue;
-
-                if (IsStringEntry(heap, entry, stringMethodTables))
+                foreach (var tuple in concreteCache.EnumerateIndexedEntriesAsTuples())
                 {
-                    ProcessStringObjectByAddress(heap, objectAddress, entry.Size, options, stringStats, ref totalStrings, ref totalStringMemory);
+                    scanCounter.Tick();
+
+                    ulong objectAddress = tuple.Address;
+                    if (objectAddress == 0) continue;
+
+                    var entry = new HeapEntry(objectAddress, tuple.MethodTable, tuple.Size);
+                    if (IsStringEntry(heap, entry, stringMethodTables))
+                    {
+                        ProcessStringObjectByAddress(heap, objectAddress, tuple.Size, options, stringStats, ref totalStrings, ref totalStringMemory);
+                        continue;
+                    }
+
+                    bool hasRefs = cache.MethodTableHasOutgoingRefs(heap, tuple.MethodTable);
+                    if (!hasRefs)
+                        continue;
+
+                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+                }
+            }
+            else
+            {
+                foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
+                {
+                    scanCounter.Tick();
+
+                    ulong objectAddress = entry.Address;
+                    if (objectAddress == 0) continue;
+
+                    if (IsStringEntry(heap, entry, stringMethodTables))
+                    {
+                        ProcessStringObjectByAddress(heap, objectAddress, entry.Size, options, stringStats, ref totalStrings, ref totalStringMemory);
+                        continue;
+                    }
+
+                    if (cache is not null)
+                    {
+                        if (!cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
+                            continue;
+                    }
+                    else
+                    {
+                        if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs!))
+                            continue;
+                    }
+
+                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
                 }
             }
 
             scanCounter.Complete();
-
-            // Pass 2: targeted — outgoing reference enumeration on non-string objects only.
-            // Streams directly from the index using the same MethodTableHasOutgoingRefs filter,
-            // avoiding the intermediate address list that pass 1 previously built.
-            var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
-            long skippedReferenceAddresses = 0;
-            var refScanCounter = new ObjectScanCounter("Memory leak reference scan");
-
-            foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
-            {
-                if (entry.Address == 0) continue;
-                if (IsStringEntry(heap, entry, stringMethodTables)) continue;
-                if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs)) continue;
-
-                refScanCounter.Tick();
-                CountIncomingReferencesByAddress(heap, entry.Address, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
-            }
-
-            refScanCounter.Complete();
 
             DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats, options);
             IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);

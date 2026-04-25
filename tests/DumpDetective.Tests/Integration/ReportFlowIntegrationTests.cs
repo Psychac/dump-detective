@@ -1,4 +1,4 @@
-using DumpDetective.Cli.Services;
+﻿using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
@@ -56,7 +56,7 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultAnalyzerReporterFactory(),
-        new TrendReportComposer());
+        new TrendReportComposer([]));
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
@@ -94,7 +94,7 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultAnalyzerReporterFactory(),
-        new TrendReportComposer());
+        new TrendReportComposer([]));
 
         using CancellationTokenSource cts = new();
         cts.Cancel();
@@ -155,7 +155,7 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultAnalyzerReporterFactory(),
-        new TrendReportComposer());
+        new TrendReportComposer([]));
 
         string output = facade.BuildRenderedTrendReport(
             dumpPath: "C:/dumps/current.dmp",
@@ -192,12 +192,11 @@ public sealed class ReportFlowIntegrationTests
         {
             AnalyzerName = analyzerName,
             Category = finding.Category,
-            Findings = [finding],
             Metrics = new Dictionary<string, object?>(),
             Warnings = []
         };
 
-        return new AnalyzerRunResult(analyzerName, AnalyzerExecutionStatus.Success, TimeSpan.FromMilliseconds(1), result, null, null);
+        return new AnalyzerRunResult(analyzerName, AnalyzerExecutionStatus.Success, TimeSpan.FromMilliseconds(1), result, null, null, Findings: [finding]);
     }
 
     private static int CountOccurrences(string value, string token)

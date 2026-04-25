@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.Cache;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -114,8 +114,7 @@ public sealed class AnalysisPipelineTests
             AnalyzerDomainResult result = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
-                Category = Category,
-                Findings = []
+                Category = Category
             };
 
             return ValueTask.FromResult(result);

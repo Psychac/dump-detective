@@ -185,7 +185,6 @@ public sealed class ReportingCompositionTests
         {
             AnalyzerName = analyzerName,
             Category = finding.Category,
-            Findings = [finding],
             Metrics = new Dictionary<string, object?>(),
             Warnings = []
         };
@@ -196,6 +195,7 @@ public sealed class ReportingCompositionTests
             Duration: TimeSpan.FromMilliseconds(10),
             Result: result,
             ErrorMessage: null,
-            ErrorType: null);
+            ErrorType: null,
+            Findings: [finding]);
     }
 }

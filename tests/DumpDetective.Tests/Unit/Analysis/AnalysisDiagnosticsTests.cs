@@ -19,6 +19,7 @@ public sealed class AnalysisDiagnosticsTests
     public async Task ExecuteAsync_ShouldEmitNormalizedDiagnosticsEvents()
     {
         InMemoryAnalysisDiagnosticsSink sink = new();
+        TestFindingGenerator generator = new();
         AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
         PipelineAnalysisContext context = CreateContext(sink, continueOnFailure: true);
 
@@ -86,17 +87,6 @@ public sealed class AnalysisDiagnosticsTests
             {
                 AnalyzerName = Name,
                 Category = Category,
-                Findings =
-                [
-                    new InsightFinding(
-                        Analyzer: Name,
-                        Category: Category,
-                        Severity: FindingSeverity.Warning,
-                        Title: "Synthetic finding",
-                        Evidence: "Synthetic evidence",
-                        Recommendation: "Synthetic recommendation",
-                        Tags: ["test"]) 
-                ],
                 Warnings = ["Synthetic warning"],
                 Metrics = new Dictionary<string, object?>
                 {
@@ -108,6 +98,23 @@ public sealed class AnalysisDiagnosticsTests
 
             return ValueTask.FromResult<AnalyzerDomainResult>(result);
         }
+    }
+
+    private sealed class TestFindingGenerator : IFindingGenerator
+    {
+        public string AnalyzerName => "MetricsAnalyzer";
+        public bool CanGenerate(AnalyzerDomainResult result) => true;
+        public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result) =>
+        [
+            new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Test",
+                Severity: FindingSeverity.Warning,
+                Title: "Synthetic finding",
+                Evidence: "Synthetic evidence",
+                Recommendation: "Synthetic recommendation",
+                Tags: ["test"])
+        ];
     }
 
     private sealed class ThrowingSink : IAnalysisDiagnosticsSink

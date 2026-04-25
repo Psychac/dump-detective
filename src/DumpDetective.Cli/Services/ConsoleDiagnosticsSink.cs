@@ -274,15 +274,11 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     private void PrintAnalyzerProgress(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
         if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
-        {
             return;
-        }
 
         DateTime utcNow = DateTime.UtcNow;
         if ((utcNow - _lastScanRenderUtc).TotalMilliseconds < 125)
-        {
             return;
-        }
 
         _lastScanRenderUtc = utcNow;
         TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
@@ -296,39 +292,45 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         double elapsedMs = elapsed.TotalMilliseconds;
         double deltaMs = Math.Max(0, elapsedMs - _currentAnalyzerLastElapsedMs);
         if (tickDelta > 0 && deltaMs > 0)
-        {
             _currentAnalyzerLastNonZeroRate = tickDelta / (deltaMs / 1000.0);
-        }
 
         _currentAnalyzerLastElapsedMs = elapsedMs;
 
+        // Prefer semantic phase from the analyzer's own progress report (event Message field).
+        // Only fall back to the heuristic stall detection when the analyzer hasn't reported a phase.
+        string incomingPhase = string.IsNullOrWhiteSpace(diagnosticsEvent.Message)
+            ? (tickDelta == 0 && _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : _currentAnalyzerPhase)
+            : diagnosticsEvent.Message;
+
         if (tickDelta == 0)
-        {
             _currentAnalyzerNoGrowthTicks++;
-        }
         else
-        {
             _currentAnalyzerNoGrowthTicks = 0;
+
+        if (!string.Equals(_currentAnalyzerPhase, incomingPhase, StringComparison.Ordinal))
+        {
+            _currentAnalyzerPhase = incomingPhase;
+            ConsoleUx.AnalyzerPhase(incomingPhase);
         }
 
-        string phase = _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : "scanning heap";
-        if (!string.Equals(_currentAnalyzerPhase, phase, StringComparison.Ordinal))
+        // Parse detail out of the message if the analyzer embedded it as "phase • detail".
+        string? detail = null;
+        if (!string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
         {
-            _currentAnalyzerPhase = phase;
-            ConsoleUx.AnalyzerPhase(phase);
+            int sep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
+            if (sep >= 0)
+                detail = diagnosticsEvent.Message[(sep + 3)..];
         }
 
         double displayRate = _currentAnalyzerLastNonZeroRate;
         if (displayRate <= 0 && elapsed.TotalSeconds > 0)
-        {
             displayRate = analyzerScans / elapsed.TotalSeconds;
-        }
 
         ConsoleUx.ObjectScanProgress(
             diagnosticsEvent.AnalyzerName,
             analyzerScans,
             elapsed,
-            null,
+            detail,
             displayRate > 0 ? displayRate : null);
     }
 

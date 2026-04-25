@@ -22,12 +22,17 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache);
+            return Analyze(heap, cache, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        {
+            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, progress);
             var significantStaticRoots = allStaticRootAnalysis
                 .Where(IsSignificant)
                 .ToList();
@@ -80,14 +85,16 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "retained-bytes");
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
+            int rootsScanned = 0;
 
             // OPT-#2: Consume the cached root list instead of calling heap.EnumerateRoots() directly,
             // which would be a third independent full-dump root walk (cache already performs two:
             // GetStaticRootedAddresses and GetOrBuildValidRoots). Filter to static roots inline.
+            progress?.Report(new(0, "resolving static roots"));
             IReadOnlyList<(string RootKind, ulong Address)> allRoots = cache.GetOrBuildValidRoots(heap);
 
             foreach ((string rootKind, ulong rootAddress) in allRoots)
@@ -97,6 +104,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (rootAddress == 0 || !processedRoots.Add(rootAddress))
                     continue;
+
+                rootsScanned++;
+                if (rootsScanned % 50 == 0)
+                    progress?.Report(new(rootsScanned, "scanning static roots", $"{results.Count} significant"));
 
                 ObjectMetadata rootMetadata = GetObjectMetadata(heap, rootAddress);
                 if (!rootMetadata.IsValid)

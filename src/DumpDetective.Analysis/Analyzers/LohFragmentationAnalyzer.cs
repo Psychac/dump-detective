@@ -38,10 +38,15 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap)
+        {
+            return Analyze(heap, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
         {
             // NOTE: Intentionally does not use IHeapAnalysisCache / heap index here.
             // Fragmentation analysis requires per-segment object ordering and contiguous
@@ -49,7 +54,7 @@ namespace DumpDetective.Analysis.Analyzers
             // The segment-level scan is the correct and only viable approach.
 
             var segmentStats = new List<LohSegmentStats>();
-            var scanCounter = new ObjectScanCounter("LOH object scan", reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
+            var scanCounter = new ObjectScanCounter("scanning LOH segments", progress, reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
             foreach (ClrSegment segment in heap.Segments)
             {

@@ -25,16 +25,22 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            var cachedStats = cache.GetOrBuildTypeStatistics(heap);
-            return BuildDomainResult(heap, cache, cachedStats);
+            return Analyze(heap, cache, progress: null);
         }
 
-        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> typeStats)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        {
+            progress?.Report(new(0, "reading type statistics"));
+            var cachedStats = cache.GetOrBuildTypeStatistics(heap);
+            return BuildDomainResult(heap, cache, cachedStats, progress);
+        }
+
+        private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> typeStats, IProgress<AnalyzerProgressReport>? progress)
         {
             ulong gen0Bytes = 0;
             ulong gen1Bytes = 0;
@@ -63,8 +69,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             try
             {
+                progress?.Report(new(0, "scanning GC generations"));
                 (int foundGen0Objects, int foundGen1Objects, ulong foundGen0Bytes, ulong foundGen1Bytes) =
-                    RunParallelGenerationScan(heap, cache, generationProperty, getGenerationMethod);
+                    RunParallelGenerationScan(heap, cache, generationProperty, getGenerationMethod, progress);
 
                 gen0Objects = foundGen0Objects;
                 gen1Objects = foundGen1Objects;
@@ -113,15 +120,22 @@ namespace DumpDetective.Analysis.Analyzers
                 ClrHeap heap,
                 IHeapAnalysisCache cache,
                 PropertyInfo? generationProperty,
-                MethodInfo? getGenerationMethod)
+                MethodInfo? getGenerationMethod,
+                IProgress<AnalyzerProgressReport>? progress)
         {
             int gen0Objects = 0;
             int gen1Objects = 0;
             ulong gen0Bytes = 0;
             ulong gen1Bytes = 0;
+            long scanned = 0;
+            const long progressInterval = 50_000;
 
             void ProcessEntry(ulong address, ulong size)
             {
+                long s = Interlocked.Increment(ref scanned);
+                if (s % progressInterval == 0)
+                    progress?.Report(new(s, "scanning GC generations"));
+
                 if (address == 0 || size >= LohThresholdBytes)
                     return;
 

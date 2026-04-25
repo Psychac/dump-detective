@@ -20,7 +20,7 @@ namespace DumpDetective.Analysis.Cache
         private long _objectScanCount;
         private long _cacheHits;
         private long _cacheMisses;
-        private Action<string, long>? _progressReporter;
+        private IProgress<AnalyzerProgressReport>? _progress;
         private DumpDetective.Core.Models.DumpSizeTier _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
         private Dictionary<ulong, HashSet<ulong>>? _retainedObjectsCache;
         private Dictionary<ulong, bool>? _methodTableHasRefs;
@@ -76,16 +76,16 @@ namespace DumpDetective.Analysis.Cache
                 yield return (entry.Address, entry.MethodTable, entry.Size);
         }
 
-        public void SetProgressReporter(Action<string, long>? progressReporter)
+        public void SetProgress(IProgress<AnalyzerProgressReport>? progress)
         {
-            _progressReporter = progressReporter;
+            _progress = progress;
         }
 
         public HeapIndexBuildResult PrebuildHeapIndex(
             ClrHeap heap,
             string dumpPath,
             CancellationToken cancellationToken,
-            Action<long, TimeSpan>? progress = null,
+            IProgress<AnalyzerProgressReport>? progress = null,
             HeapIndexPrebuildMode mode = HeapIndexPrebuildMode.Auto)
         {
             if (_heapIndex is not null)
@@ -249,6 +249,7 @@ namespace DumpDetective.Analysis.Cache
             var threadLocalResults = new System.Collections.Concurrent.ConcurrentBag<
                 (Dictionary<string, CachedTypeStatistics> Stats, Dictionary<string, ulong> Samples)>();
             long totalScanned = 0;
+            const long progressInterval = 50_000;
 
             Parallel.ForEach(
                 heap.Segments,
@@ -279,13 +280,16 @@ namespace DumpDetective.Analysis.Cache
                             stats.LohCount++;
                             stats.LohSize += size;
                         }
+
+                        long s = Interlocked.Increment(ref totalScanned);
+                        if (s % progressInterval == 0)
+                            _progress?.Report(new AnalyzerProgressReport(s, "building type statistics"));
                     }
                     return localState;
                 },
                 localState =>
                 {
                     threadLocalResults.Add(localState);
-                    Interlocked.Add(ref totalScanned, localState.Stats.Values.Sum(s => (long)s.Count));
                 });
 
             // Merge thread-local results into the shared cache (sequential, runs once).
@@ -309,7 +313,7 @@ namespace DumpDetective.Analysis.Cache
             }
 
             Interlocked.Add(ref _objectScanCount, totalScanned);
-            ReportProgress("Type statistics scan", _objectScanCount);
+            _progress?.Report(new AnalyzerProgressReport(totalScanned, "building type statistics"));
 
             return _typeStats;
         }
@@ -395,6 +399,7 @@ namespace DumpDetective.Analysis.Cache
 
             var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
             var queue = new Queue<ulong>(capacity: 256);
+            var scanCounter = new ObjectScanCounter("tracing retained objects", _progress, reportEveryObjects: 500);
 
             queue.Enqueue(rootAddress);
             retained.Add(rootAddress);
@@ -402,8 +407,8 @@ namespace DumpDetective.Analysis.Cache
             while (queue.Count > 0 && retained.Count < maxObjects)
             {
                 var current = queue.Dequeue();
-                long scans = ++_objectScanCount; // OPT-#11: plain increment, analysis is single-threaded
-                ReportProgress("Retained graph walk", scans);
+                scanCounter.Tick();
+                ++_objectScanCount;
                 var obj = heap.GetObject(current);
 
                 if (!obj.IsValid)
@@ -446,14 +451,13 @@ namespace DumpDetective.Analysis.Cache
             _staticRootedAddresses ??= new HashSet<ulong>(capacity: 4096);
             var roots = new List<(string RootKind, ulong Address)>(capacity: 4096);
 
-            var scanCounter = new ObjectScanCounter("Root enumeration", reportEveryObjects: 10_000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var scanCounter = new ObjectScanCounter("enumerating roots", _progress, reportEveryObjects: 10_000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 scanCounter.Tick();
                 // OPT-#11: Plain increment in single-threaded scan loop; Interlocked fence unnecessary here.
                 ++_objectScanCount;
-                ReportProgress("Static root walk", _objectScanCount);
 
                 ulong address = root.Object.Address;
                 if (address == 0)
@@ -486,20 +490,12 @@ namespace DumpDetective.Analysis.Cache
             return null;
         }
 
-        private void ReportProgress(string operation, long totalScans)
+        private void ReportProgress(string phase, long totalScans)
         {
-            Action<string, long>? reporter = _progressReporter;
-            if (reporter is null)
-            {
+            if (_progress is null || totalScans % ProgressReportEveryScans != 0)
                 return;
-            }
 
-            if (totalScans % ProgressReportEveryScans != 0)
-            {
-                return;
-            }
-
-            reporter(operation, totalScans);
+            _progress.Report(new AnalyzerProgressReport(totalScans, phase));
         }
     }
 

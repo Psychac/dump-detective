@@ -1,4 +1,4 @@
-﻿using Microsoft.Diagnostics.Runtime;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -15,12 +15,17 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            var graph = BuildLockGraph(runtime, heap);
+            return Analyze(runtime, heap, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
+        {
+            var graph = BuildLockGraph(runtime, heap, progress);
 
             var topContestedTypes = graph.ContestedLocks
                 .GroupBy(c => c.ObjectTypeName, StringComparer.Ordinal)
@@ -61,7 +66,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "deadlock-candidates");
         }
 
-        private LockGraphAnalysis BuildLockGraph(ClrRuntime runtime, ClrHeap heap)
+        private LockGraphAnalysis BuildLockGraph(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
         {
             var result = new LockGraphAnalysis();
 
@@ -75,7 +80,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             result.ThreadByAddress = threadByAddress;
 
-            var scanCounter = new ObjectScanCounter("Lock graph sync block scan", reportEveryObjects: 1000);
+            var scanCounter = new ObjectScanCounter("scanning sync blocks", progress, reportEveryObjects: 1000);
             foreach (SyncBlock sb in heap.EnumerateSyncBlocks())
             {
                 scanCounter.Tick();

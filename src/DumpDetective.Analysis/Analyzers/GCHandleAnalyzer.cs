@@ -15,12 +15,17 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
         {
-            var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            return Analyze(runtime, heap, cache, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        {
+            var scanCounter = new ObjectScanCounter("scanning GC handles", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);

@@ -23,17 +23,17 @@ public class CrashAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, cache: null);
+            return Analyze(runtime, heap, cache: null, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
         {
-            var exceptionInfo = AnalyzeExceptions(heap, runtime, cache);
+            var exceptionInfo = AnalyzeExceptions(heap, runtime, cache, progress);
 
             var domainResult = new CrashDomainResult(
                 exceptionInfo.TotalExceptions,
@@ -120,7 +120,7 @@ public class CrashAnalyzer : IAnalyzer
                 MetricUnit: "active-exceptions");
         }
 
-        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache)
+        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
         {
             var activeExceptions = BuildActiveExceptionLookup(runtime);
 
@@ -128,14 +128,14 @@ public class CrashAnalyzer : IAnalyzer
             {
                 // In-memory index: parallel over the flat entry array
                 if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
-                    return RunParallelExceptionScan(heap, inMemoryEntries: entries, heapIdx: heapIdx, activeExceptions: activeExceptions);
+                    return RunParallelExceptionScan(heap, inMemoryEntries: entries, heapIdx: heapIdx, activeExceptions: activeExceptions, progress: progress);
 
                 // Disk-backed index: sequential (I/O bound)
-                return RunSequentialExceptionScan(heap, heapCache, cache, activeExceptions);
+                return RunSequentialExceptionScan(heap, heapCache, cache, activeExceptions, progress);
             }
 
             // No cache: parallel over GC segments
-            return RunParallelExceptionScan(heap, inMemoryEntries: null, heapIdx: null, activeExceptions: activeExceptions);
+            return RunParallelExceptionScan(heap, inMemoryEntries: null, heapIdx: null, activeExceptions: activeExceptions, progress: progress);
         }
 
         // Unified parallel exception scanner — drives either a flat in-memory HeapEntry[]
@@ -144,7 +144,8 @@ public class CrashAnalyzer : IAnalyzer
             ClrHeap heap,
             HeapEntry[]? inMemoryEntries,
             HeapIndexBuildResult? heapIdx,
-            Dictionary<ulong, ActiveExceptionContext> activeExceptions)
+            Dictionary<ulong, ActiveExceptionContext> activeExceptions,
+            IProgress<AnalyzerProgressReport>? progress)
         {
             var exceptionMethodTables = new ConcurrentDictionary<ulong, bool>();
             var methodTableNameCache = new ConcurrentDictionary<ulong, string>();
@@ -154,9 +155,15 @@ public class CrashAnalyzer : IAnalyzer
             var crashThreadCandidates = new ConcurrentDictionary<uint, CrashThreadCandidate>();
             var candidateLock = new object();
             int totalExceptions = 0, activeExceptionsCount = 0;
+            long scanned = 0;
+            const long progressInterval = 50_000;
 
             void ProcessEntry(ulong exceptionAddress, ulong mt)
             {
+                long s = Interlocked.Increment(ref scanned);
+                if (s % progressInterval == 0)
+                    progress?.Report(new(s, "scanning for exceptions"));
+
                 if (exceptionAddress == 0)
                     return;
 
@@ -242,6 +249,7 @@ public class CrashAnalyzer : IAnalyzer
             }
 
             // Sequential post-processing: build per-type exception list with cap enforcement
+            progress?.Report(new(scanned, "aggregating exceptions"));
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
             foreach (var (typeName, instance, isActive) in exceptionInstances)
             {
@@ -277,7 +285,8 @@ public class CrashAnalyzer : IAnalyzer
 
         private ExceptionAnalysis RunSequentialExceptionScan(
             ClrHeap heap, HeapAnalysisCache heapCache, IHeapAnalysisCache? cache,
-            Dictionary<ulong, ActiveExceptionContext> activeExceptions)
+            Dictionary<ulong, ActiveExceptionContext> activeExceptions,
+            IProgress<AnalyzerProgressReport>? progress)
         {
             var analysis = new ExceptionAnalysis();
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
@@ -286,7 +295,7 @@ public class CrashAnalyzer : IAnalyzer
             var exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
             var methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
             var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
-            var scanCounter = new ObjectScanCounter("Crash exception scan");
+            var scanCounter = new ObjectScanCounter("scanning for exceptions", progress);
 
             foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {

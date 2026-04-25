@@ -21,17 +21,17 @@ public class HangAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, cache: null);
+            return Analyze(runtime, heap, cache: null, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
         {
-            var hangInfo = AnalyzeForHang(runtime, heap, cache);
+            var hangInfo = AnalyzeForHang(runtime, heap, cache, progress);
 
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var wt in hangInfo.WaitingThreads)
@@ -104,11 +104,11 @@ public class HangAnalyzer : IAnalyzer
                 MetricUnit: "% waiting threads");
         }
 
-        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
         {
             var analysis = new HangAnalysis();
             var waitingThreads = new List<WaitingThreadInfo>();
-            var threadScanCounter = new ObjectScanCounter("Hang thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var threadScanCounter = new ObjectScanCounter("scanning threads for hang", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var thread in runtime.Threads)
             {
@@ -147,6 +147,7 @@ public class HangAnalyzer : IAnalyzer
 
             analysis.WaitingThreads = waitingThreads;
             ReadRuntimeThreadPool(runtime, analysis);
+            progress?.Report(new(threadScanCounter.Scanned, "analyzing async work items"));
             AnalyzeAsyncWork(heap, cache, analysis);
 
             analysis.HealthScore = ComputeHealthScore(analysis);

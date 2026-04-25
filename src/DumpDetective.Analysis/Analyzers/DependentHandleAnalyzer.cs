@@ -16,14 +16,19 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
         {
+            return Analyze(runtime, heap, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IProgress<AnalyzerProgressReport>? progress)
+        {
             heap ??= runtime.Heap;
 
-            var scanCounter = new ObjectScanCounter("Dependent handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var scanCounter = new ObjectScanCounter("scanning dependent handles", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             int dependentHandleCount = 0;
             int resolvedEdgeCount = 0;

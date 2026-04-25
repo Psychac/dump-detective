@@ -22,6 +22,13 @@ public class AnalysisContext
     public DiagnosticsOptions Diagnostics { get; init; } = new();
     public IReadOnlyDictionary<string, object?> Options { get; init; } = new Dictionary<string, object?>();
     public IAnalysisDiagnosticsSink DiagnosticsSink { get; init; } = NullAnalysisDiagnosticsSink.Instance;
+
+    /// <summary>
+    /// Progress reporter injected by the pipeline per analyzer run.
+    /// Analyzers report scan count, current phase, and optional detail.
+    /// Null when running outside the pipeline (e.g. tests or direct <c>Analyze(heap)</c> calls).
+    /// </summary>
+    public IProgress<AnalyzerProgressReport>? Progress { get; set; }
 }
 
 internal static class AnalyzerCategory

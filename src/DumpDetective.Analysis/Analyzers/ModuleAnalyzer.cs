@@ -15,11 +15,17 @@ public class ModuleAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
+            return Analyze(runtime, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
+        {
+            progress?.Report(new(0, "analyzing modules"));
             var modules = AnalyzeModules(runtime);
             var domainResult = BuildDomainResult(modules);
             return domainResult;

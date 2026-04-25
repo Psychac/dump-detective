@@ -16,10 +16,15 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
+        {
+            return Analyze(runtime, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
         {
             var threads = runtime.Threads.ToList();
             var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Count);
@@ -31,7 +36,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             int aliveThreads = 0;
-            var scanCounter = new ObjectScanCounter("Thread clustering scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var scanCounter = new ObjectScanCounter("clustering thread stacks", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (ClrThread thread in threads)
             {

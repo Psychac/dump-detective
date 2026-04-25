@@ -89,7 +89,8 @@ internal sealed class DumpAnalysisService(
             loadContext.Heap,
             resolved.DumpPath,
             cancellationToken,
-            progress: (scanned, elapsed) => ConsoleUx.ObjectScanProgress("Scan + Index heap", scanned, elapsed, "streaming objects to index"),
+            progress: new Progress<AnalyzerProgressReport>(r =>
+                ConsoleUx.ObjectScanProgress("Scan + Index heap", r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
             mode: resolved.IndexPrebuildMode);
         ConsoleUx.ObjectScanComplete("Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
         stageStopwatch.Stop();
@@ -365,7 +366,8 @@ internal sealed class DumpAnalysisService(
             loadContext.Heap,
             dumpPath,
             cancellationToken,
-            progress: (scanned, elapsed) => ConsoleUx.ObjectScanProgress($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", scanned, elapsed, "streaming objects to index"),
+            progress: new Progress<AnalyzerProgressReport>(r =>
+                ConsoleUx.ObjectScanProgress($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
             mode: resolved.IndexPrebuildMode);
         string indexTarget = heapIndex.StorageKind == DumpDetective.Analysis.Indexing.HeapIndexStorageKind.Memory
             ? "in-memory"

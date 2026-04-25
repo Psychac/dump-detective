@@ -75,24 +75,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 ExceptionMessage: null));
 
             if (context.Cache is HeapAnalysisCache cacheWithProgress)
-            {
-                cacheWithProgress.SetProgressReporter((operation, objectScanCount) =>
-                {
-                    PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-                        RunId: runId,
-                        EventType: AnalysisDiagnosticsEventType.AnalyzerSubmoduleProgress,
-                        TimestampUtc: DateTime.UtcNow,
-                        AnalyzerName: analyzer.Name,
-                        Category: analyzer.Category,
-                        DurationMs: stopwatch.Elapsed.TotalMilliseconds,
-                        ObjectScanCount: objectScanCount,
-                        CacheHits: context.Cache.CacheHits,
-                        CacheMisses: context.Cache.CacheMisses,
-                        Message: operation,
-                        ExceptionType: null,
-                        ExceptionMessage: null));
-                });
-            }
+                cacheWithProgress.SetProgress(context.Progress);
 
             try
             {
@@ -211,9 +194,9 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             finally
             {
                 if (context.Cache is HeapAnalysisCache cacheWithProgressCleanup)
-                {
-                    cacheWithProgressCleanup.SetProgressReporter(null);
-                }
+                    cacheWithProgressCleanup.SetProgress(null);
+
+                context.Progress = null;
             }
         }
 
@@ -245,6 +228,35 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
     {
         const int progressTickMs = 300;
 
+        // Track the most recent progress reported by the analyzer so the 300ms heartbeat
+        // poll can fall back to it instead of always showing stale cache counts.
+        long latestScannedCount = 0;
+        string latestPhase = "scanning";
+        string? latestDetail = null;
+
+        var analyzerProgress = new Progress<AnalyzerProgressReport>(report =>
+        {
+            Interlocked.Exchange(ref latestScannedCount, report.ScannedCount);
+            latestPhase = report.Phase;
+            latestDetail = report.Detail;
+
+            PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                RunId: runId,
+                EventType: AnalysisDiagnosticsEventType.AnalyzerProgress,
+                TimestampUtc: DateTime.UtcNow,
+                AnalyzerName: analyzer.Name,
+                Category: analyzer.Category,
+                DurationMs: stopwatch.Elapsed.TotalMilliseconds,
+                ObjectScanCount: report.ScannedCount,
+                CacheHits: context.Cache.CacheHits,
+                CacheMisses: context.Cache.CacheMisses,
+                Message: string.IsNullOrEmpty(report.Detail) ? report.Phase : $"{report.Phase} • {report.Detail}",
+                ExceptionType: null,
+                ExceptionMessage: null));
+        });
+
+        context.Progress = analyzerProgress;
+
         Task<AnalyzerDomainResult> analyzeTask = Task.Run(
             async () => await analyzer.AnalyzeAsync(context, cancellationToken),
             cancellationToken);
@@ -253,8 +265,15 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
         {
             Task completedTask = await Task.WhenAny(analyzeTask, Task.Delay(progressTickMs, cancellationToken));
             if (completedTask == analyzeTask)
-            {
                 break;
+
+            // Heartbeat poll: only fires if the analyzer hasn't reported directly via Progress.
+            // Uses the latest known scan count and phase so display stays accurate.
+            long heartbeatScanCount = Interlocked.Read(ref latestScannedCount);
+            if (heartbeatScanCount == 0)
+            {
+                // Analyzer hasn't called Progress yet — fall back to cache counter (legacy path)
+                heartbeatScanCount = context.Cache.ObjectScanCount;
             }
 
             PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
@@ -264,10 +283,10 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 AnalyzerName: analyzer.Name,
                 Category: analyzer.Category,
                 DurationMs: stopwatch.Elapsed.TotalMilliseconds,
-                ObjectScanCount: context.Cache.ObjectScanCount,
+                ObjectScanCount: heartbeatScanCount,
                 CacheHits: context.Cache.CacheHits,
                 CacheMisses: context.Cache.CacheMisses,
-                Message: $"Analyzer '{analyzer.Name}' is scanning heap objects.",
+                Message: string.IsNullOrEmpty(latestDetail) ? latestPhase : $"{latestPhase} • {latestDetail}",
                 ExceptionType: null,
                 ExceptionMessage: null));
         }

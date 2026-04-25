@@ -32,18 +32,18 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new EventLeakOptions();
 
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, EventLeakOptions options)
         {
-            return Analyze(heap, cache: null, options);
+            return Analyze(heap, cache: null, options, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             int minSubscribers = options.MinSubscribers;
-            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers);
+            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers, progress);
 
             if (eventLeaks.Count == 0)
             {
@@ -137,7 +137,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers, IProgress<AnalyzerProgressReport>? progress)
         {
             var leaks = new List<EventLeakInfo>();
             var processedObjects = new HashSet<ulong>();
@@ -145,7 +145,7 @@ namespace DumpDetective.Analysis.Analyzers
             var processedStaticDelegates = new HashSet<ulong>();
             var appDomains = heap.Runtime.AppDomains;
             var rootHints = BuildRootHintMap(heap, cache);
-            var scanCounter = new ObjectScanCounter("Event leak object scan");
+            var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
 
             foreach (HeapEntry entry in EnumerateEventEntries(heap, cache))
             {

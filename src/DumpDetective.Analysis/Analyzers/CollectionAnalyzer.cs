@@ -5,31 +5,42 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers
 {
 public class CollectionAnalyzer : IAnalyzer
     {
-        private const ulong WasteThresholdBytes = 10 * 1024;           // 10 KB per collection
-        private const ulong SummaryWarnThresholdBytes = 10 * 1024 * 1024; // 10 MB total
-        private const int TopWastefulCollectionsToShow = 15;
+        private readonly CollectionAnalyzerOptions _options;
+        private readonly ILogger<CollectionAnalyzer>? _logger;
 
         public string Name => "Collection Analysis";
+
+        public CollectionAnalyzer()
+            : this(CollectionAnalyzerOptions.Default, logger: null)
+        {
+        }
+
+        public CollectionAnalyzer(CollectionAnalyzerOptions options, ILogger<CollectionAnalyzer>? logger = null)
+        {
+            _options = options ?? CollectionAnalyzerOptions.Default;
+            _logger = logger;
+        }
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap)
         {
-            return Analyze(heap, cache: null);
+            return Analyze(heap, cache: null, progress: null, cancellationToken: CancellationToken.None);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
-            var collectionStats = AnalyzeCollections(heap, cache);
+            var collectionStats = AnalyzeCollections(heap, cache, progress, cancellationToken);
             var domainResult = new CollectionDomainResult(
                 collectionStats.TotalCollections,
                 collectionStats.Dictionaries,
@@ -39,7 +50,7 @@ public class CollectionAnalyzer : IAnalyzer
                 collectionStats.TotalWastedMemory,
                 collectionStats.WastefulCollections.Count,
                 collectionStats.WastefulCollections
-                    .Take(TopWastefulCollectionsToShow)
+                    .Take(_options.TopWastefulCollectionsToShow)
                     .Select(w => new WastefulCollectionSnapshot(
                         w.Type,
                         w.Count,
@@ -57,33 +68,39 @@ public class CollectionAnalyzer : IAnalyzer
             return domainResult;
         }
 
-        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache)
+        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
             {
                 // In-memory index: parallel over the flat entry array
                 if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
-                    return RunParallelCollectionAnalysis(heap, inMemoryEntries: entries);
+                    return RunParallelCollectionAnalysis(heap, inMemoryEntries: entries, progress: progress, cancellationToken: cancellationToken);
 
                 // Disk-backed index: sequential (I/O bound; parallel won't help)
-                return AnalyzeCollectionsSequentialDisk(heap, heapCache);
+                return AnalyzeCollectionsSequentialDisk(heap, heapCache, progress, cancellationToken);
             }
 
             // No cache: parallel over GC segments
-            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null);
+            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null, progress: progress, cancellationToken: cancellationToken);
         }
 
         // Unified parallel analysis — drives either a flat in-memory HeapEntry[] (cache path)
         // or a per-segment ClrObject walk (no-cache path) using the same concurrent accumulation logic.
-        private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries)
+        private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
-                concurrencyLevel: Environment.ProcessorCount, capacity: 64);
+                concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 64);
             var concurrentWasteful = new ConcurrentBag<WastefulCollection>();
             int totalCollections = 0, dictionaries = 0, lists = 0, hashSets = 0, queues = 0;
+            long scanned = 0;
+            const long progressInterval = 50_000;
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
 
             void ProcessEntry(ulong address, ulong mt)
             {
+                long s = Interlocked.Increment(ref scanned);
+                if (s % progressInterval == 0)
+                    progress?.Report(new(s, "scanning collections"));
                 CollectionKind kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
                 if (kind == CollectionKind.None)
                     return;
@@ -94,21 +111,21 @@ public class CollectionAnalyzer : IAnalyzer
                 {
                     Interlocked.Increment(ref dictionaries);
                     var waste = AnalyzeDictionary(heap, address);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         concurrentWasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.List)
                 {
                     Interlocked.Increment(ref lists);
                     var waste = AnalyzeList(heap, address);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         concurrentWasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.HashSet)
                 {
                     Interlocked.Increment(ref hashSets);
                     var waste = AnalyzeHashSet(heap, address);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         concurrentWasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.Queue)
@@ -117,33 +134,43 @@ public class CollectionAnalyzer : IAnalyzer
                 }
             }
 
-            if (inMemoryEntries != null)
+            try
             {
-                Parallel.ForEach(inMemoryEntries, entry =>
+                if (inMemoryEntries != null)
                 {
-                    if (entry.Address == 0 || entry.MethodTable == 0)
-                        return;
-                    ProcessEntry(entry.Address, entry.MethodTable);
-                });
-            }
-            else
-            {
-                Parallel.ForEach(heap.Segments, segment =>
-                {
-                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    Parallel.ForEach(inMemoryEntries, parallelOptions, entry =>
                     {
-                        if (!obj.IsValid || obj.Type is null)
-                            continue;
-                        ulong mt = obj.Type.MethodTable;
-                        if (mt == 0)
-                            continue;
-                        ProcessEntry(obj.Address, mt);
-                    }
-                });
+                        parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+                        if (entry.Address == 0 || entry.MethodTable == 0)
+                            return;
+                        ProcessEntry(entry.Address, entry.MethodTable);
+                    });
+                }
+                else
+                {
+                    Parallel.ForEach(heap.Segments, parallelOptions, segment =>
+                    {
+                        parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+                        foreach (ClrObject obj in segment.EnumerateObjects())
+                        {
+                            if (!obj.IsValid || obj.Type is null)
+                                continue;
+                            ulong mt = obj.Type.MethodTable;
+                            if (mt == 0)
+                                continue;
+                            ProcessEntry(obj.Address, mt);
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.LogInformation("Collection analysis cancelled by user.");
             }
 
+            progress?.Report(new(scanned, "aggregating results"));
             var wastefulList = concurrentWasteful.OrderByDescending(w => w.WastedMemory).ToList();
-            return new CollectionStatistics
+            var stats = new CollectionStatistics
             {
                 TotalCollections = totalCollections,
                 Dictionaries = dictionaries,
@@ -153,18 +180,28 @@ public class CollectionAnalyzer : IAnalyzer
                 WastefulCollections = wastefulList,
                 TotalWastedMemory = wastefulList.Aggregate(0UL, (acc, w) => acc + w.WastedMemory)
             };
+
+            if (stats.TotalWastedMemory > _options.SummaryWarnThresholdBytes)
+                _logger?.LogWarning("Total wasted memory from collections exceeds threshold: {TotalWastedBytes}", stats.TotalWastedMemory);
+
+            return stats;
         }
 
-        private CollectionStatistics AnalyzeCollectionsSequentialDisk(ClrHeap heap, HeapAnalysisCache heapCache)
+        private CollectionStatistics AnalyzeCollectionsSequentialDisk(ClrHeap heap, HeapAnalysisCache heapCache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var stats = new CollectionStatistics();
             var wasteful = new List<WastefulCollection>();
             var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
-            var scanCounter = new ObjectScanCounter("Collection scan");
+            var scanCounter = new ObjectScanCounter("scanning collections", progress);
 
             foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {
-                scanCounter.Tick();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger?.LogInformation("Collection analysis cancelled (disk-backed path).");
+                    break;
+                }
+                scanCounter.Tick(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
 
                 ulong objectAddress = entry.Address;
                 if (objectAddress == 0)
@@ -177,7 +214,7 @@ public class CollectionAnalyzer : IAnalyzer
                     stats.TotalCollections++;
                     stats.Dictionaries++;
                     var waste = AnalyzeDictionary(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         wasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.List)
@@ -185,7 +222,7 @@ public class CollectionAnalyzer : IAnalyzer
                     stats.TotalCollections++;
                     stats.Lists++;
                     var waste = AnalyzeList(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         wasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.HashSet)
@@ -193,7 +230,7 @@ public class CollectionAnalyzer : IAnalyzer
                     stats.TotalCollections++;
                     stats.HashSets++;
                     var waste = AnalyzeHashSet(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                         wasteful.Add(waste);
                 }
                 else if (kind == CollectionKind.Queue)
@@ -203,7 +240,8 @@ public class CollectionAnalyzer : IAnalyzer
                 }
             }
 
-            scanCounter.Complete();
+            scanCounter.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
+            progress?.Report(new(scanCounter.Scanned, "aggregating results"));
 
             stats.WastefulCollections = wasteful.OrderByDescending(w => w.WastedMemory).ToList();
             stats.TotalWastedMemory = wasteful.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);
@@ -330,7 +368,16 @@ public class CollectionAnalyzer : IAnalyzer
                     WastedMemory = wastedMemory
                 };
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing Dictionary at {Address}", dictionaryAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing Dictionary at {Address}", dictionaryAddress);
+#if DEBUG
+                throw;
+#endif
+            }
 
             return null;
         }
@@ -376,7 +423,16 @@ public class CollectionAnalyzer : IAnalyzer
                     WastedMemory = wastedMemory
                 };
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing List at {Address}", listAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing List at {Address}", listAddress);
+#if DEBUG
+                throw;
+#endif
+            }
 
             return null;
         }
@@ -422,7 +478,16 @@ public class CollectionAnalyzer : IAnalyzer
                     WastedMemory = wastedMemory
                 };
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing HashSet at {Address}", hashSetAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing HashSet at {Address}", hashSetAddress);
+#if DEBUG
+                throw;
+#endif
+            }
 
             return null;
         }

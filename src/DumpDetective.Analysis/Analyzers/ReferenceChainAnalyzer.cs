@@ -30,10 +30,15 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new ReferenceChainOptions();
 
-            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options).Stamp(this));
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
+        {
+            return AnalyzeTopTypes(heap, cache, options, progress: null);
+        }
+
+        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             int topCount = options.TopCount > 0 ? options.TopCount : DefaultTopTypeCount;
             int maxPathSearchObjects = options.MaxPathSearchObjects > 0
@@ -44,6 +49,7 @@ namespace DumpDetective.Analysis.Analyzers
             var knownLeakPatterns = options.KnownLeakTypePatterns ?? Array.Empty<string>();
 
             // Use cached type statistics instead of re-enumerating
+            progress?.Report(new(0, "building type index"));
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
 
             var topTypes = typeStats
@@ -57,15 +63,19 @@ namespace DumpDetective.Analysis.Analyzers
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
             var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Count);
+            progress?.Report(new(0, "loading root list"));
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
             // Sort retaining roots by likelihood of early hit (Stack first) and drop weak/dependent roots
             // that can never prevent GC collection. Sorted once, reused for all top-N type samples.
             List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
 
             var telemetry = new TelemetryCounters();
+            int typeIndex = 0;
 
             foreach (var typeKvp in topTypes)
             {
+                typeIndex++;
+                progress?.Report(new(analyzedSamples, "tracing reference chains", $"{typeIndex}/{topTypes.Count} types"));
                 string typeName = typeKvp.Key;
                 var stats = typeKvp.Value;
 

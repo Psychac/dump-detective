@@ -29,18 +29,18 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new MemoryLeakOptions();
 
-            return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
         {
-            return Analyze(heap, runtime, cache: null, options);
+            return Analyze(heap, runtime, cache: null, options, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap);
-            LeakSignals signals = AnalyzeObjectsPass(heap, cache, options);
+            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap, progress);
+            LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, progress);
 
             return new MemoryLeakDomainResult(
                     finalizerResult.TotalCount,
@@ -56,11 +56,11 @@ namespace DumpDetective.Analysis.Analyzers
                     signals.TopHighlyReferencedObjects);
         }
 
-        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap)
+        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
         {
             int finalizerCount = 0;
             var topTypes = new Dictionary<string, int>(StringComparer.Ordinal);
-            var scanCounter = new ObjectScanCounter("Finalizer queue scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var scanCounter = new ObjectScanCounter("scanning finalizer queue", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
             foreach (var obj in heap.EnumerateFinalizableObjects())
             {
@@ -83,7 +83,7 @@ namespace DumpDetective.Analysis.Analyzers
                     .ToList());
         }
 
-        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             // Single-pass: enumerate the index (or heap) once and fan-out work to string
             // deduplication and reference counting to avoid two full heap enumerations.
@@ -105,7 +105,7 @@ namespace DumpDetective.Analysis.Analyzers
             var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
             long skippedReferenceAddresses = 0;
 
-            var scanCounter = new ObjectScanCounter("Memory leak single-pass scan");
+            var scanCounter = new ObjectScanCounter("scanning heap objects", progress);
 
             // Use heap index tuples when available for slightly cheaper enumeration path.
             if (cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out _))
@@ -162,6 +162,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             scanCounter.Complete();
+            progress?.Report(new(scanCounter.Scanned, "building leak signals"));
 
             DuplicateStringResult duplicateResult = ComputeDuplicateStrings(stringStats, options);
             IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);

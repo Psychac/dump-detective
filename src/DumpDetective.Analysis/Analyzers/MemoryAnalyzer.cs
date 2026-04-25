@@ -13,11 +13,17 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
+            return Analyze(heap, cache, progress: null);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        {
+            progress?.Report(new(0, "building memory snapshot"));
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
             return BuildDomainResult(typeStats);
         }

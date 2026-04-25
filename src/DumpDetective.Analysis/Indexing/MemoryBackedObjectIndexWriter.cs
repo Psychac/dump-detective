@@ -1,15 +1,18 @@
 using System.Diagnostics;
 
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing;
 
 internal sealed class MemoryBackedObjectIndexWriter
 {
+    private const long ProgressInterval = 50_000;
+
     public HeapIndexBuildResult Build(
         ClrHeap heap,
         CancellationToken cancellationToken,
-        Action<long, TimeSpan>? progress = null)
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
 
@@ -44,13 +47,16 @@ internal sealed class MemoryBackedObjectIndexWriter
                     var entry = new HeapEntry(obj.Address, mt, obj.Size);
                     localState.Entries.Add(entry);
                     localState.Builder.Add(entry);
+
+                    long count = Interlocked.Increment(ref objectCount);
+                    if (count % ProgressInterval == 0)
+                        progress?.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
                 return localState;
             },
             localState =>
             {
                 allSegmentEntries.Add(localState.Entries);
-                Interlocked.Add(ref objectCount, localState.Entries.Count);
                 lock (masterBuilder)
                     masterBuilder.Merge(localState.Builder);
             });
@@ -61,8 +67,8 @@ internal sealed class MemoryBackedObjectIndexWriter
         foreach (List<HeapEntry> segList in allSegmentEntries)
             entries.AddRange(segList);
 
-        progress?.Invoke(objectCount, stopwatch.Elapsed);
         stopwatch.Stop();
+        progress?.Report(new(objectCount, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
 
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Memory,

@@ -20,8 +20,7 @@ internal sealed class ReportBuilderFacade(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        ComposedReport report = ReportBuilder.ComposeCanonicalReport(dumpPath, runs, elapsed, _reporters);
-        report = ApplyAudience(report, audience);
+        ComposedReport report = ReportBuilder.ComposeCanonicalReport(dumpPath, runs, elapsed, _reporters, audience);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 
@@ -45,31 +44,13 @@ internal sealed class ReportBuilderFacade(
             currentRuns,
             elapsed,
             _reporters,
-            trendData);
-        report = ApplyAudience(report, audience);
+            trendData,
+            audience);
 
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
 
         cancellationToken.ThrowIfCancellationRequested();
         return formatter.Render(report);
-    }
-
-    private static ComposedReport ApplyAudience(ComposedReport report, ReportAudience audience)
-    {
-        return audience switch
-        {
-            ReportAudience.Executive => report with
-            {
-                DeveloperActionPlan = [],
-                Sections = [],
-                DetailedAnalyzerSections = []
-            },
-            ReportAudience.Developer => report with
-            {
-                DetailedAnalyzerSections = []
-            },
-            _ => report
-        };
     }
 }

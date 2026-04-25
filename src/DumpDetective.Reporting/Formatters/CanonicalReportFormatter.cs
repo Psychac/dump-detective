@@ -99,30 +99,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             lines.Add(string.Empty);
         }
 
-        if (report.ExecutiveSummary.Count > 0)
-        {
-            lines.Add("## Executive summary");
-            lines.Add(string.Empty);
-            foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
-            {
-                lines.Add($"- **{item.Label}:** {item.Value}");
-            }
-            lines.Add(string.Empty);
-        }
-
-        if (report.DeveloperActionPlan.Count > 0)
-        {
-            lines.Add("## Developer action plan");
-            lines.Add(string.Empty);
-            foreach (DeveloperActionItem action in report.DeveloperActionPlan)
-            {
-                lines.Add($"- **{action.Priority}** {action.Title}");
-                lines.Add($"  - Action: {action.Action}");
-                lines.Add($"  - Impact: {action.Impact}");
-            }
-            lines.Add(string.Empty);
-        }
-
         if (report.DetailedAnalyzerSections is { Count: > 0 })
         {
             IReadOnlyList<DetailedAnalyzerSection> detailedSections = report.DetailedAnalyzerSections;
@@ -173,6 +149,36 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 {
                     lines.Add($"> - `{dumpPath}`");
                 }
+            }
+            lines.Add(string.Empty);
+        }
+
+        if (report.ExecutiveSummary.Count > 0)
+        {
+            lines.Add("## Executive Summary");
+            lines.Add(string.Empty);
+            lines.Add("| Signal | Value |");
+            lines.Add("|---|---|");
+            foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
+            {
+                string escapedValue = item.Value.Replace("|", "\\|");
+                lines.Add($"| **{item.Label}** | {escapedValue} |");
+            }
+            lines.Add(string.Empty);
+        }
+
+        if (report.DeveloperActionPlan.Count > 0)
+        {
+            lines.Add("## Developer Action Plan");
+            lines.Add(string.Empty);
+            lines.Add("| Priority | Title | Action | Impact |");
+            lines.Add("|---|---|---|---|");
+            foreach (DeveloperActionItem action in report.DeveloperActionPlan)
+            {
+                string escapedTitle = action.Title.Replace("|", "\\|");
+                string escapedAction = action.Action.Replace("|", "\\|");
+                string escapedImpact = action.Impact.Replace("|", "\\|");
+                lines.Add($"| {action.Priority} | {escapedTitle} | {escapedAction} | {escapedImpact} |");
             }
             lines.Add(string.Empty);
         }

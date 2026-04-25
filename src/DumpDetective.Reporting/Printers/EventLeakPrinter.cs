@@ -11,6 +11,8 @@ namespace DumpDetective.Reporting.Printers
         private const int MaxTopLeakInstances = 10;
 
         public string AnalyzerName => "Event Leak Analysis";
+        public string DisplayTitle => "Event Handler Leak Analysis";
+        public int SortOrder => 80;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;
 

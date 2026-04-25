@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class ReferenceChainPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Reference Chain Analysis";
+        public string DisplayTitle => "Reference Chain Analysis";
+        public int SortOrder => 60;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ReferenceChainDomainResult;
 

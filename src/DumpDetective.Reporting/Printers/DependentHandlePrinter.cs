@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class DependentHandlePrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Dependent Handle Analysis";
+        public string DisplayTitle => "Dependent Handle Analysis";
+        public int SortOrder => 100;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is DependentHandleDomainResult;
 

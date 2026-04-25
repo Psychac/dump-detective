@@ -9,6 +9,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class HangPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Hang Analysis";
+        public string DisplayTitle => "Hang & Deadlock Analysis";
+        public int SortOrder => 120;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is HangDomainResult;
 

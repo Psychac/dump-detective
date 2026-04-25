@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -10,6 +11,8 @@ namespace DumpDetective.Reporting.Printers
         private const int TopLohTypesToShow = 15;
 
         public string AnalyzerName => "GC Generation Analysis";
+        public string DisplayTitle => "GC Generation Breakdown";
+        public int SortOrder => 50;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is GCGenerationDomainResult;
 
@@ -51,10 +54,7 @@ namespace DumpDetective.Reporting.Printers
                 writer.WriteDetailText($"{"Type",-68} {"Count",10} {"Total Size",14}");
                 foreach (var type in topLohTypes.Take(TopLohTypesToShow))
                 {
-                    var wrappedTypeLines = WrapText(type.TypeName, 68).ToList();
-                    if (wrappedTypeLines.Count == 0)
-                        wrappedTypeLines.Add(string.Empty);
-
+                    IReadOnlyList<string> wrappedTypeLines = TableWrapHelper.Wrap(type.TypeName, 68);
                     writer.WriteDetailText($"{wrappedTypeLines[0],-68} {type.Count,10:N0} {FormatHelper.FormatBytes(type.TotalBytes),14}");
                     for (int i = 1; i < wrappedTypeLines.Count; i++)
                         writer.WriteDetailText($"{wrappedTypeLines[i],-68} {string.Empty,10} {string.Empty,14}");
@@ -71,44 +71,8 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteDetailDivider();
         }
 
-        private static IEnumerable<string> WrapText(string? value, int width)
-        {
-            if (string.IsNullOrWhiteSpace(value) || width <= 0)
-            {
-                yield return string.Empty;
-                yield break;
-            }
-
-            var text = value.Trim();
-            int index = 0;
-
-            while (index < text.Length)
-            {
-                int remaining = text.Length - index;
-                if (remaining <= width)
-                {
-                    yield return text[index..];
-                    yield break;
-                }
-
-                int lastSpace = text.LastIndexOf(' ', index + width, width);
-                if (lastSpace <= index)
-                {
-                    yield return text.Substring(index, width);
-                    index += width;
-                }
-                else
-                {
-                    yield return text.Substring(index, lastSpace - index).TrimEnd();
-                    index = lastSpace + 1;
-                }
-
-                while (index < text.Length && text[index] == ' ')
-                    index++;
             }
         }
-    }
-}
 
 
 

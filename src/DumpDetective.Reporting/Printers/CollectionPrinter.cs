@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class CollectionPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Collection Analysis";
+        public string DisplayTitle => "Collection Analysis";
+        public int SortOrder => 110;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is CollectionDomainResult;
 

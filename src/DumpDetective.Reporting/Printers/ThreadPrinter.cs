@@ -9,6 +9,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class ThreadPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Thread Analysis";
+        public string DisplayTitle => "Thread Analysis";
+        public int SortOrder => 140;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ThreadDomainResult;
 

@@ -10,6 +10,8 @@ namespace DumpDetective.Reporting.Printers
         private const int TopExceptionTypesCount = 10;
 
         public string AnalyzerName => "Crash Analysis";
+        public string DisplayTitle => "Crash Analysis";
+        public int SortOrder => 10;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is CrashDomainResult;
 

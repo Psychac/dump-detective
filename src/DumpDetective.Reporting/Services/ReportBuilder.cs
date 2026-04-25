@@ -1,4 +1,5 @@
 ﻿using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Output;
@@ -14,15 +15,81 @@ namespace DumpDetective.Reporting.Services
             return ComposeCanonicalReport(dumpPath, runs, elapsed, []);
         }
 
+        /// <summary>
+        /// Composes a report directly from a flat list of findings without requiring a fake
+        /// AnalyzerRunResult wrapper. Used by trend composition to avoid fabricated pipeline state.
+        /// </summary>
+        public static ComposedReport ComposeFromFindings(
+            string dumpPath,
+            IReadOnlyList<InsightFinding> findings,
+            TimeSpan elapsed)
+        {
+            List<ReportSection> sections = [];
+            int evidenceBeforeMerge = 0;
+
+            foreach (InsightFinding finding in findings)
+            {
+                evidenceBeforeMerge += 2;
+                sections.Add(new ReportSection(
+                    SectionKey: finding.EffectiveFingerprint,
+                    Title: finding.Title,
+                    Category: finding.Category,
+                    Severity: finding.Severity,
+                    NarrativeSummary: finding.Evidence,
+                    EvidenceRows:
+                    [
+                        new ReportEvidenceRow("Analyzer", finding.Analyzer),
+                        new ReportEvidenceRow("Evidence", finding.Evidence)
+                    ],
+                    RemediationHints: [finding.Recommendation],
+                    Fingerprints: [finding.EffectiveFingerprint]));
+            }
+
+            List<ReportSection> deduped = DeduplicateSections(sections, out DedupDiagnostics dedupDiagnostics);
+
+            deduped = deduped
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .ThenBy(s => s.SectionKey, StringComparer.Ordinal)
+                .ToList();
+
+            DedupDiagnostics normalizedDiagnostics = dedupDiagnostics with
+            {
+                EvidenceBeforeMerge = evidenceBeforeMerge
+            };
+
+            IReadOnlyList<ExecutiveSummaryItem> executiveSummary = BuildExecutiveSummary(deduped);
+            IReadOnlyList<DeveloperActionItem> developerActions = BuildDeveloperActionPlan(deduped);
+
+            return new ComposedReport(
+                dumpPath,
+                DateTime.UtcNow,
+                elapsed,
+                deduped,
+                executiveSummary,
+                developerActions,
+                normalizedDiagnostics,
+                ReportContractVersions.ReportSchemaV1,
+                ReportContractVersions.SectionSchemaV1,
+                DetailedAnalyzerSections: null);
+        }
+
         public static ComposedReport ComposeCanonicalReport(
             string dumpPath,
             IReadOnlyList<AnalyzerRunResult> runs,
             TimeSpan elapsed,
-            IReadOnlyList<IAnalyzerReporter> reporters)
+            IReadOnlyList<IAnalyzerReporter> reporters,
+            ReportAudience audience = ReportAudience.All)
         {
             List<ReportSection> sections = [];
             int evidenceBeforeMerge = 0;
-            IReadOnlyList<DetailedAnalyzerSection> detailedAnalyzerSections = BuildDetailedAnalyzerSections(runs, reporters);
+
+            // Detailed sections are only built when the audience requires them, avoiding wasted I/O.
+            IReadOnlyList<DetailedAnalyzerSection> detailedAnalyzerSections =
+                audience is ReportAudience.Executive or ReportAudience.Developer
+                    ? []
+                    : BuildDetailedAnalyzerSections(runs, reporters);
 
             foreach (AnalyzerRunResult run in runs)
             {
@@ -81,13 +148,22 @@ namespace DumpDetective.Reporting.Services
             };
 
             IReadOnlyList<ExecutiveSummaryItem> executiveSummary = BuildExecutiveSummary(deduped);
-            IReadOnlyList<DeveloperActionItem> developerActions = BuildDeveloperActionPlan(deduped);
+
+            // Developer action plan is skipped for Executive audience (they use the executive summary only).
+            IReadOnlyList<DeveloperActionItem> developerActions =
+                audience == ReportAudience.Executive
+                    ? []
+                    : BuildDeveloperActionPlan(deduped);
+
+            // Raw finding sections are stripped for Executive audience.
+            IReadOnlyList<ReportSection> outputSections =
+                audience == ReportAudience.Executive ? [] : deduped;
 
             return new ComposedReport(
                 dumpPath,
                 DateTime.UtcNow,
                 elapsed,
-                deduped,
+                outputSections,
                 executiveSummary,
                 developerActions,
                 normalizedDiagnostics,
@@ -103,133 +179,102 @@ namespace DumpDetective.Reporting.Services
             int info = sections.Count(s => s.Severity == FindingSeverity.Info);
             int total = sections.Count;
 
+            // Overall health status
             string overallHealth = critical > 0
-                ? "Critical - production risk is currently elevated"
+                ? $"Critical — {critical:N0} critical issue(s) require immediate attention"
                 : warning > 0
-                    ? "Watch - degrading signals detected"
-                    : "Stable - no immediate high-risk signal";
+                    ? $"Watch — {warning:N0} warning(s) detected, degrading signals present"
+                    : total > 0
+                        ? $"Stable — {info:N0} informational finding(s), no high-severity risk"
+                        : "Stable — no findings generated";
 
+            // Top risk with its diagnostic signal
             ReportSection? topRiskSection = sections
                 .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
                 .OrderByDescending(s => s.Severity)
                 .ThenBy(s => s.Title, StringComparer.Ordinal)
                 .FirstOrDefault();
 
-            IReadOnlyList<ReportSection> topRisks = sections
-                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
-                .OrderByDescending(s => s.Severity)
-                .ThenBy(s => s.Category, StringComparer.Ordinal)
-                .ThenBy(s => s.Title, StringComparer.Ordinal)
-                .Take(3)
-                .ToList();
-
-            IReadOnlyList<ReportSection> actionQueue = sections
-                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
-                .OrderByDescending(s => s.Severity)
-                .ThenBy(s => s.Category, StringComparer.Ordinal)
-                .ThenBy(s => s.Title, StringComparer.Ordinal)
-                .Take(5)
-                .ToList();
-
             string topRisk = topRiskSection is null
-                ? "No high-severity issues were found."
-                : $"Most urgent issue: [{topRiskSection.Severity}] {topRiskSection.Title} ({topRiskSection.Category}).";
+                ? "No high-severity issues detected."
+                : $"[{topRiskSection.Severity}] {topRiskSection.Title} — {topRiskSection.NarrativeSummary}";
 
-            string topRiskEvidence = topRiskSection is null
-                ? "No critical/warning evidence requires immediate escalation."
-                : $"Signal: {topRiskSection.NarrativeSummary}";
-
+            // Business impact derived from the dominant risk category
             string businessImpact = topRiskSection is null
-                ? "Current dump does not show immediate service disruption risks."
+                ? "No immediate service disruption risk detected in this dump."
                 : topRiskSection.Category switch
                 {
-                    "Leak" or "Memory" or "Fragmentation" => "Potential stability and performance degradation due to memory pressure.",
-                    "Crash" or "Stability" => "Potential user-facing failures and service interruptions.",
-                    "Hang" or "Threading" or "Retention" => "Potential response-time degradation and request processing delays.",
-                    _ => "Potential reliability degradation if highlighted issues are not addressed."
+                    "Leak" or "Memory" or "Fragmentation" =>
+                        "Memory pressure risk: potential for OutOfMemoryException, GC pauses, and process recycling under load.",
+                    "Crash" or "Stability" =>
+                        "Stability risk: active exceptions indicate potential user-facing failures or service crashes.",
+                    "Hang" or "Threading" or "Retention" =>
+                        "Responsiveness risk: thread contention or retention issues may cause request timeouts.",
+                    _ => "Reliability risk: highlighted issues may cause degraded service quality if not addressed."
                 };
 
-            string primaryRisks = topRisks.Count == 0
-                ? "No critical/warning risks identified."
-                : string.Join("; ", topRisks.Select(s => $"[{s.Severity}] {s.Title}"));
-
-            var topCategoryGroup = sections
-                .GroupBy(s => s.Category, StringComparer.Ordinal)
-                .OrderByDescending(g => g.Count())
-                .ThenBy(g => g.Key, StringComparer.Ordinal)
-                .FirstOrDefault();
-
-            string riskConcentration = topCategoryGroup is null
-                ? "No risk concentration detected."
-                : $"{topCategoryGroup.Key} contributes {topCategoryGroup.Count():N0}/{total:N0} findings ({(topCategoryGroup.Count() * 100.0 / total):F1}%).";
-
-            string urgencyWindow = critical > 0
-                ? "Action window: immediate (same day) for critical items."
-                : warning >= 3
-                    ? "Action window: next sprint to prevent escalation."
-                    : warning > 0
-                        ? "Action window: planned remediation cycle."
-                        : "Action window: monitor via regular health checks.";
-
-            string keyThemes = sections
-                .GroupBy(s => s.Category, StringComparer.Ordinal)
-                .OrderByDescending(g => g.Count())
-                .ThenBy(g => g.Key, StringComparer.Ordinal)
+            // Top 3 actionable findings for leadership
+            IReadOnlyList<ReportSection> topActionable = sections
+                .Where(s => s.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
+                .OrderByDescending(s => s.Severity)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
                 .Take(3)
-                .Select(g => $"{g.Key} ({g.Count()})")
-                .DefaultIfEmpty("No dominant risk themes")
-                .Aggregate((a, b) => $"{a}, {b}");
+                .ToList();
 
-            string severityMix = total == 0
-                ? "No findings generated."
-                : $"High-severity share: {critical + warning:N0}/{total:N0} ({((critical + warning) * 100.0 / total):F1}%).";
+            string actionableItems = topActionable.Count == 0
+                ? "No critical or warning items require escalation."
+                : string.Join("; ", topActionable.Select((s, i) =>
+                    $"{(s.Severity == FindingSeverity.Critical ? "P0" : "P1")}: {s.Title}"));
 
-            string actionQueueSummary = actionQueue.Count == 0
-                ? "No immediate remediation queue."
-                : string.Join(" | ", actionQueue.Select(s => $"{(s.Severity == FindingSeverity.Critical ? "P0" : "P1")}: {s.Title}"));
-
-            string nextStep = critical > 0
-                ? "Address critical items first, then re-run analysis to confirm risk reduction."
-                : warning > 0
-                    ? "Triage warning items by business impact and schedule remediation."
-                    : "Maintain current safeguards and continue periodic monitoring.";
-
-            string leadershipDecision = critical > 0
-                ? "Recommended leadership decision: prioritize reliability stabilization over feature throughput until P0 risks are reduced."
+            // Urgency window
+            string urgency = critical > 0
+                ? "Immediate (same-day) action required for critical items."
                 : warning >= 3
-                    ? "Recommended leadership decision: allocate focused engineering capacity in the next sprint for risk burn-down."
-                    : "Recommended leadership decision: continue planned delivery while monitoring current risk profile.";
+                    ? "Address in next sprint to prevent escalation."
+                    : warning > 0
+                        ? "Schedule in planned remediation cycle."
+                        : "No urgent action required; continue periodic monitoring.";
+
+            // Recommended next step
+            string nextStep = critical > 0
+                ? "Review critical findings in the Developer Action Plan, apply fixes, and re-run analysis to confirm risk reduction."
+                : warning > 0
+                    ? "Triage warning items by business impact using the Developer Action Plan and schedule remediation."
+                    : "Maintain current safeguards and continue periodic memory health checks.";
 
             return
             [
                 new ExecutiveSummaryItem("Overall health", overallHealth),
-                new ExecutiveSummaryItem("What this means", businessImpact),
-                new ExecutiveSummaryItem("Risk counts", $"Critical: {critical:N0}, Warning: {warning:N0}, Info: {info:N0}"),
-                new ExecutiveSummaryItem("Severity mix", severityMix),
+                new ExecutiveSummaryItem("Finding counts", $"Critical: {critical:N0}  Warning: {warning:N0}  Info: {info:N0}  Total: {total:N0}"),
+                new ExecutiveSummaryItem("Business impact", businessImpact),
                 new ExecutiveSummaryItem("Top risk", topRisk),
-                new ExecutiveSummaryItem("Top risk signal", topRiskEvidence),
-                new ExecutiveSummaryItem("Primary risks", primaryRisks),
-                new ExecutiveSummaryItem("Risk concentration", riskConcentration),
-                new ExecutiveSummaryItem("Key themes", keyThemes),
-                new ExecutiveSummaryItem("Immediate action queue", actionQueueSummary),
-                new ExecutiveSummaryItem("Urgency", urgencyWindow),
-                new ExecutiveSummaryItem("Recommended next step", nextStep),
-                new ExecutiveSummaryItem("Decision guidance", leadershipDecision)
+                new ExecutiveSummaryItem("Actionable items", actionableItems),
+                new ExecutiveSummaryItem("Urgency", urgency),
+                new ExecutiveSummaryItem("Recommended next step", nextStep)
             ];
         }
 
         private static IReadOnlyList<DeveloperActionItem> BuildDeveloperActionPlan(IReadOnlyList<ReportSection> sections)
         {
-            var prioritized = sections
-                .Where(s => s.RemediationHints.Count > 0)
+            // Always include all critical findings; pad with warnings/info up to the cap.
+            const int ActionPlanCap = 10;
+
+            IReadOnlyList<ReportSection> criticals = sections
+                .Where(s => s.Severity == FindingSeverity.Critical && s.RemediationHints.Count > 0)
+                .OrderBy(s => s.Category, StringComparer.Ordinal)
+                .ThenBy(s => s.Title, StringComparer.Ordinal)
+                .ToList();
+
+            IReadOnlyList<ReportSection> remainder = sections
+                .Where(s => s.Severity != FindingSeverity.Critical && s.RemediationHints.Count > 0)
                 .OrderByDescending(s => s.Severity)
                 .ThenBy(s => s.Category, StringComparer.Ordinal)
                 .ThenBy(s => s.Title, StringComparer.Ordinal)
-                .Take(10)
+                .Take(Math.Max(0, ActionPlanCap - criticals.Count))
                 .ToList();
 
-            List<DeveloperActionItem> actions = new(prioritized.Count);
-            foreach (ReportSection section in prioritized)
+            List<DeveloperActionItem> actions = new(criticals.Count + remainder.Count);
+            foreach (ReportSection section in criticals.Concat(remainder))
             {
                 string priority = section.Severity switch
                 {
@@ -238,11 +283,28 @@ namespace DumpDetective.Reporting.Services
                     _ => "P2"
                 };
 
+                string impact = section.Category switch
+                {
+                    "Leak" or "Memory" =>
+                        "Unchecked growth will increase GC pressure, slow the application, and risk process recycling under load.",
+                    "Fragmentation" =>
+                        "Heap fragmentation reduces allocation efficiency and can trigger premature LOH collections.",
+                    "Crash" or "Stability" =>
+                        "Active exceptions can cause request failures and unhandled crashes visible to end-users.",
+                    "Hang" or "Threading" =>
+                        "Thread contention will increase response latency and can lead to request timeouts.",
+                    "Retention" =>
+                        "Unnecessary object retention increases memory footprint and delays garbage collection.",
+                    "Pipeline" =>
+                        "Analyzer failures may have left diagnostic gaps; re-running after the fix ensures complete coverage.",
+                    _ => "Leaving this unaddressed risks degraded reliability or performance over time."
+                };
+
                 actions.Add(new DeveloperActionItem(
                     Priority: priority,
                     Title: section.Title,
                     Action: section.RemediationHints[0],
-                    Impact: section.NarrativeSummary));
+                    Impact: impact));
             }
 
             return actions;
@@ -274,7 +336,7 @@ namespace DumpDetective.Reporting.Services
 
             List<DetailedAnalyzerSection> sections = [];
 
-            foreach (IAnalyzerReporter reporter in reporters)
+            foreach (IAnalyzerReporter reporter in reporters.OrderBy(r => r.SortOrder))
             {
                 if (!domainResults.TryGetValue(reporter.AnalyzerName, out AnalyzerDomainResult? result))
                 {
@@ -296,7 +358,7 @@ namespace DumpDetective.Reporting.Services
                 }
 
                 sections.Add(new DetailedAnalyzerSection(
-                    reporter.AnalyzerName,
+                    reporter.DisplayTitle,
                     content,
                     writer.GetSubmodules()));
             }
@@ -384,7 +446,7 @@ namespace DumpDetective.Reporting.Services
                 .OrderByDescending(f => f.Severity)
                 .Take(3))
             {
-                insights.Add($"[{finding.Severity}] {finding.Title} â€” {finding.Evidence}");
+                insights.Add($"[{finding.Severity}] {finding.Title} — {finding.Evidence}");
             }
 
             insights.Add($"[INFO] Analysis completed in {elapsed.TotalSeconds:F1}s.");
@@ -395,138 +457,6 @@ namespace DumpDetective.Reporting.Services
             return insights;
         }
 
-        public static List<string> BuildTrendInsights(
-            IReadOnlyList<AnalyzerTrendResult> overall,
-            FindingLifecycleResult lifecycle,
-            int dumpCount)
-        {
-            int regressionCount = overall.Sum(r => r.Regressions.Count);
-            return
-            [
-                $"[INFO] Trend comparison across {dumpCount} dumps: +{lifecycle.NewFindings.Count} new, {lifecycle.PersistentFindings.Count} persistent, -{lifecycle.ResolvedFindings.Count} resolved findings.",
-                $"[INFO] Metric regressions detected: {regressionCount} across {overall.Count} analyzers."
-            ];
-        }
-
-        public static List<InsightFinding> BuildTrendFindings(
-            IReadOnlyList<AnalyzerTrendResult> overall,
-            FindingLifecycleResult lifecycle)
-        {
-            int topRegressions = overall.Sum(r => r.Regressions.Count);
-            FindingSeverity severity = topRegressions >= 5 ? FindingSeverity.Warning : FindingSeverity.Info;
-
-            return
-            [
-                new(
-                    Analyzer: "TrendAnalyzer",
-                    Category: "Comparison",
-                    Severity: lifecycle.NewFindings.Count > lifecycle.ResolvedFindings.Count ? FindingSeverity.Warning : FindingSeverity.Info,
-                    Title: "Trend finding lifecycle summary",
-                    Evidence: $"New {lifecycle.NewFindings.Count}, Persistent {lifecycle.PersistentFindings.Count}, Resolved {lifecycle.ResolvedFindings.Count}",
-                    Recommendation: "Focus first on new and persistent high-severity findings.",
-                    Tags: ["trend", "lifecycle", "comparison"],
-                    MetricValue: lifecycle.NewFindings.Count - lifecycle.ResolvedFindings.Count,
-                    MetricUnit: "net-findings"),
-                new(
-                    Analyzer: "TrendAnalyzer",
-                    Category: "Comparison",
-                    Severity: severity,
-                    Title: "Trend metric regression summary",
-                    Evidence: $"{topRegressions} metric regression(s) across {overall.Count} analyzer(s) compared.",
-                    Recommendation: topRegressions > 0
-                        ? "Review per-analyzer metric regressions in the trend comparison section."
-                        : "No metric regressions detected across compared analyzers.",
-                    Tags: ["trend", "metrics", "comparison"])
-            ];
-        }
-
-        public static string BuildTrendComparisonSection(
-            IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps,
-            IReadOnlyList<AnalyzerTrendResult> overall,
-            FindingLifecycleResult lifecycle,
-            IReadOnlyList<AnalyzerMetricTimeline> timeline,
-            IReadOnlyList<AnalysisSnapshot> snapshots)
-        {
-            var builder = new StringBuilder();
-            builder.AppendLine("TREND COMPARISON:");
-            builder.AppendLine(StringConstants.Separator80);
-            builder.AppendLine($"Dumps analyzed: {snapshots.Count}");
-            builder.AppendLine($"New findings: {lifecycle.NewFindings.Count}");
-            builder.AppendLine($"Persistent findings: {lifecycle.PersistentFindings.Count}");
-            builder.AppendLine($"Resolved findings: {lifecycle.ResolvedFindings.Count}");
-
-            int totalRegressions = overall.Sum(r => r.Regressions.Count);
-            int totalImprovements = overall.Sum(r => r.Improvements.Count);
-            builder.AppendLine($"Metric regressions: {totalRegressions}");
-            builder.AppendLine($"Metric improvements: {totalImprovements}");
-
-            if (timeline.Count > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine($"PER-ANALYZER METRIC TIMELINE ({snapshots.Count} dumps):");
-
-                var regressionsByAnalyzer = overall.ToDictionary(r => r.AnalyzerName, r => r.Regressions.Count, StringComparer.Ordinal);
-                var orderedTimeline = timeline.OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName));
-
-                foreach (var analyzerTimeline in orderedTimeline)
-                {
-                    builder.AppendLine($"  [{analyzerTimeline.AnalyzerName}]");
-
-                    foreach (var point in analyzerTimeline.Points)
-                    {
-                        var validValues = point.Values.Where(v => !double.IsNaN(v)).ToList();
-                        if (validValues.Count == 0) continue;
-
-                        string valuesLine = string.Join(" â†’ ", point.Values.Select(v => FormatHelper.FormatMetricValue(v, point.Unit)));
-
-                        double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
-                        double lastVal = point.Values.Last(v => !double.IsNaN(v));
-                        double delta = lastVal - firstVal;
-                        double? deltaPercent = Math.Abs(firstVal) > double.Epsilon ? delta * 100.0 / firstVal : null;
-
-                        string deltaStr = FormatHelper.FormatDeltaValue(delta, point.Unit);
-                        string pctStr = deltaPercent.HasValue ? $", {(deltaPercent.Value >= 0 ? "+" : string.Empty)}{deltaPercent.Value:F1}%" : string.Empty;
-
-                        string icon = (point.Direction, delta > 0) switch
-                        {
-                            (MetricTrendDirection.HigherIsWorse, true)  => "âš ï¸ ",
-                            (MetricTrendDirection.HigherIsWorse, false) when delta < 0 => "âœ… ",
-                            (MetricTrendDirection.LowerIsWorse, false) when delta < 0  => "âš ï¸ ",
-                            (MetricTrendDirection.LowerIsWorse, true)   => "âœ… ",
-                            _ => "â„¹ï¸ "
-                        };
-
-                        string deltaLabel = delta == 0 ? "no change" : $"Î” {deltaStr}{pctStr}";
-                        builder.AppendLine($"    {icon} {point.Key}: {valuesLine}   ({deltaLabel})");
-                    }
-                }
-            }
-
-            if (lifecycle.NewFindings.Count > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine("New findings:");
-                foreach (var f in lifecycle.NewFindings.OrderByDescending(f => f.Severity).Take(5))
-                    builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
-            }
-
-            if (lifecycle.ResolvedFindings.Count > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine("Resolved findings:");
-                foreach (var f in lifecycle.ResolvedFindings.Take(5))
-                    builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
-            }
-
-            builder.AppendLine();
-            return builder.ToString();
-        }
-
-        internal sealed record FindingLifecycleResult(
-            IReadOnlyList<InsightFinding> NewFindings,
-            IReadOnlyList<InsightFinding> PersistentFindings,
-            IReadOnlyList<InsightFinding> ResolvedFindings);
     }
 }
-
 

@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class LockGraphPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Lock Graph Analysis";
+        public string DisplayTitle => "Lock Graph Analysis";
+        public int SortOrder => 130;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 

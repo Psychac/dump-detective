@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class ModulePrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Module Analysis";
+        public string DisplayTitle => "Loaded Modules";
+        public int SortOrder => 160;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ModuleDomainResult;
 

@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class LohFragmentationPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "LOH Fragmentation Analysis";
+        public string DisplayTitle => "LOH Fragmentation Analysis";
+        public int SortOrder => 40;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 

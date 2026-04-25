@@ -8,6 +8,8 @@ namespace DumpDetective.Reporting.Printers
     internal sealed class StaticRootPrinter : IAnalyzerReporter
     {
         public string AnalyzerName => "Static Root Leak Detection";
+        public string DisplayTitle => "Static Root Leak Detection";
+        public int SortOrder => 70;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is StaticRootDomainResult;
 

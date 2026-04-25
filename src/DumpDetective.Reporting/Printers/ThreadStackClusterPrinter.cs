@@ -10,6 +10,8 @@ namespace DumpDetective.Reporting.Printers
         private const int TopSignaturesToShow = 5;
 
         public string AnalyzerName => "Thread Stack Signature Clustering";
+        public string DisplayTitle => "Thread Stack Cluster Analysis";
+        public int SortOrder => 150;
 
         public bool CanHandle(AnalyzerDomainResult result) => result is ThreadStackClusterDomainResult;
 

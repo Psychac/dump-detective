@@ -1,4 +1,5 @@
-﻿using Microsoft.Diagnostics.Runtime;
+﻿using System.Collections.Concurrent;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -280,6 +281,133 @@ public class HangAnalyzer : IAnalyzer
 
         private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis)
         {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
+            {
+                // In-memory index: parallel over the flat entry array
+                if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
+                {
+                    RunParallelAsyncScan(heap, inMemoryEntries: entries, analysis);
+                    return;
+                }
+
+                // Disk-backed index: sequential (I/O bound)
+                RunSequentialAsyncScan(heap, heapCache, analysis);
+                return;
+            }
+
+            // No cache: parallel over GC segments
+            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis);
+        }
+
+        // Unified parallel async-work scanner — drives either a flat in-memory HeapEntry[]
+        // or a per-segment ClrObject walk.  The early scan-limit is honored via a volatile flag.
+        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis)
+        {
+            var profileByMethodTable = new ConcurrentDictionary<ulong, AsyncTypeProfile>(
+                concurrencyLevel: Environment.ProcessorCount, capacity: 64);
+            var taskContinuations = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+
+            int queuedWorkItems = 0, totalTasks = 0, pendingTasks = 0, faultedTasks = 0, canceledTasks = 0;
+            int totalContinuations = 0, tasksScanned = 0;
+            bool taskScanLimited = false;
+
+            void ProcessEntry(ulong address, ulong mt)
+            {
+                if (address == 0 || mt == 0 || Volatile.Read(ref taskScanLimited))
+                    return;
+
+                var entry = new HeapEntry(address, mt, 0);
+                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, _ =>
+                {
+                    ClrObject o = heap.GetObject(address);
+                    return (!o.IsValid || o.Type == null)
+                        ? AsyncTypeProfile.None
+                        : AsyncTypeProfile.FromTypeName(o.Type.Name ?? string.Empty);
+                });
+
+                if (!profile.IsPotentiallyRelevant)
+                    return;
+
+                ClrObject obj = heap.GetObject(address);
+                if (!obj.IsValid || obj.Type == null)
+                    return;
+
+                if (profile.IsQueuedWorkItem)
+                    Interlocked.Increment(ref queuedWorkItems);
+
+                if (profile.IsTask)
+                {
+                    int scanned = Interlocked.Increment(ref tasksScanned);
+                    Interlocked.Increment(ref totalTasks);
+
+                    if (scanned <= MaxTasksToScan)
+                    {
+                        var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                        if (stateField != null)
+                        {
+                            int stateFlags = stateField.Read<int>(obj, interior: false);
+                            bool isCompleted = (stateFlags & 0x1000000) != 0;
+                            bool isFaulted   = (stateFlags & 0x200000) != 0;
+                            bool isCanceled  = (stateFlags & 0x400000) != 0;
+
+                            if (isFaulted)        Interlocked.Increment(ref faultedTasks);
+                            else if (isCanceled)  Interlocked.Increment(ref canceledTasks);
+                            else if (!isCompleted) Interlocked.Increment(ref pendingTasks);
+                        }
+                    }
+
+                    // Honor scan limit: signal remaining threads to skip task processing
+                    if (scanned > MaxTasksToScan && Volatile.Read(ref queuedWorkItems) > 1000)
+                        Volatile.Write(ref taskScanLimited, true);
+                }
+
+                if (profile.IsContinuation)
+                {
+                    Interlocked.Increment(ref totalContinuations);
+                    taskContinuations.AddOrUpdate(profile.TypeName, 1, (_, c) => c + 1);
+                }
+            }
+
+            if (inMemoryEntries != null)
+            {
+                Parallel.ForEach(inMemoryEntries, entry =>
+                {
+                    if (entry.Address == 0 || entry.MethodTable == 0)
+                        return;
+                    ProcessEntry(entry.Address, entry.MethodTable);
+                });
+            }
+            else
+            {
+                Parallel.ForEach(heap.Segments, segment =>
+                {
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (!obj.IsValid || obj.Type is null)
+                            continue;
+                        ulong mt = obj.Type.MethodTable;
+                        if (mt == 0)
+                            continue;
+                        ProcessEntry(obj.Address, mt);
+                    }
+                });
+            }
+
+            analysis.ThreadPoolInfo = new ThreadPoolAnalysis
+            {
+                QueuedWorkItems  = queuedWorkItems,
+                TotalTasks       = totalTasks,
+                PendingTasks     = pendingTasks,
+                FaultedTasks     = faultedTasks,
+                CanceledTasks    = canceledTasks,
+                TaskScanLimited  = taskScanLimited
+            };
+            analysis.TaskContinuations = new Dictionary<string, int>(taskContinuations, StringComparer.Ordinal);
+            analysis.TotalContinuations = totalContinuations;
+        }
+
+        private void RunSequentialAsyncScan(ClrHeap heap, HeapAnalysisCache heapCache, HangAnalysis analysis)
+        {
             var threadPool = new ThreadPoolAnalysis();
             var taskContinuations = new Dictionary<string, int>();
             var profileByMethodTable = new Dictionary<ulong, AsyncTypeProfile>(capacity: 64);
@@ -287,7 +415,7 @@ public class HangAnalyzer : IAnalyzer
             int totalContinuations = 0;
             var objectScanCounter = new ObjectScanCounter("Hang async object scan");
 
-            foreach (HeapEntry entry in EnumerateAsyncEntries(heap, cache))
+            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {
                 objectScanCounter.Tick();
 
@@ -320,29 +448,6 @@ public class HangAnalyzer : IAnalyzer
             analysis.ThreadPoolInfo = threadPool;
             analysis.TaskContinuations = taskContinuations;
             analysis.TotalContinuations = totalContinuations;
-        }
-
-        private static IEnumerable<HeapEntry> EnumerateAsyncEntries(ClrHeap heap, IHeapAnalysisCache? cache)
-        {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    yield return entry;
-
-                yield break;
-            }
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong methodTable = obj.Type.MethodTable;
-                if (methodTable == 0)
-                    continue;
-
-                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
-            }
         }
 
         private static AsyncTypeProfile ResolveAsyncTypeProfile(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, AsyncTypeProfile> profileByMethodTable)

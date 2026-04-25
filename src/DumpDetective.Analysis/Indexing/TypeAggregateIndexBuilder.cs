@@ -28,6 +28,25 @@ internal sealed class TypeAggregateIndexBuilder
         }
     }
 
+    // Merges another builder's aggregates into this one.
+    // Used to combine per-thread partial results from parallel segment scans.
+    public void Merge(TypeAggregateIndexBuilder other)
+    {
+        foreach ((ulong methodTable, MutableTypeAggregate otherAgg) in other._aggregates)
+        {
+            ref MutableTypeAggregate aggregate = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                _aggregates, methodTable, out bool existed);
+
+            if (!existed)
+                aggregate.SampleAddress = otherAgg.SampleAddress;
+
+            aggregate.Count     += otherAgg.Count;
+            aggregate.TotalSize += otherAgg.TotalSize;
+            aggregate.LohCount  += otherAgg.LohCount;
+            aggregate.LohSize   += otherAgg.LohSize;
+        }
+    }
+
     public IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> Build()
     {
         Dictionary<ulong, TypeAggregateIndexEntry> result = new(_aggregates.Count);

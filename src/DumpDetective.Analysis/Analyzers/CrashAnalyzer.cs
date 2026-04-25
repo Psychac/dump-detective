@@ -1,4 +1,5 @@
-﻿using Microsoft.Diagnostics.Runtime;
+﻿using System.Collections.Concurrent;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -121,17 +122,173 @@ public class CrashAnalyzer : IAnalyzer
 
         private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache)
         {
+            var activeExceptions = BuildActiveExceptionLookup(runtime);
+
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
+            {
+                // In-memory index: parallel over the flat entry array
+                if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
+                    return RunParallelExceptionScan(heap, inMemoryEntries: entries, heapIdx: heapIdx, activeExceptions: activeExceptions);
+
+                // Disk-backed index: sequential (I/O bound)
+                return RunSequentialExceptionScan(heap, heapCache, cache, activeExceptions);
+            }
+
+            // No cache: parallel over GC segments
+            return RunParallelExceptionScan(heap, inMemoryEntries: null, heapIdx: null, activeExceptions: activeExceptions);
+        }
+
+        // Unified parallel exception scanner — drives either a flat in-memory HeapEntry[]
+        // or a per-segment ClrObject walk using the same concurrent accumulation logic.
+        private ExceptionAnalysis RunParallelExceptionScan(
+            ClrHeap heap,
+            HeapEntry[]? inMemoryEntries,
+            HeapIndexBuildResult? heapIdx,
+            Dictionary<ulong, ActiveExceptionContext> activeExceptions)
+        {
+            var exceptionMethodTables = new ConcurrentDictionary<ulong, bool>();
+            var methodTableNameCache = new ConcurrentDictionary<ulong, string>();
+            var exceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+            var activeExceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+            var exceptionInstances = new ConcurrentBag<(string TypeName, ExceptionInstance Instance, bool IsActive)>();
+            var crashThreadCandidates = new ConcurrentDictionary<uint, CrashThreadCandidate>();
+            var candidateLock = new object();
+            int totalExceptions = 0, activeExceptionsCount = 0;
+
+            void ProcessEntry(ulong exceptionAddress, ulong mt)
+            {
+                if (exceptionAddress == 0)
+                    return;
+
+                // Filter: is this an exception type?
+                bool isException = exceptionMethodTables.GetOrAdd(mt, _ =>
+                {
+                    ClrObject o = heap.GetObject(exceptionAddress);
+                    string? n = o.IsValid ? o.Type?.Name : null;
+                    return n?.Contains("Exception", StringComparison.Ordinal) == true;
+                });
+
+                if (!isException)
+                    return;
+
+                // Resolve type name
+                string? typeName = methodTableNameCache.GetOrAdd(mt, _ =>
+                {
+                    if (heapIdx?.TypeAggregates.TryGetValue(mt, out var agg) == true && agg.SampleAddress != 0)
+                    {
+                        ClrObject sample = heap.GetObject(agg.SampleAddress);
+                        if (sample.IsValid && sample.Type != null)
+                            return sample.Type.Name ?? string.Empty;
+                    }
+                    return heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
+                });
+
+                if (typeName?.Contains("Exception", StringComparison.Ordinal) != true)
+                    return;
+
+                Interlocked.Increment(ref totalExceptions);
+                exceptionTypeCounts.AddOrUpdate(typeName, 1, (_, c) => c + 1);
+
+                bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
+                if (isActive)
+                {
+                    Interlocked.Increment(ref activeExceptionsCount);
+                    activeExceptionTypeCounts.AddOrUpdate(typeName, 1, (_, c) => c + 1);
+
+                    lock (candidateLock)
+                    {
+                        if (!crashThreadCandidates.TryGetValue(activeCtx.ThreadId, out var candidate))
+                        {
+                            candidate = new CrashThreadCandidate
+                            {
+                                ThreadId = activeCtx.ThreadId,
+                                OSThreadId = activeCtx.OSThreadId,
+                                CurrentThreadStack = activeCtx.CurrentThreadStack,
+                                PrimaryExceptionType = typeName
+                            };
+                            crashThreadCandidates[activeCtx.ThreadId] = candidate;
+                        }
+                        candidate.ActiveExceptionCount++;
+                    }
+                }
+
+                var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeCtx : null);
+                exceptionInstances.Add((typeName, exceptionInstance, isActive));
+            }
+
+            if (inMemoryEntries != null)
+            {
+                Parallel.ForEach(inMemoryEntries, entry =>
+                {
+                    if (entry.Address == 0 || entry.MethodTable == 0)
+                        return;
+                    ProcessEntry(entry.Address, entry.MethodTable);
+                });
+            }
+            else
+            {
+                Parallel.ForEach(heap.Segments, segment =>
+                {
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (!obj.IsValid || obj.Type is null)
+                            continue;
+                        ulong mt = obj.Type.MethodTable;
+                        if (mt == 0)
+                            continue;
+                        ProcessEntry(obj.Address, mt);
+                    }
+                });
+            }
+
+            // Sequential post-processing: build per-type exception list with cap enforcement
+            var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
+            foreach (var (typeName, instance, isActive) in exceptionInstances)
+            {
+                if (!exceptionsByType.TryGetValue(typeName, out var list))
+                {
+                    list = new List<ExceptionInstance>(capacity: MaxExceptionsPerType);
+                    exceptionsByType[typeName] = list;
+                }
+                if (list.Count < MaxExceptionsPerType || isActive)
+                    list.Add(instance);
+            }
+
+            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(
+                exceptionsByType.Count, StringComparer.Ordinal);
+            foreach (string tn in exceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key))
+            {
+                if (exceptionsByType.TryGetValue(tn, out var list))
+                    sortedExceptionsByType[tn] = list;
+            }
+
+            return new ExceptionAnalysis
+            {
+                TotalExceptions = totalExceptions,
+                ActiveExceptions = activeExceptionsCount,
+                ExceptionTypeCounts = new Dictionary<string, int>(exceptionTypeCounts, StringComparer.Ordinal),
+                ActiveExceptionTypeCounts = new Dictionary<string, int>(activeExceptionTypeCounts, StringComparer.Ordinal),
+                ExceptionsByType = sortedExceptionsByType,
+                CrashThreadCandidates = crashThreadCandidates.Values
+                    .OrderByDescending(c => c.ActiveExceptionCount)
+                    .ToList()
+            };
+        }
+
+        private ExceptionAnalysis RunSequentialExceptionScan(
+            ClrHeap heap, HeapAnalysisCache heapCache, IHeapAnalysisCache? cache,
+            Dictionary<ulong, ActiveExceptionContext> activeExceptions)
+        {
             var analysis = new ExceptionAnalysis();
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
             var exceptionTypeCounts = new Dictionary<string, int>();
             var activeExceptionTypeCounts = new Dictionary<string, int>();
             var exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
             var methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
-            var activeExceptions = BuildActiveExceptionLookup(runtime);
             var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
             var scanCounter = new ObjectScanCounter("Crash exception scan");
 
-            foreach (HeapEntry entry in EnumerateCrashEntries(heap, cache))
+            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {
                 scanCounter.Tick();
 
@@ -139,19 +296,19 @@ public class CrashAnalyzer : IAnalyzer
                 if (exceptionAddress == 0)
                     continue;
 
-                // Check if object is an exception
                 if (!IsExceptionEntry(heap, entry, exceptionMethodTables))
                     continue;
 
                 string? typeName;
                 ulong mt = entry.MethodTable;
-                    if (mt != 0 && methodTableNameCache.TryGetValue(mt, out var cachedName))
+                if (mt != 0 && methodTableNameCache.TryGetValue(mt, out var cachedName))
                 {
                     typeName = cachedName;
                 }
                 else
                 {
-                    if (mt != 0 && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build) && build.TypeAggregates.TryGetValue(mt, out var agg) && agg.SampleAddress != 0)
+                    if (mt != 0 && cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out var build)
+                        && build.TypeAggregates.TryGetValue(mt, out var agg) && agg.SampleAddress != 0)
                     {
                         ClrObject sample = heap.GetObject(agg.SampleAddress);
                         typeName = sample.IsValid && sample.Type != null ? sample.Type.Name : null;
@@ -160,10 +317,10 @@ public class CrashAnalyzer : IAnalyzer
                     {
                         typeName = heap.GetObject(exceptionAddress).Type?.Name;
                     }
-
                     if (mt != 0 && typeName != null)
                         methodTableNameCache[mt] = typeName;
                 }
+
                 if (typeName?.Contains("Exception", StringComparison.Ordinal) == true)
                 {
                     analysis.TotalExceptions++;
@@ -188,19 +345,14 @@ public class CrashAnalyzer : IAnalyzer
                             };
                             crashThreadCandidates[activeExceptionContext.ThreadId] = candidate;
                         }
-
                         candidate.ActiveExceptionCount++;
                     }
 
-                    // Only extract detailed info if we haven't hit the limit
                     if (!exceptionsByType.TryGetValue(typeName, out var list))
                     {
                         list = new List<ExceptionInstance>(capacity: MaxExceptionsPerType);
                         exceptionsByType[typeName] = list;
                     }
-
-                    // Only store details for top N exceptions per type to save memory.
-                    // Always include active exceptions, even beyond the cap.
                     if (list.Count < MaxExceptionsPerType || isActive)
                     {
                         var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, activeExceptionContext);
@@ -211,17 +363,12 @@ public class CrashAnalyzer : IAnalyzer
 
             scanCounter.Complete();
 
-            var sortedTypeNames = exceptionTypeCounts
-                .OrderByDescending(kvp => kvp.Value)
-                .Select(kvp => kvp.Key);
-
+            var sortedTypeNames = exceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key);
             var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(exceptionsByType.Count);
             foreach (string typeName in sortedTypeNames)
             {
                 if (exceptionsByType.TryGetValue(typeName, out var list))
-                {
                     sortedExceptionsByType[typeName] = list;
-                }
             }
 
             analysis.ExceptionTypeCounts = exceptionTypeCounts;
@@ -230,46 +377,7 @@ public class CrashAnalyzer : IAnalyzer
             analysis.CrashThreadCandidates = crashThreadCandidates.Values
                 .OrderByDescending(c => c.ActiveExceptionCount)
                 .ToList();
-
             return analysis;
-        }
-
-        private static IEnumerable<HeapEntry> EnumerateCrashEntries(ClrHeap heap, IHeapAnalysisCache? cache)
-        {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    yield return entry;
-
-                yield break;
-            }
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong methodTable = obj.Type.MethodTable;
-                if (methodTable == 0)
-                    continue;
-
-                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
-            }
-        }
-
-        private static bool IsExceptionEntry(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, bool> exceptionMethodTables)
-        {
-            if (entry.MethodTable == 0)
-                return false;
-
-            if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
-                return isException;
-
-            ClrObject obj = heap.GetObject(entry.Address);
-            string? typeName = obj.IsValid ? obj.Type?.Name : null;
-            isException = typeName?.Contains("Exception", StringComparison.Ordinal) == true;
-            exceptionMethodTables[entry.MethodTable] = isException;
-            return isException;
         }
 
         private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)
@@ -295,6 +403,21 @@ public class CrashAnalyzer : IAnalyzer
             scanCounter.Complete();
 
             return lookup;
+        }
+
+        private static bool IsExceptionEntry(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, bool> exceptionMethodTables)
+        {
+            if (entry.MethodTable == 0)
+                return false;
+
+            if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
+                return isException;
+
+            ClrObject obj = heap.GetObject(entry.Address);
+            string? typeName = obj.IsValid ? obj.Type?.Name : null;
+            isException = typeName?.Contains("Exception", StringComparison.Ordinal) == true;
+            exceptionMethodTables[entry.MethodTable] = isException;
+            return isException;
         }
 
         private ExceptionInstance ExtractExceptionInfo(ClrHeap heap, ulong exceptionAddress, ActiveExceptionContext? activeContext)

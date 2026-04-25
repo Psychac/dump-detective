@@ -244,40 +244,72 @@ namespace DumpDetective.Analysis.Cache
 
             _typeStats = new Dictionary<string, CachedTypeStatistics>(capacity: 1024);
             _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
-            var scanCounter = new ObjectScanCounter("Type statistics scan");
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            // Parallel segment walk — each thread builds a local dict, merged sequentially at the end.
+            var threadLocalResults = new System.Collections.Concurrent.ConcurrentBag<
+                (Dictionary<string, CachedTypeStatistics> Stats, Dictionary<string, ulong> Samples)>();
+            long totalScanned = 0;
+
+            Parallel.ForEach(
+                heap.Segments,
+                () => (Stats: new Dictionary<string, CachedTypeStatistics>(),
+                       Samples: new Dictionary<string, ulong>()),
+                (segment, _, localState) =>
+                {
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (!obj.IsValid || obj.Type == null)
+                            continue;
+
+                        string typeName = obj.Type.Name ?? StringConstants.UnknownType;
+                        ulong size = obj.Size;
+                        bool isLoh = size >= 85000;
+
+                        if (!localState.Stats.TryGetValue(typeName, out var stats))
+                        {
+                            stats = new CachedTypeStatistics { TypeName = typeName };
+                            localState.Stats[typeName] = stats;
+                            localState.Samples[typeName] = obj.Address;
+                        }
+
+                        stats.Count++;
+                        stats.TotalSize += size;
+                        if (isLoh)
+                        {
+                            stats.LohCount++;
+                            stats.LohSize += size;
+                        }
+                    }
+                    return localState;
+                },
+                localState =>
+                {
+                    threadLocalResults.Add(localState);
+                    Interlocked.Add(ref totalScanned, localState.Stats.Values.Sum(s => (long)s.Count));
+                });
+
+            // Merge thread-local results into the shared cache (sequential, runs once).
+            foreach (var (localStats, localSamples) in threadLocalResults)
             {
-                scanCounter.Tick();
-                // OPT-#11: Plain increment in single-threaded scan loop.
-                long scans = ++_objectScanCount;
-                ReportProgress("Type statistics scan", scans);
-
-                if (!obj.IsValid || obj.Type == null)
-                    continue;
-
-                string typeName = obj.Type.Name ?? StringConstants.UnknownType;
-                ulong size = obj.Size;
-                bool isLoh = size >= 85000;
-
-                if (!_typeStats.TryGetValue(typeName, out var stats))
+                foreach ((string typeName, CachedTypeStatistics localStat) in localStats)
                 {
-                    stats = new CachedTypeStatistics { TypeName = typeName };
-                    _typeStats[typeName] = stats;
-                    _sampleInstances[typeName] = obj.Address; // Cache first instance
-                }
+                    if (!_typeStats.TryGetValue(typeName, out var stat))
+                    {
+                        stat = new CachedTypeStatistics { TypeName = typeName };
+                        _typeStats[typeName] = stat;
+                        if (localSamples.TryGetValue(typeName, out ulong sample))
+                            _sampleInstances[typeName] = sample;
+                    }
 
-                stats.Count++;
-                stats.TotalSize += size;
-
-                if (isLoh)
-                {
-                    stats.LohCount++;
-                    stats.LohSize += size;
+                    stat.Count = AddClamped(stat.Count, localStat.Count);
+                    stat.TotalSize += localStat.TotalSize;
+                    stat.LohCount = AddClamped(stat.LohCount, localStat.LohCount);
+                    stat.LohSize += localStat.LohSize;
                 }
             }
 
-            scanCounter.Complete();
+            Interlocked.Add(ref _objectScanCount, totalScanned);
+            ReportProgress("Type statistics scan", _objectScanCount);
 
             return _typeStats;
         }

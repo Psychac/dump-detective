@@ -1,4 +1,5 @@
-﻿using Microsoft.Diagnostics.Runtime;
+﻿using System.Collections.Concurrent;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -56,34 +57,112 @@ public class CollectionAnalyzer : IAnalyzer
             return domainResult;
         }
 
-        private static InsightFinding CreateFinding(CollectionStatistics stats)
+        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache)
         {
-            FindingSeverity severity = stats.TotalWastedMemory >= SummaryWarnThresholdBytes
-                ? FindingSeverity.Warning
-                : FindingSeverity.Info;
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
+            {
+                // In-memory index: parallel over the flat entry array
+                if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
+                    return RunParallelCollectionAnalysis(heap, inMemoryEntries: entries);
 
-            return new InsightFinding(
-                Analyzer: nameof(CollectionAnalyzer),
-                Category: "Memory",
-                Severity: severity,
-                Title: "Collection capacity efficiency",
-                Evidence: $"{stats.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(stats.TotalWastedMemory)} across {stats.WastefulCollections.Count:N0} wasteful collections.",
-                Recommendation: severity == FindingSeverity.Warning
-                    ? "Trim long-lived collections and initialize with realistic capacities."
-                    : "Collection sizing appears acceptable in this snapshot.",
-                Tags: ["collections", "memory-waste", "capacity"],
-                MetricValue: stats.TotalWastedMemory,
-                MetricUnit: "wasted-bytes");
+                // Disk-backed index: sequential (I/O bound; parallel won't help)
+                return AnalyzeCollectionsSequentialDisk(heap, heapCache);
+            }
+
+            // No cache: parallel over GC segments
+            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null);
         }
 
-        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache)
+        // Unified parallel analysis — drives either a flat in-memory HeapEntry[] (cache path)
+        // or a per-segment ClrObject walk (no-cache path) using the same concurrent accumulation logic.
+        private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries)
+        {
+            var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
+                concurrencyLevel: Environment.ProcessorCount, capacity: 64);
+            var concurrentWasteful = new ConcurrentBag<WastefulCollection>();
+            int totalCollections = 0, dictionaries = 0, lists = 0, hashSets = 0, queues = 0;
+
+            void ProcessEntry(ulong address, ulong mt)
+            {
+                CollectionKind kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
+                if (kind == CollectionKind.None)
+                    return;
+
+                Interlocked.Increment(ref totalCollections);
+
+                if (kind == CollectionKind.Dictionary)
+                {
+                    Interlocked.Increment(ref dictionaries);
+                    var waste = AnalyzeDictionary(heap, address);
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                        concurrentWasteful.Add(waste);
+                }
+                else if (kind == CollectionKind.List)
+                {
+                    Interlocked.Increment(ref lists);
+                    var waste = AnalyzeList(heap, address);
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                        concurrentWasteful.Add(waste);
+                }
+                else if (kind == CollectionKind.HashSet)
+                {
+                    Interlocked.Increment(ref hashSets);
+                    var waste = AnalyzeHashSet(heap, address);
+                    if (waste != null && waste.WastedMemory > WasteThresholdBytes)
+                        concurrentWasteful.Add(waste);
+                }
+                else if (kind == CollectionKind.Queue)
+                {
+                    Interlocked.Increment(ref queues);
+                }
+            }
+
+            if (inMemoryEntries != null)
+            {
+                Parallel.ForEach(inMemoryEntries, entry =>
+                {
+                    if (entry.Address == 0 || entry.MethodTable == 0)
+                        return;
+                    ProcessEntry(entry.Address, entry.MethodTable);
+                });
+            }
+            else
+            {
+                Parallel.ForEach(heap.Segments, segment =>
+                {
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (!obj.IsValid || obj.Type is null)
+                            continue;
+                        ulong mt = obj.Type.MethodTable;
+                        if (mt == 0)
+                            continue;
+                        ProcessEntry(obj.Address, mt);
+                    }
+                });
+            }
+
+            var wastefulList = concurrentWasteful.OrderByDescending(w => w.WastedMemory).ToList();
+            return new CollectionStatistics
+            {
+                TotalCollections = totalCollections,
+                Dictionaries = dictionaries,
+                Lists = lists,
+                HashSets = hashSets,
+                Queues = queues,
+                WastefulCollections = wastefulList,
+                TotalWastedMemory = wastefulList.Aggregate(0UL, (acc, w) => acc + w.WastedMemory)
+            };
+        }
+
+        private CollectionStatistics AnalyzeCollectionsSequentialDisk(ClrHeap heap, HeapAnalysisCache heapCache)
         {
             var stats = new CollectionStatistics();
             var wasteful = new List<WastefulCollection>();
             var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
             var scanCounter = new ObjectScanCounter("Collection scan");
 
-            foreach (HeapEntry entry in EnumerateCollectionEntries(heap, cache))
+            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {
                 scanCounter.Tick();
 
@@ -93,43 +172,30 @@ public class CollectionAnalyzer : IAnalyzer
 
                 CollectionKind kind = ResolveCollectionKind(heap, entry, methodTableKinds);
 
-                // Analyze Dictionary
                 if (kind == CollectionKind.Dictionary)
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
-
                     var waste = AnalyzeDictionary(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
-                    {
                         wasteful.Add(waste);
-                    }
                 }
-                // Analyze List
                 else if (kind == CollectionKind.List)
                 {
                     stats.TotalCollections++;
                     stats.Lists++;
-                    
                     var waste = AnalyzeList(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
-                    {
                         wasteful.Add(waste);
-                    }
                 }
-                // Analyze HashSet
                 else if (kind == CollectionKind.HashSet)
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
-
                     var waste = AnalyzeHashSet(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > WasteThresholdBytes)
-                    {
                         wasteful.Add(waste);
-                    }
                 }
-                // Analyze Queue
                 else if (kind == CollectionKind.Queue)
                 {
                     stats.TotalCollections++;
@@ -141,7 +207,6 @@ public class CollectionAnalyzer : IAnalyzer
 
             stats.WastefulCollections = wasteful.OrderByDescending(w => w.WastedMemory).ToList();
             stats.TotalWastedMemory = wasteful.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);
-
             return stats;
         }
 
@@ -191,6 +256,28 @@ public class CollectionAnalyzer : IAnalyzer
 
             methodTableKinds[entry.MethodTable] = resolved;
             return resolved;
+        }
+
+        private static CollectionKind ResolveCollectionKindConcurrent(
+            ClrHeap heap, ulong address, ulong methodTable,
+            ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
+        {
+            return methodTableKinds.GetOrAdd(methodTable, mt =>
+            {
+                ClrObject obj = heap.GetObject(address);
+                string typeName = obj.IsValid ? (obj.Type?.Name ?? string.Empty) : string.Empty;
+
+                if (typeName.StartsWith("System.Collections.Generic.Dictionary", StringComparison.Ordinal))
+                    return CollectionKind.Dictionary;
+                if (typeName.StartsWith("System.Collections.Generic.List", StringComparison.Ordinal))
+                    return CollectionKind.List;
+                if (typeName.StartsWith("System.Collections.Generic.HashSet", StringComparison.Ordinal))
+                    return CollectionKind.HashSet;
+                if (typeName.StartsWith("System.Collections.Generic.Queue", StringComparison.Ordinal))
+                    return CollectionKind.Queue;
+
+                return CollectionKind.None;
+            });
         }
 
         private enum CollectionKind

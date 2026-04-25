@@ -1,4 +1,5 @@
-﻿using Microsoft.Diagnostics.Runtime;
+﻿using System.Collections.Concurrent;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
@@ -62,33 +63,19 @@ namespace DumpDetective.Analysis.Analyzers
 
             try
             {
-                foreach (HeapEntry entry in EnumerateGenerationEntries(heap, cache))
-                {
-                    ulong objectAddress = entry.Address;
-                    if (objectAddress == 0)
-                        continue;
+                (int foundGen0Objects, int foundGen1Objects, ulong foundGen0Bytes, ulong foundGen1Bytes) =
+                    RunParallelGenerationScan(heap, cache, generationProperty, getGenerationMethod);
 
-                    ulong size = entry.Size;
-                    if (size >= LohThresholdBytes)
-                        continue;
+                gen0Objects = foundGen0Objects;
+                gen1Objects = foundGen1Objects;
+                gen0Bytes = foundGen0Bytes;
+                gen1Bytes = foundGen1Bytes;
 
-                    int generation = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-
-                    if (generation == 0)
-                    {
-                        gen0Objects++;
-                        gen0Bytes += size;
-                        gen2Objects = Math.Max(0, gen2Objects - 1);
-                        gen2Bytes = gen2Bytes >= size ? gen2Bytes - size : 0;
-                    }
-                    else if (generation == 1)
-                    {
-                        gen1Objects++;
-                        gen1Bytes += size;
-                        gen2Objects = Math.Max(0, gen2Objects - 1);
-                        gen2Bytes = gen2Bytes >= size ? gen2Bytes - size : 0;
-                    }
-                }
+                // Subtract discovered gen0/gen1 from the gen2 fallback totals
+                int adjObjects = gen0Objects + gen1Objects;
+                gen2Objects = Math.Max(0, gen2Objects - adjObjects);
+                ulong adjBytes = gen0Bytes + gen1Bytes;
+                gen2Bytes = gen2Bytes >= adjBytes ? gen2Bytes - adjBytes : 0;
             }
             catch
             {
@@ -119,27 +106,65 @@ namespace DumpDetective.Analysis.Analyzers
                 topLohTypes);
         }
 
-        private static IEnumerable<HeapEntry> EnumerateGenerationEntries(ClrHeap heap, IHeapAnalysisCache cache)
+        // Counts gen0 and gen1 objects in parallel over either a flat in-memory HeapEntry[]
+        // (cache path) or GC segments (no-cache path). Gen2 adjustment is done by the caller.
+        private static (int gen0Objects, int gen1Objects, ulong gen0Bytes, ulong gen1Bytes)
+            RunParallelGenerationScan(
+                ClrHeap heap,
+                IHeapAnalysisCache cache,
+                PropertyInfo? generationProperty,
+                MethodInfo? getGenerationMethod)
         {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    yield return entry;
+            int gen0Objects = 0;
+            int gen1Objects = 0;
+            ulong gen0Bytes = 0;
+            ulong gen1Bytes = 0;
 
-                yield break;
+            void ProcessEntry(ulong address, ulong size)
+            {
+                if (address == 0 || size >= LohThresholdBytes)
+                    return;
+
+                int generation = ResolveGeneration(heap, address, generationProperty, getGenerationMethod);
+
+                if (generation == 0)
+                {
+                    Interlocked.Increment(ref gen0Objects);
+                    Interlocked.Add(ref gen0Bytes, size);
+                }
+                else if (generation == 1)
+                {
+                    Interlocked.Increment(ref gen1Objects);
+                    Interlocked.Add(ref gen1Bytes, size);
+                }
             }
 
-            foreach (ClrObject obj in heap.EnumerateObjects())
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
             {
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong methodTable = obj.Type.MethodTable;
-                if (methodTable == 0)
-                    continue;
-
-                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
+                if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
+                {
+                    Parallel.ForEach(entries, entry => ProcessEntry(entry.Address, entry.Size));
+                }
+                else
+                {
+                    foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
+                        ProcessEntry(entry.Address, entry.Size);
+                }
             }
+            else
+            {
+                Parallel.ForEach(heap.Segments, segment =>
+                {
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (!obj.IsValid || obj.Type is null)
+                            continue;
+                        ProcessEntry(obj.Address, obj.Size);
+                    }
+                });
+            }
+
+            return (gen0Objects, gen1Objects, gen0Bytes, gen1Bytes);
         }
 
         private static int ResolveGeneration(ClrHeap heap, ulong objectAddress, PropertyInfo? generationProperty, MethodInfo? getGenerationMethod)

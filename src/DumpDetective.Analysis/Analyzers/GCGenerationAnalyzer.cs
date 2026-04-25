@@ -24,18 +24,13 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
+        public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            // Reuse prebuilt type statistics cache to avoid an extra full heap pass.
             var cachedStats = cache.GetOrBuildTypeStatistics(heap);
-
-            return new AnalyzerExecutionResult(
-                [CreateFinding(cachedStats)],
-                BuildDomainResult(heap, cache, cachedStats));
+            return BuildDomainResult(heap, cache, cachedStats);
         }
 
         private static GCGenerationDomainResult BuildDomainResult(ClrHeap heap, IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> typeStats)
@@ -188,31 +183,6 @@ namespace DumpDetective.Analysis.Analyzers
             return 2;
         }
 
-        private static InsightFinding CreateFinding(Dictionary<string, CachedTypeStatistics> typeStats)
-        {
-            ulong total = 0;
-            ulong loh = 0;
-            foreach (var stat in typeStats.Values)
-            {
-                total += stat.TotalSize;
-                loh += stat.LohSize;
-            }
 
-            double lohPct = total == 0 ? 0 : loh * 100.0 / total;
-            return new InsightFinding(
-                Analyzer: nameof(GCGenerationAnalyzer),
-                Category: "GC",
-                Severity: lohPct >= 35 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "GC generation footprint snapshot",
-                Evidence: $"LOH memory share is {lohPct:F1}% of managed heap.",
-                Recommendation: lohPct >= 35
-                    ? "Inspect large object churn and promotion patterns."
-                    : "Generation split appears within expected range for this dump.",
-                Tags: ["gc", "generations", "loh"],
-                MetricValue: lohPct,
-                MetricUnit: "%");
-        }
     }
 }
-
-

@@ -18,16 +18,15 @@ public class CollectionAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap)
+        public AnalyzerDomainResult Analyze(ClrHeap heap)
         {
             return Analyze(heap, cache: null);
         }
 
-        private AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var collectionStats = AnalyzeCollections(heap, cache);
             var domainResult = new CollectionDomainResult(
@@ -51,21 +50,10 @@ public class CollectionAnalyzer : IAnalyzer
 
             if (collectionStats.TotalCollections == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(CollectionAnalyzer),
-                        Category: "Memory",
-                        Severity: FindingSeverity.Info,
-                        Title: "No generic collections detected",
-                        Evidence: "Collection analyzer did not find list/dictionary/hashset instances for evaluation.",
-                        Recommendation: "No collection-sizing action required from this snapshot.",
-                        Tags: ["collections", "capacity"],
-                        MetricValue: 0,
-                        MetricUnit: "wasted-bytes")],
-                    domainResult);
+                return domainResult;
             }
 
-            return new AnalyzerExecutionResult([CreateFinding(collectionStats)], domainResult);
+            return domainResult;
         }
 
         private static InsightFinding CreateFinding(CollectionStatistics stats)

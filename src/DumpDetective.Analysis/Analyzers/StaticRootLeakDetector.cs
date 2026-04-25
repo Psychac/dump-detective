@@ -22,11 +22,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
+        public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache);
             var significantStaticRoots = allStaticRootAnalysis
@@ -41,27 +40,14 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (significantStaticRoots.Count == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(StaticRootLeakDetector),
-                        Category: "Leak",
-                        Severity: FindingSeverity.Info,
-                        Title: "No high-impact static roots",
-                        Evidence: "Static-root scan found no roots exceeding significant memory/object thresholds.",
-                        Recommendation: "No immediate static-root retention remediation required.",
-                        Tags: ["static-root", "leak", "retention"],
-                        MetricValue: 0,
-                        MetricUnit: "retained-bytes")],
-                    new StaticRootDomainResult(0, 0, topRoots));
+                return new StaticRootDomainResult(0, 0, topRoots);
             }
 
             ulong totalImpact = 0;
             foreach (var item in significantStaticRoots)
                 totalImpact += item.TotalMemoryImpact;
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(significantStaticRoots)],
-                new StaticRootDomainResult(significantStaticRoots.Count, totalImpact, topRoots));
+            return new StaticRootDomainResult(significantStaticRoots.Count, totalImpact, topRoots);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis)

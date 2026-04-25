@@ -20,16 +20,15 @@ public class HangAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             return Analyze(runtime, heap, cache: null);
         }
 
-        private AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var hangInfo = AnalyzeForHang(runtime, heap, cache);
 
@@ -44,9 +43,7 @@ public class HangAnalyzer : IAnalyzer
             double waitingPct = hangInfo.TotalAliveThreads == 0 ? 0
                 : hangInfo.WaitingThreads.Count * 100.0 / hangInfo.TotalAliveThreads;
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(hangInfo)],
-                new HangDomainResult(
+            return new HangDomainResult(
                     hangInfo.TotalAliveThreads,
                     hangInfo.WaitingThreads.Count,
                     hangInfo.ThreadsHoldingLocks,
@@ -77,7 +74,7 @@ public class HangAnalyzer : IAnalyzer
                         .OrderByDescending(k => k.Value)
                         .Take(TopContinuationTypesToShow)
                         .Select(k => new NameCountEntry(k.Key, k.Value))
-                        .ToList()));
+                        .ToList());
         }
 
         private static InsightFinding CreateFinding(HangAnalysis analysis)

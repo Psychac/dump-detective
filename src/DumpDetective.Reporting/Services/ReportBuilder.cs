@@ -93,9 +93,9 @@ namespace DumpDetective.Reporting.Services
 
             foreach (AnalyzerRunResult run in runs)
             {
-                if (run.Result?.Findings is { Count: > 0 })
+                if (run.Findings is { Count: > 0 })
                 {
-                    foreach (InsightFinding finding in run.Result.Findings)
+                    foreach (InsightFinding finding in run.Findings)
                     {
                         evidenceBeforeMerge += 2;
                         sections.Add(new ReportSection(

@@ -38,11 +38,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap)
+        public AnalyzerDomainResult Analyze(ClrHeap heap)
         {
             // NOTE: Intentionally does not use IHeapAnalysisCache / heap index here.
             // Fragmentation analysis requires per-segment object ordering and contiguous
@@ -94,18 +93,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (segmentStats.Count == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(LohFragmentationAnalyzer),
-                        Category: "Performance",
-                        Severity: FindingSeverity.Info,
-                        Title: "No LOH segments were detected",
-                        Evidence: "Heap scan did not report large-object-heap segments.",
-                        Recommendation: "No LOH-fragmentation action required for this dump.",
-                        Tags: ["loh", "fragmentation"],
-                        MetricValue: 0,
-                        MetricUnit: "% fragmentation")],
-                    new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0));
+                return new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0);
             }
 
             double overallFragmentation = CalculateOverallFragmentationPercent(segmentStats);
@@ -127,9 +115,7 @@ namespace DumpDetective.Analysis.Analyzers
                 .Select(s => new LohSegmentSnapshot(s.Address, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock))
                 .ToList();
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(overallFragmentation, segmentStats.Count)],
-                new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments));
+            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments);
         }
 
         private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)

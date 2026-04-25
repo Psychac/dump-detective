@@ -1,11 +1,8 @@
-﻿using DumpDetective.Core.Utilities;
-
-namespace DumpDetective.Core.Models;
+﻿namespace DumpDetective.Core.Models;
 public abstract record AnalyzerDomainResult
 {
     public string AnalyzerName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
-    public IReadOnlyCollection<InsightFinding> Findings { get; init; } = [];
     public IReadOnlyDictionary<string, object?> Metrics { get; init; } = new Dictionary<string, object?>();
     public IReadOnlyCollection<string> Warnings { get; init; } = [];
 }

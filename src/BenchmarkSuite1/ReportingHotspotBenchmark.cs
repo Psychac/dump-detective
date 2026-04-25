@@ -66,7 +66,6 @@ public class ReportingHotspotBenchmark
             {
                 AnalyzerName = $"Analyzer-{i % 10}",
                 Category = "Leak",
-                Findings = [finding],
                 Metrics = new Dictionary<string, object?>
                 {
                     ["objectScans"] = 1000 + i,
@@ -82,7 +81,8 @@ public class ReportingHotspotBenchmark
                 Result: result,
                 ErrorMessage: null,
                 ErrorType: null,
-                FindingCount: result.Findings.Count,
+                Findings: [finding],
+                FindingCount: 1,
                 WarningCount: result.Warnings.Count,
                 ObjectScanCount: 1000 + i,
                 CacheHits: 700 + (i % 100),

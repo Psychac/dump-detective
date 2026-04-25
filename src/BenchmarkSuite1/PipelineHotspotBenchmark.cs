@@ -63,17 +63,6 @@ public class PipelineHotspotBenchmark
             {
                 AnalyzerName = Name,
                 Category = Category,
-                Findings =
-                [
-                    new InsightFinding(
-                        Analyzer: Name,
-                        Category: Category,
-                        Severity: FindingSeverity.Info,
-                        Title: "Synthetic finding",
-                        Evidence: "Synthetic evidence",
-                        Recommendation: "Synthetic recommendation",
-                        Tags: ["benchmark"]) 
-                ],
                 Metrics = new Dictionary<string, object?>
                 {
                     ["objectScans"] = 100,

@@ -22,16 +22,15 @@ public class CrashAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             return Analyze(runtime, heap, cache: null);
         }
 
-        private AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache)
         {
             var exceptionInfo = AnalyzeExceptions(heap, runtime, cache);
 
@@ -45,21 +44,10 @@ public class CrashAnalyzer : IAnalyzer
 
             if (exceptionInfo.TotalExceptions == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(CrashAnalyzer),
-                        Category: "Stability",
-                        Severity: FindingSeverity.Info,
-                        Title: "No exception objects detected",
-                        Evidence: "Crash analysis found no exception objects in the heap snapshot.",
-                        Recommendation: "Validate dump type and capture settings if a crash was expected.",
-                        Tags: ["crash", "exception", "stability"],
-                        MetricValue: 0,
-                        MetricUnit: "active-exceptions")],
-                    domainResult);
+                return domainResult;
             }
 
-            return new AnalyzerExecutionResult([CreateFinding(exceptionInfo)], domainResult);
+            return domainResult;
         }
 
         private static IReadOnlyList<CrashThreadCandidateSnapshot> BuildCrashThreadSnapshots(ExceptionAnalysis analysis)

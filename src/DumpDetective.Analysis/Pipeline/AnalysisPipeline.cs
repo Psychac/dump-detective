@@ -107,7 +107,6 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 long cacheHits = ExtractLongMetric(analyzerResult.Metrics, "cacheHits") ?? context.Cache.CacheHits;
                 long cacheMisses = ExtractLongMetric(analyzerResult.Metrics, "cacheMisses") ?? context.Cache.CacheMisses;
                 int warningCount = analyzerResult.Warnings.Count;
-                int findingCount = analyzerResult.Findings.Count;
 
                 stopwatch.Stop();
 
@@ -118,11 +117,12 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     analyzerResult,
                     null,
                     null,
-                    findingCount,
-                    warningCount,
-                    objectScans,
-                    cacheHits,
-                    cacheMisses);
+                    Findings: null,
+                    FindingCount: 0,
+                    WarningCount: warningCount,
+                    ObjectScanCount: objectScans,
+                    CacheHits: cacheHits,
+                    CacheMisses: cacheMisses);
 
                 runResults.Add(success);
 
@@ -136,7 +136,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     ObjectScanCount: success.ObjectScanCount,
                     CacheHits: success.CacheHits,
                     CacheMisses: success.CacheMisses,
-                    Message: $"Analyzer '{analyzer.Name}' completed with {success.FindingCount} finding(s).",
+                    Message: $"Analyzer '{analyzer.Name}' completed.",
                     ExceptionType: null,
                     ExceptionMessage: null));
             }

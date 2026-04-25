@@ -15,11 +15,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap heap)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
             var graph = BuildLockGraph(runtime, heap);
 
@@ -30,14 +29,12 @@ namespace DumpDetective.Analysis.Analyzers
                 .Take(MaxContestedLocksToShow)
                 .ToList();
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(graph)],
-                new LockGraphDomainResult(
+            return new LockGraphDomainResult(
                     graph.AllHeldLocks.Count,
                     graph.ContestedLocks.Count,
                     graph.ContestedLocks.Count > 0 ? graph.ContestedLocks[0].WaitingThreadCount : 0,
                     graph.DeadlockCandidates.Count,
-                    topContestedTypes));
+                    topContestedTypes);
         }
 
         private static InsightFinding CreateFinding(LockGraphAnalysis graph)

@@ -32,39 +32,25 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new EventLeakOptions();
 
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Cache, options);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, EventLeakOptions options)
+        public AnalyzerDomainResult Analyze(ClrHeap heap, EventLeakOptions options)
         {
             return Analyze(heap, cache: null, options);
         }
 
-        private AnalyzerExecutionResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options)
         {
             int minSubscribers = options.MinSubscribers;
             var eventLeaks = FindEventLeaks(heap, cache, minSubscribers);
-            var findings = new List<InsightFinding>(capacity: 5);
 
             if (eventLeaks.Count == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(EventLeakAnalyzer),
-                        Category: "Leak",
-                        Severity: FindingSeverity.Info,
-                        Title: "No event-leak signatures detected",
-                        Evidence: $"No event instances exceeded the {minSubscribers:N0} subscriber threshold.",
-                        Recommendation: "No immediate action required for event retention patterns.",
-                        Tags: ["event", "leak", "subscriptions"],
-                        MetricValue: 0,
-                        MetricUnit: "subscribers")],
-                    new EventLeakDomainResult(0, 0, 0, 0));
+                return new EventLeakDomainResult(0, 0, 0, 0);
             }
 
             var groupedLeaks = GroupEventLeaks(eventLeaks);
-            AddFindings(findings, groupedLeaks);
 
             int totalSubscribers = groupedLeaks.Sum(g => g.TotalSubscribers);
             int staticLeaks = groupedLeaks.Count(g => g.IsStatic);
@@ -114,16 +100,14 @@ namespace DumpDetective.Analysis.Analyzers
                 .ThenByDescending(i => i.SubscriberCount)
                 .ToList();
 
-            return new AnalyzerExecutionResult(
-                findings,
-                new EventLeakDomainResult(
+            return new EventLeakDomainResult(
                     groupedLeaks.Count,
                     totalSubscribers,
                     staticLeaks,
                     instanceLeaks,
                     topPublisherEvents,
                     topLeakGroups,
-                    topLeakInstances));
+                    topLeakInstances);
         }
 
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)

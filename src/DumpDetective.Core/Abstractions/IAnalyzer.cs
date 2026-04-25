@@ -14,15 +14,6 @@ public interface IAnalyzer
     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
 }
 
-public sealed record AnalyzerExecutionResult(
-    IReadOnlyList<InsightFinding> Findings,
-    AnalyzerDomainResult? DomainResult = null,
-    IReadOnlyDictionary<string, object?>? Metrics = null,
-    IReadOnlyCollection<string>? Warnings = null)
-{
-    public static AnalyzerExecutionResult Empty { get; } = new([]);
-}
-
 public class AnalysisContext
 {
     public required ClrRuntime Runtime { get; init; }
@@ -51,19 +42,13 @@ internal static class AnalyzerCategory
     }
 }
 
-internal static class AnalyzerDomainResultFactory
+/// <summary>
+/// Stamps <see cref="AnalyzerDomainResult.AnalyzerName"/> and
+/// <see cref="AnalyzerDomainResult.Category"/> from the owning analyzer.
+/// Call this at the end of every <see cref="IAnalyzer.AnalyzeAsync"/> implementation.
+/// </summary>
+internal static class AnalyzerDomainResultExtensions
 {
-    public static AnalyzerDomainResult FromExecutionResult(IAnalyzer analyzer, AnalyzerExecutionResult executionResult)
-    {
-        AnalyzerDomainResult domainResult = executionResult.DomainResult ?? new GenericAnalyzerDomainResult();
-
-        return domainResult with
-        {
-            AnalyzerName = analyzer.Name,
-            Category = analyzer.Category,
-            Findings = executionResult.Findings,
-            Metrics = executionResult.Metrics ?? new Dictionary<string, object?>(),
-            Warnings = executionResult.Warnings ?? []
-        };
-    }
+    public static AnalyzerDomainResult Stamp(this AnalyzerDomainResult result, IAnalyzer analyzer) =>
+        result with { AnalyzerName = analyzer.Name, Category = analyzer.Category };
 }

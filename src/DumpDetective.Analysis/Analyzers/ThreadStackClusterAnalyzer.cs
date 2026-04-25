@@ -16,11 +16,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
             var threads = runtime.Threads.ToList();
             var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Count);
@@ -59,18 +58,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (clusters.Count == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [new InsightFinding(
-                        Analyzer: nameof(ThreadStackClusterAnalyzer),
-                        Category: "Threading",
-                        Severity: FindingSeverity.Info,
-                        Title: "No thread clusters available",
-                        Evidence: "No alive managed threads were available for stack-signature clustering.",
-                        Recommendation: "Capture a dump with active managed threads for clustering insights.",
-                        Tags: ["thread-cluster", "threads", "diagnostics"],
-                        MetricValue: 0,
-                        MetricUnit: "% signature-diversity")],
-                    new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, []));
+                return new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, []);
             }
 
             var topClusters = clusters.Values
@@ -85,9 +73,7 @@ namespace DumpDetective.Analysis.Analyzers
                 .Take(12)
                 .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
                 .ToList();
-            return new AnalyzerExecutionResult(
-                [CreateFinding(aliveThreads, clusters.Count)],
-                new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots));
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots);
         }
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)

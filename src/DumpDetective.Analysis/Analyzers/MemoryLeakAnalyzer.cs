@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Diagnostics.Runtime;
@@ -29,27 +29,20 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new MemoryLeakOptions();
 
-            AnalyzerExecutionResult executionResult = Analyze(context.Heap, context.Runtime, context.Cache, options);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
+        public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
         {
             return Analyze(heap, runtime, cache: null, options);
         }
 
-        private AnalyzerExecutionResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options)
         {
-            var findings = new List<InsightFinding>(capacity: 4);
-
             FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap);
             LeakSignals signals = AnalyzeObjectsPass(heap, cache, options);
 
-            AddFindings(findings, finalizerResult.TotalCount, signals, options);
-
-            return new AnalyzerExecutionResult(
-                findings,
-                new MemoryLeakDomainResult(
+            return new MemoryLeakDomainResult(
                     finalizerResult.TotalCount,
                     signals.DuplicateStringCount,
                     signals.DuplicateStringWastedBytes,
@@ -60,7 +53,7 @@ namespace DumpDetective.Analysis.Analyzers
                     signals.SkippedReferenceAddresses,
                     finalizerResult.TopTypes,
                     signals.TopDuplicateStrings,
-                    signals.TopHighlyReferencedObjects));
+                    signals.TopHighlyReferencedObjects);
         }
 
         private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap)

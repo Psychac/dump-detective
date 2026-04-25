@@ -15,15 +15,14 @@ public class ModuleAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
             var modules = AnalyzeModules(runtime);
             var domainResult = BuildDomainResult(modules);
-            return new AnalyzerExecutionResult([CreateFinding(domainResult)], domainResult);
+            return domainResult;
         }
 
         private static InsightFinding CreateFinding(ModuleDomainResult result)

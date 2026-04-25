@@ -6,8 +6,10 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Models;
 
-internal sealed class TrendReportComposer
+internal sealed class TrendReportComposer(IEnumerable<IFindingGenerator> generators)
 {
+    private readonly IReadOnlyDictionary<string, IFindingGenerator> _generators =
+        generators.ToDictionary(g => g.AnalyzerName, StringComparer.Ordinal);
     public ComposedReport ComposeCanonicalTrendReport(
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
@@ -86,7 +88,7 @@ internal sealed class TrendReportComposer
         return findings;
     }
 
-    private static IReadOnlyList<DetailedAnalyzerSection> BuildPerDumpSections(
+    private IReadOnlyList<DetailedAnalyzerSection> BuildPerDumpSections(
         IReadOnlyList<AnalysisSnapshot> snapshots,
         IReadOnlyList<IAnalyzerReporter> reporters,
         ReportAudience audience)
@@ -98,15 +100,22 @@ internal sealed class TrendReportComposer
             AnalysisSnapshot snapshot = snapshots[i];
 
             IReadOnlyList<AnalyzerRunResult> snapshotRuns = snapshot.DomainResults
-                .Select(kvp => new AnalyzerRunResult(
-                    AnalyzerName: kvp.Key,
-                    Status: AnalyzerExecutionStatus.Success,
-                    Duration: TimeSpan.Zero,
-                    Result: kvp.Value,
-                    ErrorMessage: null,
-                    ErrorType: null,
-                    FindingCount: kvp.Value.Findings.Count,
-                    WarningCount: kvp.Value.Warnings.Count))
+                .Select(kvp =>
+                {
+                    IReadOnlyList<InsightFinding> domainFindings = _generators.TryGetValue(kvp.Key, out IFindingGenerator? gen)
+                        ? gen.Generate(kvp.Value)
+                        : [];
+                    return new AnalyzerRunResult(
+                        AnalyzerName: kvp.Key,
+                        Status: AnalyzerExecutionStatus.Success,
+                        Duration: TimeSpan.Zero,
+                        Result: kvp.Value,
+                        ErrorMessage: null,
+                        ErrorType: null,
+                        Findings: domainFindings,
+                        FindingCount: domainFindings.Count,
+                        WarningCount: kvp.Value.Warnings.Count);
+                })
                 .ToList();
 
             ComposedReport snapshotReport = ReportBuilder.ComposeCanonicalReport(

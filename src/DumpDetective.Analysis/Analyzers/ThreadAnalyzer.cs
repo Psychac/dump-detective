@@ -35,17 +35,14 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
             var threadInfo = CategorizeThreads(runtime.Threads);
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(threadInfo)],
-                new ThreadDomainResult(
+            return new ThreadDomainResult(
                     threadInfo.TotalCount,
                     threadInfo.AliveCount,
                     Math.Max(0, threadInfo.TotalCount - threadInfo.AliveCount),
@@ -91,7 +88,7 @@ namespace DumpDetective.Analysis.Analyzers
                         .Take(MaxFramesForThreadScan)
                         .ToList(),
                     threadInfo.AsyncChainThreadCount,
-                    threadInfo.MaxAsyncChainDepth));
+                    threadInfo.MaxAsyncChainDepth);
         }
 
         private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source)

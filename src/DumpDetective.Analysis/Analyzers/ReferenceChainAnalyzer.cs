@@ -30,11 +30,10 @@ namespace DumpDetective.Analysis.Analyzers
                 ? typed
                 : new ReferenceChainOptions();
 
-            AnalyzerExecutionResult executionResult = AnalyzeTopTypes(context.Heap, context.Cache, options);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options).Stamp(this));
         }
 
-        public AnalyzerExecutionResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
+        public AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
             int topCount = options.TopCount > 0 ? options.TopCount : DefaultTopTypeCount;
             int maxPathSearchObjects = options.MaxPathSearchObjects > 0
@@ -126,16 +125,6 @@ namespace DumpDetective.Analysis.Analyzers
                 .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
                 .ToList();
 
-            var findings = new List<InsightFinding>(capacity: 2)
-            {
-                CreateFinding(analyzedSamples, retainedSamples)
-            };
-
-            if (traversalLimitedSamples > 0)
-            {
-                findings.Add(CreateTraversalLimitFinding(analyzedSamples, traversalLimitedSamples));
-            }
-
             var metrics = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["SearchMode"] = options.SearchMode.ToString(),
@@ -143,16 +132,13 @@ namespace DumpDetective.Analysis.Analyzers
                 ["LargeFanoutNodesSkipped"] = telemetry.LargeFanoutNodesSkipped,
                 ["CandidateSetSize"] = telemetry.TotalCandidateSetSize,
                 ["ReverseIndexEntries"] = telemetry.ReverseIndexEntries,
+                ["traversalLimitedSamples"] = (long)traversalLimitedSamples,
             };
 
-            var domainResult = new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces)
+            return new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces)
             {
                 Metrics = metrics
             };
-
-            return new AnalyzerExecutionResult(
-                findings,
-                domainResult);
         }
 
         public bool AnalyzeObject(ClrHeap heap, IHeapAnalysisCache cache, ulong objectAddress)

@@ -6,6 +6,8 @@ using DumpDetective.Cli.Console;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Reporting.Pipeline;
+using DumpDetective.Reporting.Trend;
 
 using System.Diagnostics;
 
@@ -18,13 +20,17 @@ internal sealed class DumpAnalysisService(
     StartupValidator startupValidator,
     DumpLoader dumpLoader,
     ReportBuilderFacade reportBuilderFacade,
-    IAnalyzerFactory analyzerFactory)
+    IAnalyzerFactory analyzerFactory,
+    IEnumerable<IFindingGenerator> findingGenerators,
+    FindingGenerationPipeline findingGenerationPipeline)
 {
     private readonly ConfigurationResolver _configurationResolver = configurationResolver;
     private readonly StartupValidator _startupValidator = startupValidator;
     private readonly DumpLoader _dumpLoader = dumpLoader;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly IAnalyzerFactory _analyzerFactory = analyzerFactory;
+    private readonly IReadOnlyList<IFindingGenerator> _findingGenerators = findingGenerators.ToList();
+    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private const string TemporaryAdaptiveIndexingNotice = "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
 
     public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
@@ -116,7 +122,7 @@ internal sealed class DumpAnalysisService(
 
         AnalysisPipeline pipeline = new(activeAnalyzers);
 
-        IReadOnlyList<AnalyzerRunResult> runs;
+        IReadOnlyList<AnalyzerRunResult> runs = new List<AnalyzerRunResult>();
         stageStopwatch.Restart();
         ConsoleUx.StageStart(3, totalStages, $"Run analyzers ({activeAnalyzers.Count})");
         try
@@ -141,8 +147,24 @@ internal sealed class DumpAnalysisService(
 
         stopwatch.Stop();
 
+        // Run finding generation as a reporting-stage step so interpretation is separated from analysis
         stageStopwatch.Restart();
-        ConsoleUx.StageStart(4, totalStages, $"Build {resolved.Report.Format} report");
+        ConsoleUx.StageStart(4, totalStages, "Generate findings");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            runs = (await _findingGenerationPipeline.GenerateAsync(runs, cancellationToken)).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Finding generation errors should not fail the entire pipeline; surface as diagnostic message
+            ConsoleUx.Warning($"Finding generation failed: {ex.Message}");
+        }
+        stageStopwatch.Stop();
+        ConsoleUx.StageComplete(4, totalStages, "Generate findings", stageStopwatch.Elapsed);
+
+        stageStopwatch.Restart();
+        ConsoleUx.StageStart(5, totalStages, $"Build {resolved.Report.Format} report");
         cancellationToken.ThrowIfCancellationRequested();
         string renderedReport = _reportBuilderFacade.BuildRenderedReport(
             resolved.DumpPath,
@@ -152,10 +174,10 @@ internal sealed class DumpAnalysisService(
             stopwatch.Elapsed,
             cancellationToken);
         stageStopwatch.Stop();
-        ConsoleUx.StageComplete(4, totalStages, "Build report", stageStopwatch.Elapsed);
+        ConsoleUx.StageComplete(5, totalStages, "Build report", stageStopwatch.Elapsed);
 
         stageStopwatch.Restart();
-        ConsoleUx.StageStart(5, totalStages, "Write output");
+        ConsoleUx.StageStart(6, totalStages + 1, "Write output");
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -251,7 +273,7 @@ internal sealed class DumpAnalysisService(
         TrendAnalyzer trendAnalyzer = new();
         AnalysisSnapshot baseline = snapshots[0];
         AnalysisSnapshot current = snapshots[^1];
-        var lifecycle = trendAnalyzer.CompareFindings(baseline, current);
+        FindingLifecycleResult lifecycle = FindingLifecycleComparer.Compare(baseline, current);
 
         TrendReportData trendData = new(
             Steps: trendAnalyzer.CompareSeries(snapshots),
@@ -372,6 +394,16 @@ internal sealed class DumpAnalysisService(
 
         AnalysisPipeline pipeline = new(activeAnalyzers);
         IReadOnlyList<AnalyzerRunResult> runs = await pipeline.ExecuteAsync(context, cancellationToken);
+
+        // Generate findings for trend dumps as well so snapshots include interpreted findings
+        try
+        {
+            runs = await _findingGenerationPipeline.GenerateAsync(runs, cancellationToken);
+        }
+        catch
+        {
+            // Swallow to avoid failing trend execution; diagnostics will surface elsewhere
+        }
         stopwatch.Stop();
 
         return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed);
@@ -390,7 +422,7 @@ internal sealed class DumpAnalysisService(
             }
 
             domains[run.AnalyzerName] = run.Result;
-            findings.AddRange(run.Result.Findings);
+            findings.AddRange(run.Findings);
         }
 
         return new AnalysisSnapshot(

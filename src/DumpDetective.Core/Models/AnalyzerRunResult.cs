@@ -15,8 +15,13 @@ internal sealed record AnalyzerRunResult(
     AnalyzerDomainResult? Result,
     string? ErrorMessage,
     string? ErrorType,
+    IReadOnlyList<InsightFinding>? Findings = null,
     int FindingCount = 0,
     int WarningCount = 0,
     long ObjectScanCount = 0,
     long CacheHits = 0,
-    long CacheMisses = 0);
+    long CacheMisses = 0)
+{
+    /// <summary>Generated findings for this run. Populated by <see cref="DumpDetective.Analysis.FindingGenerators"/> after the analyzer completes.</summary>
+    public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? [];
+}

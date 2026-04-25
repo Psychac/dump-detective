@@ -15,11 +15,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap, context.Cache);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
         {
             var scanCounter = new ObjectScanCounter("GC handle scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -105,16 +104,14 @@ namespace DumpDetective.Analysis.Analyzers
                 return list;
             }
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(totalHandles, pinnedTypes)],
-                new GCHandleDomainResult(
+            return new GCHandleDomainResult(
                     totalHandles,
                     strongLikeHandles,
                     weakLikeHandles,
                     pinnedHandleTargets,
                     ToTopEntries(byKind, TopTypeCount),
                     ToTopEntries(allTargetTypes, TopTypeCount),
-                    ToTopEntries(pinnedTypes, TopTypeCount)));
+                    ToTopEntries(pinnedTypes, TopTypeCount));
         }
 
         private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)

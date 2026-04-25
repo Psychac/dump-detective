@@ -16,11 +16,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AnalyzerExecutionResult executionResult = Analyze(context.Runtime, context.Heap);
-            return ValueTask.FromResult(AnalyzerDomainResultFactory.FromExecutionResult(this, executionResult));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap).Stamp(this));
         }
 
-        public AnalyzerExecutionResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
+        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
         {
             heap ??= runtime.Heap;
 
@@ -71,9 +70,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (dependentHandleCount == 0)
             {
-                return new AnalyzerExecutionResult(
-                    [],
-                    new DependentHandleDomainResult(0, 0, 0, 0));
+                return new DependentHandleDomainResult(0, 0, 0, 0);
             }
 
             static List<NameCountEntry> ToTopEntries(Dictionary<string, int> source, int take)
@@ -84,16 +81,14 @@ namespace DumpDetective.Analysis.Analyzers
                 return list;
             }
 
-            return new AnalyzerExecutionResult(
-                [CreateFinding(dependentHandleCount, resolvedEdgeCount, unresolvedTargetCount)],
-                new DependentHandleDomainResult(
+            return new DependentHandleDomainResult(
                     dependentHandleCount,
                     resolvedEdgeCount,
                     unresolvedTargetCount,
                     unresolvedPct,
                     ToTopEntries(sourceTypeCounts, TopCount),
                     ToTopEntries(targetTypeCounts, TopCount),
-                    ToTopEntries(sourceTargetPairCounts, TopCount)));
+                    ToTopEntries(sourceTargetPairCounts, TopCount));
         }
 
         private static InsightFinding CreateFinding(int dependentHandleCount, int resolvedEdgeCount, int unresolvedTargetCount)

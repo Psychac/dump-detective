@@ -59,8 +59,12 @@ namespace DumpDetective.Reporting.Services
                 EvidenceBeforeMerge = evidenceBeforeMerge
             };
 
-            IReadOnlyList<ExecutiveSummaryItem> executiveSummary = BuildExecutiveSummary(deduped);
-            IReadOnlyList<DeveloperActionItem> developerActions = BuildDeveloperActionPlan(deduped);
+            // Executive summary and developer action plan are omitted by default for the
+            // default (All) audience to keep the report focused on raw findings. These
+            // sections are still available for targeted audiences (Executive/Developer)
+            // via the `audience` parameter when composing reports.
+            IReadOnlyList<ExecutiveSummaryItem> executiveSummary = [];
+            IReadOnlyList<DeveloperActionItem> developerActions = [];
 
             return new ComposedReport(
                 dumpPath,
@@ -98,19 +102,19 @@ namespace DumpDetective.Reporting.Services
                     foreach (InsightFinding finding in run.Findings)
                     {
                         evidenceBeforeMerge += 2;
-                        sections.Add(new ReportSection(
-                            SectionKey: finding.EffectiveFingerprint,
-                            Title: finding.Title,
-                            Category: finding.Category,
-                            Severity: finding.Severity,
-                            NarrativeSummary: finding.Evidence,
-                            EvidenceRows:
-                            [
-                                new ReportEvidenceRow("Analyzer", run.AnalyzerName),
-                                new ReportEvidenceRow("Evidence", finding.Evidence)
-                            ],
-                            RemediationHints: [finding.Recommendation],
-                            Fingerprints: [finding.EffectiveFingerprint]));
+                        //sections.Add(new ReportSection(
+                        //    SectionKey: finding.EffectiveFingerprint,
+                        //    Title: finding.Title,
+                        //    Category: finding.Category,
+                        //    Severity: finding.Severity,
+                        //    NarrativeSummary: finding.Evidence,
+                        //    EvidenceRows:
+                        //    [
+                        //        new ReportEvidenceRow("Analyzer", run.AnalyzerName),
+                        //        new ReportEvidenceRow("Evidence", finding.Evidence)
+                        //    ],
+                        //    RemediationHints: [finding.Recommendation],
+                        //    Fingerprints: [finding.EffectiveFingerprint]));
                     }
                 }
 
@@ -147,13 +151,21 @@ namespace DumpDetective.Reporting.Services
                 EvidenceBeforeMerge = evidenceBeforeMerge
             };
 
-            IReadOnlyList<ExecutiveSummaryItem> executiveSummary = BuildExecutiveSummary(deduped);
-
-            // Developer action plan is skipped for Executive audience (they use the executive summary only).
-            IReadOnlyList<DeveloperActionItem> developerActions =
+            // Only build the executive summary when explicitly requested for Executive
+            // audience. Do not include it for the general (All) audience to avoid
+            // duplicating priority guidance alongside the detailed findings.
+            IReadOnlyList<ExecutiveSummaryItem> executiveSummary =
                 audience == ReportAudience.Executive
-                    ? []
-                    : BuildDeveloperActionPlan(deduped);
+                    ? BuildExecutiveSummary(deduped)
+                    : [];
+
+            // Only build the developer action plan when explicitly requested for
+            // Developer audience. Skip for All and Executive audiences to keep the
+            // report's main sections focused on findings and diagnostics.
+            IReadOnlyList<DeveloperActionItem> developerActions =
+                audience == ReportAudience.Developer
+                    ? BuildDeveloperActionPlan(deduped)
+                    : [];
 
             // Raw finding sections are stripped for Executive audience.
             IReadOnlyList<ReportSection> outputSections =

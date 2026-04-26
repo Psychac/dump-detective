@@ -1,35 +1,11 @@
 ﻿using DumpDetective.Core.Models;
-using DumpDetective.Analysis.Trend.Comparers;
 
 namespace DumpDetective.Analysis.Trend
 {
-    internal sealed class TrendAnalyzer
+    internal sealed class TrendAnalyzer(IEnumerable<IAnalyzerTrendComparer> comparers)
     {
-        private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers;
-
-        public TrendAnalyzer()
-        {
-            var list = new List<IAnalyzerTrendComparer>
-            {
-                new MemoryAnalyzerTrendComparer(),
-                new GCGenerationTrendComparer(),
-                new ModuleTrendComparer(),
-                new CrashTrendComparer(),
-                new HangTrendComparer(),
-                new MemoryLeakTrendComparer(),
-                new CollectionTrendComparer(),
-                new StaticRootTrendComparer(),
-                new ReferenceChainTrendComparer(),
-                new ThreadTrendComparer(),
-                new GCHandleTrendComparer(),
-                new LohFragmentationTrendComparer(),
-                new DependentHandleTrendComparer(),
-                new ThreadStackClusterTrendComparer(),
-                new EventLeakTrendComparer(),
-                new LockGraphTrendComparer()
-            };
-            _comparers = list.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
-        }
+        private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers =
+            comparers.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
 
         public IReadOnlyList<AnalyzerTrendResult> CompareAll(AnalysisSnapshot baseline, AnalysisSnapshot current)
         {

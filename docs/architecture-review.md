@@ -11,6 +11,7 @@
 | Date | Issue | Status | Notes |
 |------|-------|--------|-------|
 | 2025 | CRITICAL-01 | ✅ **Done** | `Reporting → Analysis` reference added; 30 domain types moved to `Analysis/Models/AnalyzerDomainModels.cs`; `Core/Models/AnalyzerDomainResult.cs` reduced from 285 → 23 lines; zero individual file changes via `GlobalUsings.cs` in both projects |
+| 2025 | CRITICAL-02 | ✅ **Done** | `TrendAnalyzer` refactored to primary DI constructor; 16 comparers registered in `ServiceRegistration.cs`; `TrendAnalyzer` injected into `DumpAnalysisService`; dead duplicate `Core/Abstractions/IAnalyzerTrendComparer.cs` removed |
 
 ---
 
@@ -115,80 +116,39 @@ No circular dependency: `Analysis` → `Core` ← `Reporting` → `Analysis` is 
 
 ---
 
-### CRITICAL-02 — `TrendAnalyzer` constructor hardcodes all comparers (3-point sync trap)
+### ✅ CRITICAL-02 — `TrendAnalyzer` constructor hardcodes all comparers (3-point sync trap) — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Analysis/Trend/TrendAnalyzer.cs`
 
-#### What
+#### What *(was)*
 ```csharp
 public TrendAnalyzer()
 {
     var list = new List<IAnalyzerTrendComparer>
     {
         new MemoryAnalyzerTrendComparer(),
-        new GCGenerationTrendComparer(),
-        new ModuleTrendComparer(),
-        // ... 13 more manually listed
+        // ... 15 more manually listed
     };
     _comparers = list.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
 }
 ```
-The `TrendAnalyzer` is constructed without DI and manually instantiates every comparer.
+The `TrendAnalyzer` was constructed without DI and manually instantiated every comparer.
 
-#### Why it's a problem
-Adding a new analyzer requires touching **three separate registration points**:
-1. `DefaultAnalyzerFactory.CreateAnalyzers()` — register the `IAnalyzer`
-2. `TrendAnalyzer` constructor — register the `IAnalyzerTrendComparer`
-3. `ServiceRegistration.cs` — register the `IFindingGenerator`
+#### Why it was a problem *(archived)*
+Adding a new analyzer required touching **three separate registration points** with no compile-time enforcement, creating a silent regression risk.
 
-Miss any one of these and the new analyzer silently produces no trend data or no findings. There is no compile-time enforcement. This is the exact 3-point sync trap that causes regressions in growing codebases.
+#### What was done
 
-#### How to fix
-Inject `IEnumerable<IAnalyzerTrendComparer>` via constructor — the same pattern already used by `FindingGenerationPipeline`:
+| File | Change |
+|------|--------|
+| `Analysis/Trend/TrendAnalyzer.cs` | Replaced parameterless constructor with primary DI constructor `(IEnumerable<IAnalyzerTrendComparer> comparers)`; removed `using DumpDetective.Analysis.Trend.Comparers;` (no longer needed) |
+| `Cli/Services/DumpAnalysisService.cs` | Added `TrendAnalyzer trendAnalyzer` constructor parameter + `_trendAnalyzer` field; removed `TrendAnalyzer trendAnalyzer = new()` local instantiation |
+| `Cli/Hosting/ServiceRegistration.cs` | Registered all 16 `IAnalyzerTrendComparer` singletons + `TrendAnalyzer` singleton alongside the existing `IFindingGenerator` registrations |
+| `Core/Abstractions/IAnalyzerTrendComparer.cs` | **Deleted** — was a dead duplicate of `Core/Models/AnalyzerTrendContracts.cs`; caused CS0104 ambiguity and was never implemented by any comparer |
 
-```csharp
-// BEFORE
-internal sealed class TrendAnalyzer
-{
-    public TrendAnalyzer() { /* hardcoded list */ }
-}
-
-// AFTER
-internal sealed class TrendAnalyzer(IEnumerable<IAnalyzerTrendComparer> comparers)
-{
-    private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers =
-        comparers.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
-}
-```
-
-Register all comparers in `ServiceRegistration.cs` alongside their sibling generators:
-
-```csharp
-// ServiceRegistration.cs — add alongside IFindingGenerator registrations
-services.AddSingleton<IAnalyzerTrendComparer, MemoryAnalyzerTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, GCGenerationTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, ModuleTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, CrashTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, HangTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, MemoryLeakTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, CollectionTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, StaticRootTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, ReferenceChainTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, ThreadTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, GCHandleTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, LohFragmentationTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, DependentHandleTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, ThreadStackClusterTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, EventLeakTrendComparer>();
-services.AddSingleton<IAnalyzerTrendComparer, LockGraphTrendComparer>();
-
-// Register TrendAnalyzer via DI (it is currently constructed with `new` in DumpAnalysisService)
-services.AddSingleton<TrendAnalyzer>();
-```
-
-`IAnalyzerTrendComparer` is `internal` — make it `public` or move the registration to the `Analysis` assembly if visibility is a concern. Alternatively, keep it `internal` and use a public registration extension method in `Analysis`.
-
-#### Adding a new analyzer checklist (after this fix)
+#### Adding a new analyzer checklist (current state)
 | Step | What to add | File |
 |------|-------------|------|
 | 1 | New `IAnalyzer` implementation | `Analysis/Analyzers/` |
@@ -825,7 +785,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | CRITICAL-03 | Add diagnostics to `FindingGenerationPipeline` catch block | `Reporting/Pipeline/FindingGenerationPipeline.cs`, `Core/Models/AnalyzerRunResult.cs` | XS |
 | MINOR-14 | Fix `SingleDumpPipelineState` stage 4 comment gap | `Cli/Pipeline/SingleDumpPipelineState.cs` | XS |
 | MAJOR-07 | Rename `Analysis.Pipeline.AnalysisContext` → `RuntimeAnalysisContext` | 1 rename + 4 usages | S |
-| CRITICAL-02 | Inject `IEnumerable<IAnalyzerTrendComparer>` into `TrendAnalyzer` | `Analysis/Trend/TrendAnalyzer.cs`, `Cli/Hosting/ServiceRegistration.cs` | S |
+| ~~CRITICAL-02~~ | ~~Inject `IEnumerable<IAnalyzerTrendComparer>` into `TrendAnalyzer`~~ | ~~`Analysis/Trend/TrendAnalyzer.cs`, `Cli/Hosting/ServiceRegistration.cs`~~ | ✅ **Done** |
 | MAJOR-05 | Add `GetOption<T>()` extension method to eliminate magic-key pattern | `Analysis/` (new extensions file), 3 analyzer files | S |
 
 ### 🟡 Tier 2 — High Impact, Plan for Next Cycle

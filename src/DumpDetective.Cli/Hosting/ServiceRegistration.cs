@@ -3,8 +3,11 @@ using DumpDetective.Reporting.Pipeline;
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Analysis.Trend;
+using DumpDetective.Analysis.Trend.Comparers;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -54,6 +57,27 @@ internal static class ServiceRegistration
 
         // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
+
+        // Trend comparers — one per analyzer, registered as IAnalyzerTrendComparer.
+        // TrendAnalyzer consumes IEnumerable<IAnalyzerTrendComparer> via DI.
+        // Keep this list in sync with DefaultAnalyzerFactory and the finding generators above.
+        services.AddSingleton<IAnalyzerTrendComparer, MemoryAnalyzerTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, MemoryLeakTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, GCGenerationTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, CrashTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, EventLeakTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, GCHandleTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, LohFragmentationTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, HangTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, LockGraphTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, StaticRootTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, ReferenceChainTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, CollectionTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, ThreadTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, ThreadStackClusterTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, ModuleTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, DependentHandleTrendComparer>();
+        services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();
         services.AddSingleton<ReportBuilderFacade>();

@@ -24,7 +24,8 @@ internal sealed class DumpAnalysisService(
     ReportBuilderFacade reportBuilderFacade,
     IAnalyzerFactory analyzerFactory,
     IEnumerable<IFindingGenerator> findingGenerators,
-    FindingGenerationPipeline findingGenerationPipeline)
+    FindingGenerationPipeline findingGenerationPipeline,
+    TrendAnalyzer trendAnalyzer)
 {
     private readonly ConfigurationResolver _configurationResolver = configurationResolver;
     private readonly StartupValidator _startupValidator = startupValidator;
@@ -33,6 +34,7 @@ internal sealed class DumpAnalysisService(
     private readonly IAnalyzerFactory _analyzerFactory = analyzerFactory;
     private readonly IReadOnlyList<IFindingGenerator> _findingGenerators = findingGenerators.ToList();
     private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
+    private readonly TrendAnalyzer _trendAnalyzer = trendAnalyzer;
     private const string TemporaryAdaptiveIndexingNotice = "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
 
     public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
@@ -164,15 +166,14 @@ internal sealed class DumpAnalysisService(
             .Select((execution, index) => BuildSnapshot(index, execution.DumpPath, execution.Runs))
             .ToList();
 
-        TrendAnalyzer trendAnalyzer = new();
         AnalysisSnapshot baseline = snapshots[0];
         AnalysisSnapshot current = snapshots[^1];
         FindingLifecycleResult lifecycle = FindingLifecycleComparer.Compare(baseline, current);
 
         TrendReportData trendData = new(
-            Steps: trendAnalyzer.CompareSeries(snapshots),
-            Overall: trendAnalyzer.CompareAll(baseline, current),
-            Timeline: trendAnalyzer.ExtractTimeline(snapshots),
+            Steps: _trendAnalyzer.CompareSeries(snapshots),
+            Overall: _trendAnalyzer.CompareAll(baseline, current),
+            Timeline: _trendAnalyzer.ExtractTimeline(snapshots),
             Snapshots: snapshots,
             NewFindings: lifecycle.NewFindings,
             PersistentFindings: lifecycle.PersistentFindings,

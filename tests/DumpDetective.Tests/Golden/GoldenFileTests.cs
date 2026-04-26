@@ -35,6 +35,19 @@ public sealed class GoldenFileTests
 
         string actual = formatter.Render(fixture);
         string baselinePath = Path.Combine(AppContext.BaseDirectory, "Golden", "Baselines", folder, fileName);
+
+        if (Environment.GetEnvironmentVariable("UPDATE_GOLDENS") == "1")
+        {
+            File.WriteAllText(baselinePath, actual);
+            return;
+        }
+
+        if (Environment.GetEnvironmentVariable("UPDATE_GOLDENS") == "1")
+        {
+            File.WriteAllText(baselinePath, actual);
+            return;
+        }
+
         string expected = File.ReadAllText(baselinePath);
 
         GoldenFileAssert.AssertMatches(expected, actual);

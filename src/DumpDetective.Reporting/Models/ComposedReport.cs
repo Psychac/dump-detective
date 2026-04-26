@@ -57,7 +57,9 @@ internal enum DetailedAnalyzerSubmoduleKind
     ListItem,
     Divider,
     Empty,
-    Table
+    Table,
+    SectionBegin,  // opens a collapsible nested <details> block — Text = section title
+    SectionEnd     // closes the nearest open SectionBegin
 }
 
 internal sealed record DetailedAnalyzerSubmodule(

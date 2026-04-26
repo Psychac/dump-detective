@@ -170,9 +170,10 @@ public sealed class ReportingCompositionTests
 
         string output = formatter.Render(report);
 
-        output.Should().Contain("<details class=\"detail-item\" open>");
-        output.Should().Contain("<summary>Memory Leak Analyzer</summary>");
-        output.Should().Contain("<summary>Thread Analyzer</summary>");
+        output.Should().Contain("<details>");
+        output.Should().Contain("aria-controls=\"detail-0-content\"");
+        output.Should().Contain(">Memory Leak Analyzer<");
+        output.Should().Contain(">Thread Analyzer<");
         output.Should().Contain("<span class=\"detail-key\">Top type:</span>");
         output.Should().Contain("<span class=\"detail-value wrap\">System.String</span>");
         output.Should().Contain("<span class=\"detail-key\">Blocked threads:</span>");

@@ -5,6 +5,7 @@ using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Output;
 
 internal sealed class TrendReportComposer(IEnumerable<IFindingGenerator> generators)
 {
@@ -31,15 +32,13 @@ internal sealed class TrendReportComposer(IEnumerable<IFindingGenerator> generat
 
         ComposedReport report = ReportBuilder.ComposeFromFindings(dumpPath, trendFindings, elapsed);
 
-        string trendComparison = BuildTrendComparisonSection(
+        List<DetailedAnalyzerSection> detailedSections = [];
+        detailedSections.Add(BuildTrendComparisonSection(
             trendData.Steps,
             trendData.Overall,
             lifecycle,
             trendData.Timeline,
-            trendData.Snapshots);
-
-        List<DetailedAnalyzerSection> detailedSections = [];
-        detailedSections.Add(new DetailedAnalyzerSection("Trend Comparison", trendComparison));
+            trendData.Snapshots));
         detailedSections.AddRange(BuildPerDumpSections(trendData.Snapshots, reporters, audience));
 
         if (report.DetailedAnalyzerSections is { Count: > 0 })
@@ -125,12 +124,56 @@ internal sealed class TrendReportComposer(IEnumerable<IFindingGenerator> generat
                 reporters,
                 audience);
 
-            sections.Add(new DetailedAnalyzerSection(
-                $"Dump {i + 1}: {Path.GetFileName(snapshot.DumpPath)} - Full Report",
-                BuildSnapshotFullReport(snapshotReport)));
+            sections.Add(BuildStructuredDumpSection(snapshotReport, i, snapshots.Count));
         }
 
         return sections;
+    }
+
+    /// <summary>Builds one card per dump: summary header + findings summary, then each analyzer as a
+    /// collapsible nested <c>&lt;details&gt;</c> block inside the same dark content area.</summary>
+    private static DetailedAnalyzerSection BuildStructuredDumpSection(ComposedReport snapshotReport, int dumpIndex, int totalDumps)
+    {
+        string sectionTitle = $"Dump {dumpIndex + 1} of {totalDumps}: {Path.GetFileName(snapshotReport.DumpPath)}";
+
+        // Build summary + findings through the writer (for both text content and submodules)
+        var writer = new StructuredCaptureReportWriter();
+        writer.WriteSubHeading("DUMP SUMMARY:");
+        writer.WriteSeparator();
+        writer.WritePathMetric("Path", snapshotReport.DumpPath);
+        writer.WriteMetric("Generated (UTC)", $"{snapshotReport.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}");
+        writer.WriteMetric("Findings", $"{snapshotReport.Sections.Count}");
+
+        if (snapshotReport.Sections.Count > 0)
+        {
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("FINDINGS:");
+            writer.WriteSeparator();
+            foreach (ReportSection section in snapshotReport.Sections)
+            {
+                writer.WriteDetailHeading($"[{section.Severity}] {section.Title}", indentLevel: 1);
+                writer.WriteDetailText(section.NarrativeSummary, indentLevel: 2);
+                foreach (ReportEvidenceRow row in section.EvidenceRows)
+                    writer.WriteDetailMetric(row.Label, row.Value, indentLevel: 2);
+            }
+        }
+
+        // Start from the writer's submodules, then append SectionBegin/content/SectionEnd per analyzer
+        List<DetailedAnalyzerSubmodule> allSubmodules = [.. writer.GetSubmodules()];
+        if (snapshotReport.DetailedAnalyzerSections is { Count: > 0 })
+        {
+            allSubmodules.Add(new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Empty, null, null, null));
+            foreach (DetailedAnalyzerSection analyzerSection in snapshotReport.DetailedAnalyzerSections)
+            {
+                allSubmodules.Add(new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.SectionBegin, null, null, analyzerSection.Title));
+                if (analyzerSection.Submodules is { Count: > 0 })
+                    allSubmodules.AddRange(analyzerSection.Submodules);
+                allSubmodules.Add(new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.SectionEnd, null, null, null));
+            }
+        }
+
+        // Keep full text content for text/markdown formatters (no regression there)
+        return new DetailedAnalyzerSection(sectionTitle, BuildSnapshotFullReport(snapshotReport), allSubmodules);
     }
 
     private static string BuildSnapshotFullReport(ComposedReport snapshotReport)
@@ -222,86 +265,104 @@ internal sealed class TrendReportComposer(IEnumerable<IFindingGenerator> generat
         ];
     }
 
-    private static string BuildTrendComparisonSection(
+    private static DetailedAnalyzerSection BuildTrendComparisonSection(
         IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps,
         IReadOnlyList<AnalyzerTrendResult> overall,
         FindingLifecycleResult lifecycle,
         IReadOnlyList<AnalyzerMetricTimeline> timeline,
         IReadOnlyList<AnalysisSnapshot> snapshots)
     {
-        var builder = new System.Text.StringBuilder();
-        builder.AppendLine("TREND COMPARISON:");
-        builder.AppendLine(StringConstants.Separator80);
-        builder.AppendLine($"Dumps analyzed: {snapshots.Count}");
-        builder.AppendLine($"New findings: {lifecycle.NewFindings.Count}");
-        builder.AppendLine($"Persistent findings: {lifecycle.PersistentFindings.Count}");
-        builder.AppendLine($"Resolved findings: {lifecycle.ResolvedFindings.Count}");
-
         int totalRegressions = overall.Sum(r => r.Regressions.Count);
         int totalImprovements = overall.Sum(r => r.Improvements.Count);
-        builder.AppendLine($"Metric regressions: {totalRegressions}");
-        builder.AppendLine($"Metric improvements: {totalImprovements}");
+
+        var writer = new StructuredCaptureReportWriter();
+        writer.WriteHeader("TREND COMPARISON");
+        writer.WriteSubHeading("LIFECYCLE SUMMARY:");
+        writer.WriteSeparator();
+        writer.WriteMetric("Dumps analyzed", $"{snapshots.Count}");
+        writer.WriteMetric("New findings", $"{lifecycle.NewFindings.Count}");
+        writer.WriteMetric("Persistent findings", $"{lifecycle.PersistentFindings.Count}");
+        writer.WriteMetric("Resolved findings", $"{lifecycle.ResolvedFindings.Count}");
+        writer.WriteMetric("Metric regressions", $"{totalRegressions}");
+        writer.WriteMetric("Metric improvements", $"{totalImprovements}");
 
         if (timeline.Count > 0)
         {
-            builder.AppendLine();
-            builder.AppendLine($"PER-ANALYZER METRIC TIMELINE ({snapshots.Count} dumps):");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading($"METRIC TIMELINE ({snapshots.Count} dumps):");
+            writer.WriteSeparator();
 
             var regressionsByAnalyzer = overall.ToDictionary(r => r.AnalyzerName, r => r.Regressions.Count, StringComparer.Ordinal);
-            var orderedTimeline = timeline.OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName));
+            var orderedTimeline = timeline.OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName)).ToList();
 
             foreach (var analyzerTimeline in orderedTimeline)
             {
-                builder.AppendLine($"  [{analyzerTimeline.AnalyzerName}]");
-
+                List<DetailedAnalyzerTableRow> rows = [];
                 foreach (var point in analyzerTimeline.Points)
                 {
-                    var validValues = point.Values.Where(v => !double.IsNaN(v)).ToList();
-                    if (validValues.Count == 0) continue;
-
-                    string valuesLine = string.Join(" \u2192 ", point.Values.Select(v => FormatHelper.FormatMetricValue(v, point.Unit)));
+                    if (point.Values.All(double.IsNaN)) continue;
 
                     double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
                     double lastVal = point.Values.Last(v => !double.IsNaN(v));
                     double delta = lastVal - firstVal;
                     double? deltaPercent = Math.Abs(firstVal) > double.Epsilon ? delta * 100.0 / firstVal : null;
 
-                    string deltaStr = FormatHelper.FormatDeltaValue(delta, point.Unit);
-                    string pctStr = deltaPercent.HasValue ? $", {(deltaPercent.Value >= 0 ? "+" : string.Empty)}{deltaPercent.Value:F1}%" : string.Empty;
+                    string trendText = snapshots.Count <= 6
+                        ? string.Join(" \u2192 ", point.Values.Select(v => FormatHelper.FormatMetricValue(v, point.Unit)))
+                        : $"{FormatHelper.FormatMetricValue(firstVal, point.Unit)} \u2192 \u2026 \u2192 {FormatHelper.FormatMetricValue(lastVal, point.Unit)}";
 
-                    string icon = (point.Direction, delta > 0) switch
+                    string pctStr = deltaPercent.HasValue ? $" ({(deltaPercent.Value >= 0 ? "+" : string.Empty)}{deltaPercent.Value:F1}%)" : string.Empty;
+                    string deltaDisplay = delta == 0 ? "no change" : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}{pctStr}";
+
+                    string status = (point.Direction, delta > 0, delta < 0) switch
                     {
-                        (MetricTrendDirection.HigherIsWorse, true)  => "!! ",
-                        (MetricTrendDirection.HigherIsWorse, false) when delta < 0 => "OK ",
-                        (MetricTrendDirection.LowerIsWorse, false) when delta < 0  => "!! ",
-                        (MetricTrendDirection.LowerIsWorse, true)   => "OK ",
-                        _ => "   "
+                        (MetricTrendDirection.HigherIsWorse, true, _)  => "\u26a0 Regression",
+                        (MetricTrendDirection.HigherIsWorse, _, true)  => "\u2705 Improvement",
+                        (MetricTrendDirection.LowerIsWorse,  _, true)  => "\u26a0 Regression",
+                        (MetricTrendDirection.LowerIsWorse,  true, _)  => "\u2705 Improvement",
+                        _                                               => "\u2014 Stable"
                     };
 
-                    string deltaLabel = delta == 0 ? "no change" : $"\u0394 {deltaStr}{pctStr}";
-                    builder.AppendLine($"    {icon} {point.Key}: {valuesLine}   ({deltaLabel})");
+                    rows.Add(new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(point.Key),
+                        new DetailedAnalyzerTableCell(trendText),
+                        new DetailedAnalyzerTableCell(deltaDisplay, delta == 0 ? 0L : (long)Math.Round(Math.Abs(delta))),
+                        new DetailedAnalyzerTableCell(status)
+                    ]));
+                }
+
+                if (rows.Count > 0)
+                {
+                    writer.WriteDetailBlank();
+                    writer.WriteSubHeading($"[{analyzerTimeline.AnalyzerName}]", indentLevel: 1);
+                    writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                        Caption: $"{analyzerTimeline.AnalyzerName} metric timeline",
+                        Headers: ["Metric", $"Trend ({snapshots.Count} snapshots)", "\u0394", "Status"],
+                        Rows: rows));
                 }
             }
         }
 
         if (lifecycle.NewFindings.Count > 0)
         {
-            builder.AppendLine();
-            builder.AppendLine("New findings:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("NEW FINDINGS:");
+            writer.WriteSeparator();
             foreach (var f in lifecycle.NewFindings.OrderByDescending(f => f.Severity).Take(5))
-                builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
+                writer.WriteDetailListItem($"[{f.Severity}] {f.Analyzer}: {f.Title}");
         }
 
         if (lifecycle.ResolvedFindings.Count > 0)
         {
-            builder.AppendLine();
-            builder.AppendLine("Resolved findings:");
+            writer.WriteDetailBlank();
+            writer.WriteSubHeading("RESOLVED FINDINGS:");
+            writer.WriteSeparator();
             foreach (var f in lifecycle.ResolvedFindings.Take(5))
-                builder.AppendLine($"  - [{f.Severity}] {f.Analyzer}: {f.Title}");
+                writer.WriteDetailListItem($"[{f.Severity}] {f.Analyzer}: {f.Title}");
         }
 
-        builder.AppendLine();
-        return builder.ToString();
+        writer.WriteDetailDivider();
+        return new DetailedAnalyzerSection("Trend Comparison", writer.GetContent(), writer.GetSubmodules());
     }
 
     private sealed record FindingLifecycleResult(

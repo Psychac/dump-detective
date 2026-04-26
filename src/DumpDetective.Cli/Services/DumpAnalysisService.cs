@@ -3,6 +3,8 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Console;
+using DumpDetective.Cli.Pipeline;
+using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
@@ -72,149 +74,40 @@ internal sealed class DumpAnalysisService(
             ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers...");
         }
 
-        const int totalStages = 5;
-        Stopwatch stageStopwatch = Stopwatch.StartNew();
+        IReadOnlyList<IAnalysisStage> stages = BuildSingleDumpStages();
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        ConsoleUx.StageStart(1, totalStages, "Load dump");
-        using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(resolved.DumpPath, cancellationToken);
-        stageStopwatch.Stop();
-        ConsoleUx.StageComplete(1, totalStages, "Load dump", stageStopwatch.Elapsed);
+        using SingleDumpPipelineState state = new()
+        {
+            Resolved = resolved,
+            ActiveAnalyzers = activeAnalyzers
+        };
 
-        HeapAnalysisCache heapCache = new();
-
-        stageStopwatch.Restart();
-        ConsoleUx.StageStart(2, totalStages, "Scan + Index heap");
-        var heapIndex = heapCache.PrebuildHeapIndex(
-            loadContext.Heap,
-            resolved.DumpPath,
-            cancellationToken,
-            progress: new Progress<AnalyzerProgressReport>(r =>
-                ConsoleUx.ObjectScanProgress("Scan + Index heap", r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
-            mode: resolved.IndexPrebuildMode);
-        ConsoleUx.ObjectScanComplete("Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
-        stageStopwatch.Stop();
-        ConsoleUx.StageComplete(2, totalStages, "Scan + Index heap", stageStopwatch.Elapsed);
+        await new StagedPipelineRunner().RunAsync(stages, state, cancellationToken);
 
         if (resolved.DiagnosticMode)
         {
-            ConsoleUx.Info($"Index built: requested={resolved.IndexPrebuildMode}, selected={heapIndex.StorageKind}, objects={heapIndex.ObjectCount:N0}, elapsed={heapIndex.Elapsed.TotalSeconds:F1}s");
-        }
-
-        PipelineAnalysisContext context = new()
-        {
-            Runtime = loadContext.Runtime,
-            Heap = loadContext.Heap,
-            Cache = heapCache,
-            Diagnostics = resolved.Diagnostics,
-            Options = new Dictionary<string, object?>
-            {
-                [nameof(Core.Options.MemoryLeakOptions)] = resolved.MemoryLeak,
-                [nameof(Core.Options.ReferenceChainOptions)] = resolved.ReferenceChain,
-                [nameof(Core.Options.EventLeakOptions)] = resolved.EventLeak,
-                [nameof(Core.Options.DiagnosticsOptions)] = resolved.Diagnostics
-            },
-            MemoryLeakOptions = resolved.MemoryLeak,
-            ReferenceChainOptions = resolved.ReferenceChain,
-            EventLeakOptions = resolved.EventLeak,
-            DiagnosticsOptions = resolved.Diagnostics,
-            DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
-        };
-
-        AnalysisPipeline pipeline = new(activeAnalyzers);
-
-        IReadOnlyList<AnalyzerRunResult> runs = new List<AnalyzerRunResult>();
-        stageStopwatch.Restart();
-        ConsoleUx.StageStart(3, totalStages, $"Run analyzers ({activeAnalyzers.Count})");
-        try
-        {
-            runs = await pipeline.ExecuteAsync(context, cancellationToken);
-            stageStopwatch.Stop();
-            ConsoleUx.StageComplete(3, totalStages, "Run analyzers", stageStopwatch.Elapsed);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw new AnalysisPipelineException("Analysis pipeline failed unexpectedly.", ex);
-        }
-
-        if (runs.Any(r => r.Status == AnalyzerExecutionStatus.Canceled))
-        {
-            throw new OperationCanceledException("Analysis canceled.");
-        }
-
-        stopwatch.Stop();
-
-        // Run finding generation as a reporting-stage step so interpretation is separated from analysis
-        stageStopwatch.Restart();
-        ConsoleUx.StageStart(4, totalStages, "Generate findings");
-        cancellationToken.ThrowIfCancellationRequested();
-        try
-        {
-            runs = (await _findingGenerationPipeline.GenerateAsync(runs, cancellationToken)).ToList();
-        }
-        catch (Exception ex)
-        {
-            // Finding generation errors should not fail the entire pipeline; surface as diagnostic message
-            ConsoleUx.Warning($"Finding generation failed: {ex.Message}");
-        }
-        stageStopwatch.Stop();
-        ConsoleUx.StageComplete(4, totalStages, "Generate findings", stageStopwatch.Elapsed);
-
-        stageStopwatch.Restart();
-        ConsoleUx.StageStart(5, totalStages, $"Build {resolved.Report.Format} report");
-        cancellationToken.ThrowIfCancellationRequested();
-        string renderedReport = _reportBuilderFacade.BuildRenderedReport(
-            resolved.DumpPath,
-            resolved.Report.Format,
-            resolved.Report.Audience,
-            runs,
-            stopwatch.Elapsed,
-            cancellationToken);
-        stageStopwatch.Stop();
-        ConsoleUx.StageComplete(5, totalStages, "Build report", stageStopwatch.Elapsed);
-
-        stageStopwatch.Restart();
-        ConsoleUx.StageStart(6, totalStages + 1, "Write output");
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!string.IsNullOrWhiteSpace(resolved.OutputPath))
-            {
-                await File.WriteAllTextAsync(resolved.OutputPath, renderedReport, cancellationToken);
-                ConsoleUx.Success($"Report written to: {resolved.OutputPath}");
-            }
-
-            if (resolved.DiagnosticMode)
-            {
-                ConsoleUx.Info($"Pipeline completed in {stopwatch.Elapsed.TotalSeconds:F1}s");
-                ConsoleUx.Info($"Run summary: {runs.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
-                PrintDiagnosticsSummary(runs);
-            }
-
-            stageStopwatch.Stop();
-            ConsoleUx.StageComplete(5, totalStages, "Write output", stageStopwatch.Elapsed);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw new OutputWriteException("Failed while writing analysis output.", ex);
+            ConsoleUx.Info($"Pipeline completed in {state.PipelineStopwatch.Elapsed.TotalSeconds:F1}s");
+            ConsoleUx.Info($"Run summary: {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
+            PrintDiagnosticsSummary(state.Runs);
         }
 
         totalStopwatch.Stop();
         ConsoleUx.Success($"Total analysis time: {totalStopwatch.Elapsed.TotalSeconds:F1}s");
 
-        return runs.Any(r => r.Status == AnalyzerExecutionStatus.Failed)
+        return state.Runs.Any(r => r.Status == AnalyzerExecutionStatus.Failed)
             ? ExitCodes.AnalysisFailure
             : ExitCodes.Success;
     }
+
+    private IReadOnlyList<IAnalysisStage> BuildSingleDumpStages() =>
+    [
+        new LoadDumpStage(_dumpLoader),
+        new BuildHeapIndexStage(),
+        new RunAnalyzersPipelineStage(),
+        new GenerateFindingsStage(_findingGenerationPipeline),
+        new BuildReportStage(_reportBuilderFacade),
+        new WriteOutputStage()
+    ];
 
     private async Task<int> ExecuteTrendAsync(
         ResolvedExecutionOptions resolved,

@@ -34,10 +34,11 @@ internal sealed class FindingGenerationPipeline(IEnumerable<IFindingGenerator> g
                     AnalyzerRunResult enriched = run with { Findings = findings, FindingCount = findings?.Count ?? 0 };
                     updated.Add(enriched);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // swallows errors from finding generation to avoid failing reporting; diagnostics can be emitted from caller
-                    updated.Add(run);
+                    // Do not abort the pipeline — record the error on the run result so it is
+                    // visible in both the report (Warning section) and the console summary.
+                    updated.Add(run with { FindingGeneratorError = $"{ex.GetType().Name}: {ex.Message}" });
                 }
             }
             else

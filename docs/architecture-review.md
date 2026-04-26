@@ -12,6 +12,7 @@
 |------|-------|--------|-------|
 | 2025 | CRITICAL-01 | ✅ **Done** | `Reporting → Analysis` reference added; 30 domain types moved to `Analysis/Models/AnalyzerDomainModels.cs`; `Core/Models/AnalyzerDomainResult.cs` reduced from 285 → 23 lines; zero individual file changes via `GlobalUsings.cs` in both projects |
 | 2025 | CRITICAL-02 | ✅ **Done** | `TrendAnalyzer` refactored to primary DI constructor; 16 comparers registered in `ServiceRegistration.cs`; `TrendAnalyzer` injected into `DumpAnalysisService`; dead duplicate `Core/Abstractions/IAnalyzerTrendComparer.cs` removed |
+| 2025 | CRITICAL-03 | ✅ **Done** | `FindingGeneratorError` added to `AnalyzerRunResult`; `FindingGenerationPipeline` catch now populates it; `ReportBuilder` emits a `Warning` section; `GenerateFindingsStage` warns per-generator failure to console immediately |
 
 ---
 
@@ -160,74 +161,39 @@ One file, three lines — no hidden runtime surprises.
 
 ---
 
-### CRITICAL-03 — `FindingGenerationPipeline` silently swallows exceptions
+### ✅ CRITICAL-03 — `FindingGenerationPipeline` silently swallows exceptions — **RESOLVED**
+
+> **Implemented (Option B).** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Reporting/Pipeline/FindingGenerationPipeline.cs`
 
-#### What
+#### What *(was)*
 ```csharp
 catch
 {
-    // swallows errors from finding generation to avoid failing reporting; diagnostics can be emitted from caller
+    // swallows errors from finding generation to avoid failing reporting
     updated.Add(run);
 }
 ```
-The catch block does nothing — no logging, no sink event, no error message on the run result. A generator can throw `NullReferenceException`, `InvalidCastException`, or any other exception and the user sees zero indication that findings are missing.
+A bare `catch` with no error capture — generator failures were invisible to both the user and the report.
 
-#### Why it's a problem
-Directly violates the project guideline: *"more actionable diagnostic data is better than condensed summaries"*. Silent failure in finding generation means the report may show zero findings for an analyzer not because there are none, but because the generator crashed. The user has no way to know.
+#### Why it was a problem *(archived)*
+Violated the project guideline *"more actionable diagnostic data is better"*. Zero findings from an analyzer could mean clean results **or** a crashed generator — indistinguishable.
 
-#### How to fix
-Inject `IAnalysisDiagnosticsSink` (already exists in `Core`) and publish a `FindingGeneratorFailed` event. Also surface the error in the `AnalyzerRunResult` itself by setting an error field.
+#### What was done (Option B)
 
-The cleanest approach requires `AnalyzerRunResult` to carry a nullable `FindingGeneratorError` string (add it to the record) so the report printer can optionally render it as a warning row.
+| File | Change |
+|------|--------|
+| `Core/Models/AnalyzerRunResult.cs` | Added `string? FindingGeneratorError = null` as the last optional parameter with an XML doc comment explaining its semantics |
+| `Reporting/Pipeline/FindingGenerationPipeline.cs` | `catch` → `catch (Exception ex)`; populates `run with { FindingGeneratorError = "{ex.GetType().Name}: {ex.Message}" }` instead of the original unmodified `run` |
+| `Reporting/Services/ReportBuilder.cs` | Added a `FindingSeverity.Warning` report section (`finding-generator-error:{analyzerName}`) rendered alongside the existing `analyzer-failure` section pattern |
+| `Cli/Pipeline/Stages/GenerateFindingsStage.cs` | After the pipeline completes, iterates `state.Runs` and calls `ConsoleUx.Warning(...)` for every run with a non-null `FindingGeneratorError` — visible in all modes, not just diagnostic |
 
-**Option A — Minimal (no model change): inject and publish to sink**
-
-```csharp
-// FindingGenerationPipeline.cs
-internal sealed class FindingGenerationPipeline(
-    IEnumerable<IFindingGenerator> generators,
-    IAnalysisDiagnosticsSink diagnosticsSink)   // ← inject sink
-{
-    ...
-    catch (Exception ex)
-    {
-        diagnosticsSink.Publish(new AnalysisDiagnosticsEvent(
-            RunId: Guid.Empty,
-            EventType: AnalysisDiagnosticsEventType.AnalyzerFailed,   // reuse or add FindingGeneratorFailed
-            TimestampUtc: DateTime.UtcNow,
-            AnalyzerName: run.AnalyzerName,
-            Category: "FindingGeneration",
-            DurationMs: null,
-            ObjectScanCount: 0,
-            CacheHits: 0,
-            CacheMisses: 0,
-            Message: $"Finding generator for '{run.AnalyzerName}' threw: {ex.Message}",
-            ExceptionType: ex.GetType().Name,
-            ExceptionMessage: ex.Message));
-        updated.Add(run);
-    }
-}
-```
-
-**Option B — Full (model change): add `FindingGeneratorError` to `AnalyzerRunResult`**
-
-```csharp
-// AnalyzerRunResult.cs — add optional field
-internal sealed record AnalyzerRunResult(
-    ...
-    string? FindingGeneratorError = null)    // ← add
-```
-
-Then in the catch:
-```csharp
-updated.Add(run with { FindingGeneratorError = $"{ex.GetType().Name}: {ex.Message}" });
-```
-
-Report printers can then emit this as a `[WARN] Finding generator error: ...` row in the relevant section.
-
-**Recommendation:** Option B gives users the most visibility and is consistent with the project's detail-preservation principle.
+#### Visibility chain
+A generator crash now surfaces at three levels:
+1. **Console** — `[WARN] Finding generator failed for 'X': ExceptionType: message` printed by `GenerateFindingsStage` immediately after the stage
+2. **Report** — `Finding generator failed: X` Warning section in the canonical report (same section pattern as analyzer execution failures)
+3. **Model** — `run.FindingGeneratorError` on `AnalyzerRunResult` for programmatic inspection by any future consumer
 
 ---
 
@@ -782,7 +748,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 
 | ID | Action | Files to Touch | Effort |
 |---|---|---|---|
-| CRITICAL-03 | Add diagnostics to `FindingGenerationPipeline` catch block | `Reporting/Pipeline/FindingGenerationPipeline.cs`, `Core/Models/AnalyzerRunResult.cs` | XS |
+| ~~CRITICAL-03~~ | ~~Add diagnostics to `FindingGenerationPipeline` catch block~~ | ~~`Reporting/Pipeline/FindingGenerationPipeline.cs`, `Core/Models/AnalyzerRunResult.cs`~~ | ✅ **Done** |
 | MINOR-14 | Fix `SingleDumpPipelineState` stage 4 comment gap | `Cli/Pipeline/SingleDumpPipelineState.cs` | XS |
 | MAJOR-07 | Rename `Analysis.Pipeline.AnalysisContext` → `RuntimeAnalysisContext` | 1 rename + 4 usages | S |
 | ~~CRITICAL-02~~ | ~~Inject `IEnumerable<IAnalyzerTrendComparer>` into `TrendAnalyzer`~~ | ~~`Analysis/Trend/TrendAnalyzer.cs`, `Cli/Hosting/ServiceRegistration.cs`~~ | ✅ **Done** |

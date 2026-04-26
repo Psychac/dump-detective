@@ -135,6 +135,23 @@ namespace DumpDetective.Reporting.Services
                         RemediationHints: ["Inspect analyzer failure details and re-run analysis."],
                         Fingerprints: [$"analyzer-failure:{run.AnalyzerName}"]));
                 }
+
+                if (!string.IsNullOrWhiteSpace(run.FindingGeneratorError))
+                {
+                    evidenceBeforeMerge += 1;
+                    sections.Add(new ReportSection(
+                        SectionKey: $"finding-generator-error:{run.AnalyzerName}",
+                        Title: $"Finding generator failed: {run.AnalyzerName}",
+                        Category: "Pipeline",
+                        Severity: FindingSeverity.Warning,
+                        NarrativeSummary: $"The finding generator for '{run.AnalyzerName}' threw an exception. Findings for this analyzer may be incomplete or missing.",
+                        EvidenceRows:
+                        [
+                            new ReportEvidenceRow("Error", run.FindingGeneratorError)
+                        ],
+                        RemediationHints: ["Re-run analysis. If the error persists, report it with the full error details above."],
+                        Fingerprints: [$"finding-generator-error:{run.AnalyzerName}"]));
+                }
             }
 
             List<ReportSection> deduped = DeduplicateSections(sections, out DedupDiagnostics dedupDiagnostics);

@@ -31,6 +31,9 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// <summary>Elapsed time from pipeline start through the end of analyzer execution (stages 1–3).</summary>
     public TimeSpan AnalysisElapsed { get; set; }
 
+    // ── Stage 4: GenerateFindingsStage ───────────────────────────────────────
+    // Enriches Runs in-place with InsightFinding lists; no new properties required.
+
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
     public string RenderedReport { get; set; } = string.Empty;
 

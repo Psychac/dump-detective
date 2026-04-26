@@ -13,14 +13,13 @@ using System.Threading.Tasks;
 namespace BenchmarkSuite1;
 
 using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 
 [MemoryDiagnoser]
 [ShortRunJob]
 public class PipelineHotspotBenchmark
 {
     private AnalysisPipeline _pipeline = null!;
-    private PipelineAnalysisContext _context = null!;
+    private RuntimeAnalysisContext _context = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -30,7 +29,7 @@ public class PipelineHotspotBenchmark
             .ToArray();
 
         _pipeline = new AnalysisPipeline(analyzers);
-        _context = new PipelineAnalysisContext
+        _context = new RuntimeAnalysisContext
         {
             Runtime = null!,
             Heap = null!,

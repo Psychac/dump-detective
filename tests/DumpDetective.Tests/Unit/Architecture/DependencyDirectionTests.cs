@@ -20,7 +20,7 @@ public sealed class DependencyDirectionTests
 
         coreRefs.Should().BeEmpty();
         analysisRefs.Should().Equal(["DumpDetective.Core"]);
-        reportingRefs.Should().Equal(["DumpDetective.Core"]);
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core"]);
         cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting"]);
     }
 

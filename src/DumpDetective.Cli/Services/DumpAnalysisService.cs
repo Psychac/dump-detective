@@ -15,8 +15,6 @@ using System.Diagnostics;
 
 namespace DumpDetective.Cli.Services;
 
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
-
 internal sealed class DumpAnalysisService(
     ConfigurationResolver configurationResolver,
     StartupValidator startupValidator,
@@ -268,7 +266,7 @@ internal sealed class DumpAnalysisService(
             : Path.GetFileName(heapIndex.IndexPath);
         ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, $"{heapIndex.StorageKind} • {indexTarget}");
 
-        PipelineAnalysisContext context = new()
+        RuntimeAnalysisContext context = new()
         {
             Runtime = loadContext.Runtime,
             Heap = loadContext.Heap,

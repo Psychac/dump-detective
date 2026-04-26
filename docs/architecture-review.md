@@ -13,6 +13,8 @@
 | 2025 | CRITICAL-01 | ✅ **Done** | `Reporting → Analysis` reference added; 30 domain types moved to `Analysis/Models/AnalyzerDomainModels.cs`; `Core/Models/AnalyzerDomainResult.cs` reduced from 285 → 23 lines; zero individual file changes via `GlobalUsings.cs` in both projects |
 | 2025 | CRITICAL-02 | ✅ **Done** | `TrendAnalyzer` refactored to primary DI constructor; 16 comparers registered in `ServiceRegistration.cs`; `TrendAnalyzer` injected into `DumpAnalysisService`; dead duplicate `Core/Abstractions/IAnalyzerTrendComparer.cs` removed |
 | 2025 | CRITICAL-03 | ✅ **Done** | `FindingGeneratorError` added to `AnalyzerRunResult`; `FindingGenerationPipeline` catch now populates it; `ReportBuilder` emits a `Warning` section; `GenerateFindingsStage` warns per-generator failure to console immediately |
+| 2025 | MINOR-14 | ✅ **Done** | Stage 4 comment block added to `SingleDumpPipelineState.cs` between Stage 3 and Stage 5 |
+| 2025 | MAJOR-07 | ✅ **Done** | `AnalysisContext` → `RuntimeAnalysisContext` in `Analysis/Pipeline/`; all 6 alias usages removed across Cli, BenchmarkSuite1, and test files; architecture test updated to reflect correct `Reporting → Analysis` dependency |
 
 ---
 
@@ -382,40 +384,32 @@ public IHeapAnalysisCache? HeapCache { get; set; }         // for RunAnalyzersPi
 
 ---
 
-### MAJOR-07 — Two `Pipeline` namespaces with `AnalysisContext` name collision
+### ✅ MAJOR-07 — Two `Pipeline` namespaces with `AnalysisContext` name collision — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **Files:** `Analysis/Pipeline/AnalysisContext.cs`, `Cli/Pipeline/Stages/RunAnalyzersPipelineStage.cs`, `Cli/Services/DumpAnalysisService.cs`
 
-#### What
-There is `DumpDetective.Core.Abstractions.AnalysisContext` (base), `DumpDetective.Analysis.Pipeline.AnalysisContext` (derived), and both are in a namespace called `Pipeline`. Any file that needs both must alias one:
-
+#### What *(was)*
+`DumpDetective.Analysis.Pipeline.AnalysisContext` collided with `DumpDetective.Core.Abstractions.AnalysisContext`, forcing five files to declare a `PipelineAnalysisContext` alias:
 ```csharp
-// Required in RunAnalyzersPipelineStage.cs and DumpAnalysisService.cs
 using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 ```
 
-#### Why it's a problem
-- Naming friction. The alias `PipelineAnalysisContext` is used in multiple files, adding ceremony.
-- `AnalysisContext` in `Core` is already not in a `Pipeline` namespace (it's in `Abstractions`) — the name collision is only in the derived type.
+#### What was done
 
-#### How to fix
-Rename `DumpDetective.Analysis.Pipeline.AnalysisContext` to `RuntimeAnalysisContext`. This is a single file rename with find-and-replace on usages:
-
-```csharp
-// BEFORE: Analysis/Pipeline/AnalysisContext.cs
-namespace DumpDetective.Analysis.Pipeline;
-internal sealed class AnalysisContext : DumpDetective.Core.Abstractions.AnalysisContext { ... }
-
-// AFTER: Analysis/Pipeline/RuntimeAnalysisContext.cs
-namespace DumpDetective.Analysis.Pipeline;
-internal sealed class RuntimeAnalysisContext : DumpDetective.Core.Abstractions.AnalysisContext { ... }
-```
-
-Affected files to update:
-- `Analysis/Pipeline/AnalysisPipeline.cs`
-- `Cli/Pipeline/Stages/RunAnalyzersPipelineStage.cs` — remove the `using` alias
-- `Cli/Services/DumpAnalysisService.cs` — remove the `using` alias
-- `Cli/Pipeline/SingleDumpPipelineState.cs` (if it references the type directly)
+| File | Change |
+|------|--------|
+| `Analysis/Pipeline/AnalysisContext.cs` | **Deleted** |
+| `Analysis/Pipeline/RuntimeAnalysisContext.cs` | **New file** — class renamed from `AnalysisContext` to `RuntimeAnalysisContext` |
+| `Analysis/Pipeline/AnalysisPipeline.cs` | Both `AnalysisContext context` parameters updated to `RuntimeAnalysisContext context` |
+| `Cli/Pipeline/Stages/RunAnalyzersPipelineStage.cs` | Alias removed; `PipelineAnalysisContext` → `RuntimeAnalysisContext` throughout |
+| `Cli/Pipeline/Stages/BuildHeapIndexStage.cs` | Unused alias removed |
+| `Cli/Services/DumpAnalysisService.cs` | Alias removed; `PipelineAnalysisContext` → `RuntimeAnalysisContext` |
+| `BenchmarkSuite1/PipelineHotspotBenchmark.cs` | Alias removed; `PipelineAnalysisContext` → `RuntimeAnalysisContext` |
+| `tests/.../AnalysisPipelineTests.cs` | Alias removed; `PipelineAnalysisContext` → `RuntimeAnalysisContext` |
+| `tests/.../AnalysisDiagnosticsTests.cs` | Alias removed; `PipelineAnalysisContext` → `RuntimeAnalysisContext` |
+| `tests/.../DependencyDirectionTests.cs` | Expected `Reporting` deps updated to `{"DumpDetective.Analysis", "DumpDetective.Core"}` (reflects CRITICAL-01) |
 
 ---
 
@@ -645,30 +639,21 @@ The `Analysis.csproj` already has `InternalsVisibleTo` for `DumpDetective.Tests`
 
 ---
 
-### MINOR-14 — `SingleDumpPipelineState` stage comment gap
+### ✅ MINOR-14 — `SingleDumpPipelineState` stage comment gap — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Cli/Pipeline/SingleDumpPipelineState.cs`
 
-#### What
-The state bag uses region-style comments to document which stage owns each property block. Stage 4 (`GenerateFindingsStage`) has no comment, creating a gap:
-
-```csharp
-// ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────────
-public IReadOnlyList<AnalyzerRunResult> Runs { get; set; } = [];
-
-// ── Stage 5: BuildReportStage ────────────────────────────────────────────    ← gap: Stage 4 missing
-public string RenderedReport { get; set; } = string.Empty;
-```
-
-#### How to fix
-`GenerateFindingsStage` does not add new properties to the state — it transforms `Runs` in place. Add a comment acknowledging this:
+#### What was done
+Added a Stage 4 comment block between the Stage 3 and Stage 5 comments, documenting that `GenerateFindingsStage` enriches `Runs` in-place and requires no new state properties:
 
 ```csharp
 // ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────────
 public IReadOnlyList<AnalyzerRunResult> Runs { get; set; } = [];
 public TimeSpan AnalysisElapsed { get; set; }
 
-// ── Stage 4: GenerateFindingsStage ──────────────────────────────────────────
+// ── Stage 4: GenerateFindingsStage ───────────────────────────────────────────
 // Enriches Runs in-place with InsightFinding lists; no new properties required.
 
 // ── Stage 5: BuildReportStage ────────────────────────────────────────────────
@@ -749,8 +734,8 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | ID | Action | Files to Touch | Effort |
 |---|---|---|---|
 | ~~CRITICAL-03~~ | ~~Add diagnostics to `FindingGenerationPipeline` catch block~~ | ~~`Reporting/Pipeline/FindingGenerationPipeline.cs`, `Core/Models/AnalyzerRunResult.cs`~~ | ✅ **Done** |
-| MINOR-14 | Fix `SingleDumpPipelineState` stage 4 comment gap | `Cli/Pipeline/SingleDumpPipelineState.cs` | XS |
-| MAJOR-07 | Rename `Analysis.Pipeline.AnalysisContext` → `RuntimeAnalysisContext` | 1 rename + 4 usages | S |
+| ~~MINOR-14~~ | ~~Fix `SingleDumpPipelineState` stage 4 comment gap~~ | ~~`Cli/Pipeline/SingleDumpPipelineState.cs`~~ | ✅ **Done** |
+| ~~MAJOR-07~~ | ~~Rename `Analysis.Pipeline.AnalysisContext` → `RuntimeAnalysisContext`~~ | ~~1 rename + 4 usages~~ | ✅ **Done** |
 | ~~CRITICAL-02~~ | ~~Inject `IEnumerable<IAnalyzerTrendComparer>` into `TrendAnalyzer`~~ | ~~`Analysis/Trend/TrendAnalyzer.cs`, `Cli/Hosting/ServiceRegistration.cs`~~ | ✅ **Done** |
 | MAJOR-05 | Add `GetOption<T>()` extension method to eliminate magic-key pattern | `Analysis/` (new extensions file), 3 analyzer files | S |
 

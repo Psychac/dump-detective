@@ -7,15 +7,13 @@ using DumpDetective.Core.Options;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
-
 internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
 {
     public string Name => "Run analyzers";
 
     public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
-        PipelineAnalysisContext context = BuildContext(state);
+        RuntimeAnalysisContext context = BuildContext(state);
 
         AnalysisPipeline pipeline = new(state.ActiveAnalyzers);
 
@@ -42,10 +40,10 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
     }
 
-    private static PipelineAnalysisContext BuildContext(SingleDumpPipelineState state)
+    private static RuntimeAnalysisContext BuildContext(SingleDumpPipelineState state)
     {
         ResolvedExecutionOptions resolved = state.Resolved;
-        return new PipelineAnalysisContext
+        return new RuntimeAnalysisContext
         {
             Runtime = state.LoadContext!.Runtime,
             Heap = state.LoadContext.Heap,

@@ -11,7 +11,6 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Analysis;
 
 using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 
 public sealed class AnalysisPipelineTests
 {
@@ -25,7 +24,7 @@ public sealed class AnalysisPipelineTests
         ];
 
         AnalysisPipeline pipeline = new(analyzers);
-        PipelineAnalysisContext context = CreateContext(continueOnFailure: true);
+        RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
@@ -44,7 +43,7 @@ public sealed class AnalysisPipelineTests
         ];
 
         AnalysisPipeline pipeline = new(analyzers);
-        PipelineAnalysisContext context = CreateContext(continueOnFailure: false);
+        RuntimeAnalysisContext context = CreateContext(continueOnFailure: false);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
@@ -63,7 +62,7 @@ public sealed class AnalysisPipelineTests
         ];
 
         AnalysisPipeline pipeline = new(analyzers);
-        PipelineAnalysisContext context = CreateContext(continueOnFailure: true);
+        RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
@@ -71,14 +70,14 @@ public sealed class AnalysisPipelineTests
         result[0].Status.Should().Be(AnalyzerExecutionStatus.Canceled);
     }
 
-    private static PipelineAnalysisContext CreateContext(bool continueOnFailure)
+    private static RuntimeAnalysisContext CreateContext(bool continueOnFailure)
     {
         DiagnosticsOptions diagnostics = new()
         {
             ContinueOnAnalyzerFailure = continueOnFailure
         };
 
-        return new PipelineAnalysisContext
+        return new RuntimeAnalysisContext
         {
             Runtime = null!,
             Heap = null!,

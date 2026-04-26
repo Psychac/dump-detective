@@ -9,7 +9,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 {
     private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
 
-    public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(RuntimeAnalysisContext context, CancellationToken cancellationToken)
     {
         Guid runId = Guid.NewGuid();
         Stopwatch runStopwatch = Stopwatch.StartNew();
@@ -222,7 +222,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
     private static async Task<AnalyzerDomainResult> ExecuteAnalyzerWithProgressAsync(
         Guid runId,
         IAnalyzer analyzer,
-        AnalysisContext context,
+        RuntimeAnalysisContext context,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {

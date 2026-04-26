@@ -11,7 +11,6 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Analysis;
 
 using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 
 public sealed class AnalysisDiagnosticsTests
 {
@@ -21,7 +20,7 @@ public sealed class AnalysisDiagnosticsTests
         InMemoryAnalysisDiagnosticsSink sink = new();
         TestFindingGenerator generator = new();
         AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
-        PipelineAnalysisContext context = CreateContext(sink, continueOnFailure: true);
+        RuntimeAnalysisContext context = CreateContext(sink, continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
@@ -51,18 +50,18 @@ public sealed class AnalysisDiagnosticsTests
     public async Task ExecuteAsync_ShouldNotFail_WhenSinkThrows()
     {
         AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
-        PipelineAnalysisContext context = CreateContext(new ThrowingSink(), continueOnFailure: true);
+        RuntimeAnalysisContext context = CreateContext(new ThrowingSink(), continueOnFailure: true);
 
         Func<Task> act = async () => await pipeline.ExecuteAsync(context, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }
 
-    private static PipelineAnalysisContext CreateContext(IAnalysisDiagnosticsSink sink, bool continueOnFailure)
+    private static RuntimeAnalysisContext CreateContext(IAnalysisDiagnosticsSink sink, bool continueOnFailure)
     {
         DiagnosticsOptions diagnostics = new() { ContinueOnAnalyzerFailure = continueOnFailure };
 
-        return new PipelineAnalysisContext
+        return new RuntimeAnalysisContext
         {
             Runtime = null!,
             Heap = null!,

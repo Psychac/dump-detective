@@ -6,8 +6,6 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
-
 internal sealed class BuildHeapIndexStage : IAnalysisStage
 {
     public string Name => "Scan + Index heap";

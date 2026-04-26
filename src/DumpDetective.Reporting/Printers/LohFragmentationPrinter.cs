@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -46,10 +47,15 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                foreach (var seg in segments.Take(8))
-                {
-                    writer.WriteDetailText($"• 0x{seg.Address:X}: {seg.FragmentationPercent:F1}% frag, free {FormatHelper.FormatBytes(seg.FreeBytes)}, largest hole {FormatHelper.FormatBytes(seg.LargestFreeBlock)}", indentLevel: 1);
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Top fragmented LOH segments",
+                    Headers: ["Address", "Frag %", "Free Bytes", "Largest Free Block"],
+                    Rows: segments.Take(8).Select(seg => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell($"0x{seg.Address:X}"),
+                        new DetailedAnalyzerTableCell($"{seg.FragmentationPercent:F1}%"),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(seg.FreeBytes), (long)seg.FreeBytes),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(seg.LargestFreeBlock), (long)seg.LargestFreeBlock)]))
+                    .ToList()));
             }
             writer.WriteDetailDivider();
         }

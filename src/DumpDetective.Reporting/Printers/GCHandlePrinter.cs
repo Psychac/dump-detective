@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -43,15 +44,17 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteDetailText($"{"Kind",-50} {"Count",12} {"% Total",8}");
-                foreach (var entry in byKind)
-                {
-                    double pct = domain.TotalHandles == 0 ? 0 : entry.Count * 100.0 / domain.TotalHandles;
-                    IReadOnlyList<string> wrappedLines = TableWrapHelper.Wrap(entry.Name, KindColumnWidth);
-                    writer.WriteDetailText($"{wrappedLines[0],-50} {entry.Count,12:N0} {pct,7:F1}%");
-                    for (int i = 1; i < wrappedLines.Count; i++)
-                        writer.WriteDetailText($"{wrappedLines[i],-50} {string.Empty,12} {string.Empty,8}");
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Handles by kind",
+                    Headers: ["Kind", "Count", "% Total"],
+                    Rows: byKind.Select(entry =>
+                    {
+                        double pct = domain.TotalHandles == 0 ? 0 : entry.Count * 100.0 / domain.TotalHandles;
+                        return new DetailedAnalyzerTableRow([
+                            new DetailedAnalyzerTableCell(entry.Name),
+                            new DetailedAnalyzerTableCell($"{entry.Count:N0}", entry.Count),
+                            new DetailedAnalyzerTableCell($"{pct:F1}%")]);
+                    }).ToList()));
             }
 
             writer.WriteDetailBlank();
@@ -64,14 +67,13 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteDetailText($"{"Type",-70} {"Count",12}");
-                foreach (var entry in topTargets)
-                {
-                    IReadOnlyList<string> wrappedLines = TableWrapHelper.Wrap(entry.Name, TypeColumnWidth);
-                    writer.WriteDetailText($"{wrappedLines[0],-70} {entry.Count,12:N0}");
-                    for (int i = 1; i < wrappedLines.Count; i++)
-                        writer.WriteDetailText($"{wrappedLines[i],-70} {string.Empty,12}");
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Top types referenced by handles",
+                    Headers: ["Type", "Count"],
+                    Rows: topTargets.Select(entry => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(entry.Name),
+                        new DetailedAnalyzerTableCell($"{entry.Count:N0}", entry.Count)]))
+                    .ToList()));
             }
 
             writer.WriteDetailBlank();
@@ -84,14 +86,13 @@ namespace DumpDetective.Reporting.Printers
             }
             else
             {
-                writer.WriteDetailText($"{"Type",-70} {"Count",12}");
-                foreach (var entry in topPinned)
-                {
-                    IReadOnlyList<string> wrappedLines2 = TableWrapHelper.Wrap(entry.Name, TypeColumnWidth);
-                    writer.WriteDetailText($"{wrappedLines2[0],-70} {entry.Count,12:N0}");
-                    for (int i = 1; i < wrappedLines2.Count; i++)
-                        writer.WriteDetailText($"{wrappedLines2[i],-70} {string.Empty,12}");
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Top types referenced by pinned handles",
+                    Headers: ["Type", "Count"],
+                    Rows: topPinned.Select(entry => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(entry.Name),
+                        new DetailedAnalyzerTableCell($"{entry.Count:N0}", entry.Count)]))
+                    .ToList()));
             }
 
             writer.WriteDetailBlank();

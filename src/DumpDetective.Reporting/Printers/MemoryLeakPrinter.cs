@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -28,18 +29,17 @@ namespace DumpDetective.Reporting.Printers
             {
                 writer.WriteDetailBlank();
                 writer.WriteSubHeading("Top types in finalizer queue:");
-                writer.WriteDetailText($"{"Type",-80} {"Count",12} {"% Queue",8}");
-                foreach (var type in finalizerTypes)
-                {
-                    double pct = domain.FinalizerQueueCount == 0
-                        ? 0
-                        : type.Count * 100.0 / domain.FinalizerQueueCount;
-
-                    IReadOnlyList<string> wrappedTypeLines = TableWrapHelper.Wrap(type.Name, 80);
-                    writer.WriteDetailText($"{wrappedTypeLines[0],-80} {type.Count,12:N0} {pct,7:F1}%");
-                    for (int i = 1; i < wrappedTypeLines.Count; i++)
-                        writer.WriteDetailText($"{wrappedTypeLines[i],-80} {string.Empty,12} {string.Empty,8}");
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Top types in finalizer queue",
+                    Headers: ["Type", "Count", "% Queue"],
+                    Rows: finalizerTypes.Select(t =>
+                    {
+                        double pct = domain.FinalizerQueueCount == 0 ? 0 : t.Count * 100.0 / domain.FinalizerQueueCount;
+                        return new DetailedAnalyzerTableRow([
+                            new DetailedAnalyzerTableCell(t.Name),
+                            new DetailedAnalyzerTableCell($"{t.Count:N0}", t.Count),
+                            new DetailedAnalyzerTableCell($"{pct:F1}%")]);
+                    }).ToList()));
             }
 
             writer.WriteDetailBlank();
@@ -56,9 +56,14 @@ namespace DumpDetective.Reporting.Printers
             {
                 writer.WriteDetailBlank();
                 writer.WriteSubHeading("Most duplicated strings (potential string pooling opportunities):");
-                writer.WriteDetailText($"{"String Preview",-50} {"Count",10} {"Wasted",12}");
-                foreach (var dup in duplicateStrings)
-                    writer.WriteDetailText($"{FormatHelper.TruncateString(dup.Preview, 50),-50} {dup.Count,10:N0} {FormatHelper.FormatBytes(dup.WastedBytes),12}");
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Most duplicated strings",
+                    Headers: ["String Preview", "Count", "Wasted"],
+                    Rows: duplicateStrings.Select(dup => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(FormatHelper.TruncateString(dup.Preview, 80)),
+                        new DetailedAnalyzerTableCell($"{dup.Count:N0}", dup.Count),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes)]))
+                    .ToList()));
             }
 
             writer.WriteDetailBlank();

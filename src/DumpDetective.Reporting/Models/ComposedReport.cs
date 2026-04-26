@@ -56,7 +56,8 @@ internal enum DetailedAnalyzerSubmoduleKind
     Text,
     ListItem,
     Divider,
-    Empty
+    Empty,
+    Table
 }
 
 internal sealed record DetailedAnalyzerSubmodule(
@@ -64,7 +65,15 @@ internal sealed record DetailedAnalyzerSubmodule(
     string? Label,
     string? Value,
     string? Text,
-    int IndentLevel = 0);
+    int IndentLevel = 0,
+    DetailedAnalyzerTableData? TableData = null);
+
+internal sealed record DetailedAnalyzerTableCell(string Display, long? RawValue = null);
+internal sealed record DetailedAnalyzerTableRow(IReadOnlyList<DetailedAnalyzerTableCell> Cells);
+internal sealed record DetailedAnalyzerTableData(
+    string? Caption,
+    IReadOnlyList<string> Headers,
+    IReadOnlyList<DetailedAnalyzerTableRow> Rows);
 
 internal sealed record DedupDiagnostics(
     int DuplicateCandidates,

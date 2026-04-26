@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -51,14 +52,15 @@ namespace DumpDetective.Reporting.Printers
             {
                 writer.WriteDetailBlank();
                 writer.WriteSubHeading("Top LOH Object Types:");
-                writer.WriteDetailText($"{"Type",-68} {"Count",10} {"Total Size",14}");
-                foreach (var type in topLohTypes.Take(TopLohTypesToShow))
-                {
-                    IReadOnlyList<string> wrappedTypeLines = TableWrapHelper.Wrap(type.TypeName, 68);
-                    writer.WriteDetailText($"{wrappedTypeLines[0],-68} {type.Count,10:N0} {FormatHelper.FormatBytes(type.TotalBytes),14}");
-                    for (int i = 1; i < wrappedTypeLines.Count; i++)
-                        writer.WriteDetailText($"{wrappedTypeLines[i],-68} {string.Empty,10} {string.Empty,14}");
-                }
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Top LOH object types",
+                    Headers: ["Type", "Count", "Total Size"],
+                    Rows: topLohTypes.Take(TopLohTypesToShow)
+                        .Select(t => new DetailedAnalyzerTableRow([
+                            new DetailedAnalyzerTableCell(t.TypeName),
+                            new DetailedAnalyzerTableCell($"{t.Count:N0}", t.Count),
+                            new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes)]))
+                        .ToList()));
             }
 
             writer.WriteDetailBlank();

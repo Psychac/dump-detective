@@ -93,6 +93,17 @@ internal sealed class StructuredCaptureReportWriter : IStructuredReportWriter
         _submodules.Add(new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Empty, null, null, null));
     }
 
+    public void WriteDetailTable(DetailedAnalyzerTableData tableData)
+    {
+        if (tableData.Caption is not null)
+            AppendRawLine(tableData.Caption);
+        if (tableData.Headers.Count > 0)
+            AppendRawLine(string.Join("  ", tableData.Headers.Select((h, i) => i == 0 ? $"{h,-60}" : $"{h,14}")));
+        foreach (DetailedAnalyzerTableRow row in tableData.Rows)
+            AppendRawLine(string.Join("  ", row.Cells.Select((c, i) => i == 0 ? $"{c.Display,-60}" : $"{c.Display,14}")));
+        _submodules.Add(new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Table, null, null, null, 0, tableData));
+    }
+
     public string GetContent() => _buffer.ToString().Trim();
 
     public IReadOnlyList<DetailedAnalyzerSubmodule> GetSubmodules() => _submodules;

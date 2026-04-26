@@ -43,28 +43,48 @@ tbody tr:nth-child(even){background:#fcfcfd;}
 .detail-gap{height:8px;}
 .detail-indent-1{padding-left:12px;}
 .detail-indent-2{padding-left:24px;}
+.detail-block table{background:transparent;border-collapse:collapse;width:100%;margin:8px 0;color:#e5e7eb;}
+.detail-block thead th{background:#1e293b;color:#93c5fd;font-weight:600;border:1px solid #334155;padding:6px 8px;text-align:left;}
+.detail-block tbody td{border:1px solid #334155;padding:5px 8px;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;}
+.detail-block tbody tr:nth-child(even){background:rgba(255,255,255,0.04);}
+.detail-block caption{color:#94a3b8;font-size:13px;font-weight:600;text-align:left;padding:2px 0 4px 0;caption-side:top;}
+nav.toc{background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05);padding:16px 18px;margin-bottom:16px;}
+nav.toc h2{margin:0 0 10px 0;font-size:16px;color:#1f2937;}
+nav.toc ol{margin:0;padding-left:20px;column-count:auto;column-width:280px;column-gap:24px;}
+nav.toc li{margin:4px 0;font-size:14px;}
+nav.toc a{color:#1d4ed8;text-decoration:none;}
+nav.toc a:hover{text-decoration:underline;}
+.toc-badge{display:inline-block;padding:1px 6px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;margin-left:5px;vertical-align:middle;}
 </style>
 </head>
 <body>
 <main class="container">
-<section class="header-card">
-<h1>DumpDetective Analysis Report</h1>
+<section id="section-header" class="header-card" aria-labelledby="section-header-heading">
+<h1 id="section-header-heading">DumpDetective Analysis Report</h1>
 <div class="meta-grid">
 <div class="meta-item"><span class="meta-label">Dump:</span> <span class="wrap">C:/fixtures/MixedSeverity.dmp</span></div>
-<div class="meta-item"><span class="meta-label">Generated (UTC):</span> 2026-01-01 12:00:00</div>
-<div class="meta-item"><span class="meta-label">Elapsed:</span> 6.6s</div>
+<div class="meta-item"><span class="meta-label">Generated (UTC):</span> <time datetime="2026-01-01T12:00:00Z">2026-01-01 12:00:00</time></div>
+<div class="meta-item"><span class="meta-label">Elapsed:</span> <span data-value="6.600">6.6s</span></div>
 </div>
-<div class="dedup-note"><strong>Dedup:</strong> merged 0/0</div>
+<div class="dedup-note"><strong>Dedup:</strong> merged <span data-value="0">0</span>/<span data-value="0">0</span></div>
 </section>
-<section class="section-card">
+<nav class="toc" aria-labelledby="toc-heading">
+<h2 id="toc-heading">Contents</h2>
+<ol>
+<li><a href="#finding-0">Critical leak</a><span class="toc-badge severity-critical">Critical</span></li>
+<li><a href="#finding-1">Warning leak</a><span class="toc-badge severity-warning">Warning</span></li>
+<li><a href="#finding-2">Info signal</a><span class="toc-badge severity-info">Info</span></li>
+</ol>
+</nav>
+<section id="finding-0" class="section-card" aria-labelledby="finding-0-heading">
 <div class="section-header">
 <span class="severity-badge severity-critical">Critical</span>
-<h2>Critical leak</h2>
+<h2 id="finding-0-heading">Critical leak</h2>
 <span class="category">Leak</span>
 </div>
 <p class="summary">Critical item</p>
 <table>
-<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<thead><tr><th scope="col">Label</th><th scope="col">Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Critical</td></tr>
 </tbody>
@@ -73,15 +93,15 @@ tbody tr:nth-child(even){background:#fcfcfd;}
 <li class="wrap">Handle now</li>
 </ul>
 </section>
-<section class="section-card">
+<section id="finding-1" class="section-card" aria-labelledby="finding-1-heading">
 <div class="section-header">
 <span class="severity-badge severity-warning">Warning</span>
-<h2>Warning leak</h2>
+<h2 id="finding-1-heading">Warning leak</h2>
 <span class="category">Leak</span>
 </div>
 <p class="summary">Warning item</p>
 <table>
-<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<thead><tr><th scope="col">Label</th><th scope="col">Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Warning</td></tr>
 </tbody>
@@ -90,15 +110,15 @@ tbody tr:nth-child(even){background:#fcfcfd;}
 <li class="wrap">Plan remediation</li>
 </ul>
 </section>
-<section class="section-card">
+<section id="finding-2" class="section-card" aria-labelledby="finding-2-heading">
 <div class="section-header">
 <span class="severity-badge severity-info">Info</span>
-<h2>Info signal</h2>
+<h2 id="finding-2-heading">Info signal</h2>
 <span class="category">Info</span>
 </div>
 <p class="summary">Informational item</p>
 <table>
-<thead><tr><th>Label</th><th>Value</th></tr></thead>
+<thead><tr><th scope="col">Label</th><th scope="col">Value</th></tr></thead>
 <tbody>
 <tr><td>Item</td><td class="wrap">Info</td></tr>
 </tbody>
@@ -107,5 +127,6 @@ tbody tr:nth-child(even){background:#fcfcfd;}
 <li class="wrap">Observe</li>
 </ul>
 </section>
+<script type="application/json" id="report-data">{"schemaVersion":"1.0","dumpPath":"C:/fixtures/MixedSeverity.dmp","generatedAtUtc":"2026-01-01T12:00:00Z","elapsedSeconds":6.6,"isTrendReport":false,"dedup":{"mergedSections":0,"duplicateCandidates":0},"executiveSummary":[],"developerActionPlan":[],"sections":[{"id":"finding-0","title":"Critical leak","category":"Leak","severity":"Critical","summary":"Critical item","evidence":[{"label":"Item","value":"Critical"}],"remediation":["Handle now"]},{"id":"finding-1","title":"Warning leak","category":"Leak","severity":"Warning","summary":"Warning item","evidence":[{"label":"Item","value":"Warning"}],"remediation":["Plan remediation"]},{"id":"finding-2","title":"Info signal","category":"Info","severity":"Info","summary":"Informational item","evidence":[{"label":"Item","value":"Info"}],"remediation":["Observe"]}]}</script>
 </main>
 </body></html>

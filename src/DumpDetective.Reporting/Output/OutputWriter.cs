@@ -66,6 +66,14 @@ internal sealed class OutputWriter(TextWriter? writer, bool writeToConsoleWhenNo
     {
         WriteLine(string.Empty);
     }
+
+    public void WriteDetailTable(DumpDetective.Reporting.Models.DetailedAnalyzerTableData tableData)
+    {
+        if (tableData.Caption is not null)
+            WriteLine(tableData.Caption);
+        if (tableData.Headers.Count > 0)
+            WriteLine(string.Join("  ", tableData.Headers.Select((h, i) => i == 0 ? $"{h,-60}" : $"{h,14}")));
+        foreach (DumpDetective.Reporting.Models.DetailedAnalyzerTableRow row in tableData.Rows)
+            WriteLine(string.Join("  ", row.Cells.Select((c, i) => i == 0 ? $"{c.Display,-60}" : $"{c.Display,14}")));
+    }
 }
-
-

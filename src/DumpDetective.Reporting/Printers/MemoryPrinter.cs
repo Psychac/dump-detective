@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -42,26 +43,28 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteDetailBlank();
             writer.WriteSubHeading("TOP 20 OBJECT TYPES BY MEMORY SIZE:");
             writer.WriteSeparator();
-            writer.WriteDetailText($"{"Type",-80} {"Count",12} {"Total Size",12}");
-            foreach (var type in domain.TopTypesBySize.Take(TopItemsToShow))
-            {
-                IReadOnlyList<string> wrapped = TableWrapHelper.Wrap(type.TypeName, 80);
-                writer.WriteDetailText($"{wrapped[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
-                for (int i = 1; i < wrapped.Count; i++)
-                    writer.WriteDetailText($"{wrapped[i],-80} {string.Empty,12} {string.Empty,12}");
-            }
+            writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                Caption: "Top 20 object types by memory size",
+                Headers: ["Type", "Count", "Total Size"],
+                Rows: domain.TopTypesBySize.Take(TopItemsToShow)
+                    .Select(t => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(t.TypeName),
+                        new DetailedAnalyzerTableCell($"{t.Count:N0}", t.Count),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes)]))
+                    .ToList()));
 
             writer.WriteDetailBlank();
             writer.WriteSubHeading("TOP 20 OBJECT TYPES BY COUNT:");
             writer.WriteSeparator();
-            writer.WriteDetailText($"{"Type",-80} {"Count",12} {"Total Size",12}");
-            foreach (var type in domain.TopTypesByCount.Take(TopItemsToShow))
-            {
-                IReadOnlyList<string> wrapped = TableWrapHelper.Wrap(type.TypeName, 80);
-                writer.WriteDetailText($"{wrapped[0],-80} {type.Count,12:N0} {FormatHelper.FormatBytes(type.TotalBytes),12}");
-                for (int i = 1; i < wrapped.Count; i++)
-                    writer.WriteDetailText($"{wrapped[i],-80} {string.Empty,12} {string.Empty,12}");
-            }
+            writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                Caption: "Top 20 object types by count",
+                Headers: ["Type", "Count", "Total Size"],
+                Rows: domain.TopTypesByCount.Take(TopItemsToShow)
+                    .Select(t => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(t.TypeName),
+                        new DetailedAnalyzerTableCell($"{t.Count:N0}", t.Count),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes)]))
+                    .ToList()));
 
             writer.WriteDetailDivider();
         }

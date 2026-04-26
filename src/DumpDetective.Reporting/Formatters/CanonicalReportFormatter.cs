@@ -1,5 +1,7 @@
 using DumpDetective.Core.Configuration;
 using DumpDetective.Reporting.Models;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DumpDetective.Reporting.Formatters;
 
@@ -275,6 +277,30 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                         case DetailedAnalyzerSubmoduleKind.Empty:
                             rendered.Add("<div class=\"detail-gap\"></div>");
                             break;
+                        case DetailedAnalyzerSubmoduleKind.Table when submodule.TableData is { } td:
+                        {
+                            System.Text.StringBuilder tableSb = new();
+                            tableSb.Append("<table>");
+                            if (td.Caption is not null)
+                                tableSb.Append($"<caption>{Encode(td.Caption)}</caption>");
+                            tableSb.Append("<thead><tr>");
+                            foreach (string header in td.Headers)
+                                tableSb.Append($"<th scope=\"col\">{Encode(header)}</th>");
+                            tableSb.Append("</tr></thead><tbody>");
+                            foreach (DetailedAnalyzerTableRow row in td.Rows)
+                            {
+                                tableSb.Append("<tr>");
+                                foreach (DetailedAnalyzerTableCell cell in row.Cells)
+                                {
+                                    string dataAttr = cell.RawValue.HasValue ? $" data-value=\"{cell.RawValue.Value}\"" : string.Empty;
+                                    tableSb.Append($"<td{dataAttr}>{Encode(cell.Display)}</td>");
+                                }
+                                tableSb.Append("</tr>");
+                            }
+                            tableSb.Append("</tbody></table>");
+                            rendered.Add(tableSb.ToString());
+                            break;
+                        }
                         default:
                             rendered.Add($"<div class=\"detail-line{indentClass}\">{Encode(submodule.Text ?? string.Empty)}</div>");
                             break;
@@ -356,18 +382,30 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             ".detail-gap{height:8px;}",
             ".detail-indent-1{padding-left:12px;}",
             ".detail-indent-2{padding-left:24px;}",
+            ".detail-block table{background:transparent;border-collapse:collapse;width:100%;margin:8px 0;color:#e5e7eb;}",
+            ".detail-block thead th{background:#1e293b;color:#93c5fd;font-weight:600;border:1px solid #334155;padding:6px 8px;text-align:left;}",
+            ".detail-block tbody td{border:1px solid #334155;padding:5px 8px;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;}",
+            ".detail-block tbody tr:nth-child(even){background:rgba(255,255,255,0.04);}",
+            ".detail-block caption{color:#94a3b8;font-size:13px;font-weight:600;text-align:left;padding:2px 0 4px 0;caption-side:top;}",
+            "nav.toc{background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05);padding:16px 18px;margin-bottom:16px;}",
+            "nav.toc h2{margin:0 0 10px 0;font-size:16px;color:#1f2937;}",
+            "nav.toc ol{margin:0;padding-left:20px;column-count:auto;column-width:280px;column-gap:24px;}",
+            "nav.toc li{margin:4px 0;font-size:14px;}",
+            "nav.toc a{color:#1d4ed8;text-decoration:none;}",
+            "nav.toc a:hover{text-decoration:underline;}",
+            ".toc-badge{display:inline-block;padding:1px 6px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;margin-left:5px;vertical-align:middle;}",
             "</style>",
             "</head>",
             "<body>",
             "<main class=\"container\">",
-            "<section class=\"header-card\">",
-            $"<h1>{Encode(reportTitle)}</h1>",
+            "<section id=\"section-header\" class=\"header-card\" aria-labelledby=\"section-header-heading\">",
+            $"<h1 id=\"section-header-heading\">{Encode(reportTitle)}</h1>",
             "<div class=\"meta-grid\">",
             $"<div class=\"meta-item\"><span class=\"meta-label\">{Encode(dumpLabel)}:</span> <span class=\"wrap\">{Encode(report.DumpPath)}</span></div>",
-            $"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</div>",
-            $"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> {report.Elapsed.TotalSeconds:F1}s</div>",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> <time datetime=\"{report.GeneratedAtUtc:yyyy-MM-ddTHH:mm:ssZ}\">{report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</time></div>",
+            $"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> <span data-value=\"{report.Elapsed.TotalSeconds:F3}\">{report.Elapsed.TotalSeconds:F1}s</span></div>",
             "</div>",
-            $"<div class=\"dedup-note\"><strong>Dedup:</strong> merged {report.DedupDiagnostics.MergedSections}/{report.DedupDiagnostics.DuplicateCandidates}</div>",
+            $"<div class=\"dedup-note\"><strong>Dedup:</strong> merged <span data-value=\"{report.DedupDiagnostics.MergedSections}\">{report.DedupDiagnostics.MergedSections}</span>/<span data-value=\"{report.DedupDiagnostics.DuplicateCandidates}\">{report.DedupDiagnostics.DuplicateCandidates}</span></div>",
             "</section>"
         ];
 
@@ -381,11 +419,43 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             }
         }
 
+        // Build Table of Contents nav
+        {
+            List<string> tocItems = [];
+            if (report.ExecutiveSummary.Count > 0)
+                tocItems.Add("<li><a href=\"#section-executive-summary\">Executive Summary</a></li>");
+            if (report.DeveloperActionPlan.Count > 0)
+                tocItems.Add("<li><a href=\"#section-developer-action-plan\">Developer Action Plan</a></li>");
+            for (int i = 0; i < report.Sections.Count; i++)
+            {
+                ReportSection s = report.Sections[i];
+                string severityCssForToc = s.Severity switch
+                {
+                    Core.Models.FindingSeverity.Critical => "severity-critical",
+                    Core.Models.FindingSeverity.Warning => "severity-warning",
+                    _ => "severity-info"
+                };
+                tocItems.Add($"<li><a href=\"#finding-{i}\">{Encode(s.Title)}</a><span class=\"toc-badge {severityCssForToc}\">{Encode(s.Severity.ToString())}</span></li>");
+            }
+            if (report.DetailedAnalyzerSections is { Count: > 0 })
+                tocItems.Add("<li><a href=\"#section-detailed-analyzers\">Detailed Analyzer Sections</a></li>");
+
+            if (tocItems.Count > 0)
+            {
+                lines.Add("<nav class=\"toc\" aria-labelledby=\"toc-heading\">");
+                lines.Add("<h2 id=\"toc-heading\">Contents</h2>");
+                lines.Add("<ol>");
+                lines.AddRange(tocItems);
+                lines.Add("</ol>");
+                lines.Add("</nav>");
+            }
+        }
+
         if (report.ExecutiveSummary.Count > 0)
         {
-            lines.Add("<section class=\"section-card\">");
-            lines.Add("<h2>Executive summary</h2>");
-            lines.Add("<table><thead><tr><th>Signal</th><th>Value</th></tr></thead><tbody>");
+            lines.Add("<section id=\"section-executive-summary\" class=\"section-card\" aria-labelledby=\"section-executive-summary-heading\">");
+            lines.Add("<h2 id=\"section-executive-summary-heading\">Executive summary</h2>");
+            lines.Add("<table><thead><tr><th scope=\"col\">Signal</th><th scope=\"col\">Value</th></tr></thead><tbody>");
             foreach (ExecutiveSummaryItem item in report.ExecutiveSummary)
             {
                 lines.Add($"<tr><td>{Encode(item.Label)}</td><td class=\"wrap\">{Encode(item.Value)}</td></tr>");
@@ -396,9 +466,9 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
 
         if (report.DeveloperActionPlan.Count > 0)
         {
-            lines.Add("<section class=\"section-card\">");
-            lines.Add("<h2>Developer action plan</h2>");
-            lines.Add("<table><thead><tr><th>Priority</th><th>Title</th><th>Action</th><th>Impact</th></tr></thead><tbody>");
+            lines.Add("<section id=\"section-developer-action-plan\" class=\"section-card\" aria-labelledby=\"section-developer-action-plan-heading\">");
+            lines.Add("<h2 id=\"section-developer-action-plan-heading\">Developer action plan</h2>");
+            lines.Add("<table><thead><tr><th scope=\"col\">Priority</th><th scope=\"col\">Title</th><th scope=\"col\">Action</th><th scope=\"col\">Impact</th></tr></thead><tbody>");
             foreach (DeveloperActionItem action in report.DeveloperActionPlan)
             {
                 lines.Add($"<tr><td>{Encode(action.Priority)}</td><td>{Encode(action.Title)}</td><td class=\"wrap\">{Encode(action.Action)}</td><td class=\"wrap\">{Encode(action.Impact)}</td></tr>");
@@ -407,8 +477,9 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             lines.Add("</section>");
         }
 
-        foreach (ReportSection section in report.Sections)
+        for (int sectionIndex = 0; sectionIndex < report.Sections.Count; sectionIndex++)
         {
+            ReportSection section = report.Sections[sectionIndex];
             string severityCss = section.Severity switch
             {
                 Core.Models.FindingSeverity.Critical => "severity-critical",
@@ -416,15 +487,15 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 _ => "severity-info"
             };
 
-            lines.Add("<section class=\"section-card\">");
+            lines.Add($"<section id=\"finding-{sectionIndex}\" class=\"section-card\" aria-labelledby=\"finding-{sectionIndex}-heading\">");
             lines.Add("<div class=\"section-header\">");
             lines.Add($"<span class=\"severity-badge {severityCss}\">{Encode(section.Severity.ToString())}</span>");
-            lines.Add($"<h2>{Encode(section.Title)}</h2>");
+            lines.Add($"<h2 id=\"finding-{sectionIndex}-heading\">{Encode(section.Title)}</h2>");
             lines.Add($"<span class=\"category\">{Encode(section.Category)}</span>");
             lines.Add("</div>");
             lines.Add($"<p class=\"summary\">{Encode(section.NarrativeSummary)}</p>");
             lines.Add("<table>");
-            lines.Add("<thead><tr><th>Label</th><th>Value</th></tr></thead>");
+            lines.Add("<thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead>");
             lines.Add("<tbody>");
             foreach (ReportEvidenceRow row in section.EvidenceRows)
             {
@@ -452,14 +523,14 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         {
             IReadOnlyList<DetailedAnalyzerSection> detailedSections = report.DetailedAnalyzerSections;
 
-            lines.Add("<section class=\"section-card\">");
-            lines.Add("<h2>Detailed analyzer sections</h2>");
+            lines.Add("<section id=\"section-detailed-analyzers\" class=\"section-card\" aria-labelledby=\"section-detailed-analyzers-heading\">");
+            lines.Add("<h2 id=\"section-detailed-analyzers-heading\">Detailed analyzer sections</h2>");
 
             for (int i = 0; i < detailedSections.Count; i++)
             {
                 DetailedAnalyzerSection detail = detailedSections[i];
                 string openAttribute = i == 0 ? " open" : string.Empty;
-                lines.Add($"<details class=\"detail-item\"{openAttribute}>");
+                lines.Add($"<details id=\"detail-{i}\" class=\"detail-item\"{openAttribute}>");
                 lines.Add($"<summary>{Encode(detail.Title)}</summary>");
                 lines.Add($"<div class=\"detail-block\">{RenderDetailedContentHtml(detail)}</div>");
                 lines.Add("</details>");
@@ -467,6 +538,45 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
 
             lines.Add("</section>");
         }
+
+        // Point 4: embed canonical JSON for client-side consumption
+        var reportData = new
+        {
+            schemaVersion = report.ReportSchemaVersion,
+            dumpPath = report.DumpPath,
+            generatedAtUtc = report.GeneratedAtUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            elapsedSeconds = Math.Round(report.Elapsed.TotalSeconds, 3),
+            isTrendReport = report.IsTrendReport,
+            trendDumpCount = report.IsTrendReport ? (int?)report.TrendDumpCount : null,
+            trendDumpPaths = report.IsTrendReport ? report.TrendDumpPaths : null,
+            dedup = new
+            {
+                mergedSections = report.DedupDiagnostics.MergedSections,
+                duplicateCandidates = report.DedupDiagnostics.DuplicateCandidates
+            },
+            executiveSummary = report.ExecutiveSummary
+                .Select(e => new { label = e.Label, value = e.Value }),
+            developerActionPlan = report.DeveloperActionPlan
+                .Select(a => new { priority = a.Priority, title = a.Title, action = a.Action, impact = a.Impact }),
+            sections = report.Sections
+                .Select((s, i) => new
+                {
+                    id = $"finding-{i}",
+                    title = s.Title,
+                    category = s.Category,
+                    severity = s.Severity.ToString(),
+                    summary = s.NarrativeSummary,
+                    evidence = s.EvidenceRows.Select(r => new { label = r.Label, value = r.Value }),
+                    remediation = s.RemediationHints
+                })
+        };
+        var jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+        string reportDataJson = JsonSerializer.Serialize(reportData, jsonOptions);
+        lines.Add($"<script type=\"application/json\" id=\"report-data\">{reportDataJson}</script>");
 
         lines.Add("</main>");
         lines.Add("</body></html>");

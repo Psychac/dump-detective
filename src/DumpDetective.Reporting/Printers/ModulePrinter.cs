@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Output;
 
 namespace DumpDetective.Reporting.Printers
@@ -33,17 +34,17 @@ namespace DumpDetective.Reporting.Printers
             }
 
             writer.WriteDetailBlank();
-            writer.WriteDetailBlank();
             writer.WriteSubHeading("LOADED ASSEMBLIES (Top 30):");
             writer.WriteSeparator();
-            writer.WriteDetailText($"{"Module Name",-40} {"Version/Assembly Name",-45} {"Size",12}");
-            writer.WriteSeparator();
-
-            foreach (var module in domain.TopModulesBySize)
-            {
-                string dynamicMarker = module.IsDynamic ? " [Dynamic]" : "";
-                writer.WriteDetailText($"{FormatHelper.TruncateString(module.Name, 40),-40} {FormatHelper.TruncateString(module.AssemblyName, 45),-45} {FormatHelper.FormatBytes(module.Size),12}{dynamicMarker}");
-            }
+            writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                Caption: "Loaded assemblies (top 30 by size)",
+                Headers: ["Module Name", "Assembly Name", "Size", "Dynamic"],
+                Rows: domain.TopModulesBySize.Select(module => new DetailedAnalyzerTableRow([
+                    new DetailedAnalyzerTableCell(module.Name),
+                    new DetailedAnalyzerTableCell(module.AssemblyName),
+                    new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(module.Size), (long)module.Size),
+                    new DetailedAnalyzerTableCell(module.IsDynamic ? "Yes" : "No")]))
+                .ToList()));
 
             if (domain.ConflictDetails.Count == 0)
             {

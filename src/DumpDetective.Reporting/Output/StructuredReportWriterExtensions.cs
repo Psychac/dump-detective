@@ -80,4 +80,25 @@ internal static class StructuredReportWriterExtensions
 
         writer.WriteLine(string.Empty);
     }
+
+    public static void WriteDetailTable(this IReportWriter writer, DumpDetective.Reporting.Models.DetailedAnalyzerTableData tableData)
+    {
+        if (writer is StructuredCaptureReportWriter capture)
+        {
+            capture.WriteDetailTable(tableData);
+            return;
+        }
+        if (writer is OutputWriter output)
+        {
+            output.WriteDetailTable(tableData);
+            return;
+        }
+        // Generic text fallback
+        if (tableData.Caption is not null)
+            writer.WriteLine(tableData.Caption);
+        if (tableData.Headers.Count > 0)
+            writer.WriteLine(string.Join("  ", tableData.Headers.Select((h, i) => i == 0 ? $"{h,-60}" : $"{h,14}")));
+        foreach (DumpDetective.Reporting.Models.DetailedAnalyzerTableRow row in tableData.Rows)
+            writer.WriteLine(string.Join("  ", row.Cells.Select((c, i) => i == 0 ? $"{c.Display,-60}" : $"{c.Display,14}")));
+    }
 }

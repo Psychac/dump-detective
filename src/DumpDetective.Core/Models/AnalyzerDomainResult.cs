@@ -4,7 +4,7 @@ public abstract record AnalyzerDomainResult
     public string AnalyzerName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public IReadOnlyDictionary<string, object?> Metrics { get; init; } = new Dictionary<string, object?>();
-    public IReadOnlyCollection<string> Warnings { get; init; } = [];
+    public IReadOnlyCollection<string> Warnings { get; init; } = Array.Empty<string>();
 }
 
 public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
@@ -152,7 +152,16 @@ internal sealed record WastefulCollectionSnapshot(
     int Capacity,
     double FillRate,
     ulong WastedMemory,
-    ulong Address);
+    ulong Address,
+    int? Head = null,
+    int? Tail = null,
+    ulong? LargestContiguousFreeSegmentBytes = null,
+    int? FreeSegmentCount = null,
+    ulong ElementSize = 0,
+    string ElementType = "",
+    string SizeEstimateConfidence = "Unknown",
+    string DetectionMethod = "",
+    string? RootDescription = null);
 
 internal sealed record StaticRootDomainResult(
     int RootCount,

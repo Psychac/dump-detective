@@ -2,6 +2,13 @@ using System;
 
 namespace DumpDetective.Analysis.Analyzers
 {
+    public enum AnalysisProfile
+    {
+        Fast = 0,
+        Balanced = 1,
+        Deep = 2,
+    }
+
     /// <summary>
     /// Options that control how the <see cref="CollectionAnalyzer"/> runs and reports findings.
     /// This class centralizes thresholds and performance-related configuration so they can be
@@ -13,13 +20,15 @@ namespace DumpDetective.Analysis.Analyzers
         /// Threshold (in bytes) under which an individual collection is considered "wasteful".
         /// Default is 10 KB to match current heuristics.
         /// </summary>
-        public ulong WasteThresholdBytes { get; init; } = 10 * 1024UL;
+        public ulong WasteThresholdBytes { get; init; } = 1 * 1024UL;
 
         /// <summary>
-        /// Total wasted memory (sum of reported wasteful collections) above which the analyzer
-        /// should surface a summary warning. Default is 10 MB.
+        /// <summary>
+        /// NOTE: Summary warning thresholds are report-level concerns and have been moved
+        /// to the findings generator options. This property was intentionally removed from
+        /// analyzer options to avoid mixing analysis configuration with reporting thresholds.
         /// </summary>
-        public ulong SummaryWarnThresholdBytes { get; init; } = 10 * 1024UL * 1024UL;
+        // SummaryWarnThresholdBytes removed; reporting thresholds live in CollectionFindingGeneratorOptions
 
         /// <summary>
         /// Number of top wasteful collections to include in the short report.
@@ -47,6 +56,31 @@ namespace DumpDetective.Analysis.Analyzers
         /// preserves existing behavior but callers are encouraged to enable logging.
         /// </summary>
         public bool SurfaceProbingExceptions { get; init; } = false;
+
+        /// <summary>
+        /// Analysis profile controls the depth and cost of additional diagnostics such as
+        /// shortest-root-path searches. Fast = cheapest, Balanced = targeted deep search for top items,
+        /// Deep = more exhaustive searches for top items.
+        /// </summary>
+        public AnalysisProfile Profile { get; init; } = AnalysisProfile.Balanced;
+
+        /// <summary>
+        /// Number of top wasteful items to run reference-path analysis for when the profile
+        /// is not <see cref="AnalysisProfile.Fast"/>. Defaults to 5.
+        /// </summary>
+        public int PathAnalysisTopN { get; init; } = 5;
+
+        /// <summary>
+        /// Reference-chain search options used when running targeted path searches.
+        /// Consumers may customize budgets for balanced/deep searches here.
+        /// </summary>
+        public DumpDetective.Core.Options.ReferenceChainOptions ReferenceChainOptions { get; init; } = new();
+
+        /// <summary>
+        /// If true, serialize accesses to the ClrHeap APIs (e.g., GetObject) to avoid
+        /// potential thread-safety issues when running parallel heap scans. Default false.
+        /// </summary>
+        public bool SerializeHeapAccess { get; init; } = false;
 
         /// <summary>
         /// Default options instance with recommended values matching the original analyzer.

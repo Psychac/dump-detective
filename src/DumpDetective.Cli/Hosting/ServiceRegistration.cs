@@ -8,6 +8,7 @@ using DumpDetective.Reporting.Services;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Cli.Hosting;
 
@@ -17,6 +18,12 @@ internal static class ServiceRegistration
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
         IServiceCollection services = builder.Services;
+
+        // Scope debug-level logging to DumpDetective namespaces only to avoid framework noise.
+        // CollectionAnalyzer diagnostics (field detection, waste scan summary) log at Debug.
+        builder.Logging
+            .SetMinimumLevel(LogLevel.Warning);
+            //.AddFilter("DumpDetective", LogLevel.Debug);
 
         services.AddSingleton<RootCommandBuilder>();
 

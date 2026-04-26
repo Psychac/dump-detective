@@ -12,6 +12,7 @@
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
     <PackageReference Include="FluentAssertions" Version="7.*" />
+    <PackageReference Include="Moq" Version="4.*" />
     <ProjectReference Include="..\..\src\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />

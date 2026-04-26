@@ -6,8 +6,6 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class CollectionFindingGenerator : IFindingGenerator
 {
-    private const ulong SummaryWarnThresholdBytes = 50 * 1024 * 1024; // 50 MB
-
     public string AnalyzerName => "Collection Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is CollectionDomainResult;
 
@@ -15,7 +13,9 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
     {
         if (result is not CollectionDomainResult r) return [];
 
-        FindingSeverity severity = r.TotalWastedMemory >= SummaryWarnThresholdBytes
+        // Use a moderate default; this may be overridden by a reporting-level configuration in the future.
+        ulong summaryWarnBytes = 50 * 1024 * 1024;
+        FindingSeverity severity = r.TotalWastedMemory >= summaryWarnBytes
             ? FindingSeverity.Warning : FindingSeverity.Info;
 
         return

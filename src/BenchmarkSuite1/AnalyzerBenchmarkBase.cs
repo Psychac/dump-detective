@@ -18,7 +18,14 @@ namespace BenchmarkSuite1
     /// Setup mirrors DumpAnalysisService: loads dump, builds heap index, and constructs a fully
     /// populated AnalysisContext (including Options) so analyzers take the index-driven path.
     /// </summary>
-    [SimpleJob(warmupCount: 0, iterationCount: 3)]
+    /// <remarks>
+    /// [Config(AnalyzerBenchmarkIterationConfig)] is the authoritative source for WarmupCount/IterationCount.
+    /// [SimpleJob] alone is insufficient because BenchmarkProfilerAgentConfig (assembly-level) injects a
+    /// mutator with WarmupCount=1/IterationCount=5 that overwrites it. The type-level config is merged
+    /// last in BenchmarkDotNet's global → assembly → type chain, so its mutator values win.
+    /// </remarks>
+    [Config(typeof(AnalyzerBenchmarkIterationConfig))]
+    [SimpleJob(warmupCount: AnalyzerBenchmarkIterationConfig.WarmupCount, iterationCount: AnalyzerBenchmarkIterationConfig.IterationCount)]
     public abstract class AnalyzerBenchmarkBase<TAnalyzer> where TAnalyzer : IAnalyzer, new()
     {
         protected TAnalyzer Analyzer = default!;
@@ -28,7 +35,8 @@ namespace BenchmarkSuite1
 
         // Built once in Setup and reused across all iterations — avoids per-call allocation
         // and ensures the index-path is available to every analyzer.
-        protected AnalysisContext? AnalysisContext { get; private set; }
+        // Protected setter so subclasses can inject additional options after base.Setup().
+        protected AnalysisContext? AnalysisContext { get; set; }
 
         private DataTarget? _dataTarget;
 
@@ -97,11 +105,20 @@ namespace BenchmarkSuite1
                     [typeof(DiagnosticsOptions)]    = diagnosticsOptions,
                 }
             };
+
+            OnSetup();
         }
+
+        /// <summary>Override to perform additional setup after the base context is fully initialized.</summary>
+        protected virtual void OnSetup() { }
+
+        /// <summary>Override to perform cleanup before the base cleanup runs.</summary>
+        protected virtual void OnCleanup() { }
 
         [GlobalCleanup]
         public virtual void Cleanup()
         {
+            OnCleanup();
             AnalysisContext = null;
             Cache = null;
             Heap = null;

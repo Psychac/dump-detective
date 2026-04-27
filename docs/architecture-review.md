@@ -23,6 +23,7 @@
 | 2025 | MINOR-10 | ✅ **Done** | `EnumerateIndexedEntriesAsTuples` now delegates to `EnumerateIndexedEntries().Select(...)`; duplicate iteration body removed |
 | 2025 | MINOR-12 | ✅ **Done** | `Resolve<T>()` helper added to `ConfigurationResolver`; all 7 option ternaries collapsed to one-line calls |
 | 2025 | MINOR-15 | ✅ **Done** | `LazyReferenceGraph` now implements `IReferenceProvider` via explicit interface; `ReferenceChainAnalyzer` replaced `ClrReferenceProvider` with `LazyReferenceGraph`, gaining edge caching across the 3 BFS phases |
+| 2025 | MAJOR-04 | ✅ **Done** | `DumpAnalysisService` decomposed into `AnalyzerFilterService` (static), `SingleDumpOrchestrationService`, and `TrendOrchestrationService`; dead `IFindingGenerator` injection removed; coordinator reduced to ~60 LOC |
 
 ---
 
@@ -207,69 +208,31 @@ A generator crash now surfaces at three levels:
 
 ---
 
-### MAJOR-04 — `DumpAnalysisService` is a God Class
+### ✅ MAJOR-04 — `DumpAnalysisService` is a God Class — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Cli/Services/DumpAnalysisService.cs`
 
-#### What
-`DumpAnalysisService.ExecuteAsync` currently handles:
-1. Config resolution + startup validation
-2. Analyzer factory call + filter/order logic
-3. Trend vs. single-dump routing decision
-4. Building the CLI stage list
-5. Running the `StagedPipelineRunner`
-6. Rendering diagnostic summary to console
-7. Trend orchestration (`ExecuteTrendAsync` is a large private method)
+#### What was done
 
-#### Why it's a problem
-- **SRP violation:** 5–7 distinct responsibilities in a single class.
-- Every new feature (new routing mode, new output format, new validation rule) touches this file.
-- `ExecuteTrendAsync` duplicates pipeline logic that partially overlaps with `BuildSingleDumpStages`.
+| File | Change |
+|------|--------|
+| `Cli/Services/AnalyzerFilterService.cs` | **New file** — static class; `Validate()`, `Apply()`, `Order()`, `GetStageRank()` extracted from `DumpAnalysisService`; pure logic, no DI, unit-testable without infrastructure |
+| `Cli/Services/SingleDumpOrchestrationService.cs` | **New file** — DI service; owns the single-dump pipeline: header output, `StagedPipelineRunner`, diagnostic summary, exit code. Deps: `DumpLoader`, `FindingGenerationPipeline`, `ReportBuilderFacade` |
+| `Cli/Services/TrendOrchestrationService.cs` | **New file** — DI service; owns the full trend pipeline: per-dump `ExecutePipelineForDumpAsync`, snapshot building, `TrendReportData` construction, staged output (3 stages). Deps: `DumpLoader`, `FindingGenerationPipeline`, `ReportBuilderFacade`, `TrendAnalyzer` |
+| `Cli/Services/DumpAnalysisService.cs` | Reduced from ~560 → ~65 LOC; now a thin coordinator: resolve config, validate, filter/order analyzers, route to the appropriate orchestrator via `TryResolveTrendSequence` |
+| `Cli/Hosting/ServiceRegistration.cs` | Registered `SingleDumpOrchestrationService` and `TrendOrchestrationService` as singletons; dead `IEnumerable<IFindingGenerator>` parameter removed from `DumpAnalysisService` |
 
-#### How to fix
-Extract into focused services. Suggested decomposition:
-
+#### Responsibility map after refactor
 ```
-DumpAnalysisService (coordinator — thin, orchestrates only)
-├── AnalyzerFilterService          (filter + order analyzers from IReadOnlyList)
-├── TrendOrchestrationService      (owns ExecuteTrendAsync logic)
-└── SingleDumpOrchestrationService (owns BuildSingleDumpStages + RunAsync)
+DumpAnalysisService            ← config resolution + routing only (~65 LOC)
+  AnalyzerFilterService        ← validate + filter + order (static, ~95 LOC)
+  SingleDumpOrchestrationService ← single-dump stages + console output
+  TrendOrchestrationService    ← per-dump pipeline + trend report + staged output
 ```
 
-**`AnalyzerFilterService`** — pure static logic, easily unit-testable without any DI:
-```csharp
-internal static class AnalyzerFilterService
-{
-    public static IReadOnlyList<IAnalyzer> Apply(
-        IReadOnlyList<IAnalyzer> all,
-        IReadOnlyCollection<string> include,
-        IReadOnlyCollection<string> exclude) { ... }
-
-    public static IReadOnlyList<IAnalyzer> Order(IReadOnlyList<IAnalyzer> filtered) { ... }
-}
-```
-
-**`DumpAnalysisService` after refactor** becomes:
-```csharp
-internal sealed class DumpAnalysisService(
-    ConfigurationResolver configurationResolver,
-    StartupValidator startupValidator,
-    IAnalyzerFactory analyzerFactory,
-    SingleDumpOrchestrationService singleDumpOrchestration,
-    TrendOrchestrationService trendOrchestration)
-{
-    public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
-    {
-        ResolvedExecutionOptions resolved = Resolve(request);
-        IReadOnlyList<IAnalyzer> active = AnalyzerFilterService.Order(
-            AnalyzerFilterService.Apply(analyzerFactory.CreateAnalyzers(), resolved.IncludeAnalyzers, resolved.ExcludeAnalyzers));
-
-        return TryResolveTrendSequence(resolved, out var trendPaths)
-            ? await trendOrchestration.ExecuteAsync(resolved, active, trendPaths!, cancellationToken)
-            : await singleDumpOrchestration.ExecuteAsync(resolved, active, cancellationToken);
-    }
-}
-```
+Every new routing mode, output format, or validation rule now touches exactly one class.
 
 ---
 
@@ -586,7 +549,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | ~~MINOR-12~~ | ~~Extract `Resolve<T>()` helper in `ConfigurationResolver`~~ | ~~`Cli/Services/ConfigurationResolver.cs`~~ | ✅ **Done** |
 | ~~MINOR-15~~ | ~~Have `LazyReferenceGraph` implement `IReferenceProvider`; retire `ClrReferenceProvider`~~ | ~~`Analysis/Traversal/LazyReferenceGraph.cs`, `Core/Abstractions/ClrReferenceProvider.cs`~~ | ✅ **Done** |
 | ~~MINOR-08~~ | ~~Document cache eviction strategy in `LazyReferenceGraph` (or implement partial eviction)~~ | ~~`Analysis/Traversal/LazyReferenceGraph.cs`~~ | ✅ **Done** |
-| MAJOR-04 | Decompose `DumpAnalysisService` into focused service classes | `Cli/Services/` (new files) | L |
+| ~~MAJOR-04~~ | ~~Decompose `DumpAnalysisService` into focused service classes~~ | ~~`Cli/Services/` (new files)~~ | ✅ **Done** |
 
 ---
 

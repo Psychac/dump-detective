@@ -34,6 +34,8 @@ internal static class ServiceRegistration
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<DumpLoader>();
         services.AddSingleton<DumpAnalysisService>();
+        services.AddSingleton<SingleDumpOrchestrationService>();
+        services.AddSingleton<TrendOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
         services.AddSingleton<IAnalyzerReporterFactory, DefaultAnalyzerReporterFactory>();
 

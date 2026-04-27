@@ -17,6 +17,7 @@ namespace DumpDetective.Analysis.Analyzers
     // Suspect a bug in ReferenceChainAnalyzer's root description logic where it doesn't populate descriptions for certain stack roots.
     // This would impact the root hints shown for wasteful collections that are rooted in stacks.
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
+    // Need to revisit the logic once again.
     public class CollectionAnalyzer : IAnalyzer
     {
         private CollectionAnalysisOptions _options;

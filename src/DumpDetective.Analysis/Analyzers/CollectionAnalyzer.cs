@@ -35,6 +35,7 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly ILogger<CollectionAnalyzer>? _logger;
 
         public string Name => "Collection Analysis";
+        public string Category => "Memory";
 
         public CollectionAnalyzer()
             : this(CollectionAnalyzerOptions.Default, logger: null)

@@ -9,6 +9,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const ulong LohThresholdBytes = 85000;
 
         public string Name => "Memory Analysis";
+        public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

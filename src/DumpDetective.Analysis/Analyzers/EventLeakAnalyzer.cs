@@ -22,6 +22,7 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly object _eventNameCacheLock = new();
 
         public string Name => "Event Leak Analysis";
+        public string Category => "Events";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

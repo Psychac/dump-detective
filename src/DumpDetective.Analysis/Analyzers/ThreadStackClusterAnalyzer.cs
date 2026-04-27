@@ -12,6 +12,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const int MaxThreadIdsPerCluster = 8;
 
         public string Name => "Thread Stack Signature Clustering";
+        public string Category => "Threads";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

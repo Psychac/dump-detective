@@ -12,6 +12,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const int TopCount = 15;
 
         public string Name => "Dependent Handle Analysis";
+        public string Category => "Handles";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

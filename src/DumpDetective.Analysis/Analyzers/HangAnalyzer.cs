@@ -17,6 +17,7 @@ public class HangAnalyzer : IAnalyzer
         private const int TopContinuationTypesToShow = 5;
 
         public string Name => "Hang Analysis";
+        public string Category => "Hang";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

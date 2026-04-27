@@ -19,6 +19,7 @@ public class CrashAnalyzer : IAnalyzer
         private const int TopDetailedExceptionInstances = 25;
 
         public string Name => "Crash Analysis";
+        public string Category => "Crash";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

@@ -8,17 +8,17 @@ internal sealed class GenerateFindingsStage(FindingGenerationPipeline findingGen
 {
     public string Name => "Generate findings";
 
-    public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
+    public Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
         try
         {
-            state.Runs = (await findingGenerationPipeline.GenerateAsync(state.Runs, cancellationToken)).ToList();
+            state.Runs = findingGenerationPipeline.Generate(state.Runs, cancellationToken).ToList();
         }
         catch (Exception ex)
         {
             // Pipeline-level failure (not per-generator) — surface as a visible warning and continue.
             ConsoleUx.Warning($"Finding generation pipeline failed: {ex.Message}");
-            return;
+            return Task.CompletedTask;
         }
 
         // Per-generator errors are captured in FindingGeneratorError on each run result.
@@ -28,5 +28,7 @@ internal sealed class GenerateFindingsStage(FindingGenerationPipeline findingGen
             if (!string.IsNullOrWhiteSpace(run.FindingGeneratorError))
                 ConsoleUx.Warning($"Finding generator failed for '{run.AnalyzerName}': {run.FindingGeneratorError}");
         }
+
+        return Task.CompletedTask;
     }
 }

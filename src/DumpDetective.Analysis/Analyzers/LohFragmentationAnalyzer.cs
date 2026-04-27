@@ -34,6 +34,7 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         public string Name => "LOH Fragmentation Analysis";
+        public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

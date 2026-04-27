@@ -31,6 +31,7 @@ namespace DumpDetective.Analysis.Analyzers
         ];
 
         public string Name => "Thread Analysis";
+        public string Category => "Threads";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

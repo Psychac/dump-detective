@@ -11,6 +11,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const int MaxContestedLocksToShow = 15;
 
         public string Name => "Lock Graph Analysis";
+        public string Category => "Locks";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

@@ -20,33 +20,13 @@ internal sealed class ConfigurationResolver
 
         bool usedConfigFile = fileModel is not null;
 
-        MemoryLeakOptions memoryLeak = usedConfigFile
-            ? BuildMemoryLeakFromConfig(fileModel!, request)
-            : BuildMemoryLeakFromCli(request);
-
-        ReferenceChainOptions referenceChain = usedConfigFile
-            ? BuildReferenceChainFromConfig(fileModel!, request)
-            : BuildReferenceChainFromCli(request);
-
-        EventLeakOptions eventLeak = usedConfigFile
-            ? BuildEventLeakFromConfig(fileModel!, request)
-            : BuildEventLeakFromCli(request);
-
-        DiagnosticsOptions diagnostics = usedConfigFile
-            ? BuildDiagnosticsFromConfig(fileModel!, request)
-            : BuildDiagnosticsFromCli(request);
-
-        ReportOptions report = usedConfigFile
-            ? BuildReportFromConfig(fileModel!, request)
-            : BuildReportFromCli(request);
-
-        HeapIndexPrebuildMode indexPrebuildMode = usedConfigFile
-            ? BuildIndexPrebuildModeFromConfig(fileModel!, request)
-            : BuildIndexPrebuildModeFromCli(request);
-
-        CollectionAnalyzerOptions collection = usedConfigFile
-            ? BuildCollectionFromConfig(fileModel!, request)
-            : BuildCollectionFromCli(request);
+        MemoryLeakOptions memoryLeak      = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,         BuildMemoryLeakFromCli,         fileModel, request);
+        ReferenceChainOptions refChain    = Resolve(usedConfigFile, BuildReferenceChainFromConfig,     BuildReferenceChainFromCli,     fileModel, request);
+        EventLeakOptions eventLeak        = Resolve(usedConfigFile, BuildEventLeakFromConfig,          BuildEventLeakFromCli,          fileModel, request);
+        DiagnosticsOptions diagnostics    = Resolve(usedConfigFile, BuildDiagnosticsFromConfig,        BuildDiagnosticsFromCli,        fileModel, request);
+        ReportOptions report              = Resolve(usedConfigFile, BuildReportFromConfig,             BuildReportFromCli,             fileModel, request);
+        HeapIndexPrebuildMode indexMode   = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig,  BuildIndexPrebuildModeFromCli,  fileModel, request);
+        CollectionAnalyzerOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig,     BuildCollectionFromCli,         fileModel, request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
@@ -73,7 +53,7 @@ internal sealed class ConfigurationResolver
             configuredBaseline ?? request.BaselineDumpPath,
             effectiveTrend,
             memoryLeak,
-            referenceChain,
+            refChain,
             eventLeak,
             diagnostics,
             report,
@@ -83,7 +63,7 @@ internal sealed class ConfigurationResolver
             request.IncludeAnalyzers,
             request.ExcludeAnalyzers,
             request.DiagnosticMode,
-            indexPrebuildMode);
+            indexMode);
     }
 
     private static string? ResolveConfigPath(string? cliConfigPath)
@@ -287,6 +267,14 @@ internal sealed class ConfigurationResolver
 
     private static CollectionAnalyzerOptions BuildCollectionFromCli(AnalysisCommandRequest request)
         => new CollectionAnalyzerOptions();
+
+    private static T Resolve<T>(
+        bool fromFile,
+        Func<CliConfigurationFileModel, AnalysisCommandRequest, T> fromConfig,
+        Func<AnalysisCommandRequest, T> fromCli,
+        CliConfigurationFileModel? fileModel,
+        AnalysisCommandRequest request)
+        => fromFile ? fromConfig(fileModel!, request) : fromCli(request);
 
     private static string BuildOutputPath(string dumpPath, ReportFormat format)
     {

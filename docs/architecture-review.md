@@ -17,6 +17,12 @@
 | 2025 | MAJOR-07 | ✅ **Done** | `AnalysisContext` → `RuntimeAnalysisContext` in `Analysis/Pipeline/`; all 6 alias usages removed across Cli, BenchmarkSuite1, and test files; architecture test updated to reflect correct `Reporting → Analysis` dependency |
 | 2025 | MAJOR-05 | ✅ **Done** | `AnalysisContext.Options` key changed `string` → `Type`; `GetOption<T>()` extension added; `RuntimeAnalysisContext` redundant properties removed; 3 magic-key analyzers fixed; `CollectionAnalyzer` wired to context; `CollectionAnalyzerOptions` added to `ResolvedExecutionOptions` and config |
 | 2025 | MAJOR-06 | ✅ **Done** | `IHeapIndexBuilder` interface added to `Analysis/Cache/`; `HeapAnalysisCache` implements it; state bag split into `IHeapIndexBuilder HeapIndexBuilder` + `IHeapAnalysisCache HeapCache`; `AnalysisPipeline` casts replaced with interface checks |
+| 2025 | MINOR-08 | ✅ **Done** | Full-clear eviction rationale expanded in `LazyReferenceGraph`; OPT-#7 comment now documents the thrash scenario, the deliberate choice, and the two upgrade paths |
+| 2025 | MINOR-09 | ✅ **Done** | `GenerateAsync` renamed to `Generate`; return type changed from `Task<IReadOnlyList<...>>` to `IReadOnlyList<...>`; `Task.FromResult` wrapper removed; both call sites updated (`GenerateFindingsStage` and `DumpAnalysisService` trend path) |
+| 2025 | MINOR-11 | ✅ **Done** | Explicit `Category` property override added to all 16 analyzers; `Infer()` retained as fallback for unknown/third-party analyzers only |
+| 2025 | MINOR-10 | ✅ **Done** | `EnumerateIndexedEntriesAsTuples` now delegates to `EnumerateIndexedEntries().Select(...)`; duplicate iteration body removed |
+| 2025 | MINOR-12 | ✅ **Done** | `Resolve<T>()` helper added to `ConfigurationResolver`; all 7 option ternaries collapsed to one-line calls |
+| 2025 | MINOR-15 | ✅ **Done** | `LazyReferenceGraph` now implements `IReferenceProvider` via explicit interface; `ReferenceChainAnalyzer` replaced `ClrReferenceProvider` with `LazyReferenceGraph`, gaining edge caching across the 3 BFS phases |
 
 ---
 
@@ -372,199 +378,89 @@ using PipelineAnalysisContext = DumpDetective.Analysis.Pipeline.AnalysisContext;
 
 ---
 
-### MINOR-08 — `LazyReferenceGraph` full-cache eviction on limit hit
+### ✅ MINOR-08 — `LazyReferenceGraph` full-cache eviction on limit hit — **RESOLVED**
+
+> **Implemented (Option A — document and accept).** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Analysis/Traversal/LazyReferenceGraph.cs`
 
-#### What
-```csharp
-private const int MaxCachedNodes = 500_000;
-
-public IReadOnlyList<ulong> GetReferences(ulong address)
-{
-    ...
-    if (_cache.Count >= MaxCachedNodes)
-        _cache.Clear();   // ← blows entire cache
-    ...
-}
-```
-
-#### Why it's a problem
-In worst-case dense graph traversal (e.g., a large collection type appearing as the top-N sample), the same root nodes are visited repeatedly across multiple BFS runs. When the limit is hit mid-BFS, `_cache.Clear()` discards nodes that will be immediately re-requested in the same run. This creates a thrash cycle: fill → clear → fill → clear.
-
-#### How to fix
-**Option A — Accept and document (KISS, current behavior is memory-safe):**
-Add a comment documenting the worst-case thrash scenario and the deliberate choice:
-```csharp
-// Full-clear eviction: when the 500 000-node limit is hit, the entire cache is discarded
-// and rebuilt from the next BFS traversal. This is intentionally aggressive — it bounds
-// peak memory at the cost of potential re-fetching in dense-graph scenarios. The 500 000
-// limit is sized to avoid this in practice for typical production dumps (<500 MB managed heap).
-// If thrash is observed on very large dumps, consider halving the limit or switching to a
-// generation-based strategy (evict the oldest 50% by insertion order).
-if (_cache.Count >= MaxCachedNodes)
-    _cache.Clear();
-```
-
-**Option B — Partial eviction (evict oldest 50%):**
-```csharp
-if (_cache.Count >= MaxCachedNodes)
-{
-    // Evict the oldest half of entries by insertion order.
-    // Dictionary<K,V> in .NET preserves insertion order for enumeration.
-    int toRemove = _cache.Count / 2;
-    foreach (ulong key in _cache.Keys.Take(toRemove).ToList())
-        _cache.Remove(key);
-}
-```
-
-**Recommendation:** Option A for now (KISS). Document it and revisit during profiling on large dumps.
+The existing OPT-#7 comment was expanded to document the full-clear eviction strategy, the worst-case thrash scenario (dense-graph BFS on large dumps), the deliberate choice to keep it aggressive, and the two concrete upgrade paths (halve the limit; or partial eviction evicting oldest 50% by insertion order). Revisit during profiling if thrash is observed on dumps >500 MB managed heap.
 
 ---
 
-### MINOR-09 — `FindingGenerationPipeline.GenerateAsync` is sync wrapped in `Task.FromResult`
+### ✅ MINOR-09 — `FindingGenerationPipeline.GenerateAsync` is sync wrapped in `Task.FromResult` — **RESOLVED**
+
+> **Implemented (Option A — truly sync).** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Reporting/Pipeline/FindingGenerationPipeline.cs`
 
-#### What
-```csharp
-public Task<IReadOnlyList<AnalyzerRunResult>> GenerateAsync(...)
-{
-    List<AnalyzerRunResult> updated = new(runs.Count);
-    foreach (AnalyzerRunResult run in runs)
-    {
-        // entirely synchronous work
-    }
-    return Task.FromResult((IReadOnlyList<AnalyzerRunResult>)updated);
-}
-```
-
-#### Why it's a problem
-The `Async` suffix implies I/O or concurrency but there is none. Callers may `await` this expecting actual async behavior. It allocates a `Task` wrapper unnecessarily.
-
-#### How to fix
-Either make it truly sync or use `ValueTask`:
-
-```csharp
-// Option A — remove async fiction, make it sync
-public IReadOnlyList<AnalyzerRunResult> Generate(IReadOnlyList<AnalyzerRunResult> runs, CancellationToken cancellationToken)
-{ ... }
-
-// Option B — use ValueTask for zero-allocation on the hot path
-public ValueTask<IReadOnlyList<AnalyzerRunResult>> GenerateAsync(...)
-{
-    ...
-    return ValueTask.FromResult((IReadOnlyList<AnalyzerRunResult>)updated);
-}
-```
-
-Update the call site in `GenerateFindingsStage.cs` accordingly.
+| File | Change |
+|------|--------|
+| `Reporting/Pipeline/FindingGenerationPipeline.cs` | `GenerateAsync` renamed to `Generate`; return type `Task<IReadOnlyList<...>>` → `IReadOnlyList<...>`; `Task.FromResult` wrapper removed |
+| `Cli/Pipeline/Stages/GenerateFindingsStage.cs` | `async Task ExecuteAsync` → `Task ExecuteAsync`; `await findingGenerationPipeline.GenerateAsync(...)` → `findingGenerationPipeline.Generate(...)`; early-return `return;` → `return Task.CompletedTask;` |
+| `Cli/Services/DumpAnalysisService.cs` | Trend path: `await _findingGenerationPipeline.GenerateAsync(...)` → `_findingGenerationPipeline.Generate(...)` |
 
 ---
 
-### MINOR-10 — Duplicate iteration code in `HeapAnalysisCache`
+### ✅ MINOR-10 — Duplicate iteration code in `HeapAnalysisCache` — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
 
-#### What
-`EnumerateIndexedEntries()` and `EnumerateIndexedEntriesAsTuples()` are structurally identical — the only difference is the projection:
+`EnumerateIndexedEntriesAsTuples()` now delegates to `EnumerateIndexedEntries()` via a single LINQ `Select` projection. The duplicated in-memory/disk iteration block was removed. `HeapEntry` is a small struct, so the projection is zero-overhead.
 
 ```csharp
-// Method 1: yields HeapEntry
-foreach (HeapEntry entry in HeapIndexEntryReader.ReadDiskEntries(_heapIndex.IndexPath))
-    yield return entry;
-
-// Method 2: yields (Address, MethodTable, Size)
-foreach (HeapEntry entry in HeapIndexEntryReader.ReadDiskEntries(_heapIndex.IndexPath))
-    yield return (entry.Address, entry.MethodTable, entry.Size);
-```
-
-#### How to fix
-```csharp
-// IHeapAnalysisCache already exposes the tuple variant; internally delegate:
 public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
     => EnumerateIndexedEntries().Select(e => (e.Address, e.MethodTable, e.Size));
 ```
 
-If `HeapEntry` is a small struct, this is zero-overhead. If callers need the tuple form to avoid the `HeapEntry` type dependency, keep both but delegate the implementation.
-
 ---
 
-### MINOR-11 — `AnalyzerCategory.Infer()` relies on fragile name matching
+### ✅ MINOR-11 — `AnalyzerCategory.Infer()` relies on fragile name matching — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Core/Abstractions/IAnalyzer.cs`
 
-#### What
-```csharp
-internal static string Infer(string analyzerName)
-{
-    string name = analyzerName.ToLowerInvariant();
-    if (name.Contains("memory")) return "Memory";
-    if (name.Contains("thread")) return "Threads";
-    // ...
-    return "General";   // silent fallback
-}
-```
+All 16 built-in analyzers now carry an explicit `public string Category => "...";` override. `AnalyzerCategory.Infer()` is retained as the default interface implementation for unknown/third-party analyzers.
 
-#### Why it's a problem
-If an analyzer is renamed (e.g., `"Heap Pressure Analysis"` instead of `"Memory Analysis"`), its category silently drops to `"General"`. This affects report grouping and trend analysis bucketing. The `Contains("memory")` check is a ticking maintenance debt.
-
-#### How to fix
-Prefer explicit override in each analyzer. `IAnalyzer.Category` already has a default implementation that calls `Infer()` — analyzers simply need to override it:
-
-```csharp
-// IAnalyzer.cs — keep Infer() as the default fallback, not the primary mechanism
-string Category => "General";  // each analyzer overrides this
-
-// MemoryLeakAnalyzer.cs
-public string Category => "Memory";
-
-// ThreadAnalyzer.cs
-public string Category => "Threads";
-```
-
-This is a two-line change per analyzer but gives compile-time guarantees that category is always correct. Keep `Infer()` as a fallback for third-party or dynamically-loaded analyzers only, and log a warning when the fallback fires.
+| Analyzer | Category |
+|---|---|
+| Collection Analysis | Memory |
+| Crash Analysis | Crash |
+| Dependent Handle Analysis | Handles |
+| Event Leak Analysis | Events |
+| GC Generation Analysis | GC |
+| GC Handle Analysis | Handles |
+| Hang Analysis | Hang |
+| Lock Graph Analysis | Locks |
+| LOH Fragmentation Analysis | Memory |
+| Memory Analysis | Memory |
+| Memory Leak Analysis | Memory |
+| Module Analysis | Modules |
+| Reference Chain Analysis | Memory |
+| Static Root Leak Detection | Memory |
+| Thread Analysis | Threads |
+| Thread Stack Signature Clustering | Threads |
 
 ---
 
-### MINOR-12 — `ConfigurationResolver` has mechanical duplication
+### ✅ MINOR-12 — `ConfigurationResolver` has mechanical duplication — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **File:** `src/DumpDetective.Cli/Services/ConfigurationResolver.cs`
 
-#### What
+A private static `Resolve<T>()` helper was added. All 7 ternary option-building blocks in `Resolve()` are now single-line calls:
+
 ```csharp
-MemoryLeakOptions memoryLeak = usedConfigFile
-    ? BuildMemoryLeakFromConfig(fileModel!, request)
-    : BuildMemoryLeakFromCli(request);
-
-ReferenceChainOptions referenceChain = usedConfigFile
-    ? BuildReferenceChainFromConfig(fileModel!, request)
-    : BuildReferenceChainFromCli(request);
-
-EventLeakOptions eventLeak = usedConfigFile
-    ? BuildEventLeakFromConfig(fileModel!, request)
-    : BuildEventLeakFromCli(request);
-// ... repeated 6 times
+MemoryLeakOptions memoryLeak   = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,   BuildMemoryLeakFromCli,   fileModel, request);
+ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, BuildReferenceChainFromCli, fileModel, request);
+// ... all 7 options follow the same pattern
 ```
 
-#### How to fix
-A single helper reduces the pattern to one expression per option:
-```csharp
-private T Resolve<T>(
-    bool fromFile,
-    Func<CliConfigurationFileModel, AnalysisCommandRequest, T> fromConfig,
-    Func<AnalysisCommandRequest, T> fromCli,
-    CliConfigurationFileModel? fileModel,
-    AnalysisCommandRequest request)
-    => fromFile ? fromConfig(fileModel!, request) : fromCli(request);
-
-// Usage:
-MemoryLeakOptions memoryLeak     = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,     BuildMemoryLeakFromCli,     fileModel, request);
-ReferenceChainOptions refChain   = Resolve(usedConfigFile, BuildReferenceChainFromConfig, BuildReferenceChainFromCli, fileModel, request);
-EventLeakOptions eventLeak       = Resolve(usedConfigFile, BuildEventLeakFromConfig,      BuildEventLeakFromCli,      fileModel, request);
-```
-
-This is a readability improvement rather than a behavior change. The logic is unchanged; the pattern is just expressed once.
+Behavior is unchanged; the pattern is now expressed once.
 
 ---
 
@@ -621,45 +517,19 @@ public string RenderedReport { get; set; } = string.Empty;
 
 ---
 
-### MINOR-15 — `ClrReferenceProvider` and `LazyReferenceGraph` are redundant
+### ✅ MINOR-15 — `ClrReferenceProvider` and `LazyReferenceGraph` are redundant — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **Files:** `Core/Abstractions/ClrReferenceProvider.cs`, `Analysis/Traversal/LazyReferenceGraph.cs`
 
-#### What
-Both classes do the same thing — enumerate `ClrObject.EnumerateReferences()` for a given address. `ClrReferenceProvider` is the non-caching version in `Core`; `LazyReferenceGraph` is the caching version in `Analysis`.
+| File | Change |
+|------|--------|
+| `Analysis/Traversal/LazyReferenceGraph.cs` | Added `IReferenceProvider` to the class declaration; explicit interface implementation `IEnumerable<ulong> IReferenceProvider.GetReferences(ulong address) => GetReferences(address)` adapts the `IReadOnlyList<ulong>` public API to the interface |
+| `Analysis/Analyzers/ReferenceChainAnalyzer.cs` | `new ClrReferenceProvider(heap)` → `new LazyReferenceGraph(heap)` in `TryFindAnyRootPath_Bidirectional`; comment updated to explain the caching benefit across all 3 BFS phases |
+| `Core/Abstractions/ClrReferenceProvider.cs` | Retained as a lightweight non-caching fallback (no deletion — KISS) |
 
-```csharp
-// ClrReferenceProvider.cs (Core)
-public IEnumerable<ulong> GetReferences(ulong obj)
-{
-    var clrObj = _heap.GetObject(obj);
-    foreach (var child in clrObj.EnumerateReferences(carefully: true))
-        yield return child.Address;
-}
-
-// LazyReferenceGraph.cs (Analysis)
-public IReadOnlyList<ulong> GetReferences(ulong address)
-{
-    // same logic + Dictionary<ulong, ulong[]> cache
-}
-```
-
-#### Why it's a problem
-The `IReferenceProvider` interface exists in `Core` but `LazyReferenceGraph` does not implement it — it implements its own ad-hoc API. So the interface and the actual production implementation are disconnected.
-
-#### How to fix
-Have `LazyReferenceGraph` implement `IReferenceProvider`:
-```csharp
-internal sealed class LazyReferenceGraph(ClrHeap heap) : IReferenceProvider
-{
-    // IReadOnlyList<ulong> → IEnumerable<ulong> (interface-compatible)
-    IEnumerable<ulong> IReferenceProvider.GetReferences(ulong address) => GetReferences(address);
-
-    public IReadOnlyList<ulong> GetReferences(ulong address) { ... }
-}
-```
-
-`ClrReferenceProvider` can then be removed or kept only as a lightweight non-caching fallback for test scenarios.
+`ReferenceChainAnalyzer` now uses `LazyReferenceGraph` as the `IReferenceProvider` for bidirectional path-finding. The same cache is reused across the candidate-set build, reverse-index build, and constrained BFS phases — reducing redundant `ClrObject.EnumerateReferences` calls on graphs with repeated edges.
 
 ---
 
@@ -705,17 +575,17 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | ~~CRITICAL-01~~ | ~~Add `Reporting → Analysis` project reference; move domain types out of `Core`~~ | ~~`Reporting.csproj`, `Core/Models/AnalyzerDomainResult.cs`, all `Reporting/FindingGenerators/`~~ | ✅ **Done** |
 | ~~MAJOR-06~~ | ~~Extract `IHeapIndexBuilder` interface; split `HeapCache` state bag property~~ | ~~`Core/Abstractions/` (new file), `Cli/Pipeline/SingleDumpPipelineState.cs`, `BuildHeapIndexStage.cs`~~ | ✅ **Done** |
 | MINOR-13 | Mark `MemoryLeakAnalyzer`, `ReferenceChainAnalyzer` as `internal` | 2 files | XS |
-| MINOR-11 | Add explicit `Category` override to each analyzer; keep `Infer()` as fallback only | 16 analyzer files (2-line change each) | S |
+| ~~MINOR-11~~ | ~~Add explicit `Category` override to each analyzer; keep `Infer()` as fallback only~~ | ~~16 analyzer files (2-line change each)~~ | ✅ **Done** |
 
 ### 🟢 Tier 3 — Quality / Maintainability
 
 | ID | Action | Files to Touch | Effort |
 |---|---|---|---|
-| MINOR-09 | Change `GenerateAsync` to sync `Generate` or `ValueTask` | `Reporting/Pipeline/FindingGenerationPipeline.cs`, `Cli/Pipeline/Stages/GenerateFindingsStage.cs` | XS |
-| MINOR-10 | Delegate `EnumerateIndexedEntriesAsTuples` to `EnumerateIndexedEntries` | `Analysis/Cache/HeapAnalysisCache.cs` | XS |
-| MINOR-12 | Extract `Resolve<T>()` helper in `ConfigurationResolver` | `Cli/Services/ConfigurationResolver.cs` | XS |
-| MINOR-15 | Have `LazyReferenceGraph` implement `IReferenceProvider`; retire `ClrReferenceProvider` | `Analysis/Traversal/LazyReferenceGraph.cs`, `Core/Abstractions/ClrReferenceProvider.cs` | S |
-| MINOR-08 | Document cache eviction strategy in `LazyReferenceGraph` (or implement partial eviction) | `Analysis/Traversal/LazyReferenceGraph.cs` | XS |
+| ~~MINOR-09~~ | ~~Change `GenerateAsync` to sync `Generate` or `ValueTask`~~ | ~~`Reporting/Pipeline/FindingGenerationPipeline.cs`, `Cli/Pipeline/Stages/GenerateFindingsStage.cs`~~ | ✅ **Done** |
+| ~~MINOR-10~~ | ~~Delegate `EnumerateIndexedEntriesAsTuples` to `EnumerateIndexedEntries`~~ | ~~`Analysis/Cache/HeapAnalysisCache.cs`~~ | ✅ **Done** |
+| ~~MINOR-12~~ | ~~Extract `Resolve<T>()` helper in `ConfigurationResolver`~~ | ~~`Cli/Services/ConfigurationResolver.cs`~~ | ✅ **Done** |
+| ~~MINOR-15~~ | ~~Have `LazyReferenceGraph` implement `IReferenceProvider`; retire `ClrReferenceProvider`~~ | ~~`Analysis/Traversal/LazyReferenceGraph.cs`, `Core/Abstractions/ClrReferenceProvider.cs`~~ | ✅ **Done** |
+| ~~MINOR-08~~ | ~~Document cache eviction strategy in `LazyReferenceGraph` (or implement partial eviction)~~ | ~~`Analysis/Traversal/LazyReferenceGraph.cs`~~ | ✅ **Done** |
 | MAJOR-04 | Decompose `DumpAnalysisService` into focused service classes | `Cli/Services/` (new files) | L |
 
 ---

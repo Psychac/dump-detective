@@ -3,6 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
+using System.Linq;
 
 namespace DumpDetective.Analysis.Cache
 {
@@ -57,24 +58,7 @@ namespace DumpDetective.Analysis.Cache
         }
 
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
-        {
-            if (_heapIndex is null)
-                yield break;
-
-            if (_heapIndex.StorageKind == HeapIndexStorageKind.Memory)
-            {
-                if (_heapIndex.InMemoryEntries is null)
-                    yield break;
-
-                foreach (HeapEntry entry in _heapIndex.InMemoryEntries)
-                    yield return (entry.Address, entry.MethodTable, entry.Size);
-
-                yield break;
-            }
-
-            foreach (HeapEntry entry in HeapIndexEntryReader.ReadDiskEntries(_heapIndex.IndexPath))
-                yield return (entry.Address, entry.MethodTable, entry.Size);
-        }
+            => EnumerateIndexedEntries().Select(e => (e.Address, e.MethodTable, e.Size));
 
         public void SetProgress(IProgress<AnalyzerProgressReport>? progress)
         {

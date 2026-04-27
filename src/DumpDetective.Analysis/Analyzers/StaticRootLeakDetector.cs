@@ -18,6 +18,7 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly record struct ObjectMetadata(bool IsValid, string TypeName, ulong Size, ulong MethodTable);
 
         public string Name => "Static Root Leak Detection";
+        public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

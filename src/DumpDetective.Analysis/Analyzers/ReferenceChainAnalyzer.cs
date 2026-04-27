@@ -1,5 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -20,6 +21,7 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size);
 
         public string Name => "Reference Chain Analysis";
+        public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -233,8 +235,9 @@ namespace DumpDetective.Analysis.Analyzers
             searchTruncated = false;
 
             // Phase 1: build candidate set via bidirectional expansion.
-            // Use a simple CLR-based reference provider adapter (defined in core abstractions)
-            var provider = new ClrReferenceProvider(heap);
+            // Use LazyReferenceGraph as the reference provider — it caches edges, reducing re-fetching
+            // across the three phases (candidate set, reverse index, and constrained BFS).
+            var provider = new LazyReferenceGraph(heap);
             var candidateBuilder = new CandidateSetBuilder(heap, provider, options, telemetry.AsProxy());
             HashSet<ulong> candidateSet = candidateBuilder.Build(objectAddress, roots);
 

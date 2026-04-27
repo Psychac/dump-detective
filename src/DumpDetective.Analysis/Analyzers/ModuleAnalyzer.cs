@@ -11,6 +11,7 @@ public class ModuleAnalyzer : IAnalyzer
         private const int TopLoadedAssembliesCount = 30;
 
         public string Name => "Module Analysis";
+        public string Category => "Modules";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

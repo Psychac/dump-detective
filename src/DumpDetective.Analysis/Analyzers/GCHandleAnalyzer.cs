@@ -11,6 +11,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const int TopTypeCount = 15;
 
         public string Name => "GC Handle Analysis";
+        public string Category => "Handles";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

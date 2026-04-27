@@ -8,7 +8,7 @@ internal sealed class FindingGenerationPipeline(IEnumerable<IFindingGenerator> g
     private readonly IReadOnlyDictionary<string, IFindingGenerator> _generators =
         generators.ToDictionary(g => g.AnalyzerName, StringComparer.Ordinal);
 
-    public Task<IReadOnlyList<AnalyzerRunResult>> GenerateAsync(IReadOnlyList<AnalyzerRunResult> runs, CancellationToken cancellationToken)
+    public IReadOnlyList<AnalyzerRunResult> Generate(IReadOnlyList<AnalyzerRunResult> runs, CancellationToken cancellationToken)
     {
         List<AnalyzerRunResult> updated = new(runs.Count);
 
@@ -47,6 +47,6 @@ internal sealed class FindingGenerationPipeline(IEnumerable<IFindingGenerator> g
             }
         }
 
-        return Task.FromResult((IReadOnlyList<AnalyzerRunResult>)updated);
+        return updated;
     }
 }

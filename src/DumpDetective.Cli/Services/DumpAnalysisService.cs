@@ -290,7 +290,7 @@ internal sealed class DumpAnalysisService(
         // Generate findings for trend dumps as well so snapshots include interpreted findings
         try
         {
-            runs = await _findingGenerationPipeline.GenerateAsync(runs, cancellationToken);
+            runs = _findingGenerationPipeline.Generate(runs, cancellationToken);
         }
         catch
         {

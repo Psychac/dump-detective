@@ -19,6 +19,7 @@ namespace DumpDetective.Analysis.Analyzers
         private const int TopHighlyReferencedObjectsToShow = 15;
 
         public string Name => "Memory Leak Analysis";
+        public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

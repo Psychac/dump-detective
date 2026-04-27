@@ -21,6 +21,7 @@ namespace DumpDetective.Analysis.Analyzers
             typeof(ClrHeap).GetMethod("GetGeneration", [typeof(ulong)]);
 
         public string Name => "GC Generation Analysis";
+        public string Category => "GC";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

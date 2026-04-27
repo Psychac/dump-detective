@@ -1,10 +1,11 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Models;
+
+using Microsoft.Diagnostics.Runtime;
+
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -93,74 +94,8 @@ public class ModuleAnalyzer : IAnalyzer
             if (index.Modules is not { Count: > 0 } modules)
                 return null;
 
-            // Aggregate per-module: total bytes, object count, unique type count.
-            var statsById = new Dictionary<int, MutableModuleStats>(modules.Count);
-            foreach (var aggregate in index.TypeAggregates.Values)
-            {
-                int id = aggregate.ModuleId;
-                if (id < 0) continue;
-
-                if (!statsById.TryGetValue(id, out var s))
-                {
-                    s = new MutableModuleStats();
-                    statsById[id] = s;
-                }
-                s.UniqueTypeCount++;
-                s.ObjectCount += aggregate.Count;
-                s.TotalBytes += aggregate.TotalSize;
-            }
-
-            int TopN = options.TopModulesByHeapCount;
-            ulong DensityAnomalyMinBytes = options.DensityAnomalyMinBytes;
-            int DensityAnomalyMaxTypes = options.DensityAnomalyMaxTypes;
-
-            var topByMemory = new List<(ulong Bytes, int Id)>(statsById.Count);
-            var densityList = new List<ModuleTypeDensity>();
-
-            foreach ((int id, MutableModuleStats s) in statsById)
-            {
-                topByMemory.Add((s.TotalBytes, id));
-
-                if (s.UniqueTypeCount <= DensityAnomalyMaxTypes && s.TotalBytes >= DensityAnomalyMinBytes)
-                {
-                    var mod = modules[id];
-                    ulong bytesPerType = s.UniqueTypeCount > 0 ? s.TotalBytes / (ulong)s.UniqueTypeCount : s.TotalBytes;
-                    densityList.Add(new ModuleTypeDensity(
-                        System.IO.Path.GetFileName(mod.Name ?? string.Empty),
-                        mod.AssemblyName ?? string.Empty,
-                        s.UniqueTypeCount,
-                        s.ObjectCount,
-                        s.TotalBytes,
-                        bytesPerType));
-                }
-            }
-
-            topByMemory.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
-
-            var topStats = new List<ModuleHeapStats>(Math.Min(TopN, topByMemory.Count));
-            for (int i = 0; i < topByMemory.Count && i < TopN; i++)
-            {
-                int id = topByMemory[i].Id;
-                var mod = modules[id];
-                var s = statsById[id];
-                topStats.Add(new ModuleHeapStats(
-                    System.IO.Path.GetFileName(mod.Name ?? string.Empty),
-                    mod.AssemblyName ?? string.Empty,
-                    s.UniqueTypeCount,
-                    s.ObjectCount,
-                    s.TotalBytes));
-            }
-
-            densityList.Sort((a, b) => b.BytesPerType.CompareTo(a.BytesPerType));
-
-            return (topStats, densityList);
-        }
-
-        private sealed class MutableModuleStats
-        {
-            public int UniqueTypeCount;
-            public long ObjectCount;
-            public ulong TotalBytes;
+            // Delegate aggregation to ModuleAggregator
+            return ModuleAggregator.Aggregate(index.TypeAggregates, index.Modules, options);
         }
 
         private ModuleAnalysis AnalyzeModules(ClrRuntime runtime)
@@ -168,6 +103,13 @@ public class ModuleAnalyzer : IAnalyzer
             var analysis = new ModuleAnalysis();
             var modulesByName = new Dictionary<string, List<ModuleInfo>>();
             var processedModuleAddresses = new HashSet<ulong>();
+            var moduleByAddress = new Dictionary<ulong, ClrModule>();
+
+            // Scope-local string pool: deduplicates repeated path/name strings within this analysis pass.
+            // Unlike string.Intern() this is GC'd when AnalyzeModules returns — safe for multi-dump scenarios.
+            var stringPool = new Dictionary<string, string>(StringComparer.Ordinal);
+            string Pool(string s) => stringPool.TryGetValue(s, out var c) ? c : (stringPool[s] = s);
+
             var scanCounter = new ObjectScanCounter("Module scan");
 
             foreach (var module in runtime.EnumerateModules())
@@ -180,13 +122,17 @@ public class ModuleAnalyzer : IAnalyzer
                 if (module.Address == 0 || !processedModuleAddresses.Add(module.Address))
                     continue;
 
-                string moduleName = Path.GetFileName(module.Name);
-                string assemblyName = module.AssemblyName ?? "Unknown";
+                // keep a reference to the ClrModule for later in-memory manifest probing
+                moduleByAddress[module.Address] = module;
+
+                // Pool filename and assembly name — directory prefix segments repeat heavily across modules.
+                string moduleName = Pool(Path.GetFileName(module.Name));
+                string assemblyName = Pool(module.AssemblyName ?? "Unknown");
 
                 var moduleInfo = new ModuleInfo
                 {
                     Name = moduleName,
-                    FullPath = module.Name,
+                    FullPath = Pool(module.Name),   // pool the full path: same dir prefix shared by many modules
                     AssemblyName = assemblyName,
                     Address = module.Address,
                     Size = module.Size,
@@ -217,24 +163,65 @@ public class ModuleAnalyzer : IAnalyzer
                     continue;
 
                 // Conflict means same module file-name appears with different assembly identities.
-                var assemblyNames = new HashSet<string>(StringComparer.Ordinal);
+                var identities = new Dictionary<AssemblyIdentity, List<ModuleInfo>>(new AssemblyIdentityComparer());
                 foreach (var moduleInfo in kvp.Value)
                 {
-                    assemblyNames.Add(moduleInfo.AssemblyName);
-                    if (assemblyNames.Count > 1)
+                    moduleByAddress.TryGetValue(moduleInfo.Address, out var clrModule);
+                    var identity = ModuleProbe.ProbeAssemblyIdentity(clrModule, moduleInfo.AssemblyName);
+                    if (!identities.TryGetValue(identity, out var list))
                     {
-                        versionConflicts[kvp.Key] = kvp.Value;
-                        break;
+                        list = new List<ModuleInfo>();
+                        identities[identity] = list;
+                    }
+                    list.Add(moduleInfo);
+                }
+
+                // Partition into known vs unknown identities. Unknown = no version, no public-key-token, no file-hash.
+                int knownCount = 0;
+                foreach (var kv in identities)
+                {
+                    var id = kv.Key;
+                    bool isUnknown = string.IsNullOrEmpty(id.Version) && string.IsNullOrEmpty(id.PublicKeyToken) && string.IsNullOrEmpty(id.FileHash);
+                    if (!isUnknown) knownCount++;
+                }
+
+                if (knownCount > 1)
+                {
+                    // Multiple distinct, well-known identities -> real conflict
+                    versionConflicts[kvp.Key] = kvp.Value;
+                }
+                else
+                {
+                    // No conflicting known identities; mark any unknowns for reporting but do NOT treat as conflicts
+                    foreach (var kv in identities)
+                    {
+                        var id = kv.Key;
+                        bool isUnknown = string.IsNullOrEmpty(id.Version) && string.IsNullOrEmpty(id.PublicKeyToken) && string.IsNullOrEmpty(id.FileHash);
+                        if (isUnknown)
+                        {
+                            foreach (var mi in kv.Value)
+                            {
+                                if (!mi.AssemblyName.Contains("(Unknown identity)", StringComparison.Ordinal))
+                                    mi.AssemblyName = mi.AssemblyName + " (Unknown identity)";
+                            }
+                        }
                     }
                 }
             }
+
+            // Clear any transient ClrModule references to avoid accidental long-lived retention.
+            // moduleByAddress is a local cache for in-memory probing only; explicitly clear it before returning.
+            moduleByAddress.Clear();
+
+            // String pool is scope-local and GC'd naturally; clear it explicitly to release references promptly.
+            stringPool.Clear();
 
             analysis.VersionConflicts = versionConflicts;
 
             return analysis;
         }
 
-    }
+        }
 
     internal class ModuleAnalysis
     {

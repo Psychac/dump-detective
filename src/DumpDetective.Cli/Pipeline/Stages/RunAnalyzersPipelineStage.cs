@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Services;
@@ -49,18 +50,15 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
             Heap = state.LoadContext.Heap,
             Cache = state.HeapCache!,
             Diagnostics = resolved.Diagnostics,
-            Options = new Dictionary<string, object?>
+            Options = new Dictionary<Type, object?>
             {
-                [nameof(MemoryLeakOptions)]    = resolved.MemoryLeak,
-                [nameof(ReferenceChainOptions)] = resolved.ReferenceChain,
-                [nameof(EventLeakOptions)]      = resolved.EventLeak,
-                [nameof(DiagnosticsOptions)]    = resolved.Diagnostics
+                [typeof(MemoryLeakOptions)]         = resolved.MemoryLeak,
+                [typeof(ReferenceChainOptions)]     = resolved.ReferenceChain,
+                [typeof(EventLeakOptions)]          = resolved.EventLeak,
+                [typeof(DiagnosticsOptions)]        = resolved.Diagnostics,
+                [typeof(CollectionAnalyzerOptions)] = resolved.Collection,
             },
-            MemoryLeakOptions      = resolved.MemoryLeak,
-            ReferenceChainOptions  = resolved.ReferenceChain,
-            EventLeakOptions       = resolved.EventLeak,
-            DiagnosticsOptions     = resolved.Diagnostics,
-            DiagnosticsSink        = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, state.ActiveAnalyzers)
+            DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, state.ActiveAnalyzers)
         };
     }
 }

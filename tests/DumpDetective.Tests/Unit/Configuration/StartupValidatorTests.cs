@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Services;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
@@ -75,6 +76,7 @@ public sealed class StartupValidatorTests
             EventLeak: new EventLeakOptions(),
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },
+            Collection: new CollectionAnalyzerOptions(),
             ConfigPath: null,
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),

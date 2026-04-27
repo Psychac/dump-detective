@@ -1,14 +1,10 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class RuntimeAnalysisContext : DumpDetective.Core.Abstractions.AnalysisContext
 {
+    /// <summary>Convenience accessor that down-casts <see cref="AnalysisContext.Cache"/> to the concrete type.</summary>
     public HeapAnalysisCache HeapCache => (HeapAnalysisCache)Cache;
-    public MemoryLeakOptions MemoryLeakOptions { get; init; } = new();
-    public ReferenceChainOptions ReferenceChainOptions { get; init; } = new();
-    public EventLeakOptions EventLeakOptions { get; init; } = new();
-    public DiagnosticsOptions DiagnosticsOptions { get; init; } = new();
 }

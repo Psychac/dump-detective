@@ -24,10 +24,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            MemoryLeakOptions options = context.Options.TryGetValue(nameof(MemoryLeakOptions), out object? configured)
-                && configured is MemoryLeakOptions typed
-                ? typed
-                : new MemoryLeakOptions();
+            MemoryLeakOptions options = context.GetOption<MemoryLeakOptions>();
 
             return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, context.Progress).Stamp(this));
         }

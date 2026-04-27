@@ -89,12 +89,12 @@ namespace BenchmarkSuite1
                 Cache = Cache,
                 Diagnostics = diagnosticsOptions,
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
-                Options = new Dictionary<string, object?>
+                Options = new Dictionary<Type, object?>
                 {
-                    [nameof(MemoryLeakOptions)]    = memoryLeakOptions,
-                    [nameof(ReferenceChainOptions)] = referenceChainOptions,
-                    [nameof(EventLeakOptions)]      = eventLeakOptions,
-                    [nameof(DiagnosticsOptions)]    = diagnosticsOptions,
+                    [typeof(MemoryLeakOptions)]    = memoryLeakOptions,
+                    [typeof(ReferenceChainOptions)] = referenceChainOptions,
+                    [typeof(EventLeakOptions)]      = eventLeakOptions,
+                    [typeof(DiagnosticsOptions)]    = diagnosticsOptions,
                 }
             };
         }

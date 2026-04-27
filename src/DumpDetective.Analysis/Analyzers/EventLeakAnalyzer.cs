@@ -27,10 +27,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            EventLeakOptions options = context.Options.TryGetValue(nameof(EventLeakOptions), out object? configured)
-                && configured is EventLeakOptions typed
-                ? typed
-                : new EventLeakOptions();
+            EventLeakOptions options = context.GetOption<EventLeakOptions>();
 
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }

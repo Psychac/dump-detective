@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Commands;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
@@ -43,6 +44,10 @@ internal sealed class ConfigurationResolver
             ? BuildIndexPrebuildModeFromConfig(fileModel!, request)
             : BuildIndexPrebuildModeFromCli(request);
 
+        CollectionAnalyzerOptions collection = usedConfigFile
+            ? BuildCollectionFromConfig(fileModel!, request)
+            : BuildCollectionFromCli(request);
+
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
         IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
@@ -72,6 +77,7 @@ internal sealed class ConfigurationResolver
             eventLeak,
             diagnostics,
             report,
+            collection,
             configPath,
             usedConfigFile,
             request.IncludeAnalyzers,
@@ -276,6 +282,12 @@ internal sealed class ConfigurationResolver
         return request.IndexPrebuildMode ?? HeapIndexPrebuildMode.Auto;
     }
 
+    private static CollectionAnalyzerOptions BuildCollectionFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+        => config.Collection ?? new CollectionAnalyzerOptions();
+
+    private static CollectionAnalyzerOptions BuildCollectionFromCli(AnalysisCommandRequest request)
+        => new CollectionAnalyzerOptions();
+
     private static string BuildOutputPath(string dumpPath, ReportFormat format)
     {
         string extension = format switch
@@ -352,6 +364,7 @@ internal sealed class CliConfigurationFileModel
     public ReferenceChainOptions? ReferenceChain { get; init; }
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }
+    public CollectionAnalyzerOptions? Collection { get; init; }
     public ReportOptionsModel? Report { get; init; }
 
     public int? HighReferenceThreshold { get; init; }
@@ -385,6 +398,8 @@ internal sealed class IndexingOptionsModel
     ReadCommentHandling = JsonCommentHandling.Skip,
     AllowTrailingCommas = true)]
 [JsonSerializable(typeof(CliConfigurationFileModel))]
+[JsonSerializable(typeof(CollectionAnalyzerOptions))]
+[JsonSerializable(typeof(AnalysisProfile))]
 internal partial class CliConfigurationJsonSerializerContext : JsonSerializerContext
 {
 }

@@ -25,10 +25,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ReferenceChainOptions options = context.Options.TryGetValue(nameof(ReferenceChainOptions), out object? configured)
-                && configured is ReferenceChainOptions typed
-                ? typed
-                : new ReferenceChainOptions();
+            ReferenceChainOptions options = context.GetOption<ReferenceChainOptions>();
 
             return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }

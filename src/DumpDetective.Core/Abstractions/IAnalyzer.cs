@@ -20,7 +20,12 @@ public class AnalysisContext
     public required ClrHeap Heap { get; init; }
     public required IHeapAnalysisCache Cache { get; init; }
     public DiagnosticsOptions Diagnostics { get; init; } = new();
-    public IReadOnlyDictionary<string, object?> Options { get; init; } = new Dictionary<string, object?>();
+    /// <summary>
+    /// Per-analyzer options, keyed by the option type itself.
+    /// Use <c>context.GetOption&lt;T&gt;()</c> (Analysis project extension) to read safely with default fallback.
+    /// Populated by the CLI pipeline from <see cref="DumpDetective.Cli.Services.ResolvedExecutionOptions"/>.
+    /// </summary>
+    public IReadOnlyDictionary<Type, object?> Options { get; init; } = new Dictionary<Type, object?>();
     public IAnalysisDiagnosticsSink DiagnosticsSink { get; init; } = NullAnalysisDiagnosticsSink.Instance;
 
     /// <summary>

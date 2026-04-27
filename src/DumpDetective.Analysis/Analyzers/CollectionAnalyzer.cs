@@ -31,13 +31,19 @@ namespace DumpDetective.Analysis.Analyzers
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
     public class CollectionAnalyzer : IAnalyzer
     {
-        private readonly CollectionAnalyzerOptions _options;
+        private CollectionAnalyzerOptions _options;
         private readonly ILogger<CollectionAnalyzer>? _logger;
 
         public string Name => "Collection Analysis";
 
         public CollectionAnalyzer()
             : this(CollectionAnalyzerOptions.Default, logger: null)
+        {
+        }
+
+        /// <summary>Constructor for DI/factory use — options are read from the analysis context at run time.</summary>
+        public CollectionAnalyzer(ILogger<CollectionAnalyzer>? logger)
+            : this(CollectionAnalyzerOptions.Default, logger)
         {
         }
 
@@ -50,6 +56,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            _options = context.GetOption<CollectionAnalyzerOptions>();
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 

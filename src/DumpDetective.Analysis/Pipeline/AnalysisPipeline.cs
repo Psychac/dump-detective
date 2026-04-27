@@ -186,7 +186,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     ExceptionType: ex.GetType().Name,
                     ExceptionMessage: ex.Message));
 
-                if (!context.DiagnosticsOptions.ContinueOnAnalyzerFailure)
+                if (!context.Diagnostics.ContinueOnAnalyzerFailure)
                 {
                     break;
                 }

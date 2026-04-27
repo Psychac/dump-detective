@@ -15,6 +15,7 @@
 | 2025 | CRITICAL-03 | ✅ **Done** | `FindingGeneratorError` added to `AnalyzerRunResult`; `FindingGenerationPipeline` catch now populates it; `ReportBuilder` emits a `Warning` section; `GenerateFindingsStage` warns per-generator failure to console immediately |
 | 2025 | MINOR-14 | ✅ **Done** | Stage 4 comment block added to `SingleDumpPipelineState.cs` between Stage 3 and Stage 5 |
 | 2025 | MAJOR-07 | ✅ **Done** | `AnalysisContext` → `RuntimeAnalysisContext` in `Analysis/Pipeline/`; all 6 alias usages removed across Cli, BenchmarkSuite1, and test files; architecture test updated to reflect correct `Reporting → Analysis` dependency |
+| 2025 | MAJOR-05 | ✅ **Done** | `AnalysisContext.Options` key changed `string` → `Type`; `GetOption<T>()` extension added; `RuntimeAnalysisContext` redundant properties removed; 3 magic-key analyzers fixed; `CollectionAnalyzer` wired to context; `CollectionAnalyzerOptions` added to `ResolvedExecutionOptions` and config |
 
 ---
 
@@ -265,70 +266,46 @@ internal sealed class DumpAnalysisService(
 
 ---
 
-### MAJOR-05 — Options resolution uses fragile magic-key dictionary pattern
+### ✅ MAJOR-05 — Options resolution uses fragile magic-key dictionary pattern — **RESOLVED**
 
-**Files:** `Analysis/Analyzers/MemoryLeakAnalyzer.cs`, `ReferenceChainAnalyzer.cs`, `EventLeakAnalyzer.cs`, `RunAnalyzersPipelineStage.cs`
+> **Implemented (Option A, key changed to `Type`).** See [Changelog](#changelog) for details.
 
-#### What
-Every analyzer that needs options does this:
-```csharp
-MemoryLeakOptions options = context.Options.TryGetValue(nameof(MemoryLeakOptions), out object? configured)
-    && configured is MemoryLeakOptions typed
-    ? typed
-    : new MemoryLeakOptions();
-```
-And `RunAnalyzersPipelineStage` populates the same dictionary with keys that must match these strings:
-```csharp
-Options = new Dictionary<string, object?>
-{
-    [nameof(MemoryLeakOptions)]     = resolved.MemoryLeak,
-    [nameof(ReferenceChainOptions)] = resolved.ReferenceChain,
-    [nameof(EventLeakOptions)]      = resolved.EventLeak,
-    [nameof(DiagnosticsOptions)]    = resolved.Diagnostics
-}
-```
+**Files:** `Analysis/Analyzers/MemoryLeakAnalyzer.cs`, `ReferenceChainAnalyzer.cs`, `EventLeakAnalyzer.cs`, `CollectionAnalyzer.cs`, `RunAnalyzersPipelineStage.cs`
 
-#### Why it's a problem
-- The dictionary key is a compile-time string (`nameof`) but the coupling between producer and consumer is entirely by convention. Rename the options class and the analyzer silently falls back to defaults — **no compiler error, no test failure**.
-- The pattern is copy-pasted across at least 3 analyzers.
-- The strongly-typed properties (`MemoryLeakOptions`, `ReferenceChainOptions`, etc.) already exist on `DumpDetective.Analysis.Pipeline.AnalysisContext` but analyzers can't access them because `IAnalyzer.AnalyzeAsync` accepts the base `Core.Abstractions.AnalysisContext`.
+#### What *(was)*
+Three analyzers used `context.Options.TryGetValue(nameof(XxxOptions), ...)` with a string key. Renaming the options class silently fell through to the default. `CollectionAnalyzer` was separately wired via constructor, bypassing the context entirely.
 
-#### How to fix
-**Option A — Extension method (KISS, no interface change):**
-```csharp
-// In Analysis project
-internal static class AnalysisContextExtensions
-{
-    public static T GetOption<T>(this AnalysisContext context, T defaultValue = default!)
-        where T : class, new()
-    {
-        string key = typeof(T).Name;
-        return context.Options.TryGetValue(key, out object? value) && value is T typed
-            ? typed
-            : defaultValue ?? new T();
-    }
-}
-```
+#### What was done
 
-Usage in each analyzer:
-```csharp
-// BEFORE
-MemoryLeakOptions options = context.Options.TryGetValue(nameof(MemoryLeakOptions), out object? configured)
-    && configured is MemoryLeakOptions typed ? typed : new MemoryLeakOptions();
+| File | Change |
+|------|--------|
+| `Core/Abstractions/IAnalyzer.cs` | `Options` dict key changed from `string` to `Type`; doc comment added explaining `GetOption<T>()` |
+| `Analysis/Pipeline/AnalysisContextExtensions.cs` | **New file** — `GetOption<T>()` extension; returns `new T()` when not registered |
+| `Analysis/Pipeline/RuntimeAnalysisContext.cs` | Removed `MemoryLeakOptions`, `ReferenceChainOptions`, `EventLeakOptions`, `DiagnosticsOptions` redundant properties; stripped `Core.Options` using |
+| `Analysis/GlobalUsings.cs` | Added `global using DumpDetective.Analysis.Pipeline;` so `GetOption<T>()` is visible to all 16 analyzer files |
+| `Analysis/Analyzers/MemoryLeakAnalyzer.cs` | `context.GetOption<MemoryLeakOptions>()` |
+| `Analysis/Analyzers/ReferenceChainAnalyzer.cs` | `context.GetOption<ReferenceChainOptions>()` |
+| `Analysis/Analyzers/EventLeakAnalyzer.cs` | `context.GetOption<EventLeakOptions>()` |
+| `Analysis/Analyzers/CollectionAnalyzer.cs` | `_options` made non-readonly; `AnalyzeAsync` sets `_options = context.GetOption<CollectionAnalyzerOptions>()`; logger-only constructor added |
+| `Analysis/Pipeline/AnalysisPipeline.cs` | `context.DiagnosticsOptions` → `context.Diagnostics` (used the base property, not the now-removed derived one) |
+| `Cli/Pipeline/Stages/RunAnalyzersPipelineStage.cs` | `typeof(T)` keys; `CollectionAnalyzerOptions` added; redundant named properties removed |
+| `Cli/Services/DumpAnalysisService.cs` | Same in trend-path context |
+| `Cli/Services/DefaultAnalyzerFactory.cs` | `CollectionAnalyzer(logger)` — logger-only ctor; options come from context |
+| `Cli/Services/ResolvedExecutionOptions.cs` | `CollectionAnalyzerOptions Collection` parameter added |
+| `Cli/Services/ConfigurationResolver.cs` | `BuildCollectionFromConfig` / `BuildCollectionFromCli` added; `config.Collection` on file model; `CliConfigurationJsonSerializerContext` updated |
+| `BenchmarkSuite1/AnalyzerBenchmarkBase.cs` | `typeof(T)` keys |
+| `BenchmarkSuite1/PipelineHotspotBenchmark.cs` | Dropped removed `RuntimeAnalysisContext` properties |
+| `tests/.../AnalysisDiagnosticsTests.cs` | Dropped removed `RuntimeAnalysisContext` properties |
+| `tests/.../AnalysisPipelineTests.cs` | Dropped removed `RuntimeAnalysisContext` properties |
+| `tests/.../StartupValidatorTests.cs` | Added `Collection` to `ResolvedExecutionOptions` construction |
 
-// AFTER
-MemoryLeakOptions options = context.GetOption<MemoryLeakOptions>();
-```
+#### Adding a new analyzer with options (current state)
+1. Create `Analysis/Options/XxxAnalyzerOptions.cs` (or `Analysis/Analyzers/` until a future move)
+2. Call `context.GetOption<XxxAnalyzerOptions>()` in the analyzer
+3. Add `[typeof(XxxAnalyzerOptions)] = resolved.Xxx` in `RunAnalyzersPipelineStage`
+4. Add `XxxAnalyzerOptions Xxx` to `ResolvedExecutionOptions` + `ConfigurationResolver`
 
-**Option B — Cast to derived context (since all analyzers live in `Analysis`):**
-Since `IAnalyzer` implementations are all in the `Analysis` assembly, they can safely cast:
-```csharp
-// In AnalyzeAsync, before accessing options:
-if (context is DumpDetective.Analysis.Pipeline.AnalysisContext richContext)
-    return ValueTask.FromResult(Analyze(richContext.MemoryLeakOptions, ...).Stamp(this));
-```
-
-**Recommendation:** Option A. It's less invasive, adds no cast, and centralises the fallback logic in one place.
+One entry in each of two files — no magic strings, no silent fallback risk.
 
 ---
 
@@ -737,7 +714,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | ~~MINOR-14~~ | ~~Fix `SingleDumpPipelineState` stage 4 comment gap~~ | ~~`Cli/Pipeline/SingleDumpPipelineState.cs`~~ | ✅ **Done** |
 | ~~MAJOR-07~~ | ~~Rename `Analysis.Pipeline.AnalysisContext` → `RuntimeAnalysisContext`~~ | ~~1 rename + 4 usages~~ | ✅ **Done** |
 | ~~CRITICAL-02~~ | ~~Inject `IEnumerable<IAnalyzerTrendComparer>` into `TrendAnalyzer`~~ | ~~`Analysis/Trend/TrendAnalyzer.cs`, `Cli/Hosting/ServiceRegistration.cs`~~ | ✅ **Done** |
-| MAJOR-05 | Add `GetOption<T>()` extension method to eliminate magic-key pattern | `Analysis/` (new extensions file), 3 analyzer files | S |
+| ~~MAJOR-05~~ | ~~Add `GetOption<T>()` extension method to eliminate magic-key pattern~~ | ~~`Analysis/` (new extensions file), 3 analyzer files~~ | ✅ **Done** |
 
 ### 🟡 Tier 2 — High Impact, Plan for Next Cycle
 

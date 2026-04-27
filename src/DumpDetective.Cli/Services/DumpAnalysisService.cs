@@ -272,17 +272,14 @@ internal sealed class DumpAnalysisService(
             Heap = loadContext.Heap,
             Cache = heapCache,
             Diagnostics = resolved.Diagnostics,
-            Options = new Dictionary<string, object?>
+            Options = new Dictionary<Type, object?>
             {
-                [nameof(Core.Options.MemoryLeakOptions)] = resolved.MemoryLeak,
-                [nameof(Core.Options.ReferenceChainOptions)] = resolved.ReferenceChain,
-                [nameof(Core.Options.EventLeakOptions)] = resolved.EventLeak,
-                [nameof(Core.Options.DiagnosticsOptions)] = resolved.Diagnostics
+                [typeof(Core.Options.MemoryLeakOptions)]         = resolved.MemoryLeak,
+                [typeof(Core.Options.ReferenceChainOptions)]     = resolved.ReferenceChain,
+                [typeof(Core.Options.EventLeakOptions)]          = resolved.EventLeak,
+                [typeof(Core.Options.DiagnosticsOptions)]        = resolved.Diagnostics,
+                [typeof(Analysis.Analyzers.CollectionAnalyzerOptions)] = resolved.Collection,
             },
-            MemoryLeakOptions = resolved.MemoryLeak,
-            ReferenceChainOptions = resolved.ReferenceChain,
-            EventLeakOptions = resolved.EventLeak,
-            DiagnosticsOptions = resolved.Diagnostics,
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };
 

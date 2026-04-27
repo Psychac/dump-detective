@@ -35,10 +35,6 @@ public class PipelineHotspotBenchmark
             Heap = null!,
             Cache = new HeapAnalysisCache(),
             Diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true },
-            DiagnosticsOptions = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true },
-            MemoryLeakOptions = new MemoryLeakOptions(),
-            ReferenceChainOptions = new ReferenceChainOptions(),
-            EventLeakOptions = new EventLeakOptions(),
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance
         };
     }

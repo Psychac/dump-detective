@@ -67,10 +67,6 @@ public sealed class AnalysisDiagnosticsTests
             Heap = null!,
             Cache = new HeapAnalysisCache(),
             Diagnostics = diagnostics,
-            DiagnosticsOptions = diagnostics,
-            MemoryLeakOptions = new MemoryLeakOptions(),
-            ReferenceChainOptions = new ReferenceChainOptions(),
-            EventLeakOptions = new EventLeakOptions(),
             DiagnosticsSink = sink
         };
     }

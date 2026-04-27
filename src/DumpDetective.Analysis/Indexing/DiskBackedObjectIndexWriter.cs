@@ -35,19 +35,39 @@ internal sealed class DiskBackedObjectIndexWriter
             DumpDetective.Core.Models.DumpSizeTier.Medium => 1 * 1024 * 1024,
             _ => 128 * 1024,
         };
-        // Parallelize enumeration across segments to speed up object collection and type aggregation.
+        // Each segment gets its own entry list sized from its own byte length (see below).
+
+        // Cap DOP so ClrMD's minidump page cache never holds more than this many segments'
+        // pages resident simultaneously. Uncapped (default -1) causes ProcessorCount threads
+        // to each hold a different segment's pages in cache concurrently, which multiplied the
+        // working-set footprint proportional to core count after the parallel rearchitecture.
+        // 4 concurrent segments gives ~4x speedup over sequential while bounding peak page pressure.
+        const int MaxSegmentParallelism = 4;
+
         var masterBuilder = new TypeAggregateIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
         var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<List<HeapEntry>>();
 
-        var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken };
+        var parallelOptions = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = MaxSegmentParallelism
+        };
 
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => (Entries: new List<HeapEntry>(), Builder: new TypeAggregateIndexBuilder()),
-            (segment, _, localState) =>
+            () => new TypeAggregateIndexBuilder(),
+            (segment, _, localBuilder) =>
             {
+                // Size this segment's list from its own byte length — matches the 128-byte average
+                // object size heuristic used for the whole-heap estimate, but applied per-segment
+                // so the estimate is local to each segment rather than divided by thread count.
+                // This eliminates the ÷ threadCount skew that caused heavily-loaded threads to
+                // undershoot their capacity and trigger repeated List<T> doubling.
+                int segEstimate = (int)Math.Min(Math.Max(segment.Length / 128, 64), int.MaxValue);
+                var segEntries = new List<HeapEntry>(segEstimate);
+
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
                     if (!obj.IsValid || obj.Type is null)
@@ -57,26 +77,35 @@ internal sealed class DiskBackedObjectIndexWriter
                         continue;
                     var entry = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    localState.Entries.Add(entry);
-                    localState.Builder.Add(entry, moduleId);
+                    segEntries.Add(entry);
+                    localBuilder.Add(entry, moduleId);
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (progress is not null && count % ProgressReportEveryObjects == 0)
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
-                return localState;
+
+                allSegmentEntries.Add(segEntries);
+                return localBuilder;
             },
-            localState =>
+            localBuilder =>
             {
-                allSegmentEntries.Add(localState.Entries);
                 lock (masterBuilder)
-                    masterBuilder.Merge(localState.Builder);
+                    masterBuilder.Merge(localBuilder);
             });
 
-        // Flatten per-thread entry lists into a single array for efficient batched writing
-        var entries = new List<HeapEntry>(capacity: Math.Max((int)Math.Min(objectCount, int.MaxValue), 1024));
+        // Flatten per-segment lists into a single array.
+        // objectCount is exact at this point so we allocate the array at the right size,
+        // copying each segment's contiguous span in one pass — no intermediate List resize.
+        int totalCount = (int)Math.Min(objectCount, int.MaxValue);
+        HeapEntry[] entries = new HeapEntry[Math.Max(totalCount, 1)];
+        int writeOffset = 0;
         foreach (List<HeapEntry> segList in allSegmentEntries)
-            entries.AddRange(segList);
+        {
+            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(segList)
+                .CopyTo(entries.AsSpan(writeOffset));
+            writeOffset += segList.Count;
+        }
 
         // Now write flattened entries to disk using batched writes
         using (FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: writeBuffer, FileOptions.SequentialScan))

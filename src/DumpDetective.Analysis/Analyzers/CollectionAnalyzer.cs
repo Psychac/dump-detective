@@ -621,13 +621,15 @@ namespace DumpDetective.Analysis.Analyzers
             return resolved;
         }
 
+        private static readonly char[] s_typeNameCutChars = ['`', '[', '<', '+'];
+
         private static CollectionKind ResolveCollectionKindConcurrent(
             ClrHeap heap, ulong address, ulong methodTable,
             ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
         {
-            return methodTableKinds.GetOrAdd(methodTable, mt =>
+            return methodTableKinds.GetOrAdd(methodTable, static (mt, state) =>
             {
-                ClrObject obj = heap.GetObject(address);
+                ClrObject obj = state.heap.GetObject(state.address);
                 string typeName = obj.IsValid ? (obj.Type?.Name ?? string.Empty) : string.Empty;
 
                 // Skip arrays (e.g. Dictionary<...>[]). Only classify actual collection instances.
@@ -645,7 +647,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!isBcl) return CollectionKind.None;
 
                 string outer = typeName;
-                int cut = outer.IndexOfAny(new char[] { '`', '[', '<', '+' });
+                int cut = outer.IndexOfAny(s_typeNameCutChars);
                 if (cut >= 0) outer = outer.Substring(0, cut);
                 int lastDot = outer.LastIndexOf('.');
                 string shortName = lastDot >= 0 ? outer.Substring(lastDot + 1) : outer;
@@ -673,7 +675,7 @@ namespace DumpDetective.Analysis.Analyzers
                     return CollectionKind.SortedSet;
 
                 return CollectionKind.None;
-            });
+            }, (heap, address));
         }
 
 

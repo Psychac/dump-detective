@@ -169,27 +169,37 @@ public class CrashAnalyzer : IAnalyzer
                     return;
 
                 // Filter: is this an exception type?
-                bool isException = exceptionMethodTables.GetOrAdd(mt, _ =>
+                // TryGetValue avoids allocating a Func<ulong,bool> delegate on every call (cache hit path).
+                // The factory lambda is only constructed on a genuine cache miss (first time seeing this MT).
+                if (!exceptionMethodTables.TryGetValue(mt, out bool isException))
                 {
                     ClrObject o = heap.GetObject(exceptionAddress);
                     string? n = o.IsValid ? o.Type?.Name : null;
-                    return n?.Contains("Exception", StringComparison.Ordinal) == true;
-                });
+                    isException = n?.Contains("Exception", StringComparison.Ordinal) == true;
+                    exceptionMethodTables.TryAdd(mt, isException);
+                }
 
                 if (!isException)
                     return;
 
-                // Resolve type name
-                string? typeName = methodTableNameCache.GetOrAdd(mt, _ =>
+                // Resolve type name — same pattern: TryGetValue first to avoid per-call delegate allocation.
+                if (!methodTableNameCache.TryGetValue(mt, out string? typeName))
                 {
+                    string resolved;
                     if (heapIdx?.TypeAggregates.TryGetValue(mt, out var agg) == true && agg.SampleAddress != 0)
                     {
                         ClrObject sample = heap.GetObject(agg.SampleAddress);
-                        if (sample.IsValid && sample.Type != null)
-                            return sample.Type.Name ?? string.Empty;
+                        resolved = (sample.IsValid && sample.Type != null)
+                            ? sample.Type.Name ?? string.Empty
+                            : heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
                     }
-                    return heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
-                });
+                    else
+                    {
+                        resolved = heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
+                    }
+                    methodTableNameCache.TryAdd(mt, resolved);
+                    typeName = resolved;
+                }
 
                 if (typeName?.Contains("Exception", StringComparison.Ordinal) != true)
                     return;

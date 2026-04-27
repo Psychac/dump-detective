@@ -319,13 +319,13 @@ public class HangAnalyzer : IAnalyzer
                     return;
 
                 var entry = new HeapEntry(address, mt, 0);
-                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, _ =>
+                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, static (_, state) =>
                 {
-                    ClrObject o = heap.GetObject(address);
+                    ClrObject o = state.heap.GetObject(state.address);
                     return (!o.IsValid || o.Type == null)
                         ? AsyncTypeProfile.None
                         : AsyncTypeProfile.FromTypeName(o.Type.Name ?? string.Empty);
-                });
+                }, (heap, address));
 
                 if (!profile.IsPotentiallyRelevant)
                     return;

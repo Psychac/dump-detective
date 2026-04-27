@@ -52,6 +52,23 @@ public sealed record ModuleConflictGroup(
     string ModuleName,
     IReadOnlyList<LoadedModuleSnapshot> Instances);
 
+/// <summary>Per-module heap memory and object footprint aggregated from the heap index.</summary>
+public sealed record ModuleHeapStats(
+    string ModuleName,
+    string AssemblyName,
+    int UniqueTypeCount,
+    long ObjectCount,
+    ulong TotalBytes);
+
+/// <summary>Modules where memory is abnormally concentrated into very few types.</summary>
+public sealed record ModuleTypeDensity(
+    string ModuleName,
+    string AssemblyName,
+    int UniqueTypeCount,
+    long ObjectCount,
+    ulong TotalBytes,
+    ulong BytesPerType);
+
 internal sealed record ModuleDomainResult(
     int TotalModules,
     int DynamicModules,
@@ -59,7 +76,9 @@ internal sealed record ModuleDomainResult(
     int VersionConflictGroups,
     IReadOnlyList<string> ConflictingAssemblyNames,
     IReadOnlyList<LoadedModuleSnapshot> TopModulesBySize,
-    IReadOnlyList<ModuleConflictGroup> ConflictDetails) : AnalyzerDomainResult;
+    IReadOnlyList<ModuleConflictGroup> ConflictDetails,
+    IReadOnlyList<ModuleHeapStats>? TopModulesByHeapMemory = null,
+    IReadOnlyList<ModuleTypeDensity>? HeavyTypeDensityModules = null) : AnalyzerDomainResult;
 
 // ── Crash ────────────────────────────────────────────────────────────────────
 

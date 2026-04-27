@@ -26,6 +26,7 @@ internal sealed class MemoryBackedObjectIndexWriter
         // Each thread accumulates its own entry list and type aggregate builder.
         // localFinally fires once per thread, so the merge is O(threadCount) not O(segmentCount).
         var masterBuilder = new TypeAggregateIndexBuilder();
+        var moduleRegistry = new ModuleRegistry();
         var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<List<HeapEntry>>();
         long objectCount = 0;
 
@@ -45,8 +46,9 @@ internal sealed class MemoryBackedObjectIndexWriter
                     if (mt == 0)
                         continue;
                     var entry = new HeapEntry(obj.Address, mt, obj.Size);
+                    int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
                     localState.Entries.Add(entry);
-                    localState.Builder.Add(entry);
+                    localState.Builder.Add(entry, moduleId);
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (count % ProgressInterval == 0)
@@ -76,6 +78,7 @@ internal sealed class MemoryBackedObjectIndexWriter
             ObjectCount: objectCount,
             Elapsed: stopwatch.Elapsed,
             TypeAggregates: masterBuilder.Build(),
-            InMemoryEntries: entries.ToArray());
+            InMemoryEntries: entries.ToArray(),
+            Modules: moduleRegistry.Modules);
     }
 }

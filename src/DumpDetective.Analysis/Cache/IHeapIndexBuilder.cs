@@ -13,6 +13,9 @@ namespace DumpDetective.Analysis.Cache;
 /// </summary>
 internal interface IHeapIndexBuilder
 {
+    /// <summary>Returns the prebuilt heap index, or false when no index has been built yet.</summary>
+    bool TryGetHeapIndex([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HeapIndexBuildResult? heapIndex);
+
     /// <summary>Scans the heap and builds the in-memory or disk-backed object index.</summary>
     HeapIndexBuildResult PrebuildHeapIndex(
         ClrHeap heap,

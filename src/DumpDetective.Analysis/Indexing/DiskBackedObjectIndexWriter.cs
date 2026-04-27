@@ -37,6 +37,7 @@ internal sealed class DiskBackedObjectIndexWriter
         };
         // Parallelize enumeration across segments to speed up object collection and type aggregation.
         var masterBuilder = new TypeAggregateIndexBuilder();
+        var moduleRegistry = new ModuleRegistry();
         var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<List<HeapEntry>>();
 
         var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken };
@@ -55,8 +56,9 @@ internal sealed class DiskBackedObjectIndexWriter
                     if (mt == 0)
                         continue;
                     var entry = new HeapEntry(obj.Address, mt, obj.Size);
+                    int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
                     localState.Entries.Add(entry);
-                    localState.Builder.Add(entry);
+                    localState.Builder.Add(entry, moduleId);
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (progress is not null && count % ProgressReportEveryObjects == 0)
@@ -131,7 +133,14 @@ internal sealed class DiskBackedObjectIndexWriter
         stopwatch.Stop();
         progress?.Report(new(objectCount, "writing index", Detail: null, Elapsed: stopwatch.Elapsed));
 
-        return new HeapIndexBuildResult(HeapIndexStorageKind.Disk, indexPath, objectCount, stopwatch.Elapsed, masterBuilder.Build());
+        return new HeapIndexBuildResult(
+            HeapIndexStorageKind.Disk,
+            indexPath,
+            objectCount,
+            stopwatch.Elapsed,
+            masterBuilder.Build(),
+            InMemoryEntries: null,
+            Modules: moduleRegistry.Modules);
     }
 
     private static void WriteHeader(Stream stream, long recordCount)

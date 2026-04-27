@@ -7,7 +7,7 @@ internal sealed class TypeAggregateIndexBuilder
     private const ulong LohThresholdBytes = 85_000;
     private readonly Dictionary<ulong, MutableTypeAggregate> _aggregates = new(capacity: 1024);
 
-    public void Add(in HeapEntry entry)
+    public void Add(in HeapEntry entry, int moduleId = -1)
     {
         // OPT-#5: Single ref-returning probe via CollectionsMarshal eliminates the TryGetValue copy-out
         // + _aggregates[key] = agg copy-back that the previous TryGetValue/assign pattern required.
@@ -16,7 +16,10 @@ internal sealed class TypeAggregateIndexBuilder
             _aggregates, entry.MethodTable, out bool existed);
 
         if (!existed)
+        {
             aggregate.SampleAddress = entry.Address;
+            aggregate.ModuleId = moduleId;
+        }
 
         aggregate.Count++;
         aggregate.TotalSize += entry.Size;
@@ -38,7 +41,10 @@ internal sealed class TypeAggregateIndexBuilder
                 _aggregates, methodTable, out bool existed);
 
             if (!existed)
+            {
                 aggregate.SampleAddress = otherAgg.SampleAddress;
+                aggregate.ModuleId = otherAgg.ModuleId;
+            }
 
             aggregate.Count     += otherAgg.Count;
             aggregate.TotalSize += otherAgg.TotalSize;
@@ -55,6 +61,7 @@ internal sealed class TypeAggregateIndexBuilder
         {
             result[methodTable] = new TypeAggregateIndexEntry(
                 methodTable,
+                aggregate.ModuleId,
                 aggregate.Count,
                 aggregate.TotalSize,
                 aggregate.LohCount,
@@ -72,5 +79,6 @@ internal sealed class TypeAggregateIndexBuilder
         public long LohCount;
         public ulong LohSize;
         public ulong SampleAddress;
+        public int ModuleId;
     }
 }

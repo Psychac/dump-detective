@@ -46,6 +46,43 @@ namespace DumpDetective.Reporting.Printers
                     new DetailedAnalyzerTableCell(module.IsDynamic ? "Yes" : "No")]))
                 .ToList()));
 
+            if (domain.TopModulesByHeapMemory is { Count: > 0 } heapModules)
+            {
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("TOP MODULES BY HEAP MEMORY:");
+                writer.WriteSeparator();
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "Modules ranked by live heap memory (from index)",
+                    Headers: ["Module Name", "Assembly Name", "Heap Memory", "Objects", "Unique Types"],
+                    Rows: heapModules.Select(m => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(m.ModuleName),
+                        new DetailedAnalyzerTableCell(m.AssemblyName),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(m.TotalBytes), (long)m.TotalBytes),
+                        new DetailedAnalyzerTableCell($"{m.ObjectCount:N0}", m.ObjectCount),
+                        new DetailedAnalyzerTableCell($"{m.UniqueTypeCount:N0}", m.UniqueTypeCount)]))
+                    .ToList()));
+            }
+
+            if (domain.HeavyTypeDensityModules is { Count: > 0 } densityModules)
+            {
+                writer.WriteDetailBlank();
+                writer.WriteSubHeading("⚠️  TYPE DENSITY ANOMALIES:");
+                writer.WriteSeparator();
+                writer.WriteDetailText("Modules with very few types consuming large amounts of heap memory:");
+                writer.WriteDetailBlank();
+                writer.WriteDetailTable(new DetailedAnalyzerTableData(
+                    Caption: "High memory concentration — few types, large footprint",
+                    Headers: ["Module Name", "Assembly Name", "Types", "Objects", "Heap Memory", "Bytes / Type"],
+                    Rows: densityModules.Select(m => new DetailedAnalyzerTableRow([
+                        new DetailedAnalyzerTableCell(m.ModuleName),
+                        new DetailedAnalyzerTableCell(m.AssemblyName),
+                        new DetailedAnalyzerTableCell($"{m.UniqueTypeCount:N0}", m.UniqueTypeCount),
+                        new DetailedAnalyzerTableCell($"{m.ObjectCount:N0}", m.ObjectCount),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(m.TotalBytes), (long)m.TotalBytes),
+                        new DetailedAnalyzerTableCell(FormatHelper.FormatBytes(m.BytesPerType), (long)m.BytesPerType)]))
+                    .ToList()));
+            }
+
             if (domain.ConflictDetails.Count == 0)
             {
                 writer.WriteDetailBlank();

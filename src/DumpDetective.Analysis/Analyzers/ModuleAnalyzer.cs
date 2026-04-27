@@ -3,12 +3,15 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Analysis.Analyzers
 {
 public class ModuleAnalyzer : IAnalyzer
     {
         private const int TopLoadedAssembliesCount = 30;
+        private DumpDetective.Core.Options.ModuleAnalysisOptions _options = DumpDetective.Core.Options.ModuleAnalysisOptions.Default;
 
         public string Name => "Module Analysis";
         public string Category => "Modules";
@@ -16,7 +19,10 @@ public class ModuleAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress).Stamp(this));
+            _options = context.GetOption<DumpDetective.Core.Options.ModuleAnalysisOptions>();
+            var modules = AnalyzeModules(context.Runtime);
+            var heapStats = BuildModuleHeapStats(context.Cache, _options);
+            return ValueTask.FromResult(BuildDomainResult(modules, heapStats).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
@@ -28,34 +34,11 @@ public class ModuleAnalyzer : IAnalyzer
         {
             progress?.Report(new(0, "analyzing modules"));
             var modules = AnalyzeModules(runtime);
-            var domainResult = BuildDomainResult(modules);
+            var domainResult = BuildDomainResult(modules, heapStats: null);
             return domainResult;
         }
 
-        private static InsightFinding CreateFinding(ModuleDomainResult result)
-        {
-            int conflicts = result.VersionConflictGroups;
-            FindingSeverity severity = conflicts >= 3
-                ? FindingSeverity.Critical
-                : conflicts > 0
-                    ? FindingSeverity.Warning
-                    : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(ModuleAnalyzer),
-                Category: "Dependency",
-                Severity: severity,
-                Title: conflicts > 0 ? "Module identity conflicts detected" : "Module dependency snapshot",
-                Evidence: $"{result.TotalModules:N0} modules loaded, {result.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).",
-                Recommendation: conflicts > 0
-                    ? "Align dependency versions and verify binding redirects/deployment consistency."
-                    : "No immediate module-version conflict action required.",
-                Tags: ["modules", "assemblies", "dependency"],
-                MetricValue: conflicts,
-                MetricUnit: "conflict-groups");
-        }
-
-        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis)
+        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis, (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)? heapStats)
         {
             // Top modules by size — same selection logic as PrintLoadedAssemblies.
             var candidates = new List<ModuleInfo>(analysis.ModulesByName.Count);
@@ -96,7 +79,88 @@ public class ModuleAnalyzer : IAnalyzer
                 analysis.VersionConflicts.Count,
                 analysis.VersionConflicts.Keys.ToList(),
                 topModules,
-                conflictDetails);
+                conflictDetails,
+                heapStats?.TopByMemory,
+                heapStats?.DensityAnomalies);
+        }
+
+        private static (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)?
+            BuildModuleHeapStats(IHeapAnalysisCache cache, DumpDetective.Core.Options.ModuleAnalysisOptions options)
+        {
+            // Requires a prebuilt heap index with module registry data.
+            if (cache is not IHeapIndexBuilder builder || !builder.TryGetHeapIndex(out var index))
+                return null;
+            if (index.Modules is not { Count: > 0 } modules)
+                return null;
+
+            // Aggregate per-module: total bytes, object count, unique type count.
+            var statsById = new Dictionary<int, MutableModuleStats>(modules.Count);
+            foreach (var aggregate in index.TypeAggregates.Values)
+            {
+                int id = aggregate.ModuleId;
+                if (id < 0) continue;
+
+                if (!statsById.TryGetValue(id, out var s))
+                {
+                    s = new MutableModuleStats();
+                    statsById[id] = s;
+                }
+                s.UniqueTypeCount++;
+                s.ObjectCount += aggregate.Count;
+                s.TotalBytes += aggregate.TotalSize;
+            }
+
+            int TopN = options.TopModulesByHeapCount;
+            ulong DensityAnomalyMinBytes = options.DensityAnomalyMinBytes;
+            int DensityAnomalyMaxTypes = options.DensityAnomalyMaxTypes;
+
+            var topByMemory = new List<(ulong Bytes, int Id)>(statsById.Count);
+            var densityList = new List<ModuleTypeDensity>();
+
+            foreach ((int id, MutableModuleStats s) in statsById)
+            {
+                topByMemory.Add((s.TotalBytes, id));
+
+                if (s.UniqueTypeCount <= DensityAnomalyMaxTypes && s.TotalBytes >= DensityAnomalyMinBytes)
+                {
+                    var mod = modules[id];
+                    ulong bytesPerType = s.UniqueTypeCount > 0 ? s.TotalBytes / (ulong)s.UniqueTypeCount : s.TotalBytes;
+                    densityList.Add(new ModuleTypeDensity(
+                        System.IO.Path.GetFileName(mod.Name ?? string.Empty),
+                        mod.AssemblyName ?? string.Empty,
+                        s.UniqueTypeCount,
+                        s.ObjectCount,
+                        s.TotalBytes,
+                        bytesPerType));
+                }
+            }
+
+            topByMemory.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
+
+            var topStats = new List<ModuleHeapStats>(Math.Min(TopN, topByMemory.Count));
+            for (int i = 0; i < topByMemory.Count && i < TopN; i++)
+            {
+                int id = topByMemory[i].Id;
+                var mod = modules[id];
+                var s = statsById[id];
+                topStats.Add(new ModuleHeapStats(
+                    System.IO.Path.GetFileName(mod.Name ?? string.Empty),
+                    mod.AssemblyName ?? string.Empty,
+                    s.UniqueTypeCount,
+                    s.ObjectCount,
+                    s.TotalBytes));
+            }
+
+            densityList.Sort((a, b) => b.BytesPerType.CompareTo(a.BytesPerType));
+
+            return (topStats, densityList);
+        }
+
+        private sealed class MutableModuleStats
+        {
+            public int UniqueTypeCount;
+            public long ObjectCount;
+            public ulong TotalBytes;
         }
 
         private ModuleAnalysis AnalyzeModules(ClrRuntime runtime)

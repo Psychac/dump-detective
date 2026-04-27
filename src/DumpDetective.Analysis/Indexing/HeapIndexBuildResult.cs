@@ -9,4 +9,5 @@ internal sealed record HeapIndexBuildResult(
     long ObjectCount,
     TimeSpan Elapsed,
     IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> TypeAggregates,
-    HeapEntry[]? InMemoryEntries = null);
+    HeapEntry[]? InMemoryEntries = null,
+    IReadOnlyList<ModuleInfo>? Modules = null);

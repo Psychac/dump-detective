@@ -5,6 +5,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Output;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Reporting.Printers
 {
@@ -27,6 +28,10 @@ namespace DumpDetective.Reporting.Printers
             writer.WriteMetric("Total Collections", $"{domain.TotalCollections:N0}");
             writer.WriteMetric("Dictionaries", $"{domain.Dictionaries:N0}", indentLevel: 1);
             writer.WriteMetric("Lists", $"{domain.Lists:N0}", indentLevel: 1);
+            writer.WriteMetric("ArrayLists", $"{domain.ArrayLists:N0}", indentLevel: 1);
+            writer.WriteMetric("Stacks", $"{domain.Stacks:N0}", indentLevel: 1);
+            writer.WriteMetric("SortedLists", $"{domain.SortedLists:N0}", indentLevel: 1);
+            writer.WriteMetric("SortedSets", $"{domain.SortedSets:N0}", indentLevel: 1);
             writer.WriteMetric("HashSets", $"{domain.HashSets:N0}", indentLevel: 1);
             writer.WriteMetric("Queues", $"{domain.Queues:N0}", indentLevel: 1);
             writer.WriteDetailBlank();
@@ -120,6 +125,17 @@ namespace DumpDetective.Reporting.Printers
                             if (kindMetrics.TryGetValue("P75Bytes", out var k75)) writer.WriteMetric("P75", FormatHelper.FormatBytes(Convert.ToUInt64(Convert.ToDouble(k75 ?? 0d))), indentLevel: 1);
                             if (kindMetrics.TryGetValue("P90Bytes", out var k90)) writer.WriteMetric("P90", FormatHelper.FormatBytes(Convert.ToUInt64(Convert.ToDouble(k90 ?? 0d))), indentLevel: 1);
                         }
+                    }
+                }
+
+                // Per-kind counts if present
+                if (metrics.TryGetValue("Waste.Counts.ByKind", out var countsObj) && countsObj is IReadOnlyDictionary<string, int> counts)
+                {
+                    writer.WriteDetailBlank();
+                    writer.WriteSubHeading("PER-KIND COUNTS:");
+                    foreach (var kv in counts)
+                    {
+                        writer.WriteMetric(kv.Key, kv.Value.ToString(), indentLevel: 1);
                     }
                 }
             }

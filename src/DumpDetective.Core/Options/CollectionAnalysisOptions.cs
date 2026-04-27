@@ -20,7 +20,7 @@ namespace DumpDetective.Core.Options
         /// Threshold (in bytes) under which an individual collection is considered "wasteful".
         /// Default is 10 KB to match current heuristics.
         /// </summary>
-        public ulong WasteThresholdBytes { get; init; } = 1 * 1024UL;
+        public ulong WasteThresholdBytes { get; init; } = 10 * 1024UL;
 
         /// <summary>
         /// <summary>

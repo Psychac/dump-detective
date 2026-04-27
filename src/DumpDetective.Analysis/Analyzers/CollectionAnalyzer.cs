@@ -13,19 +13,6 @@ using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal enum CollectionKind
-    {
-        None,
-        Dictionary,
-        List,
-        ArrayList,
-        Stack,
-        HashSet,
-        SortedList,
-        SortedSet,
-        Queue
-    }
-
     // TODO: Need to check why root stack frames are not showing in deep mode.
     // Suspect a bug in ReferenceChainAnalyzer's root description logic where it doesn't populate descriptions for certain stack roots.
     // This would impact the root hints shown for wasteful collections that are rooted in stacks.
@@ -74,14 +61,19 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.TotalCollections,
                 collectionStats.Dictionaries,
                 collectionStats.Lists,
+                collectionStats.ArrayLists,
+                collectionStats.Stacks,
+                collectionStats.SortedLists,
+                collectionStats.SortedSets,
                 collectionStats.HashSets,
                 collectionStats.Queues,
                 collectionStats.TotalWastedMemory,
                 collectionStats.WastefulCollections.Count,
                 collectionStats.WastefulCollections
                     .Take(_options.TopWastefulCollectionsToShow)
-                    .Select(w => new WastefulCollectionSnapshot(
+                .Select(w => new WastefulCollectionSnapshot(
                         w.Type,
+                        (DumpDetective.Core.Models.CollectionKind)w.Kind,
                         w.Count,
                         w.Capacity,
                         w.FillRate,
@@ -135,8 +127,8 @@ namespace DumpDetective.Analysis.Analyzers
             var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
                 concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 64);
             var concurrentWasteful = new ConcurrentBag<WastefulCollection>();
-            int totalCollections = 0, dictionaries = 0, lists = 0, hashSets = 0, queues = 0;
-            int skippedDictionaries = 0, skippedHashSets = 0, skippedQueues = 0, skippedLists = 0;
+            int totalCollections = 0, dictionaries = 0, lists = 0, arrayLists = 0, stacks = 0, sortedLists = 0, sortedSets = 0, hashSets = 0, queues = 0;
+            int skippedDictionaries = 0, skippedHashSets = 0, skippedQueues = 0, skippedLists = 0, skippedArrayLists = 0, skippedStacks = 0, skippedSortedLists = 0, skippedSortedSets = 0;
             long scanned = 0;
             const long progressInterval = 50_000;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
@@ -195,17 +187,49 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedHashSets);
                 }
-                else if (kind == CollectionKind.ArrayList || kind == CollectionKind.Stack || kind == CollectionKind.SortedList || kind == CollectionKind.SortedSet)
+                else if (kind == CollectionKind.ArrayList)
                 {
-                    // treat these as list-like for counting purposes
-                    Interlocked.Increment(ref lists);
+                    Interlocked.Increment(ref arrayLists);
                     var waste = AnalyzeArrayBackedCollection(heap, address, kind);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
                         concurrentWasteful.Add(waste);
                     }
-                    else if (waste == null) Interlocked.Increment(ref skippedLists);
+                    else if (waste == null) Interlocked.Increment(ref skippedArrayLists);
+                }
+                else if (kind == CollectionKind.Stack)
+                {
+                    Interlocked.Increment(ref stacks);
+                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        concurrentWasteful.Add(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedStacks);
+                }
+                else if (kind == CollectionKind.SortedList)
+                {
+                    Interlocked.Increment(ref sortedLists);
+                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        concurrentWasteful.Add(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedSortedLists);
+                }
+                else if (kind == CollectionKind.SortedSet)
+                {
+                    Interlocked.Increment(ref sortedSets);
+                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        concurrentWasteful.Add(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedSortedSets);
                 }
                 else if (kind == CollectionKind.Queue)
                 {
@@ -262,6 +286,10 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalCollections = totalCollections,
                 Dictionaries = dictionaries,
                 Lists = lists,
+                ArrayLists = arrayLists,
+                Stacks = stacks,
+                SortedLists = sortedLists,
+                SortedSets = sortedSets,
                 HashSets = hashSets,
                 Queues = queues,
                 WastefulCollections = wastefulList,
@@ -304,6 +332,21 @@ namespace DumpDetective.Analysis.Analyzers
                         ["Waste.TotalBytes"] = stats.TotalWastedMemory,
                         ["Waste.Count"] = wastes.Length
                     };
+
+                    // Per-kind counts for reporting
+                    var perKindCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+                    {
+                        [DumpDetective.Core.Models.CollectionKind.Dictionary.ToString()] = dictionaries,
+                        [DumpDetective.Core.Models.CollectionKind.List.ToString()] = lists,
+                        [DumpDetective.Core.Models.CollectionKind.ArrayList.ToString()] = arrayLists,
+                        [DumpDetective.Core.Models.CollectionKind.Stack.ToString()] = stacks,
+                        [DumpDetective.Core.Models.CollectionKind.SortedList.ToString()] = sortedLists,
+                        [DumpDetective.Core.Models.CollectionKind.SortedSet.ToString()] = sortedSets,
+                        [DumpDetective.Core.Models.CollectionKind.HashSet.ToString()] = hashSets,
+                        [DumpDetective.Core.Models.CollectionKind.Queue.ToString()] = queues,
+                    };
+
+                    metrics["Waste.Counts.ByKind"] = perKindCounts;
 
                     // Histogram buckets (overall)
                     var buckets = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -413,6 +456,8 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
+                    stats.TotalCollections++;
+                    stats.Dictionaries++;
                     var waste = AnalyzeDictionary(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -422,6 +467,8 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 else if (kind == CollectionKind.List)
                 {
+                    stats.TotalCollections++;
+                    stats.Lists++;
                     stats.TotalCollections++;
                     stats.Lists++;
                     var waste = AnalyzeList(heap, objectAddress);
@@ -435,6 +482,8 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
+                    stats.TotalCollections++;
+                    stats.HashSets++;
                     var waste = AnalyzeHashSet(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -444,6 +493,8 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 else if (kind == CollectionKind.Queue)
                 {
+                    stats.TotalCollections++;
+                    stats.Queues++;
                     stats.TotalCollections++;
                     stats.Queues++;
                     var qWaste = AnalyzeQueue(heap, objectAddress);
@@ -1130,6 +1181,10 @@ namespace DumpDetective.Analysis.Analyzers
         public int TotalCollections { get; set; }
         public int Dictionaries { get; set; }
         public int Lists { get; set; }
+        public int ArrayLists { get; set; }
+        public int Stacks { get; set; }
+        public int SortedLists { get; set; }
+        public int SortedSets { get; set; }
         public int HashSets { get; set; }
         public int Queues { get; set; }
         public ulong TotalWastedMemory { get; set; }

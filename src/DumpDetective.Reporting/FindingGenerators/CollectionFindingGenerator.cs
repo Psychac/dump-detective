@@ -18,6 +18,30 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
         FindingSeverity severity = r.TotalWastedMemory >= summaryWarnBytes
             ? FindingSeverity.Warning : FindingSeverity.Info;
 
+        // Build a simple per-kind breakdown string if metrics contain it
+        string perKindBreakdown = string.Empty;
+        if (r.Metrics != null && r.Metrics.TryGetValue("Waste.Counts.ByKind", out var byKindObj) && byKindObj is IReadOnlyDictionary<string, int> byKind)
+        {
+            perKindBreakdown = " (" + string.Join(", ", byKind.Select(kv => $"{kv.Key}:{kv.Value:N0}")) + ")";
+        }
+
+        string evidence = $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections{perKindBreakdown}.";
+
+        string recommendation = severity == FindingSeverity.Warning
+            ? "Trim long-lived collections and initialize with realistic capacities."
+            : "Collection sizing appears acceptable in this snapshot.";
+
+        // If a particular kind dominates wasted bytes we can add a focused recommendation
+        if (r.Metrics != null && r.Metrics.TryGetValue("Waste.Histogram.ByKind", out var byKindMetricsObj) && byKindMetricsObj is IReadOnlyDictionary<string, object?> perKindMetrics)
+        {
+            // Detect dominant kind by count in TopWastefulCollections, if present
+            var topKind = r.TopWastefulCollections?.FirstOrDefault()?.Kind;
+            if (topKind.HasValue && topKind.Value != DumpDetective.Core.Models.CollectionKind.List)
+            {
+                recommendation += $" Consider addressing {topKind.Value} instances specifically (e.g., TrimExcess / Resize / Use alternative collection) if they are long-lived.";
+            }
+        }
+
         return
         [
             new InsightFinding(
@@ -25,10 +49,8 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
                 Category: "Memory",
                 Severity: severity,
                 Title: "Collection capacity efficiency",
-                Evidence: $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections.",
-                Recommendation: severity == FindingSeverity.Warning
-                    ? "Trim long-lived collections and initialize with realistic capacities."
-                    : "Collection sizing appears acceptable in this snapshot.",
+                Evidence: evidence,
+                Recommendation: recommendation,
                 Tags: ["collections", "memory-waste", "capacity"],
                 MetricValue: r.TotalWastedMemory,
                 MetricUnit: "wasted-bytes")

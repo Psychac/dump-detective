@@ -142,14 +142,18 @@ internal sealed record CollectionDomainResult(
     int TotalCollections,
     int Dictionaries,
     int Lists,
+    int ArrayLists,
+    int Stacks,
+    int SortedLists,
+    int SortedSets,
     int HashSets,
     int Queues,
     ulong TotalWastedMemory,
     int WastefulCollectionCount,
     IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null) : AnalyzerDomainResult;
-
 internal sealed record WastefulCollectionSnapshot(
     string Type,
+    CollectionKind Kind,
     int Count,
     int Capacity,
     double FillRate,

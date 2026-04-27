@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Analysis.Cache
 {
-    internal class HeapAnalysisCache : IHeapAnalysisCache
+    internal class HeapAnalysisCache : IHeapAnalysisCache, IHeapIndexBuilder
     {
         private const int ProgressReportEveryScans = 25_000;
         private const long MemoryIndexDumpSizeThresholdBytes = 4096L * 1024 * 1024; // TEMP-ADAPTIVE-INDEXING: tune threshold with profiling.

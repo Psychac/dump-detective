@@ -22,7 +22,10 @@ internal sealed class SingleDumpPipelineState : IDisposable
     public DumpLoadContext? LoadContext { get; set; }
 
     // ── Stage 2: BuildHeapIndexStage ────────────────────────────────────────
-    public HeapAnalysisCache? HeapCache { get; set; }
+    /// <summary>Build-time interface — used by <see cref="Stages.BuildHeapIndexStage"/> to construct the index.</summary>
+    public IHeapIndexBuilder? HeapIndexBuilder { get; set; }
+    /// <summary>Read-only cache interface — used by <see cref="Stages.RunAnalyzersPipelineStage"/> as the analyzer <c>Cache</c> contract.</summary>
+    public IHeapAnalysisCache? HeapCache { get; set; }
     public HeapIndexBuildResult? HeapIndex { get; set; }
 
     // ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────

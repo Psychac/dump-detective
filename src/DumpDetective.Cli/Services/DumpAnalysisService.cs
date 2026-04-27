@@ -254,7 +254,8 @@ internal sealed class DumpAnalysisService(
         Stopwatch stopwatch = Stopwatch.StartNew();
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
         HeapAnalysisCache heapCache = new();
-        var heapIndex = heapCache.PrebuildHeapIndex(
+        IHeapIndexBuilder heapBuilder = heapCache;
+        var heapIndex = heapBuilder.PrebuildHeapIndex(
             loadContext.Heap,
             dumpPath,
             cancellationToken,

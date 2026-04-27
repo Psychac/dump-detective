@@ -74,7 +74,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 ExceptionType: null,
                 ExceptionMessage: null));
 
-            if (context.Cache is HeapAnalysisCache cacheWithProgress)
+            if (context.Cache is IHeapIndexBuilder cacheWithProgress)
                 cacheWithProgress.SetProgress(context.Progress);
 
             try
@@ -193,7 +193,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             }
             finally
             {
-                if (context.Cache is HeapAnalysisCache cacheWithProgressCleanup)
+                if (context.Cache is IHeapIndexBuilder cacheWithProgressCleanup)
                     cacheWithProgressCleanup.SetProgress(null);
 
                 context.Progress = null;

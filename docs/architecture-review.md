@@ -16,6 +16,7 @@
 | 2025 | MINOR-14 | ✅ **Done** | Stage 4 comment block added to `SingleDumpPipelineState.cs` between Stage 3 and Stage 5 |
 | 2025 | MAJOR-07 | ✅ **Done** | `AnalysisContext` → `RuntimeAnalysisContext` in `Analysis/Pipeline/`; all 6 alias usages removed across Cli, BenchmarkSuite1, and test files; architecture test updated to reflect correct `Reporting → Analysis` dependency |
 | 2025 | MAJOR-05 | ✅ **Done** | `AnalysisContext.Options` key changed `string` → `Type`; `GetOption<T>()` extension added; `RuntimeAnalysisContext` redundant properties removed; 3 magic-key analyzers fixed; `CollectionAnalyzer` wired to context; `CollectionAnalyzerOptions` added to `ResolvedExecutionOptions` and config |
+| 2025 | MAJOR-06 | ✅ **Done** | `IHeapIndexBuilder` interface added to `Analysis/Cache/`; `HeapAnalysisCache` implements it; state bag split into `IHeapIndexBuilder HeapIndexBuilder` + `IHeapAnalysisCache HeapCache`; `AnalysisPipeline` casts replaced with interface checks |
 
 ---
 
@@ -309,55 +310,36 @@ One entry in each of two files — no magic strings, no silent fallback risk.
 
 ---
 
-### MAJOR-06 — `HeapAnalysisCache` bypasses `IHeapAnalysisCache` in the CLI pipeline
+### ✅ MAJOR-06 — `HeapAnalysisCache` bypasses `IHeapAnalysisCache` in the CLI pipeline — **RESOLVED**
+
+> **Implemented.** See [Changelog](#changelog) for details.
 
 **Files:** `Cli/Pipeline/SingleDumpPipelineState.cs`, `Cli/Pipeline/Stages/BuildHeapIndexStage.cs`
 
-#### What
-```csharp
-// SingleDumpPipelineState.cs
-public HeapAnalysisCache? HeapCache { get; set; }   // concrete type, not IHeapAnalysisCache
+#### What *(was)*
+`SingleDumpPipelineState.HeapCache` was typed as the concrete `HeapAnalysisCache` class. `BuildHeapIndexStage` called `heapCache.PrebuildHeapIndex()` directly on the concrete type. `AnalysisPipeline` cast `context.Cache is HeapAnalysisCache` to call `SetProgress`. No interface stood between the build-time API and its consumers.
 
-// BuildHeapIndexStage.cs
-HeapAnalysisCache heapCache = new();
-HeapIndexBuildResult heapIndex = heapCache.PrebuildHeapIndex(...); // not on the interface
+#### What was done
+
+| File | Change |
+|------|--------|
+| `Analysis/Cache/IHeapIndexBuilder.cs` | **New file** — `internal interface IHeapIndexBuilder` with `PrebuildHeapIndex()` and `SetProgress()`. Lives in `Analysis` (not `Core`) because `HeapIndexBuildResult` and `HeapIndexPrebuildMode` are `internal` to `Analysis.Indexing` |
+| `Analysis/Cache/HeapAnalysisCache.cs` | Added `IHeapIndexBuilder` to the implements list: `HeapAnalysisCache : IHeapAnalysisCache, IHeapIndexBuilder` |
+| `Cli/Pipeline/SingleDumpPipelineState.cs` | `HeapAnalysisCache? HeapCache` split into: `IHeapIndexBuilder? HeapIndexBuilder` (Stage 2 build contract) + `IHeapAnalysisCache? HeapCache` (Stage 3 read-only cache contract). Both point to the same `HeapAnalysisCache` instance |
+| `Cli/Pipeline/Stages/BuildHeapIndexStage.cs` | `HeapAnalysisCache heapCache = new()` kept for construction; `IHeapIndexBuilder heapBuilder = heapCache` used for `PrebuildHeapIndex()`. Both `HeapIndexBuilder` and `HeapCache` are set on state |
+| `Cli/Pipeline/Stages/RunAnalyzersPipelineStage.cs` | Removed `using DumpDetective.Analysis.Cache;` — `state.HeapCache` is now `IHeapAnalysisCache`, no concrete type imported |
+| `Analysis/Pipeline/AnalysisPipeline.cs` | `context.Cache is HeapAnalysisCache cacheWithProgress` → `context.Cache is IHeapIndexBuilder cacheWithProgress` (both `SetProgress` call-sites) |
+| `Analysis/Pipeline/RuntimeAnalysisContext.cs` | Removed down-cast `HeapCache` property; replaced with `IHeapIndexBuilder? HeapIndexBuilder => Cache as IHeapIndexBuilder` (null-safe) |
+| `Cli/Services/DumpAnalysisService.cs` | Trend path: `heapCache.PrebuildHeapIndex()` → `IHeapIndexBuilder heapBuilder = heapCache; heapBuilder.PrebuildHeapIndex()` |
+
+#### Contracts after fix
 ```
-
-`IHeapAnalysisCache` is the declared contract but `PrebuildHeapIndex()` and `SetProgress()` are only on the concrete class.
-
-#### Why it's a problem
-- The interface provides no actual abstraction for the CLI layer. It's impossible to substitute a test double for `HeapAnalysisCache` in pipeline stage tests.
-- `BuildHeapIndexStage` and `RunAnalyzersPipelineStage` are implicitly coupled to the concrete class through the state bag.
-
-#### How to fix
-Introduce a second interface covering the build-time API, keeping `IHeapAnalysisCache` as the analyzer read-only contract:
-
-```csharp
-// In Core.Abstractions
-public interface IHeapIndexBuilder
-{
-    HeapIndexBuildResult PrebuildHeapIndex(
-        ClrHeap heap,
-        string dumpPath,
-        CancellationToken cancellationToken,
-        IProgress<AnalyzerProgressReport>? progress = null,
-        HeapIndexPrebuildMode mode = HeapIndexPrebuildMode.Auto);
-
-    void SetProgress(IProgress<AnalyzerProgressReport>? progress);
-}
+BuildHeapIndexStage  → IHeapIndexBuilder  (build-time: PrebuildHeapIndex, SetProgress)
+RunAnalyzers stage   → IHeapAnalysisCache (read-only: GetStaticRoots, EnumerateEntries, ...)
+AnalysisPipeline     → IHeapIndexBuilder  (SetProgress per analyzer)
+RuntimeAnalysisContext.HeapIndexBuilder → IHeapIndexBuilder? (null-safe cast from Cache)
 ```
-
-`HeapAnalysisCache` implements both `IHeapAnalysisCache` and `IHeapIndexBuilder`. The state bag becomes:
-
-```csharp
-// SingleDumpPipelineState.cs
-public IHeapIndexBuilder? HeapIndexBuilder { get; set; }   // for BuildHeapIndexStage
-public IHeapAnalysisCache? HeapCache { get; set; }         // for RunAnalyzersPipelineStage
-
-// Both point to the same HeapAnalysisCache instance, typed through their respective interfaces
-```
-
-`BuildHeapIndexStage` uses `IHeapIndexBuilder`, `RunAnalyzersPipelineStage` uses `IHeapAnalysisCache` via `context.Cache`. Pipeline stage tests can now substitute either independently.
+Pipeline stage tests can now substitute either interface independently without touching `HeapAnalysisCache`.
 
 ---
 
@@ -721,7 +703,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 | ID | Action | Files to Touch | Effort |
 |---|---|---|---|
 | ~~CRITICAL-01~~ | ~~Add `Reporting → Analysis` project reference; move domain types out of `Core`~~ | ~~`Reporting.csproj`, `Core/Models/AnalyzerDomainResult.cs`, all `Reporting/FindingGenerators/`~~ | ✅ **Done** |
-| MAJOR-06 | Extract `IHeapIndexBuilder` interface; split `HeapCache` state bag property | `Core/Abstractions/` (new file), `Cli/Pipeline/SingleDumpPipelineState.cs`, `BuildHeapIndexStage.cs` | M |
+| ~~MAJOR-06~~ | ~~Extract `IHeapIndexBuilder` interface; split `HeapCache` state bag property~~ | ~~`Core/Abstractions/` (new file), `Cli/Pipeline/SingleDumpPipelineState.cs`, `BuildHeapIndexStage.cs`~~ | ✅ **Done** |
 | MINOR-13 | Mark `MemoryLeakAnalyzer`, `ReferenceChainAnalyzer` as `internal` | 2 files | XS |
 | MINOR-11 | Add explicit `Category` override to each analyzer; keep `Infer()` as fallback only | 16 analyzer files (2-line change each) | S |
 

@@ -1,5 +1,4 @@
 using DumpDetective.Analysis.Analyzers;
-using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;

@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Indexing;
 
@@ -14,7 +13,7 @@ internal sealed record ResolvedExecutionOptions(
     EventLeakOptions EventLeak,
     DiagnosticsOptions Diagnostics,
     ReportOptions Report,
-    CollectionAnalyzerOptions Collection,
+    CollectionAnalysisOptions Collection,
     string? ConfigPath,
     bool UsedConfigFile,
     IReadOnlyCollection<string> IncludeAnalyzers,

@@ -9,6 +9,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using Microsoft.Extensions.Logging;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -31,33 +32,33 @@ namespace DumpDetective.Analysis.Analyzers
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
     public class CollectionAnalyzer : IAnalyzer
     {
-        private CollectionAnalyzerOptions _options;
+        private CollectionAnalysisOptions _options;
         private readonly ILogger<CollectionAnalyzer>? _logger;
 
         public string Name => "Collection Analysis";
         public string Category => "Memory";
 
         public CollectionAnalyzer()
-            : this(CollectionAnalyzerOptions.Default, logger: null)
+            : this(CollectionAnalysisOptions.Default, logger: null)
         {
         }
 
         /// <summary>Constructor for DI/factory use — options are read from the analysis context at run time.</summary>
         public CollectionAnalyzer(ILogger<CollectionAnalyzer>? logger)
-            : this(CollectionAnalyzerOptions.Default, logger)
+            : this(CollectionAnalysisOptions.Default, logger)
         {
         }
 
-        public CollectionAnalyzer(CollectionAnalyzerOptions options, ILogger<CollectionAnalyzer>? logger = null)
+        public CollectionAnalyzer(CollectionAnalysisOptions options, ILogger<CollectionAnalyzer>? logger = null)
         {
-            _options = options ?? CollectionAnalyzerOptions.Default;
+            _options = options ?? CollectionAnalysisOptions.Default;
             _logger = logger;
         }
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _options = context.GetOption<CollectionAnalyzerOptions>();
+            _options = context.GetOption<CollectionAnalysisOptions>();
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 
@@ -629,7 +630,7 @@ namespace DumpDetective.Analysis.Analyzers
         // This avoids the catastrophic O(n * heap-walk) cost of doing it per item during scanning.
         // Fast profile: cache.GetRootDescription only (O(1) lookup).
         // Balanced/Deep: additionally runs ReferenceChainAnalyzer BFS for items still missing a description.
-        private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalyzerOptions options)
+        private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options)
         {
             if (wastefulList.Count == 0)
                 return;

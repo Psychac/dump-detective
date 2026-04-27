@@ -1,6 +1,6 @@
 using System;
 
-namespace DumpDetective.Analysis.Analyzers
+namespace DumpDetective.Core.Options
 {
     public enum AnalysisProfile
     {
@@ -10,11 +10,11 @@ namespace DumpDetective.Analysis.Analyzers
     }
 
     /// <summary>
-    /// Options that control how the <see cref="CollectionAnalyzer"/> runs and reports findings.
+    /// Options that control how the <see cref="DumpDetective.Analysis.Analyzers.CollectionAnalyzer"/> runs and reports findings.
     /// This class centralizes thresholds and performance-related configuration so they can be
     /// provided by callers (CLI, tests or higher-level orchestration) instead of hard-coded constants.
     /// </summary>
-    public sealed class CollectionAnalyzerOptions
+    public sealed class CollectionAnalysisOptions
     {
         /// <summary>
         /// Threshold (in bytes) under which an individual collection is considered "wasteful".
@@ -74,7 +74,7 @@ namespace DumpDetective.Analysis.Analyzers
         /// Reference-chain search options used when running targeted path searches.
         /// Consumers may customize budgets for balanced/deep searches here.
         /// </summary>
-        public DumpDetective.Core.Options.ReferenceChainOptions ReferenceChainOptions { get; init; } = new();
+        public ReferenceChainOptions ReferenceChainOptions { get; init; } = new();
 
         /// <summary>
         /// If true, serialize accesses to the ClrHeap APIs (e.g., GetObject) to avoid
@@ -86,6 +86,6 @@ namespace DumpDetective.Analysis.Analyzers
         /// Default options instance with recommended values matching the original analyzer.
         /// Consumers may clone/modify this instance when invoking the analyzer.
         /// </summary>
-        public static CollectionAnalyzerOptions Default { get; } = new();
+        public static CollectionAnalysisOptions Default { get; } = new();
     }
 }

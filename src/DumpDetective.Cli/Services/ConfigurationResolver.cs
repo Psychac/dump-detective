@@ -26,7 +26,7 @@ internal sealed class ConfigurationResolver
         DiagnosticsOptions diagnostics    = Resolve(usedConfigFile, BuildDiagnosticsFromConfig,        BuildDiagnosticsFromCli,        fileModel, request);
         ReportOptions report              = Resolve(usedConfigFile, BuildReportFromConfig,             BuildReportFromCli,             fileModel, request);
         HeapIndexPrebuildMode indexMode   = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig,  BuildIndexPrebuildModeFromCli,  fileModel, request);
-        CollectionAnalyzerOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig,     BuildCollectionFromCli,         fileModel, request);
+        CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig,     BuildCollectionFromCli,         fileModel, request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
@@ -262,11 +262,11 @@ internal sealed class ConfigurationResolver
         return request.IndexPrebuildMode ?? HeapIndexPrebuildMode.Auto;
     }
 
-    private static CollectionAnalyzerOptions BuildCollectionFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => config.Collection ?? new CollectionAnalyzerOptions();
+    private static CollectionAnalysisOptions BuildCollectionFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+        => config.Collection ?? new CollectionAnalysisOptions();
 
-    private static CollectionAnalyzerOptions BuildCollectionFromCli(AnalysisCommandRequest request)
-        => new CollectionAnalyzerOptions();
+    private static CollectionAnalysisOptions BuildCollectionFromCli(AnalysisCommandRequest request)
+        => new CollectionAnalysisOptions();
 
     private static T Resolve<T>(
         bool fromFile,
@@ -352,7 +352,7 @@ internal sealed class CliConfigurationFileModel
     public ReferenceChainOptions? ReferenceChain { get; init; }
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }
-    public CollectionAnalyzerOptions? Collection { get; init; }
+    public CollectionAnalysisOptions? Collection { get; init; }
     public ReportOptionsModel? Report { get; init; }
 
     public int? HighReferenceThreshold { get; init; }
@@ -386,7 +386,7 @@ internal sealed class IndexingOptionsModel
     ReadCommentHandling = JsonCommentHandling.Skip,
     AllowTrailingCommas = true)]
 [JsonSerializable(typeof(CliConfigurationFileModel))]
-[JsonSerializable(typeof(CollectionAnalyzerOptions))]
+[JsonSerializable(typeof(CollectionAnalysisOptions))]
 [JsonSerializable(typeof(AnalysisProfile))]
 internal partial class CliConfigurationJsonSerializerContext : JsonSerializerContext
 {

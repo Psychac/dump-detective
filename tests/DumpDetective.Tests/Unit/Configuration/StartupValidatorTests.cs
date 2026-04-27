@@ -76,7 +76,7 @@ public sealed class StartupValidatorTests
             EventLeak: new EventLeakOptions(),
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },
-            Collection: new CollectionAnalyzerOptions(),
+            Collection: new CollectionAnalysisOptions(),
             ConfigPath: null,
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),

@@ -196,7 +196,7 @@ internal sealed class TrendOrchestrationService(
                 [typeof(Core.Options.ReferenceChainOptions)]          = resolved.ReferenceChain,
                 [typeof(Core.Options.EventLeakOptions)]               = resolved.EventLeak,
                 [typeof(Core.Options.DiagnosticsOptions)]             = resolved.Diagnostics,
-                [typeof(Analysis.Analyzers.CollectionAnalyzerOptions)] = resolved.Collection,
+                [typeof(Core.Options.CollectionAnalysisOptions)] = resolved.Collection,
             },
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };

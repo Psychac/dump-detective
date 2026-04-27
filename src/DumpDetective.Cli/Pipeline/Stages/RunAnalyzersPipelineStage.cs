@@ -55,7 +55,7 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
                 [typeof(ReferenceChainOptions)]     = resolved.ReferenceChain,
                 [typeof(EventLeakOptions)]          = resolved.EventLeak,
                 [typeof(DiagnosticsOptions)]        = resolved.Diagnostics,
-                [typeof(CollectionAnalyzerOptions)] = resolved.Collection,
+                [typeof(CollectionAnalysisOptions)] = resolved.Collection,
             },
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, state.ActiveAnalyzers)
         };

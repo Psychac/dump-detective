@@ -1,0 +1,97 @@
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Utilities;
+using DumpDetective.Reporting.Abstractions;
+using DumpDetective.Reporting.Models;
+
+namespace DumpDetective.Reporting.SectionBuilders;
+
+internal sealed class MemoryLeakSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+{
+    public string AnalyzerName => "Memory Leak Analysis";
+    public int SortOrder => 25;
+
+    public bool CanHandle(AnalyzerDomainResult result) => result is MemoryLeakDomainResult;
+
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
+    {
+        var d = (MemoryLeakDomainResult)result;
+        var blocks = new List<SectionBlock>();
+
+        // Strings
+        blocks.Add(H("DUPLICATE STRING ANALYSIS"));
+        blocks.Add(Divider());
+        blocks.Add(M("Total Strings",               $"{d.TotalStrings:N0}",                              d.TotalStrings));
+        blocks.Add(M("Total String Memory",         FormatHelper.FormatBytes(d.TotalStringMemoryBytes),  (double)d.TotalStringMemoryBytes));
+        blocks.Add(M("Unique Strings",              $"{d.UniqueStrings:N0}",                             d.UniqueStrings));
+        blocks.Add(M("Duplicate String Waste",      FormatHelper.FormatBytes(d.DuplicateStringWastedBytes), (double)d.DuplicateStringWastedBytes));
+
+        var dupStrings = d.TopDuplicateStrings ?? [];
+        if (dupStrings.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("TOP DUPLICATE STRINGS"));
+            var dsRows = new List<TableRow>(dupStrings.Count);
+            for (int i = 0; i < dupStrings.Count; i++)
+            {
+                var dup = dupStrings[i];
+                dsRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(dup.Preview, 80)),
+                    Cell($"{dup.Count:N0}", dup.Count),
+                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes)]));
+            }
+            blocks.Add(new TableBlock("Most duplicated strings", ["String Preview", "Count", "Wasted"], dsRows));
+        }
+
+        // Finalizer queue
+        blocks.Add(Blank());
+        blocks.Add(H("FINALIZER QUEUE"));
+        blocks.Add(Divider());
+        blocks.Add(M("Finalizer Queue Objects", $"{d.FinalizerQueueCount:N0}", d.FinalizerQueueCount));
+
+        var finalizerTypes = d.TopFinalizerTypes ?? [];
+        if (finalizerTypes.Count > 0)
+        {
+            var ftRows = new List<TableRow>(finalizerTypes.Count);
+            for (int i = 0; i < finalizerTypes.Count; i++)
+            {
+                var t = finalizerTypes[i];
+                double pct = d.FinalizerQueueCount == 0 ? 0 : t.Count * 100.0 / d.FinalizerQueueCount;
+                ftRows.Add(new TableRow([
+                    Cell(t.Name),
+                    Cell($"{t.Count:N0}", t.Count),
+                    Cell($"{pct:F1}%")]));
+            }
+            blocks.Add(new TableBlock("Top types in finalizer queue", ["Type", "Count", "% Queue"], ftRows));
+        }
+
+        // Highly referenced objects
+        blocks.Add(Blank());
+        blocks.Add(H("HIGHLY REFERENCED OBJECTS"));
+        blocks.Add(Divider());
+        blocks.Add(M("Highly Referenced Objects", $"{d.HighlyReferencedObjectCount:N0}", d.HighlyReferencedObjectCount));
+
+        var topRefs = d.TopHighlyReferencedObjects ?? [];
+        if (topRefs.Count > 0)
+        {
+            var hrRows = new List<TableRow>(topRefs.Count);
+            for (int i = 0; i < topRefs.Count; i++)
+            {
+                var obj = topRefs[i];
+                hrRows.Add(new TableRow([
+                    Cell(obj.TypeName),
+                    Cell($"0x{obj.Address:X}"),
+                    Cell(FormatHelper.FormatBytes(obj.Size), (long)obj.Size),
+                    Cell($"{obj.IncomingReferences:N0}", obj.IncomingReferences)]));
+            }
+            blocks.Add(new TableBlock("Top highly referenced objects", ["Type", "Address", "Size", "Incoming Refs"], hrRows));
+        }
+
+        if (d.SkippedReferenceAddresses > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(T($"Reference tracking cap hit; {d.SkippedReferenceAddresses:N0} addresses skipped — counts above may be partial."));
+        }
+
+        return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+    }
+}

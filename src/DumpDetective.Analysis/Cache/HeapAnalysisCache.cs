@@ -3,7 +3,6 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
-using System.Linq;
 
 namespace DumpDetective.Analysis.Cache
 {
@@ -58,7 +57,13 @@ namespace DumpDetective.Analysis.Cache
         }
 
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
-            => EnumerateIndexedEntries().Select(e => (e.Address, e.MethodTable, e.Size));
+        {
+            // OPT-#15 (PERF-MED-01): yield return avoids the SelectEnumerableIterator + delegate closure
+            // allocated by LINQ .Select() on every call. HeapEntry is a 24-byte struct; the projection
+            // cost is identical — only the wrapper allocation is eliminated.
+            foreach (HeapEntry entry in EnumerateIndexedEntries())
+                yield return (entry.Address, entry.MethodTable, entry.Size);
+        }
 
         public void SetProgress(IProgress<AnalyzerProgressReport>? progress)
         {
@@ -233,7 +238,6 @@ namespace DumpDetective.Analysis.Cache
             var threadLocalResults = new System.Collections.Concurrent.ConcurrentBag<
                 (Dictionary<string, CachedTypeStatistics> Stats, Dictionary<string, ulong> Samples)>();
             long totalScanned = 0;
-            const long progressInterval = 50_000;
 
             Parallel.ForEach(
                 heap.Segments,
@@ -266,8 +270,10 @@ namespace DumpDetective.Analysis.Cache
                         }
 
                         long s = Interlocked.Increment(ref totalScanned);
-                        if (s % progressInterval == 0)
-                            _progress?.Report(new AnalyzerProgressReport(s, "building type statistics"));
+                        // OPT-#18 (PERF-MED-08): Do NOT call _progress.Report from parallel worker threads.
+                        // Progress<T>.Report() without a SynchronizationContext dispatches on the calling
+                        // thread, causing concurrent calls to race on any handler-side shared state.
+                        // Progress is reported once in the sequential merge phase below.
                     }
                     return localState;
                 },
@@ -337,13 +343,18 @@ namespace DumpDetective.Analysis.Cache
 
         private static string ResolveTypeNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
         {
+            // OPT-#19 (PERF-HIGH-06): GetTypeByMethodTable uses already-loaded type metadata and does
+            // not touch object memory — no page fault into the dump file. Fall back to GetObject only
+            // if the method-table lookup fails (e.g. corrupted / unknown MT).
+            ClrType? type = heap.GetTypeByMethodTable(methodTable);
+            if (type?.Name is string name)
+                return name;
+
             if (sampleAddress != 0)
             {
                 ClrObject sample = heap.GetObject(sampleAddress);
-                if (sample.IsValid && sample.Type != null)
-                {
-                    return sample.Type.Name ?? StringConstants.UnknownType;
-                }
+                if (sample.IsValid && sample.Type?.Name is string sampleName)
+                    return sampleName;
             }
 
             return $"MethodTable@0x{methodTable:X}";

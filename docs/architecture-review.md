@@ -30,6 +30,12 @@
 | 2025 | PERF-MED-04 | ✅ **Done** | `BoundedPathSearchResult` changed from `sealed record` to `sealed class` with explicit constructor; eliminates synthesized `Equals`/`GetHashCode`/`==`/`Clone` machinery that was never used |
 | 2025 | PERF-LOW-02 | ✅ **Done** | `BoundedPathSearchBudget` changed from `readonly record struct` to `readonly struct` with explicit properties and constructor; removes synthesized equality overhead on a config-only struct |
 | 2025 | PERF-LOW-03 | ✅ **Done** | `bool IsThreadSafe { get; }` added to `IAnalyzer` with default interface implementation returning `false`; gives `AnalysisPipeline` a concurrency contract to query before scheduling parallel Phase 2 |
+| 2025 | PERF-HIGH-01 | ✅ **Done** | `DateTime.UtcNow` replaced with `Stopwatch.GetTimestamp()`/`Stopwatch.GetElapsedTime()` in `BoundedRootPathFinder`; `maxTicks` computed once outside the root loop; eliminates kernel-mode transitions from the BFS inner loop |
+| 2025 | PERF-HIGH-06 | ✅ **Done** | `ResolveTypeNameFromSample` now calls `heap.GetTypeByMethodTable(methodTable)` first; `heap.GetObject(sampleAddress)` retained as fallback only when the MT lookup returns null; removes 5,000 potential page faults on a dump with 5,000 unique types |
+| 2025 | PERF-MED-01 | ✅ **Done** | `EnumerateIndexedEntriesAsTuples` rewritten with `yield return`; eliminates the `SelectEnumerableIterator` wrapper and delegate closure allocated by the LINQ `.Select()` on every call |
+| 2025 | PERF-MED-03 | ✅ **Done** | `ReconstructPath` now uses `Stack<ulong>` to produce root→target order directly; eliminates the `List<T>.Reverse()` O(N) second pass |
+| 2025 | PERF-MED-08 | ✅ **Done** | `_progress?.Report(...)` removed from inside `Parallel.ForEach` worker body in `GetOrBuildTypeStatistics`; progress is now reported once in the sequential merge phase, eliminating concurrent handler races and the unused `progressInterval` constant |
+| 2025 | PERF-LOW-04 | ✅ **Done** | `using System.Linq` removed from `HeapAnalysisCache.cs`; LINQ is no longer available in the file after `EnumerateIndexedEntriesAsTuples` was converted to `yield return` (PERF-MED-01) |
 
 ---
 
@@ -1106,24 +1112,24 @@ Analyzer count is always small (< 20) so this is not a performance issue. Howeve
 | PERF-CRIT-02 | 🔴 | `HeapAnalysisCache.cs` | Second full heap scan when index hydration returns empty | S |
 | PERF-CRIT-03 | 🔴 | `HeapAnalysisCache.cs` | `_retainedObjectsCache` unbounded memory growth | S |
 | ~~PERF-CRIT-04~~ | 🔴 | ~~`HeapAnalysisCache.cs`~~ | ~~`++_objectScanCount` non-atomic — data race~~ | ✅ **Done** |
-| PERF-HIGH-01 | 🟠 | `BoundedRootPathFinder.cs` | `DateTime.UtcNow` in BFS inner loop; replace with `Stopwatch` | XS |
+| ~~PERF-HIGH-01~~ | 🟠 | ~~`BoundedRootPathFinder.cs`~~ | ~~`DateTime.UtcNow` in BFS inner loop; replace with `Stopwatch`~~ | ✅ **Done** |
 | PERF-HIGH-02 | 🟠 | `HeapAnalysisCache.cs` | `Dictionary<string, ...>` hot-path cache; change to `ulong` keys | M |
 | PERF-HIGH-03 | 🟠 | `LazyReferenceGraph.cs` | Full-clear eviction causes thrash cliff on dense graphs | S |
 | PERF-HIGH-04 | 🟠 | `DiskBackedObjectIndexWriter.cs` | All entries materialized into `HeapEntry[]` before disk write — ~2× peak RAM | L |
 | ~~PERF-HIGH-05~~ | 🟠 | ~~`DiskBackedObjectIndexWriter.cs`~~ | ~~`ThrowIfCancellationRequested()` per-record; throttle to 100K cadence~~ | ✅ **Done** |
-| PERF-HIGH-06 | 🟠 | `HeapAnalysisCache.cs` | `heap.GetObject()` per type in hydration; use `GetTypeByMethodTable` instead | XS |
-| PERF-MED-01 | 🟡 | `HeapAnalysisCache.cs` | LINQ `.Select()` on streaming enumerator; replace with `yield return` | XS |
+| ~~PERF-HIGH-06~~ | 🟠 | ~~`HeapAnalysisCache.cs`~~ | ~~`heap.GetObject()` per type in hydration; use `GetTypeByMethodTable` instead~~ | ✅ **Done** |
+| ~~PERF-MED-01~~ | 🟡 | ~~`HeapAnalysisCache.cs`~~ | ~~LINQ `.Select()` on streaming enumerator; replace with `yield return`~~ | ✅ **Done** |
 | PERF-MED-02 | 🟡 | `BoundedRootPathFinder.cs` | `string RootKind` in traversal-hot struct; intern to `enum RootKind : byte` | S |
-| PERF-MED-03 | 🟡 | `BoundedRootPathFinder.cs` | `ReconstructPath` list + `.Reverse()`; use `Stack<ulong>` instead | XS |
+| ~~PERF-MED-03~~ | 🟡 | ~~`BoundedRootPathFinder.cs`~~ | ~~`ReconstructPath` list + `.Reverse()`; use `Stack<ulong>` instead~~ | ✅ **Done** |
 | ~~PERF-MED-04~~ | 🟡 | ~~`BoundedRootPathFinder.cs`~~ | ~~`BoundedPathSearchResult` as `sealed record`; change to `sealed class`~~ | ✅ **Done** |
 | PERF-MED-05 | 🟡 | `HeapAnalysisCache.cs` | `_methodTableHasRefs` not thread-safe; change to `ConcurrentDictionary` | XS |
 | PERF-MED-06 | 🟡 | Architecture | No `RuntimeFacade`; `ClrHeap` used raw in all analyzers | L |
 | PERF-MED-07 | 🟡 | `AnalysisPipeline.cs` | Phase 2 runs sequentially; parallelize independent analyzers | M |
-| PERF-MED-08 | 🟡 | `HeapAnalysisCache.cs` | Progress reporting called from parallel threads | XS |
+| ~~PERF-MED-08~~ | 🟡 | ~~`HeapAnalysisCache.cs`~~ | ~~Progress reporting called from parallel threads~~ | ✅ **Done** |
 | PERF-LOW-01 | 🟢 | `HeapIndexEntryReader.cs` | Partial-record remainder silently dropped; add diagnostic | XS |
 | ~~PERF-LOW-02~~ | 🟢 | ~~`BoundedRootPathFinder.cs`~~ | ~~`BoundedPathSearchBudget` as `record struct`; simplify to plain `struct`~~ | ✅ **Done** |
 | ~~PERF-LOW-03~~ | 🟢 | ~~`IAnalyzer.cs`~~ | ~~No concurrency contract; add `IsThreadSafe` default interface property~~ | ✅ **Done** |
-| PERF-LOW-04 | 🟢 | `HeapAnalysisCache.cs` | Remove `using System.Linq` after PERF-MED-01 | XS |
+| ~~PERF-LOW-04~~ | 🟢 | ~~`HeapAnalysisCache.cs`~~ | ~~Remove `using System.Linq` after PERF-MED-01~~ | ✅ **Done** |
 | PERF-LOW-05 | 🟢 | `AnalysisPipeline.cs` | `.ToList()` on analyzer collection; accept `IReadOnlyList` directly | XS |
 
 **Effort key:** XS = < 30 min · S = 1–2 h · M = half-day · L = 1–2 days
@@ -1142,12 +1148,12 @@ Phase A — Correctness & Safety  (zero behaviour change — do first, batch in 
   ✅ PERF-LOW-03   IAnalyzer.IsThreadSafe default interface property
 
 Phase B — Performance hot-path fixes  (high ROI, low risk)
-  PERF-HIGH-01  DateTime.UtcNow  →  Stopwatch in BoundedRootPathFinder
-  PERF-HIGH-06  heap.GetObject()  →  GetTypeByMethodTable in hydration
-  PERF-MED-01   EnumerateIndexedEntriesAsTuples  →  yield return
-  PERF-MED-03   ReconstructPath  →  Stack<ulong>
-  PERF-MED-08   Throttle parallel progress report to sequential merge phase
-  PERF-LOW-04   Remove using System.Linq from HeapAnalysisCache
+  ✅ PERF-HIGH-01  DateTime.UtcNow  →  Stopwatch in BoundedRootPathFinder
+  ✅ PERF-HIGH-06  heap.GetObject()  →  GetTypeByMethodTable in hydration
+  ✅ PERF-MED-01   EnumerateIndexedEntriesAsTuples  →  yield return
+  ✅ PERF-MED-03   ReconstructPath  →  Stack<ulong>
+  ✅ PERF-MED-08   Throttle parallel progress report to sequential merge phase
+  ✅ PERF-LOW-04   Remove using System.Linq from HeapAnalysisCache
 
 Phase C — Memory bounds  (validate with large-dump run after each)
   PERF-CRIT-02  Guard fallback heap scan in GetOrBuildTypeStatistics

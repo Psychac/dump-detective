@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Traversal;
@@ -81,7 +82,9 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
             return new BoundedPathSearchResult(false, null, null, false, PathSearchCapReason.None, 0, 0, 0, TimeSpan.Zero);
         }
 
-        DateTime start = DateTime.UtcNow;
+        long startTicks = Stopwatch.GetTimestamp();
+        TimeSpan maxDuration = budget.MaxDuration <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(1) : budget.MaxDuration;
+        long maxTicks = (long)(maxDuration.TotalSeconds * Stopwatch.Frequency);
         int rootsChecked = 0;
         int nodesVisited = 0;
         int edgesVisited = 0;
@@ -90,7 +93,6 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
         int maxNodes = Math.Max(1, budget.MaxNodes);
         int maxEdges = Math.Max(1, budget.MaxEdges);
         int maxDepth = Math.Max(1, budget.MaxDepth);
-        TimeSpan maxDuration = budget.MaxDuration <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(1) : budget.MaxDuration;
 
         int rootLoop = Math.Min(roots.Count, maxRoots);
 
@@ -102,9 +104,9 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
 
         for (int rootIndex = 0; rootIndex < rootLoop; rootIndex++)
         {
-            if (DateTime.UtcNow - start > maxDuration)
+            if (Stopwatch.GetTimestamp() - startTicks > maxTicks)
             {
-                return Complete(false, null, null, true, PathSearchCapReason.TimeLimit, rootsChecked, nodesVisited, edgesVisited, start);
+                return Complete(false, null, null, true, PathSearchCapReason.TimeLimit, rootsChecked, nodesVisited, edgesVisited, startTicks);
             }
 
             RootCandidate root = roots[rootIndex];
@@ -112,7 +114,7 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
 
             if (root.Address == targetAddress)
             {
-                return Complete(true, root.RootKind, [targetAddress], false, PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, start);
+                return Complete(true, root.RootKind, [targetAddress], false, PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, startTicks);
             }
 
             if (root.Address == 0)
@@ -128,9 +130,9 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
 
             while (queue.Count > 0)
             {
-                if (DateTime.UtcNow - start > maxDuration)
+                if (Stopwatch.GetTimestamp() - startTicks > maxTicks)
                 {
-                    return Complete(false, null, null, true, PathSearchCapReason.TimeLimit, rootsChecked, nodesVisited, edgesVisited, start);
+                    return Complete(false, null, null, true, PathSearchCapReason.TimeLimit, rootsChecked, nodesVisited, edgesVisited, startTicks);
                 }
 
                 (ulong current, int depth) = queue.Dequeue();
@@ -138,7 +140,7 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
 
                 if (nodesVisited > maxNodes)
                 {
-                    return Complete(false, null, null, true, PathSearchCapReason.NodeLimit, rootsChecked, nodesVisited, edgesVisited, start);
+                    return Complete(false, null, null, true, PathSearchCapReason.NodeLimit, rootsChecked, nodesVisited, edgesVisited, startTicks);
                 }
 
                 if (depth >= maxDepth)
@@ -151,13 +153,13 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
                     edgesVisited++;
                     if (edgesVisited > maxEdges)
                     {
-                        return Complete(false, null, null, true, PathSearchCapReason.EdgeLimit, rootsChecked, nodesVisited, edgesVisited, start);
+                        return Complete(false, null, null, true, PathSearchCapReason.EdgeLimit, rootsChecked, nodesVisited, edgesVisited, startTicks);
                     }
 
                     if (referenceAddress == targetAddress)
                     {
                         IReadOnlyList<ulong> path = ReconstructPath(previous, root.Address, targetAddress, current);
-                        return Complete(true, root.RootKind, path, false, PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, start);
+                        return Complete(true, root.RootKind, path, false, PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, startTicks);
                     }
 
                     if (visited.Add(referenceAddress))
@@ -170,22 +172,25 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
         }
 
         bool cappedByRoots = roots.Count > maxRoots;
-        return Complete(false, null, null, cappedByRoots, cappedByRoots ? PathSearchCapReason.RootLimit : PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, start);
+        return Complete(false, null, null, cappedByRoots, cappedByRoots ? PathSearchCapReason.RootLimit : PathSearchCapReason.None, rootsChecked, nodesVisited, edgesVisited, startTicks);
     }
 
     private static IReadOnlyList<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress, ulong targetParent)
     {
-        List<ulong> reversed = new(capacity: 16) { targetAddress, targetParent };
+        // OPT-#17 (PERF-MED-03): Stack naturally produces root→target order; eliminates the O(N)
+        // List.Reverse() second pass that the previous List<ulong> approach required.
+        Stack<ulong> stack = new(capacity: 16);
+        stack.Push(targetAddress);
         ulong cursor = targetParent;
 
         while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
         {
-            reversed.Add(parent);
+            stack.Push(cursor);
             cursor = parent;
         }
 
-        reversed.Reverse();
-        return reversed;
+        stack.Push(startAddress);
+        return stack.ToArray();
     }
 
     private static BoundedPathSearchResult Complete(
@@ -197,8 +202,10 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
         int rootsChecked,
         int nodesVisited,
         int edgesVisited,
-        DateTime started)
+        long startTicks)
     {
+        // OPT-#16 (PERF-HIGH-01): Stopwatch.GetElapsedTime avoids a kernel-mode transition;
+        // available on .NET 7+ (including .NET 10).
         return new BoundedPathSearchResult(
             found,
             rootKind,
@@ -208,6 +215,6 @@ internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph gra
             rootsChecked,
             nodesVisited,
             edgesVisited,
-            DateTime.UtcNow - started);
+            Stopwatch.GetElapsedTime(startTicks));
     }
 }

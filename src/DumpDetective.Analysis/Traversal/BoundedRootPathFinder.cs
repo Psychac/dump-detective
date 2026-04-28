@@ -4,12 +4,23 @@ namespace DumpDetective.Analysis.Traversal;
 
 internal readonly record struct RootCandidate(string RootKind, ulong Address);
 
-internal readonly record struct BoundedPathSearchBudget(
-    int MaxRoots,
-    int MaxNodes,
-    int MaxEdges,
-    int MaxDepth,
-    TimeSpan MaxDuration);
+internal readonly struct BoundedPathSearchBudget
+{
+    public int MaxRoots { get; init; }
+    public int MaxNodes { get; init; }
+    public int MaxEdges { get; init; }
+    public int MaxDepth { get; init; }
+    public TimeSpan MaxDuration { get; init; }
+
+    public BoundedPathSearchBudget(int maxRoots, int maxNodes, int maxEdges, int maxDepth, TimeSpan maxDuration)
+    {
+        MaxRoots = maxRoots;
+        MaxNodes = maxNodes;
+        MaxEdges = maxEdges;
+        MaxDepth = maxDepth;
+        MaxDuration = maxDuration;
+    }
+}
 
 internal enum PathSearchCapReason
 {
@@ -20,16 +31,40 @@ internal enum PathSearchCapReason
     TimeLimit
 }
 
-internal sealed record BoundedPathSearchResult(
-    bool Found,
-    string? RootKind,
-    IReadOnlyList<ulong>? Path,
-    bool Capped,
-    PathSearchCapReason CapReason,
-    int RootsChecked,
-    int NodesVisited,
-    int EdgesVisited,
-    TimeSpan Elapsed);
+internal sealed class BoundedPathSearchResult
+{
+    public bool Found { get; }
+    public string? RootKind { get; }
+    public IReadOnlyList<ulong>? Path { get; }
+    public bool Capped { get; }
+    public PathSearchCapReason CapReason { get; }
+    public int RootsChecked { get; }
+    public int NodesVisited { get; }
+    public int EdgesVisited { get; }
+    public TimeSpan Elapsed { get; }
+
+    public BoundedPathSearchResult(
+        bool found,
+        string? rootKind,
+        IReadOnlyList<ulong>? path,
+        bool capped,
+        PathSearchCapReason capReason,
+        int rootsChecked,
+        int nodesVisited,
+        int edgesVisited,
+        TimeSpan elapsed)
+    {
+        Found = found;
+        RootKind = rootKind;
+        Path = path;
+        Capped = capped;
+        CapReason = capReason;
+        RootsChecked = rootsChecked;
+        NodesVisited = nodesVisited;
+        EdgesVisited = edgesVisited;
+        Elapsed = elapsed;
+    }
+}
 
 internal sealed class BoundedRootPathFinder(ClrHeap heap, LazyReferenceGraph graph)
 {

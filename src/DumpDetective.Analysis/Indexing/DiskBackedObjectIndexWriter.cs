@@ -125,8 +125,6 @@ internal sealed class DiskBackedObjectIndexWriter
                 long writtenCount = 0;
                 foreach (HeapEntry entry in entries)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
                     var span = new Span<byte>(rented, offset, RecordSize);
                     BinaryPrimitives.WriteUInt64LittleEndian(span, entry.Address);
                     BinaryPrimitives.WriteUInt64LittleEndian(span[8..], entry.MethodTable);
@@ -135,8 +133,12 @@ internal sealed class DiskBackedObjectIndexWriter
                     offset += RecordSize;
                     writtenCount++;
 
-                    if (progress is not null && writtenCount % ProgressReportEveryObjects == 0)
-                        progress.Report(new(writtenCount, "writing index", Detail: null, Elapsed: stopwatch.Elapsed));
+                    if (writtenCount % ProgressReportEveryObjects == 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (progress is not null)
+                            progress.Report(new(writtenCount, "writing index", Detail: null, Elapsed: stopwatch.Elapsed));
+                    }
 
                     if (offset == batchSize)
                     {

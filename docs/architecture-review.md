@@ -24,6 +24,12 @@
 | 2025 | MINOR-12 | ✅ **Done** | `Resolve<T>()` helper added to `ConfigurationResolver`; all 7 option ternaries collapsed to one-line calls |
 | 2025 | MINOR-15 | ✅ **Done** | `LazyReferenceGraph` now implements `IReferenceProvider` via explicit interface; `ReferenceChainAnalyzer` replaced `ClrReferenceProvider` with `LazyReferenceGraph`, gaining edge caching across the 3 BFS phases |
 | 2025 | MAJOR-04 | ✅ **Done** | `DumpAnalysisService` decomposed into `AnalyzerFilterService` (static), `SingleDumpOrchestrationService`, and `TrendOrchestrationService`; dead `IFindingGenerator` injection removed; coordinator reduced to ~60 LOC |
+| 2025 | PERF-CRIT-04 | ✅ **Done** | `++_objectScanCount` in `GetRetainedObjects` replaced with `Interlocked.Increment`; consistent with all other increment sites in the file |
+| 2025 | PERF-HIGH-05 | ✅ **Done** | `ThrowIfCancellationRequested()` in `DiskBackedObjectIndexWriter` write loop throttled to `ProgressReportEveryObjects` (100 K) cadence; eliminates 80 M volatile reads on a large dump |
+| 2025 | PERF-CRIT-01 | ✅ **Done** | `binary-format.md` updated to reflect true on-disk layout: `Size` is `ulong` / 8 bytes, not `int` / 4 bytes; phantom padding row and 20-byte total removed; note added explaining `RecordSize = sizeof(ulong) * 3 = 24` |
+| 2025 | PERF-MED-04 | ✅ **Done** | `BoundedPathSearchResult` changed from `sealed record` to `sealed class` with explicit constructor; eliminates synthesized `Equals`/`GetHashCode`/`==`/`Clone` machinery that was never used |
+| 2025 | PERF-LOW-02 | ✅ **Done** | `BoundedPathSearchBudget` changed from `readonly record struct` to `readonly struct` with explicit properties and constructor; removes synthesized equality overhead on a config-only struct |
+| 2025 | PERF-LOW-03 | ✅ **Done** | `bool IsThreadSafe { get; }` added to `IAnalyzer` with default interface implementation returning `false`; gives `AnalysisPipeline` a concurrency contract to query before scheduling parallel Phase 2 |
 
 ---
 
@@ -558,3 +564,603 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 > **Note on MAJOR-04:** This is the remaining high-risk refactor. Decompose `DumpAnalysisService` with the test suite green before and after each extraction step.
 
 > ~~**Note on CRITICAL-01:** This was a project reference change — run a full build and all tests immediately after moving each domain result type.~~ **CRITICAL-01 is complete. Build passed clean.**
+
+---
+
+---
+
+# Performance & Memory Deep-Dive Review (Round 2)
+
+**Date:** 2025-07-16  
+**Branch:** `optimize`  
+**Scope:** `HeapStreamer`, `HeapEntry`, `HeapAnalysisCache`, `DiskBackedObjectIndexWriter`, `HeapIndexEntryReader`, `BoundedRootPathFinder`, `LazyReferenceGraph`, `TypeAggregateIndexBuilder`, `AnalysisPipeline`  
+**Standard:** Project performance checklist + architecture guidelines
+
+---
+
+## Legend
+
+| Symbol | Meaning |
+|--------|---------|
+| 🔴 | Critical — correctness risk, charter violation, or data corruption |
+| 🟠 | High — measurable performance or memory regression at scale |
+| 🟡 | Medium — meaningful overhead or design gap; address before large-dump testing |
+| 🟢 | Low — proactive hardening, defensive coding |
+| ✅ | Confirmed correct; preserve as-is |
+
+---
+
+## Confirmed Strengths
+
+| # | Location | What Is Good |
+|---|----------|-------------|
+| ✅1 | `HeapStreamer.cs` | `yield return` with `IsValid` + `Type != null` guard before every `MethodTable` access. Zero heap materialization. |
+| ✅2 | `TypeAggregateIndexBuilder.Add()` | `CollectionsMarshal.GetValueRefOrAddDefault` — zero struct copy in the innermost hot loop. Correct `Merge()` for parallel segment results. |
+| ✅3 | `DiskBackedObjectIndexWriter` | Per-segment list capacity pre-sized from `segment.Length / 128`; `ArrayPool<byte>` write buffer; `MaxSegmentParallelism = 4` caps concurrent page pressure. |
+| ✅4 | `HeapIndexEntryReader` | `ArrayPool<byte>` read buffer; adaptive batch size by index file size; `SequentialScan` hint; partial-record carry-forward path. |
+| ✅5 | `BoundedRootPathFinder` | BFS (not DFS); pre-allocated `Queue`/`HashSet`/`Dictionary` cleared between roots; hard-caps on `maxRoots`, `maxNodes`, `maxEdges`, `maxDepth`. |
+| ✅6 | `LazyReferenceGraph` | `MaxCachedNodes = 500_000` bound on cache size. `carefully: true` prevents invalid pointer dereference in BFS. |
+| ✅7 | `HeapAnalysisCache.MethodTableHasOutgoingRefs()` | `ulong MethodTable` key; `ContainsPointers` fast path before field-by-field inspection; conservative `true` fallback. |
+| ✅8 | `HeapAnalysisCache.PrebuildHeapIndex()` | Auto-selects memory vs. disk backend by dump size; idempotent on repeat calls. |
+| ✅9 | `AnalysisPipeline` | Per-analyzer `Stopwatch`; structured `AnalysisDiagnosticsEvent` at every lifecycle point; graceful cancellation with `Skipped` result. |
+| ✅10 | `TypeAggregateIndexBuilder` | Keyed by `ulong MethodTable` — no type-name string allocation in the index hot path. |
+
+---
+
+## Issues by Priority
+
+---
+
+### 🔴 P1 — Critical
+
+---
+
+#### PERF-CRIT-01 · `HeapEntry.Size` is `ulong`; `binary-format.md` documents it as `int` (4 bytes) — spec/code divergence
+
+**File:** `src/DumpDetective.Analysis/Indexing/HeapEntry.cs`, `docs/binary-format.md`
+
+```csharp
+// Actual struct:
+internal readonly record struct HeapEntry(ulong Address, ulong MethodTable, ulong Size);
+// Size = ulong = 8 bytes on disk
+
+// binary-format.md claims:
+// | Size    | 4 | int    | Object size in bytes |
+// | Padding | 4 | unused | Reserved             |
+```
+
+The writer encodes `Size` with `BinaryPrimitives.WriteUInt64LittleEndian(span[16..], entry.Size)` (8 bytes). The reader also reads 8 bytes at offset 16. Both sides are internally consistent at 24 bytes with layout `[Address:8][MethodTable:8][Size:8]`. However:
+
+- `binary-format.md` describes a **different** on-disk layout: `[Address:8][MethodTable:8][Size:4][Padding:4]`.
+- The architecture doc shows `HeapEntry.Size` as `int`.
+- Any external reader, migration script, or future developer following the spec will produce or consume a **corrupt index**.
+- `RecordSize = sizeof(ulong) * 3 = 24` is only coincidentally correct because `Size` happens to be `ulong` in practice.
+
+**Action:** Update `binary-format.md` to reflect the true layout (`Size: 8 bytes, ulong`). Update the architecture doc `HeapEntry` code snippet. If `int` sizing is preferred (saves 4 bytes/record = ~320 MB on 80M objects), change the struct, writer, and reader atomically.
+
+---
+
+#### PERF-CRIT-02 · `GetOrBuildTypeStatistics` executes a full second heap scan when index hydration returns zero entries
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+if (TryHydrateTypeStatisticsFromIndex(...))
+{
+    _typeStats = hydratedStats;
+    return _typeStats;
+}
+// Falls through to full Parallel.ForEach heap scan even after Phase 1 ran
+```
+
+`TryHydrateTypeStatisticsFromIndex` returns `false` only when `hydratedStats.Count == 0`. That triggers a **complete second parallel heap scan** — identical to Phase 1, without the disk write. On a 10 GB dump this adds 10–30 seconds and significant GC pressure. If `typeAggregates` is empty, the fallback scan will also produce nothing. The fallback gives no benefit in any real scenario.
+
+**Action:** If `_heapIndex` exists and `typeAggregates.Count > 0`, trust the index unconditionally. Reserve the fallback scan exclusively for the case where no index was built at all.
+
+---
+
+#### PERF-CRIT-03 · `_retainedObjectsCache` grows without bound
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+private Dictionary<ulong, HashSet<ulong>>? _retainedObjectsCache;
+// Each entry capped at maxObjects (default 10,000) ulongs — never evicted
+_retainedObjectsCache[rootAddress] = retained;
+```
+
+`GetRetainedObjects` is called per root address — once per top-N suspect type sample. For top-50 types with 1 sample each, this accumulates 50 × 10,000 = 500,000 `ulong` entries plus per-`HashSet` metadata (~40 bytes each = ~2 MB overhead on top of data). With no eviction, this memory persists for the entire analysis run.
+
+**Action:** Cap the cache at a fixed entry count (e.g. 32). On insertion when full, either evict the oldest key or skip caching the new result. Document the cap with a comment explaining the trade-off.
+
+---
+
+#### PERF-CRIT-04 · `++_objectScanCount` in `GetRetainedObjects` is non-atomic — data race under parallel Phase 2
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+++_objectScanCount; // plain increment — not atomic
+```
+
+Every other increment site in this class uses `Interlocked.Increment(ref _objectScanCount)` or `Interlocked.Add`. This single non-atomic write is a torn-write race if `GetRetainedObjects` is ever called from multiple threads. The architecture document states Phase 2 is planned to be parallelized.
+
+**Action:** Replace `++_objectScanCount` with `Interlocked.Increment(ref _objectScanCount)`.
+
+---
+
+### 🟠 P2 — High
+
+---
+
+#### PERF-HIGH-01 · `DateTime.UtcNow` in BFS inner loop — ~100–250 ms overhead per `TryFindAnyRootPath` call
+
+**File:** `src/DumpDetective.Analysis/Traversal/BoundedRootPathFinder.cs`
+
+```csharp
+// Called in the outer root loop AND inside the BFS dequeue loop:
+if (DateTime.UtcNow - start > maxDuration) { ... }
+
+// Also called in Complete() for the Elapsed result:
+DateTime.UtcNow - started
+```
+
+`DateTime.UtcNow` on Windows calls `GetSystemTimeAsFileTime` — a kernel mode transition costing ~200–500 ns. With `maxNodes = 10,000` and `maxRoots = 50`, this executes up to 500,000 times per call. At 300 ns average, that is ~150 ms of pure time-check overhead per invocation, independent of actual BFS work.
+
+`Stopwatch.GetTimestamp()` issues a single `RDTSC` instruction (~5 ns, 40–100× faster) and does not require a kernel transition.
+
+**Action:**
+
+```csharp
+// Replace:
+DateTime start = DateTime.UtcNow;
+if (DateTime.UtcNow - start > maxDuration) { ... }
+
+// With:
+long startTicks = Stopwatch.GetTimestamp();
+long maxTicks   = (long)(maxDuration.TotalSeconds * Stopwatch.Frequency);
+if (Stopwatch.GetTimestamp() - startTicks > maxTicks) { ... }
+
+// For Elapsed in Complete():
+TimeSpan elapsed = Stopwatch.GetElapsedTime(startTicks);
+```
+
+`Stopwatch.GetElapsedTime(long)` is a .NET 7+ API and available on .NET 10.
+
+---
+
+#### PERF-HIGH-02 · `Dictionary<string, CachedTypeStatistics>` — string keys in analysis-hot cache
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+private Dictionary<string, CachedTypeStatistics>? _typeStats;
+private Dictionary<string, ulong>? _sampleInstances;
+```
+
+Every lookup in `GetOrBuildTypeStatistics`, `GetSampleInstanceAddress`, and `TryHydrateTypeStatisticsFromIndex` hashes and compares type name strings. On a dump with 5,000 unique types, this means 5,000 string hash computations and comparisons per merge. Per checklist: **"Do NOT use `Dictionary<string, ...>` in hot paths."**
+
+Phase 1 already produces `TypeAggregateIndexEntry` keyed by `ulong MethodTable`. The string name is only needed at output time.
+
+**Action:**
+1. Change `_typeStats` to `Dictionary<ulong, CachedTypeStatistics>` (keyed by `MethodTable`).
+2. Change `_sampleInstances` to `Dictionary<ulong, ulong>` (MethodTable → sample address).
+3. Keep a separate `Dictionary<ulong, string>` for display-name resolution, populated lazily at report time.
+4. Update callers to use `MethodTable` keys; resolve type name strings in `FindingGenerator` / `Printer` layers only.
+
+---
+
+#### PERF-HIGH-03 · `LazyReferenceGraph` full-cache eviction causes thrash cliff on dense graphs
+
+**File:** `src/DumpDetective.Analysis/Traversal/LazyReferenceGraph.cs`
+
+```csharp
+if (_cache.Count >= MaxCachedNodes)
+    _cache.Clear(); // evicts all 500,000 entries at once
+```
+
+The file's own comment acknowledges the risk. When the cache hits 500,000 entries on a dense graph (large collection types, event subscriber chains), it clears entirely. The very next BFS immediately re-fetches the same hot nodes — triggering a second wave of `ClrObject.EnumerateReferences` calls. On a graph where the top-N types share many common nodes, this cycle repeats, making cache hit rate effectively zero in the worst case.
+
+**Action:** Replace full-clear with ordered partial eviction. .NET 10 `Dictionary<TKey, TValue>` preserves insertion order for enumeration. Evict the oldest 50% on threshold using `ArrayPool<ulong>` to collect the keys, avoiding LINQ:
+
+```csharp
+if (_cache.Count >= MaxCachedNodes)
+{
+    int toRemove = MaxCachedNodes / 2;
+    ulong[] keys = ArrayPool<ulong>.Shared.Rent(toRemove);
+    int i = 0;
+    foreach (ulong key in _cache.Keys)
+    {
+        if (i >= toRemove) break;
+        keys[i++] = key;
+    }
+    for (int j = 0; j < i; j++)
+        _cache.Remove(keys[j]);
+    ArrayPool<ulong>.Shared.Return(keys);
+}
+```
+
+---
+
+#### PERF-HIGH-04 · `DiskBackedObjectIndexWriter` materialises all `HeapEntry` records into a `HeapEntry[]` before any disk write — peak RAM doubles
+
+**File:** `src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs`
+
+```csharp
+// All per-segment lists remain alive while the flat array is allocated:
+HeapEntry[] entries = new HeapEntry[Math.Max(totalCount, 1)];
+// ... CopyTo from all segment lists ...
+foreach (HeapEntry entry in entries) { /* write to disk */ }
+```
+
+After parallel segment scanning, per-segment `List<HeapEntry>` instances are alive **simultaneously** with the flat `entries` array. On 80M objects × 24 bytes = ~1.9 GB in lists + ~1.9 GB in the array = **~3.8 GB peak RAM** before a single byte reaches disk. This directly violates the bounded-memory core charter.
+
+**Action:** Write each segment's entries to disk as it completes inside the `Parallel.ForEach` body, protected by a `SemaphoreSlim(1,1)` for sequential disk access. This eliminates `entries`, `allSegmentEntries`, and the flatten step entirely. Each segment's `List<HeapEntry>` is freed as soon as its write completes.
+
+---
+
+#### PERF-HIGH-05 · `CancellationToken.ThrowIfCancellationRequested()` called once per record in the write loop
+
+**File:** `src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs`
+
+```csharp
+foreach (HeapEntry entry in entries)
+{
+    cancellationToken.ThrowIfCancellationRequested(); // 80M volatile reads
+    ...
+}
+```
+
+On 80M objects this executes 80M volatile reads of the cancellation token's state, even when cancellation is never requested. `ThrowIfCancellationRequested` internally reads a volatile `bool` and a linked-list of registered callbacks on every call.
+
+**Action:** Throttle to the existing `ProgressReportEveryObjects` cadence (100,000 records):
+
+```csharp
+if (writtenCount % ProgressReportEveryObjects == 0)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    progress?.Report(...);
+}
+```
+
+---
+
+#### PERF-HIGH-06 · `ResolveTypeNameFromSample` calls `heap.GetObject()` for every unique type during index hydration
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+foreach ((ulong methodTable, TypeAggregateIndexEntry aggregate) in typeAggregates)
+{
+    string typeName = ResolveTypeNameFromSample(heap, aggregate.SampleAddress, methodTable);
+    // ResolveTypeNameFromSample → heap.GetObject(sampleAddress) — one ClrMD object read per type
+}
+```
+
+On a dump with 5,000 unique types, this is 5,000 `heap.GetObject()` calls in a tight loop, each potentially causing a page fault into the dump file. `heap.GetTypeByMethodTable(methodTable)` achieves the same result using already-loaded type metadata without an object read.
+
+**Action:**
+
+```csharp
+private static string ResolveTypeNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
+{
+    ClrType? type = heap.GetTypeByMethodTable(methodTable);
+    if (type?.Name is string name)
+        return name;
+
+    if (sampleAddress != 0)
+    {
+        ClrObject sample = heap.GetObject(sampleAddress);
+        if (sample.IsValid && sample.Type?.Name is string sampleName)
+            return sampleName;
+    }
+
+    return $"MethodTable@0x{methodTable:X}";
+}
+```
+
+---
+
+### 🟡 P3 — Medium
+
+---
+
+#### PERF-MED-01 · `EnumerateIndexedEntriesAsTuples()` wraps a streaming enumerator in LINQ `.Select()`
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
+    => EnumerateIndexedEntries().Select(e => (e.Address, e.MethodTable, e.Size));
+```
+
+This allocates a `SelectEnumerableIterator<HeapEntry, (ulong,ulong,ulong)>` wrapper and a delegate closure on every call. Callers iterate millions of entries through this wrapper. Per checklist: **"Avoid LINQ in hot paths."**
+
+**Action:**
+
+```csharp
+public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
+{
+    foreach (HeapEntry entry in EnumerateIndexedEntries())
+        yield return (entry.Address, entry.MethodTable, entry.Size);
+}
+```
+
+---
+
+#### PERF-MED-02 · `RootCandidate` struct carries a `string RootKind` field — managed reference in a traversal-hot struct
+
+**File:** `src/DumpDetective.Analysis/Traversal/BoundedRootPathFinder.cs`
+
+```csharp
+internal readonly record struct RootCandidate(string RootKind, ulong Address);
+```
+
+`RootCandidate` is iterated up to `maxRoots` times per call. The `RootKind` string is only consumed when a path is **found** (one success out of potentially thousands of roots checked). Carrying a managed reference through the entire BFS root loop inflates struct size and increases GC scan surface for no benefit in the common (not-found) case.
+
+**Action:** Replace `string RootKind` with a `byte`-sized enum:
+
+```csharp
+internal enum RootKind : byte { Static, Stack, Finalizer, Handle, AsyncStateMachine, Other }
+internal readonly record struct RootCandidate(RootKind Kind, ulong Address);
+```
+
+Resolve the display string only in `Complete()` when a path is actually returned.
+
+---
+
+#### PERF-MED-03 · `ReconstructPath` allocates a `List<ulong>` then calls `.Reverse()` — two O(N) passes
+
+**File:** `src/DumpDetective.Analysis/Traversal/BoundedRootPathFinder.cs`
+
+```csharp
+List<ulong> reversed = new(capacity: 16) { targetAddress, targetParent };
+// ... traverse `previous` backwards ...
+reversed.Reverse(); // second pass
+```
+
+Using a `Stack<ulong>` naturally produces the path in the correct (root → target) order without a reverse pass, saving one O(N) traversal:
+
+```csharp
+private static IReadOnlyList<ulong> ReconstructPath(
+    Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress, ulong targetParent)
+{
+    Stack<ulong> stack = new(capacity: 16);
+    stack.Push(targetAddress);
+    ulong cursor = targetParent;
+    while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
+    {
+        stack.Push(cursor);
+        cursor = parent;
+    }
+    stack.Push(startAddress);
+    return stack.ToArray();
+}
+```
+
+---
+
+#### PERF-MED-04 · `BoundedPathSearchResult` is a `sealed record` — synthesized equality machinery never used
+
+**File:** `src/DumpDetective.Analysis/Traversal/BoundedRootPathFinder.cs`
+
+```csharp
+internal sealed record BoundedPathSearchResult(bool Found, string? RootKind, IReadOnlyList<ulong>? Path, ...);
+```
+
+`record` synthesizes `Equals`, `GetHashCode`, `==`, `!=`, `<Clone>$`, and `PrintMembers`. None are used on a result container. `IReadOnlyList<ulong>?` in the record means `GetHashCode` falls back to reference equality on the list — potentially misleading. `sealed class` with init-only properties is semantically cleaner and avoids the generated overhead.
+
+**Action:** Change to `internal sealed class BoundedPathSearchResult` with a constructor or `init` properties.
+
+---
+
+#### PERF-MED-05 · `_methodTableHasRefs` is not thread-safe — will race when Phase 2 is parallelized
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+private Dictionary<ulong, bool>? _methodTableHasRefs;
+// ...
+_methodTableHasRefs ??= new Dictionary<ulong, bool>(capacity: 512);
+_methodTableHasRefs[methodTable] = has; // non-thread-safe write
+```
+
+The architecture document explicitly plans parallel Phase 2. `MethodTableHasOutgoingRefs` is called from graph traversal during BFS. Concurrent writes to a `Dictionary<TKey,TValue>` produce undefined behaviour.
+
+**Action:** Change to `ConcurrentDictionary<ulong, bool>` or protect all reads/writes with a dedicated `lock` object.
+
+---
+
+#### PERF-MED-06 · No centralized `RuntimeFacade` — `ClrHeap` used directly across all analyzers
+
+**Architecture doc:** Section 5.1 specifies a `RuntimeFacade` that "wraps and caches ClrMD APIs."  
+**Reality:** `ClrHeap` and `ClrRuntime` are passed raw through `RuntimeAnalysisContext` and consumed ad-hoc.
+
+Consequences:
+- `ClrType` metadata is fetched redundantly per-analyzer (`heap.GetTypeByMethodTable` called independently in multiple places).
+- No centralized field-layout cache — violates the checklist: *"Cache: ClrType metadata, Field layouts."*
+- Hard to unit-test analyzers without a real or mock `ClrHeap`.
+
+**Action:** Introduce `IRuntimeFacade` with `GetCachedType(ulong methodTable)` and `GetCachedFields(ClrType type)`. Back it with a `Dictionary<ulong, ClrType>` populated during Phase 1 from `TypeAggregates`. Inject it into `RuntimeAnalysisContext`.
+
+---
+
+#### PERF-MED-07 · Phase 2 analyzers run sequentially despite architecture intent to parallelize
+
+**File:** `src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs`
+
+```csharp
+foreach (IAnalyzer analyzer in _analyzers) { ... await ... }
+```
+
+Architecture doc Section 12: *"Phase 2: Parallelizable — Type analysis, Graph traversal (controlled)."*  
+`ThreadAnalyzer`, `GCHandleAnalyzer`, `LohFragmentationAnalyzer`, and `ModuleAnalyzer` have no data dependencies on each other and all operate on already-built indices. Running them sequentially wastes wall-clock time proportional to the number of independent analyzers.
+
+**Note:** Requires PERF-MED-05 and PERF-MED-06 (thread-safety) to be resolved first.
+
+**Action:** Add `bool IsThreadSafe { get; }` to `IAnalyzer` (default `false` via default interface implementation). Group thread-safe analyzers and run them via `Task.WhenAll`; run the rest sequentially.
+
+---
+
+#### PERF-MED-08 · Progress reporting called from parallel threads inside `GetOrBuildTypeStatistics` fallback scan
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+```csharp
+// Inside Parallel.ForEach over heap.Segments:
+long s = Interlocked.Increment(ref totalScanned); // correct
+// ...
+_progress?.Report(...) // called from multiple parallel threads concurrently
+```
+
+`Progress<T>.Report()` on a console app without a `SynchronizationContext` dispatches directly on the calling thread — meaning concurrent calls from `Parallel.ForEach` workers race on any shared state the progress handler touches.
+
+**Action:** Report progress only inside the sequential merge phase (after `Parallel.ForEach` completes) using the final `totalScanned` value.
+
+---
+
+### 🟢 P4 — Low / Proactive
+
+---
+
+#### PERF-LOW-01 · `HeapIndexEntryReader` partial-record remainder path silently discards data on premature stream end
+
+**File:** `src/DumpDetective.Analysis/Indexing/HeapIndexEntryReader.cs`
+
+```csharp
+int nextRead = stream.Read(readBuffer, remaining, batchSize - remaining);
+if (nextRead <= 0)
+    break; // `remaining` bytes of partial record silently dropped
+```
+
+If the file ends mid-record (crash during index write, disk full), the partial record is silently discarded. The caller receives fewer entries than the header's `recordCount` field promises with no diagnostic.
+
+**Action:** Add a `Debug.Assert(remaining % RecordSize == 0)` before the `break`, and log a warning in production when `remaining > 0 && remaining < RecordSize`.
+
+---
+
+#### PERF-LOW-02 · `BoundedPathSearchBudget` is a `readonly record struct` — synthesized equality unused
+
+**File:** `src/DumpDetective.Analysis/Traversal/BoundedRootPathFinder.cs`
+
+```csharp
+internal readonly record struct BoundedPathSearchBudget(int MaxRoots, int MaxNodes, ...);
+```
+
+A configuration struct passed as a parameter does not need record equality semantics. `readonly struct` is sufficient and avoids synthesized `Equals`/`GetHashCode`/`PrintMembers`.
+
+**Action:** Change to `internal readonly struct BoundedPathSearchBudget` with explicit property declarations.
+
+---
+
+#### PERF-LOW-03 · `IAnalyzer` missing a concurrency contract — future parallel Phase 2 has no safety signal
+
+**File:** `src/DumpDetective.Core/Abstractions/IAnalyzer.cs`
+
+Without a declared concurrency contract, third-party analyzer implementers have no guidance on whether their analyzer will be called from multiple threads simultaneously. A silent concurrent call to a single-threaded analyzer will produce non-deterministic results once PERF-MED-07 is implemented.
+
+**Action:** Add `bool IsThreadSafe { get; }` with a default interface implementation returning `false`, so `AnalysisPipeline` can query it before scheduling parallel execution.
+
+---
+
+#### PERF-LOW-04 · `using System.Linq` in `HeapAnalysisCache.cs` — LINQ available in hot-path context
+
+**File:** `src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs`
+
+Having `System.Linq` imported in a file containing hot-path methods creates low friction for accidental LINQ introduction in future edits. After PERF-MED-01 is resolved (removing `.Select()`), remove this import entirely to enforce the no-LINQ rule at the compiler level.
+
+---
+
+#### PERF-LOW-05 · `AnalysisPipeline` constructor calls `.ToList()` on `IEnumerable<IAnalyzer>`
+
+**File:** `src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs`
+
+```csharp
+private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
+```
+
+Analyzer count is always small (< 20) so this is not a performance issue. However, `.ToList()` on `IEnumerable<T>` is the exact pattern banned for heap-scale enumerables. It sets a misleading precedent in a file that new contributors will read as a pattern reference.
+
+**Action:** Accept `IReadOnlyList<IAnalyzer>` directly in the constructor signature.
+
+---
+
+## Architecture Gaps vs. Design Documents
+
+| Gap | Architecture Doc Reference | Reality |
+|-----|---------------------------|---------|
+| No `QueryEngine` layer | Section 5.6: *"Operates on indices, not raw heap"* | Analyzers access `HeapAnalysisCache` directly; no boundary prevents raw heap access |
+| No `RuntimeFacade` | Section 5.1 | `ClrHeap`/`ClrRuntime` passed raw; no centralized type metadata cache |
+| `InsightEngine` not implemented | Section 5.7 | Findings generated directly in `FindingGenerator` classes |
+| `ReverseReferenceIndex` not implemented | Section 5.4 | `GetRetainedObjects` traverses forward from root, which is not equivalent to a reverse index |
+| `HeapEntry.Size` type mismatch | Architecture doc shows `int Size` | Actual field is `ulong` — 8 bytes, not 4 |
+| `binary-format.md` layout incorrect | Section 3 | Doc: `[Address:8][MT:8][Size:4][Pad:4]`; actual: `[Address:8][MT:8][Size:8]` |
+
+---
+
+## Fix Priority Backlog
+
+| ID | Severity | File | Description | Effort |
+|----|----------|------|-------------|--------|
+| ~~PERF-CRIT-01~~ | 🔴 | ~~`HeapEntry.cs`, `binary-format.md`~~ | ~~Spec/code divergence on `Size` field layout~~ | ✅ **Done** |
+| PERF-CRIT-02 | 🔴 | `HeapAnalysisCache.cs` | Second full heap scan when index hydration returns empty | S |
+| PERF-CRIT-03 | 🔴 | `HeapAnalysisCache.cs` | `_retainedObjectsCache` unbounded memory growth | S |
+| ~~PERF-CRIT-04~~ | 🔴 | ~~`HeapAnalysisCache.cs`~~ | ~~`++_objectScanCount` non-atomic — data race~~ | ✅ **Done** |
+| PERF-HIGH-01 | 🟠 | `BoundedRootPathFinder.cs` | `DateTime.UtcNow` in BFS inner loop; replace with `Stopwatch` | XS |
+| PERF-HIGH-02 | 🟠 | `HeapAnalysisCache.cs` | `Dictionary<string, ...>` hot-path cache; change to `ulong` keys | M |
+| PERF-HIGH-03 | 🟠 | `LazyReferenceGraph.cs` | Full-clear eviction causes thrash cliff on dense graphs | S |
+| PERF-HIGH-04 | 🟠 | `DiskBackedObjectIndexWriter.cs` | All entries materialized into `HeapEntry[]` before disk write — ~2× peak RAM | L |
+| ~~PERF-HIGH-05~~ | 🟠 | ~~`DiskBackedObjectIndexWriter.cs`~~ | ~~`ThrowIfCancellationRequested()` per-record; throttle to 100K cadence~~ | ✅ **Done** |
+| PERF-HIGH-06 | 🟠 | `HeapAnalysisCache.cs` | `heap.GetObject()` per type in hydration; use `GetTypeByMethodTable` instead | XS |
+| PERF-MED-01 | 🟡 | `HeapAnalysisCache.cs` | LINQ `.Select()` on streaming enumerator; replace with `yield return` | XS |
+| PERF-MED-02 | 🟡 | `BoundedRootPathFinder.cs` | `string RootKind` in traversal-hot struct; intern to `enum RootKind : byte` | S |
+| PERF-MED-03 | 🟡 | `BoundedRootPathFinder.cs` | `ReconstructPath` list + `.Reverse()`; use `Stack<ulong>` instead | XS |
+| ~~PERF-MED-04~~ | 🟡 | ~~`BoundedRootPathFinder.cs`~~ | ~~`BoundedPathSearchResult` as `sealed record`; change to `sealed class`~~ | ✅ **Done** |
+| PERF-MED-05 | 🟡 | `HeapAnalysisCache.cs` | `_methodTableHasRefs` not thread-safe; change to `ConcurrentDictionary` | XS |
+| PERF-MED-06 | 🟡 | Architecture | No `RuntimeFacade`; `ClrHeap` used raw in all analyzers | L |
+| PERF-MED-07 | 🟡 | `AnalysisPipeline.cs` | Phase 2 runs sequentially; parallelize independent analyzers | M |
+| PERF-MED-08 | 🟡 | `HeapAnalysisCache.cs` | Progress reporting called from parallel threads | XS |
+| PERF-LOW-01 | 🟢 | `HeapIndexEntryReader.cs` | Partial-record remainder silently dropped; add diagnostic | XS |
+| ~~PERF-LOW-02~~ | 🟢 | ~~`BoundedRootPathFinder.cs`~~ | ~~`BoundedPathSearchBudget` as `record struct`; simplify to plain `struct`~~ | ✅ **Done** |
+| ~~PERF-LOW-03~~ | 🟢 | ~~`IAnalyzer.cs`~~ | ~~No concurrency contract; add `IsThreadSafe` default interface property~~ | ✅ **Done** |
+| PERF-LOW-04 | 🟢 | `HeapAnalysisCache.cs` | Remove `using System.Linq` after PERF-MED-01 | XS |
+| PERF-LOW-05 | 🟢 | `AnalysisPipeline.cs` | `.ToList()` on analyzer collection; accept `IReadOnlyList` directly | XS |
+
+**Effort key:** XS = < 30 min · S = 1–2 h · M = half-day · L = 1–2 days
+
+---
+
+## Recommended Execution Order
+
+```
+Phase A — Correctness & Safety  (zero behaviour change — do first, batch in one PR)
+  ✅ PERF-CRIT-04  ++_objectScanCount  →  Interlocked.Increment
+  ✅ PERF-HIGH-05  ThrowIfCancellationRequested throttle to 100K cadence
+  ✅ PERF-CRIT-01  Update binary-format.md and architecture.md to match HeapEntry code
+  ✅ PERF-MED-04   BoundedPathSearchResult  →  sealed class
+  ✅ PERF-LOW-02   BoundedPathSearchBudget  →  plain readonly struct
+  ✅ PERF-LOW-03   IAnalyzer.IsThreadSafe default interface property
+
+Phase B — Performance hot-path fixes  (high ROI, low risk)
+  PERF-HIGH-01  DateTime.UtcNow  →  Stopwatch in BoundedRootPathFinder
+  PERF-HIGH-06  heap.GetObject()  →  GetTypeByMethodTable in hydration
+  PERF-MED-01   EnumerateIndexedEntriesAsTuples  →  yield return
+  PERF-MED-03   ReconstructPath  →  Stack<ulong>
+  PERF-MED-08   Throttle parallel progress report to sequential merge phase
+  PERF-LOW-04   Remove using System.Linq from HeapAnalysisCache
+
+Phase C — Memory bounds  (validate with large-dump run after each)
+  PERF-CRIT-02  Guard fallback heap scan in GetOrBuildTypeStatistics
+  PERF-CRIT-03  Cap _retainedObjectsCache at 32 entries
+  PERF-HIGH-03  LazyReferenceGraph partial eviction (ArrayPool-based)
+  PERF-HIGH-04  DiskBackedObjectIndexWriter write-as-you-go (eliminates HeapEntry[])
+
+Phase D — Architecture alignment  (larger scope, plan separately)
+  PERF-HIGH-02  Dictionary<string,>  →  Dictionary<ulong,> in HeapAnalysisCache
+  PERF-MED-02   RootCandidate.RootKind  →  enum RootKind : byte
+  PERF-MED-05   _methodTableHasRefs  →  ConcurrentDictionary
+  PERF-MED-06   Introduce IRuntimeFacade / RuntimeFacade
+  PERF-MED-07   Parallel Phase 2 in AnalysisPipeline  (requires MED-05 + MED-06 first)
+  PERF-LOW-01   HeapIndexEntryReader partial-record diagnostic
+  PERF-LOW-05   AnalysisPipeline constructor  →  accept IReadOnlyList<IAnalyzer>
+```

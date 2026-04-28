@@ -392,7 +392,7 @@ namespace DumpDetective.Analysis.Cache
             {
                 var current = queue.Dequeue();
                 scanCounter.Tick();
-                ++_objectScanCount;
+                Interlocked.Increment(ref _objectScanCount);
                 var obj = heap.GetObject(current);
 
                 if (!obj.IsValid)

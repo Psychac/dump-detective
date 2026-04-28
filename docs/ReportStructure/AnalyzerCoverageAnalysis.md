@@ -1,4 +1,4 @@
-# Analyzer Coverage Analysis
+﻿# Analyzer Coverage Analysis
 ## Professional Tier Report — Section-to-Analyzer Mapping & Capability Gap Analysis
 
 > **Scope**: This document maps every section of `ProfessionalTierReport.md` to the existing
@@ -75,12 +75,24 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 | Shallow size per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot.TotalSize` |
 | Average size per type | 🟡 | Derivable from count + total size; not explicitly surfaced |
 | **Estimated retained size** per type | ❌ | ➕ `DominatorAnalyzer` |
+| GC generation distribution per type (Gen0/1/2/LOH %) | ❌ | ➕ `GCGenerationAnalyzer` — `PerTypeGenerationProfile` (requires §4 change) |
+| `IsFinalizable` flag | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.IsFinalizable` |
+| `IsValueType` flag | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.IsValueType` |
+| `IsArray` flag + component type | ❌ | ➕ `ArrayAnalyzer` — `ClrType.IsArray`, `ClrType.ComponentType` |
+| Base type chain depth | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.BaseType` traversal |
+| Interface count | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.Interfaces.Count` |
+| Field count (ref / value) | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.Fields` |
+| Module / owning assembly | ✅ | `ModuleAnalyzer` — `ModuleHeapStats` links types to modules |
+| Method table address | 🟡 | Available from heap index key; not surfaced in report output |
 
 ### 3.2 Dominator Candidates
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
 | High-retention objects (objects retaining large sub-graphs) | ❌ | ➕ `DominatorAnalyzer` |
+| Nomination criteria (size > 1%, Gen2 > 80%, known containers) | ❌ | ➕ `DominatorAnalyzer` |
+| Largest single instance per candidate type | ❌ | ➕ `DominatorAnalyzer` — `ClrObject.Size` max |
+| GC root reachability per candidate | ❌ | ➕ `GCRootAnalyzer` cross-reference |
 
 ### 3.3 Object Shape Analysis
 
@@ -291,16 +303,24 @@ conflated with hang/blocking data and lacks orphan detection.
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
 | Duplicate string count + top patterns | ✅ | `MemoryLeakAnalyzer` — `DuplicateStringPatternCount`, `TopDuplicateStrings` |
+| Total string object count + total bytes | ✅ | `MemoryLeakAnalyzer` — `TotalStrings`, `TotalStringMemoryBytes` |
+| Unique string count + deduplication ratio | ✅ | `MemoryLeakAnalyzer` — `UniqueStrings` |
+| String length histogram | ❌ | ➕ `StringAnalyzer` — bucketed distribution by char length |
+| Very long strings (> 85 KB, LOH residents) | ❌ | ➕ `StringAnalyzer` — cross-reference with LOH segments |
+| Interned strings in FOH | ❌ | ➕ `StringAnalyzer` — FOH segment scan for string objects |
+| Strings surviving to Gen2 | ❌ | ➕ `StringAnalyzer` — generation correlation |
 
-### 11.2 Memory Waste
+### 11.2 Memory Waste & Optimisation Potential
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
 | Wasted bytes from duplicate strings | ✅ | `MemoryLeakAnalyzer` — `DuplicateStringWastedBytes` |
 | Total string memory + unique ratio | ✅ | `MemoryLeakAnalyzer` — `TotalStringMemoryBytes`, `UniqueStrings` |
+| LOH string pressure (total size > 85 KB) | ❌ | ➕ `StringAnalyzer` |
+| Encoding waste (ASCII content in UTF-16) | ❌ | ➕ `StringAnalyzer` — heuristic byte-range scan |
+| Per-finding recommended approach (intern / pool / slice) | ❌ | Report-layer rule engine |
 
-**Verdict**: Data is complete but **buried inside `MemoryLeakDomainResult`**. The report requires
-§11 as a standalone section. Needs `StringAnalyzer` split.
+**Verdict**: Core string data exists in `MemoryLeakDomainResult` but is buried and incomplete. `StringAnalyzer` split adds LOH classification, length histogram, interned string detection, and standalone `StringDomainResult`.
 
 ---
 
@@ -312,6 +332,10 @@ conflated with hang/blocking data and lacks orphan detection.
 |----------|--------|-------------|
 | Publisher → subscriber mapping | 🟡 | `EventLeakAnalyzer` — `TopLeakGroups` with `PublisherType.EventFieldName` → subscriber types |
 | Full subscription graph (all events, not just leaks) | ❌ | `EventLeakAnalyzer` only scans delegates with `MinSubscribers` threshold |
+| `_target` field inspection per delegate | 🟡 | `EventLeakAnalyzer` reads target indirectly; not explicitly surfaced |
+| `_invocationList` depth / nested multicast | ❌ | ➕ `EventLeakAnalyzer` (subscription graph mode) |
+| Total publisher instances per event type | ❌ | ➕ `EventLeakAnalyzer` — `TotalPublisherInstances` (requires §10 change) |
+| Subscriber shallow size sum per event | ❌ | ➕ `EventLeakAnalyzer` — `EstimatedSubscriberRetainedBytes` (requires §10 change) |
 
 ### 12.2 Event Leaks
 
@@ -320,6 +344,8 @@ conflated with hang/blocking data and lacks orphan detection.
 | Retained subscriber count per event | ✅ | `EventLeakAnalyzer` — `TotalSubscribers`, `EventLeakGroupSnapshot` |
 | Static vs instance publisher breakdown | ✅ | `EventLeakAnalyzer` — `IsStatic`, `StaticLeaks`, `InstanceLeaks` |
 | Severity score per leak group | ✅ | `EventLeakAnalyzer` — `SeverityScore` |
+| Publisher lifetime (Gen0/1 vs Gen2/static) | ❌ | ➕ `EventLeakAnalyzer` — generation lookup per publisher address |
+| `EventHandler<T>` vs `Action` vs custom delegate classification | ❌ | ➕ `EventLeakAnalyzer` — type name classification |
 
 ---
 
@@ -331,6 +357,8 @@ conflated with hang/blocking data and lacks orphan detection.
 |----------|--------|-------------|
 | Most common exception types | ✅ | `CrashAnalyzer` — `ExceptionTypeCounts` |
 | Active vs total exception count | ✅ | `CrashAnalyzer` — `ActiveExceptions`, `TotalExceptions` |
+| Exception memory footprint | ❌ | ➕ `CrashAnalyzer` — `ExceptionMemoryFootprint` per type (heap index lookup) |
+| `InnerException` chain depth histogram | ❌ | ➕ `CrashAnalyzer` — `InnerExceptionChainDepth` on `ExceptionInstanceSnapshot` |
 
 ### 13.2 Failure Hotspots
 
@@ -338,6 +366,8 @@ conflated with hang/blocking data and lacks orphan detection.
 |----------|--------|-------------|
 | Thread-to-exception mapping | ✅ | `CrashAnalyzer` — `TopExceptionInstances` with `ThreadId`, `CurrentThreadFrames` |
 | Stack frame hotspots for exceptions | ✅ | `CrashAnalyzer` — `OriginalStackTrace` per instance |
+| Exception-specific frame hotspot aggregation (top N frames across exception threads) | ❌ | ➕ `CrashAnalyzer` — reuse `TopFrameHotspots` pattern, scoped to exception threads |
+| Exception origin classification (UserCode / Framework / ThirdParty) | ❌ | ➕ `CrashAnalyzer` — `ClrModule` name prefix matching via `ModuleAnalyzer` module list |
 
 ---
 
@@ -406,795 +436,295 @@ conflated with hang/blocking data and lacks orphan detection.
 
 ---
 
----
+## §18 · AppDomain & Assembly Analysis
 
-# Part 2 — Per-Analyzer Deep-Dive
+### 18.1 AppDomain Inventory
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Domain name, address, numeric ID | ❌ | ➕ `AppDomainAnalyzer` — `ClrRuntime.AppDomains` |
+| Module list per domain | 🟡 | `ModuleAnalyzer` — lists modules globally, not per `AppDomain` |
+| Managed memory attributable per domain | ❌ | ➕ `AppDomainAnalyzer` — cross-reference `ClrType.Module.AppDomain` with heap index |
+| Multi-domain type collision detection | ❌ | ➕ `AppDomainAnalyzer` |
 
-## 1. `MemoryAnalyzer` *(modify)*
+### 18.2 Assembly Version Conflicts
 
-### Currently Produces
-- `MemoryDomainResult`: total bytes, LOH bytes, LOH %, total objects, unique types
-- `TopTypesBySize` and `TopTypesByCount` — top 20 `TypeSnapshot` records
-- `TypeSnapshot` has: `TypeName`, `Count`, `TotalSize`, `LohSize`
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Same name, different path / `MetadataToken` | ✅ | `ModuleAnalyzer` — `VersionConflictGroups`, `ConflictDetails` |
+| Dynamic assembly count and size | ✅ | `ModuleAnalyzer` — `DynamicModules` count |
+| Anonymous hosted modules (no file path) | ❌ | ➕ `AppDomainAnalyzer` — `ClrModule.FileName == null` detection |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| `AverageSize` per type | §3.1 | Low — derivable but not surfaced |
-| **Retained size** per type | §3.1, §3.2 | High — fundamental gap; shallow only today |
-| Object size distribution histogram (size-bucket counts) | §2.1 | Medium |
-| Process total memory for % calculation | §1 | Medium |
+### 18.3 Type Density per Module
 
-### Required Changes
-1. **Add `AverageSize`** to `TypeSnapshot` — trivially `TotalSize / Count`. Zero cost.
-2. **Add `EstimatedRetainedBytes`** to `TypeSnapshot` — set to `0` / `null` by `MemoryAnalyzer`;
-   populated by `DominatorAnalyzer` in a post-pass. `MemoryAnalyzer` itself must not walk
-   references (that would double heap scan time).
-3. **Add `SizeBucketHistogram`** to `MemoryDomainResult` — `IReadOnlyList<SizeBucketEntry>` where
-   each bucket is `(RangeLabel, ObjectCount, TotalBytes)`. Build during the existing
-   `typeStats` iteration — no extra heap scan required.
-4. **Consider** exposing `UniqueTypes` more prominently; already present, just needs surfacing
-   in the type table section of the report.
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Type count per module from `EnumerateTypes()` | ❌ | ➕ `AppDomainAnalyzer` — `ClrModule.EnumerateTypes()` |
+| Heap footprint per module | ✅ | `ModuleAnalyzer` — `ModuleHeapStats.TotalBytes` |
+| Type-to-object ratio (load overhead vs live usage) | 🟡 | `ModuleAnalyzer` — `ModuleTypeDensity` covers partially; no `EnumerateTypes()` count |
+| Modules with > 5 000 types (source gen / reflection heavy) | ❌ | ➕ `AppDomainAnalyzer` |
+
+**Verdict**: §18.2 is largely covered by `ModuleAnalyzer`. §18.1 (per-domain breakdown) and §18.3 (type count from `EnumerateTypes()`) require `AppDomainAnalyzer`.
 
 ---
 
-## 2. `GCGenerationAnalyzer` *(modify)*
+## §19 · JIT & Native Code Footprint
 
-### Currently Produces
-- `GCGenerationDomainResult`: Gen0/1/2/LOH bytes + object counts
-- `TopLohTypes` — top LOH types by count/size
-- Uses parallel generation scan via reflection on `ClrHeap.GetGeneration`
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total JIT code heap size | ❌ | ➕ `JitAnalyzer` — `ClrRuntime.GetJitManagers()` |
+| JIT heap as % of total process memory | ❌ | ➕ `JitAnalyzer` |
+| Active method hotspot map (methods on most thread stacks) | 🟡 | `ThreadAnalyzer` — `TopFrameHotspots`; no `ClrMethod.NativeCode` size or `Signature` |
+| Native code range size per method (`HotColdInfo`) | ❌ | ➕ `JitAnalyzer` — `ClrMethod.HotColdInfo` |
+| Unmanaged frame ratio per thread | ❌ | ➕ `JitAnalyzer` — `ClrStackFrame.Kind` distribution |
+| Tiered compilation detection (Tier0 → Tier1) | ❌ | ➕ `JitAnalyzer` — same `MetadataToken`, two `NativeCode` addresses |
+| ReadyToRun pre-compiled methods | ❌ | ➕ `JitAnalyzer` — `ClrModule.IsPEFile` + R2R header |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Per-type generation distribution (Gen0 % vs Gen2 % per type) | §2.2, §9.1, §9.2 | High |
-| POH object distribution | §10.1 | Medium |
-| Gen2 % as a "long-lived pressure" signal | §9.2 | Medium |
-
-### Required Changes
-1. **Add `PerTypeGenerationProfile`** — `IReadOnlyList<TypeGenerationProfile>` on
-   `GCGenerationDomainResult` for top N types. Each record:
-   ```
-   TypeGenerationProfile(string TypeName, int Gen0Count, int Gen1Count, int Gen2Count, int LohCount)
-   ```
-   This is **computed in the existing parallel scan** — just accumulate per type instead of
-   discarding generation data after the global counter update. Use the heap index to avoid
-   a second heap walk.
-2. **Compute `Gen2Pct`** — Gen2 objects / total objects as a signal for `AllocationPatternAnalyzer`
-   to consume. Add as a field to `GCGenerationDomainResult`.
-3. **`TopLohTypes`** — currently typed as `IReadOnlyList<TypeSnapshot>?` with default null.
-   Make this non-nullable and always populated (empty list if no LOH objects). Consumers
-   should not guard against null.
+**Verdict**: §19 is entirely uncovered. Requires new `JitAnalyzer`.
 
 ---
 
-## 3. `SegmentAnalyzer` *(modify)*
+## §20 · Boxing & Value Type Pressure
 
-### Currently Produces
-- `SegmentAnalysisDomainResult`: per-kind bytes + object counts (SOH/LOH/POH/Frozen)
-- `HeapSegmentSnapshot` list — per-segment address, start, end, committed bytes, generation, kind
-- `TopSegmentsCount = 10` largest segments surfaced
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Boxed value type object count and total size | ❌ | ➕ `BoxingAnalyzer` — `ClrObject.AsBoxedValue()` |
+| Top value types most frequently boxed | ❌ | ➕ `BoxingAnalyzer` |
+| Boxed enum detection | ❌ | ➕ `BoxingAnalyzer` — `ClrType.IsEnum` on inner type |
+| Boxed structs in `object[]` / `IEnumerable<object>` collections | ❌ | ➕ `BoxingAnalyzer` |
+| Struct field padding waste | ❌ | ➕ `BoxingAnalyzer` — `ClrInstanceField.Offset` gap analysis |
+| Large structs frequently on stack | ❌ | ➕ `BoxingAnalyzer` — `ClrThread.EnumerateStackObjects()` |
+| Oversized value types by `ClrType.StaticSize` | ❌ | ➕ `ObjectShapeAnalyzer` or `BoxingAnalyzer` |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Object size distribution per segment kind | §2.1 | Low |
-| Committed vs reserved bytes distinction | §2.1 | Low |
-| POH per-type breakdown | §10.1 | Medium |
-
-### Required Changes
-1. **Add `CommittedVsReserved`** ratio per segment kind to the result — `SegmentAnalyzer` already
-   reads `CommittedBytes` via reflection; add `ReservedBytes` if available in `ClrSegment`.
-2. **Add `PohTypeDistribution`** — `IReadOnlyList<NameCountEntry>` — top pinned-object types by
-   count. Enumerate POH segment objects once (they are typically small in number).
-3. The duplicate `SegmentReflectionCache` between `SegmentAnalyzer` and `LohFragmentationAnalyzer`
-   should be **deduplicated** into a shared `SegmentReflectionHelper` utility class.
+**Verdict**: §20 is entirely uncovered. Requires new `BoxingAnalyzer`.
 
 ---
 
-## 4. `LohFragmentationAnalyzer` *(modify)*
+## §21 · Finalizable Object Lifecycle
 
-### Currently Produces
-- `LohFragmentationDomainResult`: per-segment fragmentation %, free bytes, largest free block
-- `LohSegmentSnapshot` list with address, total/used/free bytes, object/free-object counts
-- Overall `FragmentationPercent`, `TotalLohBytes`, `TotalFreeBytes`
+### 21.1 Finalizable Object Population
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Free-gap histogram (gap size distribution) | §10.2 | Medium |
-| Long-lived object classification (Gen2 LOH objects) | §10.3 | High |
-| Large objects sorted by size (top N LOH objects) | §10.3 | Medium |
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| All `IsFinalizable` objects across heap (not just queue) | ❌ | ➕ `FinalizableObjectAnalyzer` — `ClrType.IsFinalizable` flag on all heap objects |
+| Finalizable objects by generation | ❌ | ➕ `FinalizableObjectAnalyzer` — generation correlation |
+| Top finalizable types by Gen2 count and size | ❌ | ➕ `FinalizableObjectAnalyzer` |
+| `IsFinalizable` + `IDisposable` + undisposed detection | ❌ | ➕ `FinalizableObjectAnalyzer` — `_disposed` field heuristic |
 
-### Required Changes
-1. **Add `FreeGapHistogram`** — `IReadOnlyList<FreeGapBucket>` per segment, where each bucket is
-   `(GapSizeRange, GapCount)`. Build during the existing per-segment object scan by collecting
-   each contiguous free-block size and bucketing it. Zero extra heap scans.
-2. **Add `TopLargeObjects`** — `IReadOnlyList<LargeObjectSnapshot>` (top 20 by size). Capture
-   `Address`, `TypeName`, `Size` for non-free objects during the existing per-segment object walk.
-   Cap at 20 entries — use a min-heap or partial sort pattern. `LargeObjectSnapshot` must be a
-   new `internal sealed record`.
-3. **Note**: Gen2 LOH cross-reference (§10.3) requires `GCGenerationAnalyzer` data. This is a
-   **report-layer join**, not a change to `LohFragmentationAnalyzer` itself. The LOH analyzer
-   does not need to re-scan generations.
+### 21.2 Finalizer Queue Analysis
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Finalizer queue depth (total count) | ✅ | `MemoryLeakAnalyzer` — `FinalizerQueueCount` |
+| Top types in finalizer queue | ✅ | `MemoryLeakAnalyzer` — `TopFinalizerTypes` |
+| Queue objects retaining large sub-graphs | ❌ | ➕ `FinalizableObjectAnalyzer` — bounded BFS from finalizer root |
+| Resurrection detection (`GC.ReRegisterForFinalize`) | ❌ | ➕ `FinalizableObjectAnalyzer` — heuristic pattern |
 
-## 5. `MemoryLeakAnalyzer` *(split + modify)*
+### 21.3 Finalizer Thread Health
 
-### Currently Produces
-- `MemoryLeakDomainResult`: finalizer queue count, duplicate string stats, highly-referenced objects
-- Performs **two logically unrelated tasks** in one heap pass:
-  - String deduplication analysis (§11)
-  - Incoming-reference counting for highly-referenced objects (§6.1)
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Finalizer thread alive / OS thread ID | ✅ | `ThreadAnalyzer` — `FinalizerManagedThreadId`, `FinalizerOsThreadId` |
+| Finalizer thread blocked | ✅ | `ThreadAnalyzer` — `FinalizerIsBlocked`, `FinalizerLockCount` |
+| Blocking frame on finalizer thread | ✅ | `ThreadAnalyzer` — `FinalizerFrames` |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| String data as standalone result | §11.1, §11.2 | High — report section mismatch |
-| Unified leak candidate score | §6.1 | High |
-| Leak classification label per candidate | §6.2 | High |
-| Memory + performance impact estimate | §6.4 | Medium |
-
-### Required Changes — **SPLIT**
-
-#### ✂️ Extract `StringAnalyzer` (new analyzer)
-Move all string-related logic and data from `MemoryLeakAnalyzer` into `StringAnalyzer`:
-- `ProcessStringObjectByAddress` → `StringAnalyzer`
-- `IsStringEntry` helper → `StringAnalyzer`
-- `stringStats`, `stringMethodTables` dictionaries → `StringAnalyzer`
-- New domain result `StringDomainResult`:
-  ```
-  StringDomainResult(
-      int TotalStrings,
-      ulong TotalStringMemoryBytes,
-      int UniqueStrings,
-      int DuplicatePatternCount,
-      ulong DuplicateWastedBytes,
-      double DuplicationRatio,
-      IReadOnlyList<DuplicateStringSnapshot> TopDuplicates)
-  ```
-- `DuplicationRatio = (TotalStrings - UniqueStrings) / (double)TotalStrings`
-
-#### Modify `MemoryLeakAnalyzer` (after split)
-After string logic is removed, `MemoryLeakAnalyzer` retains:
-- Finalizer queue analysis
-- Highly-referenced object detection
-- Add **`SuspicionScore`** to `HighlyReferencedObjectSnapshot` — integer 0–100 derived from:
-  `IncomingReferences`, `Size`, whether the object is in Gen2
-- Add **`LeakClassification`** enum value to `HighlyReferencedObjectSnapshot`:
-  `Unknown | HighlyRetained | FinalizerBacked | ThreadRetained`
-- Update `MemoryLeakDomainResult` to remove string fields (now in `StringDomainResult`)
-- Add `IReadOnlyList<LeakCandidateSnapshot>` as top-level field — ranked union of finalizer
-  candidates + highly-referenced candidates, sorted by `SuspicionScore` descending
+**Verdict**: §21.3 is fully covered. §21.1 (population beyond queue) and §21.2 sub-graph retention require new `FinalizableObjectAnalyzer`.
 
 ---
 
-## 6. `StaticRootLeakDetector` *(modify)*
+## §22 · Array Deep Analysis
 
-### Currently Produces
-- `StaticRootDomainResult`: root count, total retained bytes, top roots by retained bytes
-- Walks static roots via `cache.GetOrBuildValidRoots(heap)` and BFS-limits each root
+### 22.1 Array Population Overview
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Root type breakdown (field type that holds the root) | §5.1 | Medium |
-| Leak classification label ("static retention") | §6.2 | Low — implied but not explicit |
-| Confidence/cap signal (when BFS was cut short) | §17 | Medium |
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total array object count and size | 🟡 | `MemoryAnalyzer` — arrays appear in type table; no array-specific aggregation |
+| By element type (`ClrType.ComponentType.Name`) | ❌ | ➕ `ArrayAnalyzer` |
+| By rank (`ClrObject.AsArray().Rank`) | ❌ | ➕ `ArrayAnalyzer` |
+| By generation (Gen0/1/2/LOH) | ❌ | ➕ `ArrayAnalyzer` — generation correlation |
 
-### Required Changes
-1. **Add `BfsCappedCount`** — number of roots where BFS hit `MaxRetainedObjectsToScan` budget.
-   Already detectable; just not surfaced. Add to `StaticRootDomainResult`.
-2. **Add `RetentionPatternHints`** — `IReadOnlyList<string>` — heuristic labels per significant
-   root (e.g., `"Dictionary<K,V> cache"`, `"EventHandler chain"`) based on type name pattern
-   matching. Pure string analysis — no extra heap scan.
-3. **Consolidate** with `GCRootAnalyzer` long-term: static root detection should be one input
-   stream to a unified root intelligence layer. `StaticRootLeakDetector` may eventually
-   become an internal component of `GCRootAnalyzer`.
+### 22.2 Large Array Analysis
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Top 10 largest individual LOH arrays | 🟡 | `LohFragmentationAnalyzer` — `TopLargeObjects` (post §6 change); no element type detail |
+| `byte[]` > 1 MB (pooling candidates) | ❌ | ➕ `ArrayAnalyzer` |
+| Multi-dimensional arrays > 85 KB | ❌ | ➕ `ArrayAnalyzer` |
 
-## 7. `GCHandleAnalyzer` *(modify)*
+### 22.3 Sparse & Wasteful Arrays
 
-### Currently Produces
-- `GCHandleDomainResult`: total handles by kind, pinned type counts, all-target type counts
-- `StrongLikeHandles`, `WeakLikeHandles` summary counts
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Null density in reference-type arrays | ❌ | ➕ `ArrayAnalyzer` — bounded element sampling |
+| Zero density in value-type arrays | ❌ | ➕ `ArrayAnalyzer` |
+| Backing arrays of over-capacity collections | 🟡 | `CollectionAnalyzer` — fill rate exists; no null-element sampling |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Pinned object **retained bytes** estimate | §9.3 | High |
-| Per-pinned-object size contribution | §9.3 | Medium |
-| Dependent handle relationship (cross-references with `DependentHandleAnalyzer`) | §12 | Low |
+### 22.4 Jagged vs Multi-Dimensional
 
-### Required Changes
-1. **Add retained-size estimation for pinned handles** — during `foreach ClrHandle`, when
-   `handle.HandleKind == Pinned`, resolve `handle.Object` → `ClrObject` → accumulate
-   `Size` into `pinnedRetainedBytes`. Add `PinnedRetainedBytes` field to
-   `GCHandleDomainResult`.
-2. **Add `TopPinnedObjectsBySize`** — `IReadOnlyList<NameBytesEntry>` — top pinned types by
-   total pinned bytes. Already has `pinnedTypes` dictionary; extend to track bytes per type
-   alongside count.
-3. **Reuse `methodTableNameCache`** pattern already present — the existing
-   `methodTableNameCache` dict is a good pattern; ensure it's applied to size accumulation
-   too for the pinned path.
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Jagged array count and inner-array distribution | ❌ | ➕ `ArrayAnalyzer` |
+| Multi-dim (`T[,]`, `T[,,]`) flag and recommendation | ❌ | ➕ `ArrayAnalyzer` — `ClrArray.Rank > 1` |
+
+**Verdict**: §22 requires new `ArrayAnalyzer`. `LohFragmentationAnalyzer` partially covers large objects post-change §6.
 
 ---
 
-## 8. `ThreadAnalyzer` *(modify)*
+## §23 · Async State Machine Objects
 
-### Currently Produces
-- `ThreadDomainResult`: total/alive/background/GC/threadpool/finalizer thread counts
-- Wait category distribution, state distribution, AppDomain distribution
-- Threads with locks, blocked threads, threads with exceptions
-- Frame hotspots, async chain thread count + max depth
+### 23.1 State Machine Population
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Long-lived thread classification | §7.1 | Low — single snapshot limitation |
-| Thread memory retained (stack-rooted objects per thread) | §7.1 | High |
-| Per-thread wait duration (not available from ClrMD static dump) | §7.2 | N/A — not possible |
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total state machine object count and size | ❌ | ➕ `AsyncStateMachineAnalyzer` — `IAsyncStateMachine` interface detection |
+| Top 20 state machine types by count and size | ❌ | ➕ `AsyncStateMachineAnalyzer` |
+| `<>1__state` field distribution (suspended at which await) | ❌ | ➕ `AsyncStateMachineAnalyzer` — `ClrType.Fields` field name pattern |
 
-### Required Changes
-1. **Add `ThreadsWithLargeStackRoots`** — `IReadOnlyList<ThreadRootSnapshot>` — threads with
-   many stack-rooted objects or high stack-root byte estimate. Use
-   `ClrThread.EnumerateStackRoots()` for top N threads (bounded by count threshold).
-   New record: `ThreadRootSnapshot(uint ThreadId, int StackRootCount, ulong EstimatedBytes)`.
-2. **Add `LongLivedThreadCount`** heuristic — threads with `IsBackground = false` and
-   `LockCount == 0` and no wait pattern detected — classified as "always-alive worker".
-   This is a naming/classification addition to existing data; no new scan needed.
-3. **`AsyncChainThreadCount`** and **`MaxAsyncChainDepth`** are already produced — ensure
-   they are prominently exposed in the §8 report path (currently in ThreadAnalyzer, will
-   also appear in `AsyncTaskAnalyzer` post-split).
+### 23.2 Captured Closure Analysis
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Reference fields on state machine types (captured locals) | ❌ | ➕ `AsyncStateMachineAnalyzer` — `ClrType.Fields` |
+| State machines with total captured ref size > 1 MB | ❌ | ➕ `AsyncStateMachineAnalyzer` |
+| Common problematic captures (`HttpClient`, `DbContext`, `Stream`) | ❌ | ➕ `AsyncStateMachineAnalyzer` — type name pattern match |
 
-## 9. `HangAnalyzer` *(split + modify)*
+### 23.3 Suspended Method Map
 
-### Currently Produces
-- `HangDomainResult`: waiting threads, threads holding locks, wait category breakdown
-- Task data: `TotalTasks`, `PendingTasks`, `FaultedTasks`, `CanceledTasks`
-- Continuation types, threadpool info, `HealthScore`
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Originating method name per state machine type | ❌ | ➕ `AsyncStateMachineAnalyzer` — decode `<MethodName>d__N` pattern |
+| Suspended methods grouped by declaring type | ❌ | ➕ `AsyncStateMachineAnalyzer` |
+| Cross-reference with faulted `Task` objects | ❌ | ➕ `AsyncStateMachineAnalyzer` + `AsyncTaskAnalyzer` |
 
-### Problem
-`HangDomainResult` conflates two orthogonal concerns:
-- **Hang/blocking** — waiting threads, lock holders, health score → §7
-- **Async/Task state** — pending/faulted tasks, continuation types → §8
-
-### Required Changes — **SPLIT**
-
-#### ✂️ Extract `AsyncTaskAnalyzer` (new analyzer)
-Responsibilities:
-- Scan the heap for `Task`, `Task<T>`, `ValueTask`, `IValueTaskSource` instances
-- Classify each by state: `Pending | Running | Faulted | Canceled | Completed | RanToCompletion`
-- Detect **orphaned tasks** — tasks where the continuation pointer is null or resolved to
-  a no-op continuation type (task was never awaited). Heuristic: `m_continuationObject` field
-  is null or `typeof(SentinelContinuation)`.
-- Build continuation chain depths by following `m_continuationObject` field links
-  (BFS, depth-capped at 20)
-- New domain result `AsyncTaskDomainResult`:
-  ```
-  AsyncTaskDomainResult(
-      int TotalTasks,
-      int PendingTasks,
-      int RunningTasks,
-      int FaultedTasks,
-      int CanceledTasks,
-      int CompletedTasks,
-      int OrphanedTasks,
-      int MaxContinuationDepth,
-      double AvgContinuationDepth,
-      bool TaskScanLimited,
-      IReadOnlyList<NameCountEntry> TopPendingTaskTypes,
-      IReadOnlyList<NameCountEntry> TopFaultedTaskTypes,
-      IReadOnlyList<NameCountEntry> TopContinuationTypes,
-      IReadOnlyList<OrphanedTaskSnapshot> TopOrphanedTasks)
-  ```
-- `OrphanedTaskSnapshot(ulong Address, string TaskType, string? ResultType, ulong Size)`
-
-#### Modify `HangAnalyzer` (after split)
-Remove all task scanning logic. `HangAnalyzer` retains:
-- `WaitingThreads` analysis
-- `ThreadsHoldingLocks`
-- Async-over-sync detection
-- `HealthScore` (now thread-blocking only)
-- Updated `HangDomainResult` removes task fields (they move to `AsyncTaskDomainResult`)
-- Deprecate `TotalTaskContinuations`, `QueuedWorkItems`, `TotalTasks`, `PendingTasks`,
-  `FaultedTasks`, `CanceledTasks`, `TaskScanLimited` from `HangDomainResult`
+**Verdict**: §23 is entirely uncovered. Requires new `AsyncStateMachineAnalyzer`.
 
 ---
 
-## 10. `EventLeakAnalyzer` *(modify)*
+## §24 · Weak Reference & ConditionalWeakTable Analysis
 
-### Currently Produces
-- `EventLeakDomainResult`: total leaks, subscriber counts, static vs instance split
-- `EventLeakGroupSnapshot`: publisher type, event name, severity, subscriber types
-- Filters by `MinSubscribers` threshold — only scans leaking events
+### 24.1 Weak GC Handle Population
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Subscription graph for **non-leaking** events (§12.1) | §12.1 | Medium |
-| Publisher object count (how many publisher instances exist) | §12.1 | Low |
-| `DelegateHelper` usage for non-multicast delegate chains | §12.1 | Low |
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Weak GC handle count (Weak / WeakLong / SizedRef) | 🟡 | `GCHandleAnalyzer` — `WeakLikeHandles` total count; no per-kind breakdown |
+| Alive vs collected target analysis | ❌ | ➕ `WeakReferenceAnalyzer` — `ClrHeap.GetObject(address).IsValid` per handle |
+| Top target types by weak handle count | 🟡 | `GCHandleAnalyzer` — `TopTargetTypes` present but not weak-filtered |
+| `WeakLong` vs `Weak` handle distinction | ❌ | ➕ `WeakReferenceAnalyzer` — `HandleKind` enum classification |
 
-### Required Changes
-1. **Add `SubscriptionGraphMode` option** — `bool IncludeNonLeakingEvents` on `EventLeakOptions`.
-   When enabled, scan all `MulticastDelegate` fields, not just those above `MinSubscribers`.
-   This fills §12.1 "full subscription graph". Default off for performance.
-2. **Add `TotalEventsScanned`** and `TotalPublisherInstances` to `EventLeakDomainResult` —
-   gives context for the subscription graph section even without full mode.
-3. **Add `EstimatedSubscriberRetainedBytes`** per `EventLeakGroupSnapshot` — multiply
-   subscriber count by average subscriber type size from the heap index. Fills §12.2
-   retention impact data.
+### 24.2 `WeakReference<T>` Object Analysis
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total `WeakReference<T>` object count and size | ❌ | ➕ `WeakReferenceAnalyzer` — type name scan |
+| Stale `WeakReference` wrapper detection | ❌ | ➕ `WeakReferenceAnalyzer` — `m_handle` field inspection |
+| Types holding large counts of stale wrappers | ❌ | ➕ `WeakReferenceAnalyzer` |
 
-## 11. `CollectionAnalyzer` *(modify)*
+### 24.3 `ConditionalWeakTable<TKey, TValue>` Analysis
 
-### Currently Produces
-- `CollectionDomainResult`: counts by collection type, total wasted memory
-- `WastefulCollectionSnapshot`: type, capacity, fill rate, wasted memory, element info
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total `DependentHandle` count | ✅ | `DependentHandleAnalyzer` — `DependentHandleCount` |
+| Source → target type distribution | ✅ | `DependentHandleAnalyzer` — `SourceTypeCounts`, `TargetTypeCounts` |
+| Live vs dead key analysis | ❌ | ➕ `WeakReferenceAnalyzer` — strong reachability check per dependent handle source |
+| Large CWT instances (> 10 000 entries) | ❌ | ➕ `WeakReferenceAnalyzer` |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Cache-pattern classification (Dictionary used as unbounded cache) | §4.3, §6.2 | Medium |
-| GC generation of wasteful collections (Gen2 oversized = more concerning) | §6.2 | Medium |
-
-### Required Changes
-1. **Add `CachePatternScore`** to `WastefulCollectionSnapshot` — heuristic 0–10 scoring whether
-   a collection looks like an unbounded cache: high capacity, high count, in Gen2, type name
-   contains "Cache/Store/Registry/Pool". Pure field additions; no new scan.
-2. **Add `Generation`** field to `WastefulCollectionSnapshot` — capture the generation of the
-   collection object during the existing scan. Requires resolving `ClrHeap.GetGeneration(address)`
-   for each wasteful collection found (small set, bounded cost).
+**Verdict**: §24.3 is partially covered by `DependentHandleAnalyzer`. §24.1 and §24.2 require new `WeakReferenceAnalyzer`.
 
 ---
 
-## 12. `LockGraphAnalyzer` *(modify)*
+## §25 · Virtual Memory & Segment Reservation
 
-### Currently Produces
-- `LockGraphDomainResult`: held locks count, contested locks count, deadlock candidates count
-- `TopContestedTypes` — types most frequently contested
+### 25.1 Committed vs Reserved Memory
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Deadlock cycle path (which threads form the cycle) | §7.3 | High |
-| Lock wait duration estimate (not available in static dump) | §7.3 | N/A |
-| Thread IDs involved in each deadlock candidate | §7.3 | High |
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total committed managed memory | 🟡 | `SegmentAnalyzer` — `CommittedBytes` per segment in `HeapSegmentSnapshot`; no global total |
+| Total reserved managed memory | ❌ | ➕ `SegmentReservationAnalyzer` — `ClrSegment.ReservedMemory` |
+| Reservation gap (`Reserved - Committed`) | ❌ | ➕ `SegmentReservationAnalyzer` |
+| Reserved-to-committed ratio | ❌ | ➕ `SegmentReservationAnalyzer` |
 
-### Required Changes
-1. **Add `DeadlockCandidateDetails`** — `IReadOnlyList<DeadlockCandidateSnapshot>` to
-   `LockGraphDomainResult`. Currently `DeadlockCandidates.Count` is surfaced but the
-   candidate list itself is not emitted. New record:
-   ```
-   DeadlockCandidateSnapshot(
-       IReadOnlyList<uint> ThreadIds,
-       IReadOnlyList<uint> OSThreadIds,
-       IReadOnlyList<string> LockObjectTypes,
-       string CycleSummary)
-   ```
-2. **Add `ContestedLockDetails`** — `IReadOnlyList<ContestedLockSnapshot>` — the top contested
-   lock objects with address, type name, waiting thread IDs, owner thread ID. The internal
-   `ContestedLocks` list already exists in `LockGraphAnalysis`; it just isn't mapped to the
-   domain result.
+### 25.2 Segment Lifecycle
 
----
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Segment count by kind (SOH ephemeral / non-ephemeral / LOH / POH / FOH) | ✅ | `SegmentAnalyzer` — `HeapSegmentSnapshot` with `Kind` |
+| Ephemeral segment fill % | ❌ | ➕ `SegmentReservationAnalyzer` — `ClrSegment.IsEphemeral` + `CommittedMemory ÷ Length` |
+| Non-ephemeral SOH segment count (compaction health) | ❌ | ➕ `SegmentReservationAnalyzer` |
+| Logical heap assignment per segment | ❌ | ➕ `SegmentReservationAnalyzer` — `ClrSegment.LogicalHeap` |
 
-## 13. `ThreadStackClusterAnalyzer` *(modify)*
+### 25.3 Address Space Pressure
 
-### Currently Produces
-*(Inspect via domain result)*
-- Groups threads by stack signature hash
-- Reports contention hotspot clusters
+| Sub-item | Status | Analyzer(s) |
+|----------|--------|-------------|
+| Total virtual address space by managed heap | ❌ | ➕ `SegmentReservationAnalyzer` |
+| 32-bit address space exhaustion risk | ❌ | ➕ `SegmentReservationAnalyzer` — `total reserved > 1.5 GB` threshold |
+| Fragmented address space detection | ❌ | ➕ `SegmentReservationAnalyzer` — non-contiguous segment range analysis |
 
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Cluster-level memory retained estimate | §7.2 | Low |
-| Integration with `LockGraphAnalyzer` (which cluster holds locks?) | §7.2 | Medium |
-
-### Required Changes
-1. **Add `LockHolderClusterCount`** — number of clusters where at least one thread holds a
-   lock. Cross-reference with `ThreadAnalyzer.ThreadsWithLocks` addresses. No extra scan.
-2. **Add `DominantWaitCategory`** per cluster — most common `WaitPattern` in the cluster.
-   Derived from existing frame data; zero overhead addition.
-
----
-
-## 14. `ReferenceChainAnalyzer` *(modify)*
-
-### Currently Produces
-- `ReferenceChainDomainResult`: samples reference chains from top N types to GC roots
-- `MaxPathSearchObjects = 5000`, `DefaultMaxPathDepth = 25`
-- Uses `BoundedRootPathFinder` internally
-
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Overlap with `GCRootAnalyzer` (once created) | §5.3 | Medium — deduplication concern |
-| Confidence / cap signal in domain result | §17 | Medium |
-
-### Required Changes
-1. **Add `ChainSearchCapped`** flag and `CappedCount` to `ReferenceChainDomainResult` —
-   how many of the sampled types had their path search capped. Already computable from
-   `BoundedRootPathFinder` results; not currently surfaced.
-2. **Post-`GCRootAnalyzer` creation**: `ReferenceChainAnalyzer` should shift focus from
-   general top-N type sampling to **on-demand deep path tracing** for specific flagged
-   objects (those identified by `DominatorAnalyzer` or `GCRootAnalyzer`). This makes it
-   a depth tool rather than a breadth tool.
-
----
-
-## 15. `CrashAnalyzer` *(modify)*
-
-### Currently Produces
-- `CrashDomainResult`: total/active exception counts, exception type distribution
-- `TopExceptionInstances` with thread + stack context
-- `TopCrashThreadCandidates`
-
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Exception frequency over time (needs multi-snapshot) | §13.1 | N/A — single snapshot |
-| Exception-to-memory correlation (leaks caused by exceptions) | §13 | Medium |
-| `InnerException` chain depth | §13.1 | Low |
-
-### Required Changes
-1. **Add `InnerExceptionChainDepth`** to `ExceptionInstanceSnapshot` — already follows
-   `InnerExceptionType`; extend to chain depth (how deep the inner chain goes). Pure
-   metadata read from `ClrException` — no heap enumeration.
-2. **Add `ExceptionMemoryFootprint`** — total bytes held by all exception objects of each type.
-   Derive from `ExceptionTypeCounts` keys → look up in heap index for size. Adds
-   §13 correlation with §3 type table.
-3. **Rename / re-scope**: `CrashAnalyzer` is named for crash scenarios but §13 is simply
-   "Exception Analysis". The analyzer name should reflect that it covers all exceptions,
-   not just crash-state ones. Consider renaming to `ExceptionAnalyzer` in a future pass.
-
----
-
-## 16. `ModuleAnalyzer` *(modify)*
-
-### Currently Produces
-- `ModuleDomainResult`: module counts, dynamic module count, version conflict groups
-- `TopModulesBySize`, `ModuleHeapStats`, `HeavyTypeDensityModules`
-
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| Module → retained memory (not just type count) | Utility for §3.1 | Low |
-| AOT / R2R detection flag | Future | Low |
-
-### Required Changes
-1. **Add `TotalRetainedEstimateBytes`** to `ModuleHeapStats` — set to `0` initially; populated
-   by `DominatorAnalyzer` in a post-pass (same pattern as `TypeSnapshot.EstimatedRetainedBytes`).
-2. This analyzer is otherwise well-scoped; no major structural changes needed.
-
----
-
-## 17. `DependentHandleAnalyzer` *(modify)*
-
-### Currently Produces
-- `DependentHandleDomainResult`: edge counts, source/target type distributions
-- Source-target pair type counts
-
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| ConditionalWeakTable size contribution | §12 | Low |
-| Integration with §12.1 subscription graph | §12 | Low |
-
-### Required Changes
-1. **Add `EstimatedRetainedBytes`** — sum of target object sizes for all resolved edges.
-   The target address is already resolved; adding a size lookup is minimal cost.
-2. **Add `IsPotentialEventSource`** flag — heuristic: if source type name ends in
-   `"EventSource"` / `"Observable"` / `"Subject"` or target type name contains `"Handler"`.
-   Links dependent handle analysis to §12.
-
----
-
-## 18. `TrendAnalyzer` *(modify)*
-
-### Currently Produces
-- `AnalyzerTrendResult`: per-analyzer metric deltas across two snapshots
-- `ExtractTimeline`: per-metric values across N snapshots
-- `MetricTrendDirection`: `Stable | Increasing | Decreasing | Volatile`
-
-### What Is Missing
-| Gap | Report Section | Priority |
-|-----|---------------|----------|
-| **Regression detection** — semantic "new leak" label | §14.2 | High |
-| Severity classification of trend changes | §14.2 | Medium |
-| Growth rate (% change per delta, not just absolute) | §14.1 | Medium |
-
-### Required Changes
-1. **Add `GrowthRatePercent`** to each `MetricDelta` — `(current - baseline) / baseline * 100`.
-   Pure arithmetic on existing values.
-2. **Add `RegressionSeverity`** enum — `None | Minor | Moderate | Severe` — applied when a
-   metric crosses a threshold in the wrong direction. Thresholds configurable.
-3. **Add `NewLeakSignals`** — `IReadOnlyList<NewLeakSignal>` on `AnalyzerTrendResult` — a type
-   that appears in `current` leak results but was absent or negligible in `baseline`.
-   Requires that `MemoryLeakDomainResult` and `StaticRootDomainResult` expose type-level
-   data comparable across snapshots (they partially do via `TopRootsByRetainedBytes`).
+**Verdict**: §25 requires new `SegmentReservationAnalyzer`. `SegmentAnalyzer` has per-segment committed bytes in its snapshot list but no reserved memory, no ephemeral fill %, and no logical heap grouping.
 
 ---
 
 ---
 
-# Part 3 — New Analyzers Required
-
----
-
-## N1. `GCRootAnalyzer` *(new — HIGH PRIORITY)*
-
-### Report Sections Served
-§5.1 Root Distribution, §5.2 Root Severity Ranking, §5.3 Root Paths
-
-### Rationale
-`BoundedRootPathFinder` and `StaticRootLeakDetector` exist as utilities and partial detectors.
-No pipeline analyzer produces a **unified root intelligence result** covering all root kinds
-(Static, Stack, GCHandle, Finalizer) with retention estimates and severity ranking.
-
-### Design
-
-**Domain Result**:
-```
-GCRootDomainResult(
-    int TotalRoots,
-    IReadOnlyList<RootKindSummary> ByKind,
-    IReadOnlyList<RootFinding> TopRootsBySeverity,
-    IReadOnlyList<RootPathFinding> RootPaths,
-    bool PathSearchCapped,
-    int PathSearchCappedCount)
-
-RootKindSummary(string Kind, int Count, ulong EstimatedRetainedBytes, double PctOfManagedHeap)
-
-RootFinding(
-    string RootKind,
-    ulong RootAddress,
-    string? FieldDescription,
-    string TargetTypeName,
-    ulong TargetAddress,
-    ulong EstimatedRetainedBytes,
-    int SeverityScore)
-
-RootPathFinding(
-    ulong TargetAddress,
-    string TargetTypeName,
-    string RootKind,
-    IReadOnlyList<string> PathTypeNames,
-    int PathLength,
-    bool WasCapped)
-```
-
-**Implementation Strategy**:
-- Use `cache.GetOrBuildValidRoots(heap)` — **do not re-enumerate roots from scratch**
-- Group roots by kind using a single pass
-- For top N roots by estimated retained bytes (N = 25, configurable), run
-  `BoundedRootPathFinder` with tight budget (`MaxNodes = 500`, `MaxDepth = 20`)
-- Retained bytes per root = BFS-discovered object count × average type size (from heap index)
-- Do **not** build a full reverse graph; scope entirely to sampled roots
-- Severity score = `f(RetainedBytes, RootKind, IsStatic)`
-
----
-
-## N2. `DominatorAnalyzer` *(new — HIGH PRIORITY)*
-
-### Report Sections Served
-§3.1 Estimated Retained Size, §3.2 Dominator Candidates, §4.1 Retention Hotspots,
-§4.2 Dominator Tree (Approx), §4.3 Retention Patterns
-
-### Rationale
-This is the **largest capability gap** in the system. Retained size and dominator tree are
-foundational to professional-tier memory analysis and no current analyzer provides them.
-
-### Design
-
-**Domain Result**:
-```
-DominatorDomainResult(
-    int CandidatesAnalyzed,
-    ulong TotalRetainedBytesEstimated,
-    IReadOnlyList<DominatorCandidate> TopDominatorsByRetainedSize,
-    IReadOnlyList<RetentionPatternFinding> DetectedPatterns,
-    bool WasBudgetCapped,
-    string CapReason)
-
-DominatorCandidate(
-    ulong Address,
-    string TypeName,
-    ulong ShallowSize,
-    ulong EstimatedRetainedBytes,
-    int RetainedObjectCount,
-    RetentionPatternHint PatternHint)
-
-RetentionPatternHint : None | StaticCache | EventChain | ThreadLocal | Singleton | Collection
-
-RetentionPatternFinding(
-    RetentionPatternHint Pattern,
-    int InstanceCount,
-    ulong TotalRetainedBytes,
-    string Description)
-```
-
-**Implementation Strategy**:
-- **Input**: Top 50 types by shallow size from `HeapAnalysisCache` type statistics
-- **Per candidate**: Sample 1 representative object of each type; run bounded reverse-BFS
-  using `ReverseReferenceIndex` (scoped, not full graph) to estimate retained sub-graph size
-- **Budget**: `MaxNodes = 2000` per candidate, `MaxEdges = 5000` total across all candidates
-- **Pattern detection**: After BFS, classify by field types in the retained set:
-  - `Dictionary/ConcurrentDictionary` → `StaticCache`
-  - `EventHandler/MulticastDelegate` → `EventChain`
-  - `[ThreadStatic]` or `ThreadLocal<T>` → `ThreadLocal`
-- **Post-pass**: Write `EstimatedRetainedBytes` back into a shared result that
-  `MemoryAnalyzer` and `ModuleAnalyzer` can expose via their type snapshots
-
-> ⚠️ **Performance constraint**: This analyzer MUST run after `MemoryAnalyzer` and use its
-> type statistics to bound the candidate set. It must **never** enumerate the full heap.
-> The reverse-reference index must be scoped to candidate addresses only.
-
----
-
-## N3. `AsyncTaskAnalyzer` *(split from `HangAnalyzer` — MEDIUM PRIORITY)*
-
-### Report Sections Served
-§8.1 Task Summary, §8.2 Orphaned Tasks, §8.3 Continuation Chains
-
-### Rationale
-Task lifecycle analysis is a first-class §8 report section. It is currently buried inside
-`HangDomainResult` alongside thread-blocking data, with no orphan task detection.
-
-### Design
-
-**Domain Result**: see §9 `HangAnalyzer` split section above.
-
-**Implementation Strategy**:
-- Scan the heap for objects whose `MethodTable` resolves to `Task`, `Task<T>`,
-  `ValueTask`, `IValueTaskSource` (use heap index MT → type name cache for O(1) lookup)
-- For each task object, read `m_stateFlags` field to determine state
-- For orphan detection: read `m_continuationObject` field — if null or
-  `System.Threading.Tasks.Task+<>c` (no-op), classify as orphaned
-- For chain depth: BFS following `m_continuationObject` links, depth-capped at 20
-- **Bounded by** `MaxTasksToScan` (carry over from `HangAnalyzer`'s existing constant)
-- Uses heap index (not raw `heap.EnumerateObjects()`) for the initial type-filtered scan
-
----
-
-## N4. `AllocationPatternAnalyzer` *(new — MEDIUM PRIORITY)*
-
-### Report Sections Served
-§2.3 Allocation Patterns, §9.1 Short/Long-lived Objects, §9.2 GC Efficiency
-
-### Rationale
-No current analyzer classifies allocation behavior or GC efficiency. Both §2.3 and §9 require
-heuristic classification derived from generation distribution data that `GCGenerationAnalyzer`
-already produces — this is a **pure post-processing analyzer** that requires no heap scan.
-
-### Design
-
-**Domain Result**:
-```
-AllocationPatternDomainResult(
-    double Gen0Pct,
-    double Gen2Pct,
-    double LohPct,
-    AllocationProfile Profile,
-    GCPressureLevel GCPressure,
-    double PromotionPressureScore,
-    IReadOnlyList<TypeAllocationProfile> TopShortLivedTypes,
-    IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes)
-
-AllocationProfile : Transient | Steady | Retained | Mixed
-
-GCPressureLevel : Low | Moderate | High | Critical
-
-TypeAllocationProfile(
-    string TypeName,
-    int Gen0Count, int Gen1Count, int Gen2Count,
-    double LongLivedRatio,
-    AllocationProfile Profile)
-```
-
-**Implementation Strategy**:
-- **Input**: `GCGenerationDomainResult` + `PerTypeGenerationProfile` (added to
-  `GCGenerationAnalyzer` per change §2 above)
-- No heap scan. Pure derived computation from already-produced results.
-- `Gen0Pct > 70%` → `Transient`; `Gen2Pct > 50%` → `Retained`; mixed otherwise
-- `GCPressureLevel` from `(Gen0Pct × 0.3) + (Gen2Pct × 0.5) + (LohPct × 0.2)` normalized score
-- **Must run after** `GCGenerationAnalyzer` in pipeline order (`Order` property)
-
----
-
-## N5. `ObjectShapeAnalyzer` *(new — LOW PRIORITY)*
-
-### Report Sections Served
-§3.3 Object Shape Analysis
-
-### Rationale
-Type structure (reference-heavy vs value-heavy) affects GC scan cost and memory layout.
-This is purely a `ClrType` metadata analysis — no heap object enumeration required.
-
-### Design
-
-**Domain Result**:
-```
-ObjectShapeAnalyzerDomainResult(
-    IReadOnlyList<TypeShapeProfile> TopReferenceHeavyTypes,
-    IReadOnlyList<TypeShapeProfile> TopValueHeavyTypes,
-    int TotalTypesAnalyzed,
-    double AvgRefFieldsPerType)
-
-TypeShapeProfile(
-    string TypeName,
-    int TotalFields,
-    int ReferenceFields,
-    int ValueFields,
-    double ReferenceFieldRatio,
-    ulong InstanceCount,
-    ObjectShapeCategory Category)
-
-ObjectShapeCategory : ReferenceHeavy | ValueHeavy | Balanced | Scalar
-```
-
-**Implementation Strategy**:
-- Enumerate `ClrType` entries from the heap index (already cached — iterate
-  `cache.GetOrBuildTypeStatistics(heap).Keys` and resolve each to `ClrType` via
-  `heap.GetTypeByMethodTable`)
-- For each type, inspect `ClrType.Fields` — count reference vs value fields
-- Skip array types and primitive types
-- **No per-object scan** — purely type metadata. Very fast.
-- Cap at top 200 types by instance count (from heap index) to bound work
-
----
-
-## N6. `StringAnalyzer` *(split from `MemoryLeakAnalyzer` — MEDIUM PRIORITY)*
-
-### Report Sections Served
-§11.1 Duplicate Strings, §11.2 Memory Waste
-
-### Rationale
-String analysis is a standalone §11 report section. Its data is currently embedded in
-`MemoryLeakDomainResult`, making it inaccessible to §11 report renderers without coupling
-them to leak analysis.
-
-### Design
-
-**Domain Result**:
-```
-StringDomainResult(
-    int TotalStrings,
-    ulong TotalStringMemoryBytes,
-    int UniqueStrings,
-    int DuplicatePatternCount,
-    ulong DuplicateWastedBytes,
-    double DuplicationRatio,
-    double PctOfManagedHeap,
-    IReadOnlyList<DuplicateStringSnapshot> TopDuplicatesByWaste,
-    IReadOnlyList<DuplicateStringSnapshot> TopDuplicatesByCount)
-```
-
-**Implementation Strategy**:
-- Lift `ProcessStringObjectByAddress`, `IsStringEntry`, `stringStats`, `stringMethodTables`
-  verbatim from `MemoryLeakAnalyzer`
-- Uses heap index fast path (`concreteCache.EnumerateIndexedEntriesAsTuples()`) already
-  present in `MemoryLeakAnalyzer` — carry it forward exactly
-- `DuplicationRatio = (TotalStrings - UniqueStrings) / (double)TotalStrings`
-- `PctOfManagedHeap` = `TotalStringMemoryBytes / totalManagedBytes * 100` (use
-  `MemoryDomainResult` as input or re-read from cache)
-- Add `TopDuplicatesByCount` sorted by `Count` in addition to `TopDuplicatesByWaste`
-  sorted by `WastedBytes`
 
 ---
 
 ---
 
+# Analyzer Deep-Dive Index
+
+Per-analyzer specs live in `docs/ReportStructure/Analyzers/`. Each file is self-sufficient:
+it contains **Currently Produces**, **What Is Missing**, **Required Changes**, **Phase Assignment**,
+and **Related Analyzers** for that single analyzer.
+
+> The Phase 1 vs Phase 2 breakdown for every work item is in the per-analyzer file, not here.
+> The architecture primer for the two-phase model is in Part 7 below.
+
+## Existing Analyzers — Modify
+
+| Priority | Analyzer | File | Key Gap |
+|----------|----------|------|---------|
+| 3 | `MemoryAnalyzer` | [MemoryAnalyzer.md](Analyzers/MemoryAnalyzer.md) | `AverageSize`, `SizeBucketHistogram` |
+| 4 | `GCGenerationAnalyzer` | [GCGenerationAnalyzer.md](Analyzers/GCGenerationAnalyzer.md) | `PerTypeGenerationProfile`, eliminate Phase 2 re-scan |
+| — | `SegmentAnalyzer` | [SegmentAnalyzer.md](Analyzers/SegmentAnalyzer.md) | POH type distribution, reserved memory |
+| 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` |
+| 1 | `MemoryLeakAnalyzer` | [MemoryLeakAnalyzer.md](Analyzers/MemoryLeakAnalyzer.md) | ✂️ Split — extract `StringAnalyzer`; add `SuspicionScore` |
+| — | `StaticRootLeakDetector` | [StaticRootLeakDetector.md](Analyzers/StaticRootLeakDetector.md) | `BfsCappedCount`, `RetentionPatternHints` |
+| 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 |
+| — | `ThreadAnalyzer` | [ThreadAnalyzer.md](Analyzers/ThreadAnalyzer.md) | `ThreadsWithLargeStackRoots`, `LongLivedThreadCount` |
+| 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` |
+| 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` |
+| — | `CollectionAnalyzer` | [CollectionAnalyzer.md](Analyzers/CollectionAnalyzer.md) | `CachePatternScore`, `Generation` field |
+| 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` |
+| — | `ThreadStackClusterAnalyzer` | [ThreadStackClusterAnalyzer.md](Analyzers/ThreadStackClusterAnalyzer.md) | `LockHolderClusterCount`, `DominantWaitCategory` |
+| — | `ReferenceChainAnalyzer` | [ReferenceChainAnalyzer.md](Analyzers/ReferenceChainAnalyzer.md) | `ChainSearchCapped`, shift to depth tool |
+| — | `CrashAnalyzer` | [CrashAnalyzer.md](Analyzers/CrashAnalyzer.md) | Exception frame hotspots, origin classification |
+| — | `ModuleAnalyzer` | [ModuleAnalyzer.md](Analyzers/ModuleAnalyzer.md) | `TotalRetainedEstimateBytes` post-pass |
+| — | `DependentHandleAnalyzer` | [DependentHandleAnalyzer.md](Analyzers/DependentHandleAnalyzer.md) | `EstimatedRetainedBytes`, `IsPotentialEventSource` |
+| 14 | `TrendAnalyzer` | [TrendAnalyzer.md](Analyzers/TrendAnalyzer.md) | `GrowthRatePercent`, `RegressionSeverity`, `NewLeakSignals` |
+
+## New Analyzers — Add
+
+| Priority | Analyzer | File | Report Sections |
+|----------|----------|------|-----------------|
+| 10 | `GCRootAnalyzer` | [GCRootAnalyzer.md](Analyzers/GCRootAnalyzer.md) | §5.1–5.3 |
+| 11 | `DominatorAnalyzer` | [DominatorAnalyzer.md](Analyzers/DominatorAnalyzer.md) | §3.1–3.2, §4.1–4.3 |
+| 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 |
+| 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 |
+| 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 |
+| 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 |
+| 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 |
+| 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 |
+| 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 |
+| 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 |
+| 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 |
+| 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 |
+| 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 |
+| 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 |
+
+---
+
+---
 # Part 4 — `InsightEngine` Enhancements
 
 The `InsightEngine` is the consumer of all analyzer outputs for cross-cutting findings.
@@ -1207,6 +737,14 @@ As new analyzers are added, the `InsightEngine.Analyze` method must be extended 
 | `AsyncTaskDomainResult` | Orphaned task warnings, async-over-sync correlation |
 | `AllocationPatternDomainResult` | GC pressure level escalation, transient allocation flood |
 | `StringDomainResult` | High duplication ratio alert (> 50% duplication) |
+| `FinalizableObjectDomainResult` | Finalizer starvation risk (large queue + blocked finalizer thread) |
+| `ArrayDomainResult` | LOH array pressure, multi-dim array anti-pattern |
+| `AsyncStateMachineDomainResult` | Fire-and-forget leak (> 100 suspended instances of same method) |
+| `WeakReferenceDomainResult` | Stale wrapper accumulation (dead target ratio > 50 %) |
+| `SegmentReservationDomainResult` | Address space pressure warning, ephemeral fill critical |
+| `AppDomainDomainResult` | Dynamic assembly accumulation, anonymous module detection |
+| `JitDomainResult` | JIT heap bloat (> 500 MB), high unmanaged frame ratio |
+| `BoxingDomainResult` | Boxed enum anti-pattern count, struct padding waste |
 
 Additionally, `InsightEngine` must gain:
 - **`ExecutiveSummary` output**: a `SummaryBlock` record with:
@@ -1237,8 +775,190 @@ Additionally, `InsightEngine` must gain:
 | 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium |
 | 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium |
 | 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low |
+| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium |
+| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium |
+| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium |
+| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low |
+| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low |
+| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low |
+| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low |
+| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low |
 
 > **`DominatorAnalyzer`** is the highest-effort item and carries the most performance risk.
 > It must be implemented last, after all other analyzers are in place, with dedicated
 > performance testing on 10GB+ dumps before merging. All other items are safe to implement
 > incrementally in the order listed.
+>
+> Items 15–22 are new §18–25 report sections. All are **Phase 2 only** or use existing Phase 1
+> indices — none require new disk files except `FinalizableObjectAnalyzer` which reuses the
+> `TypeAggregateIndexEntry.Flags` bit extension pattern already defined for items 1–9.
+
+---
+
+---
+
+# Part 7 — Extended Phase 1 Storage Model
+
+## Complete File Inventory
+
+```
+{DumpDir}/.dumpindex/
+│
+├── ObjectIndex.bin              EXISTING — core object address/MT/size table
+│                                  Header (24 bytes): Magic|Version|ObjectCount|Reserved
+│                                  Per record (24 bytes): Address(8)|MT(8)|Size(8)
+│                                  For 80M objects: ~1.92GB
+│
+├── TypeAggregateIndex.bin       EXTENDED — per-MT aggregate stats (in-memory during analysis;
+│                                  serialized here for cross-session reuse)
+│                                  Per record (64 bytes, padded):
+│                                    MT(8)|ModuleId(4)|Count(8)|TotalSize(8)|
+│                                    LohCount(8)|LohSize(8)|SampleAddress(8)|
+│                                    Gen0Count(4)|Gen1Count(4)|Gen2Count(4)|
+│                                    Flags(1)|Pad(3)
+│                                  Flags byte usage:
+│                                    bit 0 = IsStringType     (→ StringAnalyzer)
+│                                    bit 1 = IsTaskType       (→ AsyncTaskAnalyzer)
+│                                    bit 2 = IsDelegateType   (→ EventLeakAnalyzer)
+│                                    bit 3 = IsFinalizableType (→ FinalizableObjectAnalyzer)
+│                                    bit 4 = IsArrayType      (→ ArrayAnalyzer)
+│                                    bits 5–7 = reserved
+│                                  For 50K types: ~3.2MB
+│
+├── HandleSnapshot.bin           NEW — GC handle enumeration snapshot
+│                                  Per record (20 bytes): ObjectAddress(8)|MT(8)|Kind(1)|Pad(3)
+│                                  Consumers: GCHandleAnalyzer, WeakReferenceAnalyzer
+│                                  Typical size: ~1MB
+│
+├── RootIndex.bin                NEW — GC root enumeration snapshot
+│                                  Per record (20 bytes): TargetAddress(8)|RootAddress(8)|Kind(1)|Pad(3)
+│                                  Consumers: GCRootAnalyzer, StaticRootLeakDetector, FinalizableObjectAnalyzer
+│                                  Typical size: ~2MB
+│
+├── TaskIndex.bin                NEW — Task/ValueTask object snapshot
+│                                  Per record (20 bytes): Address(8)|MT(8)|StateFlags(4)
+│                                  Consumers: AsyncTaskAnalyzer
+│                                  Typical size: ~20MB (worst case 1M tasks)
+│
+├── EventCandidateIndex.bin      NEW — MulticastDelegate/EventHandler object addresses
+│                                  Per record (16 bytes): Address(8)|MT(8)
+│                                  Consumers: EventLeakAnalyzer
+│                                  Typical size: ~8MB
+│
+├── LohFreeBlockIndex.bin        NEW — Free blocks inside LOH segments
+│                                  Per record (24 bytes): SegmentAddress(8)|Offset(8)|Size(8)
+│                                  Consumers: LohFragmentationAnalyzer
+│                                  Typical size: < 1MB
+│
+├── LargeObjectIndex.bin         NEW — Top-100 LOH objects by size
+│                                  Per record (24 bytes): Address(8)|MT(8)|Size(8)
+│                                  Consumers: LohFragmentationAnalyzer, ArrayAnalyzer
+│                                  Fixed size: 2.4KB (always exactly 100 entries or fewer)
+│
+└── PartialRefEdgeIndex.bin      NEW — Reference edges for top-50 candidate types only
+                                    Per record (16 bytes): SourceAddress(8)|TargetAddress(8)
+                                    Consumers: DominatorAnalyzer
+                                    Capped at 500K edges: max 8MB
+```
+
+### New Analyzers — No Additional Disk Files Required
+
+The 8 new analyzers from §18–25 are designed to use **existing Phase 1 indices** or run
+entirely from Phase 2 ClrMD metadata:
+
+| Analyzer | Index Used | Phase 2 ClrMD Calls |
+|---|---|---|
+| `AppDomainAnalyzer` | `TypeAggregates` (join only) | `ClrRuntime.AppDomains`, `ClrModule.EnumerateTypes()` |
+| `JitAnalyzer` | None | `ClrRuntime.GetJitManagers()`, `ClrStackFrame.Method`, `ClrMethod.HotColdInfo` |
+| `BoxingAnalyzer` | `TypeAggregates`, `TypeShapeCache` | `ClrType.BaseType`, `ClrThread.EnumerateStackObjects()` |
+| `FinalizableObjectAnalyzer` | `ObjectIndex.bin` (Flags filter), `RootIndex.bin` | `ClrInstanceField.Read<bool>()` for `_disposed` |
+| `ArrayAnalyzer` | `ObjectIndex.bin` (Flags filter) | `ClrObject.AsArray()`, element sampling |
+| `AsyncStateMachineAnalyzer` | `TypeAggregates` (name scan) | `ClrType.Interfaces`, `ClrType.Fields`, `ClrInstanceField` reads |
+| `WeakReferenceAnalyzer` | `HandleSnapshot.bin` | `ClrHeap.GetObject().IsValid`, `ClrInstanceField` (`m_handle`) |
+| `SegmentReservationAnalyzer` | None | `ClrHeap.Segments`, `ClrSegment.CommittedMemory`, `ReservedMemory`, `LogicalHeap` |
+                                    Per record (16 bytes): SourceAddress(8)|TargetAddress(8)
+                                    Capped at 500K edges: max 8MB
+```
+
+## In-Memory Phase 1 Structures (not persisted to disk)
+
+These are built during Phase 1, stored in `HeapIndexBuildResult`, and held in memory for
+the lifetime of the analysis session. They are rebuilt if the session restarts.
+
+```
+HeapIndexBuildResult extensions:
+
+  GlobalSizeBuckets: long[8]
+    → 8 size-bucket object counts built by TypeIndexBuilder
+    → 64 bytes. Always in memory.
+
+  TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>
+    → Per-MT field layout (RefFields, ValFields, TotalFields)
+    → TypeShapeEntry = readonly struct (6 bytes per entry, padded to 8)
+    → 50K types × 16 bytes (key + value) = ~800KB. Always in memory.
+
+  StringMtSet: derived on first access from TypeAggregates.Flags.IsStringType
+    → Computed lazily from TypeAggregates — not stored separately.
+
+  TaskMtSet: derived on first access from TypeAggregates.Flags.IsTaskType
+    → Same pattern.
+```
+
+## Phase 1 Memory Footprint Summary
+
+| Structure | Size (50K types, 80M objects) | Storage |
+|-----------|-------------------------------|---------|
+| `TypeAggregates` dictionary (extended) | ~3.2MB | Memory |
+| `GlobalSizeBuckets` | 64 bytes | Memory (in HeapIndexBuildResult) |
+| `TypeShapeCache` | ~800KB | Memory (in HeapIndexBuildResult) |
+| `ObjectIndex.bin` write buffer | 4MB (Large tier) | Memory (transient, released after write) |
+| `TaskIndex.bin` write buffer | 256KB | Memory (transient) |
+| `EventCandidateIndex.bin` write buffer | 256KB | Memory (transient) |
+| **Total peak Phase 1 memory** | **~8.5MB** | — |
+
+> The heap-streaming working set stays near-constant regardless of dump size because
+> per-object allocations are zero (struct-only `HeapEntry` in `ArrayPool<HeapEntry>` buffers)
+> and all index files are written sequentially via `FileStream` with configurable buffer sizes.
+
+## Phase 1.5 — Bounded Reference Edge Collection
+
+This is a distinct step that runs **after Phase 1 completes** but **before Phase 2 begins**.
+It is only executed if `DominatorAnalyzer` is enabled.
+
+```
+Trigger condition:   DominatorAnalyzer in analyzer set AND ObjectIndex.bin exists
+Input:               ObjectIndex.bin (sequential read) + TypeAggregates (candidate selection)
+Output:              PartialRefEdgeIndex.bin
+Memory budget:       ≤ 64MB for the in-progress edge buffer (flushed every 32K edges)
+Time budget:         Configurable timeout (default 60 seconds)
+Capping:             Edge count cap (500K), time cap, both independently enforced
+```
+
+The step is implemented as a separate `IBoundedReferenceEdgeBuilder` service, not as part of
+`IObjectIndexWriter`, to keep the Phase 1 index writers focused and simple.
+
+## Record Format Notes
+
+- All multi-byte integers are **little-endian** — consistent with existing `ObjectIndex.bin`
+  (matches `BinaryPrimitives.ReadUInt64LittleEndian` usage in `ObjectIndexReader`).
+- All files use a **24-byte header minimum** — 4-byte magic, 4-byte version, 8-byte record count,
+  8 bytes reserved/flags — ensuring forward compatibility without breaking readers.
+- All files are **append-only during Phase 1** — no random writes, no seeking.
+- All Phase 2 reads use **`FileOptions.SequentialScan`** and `ArrayPool<byte>` buffers
+  consistent with the existing `ObjectIndexReader` pattern.
+- Index files reside in a **per-dump `.dumpindex/` subdirectory** alongside the dump file,
+  named `{DumpFileName}.dumpindex/`. This avoids polluting the dump directory and enables
+  atomic cleanup (delete the folder = full cache invalidation).
+
+## Cache Invalidation
+
+Index files are valid only for the exact dump that generated them. Validity is checked by:
+
+```
+ObjectIndex.bin header:  contains DumpFileHash(8) = FNV-64 of first 64KB of dump file
+                         + DumpFileSizeBytes(8)
+On open:                 verify both fields match current dump file — if not, rebuild
+```
+
+This same validation is applied to all satellite index files (HandleSnapshot, RootIndex, etc.)
+via a shared `IndexHeader` struct that all writers produce and all readers verify.

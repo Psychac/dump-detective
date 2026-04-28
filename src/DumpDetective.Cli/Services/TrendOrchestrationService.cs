@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Console;
@@ -16,12 +17,12 @@ namespace DumpDetective.Cli.Services;
 /// Orchestrates a multi-dump trend analysis run: per-dump pipelines → trend report → output.
 /// </summary>
 internal sealed class TrendOrchestrationService(
-    DumpLoader dumpLoader,
+    IDumpLoader dumpLoader,
     FindingGenerationPipeline findingGenerationPipeline,
     ReportBuilderFacade reportBuilderFacade,
     TrendAnalyzer trendAnalyzer)
 {
-    private readonly DumpLoader _dumpLoader = dumpLoader;
+    private readonly IDumpLoader _dumpLoader = dumpLoader;
     private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly TrendAnalyzer _trendAnalyzer = trendAnalyzer;

@@ -1,5 +1,6 @@
 using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Reporting.Pipeline;
+using DumpDetective.Analysis.Dump;
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
@@ -32,7 +33,7 @@ internal static class ServiceRegistration
 
         services.AddSingleton<ConfigurationResolver>();
         services.AddSingleton<StartupValidator>();
-        services.AddSingleton<DumpLoader>();
+        services.AddSingleton<IDumpLoader, DumpLoader>();
         services.AddSingleton<DumpAnalysisService>();
         services.AddSingleton<SingleDumpOrchestrationService>();
         services.AddSingleton<TrendOrchestrationService>();

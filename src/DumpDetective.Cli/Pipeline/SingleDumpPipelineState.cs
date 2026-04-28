@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;

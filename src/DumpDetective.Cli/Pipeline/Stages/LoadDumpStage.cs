@@ -1,8 +1,8 @@
-using DumpDetective.Cli.Services;
+using DumpDetective.Analysis.Dump;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-internal sealed class LoadDumpStage(DumpLoader dumpLoader) : IAnalysisStage
+internal sealed class LoadDumpStage(IDumpLoader dumpLoader) : IAnalysisStage
 {
     public string Name => "Load dump";
 

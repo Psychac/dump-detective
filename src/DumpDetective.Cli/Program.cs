@@ -1,4 +1,5 @@
-﻿using DumpDetective.Cli.Commands;
+﻿using DumpDetective.Analysis.Dump;
+using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Hosting;
 using DumpDetective.Cli.Services;

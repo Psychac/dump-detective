@@ -1,8 +1,12 @@
 using Microsoft.Diagnostics.Runtime;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Analysis.Dump;
 
-internal sealed class DumpLoader
+/// <summary>
+/// Loads a .NET memory dump using ClrMD, validates that the CLR runtime and heap are walkable,
+/// and returns a <see cref="DumpLoadContext"/> that owns all allocated resources.
+/// </summary>
+internal sealed class DumpLoader : IDumpLoader
 {
     public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken)
     {
@@ -11,9 +15,7 @@ internal sealed class DumpLoader
         try
         {
             if (!File.Exists(dumpPath))
-            {
                 throw new DumpLoadException($"Dump file not found: {dumpPath}");
-            }
 
             DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
             if (dataTarget.ClrVersions.Length == 0)
@@ -46,6 +48,10 @@ internal sealed class DumpLoader
     }
 }
 
+/// <summary>
+/// Holds the ClrMD objects produced by loading a dump file.
+/// Owns and disposes all underlying ClrMD resources when disposed.
+/// </summary>
 internal sealed class DumpLoadContext(string dumpPath, DataTarget dataTarget, ClrRuntime runtime, ClrHeap heap) : IDisposable
 {
     public string DumpPath { get; } = dumpPath;
@@ -59,3 +65,7 @@ internal sealed class DumpLoadContext(string dumpPath, DataTarget dataTarget, Cl
         DataTarget.Dispose();
     }
 }
+
+/// <summary>Thrown when a dump file cannot be loaded or is not a valid .NET memory dump.</summary>
+internal sealed class DumpLoadException(string message, Exception? innerException = null)
+    : Exception(message, innerException);

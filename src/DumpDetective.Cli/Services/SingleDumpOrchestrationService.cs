@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Pipeline;
@@ -15,11 +16,11 @@ namespace DumpDetective.Cli.Services;
 /// Orchestrates a single-dump analysis run: stages → pipeline runner → console summary → exit code.
 /// </summary>
 internal sealed class SingleDumpOrchestrationService(
-    DumpLoader dumpLoader,
+    IDumpLoader dumpLoader,
     FindingGenerationPipeline findingGenerationPipeline,
     ReportBuilderFacade reportBuilderFacade)
 {
-    private readonly DumpLoader _dumpLoader = dumpLoader;
+    private readonly IDumpLoader _dumpLoader = dumpLoader;
     private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
 

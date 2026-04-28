@@ -10,4 +10,15 @@ internal sealed record HeapIndexBuildResult(
     TimeSpan Elapsed,
     IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> TypeAggregates,
     HeapEntry[]? InMemoryEntries = null,
-    IReadOnlyList<ModuleInfo>? Modules = null);
+    IReadOnlyList<ModuleInfo>? Modules = null,
+    /// <summary>
+    /// 8-element heap-wide object-size histogram built during Phase 1.
+    /// Bucket boundaries are defined in <see cref="SizeBucketHelper.BucketLabels"/>.
+    /// Always 64 bytes — never null after a successful build.
+    /// </summary>
+    long[]? GlobalSizeBuckets = null,
+    /// <summary>
+    /// Per-MethodTable field layout cache built during Phase 1.
+    /// ~800 KB for 50 K types. Used by ObjectShapeAnalyzer, BoxingAnalyzer, and DominatorAnalyzer.
+    /// </summary>
+    IReadOnlyDictionary<ulong, TypeShapeEntry>? TypeShapeCache = null);

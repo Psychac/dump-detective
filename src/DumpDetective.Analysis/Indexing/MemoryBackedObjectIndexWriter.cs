@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 using Microsoft.Diagnostics.Runtime;
@@ -31,9 +32,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // 4 concurrent segments gives ~4x speedup over sequential while bounding peak page pressure.
         const int MaxSegmentParallelism = 4;
 
-        var masterBuilder = new TypeIndexBuilder();
+        var masterBuilder  = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
         var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<(HeapEntry[] Buffer, int Count)>();
+        var shapeCache = new ConcurrentDictionary<ulong, TypeShapeEntry>();
         long objectCount = 0;
 
         var parallelOptions = new ParallelOptions
@@ -45,9 +47,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => new TypeIndexBuilder(),
-            (segment, _, localBuilder) =>
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64)),
+            (segment, _, state) =>
             {
+                int segGen = MemorySegmentKindToGeneration(segment.Kind);
                 // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
                 // initial rent is guaranteed to hold all objects without resizing in the common case.
                 // Capped at 1_000_000 entries (~24 MB) to keep each ArrayPool loan reasonable;
@@ -76,10 +79,19 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         segBuf = bigger;
                     }
 
-                    var entry = new HeapEntry(obj.Address, mt, obj.Size);
+                    // Compute type flags + shape once per unique MT (thread-local cache).
+                    TypeAggregateFlags flags;
+                    if (!state.FlagsCache.TryGetValue(mt, out flags))
+                    {
+                        flags = ComputeTypeFlags(obj.Type);
+                        state.FlagsCache[mt] = flags;
+                        shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
+                    }
+
+                    var entry    = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
                     segBuf[segCount++] = entry;
-                    localBuilder.Add(entry, moduleId);
+                    state.Builder.Add(entry, moduleId, flags, segGen);
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (count % ProgressInterval == 0)
@@ -87,12 +99,12 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                 }
 
                 allSegmentEntries.Add((segBuf, segCount));
-                return localBuilder;
+                return state;
             },
-            localBuilder =>
+            state =>
             {
                 lock (masterBuilder)
-                    masterBuilder.Merge(localBuilder);
+                    masterBuilder.Merge(state.Builder);
             });
 
         // Flatten per-segment pooled buffers into a single exact-sized array,
@@ -117,6 +129,65 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             Elapsed: stopwatch.Elapsed,
             TypeAggregates: masterBuilder.Build(),
             InMemoryEntries: flatEntries,
-            Modules: moduleRegistry.Modules);
+            Modules: moduleRegistry.Modules,
+            GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
+            TypeShapeCache: shapeCache);
     }
+
+    // ── Type classification helpers (mirror DiskBackedObjectIndexWriter) ───────
+
+    private static TypeAggregateFlags ComputeTypeFlags(ClrType type)
+    {
+        TypeAggregateFlags flags = TypeAggregateFlags.None;
+
+        string? name = type.Name;
+        if (name is not null)
+        {
+            if (name == "System.String")
+                flags |= TypeAggregateFlags.IsStringType;
+
+            if (name.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
+                flags |= TypeAggregateFlags.IsTaskType;
+        }
+
+        if (type.IsArray)
+            flags |= TypeAggregateFlags.IsArrayType;
+
+        if (type.IsFinalizable)
+            flags |= TypeAggregateFlags.IsFinalizableType;
+
+        ClrType? current = type.BaseType;
+        for (int depth = 0; depth < 4 && current is not null; depth++)
+        {
+            string? baseName = current.Name;
+            if (baseName is "System.MulticastDelegate" or "System.Delegate")
+            {
+                flags |= TypeAggregateFlags.IsDelegateType;
+                break;
+            }
+            current = current.BaseType;
+        }
+
+        return flags;
+    }
+
+    private static TypeShapeEntry ComputeTypeShape(ClrType type)
+    {
+        short refFields = 0;
+        short valFields = 0;
+        foreach (ClrInstanceField field in type.Fields)
+        {
+            if (field.IsObjectReference) refFields++;
+            else valFields++;
+        }
+        return new TypeShapeEntry(refFields, valFields);
+    }
+
+    private static int MemorySegmentKindToGeneration(GCSegmentKind kind) => kind switch
+    {
+        GCSegmentKind.Generation0 => 0,
+        GCSegmentKind.Generation1 => 1,
+        GCSegmentKind.Generation2 => 2,
+        _ => -1,
+    };
 }

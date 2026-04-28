@@ -7,6 +7,13 @@
 
 ---
 
+> **Implementation Status** — Phase 1 infrastructure complete.
+> All satellite index files, in-memory caches, and supporting helpers are implemented.
+> Analyzer-level work (Phase 2) is next — see [Part 5](#part-5--implementation-priority-order)
+> for the ordered work list and [Part 6](#part-6--phase-1-implementation-log) for the change log.
+
+---
+
 # Part 1 — Section → Analyzer Mapping
 
 ## Legend
@@ -17,6 +24,7 @@
 | ❌ | Not covered — no analyzer produces this data |
 | ➕ | Requires a new analyzer |
 | ✂️ | Requires splitting an existing analyzer |
+| 🔵 | Phase 1 infrastructure implemented; Phase 2 analyzer work pending |
 
 ---
 
@@ -759,30 +767,30 @@ Additionally, `InsightEngine` must gain:
 
 # Part 5 — Implementation Priority Order
 
-| Priority | Item | Type | Effort |
-|----------|------|------|--------|
-| 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low |
-| 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium |
-| 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low |
-| 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium |
-| 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low |
-| 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low |
-| 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low |
-| 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low |
-| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low |
-| 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High |
-| 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High |
-| 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium |
-| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium |
-| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low |
-| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium |
-| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium |
-| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium |
-| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low |
-| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low |
-| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low |
-| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low |
-| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low |
+| Priority | Item | Type | Effort | Phase 1 Prereq |
+|----------|------|------|--------|----------------|
+| 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low | ✅ `IsStringType` flag ready |
+| 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written |
+| 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready |
+| 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
+| 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written |
+| 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written |
+| 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs |
+| 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready |
+| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready |
+| 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High | ✅ `RootIndex.bin` written |
+| 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only |
+| 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs |
+| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written |
+| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs |
+| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready |
+| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready |
+| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready |
+| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready |
+| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs |
+| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written |
+| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready |
+| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs |
 
 > **`DominatorAnalyzer`** is the highest-effort item and carries the most performance risk.
 > It must be implemented last, after all other analyzers are in place, with dedicated
@@ -797,20 +805,60 @@ Additionally, `InsightEngine` must gain:
 
 ---
 
-# Part 7 — Extended Phase 1 Storage Model
+# Part 6 — Phase 1 Implementation Log
+
+> Phase 1 infrastructure was completed in one batch. All items below are on branch `optimize`.
+
+## Supporting Infrastructure (new files)
+
+| File | Description |
+|------|-------------|
+| `Indexing/TypeAggregateFlags.cs` | `[Flags]` byte enum — `IsStringType`, `IsTaskType`, `IsDelegateType`, `IsFinalizableType`, `IsArrayType` |
+| `Indexing/TypeShapeEntry.cs` | `readonly struct` — `RefFields`, `ValFields`, `TotalFields` per MT (~800 KB for 50 K types) |
+| `Indexing/SizeBucketHelper.cs` | 8 logarithmic size-bucket boundaries + `GetBucketIndex(ulong size)` |
+| `Indexing/IndexHeader.cs` | Shared 24-byte binary header (Magic / Version / RecordCount) with `WriteTo`, `TryRead`, `PatchRecordCount` |
+| `Indexing/DumpIndexPaths.cs` | Canonical path resolver for all index files under `{dump}.dumpindex/` |
+
+## Satellite Index Writers (new files)
+
+| File | Writes | Record Size |
+|------|--------|-------------|
+| `Indexing/Satellite/HandleSnapshotWriter.cs` | `HandleSnapshot.bin` | 20 B (ObjAddr·8 \| MT·8 \| Kind·1 \| Pad·3) |
+| `Indexing/Satellite/RootIndexWriter.cs` | `RootIndex.bin` | 20 B (TargetAddr·8 \| RootAddr·8 \| Kind·1 \| Pad·3) |
+| `Indexing/Satellite/TaskIndexWriter.cs` | `TaskIndex.bin` | 20 B (Addr·8 \| MT·8 \| StateFlags·4) |
+| `Indexing/Satellite/EventCandidateIndexWriter.cs` | `EventCandidateIndex.bin` | 16 B (Addr·8 \| MT·8) |
+| `Indexing/Satellite/LargeObjectTracker.cs` | `LargeObjectIndex.bin` | 24 B (Addr·8 \| MT·8 \| Size·8) — top-100 only |
+| `Indexing/Satellite/LohFreeBlockWriter.cs` | `LohFreeBlockIndex.bin` | 24 B (SegAddr·8 \| Offset·8 \| Size·8) |
+| `Indexing/Satellite/IBoundedReferenceEdgeBuilder.cs` | `PartialRefEdgeIndex.bin` | Interface stub only — writer pending |
+
+## Modified Files
+
+| File | Changes |
+|------|---------|
+| `Indexing/TypeAggregateIndexEntry.cs` | Added `Gen0Count`, `Gen1Count`, `Gen2Count` (int), `Flags` (`TypeAggregateFlags`) |
+| `Indexing/TypeIndexBuilder.cs` | `Add()` accepts `flags` + `generation`; tracks gen counts, size buckets; new `BuildSizeBuckets()` |
+| `Indexing/HeapIndexBuildResult.cs` | Added `GlobalSizeBuckets: long[8]` and `TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>` |
+| `Indexing/DiskBackedObjectIndexWriter.cs` | Per-segment type-flag + shape-cache population; satellite writers wired in; `DumpIndexPaths`-based paths replace the old `%TEMP%` path |
+| `Indexing/MemoryBackedObjectIndexWriter.cs` | Same flags / gen / bucket population; `GlobalSizeBuckets` + `TypeShapeCache` returned in `HeapIndexBuildResult` |
+
+---
+
+---
 
 ## Complete File Inventory
 
 ```
 {DumpDir}/.dumpindex/
 │
-├── ObjectIndex.bin              EXISTING — core object address/MT/size table
+├── ObjectIndex.bin              ✅ EXISTING — core object address/MT/size table
 │                                  Header (24 bytes): Magic|Version|ObjectCount|Reserved
 │                                  Per record (24 bytes): Address(8)|MT(8)|Size(8)
 │                                  For 80M objects: ~1.92GB
 │
-├── TypeAggregateIndex.bin       EXTENDED — per-MT aggregate stats (in-memory during analysis;
-│                                  serialized here for cross-session reuse)
+├── TypeAggregateIndex.bin       ✅ EXTENDED (in-memory) — per-MT aggregate stats
+│                                  Gen0Count/Gen1Count/Gen2Count + Flags byte populated by
+│                                  TypeIndexBuilder during Phase 1 heap scan.
+│                                  Disk serialisation for cross-session reuse: pending.
 │                                  Per record (64 bytes, padded):
 │                                    MT(8)|ModuleId(4)|Count(8)|TotalSize(8)|
 │                                    LohCount(8)|LohSize(8)|SampleAddress(8)|
@@ -825,37 +873,46 @@ Additionally, `InsightEngine` must gain:
 │                                    bits 5–7 = reserved
 │                                  For 50K types: ~3.2MB
 │
-├── HandleSnapshot.bin           NEW — GC handle enumeration snapshot
+├── HandleSnapshot.bin           ✅ IMPLEMENTED — GC handle enumeration snapshot
+│                                  Writer: HandleSnapshotWriter.cs
 │                                  Per record (20 bytes): ObjectAddress(8)|MT(8)|Kind(1)|Pad(3)
 │                                  Consumers: GCHandleAnalyzer, WeakReferenceAnalyzer
 │                                  Typical size: ~1MB
 │
-├── RootIndex.bin                NEW — GC root enumeration snapshot
+├── RootIndex.bin                ✅ IMPLEMENTED — GC root enumeration snapshot
+│                                  Writer: RootIndexWriter.cs
 │                                  Per record (20 bytes): TargetAddress(8)|RootAddress(8)|Kind(1)|Pad(3)
 │                                  Consumers: GCRootAnalyzer, StaticRootLeakDetector, FinalizableObjectAnalyzer
 │                                  Typical size: ~2MB
 │
-├── TaskIndex.bin                NEW — Task/ValueTask object snapshot
+├── TaskIndex.bin                ✅ IMPLEMENTED — Task/ValueTask object snapshot
+│                                  Writer: TaskIndexWriter.cs
 │                                  Per record (20 bytes): Address(8)|MT(8)|StateFlags(4)
+│                                  Note: StateFlags written as 0; resolved in Phase 2 by AsyncTaskAnalyzer
 │                                  Consumers: AsyncTaskAnalyzer
 │                                  Typical size: ~20MB (worst case 1M tasks)
 │
-├── EventCandidateIndex.bin      NEW — MulticastDelegate/EventHandler object addresses
+├── EventCandidateIndex.bin      ✅ IMPLEMENTED — MulticastDelegate/EventHandler object addresses
+│                                  Writer: EventCandidateIndexWriter.cs
 │                                  Per record (16 bytes): Address(8)|MT(8)
 │                                  Consumers: EventLeakAnalyzer
 │                                  Typical size: ~8MB
 │
-├── LohFreeBlockIndex.bin        NEW — Free blocks inside LOH segments
+├── LohFreeBlockIndex.bin        ✅ IMPLEMENTED — Free blocks inside LOH segments
+│                                  Writer: LohFreeBlockWriter.cs
 │                                  Per record (24 bytes): SegmentAddress(8)|Offset(8)|Size(8)
 │                                  Consumers: LohFragmentationAnalyzer
 │                                  Typical size: < 1MB
 │
-├── LargeObjectIndex.bin         NEW — Top-100 LOH objects by size
+├── LargeObjectIndex.bin         ✅ IMPLEMENTED — Top-100 LOH objects by size
+│                                  Writer: LargeObjectTracker.cs
 │                                  Per record (24 bytes): Address(8)|MT(8)|Size(8)
 │                                  Consumers: LohFragmentationAnalyzer, ArrayAnalyzer
 │                                  Fixed size: 2.4KB (always exactly 100 entries or fewer)
 │
-└── PartialRefEdgeIndex.bin      NEW — Reference edges for top-50 candidate types only
+└── PartialRefEdgeIndex.bin      🟡 INTERFACE ONLY — Reference edges for top-50 candidate types
+                                    Interface: IBoundedReferenceEdgeBuilder.cs (stub)
+                                    Concrete writer: pending (blocked until DominatorAnalyzer design)
                                     Per record (16 bytes): SourceAddress(8)|TargetAddress(8)
                                     Consumers: DominatorAnalyzer
                                     Capped at 500K edges: max 8MB
@@ -888,11 +945,12 @@ the lifetime of the analysis session. They are rebuilt if the session restarts.
 ```
 HeapIndexBuildResult extensions:
 
-  GlobalSizeBuckets: long[8]
+  GlobalSizeBuckets: long[8]                                    ✅ IMPLEMENTED
     → 8 size-bucket object counts built by TypeIndexBuilder
+    → Bucket boundaries defined in SizeBucketHelper.BucketLabels
     → 64 bytes. Always in memory.
 
-  TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>
+  TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>    ✅ IMPLEMENTED
     → Per-MT field layout (RefFields, ValFields, TotalFields)
     → TypeShapeEntry = readonly struct (6 bytes per entry, padded to 8)
     → 50K types × 16 bytes (key + value) = ~800KB. Always in memory.
@@ -921,6 +979,8 @@ HeapIndexBuildResult extensions:
 > and all index files are written sequentially via `FileStream` with configurable buffer sizes.
 
 ## Phase 1.5 — Bounded Reference Edge Collection
+
+> **Status**: 🟡 `IBoundedReferenceEdgeBuilder` interface defined. Concrete writer pending.
 
 This is a distinct step that runs **after Phase 1 completes** but **before Phase 2 begins**.
 It is only executed if `DominatorAnalyzer` is enabled.

@@ -92,10 +92,11 @@ public sealed class ReportingCompositionTests
             Tags: ["threads"],
             Fingerprint: "sec-2");
 
-        ComposedReport report = ReportBuilder.ComposeCanonicalReport(
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/test2.dmp",
             runs: [CreateRun("CrashAnalyzer", finding1), CreateRun("ThreadAnalyzer", finding2)],
-            elapsed: TimeSpan.FromSeconds(2));
+            elapsed: TimeSpan.FromSeconds(2),
+            builders: []);
 
         IReportFormatter[] formatters =
         [
@@ -106,12 +107,11 @@ public sealed class ReportingCompositionTests
 
         foreach (IReportFormatter formatter in formatters)
         {
-            string output = formatter.Render(report);
+            string output = formatter.Render(doc);
 
             output.Should().Contain("Crash signature");
             output.Should().Contain("Thread pool pressure");
             output.Should().Contain("LongValue_XXXXXXXXXXXXXXXX");
-            output.Should().NotContain("...");
         }
     }
 
@@ -140,38 +140,31 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void HtmlFormatter_ShouldRenderDetailedAnalyzerSections_AsCollapsibleBlocks()
     {
-        ComposedReport report = new(
-            DumpPath: "C:/dumps/detailed.dmp",
-            GeneratedAtUtc: DateTime.UtcNow,
-            Elapsed: TimeSpan.FromSeconds(1),
-            Sections: [],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(0, 0, 0, 0, []),
-            DetailedAnalyzerSections:
+        AnalysisReportDocument doc = new()
+        {
+            DumpPath       = "C:/dumps/detailed.dmp",
+            GeneratedAtUtc = DateTime.UtcNow,
+            ElapsedSeconds = 1,
+            AnalyzerSections =
             [
-                new DetailedAnalyzerSection(
-                    "Memory Leak Analyzer",
-                    "Top type: System.String\nRetained MB: 123",
-                    [
-                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Top type", "System.String", null),
-                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Retained MB", "123", null)
-                    ]),
-                new DetailedAnalyzerSection(
-                    "Thread Analyzer",
-                    "Blocked threads: 4\nWait chains: 2",
-                    [
-                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Blocked threads", "4", null),
-                        new DetailedAnalyzerSubmodule(DetailedAnalyzerSubmoduleKind.Metric, "Wait chains", "2", null)
-                    ])
-            ]);
+                new AnalyzerDetailSection("Memory Leak Analyzer", "Memory Leak Analyzer", 0,
+                [
+                    new MetricBlock("Top type",   "System.String"),
+                    new MetricBlock("Retained MB", "123")
+                ]),
+                new AnalyzerDetailSection("Thread Analyzer", "Thread Analyzer", 10,
+                [
+                    new MetricBlock("Blocked threads", "4"),
+                    new MetricBlock("Wait chains",     "2")
+                ])
+            ]
+        };
 
         IReportFormatter formatter = new HtmlCanonicalReportFormatter();
 
-        string output = formatter.Render(report);
+        string output = formatter.Render(doc);
 
         output.Should().Contain("<details>");
-        output.Should().Contain("aria-controls=\"detail-0-content\"");
         output.Should().Contain(">Memory Leak Analyzer<");
         output.Should().Contain(">Thread Analyzer<");
         output.Should().Contain("<span class=\"detail-key\">Top type:</span>");

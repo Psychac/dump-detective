@@ -24,7 +24,7 @@ public sealed class GoldenFileTests
     [MemberData(nameof(GoldenCases))]
     public void Fixture_ShouldMatchGolden(string fixtureName, int formatCode, string folder, string fileName)
     {
-        ComposedReport fixture = GoldenReportFixtures.Build(fixtureName);
+        AnalysisReportDocument fixture = GoldenReportFixtures.Build(fixtureName);
         IReportFormatter formatter = formatCode switch
         {
             0 => new TextCanonicalReportFormatter(),

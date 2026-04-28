@@ -5,132 +5,111 @@ namespace DumpDetective.Tests.Golden.Fixtures;
 
 internal static class GoldenReportFixtures
 {
-    public static ComposedReport Build(string fixtureName)
+    public static AnalysisReportDocument Build(string fixtureName)
     {
         return fixtureName switch
         {
-            "BaselineSmall" => BaselineSmall(),
+            "BaselineSmall"  => BaselineSmall(),
             "DuplicateHeavy" => DuplicateHeavy(),
-            "LongNames" => LongNames(),
-            "RichEvidence" => RichEvidence(),
-            "MixedSeverity" => MixedSeverity(),
+            "LongNames"      => LongNames(),
+            "RichEvidence"   => RichEvidence(),
+            "MixedSeverity"  => MixedSeverity(),
             _ => throw new ArgumentOutOfRangeException(nameof(fixtureName), fixtureName, "Unknown golden fixture")
         };
     }
 
-    private static ComposedReport BaselineSmall() =>
-        new(
-            DumpPath: "C:/fixtures/BaselineSmall.dmp",
-            GeneratedAtUtc: new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
-            Elapsed: TimeSpan.FromSeconds(12.3),
-            Sections:
-            [
-                new ReportSection(
-                    SectionKey: "baseline-small",
-                    Title: "Leak pressure",
-                    Category: "Leak",
-                    Severity: FindingSeverity.Warning,
-                    NarrativeSummary: "Detected duplicate strings.",
-                    EvidenceRows:
-                    [
-                        new ReportEvidenceRow("Analyzer", "MemoryLeakAnalyzer"),
-                        new ReportEvidenceRow("Value", "System.String duplicated")
-                    ],
-                    RemediationHints: ["Pool repeated string payloads."],
-                    Fingerprints: ["baseline-small"])
-            ],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(0, 0, 2, 2, []));
+    private static AnalysisReportDocument BaselineSmall() => new()
+    {
+        DumpPath       = "C:/fixtures/BaselineSmall.dmp",
+        GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+        ElapsedSeconds = 12.3,
+        Findings =
+        [
+            new FindingRecord(
+                Analyzer:       "MemoryLeakAnalyzer",
+                Category:       "Leak",
+                Severity:       "Warning",
+                Title:          "Leak pressure",
+                Evidence:       "Detected duplicate strings.",
+                Recommendation: "Pool repeated string payloads.",
+                Tags:           ["baseline-small"],
+                Fingerprint:    "baseline-small")
+        ],
+        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 2)
+    };
 
-    private static ComposedReport DuplicateHeavy() =>
-        new(
-            DumpPath: "C:/fixtures/DuplicateHeavy.dmp",
-            GeneratedAtUtc: new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
-            Elapsed: TimeSpan.FromSeconds(8.1),
-            Sections:
-            [
-                new ReportSection(
-                    SectionKey: "dup-heavy",
-                    Title: "Duplicate-heavy merged section",
-                    Category: "Leak",
-                    Severity: FindingSeverity.Critical,
-                    NarrativeSummary: "Merged duplicate leak evidence from multiple analyzers.",
-                    EvidenceRows:
-                    [
-                        new ReportEvidenceRow("EvidenceA", "A repeated payload instance"),
-                        new ReportEvidenceRow("EvidenceB", "Another repeated payload instance")
-                    ],
-                    RemediationHints: ["Deduplicate payload cache keys.", "Review object retention roots."],
-                    Fingerprints: ["dup-heavy"])
-            ],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(3, 3, 8, 2, ["dup-heavy"]));
+    private static AnalysisReportDocument DuplicateHeavy() => new()
+    {
+        DumpPath       = "C:/fixtures/DuplicateHeavy.dmp",
+        GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+        ElapsedSeconds = 8.1,
+        Findings =
+        [
+            new FindingRecord(
+                Analyzer:       "MemoryLeakAnalyzer",
+                Category:       "Leak",
+                Severity:       "Critical",
+                Title:          "Duplicate-heavy merged section",
+                Evidence:       "Merged duplicate leak evidence from multiple analyzers.",
+                Recommendation: "Deduplicate payload cache keys. Review object retention roots.",
+                Tags:           ["dup-heavy"],
+                Fingerprint:    "dup-heavy")
+        ],
+        DedupDiagnostics = new DedupRecord(MergedSections: 3, DuplicateCandidates: 3, EvidenceBeforeMerge: 8)
+    };
 
-    private static ComposedReport LongNames() =>
-        new(
-            DumpPath: "C:/fixtures/LongNames.dmp",
-            GeneratedAtUtc: new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
-            Elapsed: TimeSpan.FromSeconds(4.2),
-            Sections:
-            [
-                new ReportSection(
-                    SectionKey: "long-names",
-                    Title: "Long member/type names",
-                    Category: "Memory",
-                    Severity: FindingSeverity.Warning,
-                    NarrativeSummary: "Long identifiers are preserved end-to-end.",
-                    EvidenceRows:
-                    [
-                        new ReportEvidenceRow("Type", "VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP"),
-                        new ReportEvidenceRow("Member", "VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN")
-                    ],
-                    RemediationHints: ["Keep full value visibility; do not truncate."],
-                    Fingerprints: ["long-names"])
-            ],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(0, 0, 2, 2, []));
+    private static AnalysisReportDocument LongNames() => new()
+    {
+        DumpPath       = "C:/fixtures/LongNames.dmp",
+        GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+        ElapsedSeconds = 4.2,
+        Findings =
+        [
+            new FindingRecord(
+                Analyzer:       "MemoryAnalyzer",
+                Category:       "Memory",
+                Severity:       "Warning",
+                Title:          "Long member/type names",
+                Evidence:       "Long identifiers are preserved end-to-end. Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN",
+                Recommendation: "Keep full value visibility; do not truncate.",
+                Tags:           ["long-names"],
+                Fingerprint:    "long-names")
+        ],
+        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 2)
+    };
 
-    private static ComposedReport RichEvidence() =>
-        new(
-            DumpPath: "C:/fixtures/RichEvidence.dmp",
-            GeneratedAtUtc: new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
-            Elapsed: TimeSpan.FromSeconds(9.8),
-            Sections:
-            [
-                new ReportSection(
-                    SectionKey: "rich-evidence",
-                    Title: "Rich evidence sample",
-                    Category: "Crash",
-                    Severity: FindingSeverity.Warning,
-                    NarrativeSummary: "Includes multiple evidence and remediation records.",
-                    EvidenceRows:
-                    [
-                        new ReportEvidenceRow("Thread", "42"),
-                        new ReportEvidenceRow("Exception", "System.NullReferenceException"),
-                        new ReportEvidenceRow("StackTop", "Service.ProcessRequest")
-                    ],
-                    RemediationHints: ["Guard null dereferences.", "Add targeted telemetry around request processing."],
-                    Fingerprints: ["rich-evidence"])
-            ],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(0, 0, 3, 3, []));
+    private static AnalysisReportDocument RichEvidence() => new()
+    {
+        DumpPath       = "C:/fixtures/RichEvidence.dmp",
+        GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+        ElapsedSeconds = 9.8,
+        Findings =
+        [
+            new FindingRecord(
+                Analyzer:       "CrashAnalyzer",
+                Category:       "Crash",
+                Severity:       "Warning",
+                Title:          "Rich evidence sample",
+                Evidence:       "Includes multiple evidence and remediation records. Thread: 42 Exception: System.NullReferenceException StackTop: Service.ProcessRequest",
+                Recommendation: "Guard null dereferences. Add targeted telemetry around request processing.",
+                Tags:           ["rich-evidence"],
+                Fingerprint:    "rich-evidence")
+        ],
+        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 3)
+    };
 
-    private static ComposedReport MixedSeverity() =>
-        new(
-            DumpPath: "C:/fixtures/MixedSeverity.dmp",
-            GeneratedAtUtc: new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
-            Elapsed: TimeSpan.FromSeconds(6.6),
-            Sections:
-            [
-                new ReportSection("sev-critical", "Critical leak", "Leak", FindingSeverity.Critical, "Critical item", [new ReportEvidenceRow("Item", "Critical")], ["Handle now"], ["sev-critical"]),
-                new ReportSection("sev-warning", "Warning leak", "Leak", FindingSeverity.Warning, "Warning item", [new ReportEvidenceRow("Item", "Warning")], ["Plan remediation"], ["sev-warning"]),
-                new ReportSection("sev-info", "Info signal", "Info", FindingSeverity.Info, "Informational item", [new ReportEvidenceRow("Item", "Info")], ["Observe"], ["sev-info"])
-            ],
-            ExecutiveSummary: [],
-            DeveloperActionPlan: [],
-            DedupDiagnostics: new DedupDiagnostics(0, 0, 3, 3, []));
+    private static AnalysisReportDocument MixedSeverity() => new()
+    {
+        DumpPath       = "C:/fixtures/MixedSeverity.dmp",
+        GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+        ElapsedSeconds = 6.6,
+        Findings =
+        [
+            new FindingRecord("LeakAnalyzer", "Leak", "Critical", "Critical leak",  "Critical item",     "Handle now",        ["sev-critical"], "sev-critical"),
+            new FindingRecord("LeakAnalyzer", "Leak", "Warning",  "Warning leak",   "Warning item",      "Plan remediation",  ["sev-warning"],  "sev-warning"),
+            new FindingRecord("LeakAnalyzer", "Info", "Info",     "Info signal",    "Informational item","Observe",           ["sev-info"],     "sev-info")
+        ],
+        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 3)
+    };
 }
+

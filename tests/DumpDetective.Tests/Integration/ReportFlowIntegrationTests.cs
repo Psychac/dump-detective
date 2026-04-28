@@ -55,7 +55,8 @@ public sealed class ReportFlowIntegrationTests
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
         ],
-        new DefaultAnalyzerReporterFactory(),
+        new DefaultSectionBuilderFactory(),
+        new ReportSerializer(),
         new TrendReportComposer([]));
 
         string output = facade.BuildRenderedReport(
@@ -93,7 +94,8 @@ public sealed class ReportFlowIntegrationTests
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
         ],
-        new DefaultAnalyzerReporterFactory(),
+        new DefaultSectionBuilderFactory(),
+        new ReportSerializer(),
         new TrendReportComposer([]));
 
         using CancellationTokenSource cts = new();
@@ -154,7 +156,8 @@ public sealed class ReportFlowIntegrationTests
             new MarkdownCanonicalReportFormatter(),
             new HtmlCanonicalReportFormatter()
         ],
-        new DefaultAnalyzerReporterFactory(),
+        new DefaultSectionBuilderFactory(),
+        new ReportSerializer(),
         new TrendReportComposer([]));
 
         string output = facade.BuildRenderedTrendReport(

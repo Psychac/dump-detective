@@ -2,7 +2,7 @@
 ## Printers → Section Builders + JSON Output Contract
 
 > **Branch**: `optimize`  
-> **Status**: Phase A Complete  
+> **Status**: Phase D + F1/F2/F3 Complete  
 
 ---
 
@@ -202,7 +202,7 @@ internal interface ISectionBuilderFactory
 
 ---
 
-## Phase B — Implement Section Builders
+## Phase B — Implement Section Builders ✅ Complete
 
 > Create one `IAnalyzerSectionBuilder` per existing `Printer`.  
 > Each builder returns `AnalyzerDetailSection` directly — no writer, no `IReportWriter` involved.
@@ -383,16 +383,17 @@ internal abstract class SectionBuilderBase
 
 ---
 
-## Phase C — Create `ReportSerializer`
+## Phase C — Create `ReportSerializer` ✅ Complete
 
 > Replaces `ReportBuilder`. Maps `AnalyzerRunResult[]` → `AnalysisReportDocument`.  
 > Pure function — no text formatting, no side effects, no I/O.
 
 ---
 
-### C1 · Create `ReportSerializer`
+### C1 · Create `ReportSerializer` ✅
 
 **File**: `src/DumpDetective.Reporting/Services/ReportSerializer.cs`  
+**Action**: Created  
 **Replaces**: `src/DumpDetective.Reporting/Services/ReportBuilder.cs`
 
 **Public API**:
@@ -426,10 +427,10 @@ internal sealed class ReportSerializer
 
 ---
 
-### C2 · Create `ReportJsonContext`
+### C2 · Create `ReportJsonContext` ✅
 
 **File**: `src/DumpDetective.Reporting/Serialization/ReportJsonContext.cs`  
-**Action**: Create
+**Action**: Created
 
 ```csharp
 [JsonSerializable(typeof(AnalysisReportDocument))]
@@ -447,15 +448,16 @@ internal sealed partial class ReportJsonContext : JsonSerializerContext { }
 
 ---
 
-## Phase D — Refactor Formatters
+## Phase D — Refactor Formatters ✅ Complete
 
 > All formatters now accept `AnalysisReportDocument`. The `IReportFormatter` interface signature changes.
 
 ---
 
-### D1 · Update `IReportFormatter`
+### D1 · Update `IReportFormatter` ✅
 
-**File**: `src/DumpDetective.Reporting/Formatters/CanonicalReportFormatter.cs`
+**File**: `src/DumpDetective.Reporting/Formatters/CanonicalReportFormatter.cs`  
+**Action**: Updated — `Render(ComposedReport)` → `Render(AnalysisReportDocument)`  
 
 ```csharp
 // Before
@@ -475,7 +477,7 @@ internal interface IReportFormatter
 
 ---
 
-### D2 · Rewrite `TextCanonicalReportFormatter`
+### D2 · Rewrite `TextCanonicalReportFormatter` ✅
 
 Walk `AnalysisReportDocument` directly using `StringBuilder`. No `List<string> lines` pattern.
 
@@ -494,7 +496,7 @@ Walk `AnalysisReportDocument` directly using `StringBuilder`. No `List<string> l
 
 ---
 
-### D3 · Rewrite `MarkdownCanonicalReportFormatter`
+### D3 · Rewrite `MarkdownCanonicalReportFormatter` ✅
 
 | `SectionBlock` subtype | Markdown output |
 |------------------------|-----------------|
@@ -511,10 +513,10 @@ Walk `AnalysisReportDocument` directly using `StringBuilder`. No `List<string> l
 
 ---
 
-### D4 · Create `HtmlReportRenderer`
+### D4 · Create `HtmlReportRenderer` ✅
 
 **File**: `src/DumpDetective.Reporting/Formatters/HtmlReportRenderer.cs`  
-**Replaces**: `HtmlCanonicalReportFormatter` class (~500 lines) inside `CanonicalReportFormatter.cs`
+**Action**: Created — thin shell using `EmbeddedResourceLoader`. Registered in Phase F.  
 
 ```csharp
 internal sealed class HtmlReportRenderer : IReportFormatter
@@ -540,7 +542,10 @@ The entire ~500-line class shrinks to ~20 lines. All HTML, CSS, and JS move to e
 
 ---
 
-### D5 · Rewrite `JsonCanonicalReportFormatter`
+### D5 · Rewrite `JsonCanonicalReportFormatter` ✅
+
+**File**: `src/DumpDetective.Reporting/Formatters/JsonCanonicalReportFormatter.cs`  
+**Action**: Created — new file using `ReportJsonContext` source-generated serialization.  
 
 ```csharp
 public string Render(AnalysisReportDocument doc) =>
@@ -671,14 +676,14 @@ Fields on `HtmlReportRenderer` are `static readonly` — loaded once on first ac
 
 ---
 
-## Phase F — Wire CLI Services
+## Phase F — Wire CLI Services ✅ Complete (implemented with Phase D)
 
 ---
 
-### F1 · Create `DefaultSectionBuilderFactory`
+### F1 · Create `DefaultSectionBuilderFactory` ✅
 
 **File**: `src/DumpDetective.Cli/Services/DefaultSectionBuilderFactory.cs`  
-**Replaces**: `DefaultAnalyzerReporterFactory`
+**Action**: Created — all 17 builders registered.  
 
 ```csharp
 internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
@@ -708,10 +713,10 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
 ---
 
-### F2 · Rewrite `ReportBuilderFacade`
+### F2 · Rewrite `ReportBuilderFacade` ✅
 
 **File**: `src/DumpDetective.Cli/Services/ReportBuilderFacade.cs`  
-**Changes**:
+**Action**: Rewritten — uses `ReportSerializer` for single-dump path; bridges `ComposedReport` → `AnalysisReportDocument` for trend path until `TrendReportComposer` is migrated.  
 
 - Replace `IAnalyzerReporterFactory` dependency → `ISectionBuilderFactory`
 - Replace `ReportBuilder.ComposeCanonicalReport` call → `ReportSerializer.Serialize`
@@ -720,10 +725,10 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
 ---
 
-### F3 · Update `ServiceRegistration`
+### F3 · Update `ServiceRegistration` ✅
 
 **File**: `src/DumpDetective.Cli/Hosting/ServiceRegistration.cs`  
-**Changes**:
+**Action**: Updated — `IAnalyzerReporterFactory` removed; `ISectionBuilderFactory`, `ReportSerializer`, and `JsonCanonicalReportFormatter` added. `HtmlCanonicalReportFormatter` kept until Phase E templates enable `HtmlReportRenderer` swap.  
 
 | Registration | Before | After |
 |---|---|---|

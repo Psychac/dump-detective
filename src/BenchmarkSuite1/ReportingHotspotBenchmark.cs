@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;
 using System;
@@ -12,36 +13,40 @@ namespace BenchmarkSuite1;
 [ShortRunJob]
 public class ReportingHotspotBenchmark
 {
-    private IReadOnlyList<AnalyzerRunResult> _runs = null!;
-    private MarkdownCanonicalReportFormatter _markdown = null!;
-    private HtmlCanonicalReportFormatter _html = null!;
+    private IReadOnlyList<AnalyzerRunResult>    _runs      = null!;
+    private IReadOnlyList<IAnalyzerSectionBuilder> _builders = null!;
+    private ReportSerializer                    _serializer = null!;
+    private MarkdownCanonicalReportFormatter    _markdown  = null!;
+    private HtmlCanonicalReportFormatter        _html      = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        _runs = BuildRuns(250);
-        _markdown = new MarkdownCanonicalReportFormatter();
-        _html = new HtmlCanonicalReportFormatter();
+        _runs      = BuildRuns(250);
+        _builders  = [];
+        _serializer = new ReportSerializer();
+        _markdown  = new MarkdownCanonicalReportFormatter();
+        _html      = new HtmlCanonicalReportFormatter();
     }
 
-    [Benchmark(Description = "ReportBuilder - compose canonical report (duplicate heavy)")]
-    public object ComposeCanonical_DuplicateHeavy()
+    [Benchmark(Description = "ReportSerializer - serialize (duplicate heavy)")]
+    public object SerializeCanonical_DuplicateHeavy()
     {
-        return ReportBuilder.ComposeCanonicalReport("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3));
+        return _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
     }
 
     [Benchmark(Description = "Formatter - markdown render large sections")]
     public string RenderMarkdown_LargeSections()
     {
-        var report = ReportBuilder.ComposeCanonicalReport("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3));
-        return _markdown.Render(report);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
+        return _markdown.Render(doc);
     }
 
     [Benchmark(Description = "Formatter - html render long values")]
     public string RenderHtml_LongValues()
     {
-        var report = ReportBuilder.ComposeCanonicalReport("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3));
-        return _html.Render(report);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
+        return _html.Render(doc);
     }
 
     private static IReadOnlyList<AnalyzerRunResult> BuildRuns(int count)

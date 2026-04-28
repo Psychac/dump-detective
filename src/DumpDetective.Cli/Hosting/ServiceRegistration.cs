@@ -38,7 +38,8 @@ internal static class ServiceRegistration
         services.AddSingleton<SingleDumpOrchestrationService>();
         services.AddSingleton<TrendOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
-        services.AddSingleton<IAnalyzerReporterFactory, DefaultAnalyzerReporterFactory>();
+        services.AddSingleton<ISectionBuilderFactory, DefaultSectionBuilderFactory>();
+        services.AddSingleton<ReportSerializer>();
 
         // Finding generators — one per analyzer, registered as IFindingGenerator
         services.AddSingleton<IFindingGenerator, MemoryFindingGenerator>();
@@ -89,6 +90,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IReportFormatter, TextCanonicalReportFormatter>();
         services.AddSingleton<IReportFormatter, MarkdownCanonicalReportFormatter>();
         services.AddSingleton<IReportFormatter, HtmlCanonicalReportFormatter>();
+        services.AddSingleton<IReportFormatter, JsonCanonicalReportFormatter>();
 
         return builder.Build();
     }

@@ -3,5 +3,6 @@ internal enum ReportFormat
 {
 Text,
 Markdown,
-Html
+Html,
+Json
 }

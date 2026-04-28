@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
@@ -48,6 +49,7 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
             Runtime = state.LoadContext!.Runtime,
             Heap = state.LoadContext.Heap,
             Cache = state.HeapCache!,
+            RuntimeFacade = new RuntimeFacade(state.LoadContext.Runtime, state.LoadContext.Heap),
             Diagnostics = resolved.Diagnostics,
             Options = new Dictionary<Type, object?>
             {

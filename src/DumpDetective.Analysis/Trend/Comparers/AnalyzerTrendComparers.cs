@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {
@@ -492,6 +493,39 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("lock.contested", null, b.ContestedLockCount, c.ContestedLockCount, "locks", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("lock.max.waiters", null, b.MaxWaitersOnSingleLock, c.MaxWaitersOnSingleLock, "threads", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("lock.deadlock.candidates", null, b.DeadlockCandidateCount, c.DeadlockCandidateCount, "threads", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+    }
+
+    internal sealed class SegmentTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Segment Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not SegmentAnalysisDomainResult r) return [];
+            return
+            [
+                new("segment.total", null, r.TotalSegments, "segments", MetricTrendDirection.Neutral),
+                new("segment.committed.bytes", null, r.TotalCommittedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("segment.loh.bytes", null, r.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("segment.loh.percent", null, r.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
+                new("segment.poh.bytes", null, r.PohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("segment.poh.percent", null, r.PohPercent, "%", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not SegmentAnalysisDomainResult b || current is not SegmentAnalysisDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("segment.total", null, b.TotalSegments, c.TotalSegments, "segments", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("segment.committed.bytes", null, b.TotalCommittedBytes, c.TotalCommittedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.loh.bytes", null, b.LohBytes, c.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.loh.percent", null, b.LohPercent, c.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.poh.bytes", null, b.PohBytes, c.PohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.poh.percent", null, b.PohPercent, c.PohPercent, "%", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

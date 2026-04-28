@@ -11,6 +11,7 @@ internal sealed class DefaultAnalyzerReporterFactory : IAnalyzerReporterFactory
         [
             new MemoryPrinter(),
             new GCGenerationPrinter(),
+            new SegmentPrinter(),
             new ModulePrinter(),
             new CrashPrinter(),
             new HangPrinter(),

@@ -202,8 +202,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return
             [
                 new("leak.finalizer.count", null, r.FinalizerQueueCount, "objects", MetricTrendDirection.HigherIsWorse),
-                new("leak.duplicate.strings", null, r.DuplicateStringPatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
-                new("leak.duplicate.string.bytes", null, r.DuplicateStringWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
             ];
         }
@@ -214,8 +212,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return
             [
                 MetricDeltaHelper.Compute("leak.finalizer.count", null, b.FinalizerQueueCount, c.FinalizerQueueCount, "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("leak.duplicate.strings", null, b.DuplicateStringPatternCount, c.DuplicateStringPatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("leak.duplicate.string.bytes", null, b.DuplicateStringWastedBytes, c.DuplicateStringWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("leak.highly.referenced", null, b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
             ];
         }
@@ -526,6 +522,43 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("segment.loh.percent", null, b.LohPercent, c.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("segment.poh.bytes", null, b.PohBytes, c.PohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("segment.poh.percent", null, b.PohPercent, c.PohPercent, "%", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+    }
+
+    internal sealed class StringTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "String Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not StringDomainResult r) return [];
+            return
+            [
+                new("string.total", null, r.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
+                new("string.total.bytes", null, r.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("string.unique", null, r.UniqueStrings, "objects", MetricTrendDirection.Neutral),
+                new("string.duplicate.patterns", null, r.DuplicatePatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
+                new("string.duplicate.wasted.bytes", null, r.DuplicateWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("string.duplication.ratio", null, r.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
+                new("string.loh.bytes", null, r.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("string.pct.heap", null, r.PctOfManagedHeap, "%", MetricTrendDirection.HigherIsWorse),
+                new("string.gen2.count", null, r.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not StringDomainResult b || current is not StringDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("string.total", null, b.TotalStrings, c.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.total.bytes", null, b.TotalStringMemoryBytes, c.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.duplicate.patterns", null, b.DuplicatePatternCount, c.DuplicatePatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.duplicate.wasted.bytes", null, b.DuplicateWastedBytes, c.DuplicateWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.duplication.ratio", null, b.DuplicationRatio, c.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.loh.bytes", null, b.LohStringBytes, c.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.gen2.count", null, b.Gen2StringCount, c.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

@@ -17,31 +17,6 @@ internal sealed class MemoryLeakSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var d = (MemoryLeakDomainResult)result;
         var blocks = new List<SectionBlock>();
 
-        // Strings
-        blocks.Add(H("DUPLICATE STRING ANALYSIS"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total Strings",               $"{d.TotalStrings:N0}",                              d.TotalStrings));
-        blocks.Add(M("Total String Memory",         FormatHelper.FormatBytes(d.TotalStringMemoryBytes),  (double)d.TotalStringMemoryBytes));
-        blocks.Add(M("Unique Strings",              $"{d.UniqueStrings:N0}",                             d.UniqueStrings));
-        blocks.Add(M("Duplicate String Waste",      FormatHelper.FormatBytes(d.DuplicateStringWastedBytes), (double)d.DuplicateStringWastedBytes));
-
-        var dupStrings = d.TopDuplicateStrings ?? [];
-        if (dupStrings.Count > 0)
-        {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP DUPLICATE STRINGS"));
-            var dsRows = new List<TableRow>(dupStrings.Count);
-            for (int i = 0; i < dupStrings.Count; i++)
-            {
-                var dup = dupStrings[i];
-                dsRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(dup.Preview, 80)),
-                    Cell($"{dup.Count:N0}", dup.Count),
-                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes)]));
-            }
-            blocks.Add(new TableBlock("Most duplicated strings", ["String Preview", "Count", "Wasted"], dsRows));
-        }
-
         // Finalizer queue
         blocks.Add(Blank());
         blocks.Add(H("FINALIZER QUEUE"));

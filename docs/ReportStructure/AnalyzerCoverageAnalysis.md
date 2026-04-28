@@ -310,25 +310,25 @@ conflated with hang/blocking data and lacks orphan detection.
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Duplicate string count + top patterns | ✅ | `MemoryLeakAnalyzer` — `DuplicateStringPatternCount`, `TopDuplicateStrings` |
-| Total string object count + total bytes | ✅ | `MemoryLeakAnalyzer` — `TotalStrings`, `TotalStringMemoryBytes` |
-| Unique string count + deduplication ratio | ✅ | `MemoryLeakAnalyzer` — `UniqueStrings` |
+| Duplicate string count + top patterns | ✅ | `StringAnalyzer` — `DuplicatePatternCount`, `TopDuplicatesByWaste`, `TopDuplicatesByCount` |
+| Total string object count + total bytes | ✅ | `StringAnalyzer` — `TotalStrings`, `TotalStringMemoryBytes` |
+| Unique string count + deduplication ratio | ✅ | `StringAnalyzer` — `UniqueStrings`, `DuplicationRatio` |
 | String length histogram | ❌ | ➕ `StringAnalyzer` — bucketed distribution by char length |
-| Very long strings (> 85 KB, LOH residents) | ❌ | ➕ `StringAnalyzer` — cross-reference with LOH segments |
-| Interned strings in FOH | ❌ | ➕ `StringAnalyzer` — FOH segment scan for string objects |
-| Strings surviving to Gen2 | ❌ | ➕ `StringAnalyzer` — generation correlation |
+| Very long strings (> 85 KB, LOH residents) | ✅ | `StringAnalyzer` — `VeryLongStrings` list with address + char length + size |
+| Interned strings in FOH | ✅ | `StringAnalyzer` — `InternedStringCount`, `InternedStringBytes` (FOH segment scan) |
+| Strings surviving to Gen2 | ✅ | `StringAnalyzer` — `Gen2StringCount`, `Gen2StringBytes` (derived from `TypeAggregates`) |
 
 ### 11.2 Memory Waste & Optimisation Potential
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Wasted bytes from duplicate strings | ✅ | `MemoryLeakAnalyzer` — `DuplicateStringWastedBytes` |
-| Total string memory + unique ratio | ✅ | `MemoryLeakAnalyzer` — `TotalStringMemoryBytes`, `UniqueStrings` |
-| LOH string pressure (total size > 85 KB) | ❌ | ➕ `StringAnalyzer` |
+| Wasted bytes from duplicate strings | ✅ | `StringAnalyzer` — `DuplicateWastedBytes` |
+| Total string memory + unique ratio | ✅ | `StringAnalyzer` — `TotalStringMemoryBytes`, `UniqueStrings`, `DuplicationRatio` |
+| LOH string pressure (total size > 85 KB) | ✅ | `StringAnalyzer` — `LohStringBytes` |
 | Encoding waste (ASCII content in UTF-16) | ❌ | ➕ `StringAnalyzer` — heuristic byte-range scan |
 | Per-finding recommended approach (intern / pool / slice) | ❌ | Report-layer rule engine |
 
-**Verdict**: Core string data exists in `MemoryLeakDomainResult` but is buried and incomplete. `StringAnalyzer` split adds LOH classification, length histogram, interned string detection, and standalone `StringDomainResult`.
+**Verdict**: §11 is now substantially covered by `StringAnalyzer`. String data has been split out of `MemoryLeakDomainResult` into a standalone `StringDomainResult`. Remaining gaps are the string-length histogram and ASCII-in-UTF-16 encoding waste heuristic.
 
 ---
 
@@ -720,7 +720,7 @@ and **Related Analyzers** for that single analyzer.
 | 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 |
 | 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 |
 | 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 |
-| 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 |
+| 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 |
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 |
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 |
@@ -769,7 +769,7 @@ Additionally, `InsightEngine` must gain:
 
 | Priority | Item | Type | Effort | Phase 1 Prereq |
 |----------|------|------|--------|----------------|
-| 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low | ✅ `IsStringType` flag ready |
+| 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low | ✅ `IsStringType` flag ready | ✅ **Completed** |
 | 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written |
 | 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready |
 | 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
@@ -1070,17 +1070,166 @@ Implement `IAnalyzer`. Follow the `// Copilot instructions` performance rules st
 - Call `result.Stamp(this)` at the end of `AnalyzeAsync` to attach `AnalyzerName`/`Category`.
 - If using a satellite index (e.g. `HandleSnapshot.bin`), read it via `FileOptions.SequentialScan` + `ArrayPool<byte>`.
 
+### Progress Reporting (mandatory)
+
+Every analyzer **must** emit progress so the CLI shows live activity.
+The sink is `context.Progress` (`IProgress<AnalyzerProgressReport>`).
+`AnalyzerProgressReport` has four fields: `ScannedCount`, `Phase`, `Detail?`, `Elapsed?`.
+
+Three patterns are used — choose the right one per work unit:
+
+---
+
+#### Pattern 1 — Phase announce (no count)
+
+Use at the **start of any named work phase** before the loop begins, so the CLI label
+changes immediately even if the loop is slow to start.
+
+```csharp
+progress?.Report(new(0, "resolving roots"));
+progress?.Report(new(0, "building type index"));
+progress?.Report(new(0, "analyzing threads"));
+```
+
+- `ScannedCount = 0` — no objects processed yet.
+- `Phase` — short present-participle label, lowercase, e.g. `"classifying heap segments"`.
+- No `Detail` needed unless a known total is available upfront
+  (e.g. `$"0 / {totalSegments} segments"`).
+
+---
+
+#### Pattern 2 — `ObjectScanCounter` (O(N) heap / index scans)
+
+Use for any loop that iterates the full heap, `ObjectIndex.bin`, or any large satellite index.
+`ObjectScanCounter` auto-throttles: it fires at most once every 250 000 objects **or** 2 seconds,
+whichever comes first. Override both thresholds for small datasets (e.g. thread scans).
+
+```csharp
+var scanCounter = new ObjectScanCounter("scanning foo objects", progress);
+foreach (var entry in cache.EnumerateIndexedEntriesAsTuples())
+{
+    scanCounter.Tick();          // call on EVERY iteration, not just matching ones
+    if (!IsMatch(entry)) continue;
+    // ... process ...
+}
+scanCounter.Complete();          // always call — emits final count
+```
+
+Rules:
+- Instantiate **one counter per loop**.
+- `Tick()` on **every** iteration so throughput reflects actual scan rate, not match rate.
+- `Complete()` immediately after the loop regardless of early exit.
+- For small bounded loops (e.g. thread count < 1 000), reduce cadence:
+  ```csharp
+  new ObjectScanCounter("scanning threads", progress,
+      reportEveryObjects: 100,
+      reportEveryElapsed: TimeSpan.FromSeconds(1));
+  ```
+- Use distinct labels when the same analyzer has two enumeration paths:
+  `"scanning foo objects (indexed)"` vs `"scanning foo objects"`.
+
+---
+
+#### Pattern 3 — Manual `progress?.Report` (structured multi-phase work)
+
+Use when an analyzer has **discrete named phases** with known totals or meaningful intermediate
+results — segment classification, root tracing, aggregation finalization.
+
+```csharp
+// Phase start with known total
+progress?.Report(new(0, "classifying heap segments", $"0 / {totalSegments} segments"));
+
+// Mid-loop with running total and detail
+progress?.Report(new(
+    ScannedCount: totalObjectsScanned,
+    Phase: "classifying heap segments",
+    Detail: $"{segmentsProcessed} / {totalSegments} segments, {totalObjectsScanned:N0} objects"));
+
+// Post-processing phase complete
+progress?.Report(new(
+    ScannedCount: totalObjectsScanned,
+    Phase: "aggregating results",
+    Detail: $"{snapshots.Count} segments, {totalObjectsScanned:N0} objects total"));
+```
+
+Rules:
+- Fire at phase transitions (start, completion) unconditionally.
+- For interval firing inside a loop, gate on a modulus to avoid flooding:
+  ```csharp
+  if (rootsScanned % 50 == 0)
+      progress?.Report(new(rootsScanned, "scanning static roots", $"{results.Count} significant"));
+  ```
+- `Detail` must be short — it appears inline next to the scan rate on a single console line.
+- `Elapsed` is optional; omit unless you have a meaningful `Stopwatch` to pass.
+
+---
+
+#### Combined example (all three patterns in one analyzer)
+
+```csharp
+public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken ct)
+{
+    // Pattern 1 — phase announce
+    context.Progress?.Report(new(0, "resolving candidate types"));
+    var candidates = BuildCandidates(context.Cache);
+
+    // Pattern 2 — ObjectScanCounter for the main heap scan
+    var scanCounter = new ObjectScanCounter("scanning xxx objects", context.Progress);
+    foreach (var (address, mt, size) in context.Cache.EnumerateIndexedEntriesAsTuples())
+    {
+        ct.ThrowIfCancellationRequested();
+        scanCounter.Tick();
+        if (!candidates.Contains(mt)) continue;
+        Process(address, size);
+    }
+    scanCounter.Complete();
+
+    // Pattern 3 — manual report for the aggregation phase
+    context.Progress?.Report(new(scanCounter.Scanned, "aggregating results",
+        $"{_hits:N0} matches from {scanCounter.Scanned:N0} objects"));
+
+    return ValueTask.FromResult(BuildResult().Stamp(this));
+}
+```
+
+---
+
+#### What NOT to do
+
+| Anti-pattern | Fix |
+|---|---|
+| No progress at all | Add at least Pattern 1 at entry + Pattern 2 for the main loop |
+| `Tick()` only on matching objects | Call on every iteration |
+| Missing `Complete()` | Always call after the loop |
+| Progress inside a static helper with no `progress` param | Thread `progress` through as a parameter |
+| Flooding with `Report()` on every object | Use `ObjectScanCounter` or modulus gate |
+
 ```csharp
 internal sealed class XxxAnalyzer : IAnalyzer
 {
     public string Name     => "Xxx Analysis";
     public string Category => "Xxx";
-    // ...
-    public async ValueTask<AnalyzerDomainResult> AnalyzeAsync(
+
+    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
         AnalysisContext context, CancellationToken ct)
     {
-        // ... streaming logic ...
-        return new XxxDomainResult(totalFoo, totalFooBytes).Stamp(this);
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(Analyze(context, ct).Stamp(this));
+    }
+
+    private static AnalyzerDomainResult Analyze(AnalysisContext context, CancellationToken ct)
+    {
+        context.Progress?.Report(new(0, "scanning xxx objects"));
+        var scanCounter = new ObjectScanCounter("scanning xxx objects", context.Progress);
+        foreach (var obj in context.Heap.EnumerateObjects())
+        {
+            ct.ThrowIfCancellationRequested();
+            scanCounter.Tick();
+            if (!obj.IsValid || obj.Type is null) continue;
+            // ... processing ...
+        }
+        scanCounter.Complete();
+        return new XxxDomainResult(...);
     }
 }
 ```
@@ -1230,6 +1379,9 @@ Golden files (Text / Markdown / JSON) regenerate automatically via `UPDATE_GOLDE
 ```
 □ 1. XxxDomainResult in AnalyzerDomainModels.cs
 □ 2. XxxAnalyzer.cs implements IAnalyzer + calls result.Stamp(this)
+     └─ Progress: Pattern 1 (phase announce) at entry of each named phase
+     └─ Progress: Pattern 2 (ObjectScanCounter) for every O(N) heap/index loop
+     └─ Progress: Pattern 3 (manual Report) for structured multi-phase work with known totals
 □ 3. DefaultAnalyzerFactory — add new XxxAnalyzer()
 □ 4. XxxFindingGenerator.cs + ServiceRegistration.cs
 □ 5. XxxTrendComparer.cs + ServiceRegistration.cs

@@ -42,20 +42,6 @@ internal sealed class MemoryLeakFindingGenerator : IFindingGenerator
                 MetricUnit: "finalizer-objects"));
         }
 
-        if (r.DuplicateStringPatternCount > 0)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Optimization",
-                Severity: FindingSeverity.Warning,
-                Title: "High duplicate string pressure detected",
-                Evidence: $"{r.DuplicateStringPatternCount:N0} duplicate string patterns with ~{FormatHelper.FormatBytes(r.DuplicateStringWastedBytes)} estimated waste.",
-                Recommendation: "Consider string interning/pooling or de-duplicating repeated payloads.",
-                Tags: ["string", "memory", "allocation"],
-                MetricValue: r.DuplicateStringWastedBytes,
-                MetricUnit: "wasted-bytes"));
-        }
-
         if (r.HighlyReferencedObjectCount > 0)
         {
             findings.Add(new InsightFinding(

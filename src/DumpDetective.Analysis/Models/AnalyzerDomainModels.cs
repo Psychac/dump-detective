@@ -141,19 +141,34 @@ internal sealed record WaitingThreadSnapshot(
 
 internal sealed record MemoryLeakDomainResult(
     int FinalizerQueueCount,
-    int DuplicateStringPatternCount,
-    ulong DuplicateStringWastedBytes,
-    int TotalStrings,
-    ulong TotalStringMemoryBytes,
-    int UniqueStrings,
     int HighlyReferencedObjectCount,
     long SkippedReferenceAddresses,
     IReadOnlyList<NameCountEntry>? TopFinalizerTypes = null,
-    IReadOnlyList<DuplicateStringSnapshot>? TopDuplicateStrings = null,
     IReadOnlyList<HighlyReferencedObjectSnapshot>? TopHighlyReferencedObjects = null) : AnalyzerDomainResult;
 
 internal sealed record DuplicateStringSnapshot(string Preview, int Count, ulong WastedBytes);
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences);
+
+// ── String Analysis ──────────────────────────────────────────────────────────
+
+internal sealed record LongStringEntry(ulong Address, int CharLength, ulong SizeBytes);
+
+internal sealed record StringDomainResult(
+    int TotalStrings,
+    ulong TotalStringMemoryBytes,
+    int UniqueStrings,
+    int DuplicatePatternCount,
+    ulong DuplicateWastedBytes,
+    double DuplicationRatio,
+    double PctOfManagedHeap,
+    IReadOnlyList<DuplicateStringSnapshot> TopDuplicatesByWaste,
+    IReadOnlyList<DuplicateStringSnapshot> TopDuplicatesByCount,
+    IReadOnlyList<LongStringEntry> VeryLongStrings,
+    ulong LohStringBytes,
+    int InternedStringCount,
+    ulong InternedStringBytes,
+    int Gen2StringCount,
+    ulong Gen2StringBytes) : AnalyzerDomainResult;
 
 // ── Collections ───────────────────────────────────────────────────────────────
 

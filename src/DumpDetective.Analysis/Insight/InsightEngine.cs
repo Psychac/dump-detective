@@ -51,6 +51,7 @@ internal sealed class InsightEngine
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
         CollectionDomainResult? collections = FindResult<CollectionDomainResult>(runs);
+        StringDomainResult? strings = FindResult<StringDomainResult>(runs);
 
         DetectLohPressure(findings, memory, gcGen, segments);
         DetectLohFragmentation(findings, lohFrag, segments);
@@ -59,7 +60,7 @@ internal sealed class InsightEngine
         DetectFinalizerQueueBacklog(findings, threads, leak);
         DetectPinnedHandlePressure(findings, handles, lohFrag);
         DetectActiveCrash(findings, crash);
-        DetectLeakSuspicion(findings, leak);
+        DetectLeakSuspicion(findings, leak, strings);
         DetectWastefulCollections(findings, collections);
         DetectAnalyzerFailures(findings, runs);
 
@@ -311,13 +312,10 @@ internal sealed class InsightEngine
 
     private static void DetectLeakSuspicion(
         List<InsightFinding> findings,
-        MemoryLeakDomainResult? leak)
+        MemoryLeakDomainResult? leak,
+        StringDomainResult? strings)
     {
-        if (leak is null)
-            return;
-
-        // Highly-referenced objects are a strong indicator of retention leaks.
-        if (leak.HighlyReferencedObjectCount > 0)
+        if (leak is not null && leak.HighlyReferencedObjectCount > 0)
         {
             findings.Add(new InsightFinding(
                 Analyzer: Source,
@@ -333,17 +331,17 @@ internal sealed class InsightEngine
                 Tags: ["memory-leak", "retention", "references"]));
         }
 
-        // Large duplicate string waste is a secondary leak signal.
-        if (leak.DuplicateStringWastedBytes > 10 * 1024 * 1024) // 10 MB threshold
+        // Duplicate string waste — now sourced from StringDomainResult.
+        if (strings is not null && strings.DuplicateWastedBytes > 10 * 1024 * 1024) // 10 MB threshold
         {
             findings.Add(new InsightFinding(
                 Analyzer: Source,
                 Category: "Memory",
                 Severity: FindingSeverity.Info,
                 Title: "Significant memory wasted by duplicate string instances",
-                Evidence: $"{FormatBytes(leak.DuplicateStringWastedBytes)} wasted across " +
-                          $"{leak.DuplicateStringPatternCount:N0} duplicate string pattern(s). " +
-                          $"Total strings: {leak.TotalStrings:N0} ({FormatBytes(leak.TotalStringMemoryBytes)}).",
+                Evidence: $"{FormatBytes(strings.DuplicateWastedBytes)} wasted across " +
+                          $"{strings.DuplicatePatternCount:N0} duplicate string pattern(s). " +
+                          $"Total strings: {strings.TotalStrings:N0} ({FormatBytes(strings.TotalStringMemoryBytes)}).",
                 Recommendation: "Use string.Intern or a shared lookup table for repeated strings. " +
                                 "Consider replacing string keys with enum or int IDs in hot dictionaries.",
                 Tags: ["memory-leak", "strings", "interning"]));

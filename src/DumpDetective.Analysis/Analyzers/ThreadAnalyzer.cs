@@ -131,25 +131,6 @@ namespace DumpDetective.Analysis.Analyzers
                     .ToList(),
                 source.StackRootCount);
         }
-
-        private static InsightFinding CreateFinding(ThreadCategorization info)
-        {
-            FindingSeverity severity = (info.ThreadsWithActiveExceptionsCount > 0 || info.PotentiallyBlockedThreads.Count >= 10)
-                ? FindingSeverity.Warning
-                : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(ThreadAnalyzer),
-                Category: "Threading",
-                Severity: severity,
-                Title: "Thread-state triage summary",
-                Evidence: $"Alive threads: {info.AliveCount:N0}; blocked-pattern threads: {info.PotentiallyBlockedThreads.Count:N0}; lock-holding threads: {info.ThreadsWithLocks.Count:N0}; active thread exceptions: {info.ThreadsWithActiveExceptionsCount:N0}.",
-                Recommendation: "Correlate blocked groups with lock owners and hotspot frames to isolate contention/deadlock candidates.",
-                Tags: ["threads", "locks", "blocked", "exceptions"],
-                MetricValue: info.PotentiallyBlockedThreads.Count,
-                MetricUnit: "blocked-threads");
-        }
-
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads)
         {
             var threadList = threads as IList<ClrThread> ?? threads.ToList();

@@ -6,14 +6,16 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing;
 
-internal sealed class MemoryBackedObjectIndexWriter
+internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
 {
     private const long ProgressInterval = 50_000;
 
     public HeapIndexBuildResult Build(
         ClrHeap heap,
         CancellationToken cancellationToken,
-        IProgress<AnalyzerProgressReport>? progress = null)
+        IProgress<AnalyzerProgressReport>? progress = null,
+        string? dumpPath = null,
+        DumpDetective.Core.Models.DumpSizeTier sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
 

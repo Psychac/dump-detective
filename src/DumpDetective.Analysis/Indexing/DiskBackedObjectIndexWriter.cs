@@ -7,7 +7,7 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing;
 
-internal sealed class DiskBackedObjectIndexWriter
+internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 {
     private const int HeaderSize = 24;
     private const int Magic = 0x58494444; // DDIX
@@ -17,11 +17,12 @@ internal sealed class DiskBackedObjectIndexWriter
 
     public HeapIndexBuildResult Build(
         ClrHeap heap,
-        string dumpPath,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
+        string? dumpPath = null,
         DumpDetective.Core.Models.DumpSizeTier sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium)
     {
+        ArgumentNullException.ThrowIfNull(dumpPath, nameof(dumpPath));
         Stopwatch stopwatch = Stopwatch.StartNew();
         string indexPath = CreateIndexPath(dumpPath);
 

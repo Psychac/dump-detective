@@ -53,7 +53,7 @@ namespace BenchmarkSuite1
         public long BuildDiskIndex()
         {
             var writer = new DiskBackedObjectIndexWriter();
-            return writer.Build(_heap!, _dumpPath, cancellationToken: default, progress: null).ObjectCount;
+            return writer.Build(_heap!, cancellationToken: default, progress: null, dumpPath: _dumpPath).ObjectCount;
         }
     }
 }

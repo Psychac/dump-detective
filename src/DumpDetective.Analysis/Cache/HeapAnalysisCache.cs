@@ -98,15 +98,11 @@ namespace DumpDetective.Analysis.Cache
             {
                 _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
             }
-            if (selectedMode == HeapIndexPrebuildMode.Memory)
-            {
-                var memoryWriter = new MemoryBackedObjectIndexWriter();
-                _heapIndex = memoryWriter.Build(heap, cancellationToken, progress);
-                return _heapIndex;
-            }
+            IObjectIndexWriter writer = selectedMode == HeapIndexPrebuildMode.Memory
+                ? new MemoryBackedObjectIndexWriter()
+                : new DiskBackedObjectIndexWriter();
 
-            var diskWriter = new DiskBackedObjectIndexWriter();
-            _heapIndex = diskWriter.Build(heap, dumpPath, cancellationToken, progress, _sizeTier);
+            _heapIndex = writer.Build(heap, cancellationToken, progress, dumpPath, _sizeTier);
             return _heapIndex;
         }
 

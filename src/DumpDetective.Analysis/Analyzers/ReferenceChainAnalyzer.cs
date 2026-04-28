@@ -235,9 +235,9 @@ namespace DumpDetective.Analysis.Analyzers
             searchTruncated = false;
 
             // Phase 1: build candidate set via bidirectional expansion.
-            // Use LazyReferenceGraph as the reference provider — it caches edges, reducing re-fetching
+            // Use ReferenceGraph as the reference provider — it caches edges, reducing re-fetching
             // across the three phases (candidate set, reverse index, and constrained BFS).
-            var provider = new LazyReferenceGraph(heap);
+            var provider = new ReferenceGraph(heap);
             var candidateBuilder = new CandidateSetBuilder(heap, provider, options, telemetry.AsProxy());
             HashSet<ulong> candidateSet = candidateBuilder.Build(objectAddress, roots);
 

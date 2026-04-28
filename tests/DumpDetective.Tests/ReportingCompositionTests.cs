@@ -12,7 +12,7 @@ namespace DumpDetective.Tests;
 public sealed class ReportingCompositionTests
 {
     [Fact]
-    public void ComposeCanonicalReport_ShouldMergeDuplicateSections_AndPreserveEvidenceAndRemediation()
+    public void Serialize_ShouldMergeDuplicateFindings_AndPreserveEvidenceAndRemediation()
     {
         InsightFinding findingA = new(
             Analyzer: "MemoryLeakAnalyzer",
@@ -37,23 +37,21 @@ public sealed class ReportingCompositionTests
         AnalyzerRunResult runA = CreateRun("MemoryLeakAnalyzer", findingA);
         AnalyzerRunResult runB = CreateRun("MemoryLeakAnalyzer", findingB);
 
-        ComposedReport report = ReportBuilder.ComposeCanonicalReport(
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/test.dmp",
             runs: [runA, runB],
-            elapsed: TimeSpan.FromSeconds(1));
+            elapsed: TimeSpan.FromSeconds(1),
+            builders: []);
 
-        report.Sections.Should().HaveCount(1);
-        ReportSection section = report.Sections[0];
-        section.SectionKey.Should().Be("dup-key");
-        section.Severity.Should().Be(FindingSeverity.Critical);
-        section.NarrativeSummary.Should().Contain("Evidence A").And.Contain("Evidence B");
-        section.RemediationHints.Should().Contain("Recommendation A").And.Contain("Recommendation B");
-        section.EvidenceRows.Should().Contain(r => r.Label == "Evidence" && r.Value == "Evidence A");
-        section.EvidenceRows.Should().Contain(r => r.Label == "Evidence" && r.Value == "Evidence B");
+        doc.Findings.Should().HaveCount(1);
+        FindingRecord finding = doc.Findings[0];
+        finding.Fingerprint.Should().Be("dup-key");
+        finding.Severity.Should().Be("Critical");        // severity promoted to higher
+        finding.Evidence.Should().Contain("Evidence A").And.Contain("Evidence B");
+        finding.Recommendation.Should().Contain("Recommendation A").And.Contain("Recommendation B");
 
-        report.DedupDiagnostics.DuplicateCandidates.Should().Be(1);
-        report.DedupDiagnostics.MergedSections.Should().Be(1);
-        report.DedupDiagnostics.EvidenceAfterMerge.Should().BeGreaterThan(0);
+        doc.DedupDiagnostics.DuplicateCandidates.Should().Be(1);
+        doc.DedupDiagnostics.MergedSections.Should().Be(1);
     }
 
     [Fact]
@@ -116,7 +114,7 @@ public sealed class ReportingCompositionTests
     }
 
     [Fact]
-    public void ComposeCanonicalReport_ShouldStampContractVersions()
+    public void Serialize_ShouldStampSchemaVersion()
     {
         InsightFinding finding = new(
             Analyzer: "CrashAnalyzer",
@@ -128,13 +126,13 @@ public sealed class ReportingCompositionTests
             Tags: ["contract"],
             Fingerprint: "contract-ver");
 
-        ComposedReport report = ReportBuilder.ComposeCanonicalReport(
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/contract.dmp",
             runs: [CreateRun("CrashAnalyzer", finding)],
-            elapsed: TimeSpan.FromSeconds(1));
+            elapsed: TimeSpan.FromSeconds(1),
+            builders: []);
 
-        report.ReportSchemaVersion.Should().Be(ReportContractVersions.ReportSchemaV1);
-        report.SectionSchemaVersion.Should().Be(ReportContractVersions.SectionSchemaV1);
+        doc.SchemaVersion.Should().Be("2.0");
     }
 
     [Fact]

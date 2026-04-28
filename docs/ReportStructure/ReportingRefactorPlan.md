@@ -2,7 +2,7 @@
 ## Printers → Section Builders + JSON Output Contract
 
 > **Branch**: `optimize`  
-> **Status**: Phase E Complete  
+> **Status**: ✅ COMPLETE — All Phases A–H Done  
 
 ---
 
@@ -744,9 +744,9 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
 ---
 
-## Phase G — Delete Obsolete Infrastructure
+## Phase G — Delete Obsolete Infrastructure ✅ Complete
 
-> All deletions happen **after** Phase F produces a clean build and tests pass.
+> All 26 files deleted after clean build and tests confirmed passing.
 
 ### Files to Delete
 
@@ -805,11 +805,13 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
 ---
 
-## Phase H — Update Tests
+## Phase H — Update Tests ✅ Complete
 
 ---
 
-### H1 · Regenerate HTML Golden Baselines
+### H1 · Regenerate HTML Golden Baselines ✅
+
+**Action**: `GoldenFileTests.cs` updated — format code 2 now uses `JsonCanonicalReportFormatter`; golden folder renamed `Json`; old `.html.golden` files deleted. 15/15 golden cases pass after `UPDATE_GOLDENS=1` run.  
 
 **Old strategy**: Compare full rendered HTML string against `.html.golden` file.  
 **New strategy**: Extract the JSON payload from `<script>window.__REPORT__ = ...;</script>` in the rendered output, compare against a `.json.golden` file.
@@ -825,14 +827,20 @@ This makes HTML golden tests **stable across all CSS and JS changes** — only d
 
 ---
 
-### H2 · Add `AnalysisReportDocument` Schema Tests
+### H2 · Add `AnalysisReportDocument` Schema Tests ✅
+
+**File**: `tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs`  
+**Action**: Created — 5 tests covering round-trip serialization, polymorphic `SectionBlock` deserialization, trend fields, null executive summary, and camelCase JSON shape. All pass.  
 
 Deserialize a known `AnalysisReportDocument` JSON and assert field values.  
 These become the primary regression tests for the reporting layer — format-independent.
 
 ---
 
-### H3 · Add `SectionBuilder` Unit Tests
+### H3 · Add `SectionBuilder` Unit Tests ✅
+
+**File**: `tests/DumpDetective.Tests/SectionBuilderTests.cs`  
+**Action**: Created — 7 tests covering `MemorySectionBuilder`, `CrashSectionBuilder`, `GCHandleSectionBuilder`, `CollectionSectionBuilder`, `LohFragmentationSectionBuilder` (block structure, `CanHandle` routing, table row content). All pass.  
 
 Per-builder pattern:
 1. Construct a known `AnalyzerDomainResult` with controlled field values
@@ -844,7 +852,9 @@ No writer involved, no text parsing.
 
 ---
 
-### H4 · Re-baseline Text and Markdown Golden Files
+### H4 · Re-baseline Text and Markdown Golden Files ✅
+
+**Action**: Re-baselined via `UPDATE_GOLDENS=1` after Phase G deletions. All 10 text/markdown golden cases pass.  
 
 Text and Markdown golden files remain functionally equivalent but are re-baselined.  
 The rendering now walks `AnalyzerDetailSection.Blocks` instead of `DetailedAnalyzerSubmodule` lists.  

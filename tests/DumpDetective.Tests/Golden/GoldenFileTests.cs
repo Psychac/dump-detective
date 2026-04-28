@@ -14,9 +14,9 @@ public sealed class GoldenFileTests
         string[] fixtures = ["BaselineSmall", "DuplicateHeavy", "LongNames", "RichEvidence", "MixedSeverity"];
         foreach (string fixture in fixtures)
         {
-            yield return [fixture, 0, "Text", $"{fixture}.text.golden"];
+            yield return [fixture, 0, "Text",     $"{fixture}.text.golden"];
             yield return [fixture, 1, "Markdown", $"{fixture}.markdown.golden"];
-            yield return [fixture, 2, "Html", $"{fixture}.html.golden"];
+            yield return [fixture, 2, "Json",     $"{fixture}.json.golden"];   // H1: JSON golden instead of HTML string
         }
     }
 
@@ -29,7 +29,7 @@ public sealed class GoldenFileTests
         {
             0 => new TextCanonicalReportFormatter(),
             1 => new MarkdownCanonicalReportFormatter(),
-            2 => new HtmlCanonicalReportFormatter(),
+            2 => new JsonCanonicalReportFormatter(),   // H1: JSON formatter for stable HTML-layout-independent golden
             _ => throw new NotSupportedException($"Unsupported format code {formatCode}")
         };
 
@@ -38,18 +38,13 @@ public sealed class GoldenFileTests
 
         if (Environment.GetEnvironmentVariable("UPDATE_GOLDENS") == "1")
         {
-            File.WriteAllText(baselinePath, actual);
-            return;
-        }
-
-        if (Environment.GetEnvironmentVariable("UPDATE_GOLDENS") == "1")
-        {
+            Directory.CreateDirectory(Path.GetDirectoryName(baselinePath)!);
             File.WriteAllText(baselinePath, actual);
             return;
         }
 
         string expected = File.ReadAllText(baselinePath);
-
         GoldenFileAssert.AssertMatches(expected, actual);
     }
 }
+

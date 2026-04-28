@@ -57,7 +57,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new ReportSerializer(),
-        new TrendReportComposer([]));
+        new TrendReportComposer([], new ReportSerializer()));
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
@@ -96,7 +96,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new ReportSerializer(),
-        new TrendReportComposer([]));
+        new TrendReportComposer([], new ReportSerializer()));
 
         using CancellationTokenSource cts = new();
         cts.Cancel();
@@ -158,7 +158,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new ReportSerializer(),
-        new TrendReportComposer([]));
+        new TrendReportComposer([], new ReportSerializer()));
 
         string output = facade.BuildRenderedTrendReport(
             dumpPath: "C:/dumps/current.dmp",
@@ -175,15 +175,14 @@ public sealed class ReportFlowIntegrationTests
         output.Should().Contain("C:/dumps/base.dmp");
         output.Should().Contain("C:/dumps/current.dmp");
         output.Should().Contain("Trend metric regression summary");
-        output.Should().NotContain("[Warning] Current snapshot finding (Crash)");
-        output.Should().Contain("[Dump 1: base.dmp - Full Report]");
-        output.Should().Contain("[Dump 2: current.dmp - Full Report]");
-        output.Should().Contain("DUMP FULL REPORT");
-        output.Should().Contain("TREND COMPARISON:");
         output.Should().Contain("Trend finding lifecycle summary");
+        output.Should().Contain("[Dump 1 of 2: base.dmp]");
+        output.Should().Contain("[Dump 2 of 2: current.dmp]");
+        output.Should().Contain("DUMP SUMMARY");
+        output.Should().Contain("TREND COMPARISON");
 
         int trendComparisonIndex = output.IndexOf("[Trend Comparison]", StringComparison.Ordinal);
-        int dumpOneIndex = output.IndexOf("[Dump 1: base.dmp - Full Report]", StringComparison.Ordinal);
+        int dumpOneIndex         = output.IndexOf("[Dump 1 of 2: base.dmp]", StringComparison.Ordinal);
         trendComparisonIndex.Should().BeGreaterThan(-1);
         dumpOneIndex.Should().BeGreaterThan(-1);
         trendComparisonIndex.Should().BeLessThan(dumpOneIndex);

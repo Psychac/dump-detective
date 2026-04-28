@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 
 using Microsoft.Diagnostics.Runtime;
@@ -28,9 +29,9 @@ internal sealed class MemoryBackedObjectIndexWriter
         // 4 concurrent segments gives ~4x speedup over sequential while bounding peak page pressure.
         const int MaxSegmentParallelism = 4;
 
-        var masterBuilder = new TypeAggregateIndexBuilder();
+        var masterBuilder = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
-        var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<List<HeapEntry>>();
+        var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<(HeapEntry[] Buffer, int Count)>();
         long objectCount = 0;
 
         var parallelOptions = new ParallelOptions
@@ -42,16 +43,19 @@ internal sealed class MemoryBackedObjectIndexWriter
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => new TypeAggregateIndexBuilder(),
+            () => new TypeIndexBuilder(),
             (segment, _, localBuilder) =>
             {
-                // Size this segment's list from its own byte length — matches the 128-byte average
-                // object size heuristic used for the whole-heap estimate, but applied per-segment
-                // so the estimate is local to each segment rather than divided by thread count.
-                // This eliminates the ÷ threadCount skew that caused heavily-loaded threads to
-                // undershoot their capacity and trigger repeated List<T> doubling.
-                int segEstimate = (int)Math.Min(Math.Max(segment.Length / 128, 64), int.MaxValue);
-                var segEntries = new List<HeapEntry>(segEstimate);
+                // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
+                // initial rent is guaranteed to hold all objects without resizing in the common case.
+                // Capped at 1_000_000 entries (~24 MB) to keep each ArrayPool loan reasonable;
+                // segments with more objects than the cap grow via pool doubling below — old buffers
+                // are returned to the pool rather than discarded as GC garbage, eliminating the
+                // ~800 MB of HeapEntry[] backing-array churn observed in profiling.
+                const int MaxInitialRent = 1_000_000;
+                int initCapacity = (int)Math.Min(Math.Max((long)segment.Length / 24, 64), MaxInitialRent);
+                HeapEntry[] segBuf = ArrayPool<HeapEntry>.Shared.Rent(initCapacity);
+                int segCount = 0;
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
@@ -60,9 +64,19 @@ internal sealed class MemoryBackedObjectIndexWriter
                     ulong mt = obj.Type.MethodTable;
                     if (mt == 0)
                         continue;
+
+                    if (segCount == segBuf.Length)
+                    {
+                        // Grow via pool: return old buffer, rent one twice as large.
+                        HeapEntry[] bigger = ArrayPool<HeapEntry>.Shared.Rent(segBuf.Length * 2);
+                        segBuf.AsSpan(0, segCount).CopyTo(bigger);
+                        ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+                        segBuf = bigger;
+                    }
+
                     var entry = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    segEntries.Add(entry);
+                    segBuf[segCount++] = entry;
                     localBuilder.Add(entry, moduleId);
 
                     long count = Interlocked.Increment(ref objectCount);
@@ -70,7 +84,7 @@ internal sealed class MemoryBackedObjectIndexWriter
                         progress?.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                allSegmentEntries.Add(segEntries);
+                allSegmentEntries.Add((segBuf, segCount));
                 return localBuilder;
             },
             localBuilder =>
@@ -79,17 +93,16 @@ internal sealed class MemoryBackedObjectIndexWriter
                     masterBuilder.Merge(localBuilder);
             });
 
-        // Flatten per-segment lists into a single array.
-        // objectCount is exact at this point so we allocate the array at the right size,
-        // copying each segment list's contiguous span in one pass — no intermediate resizes.
+        // Flatten per-segment pooled buffers into a single exact-sized array,
+        // then return each rented buffer to the pool so it can be reused.
         int totalCount = (int)Math.Min(objectCount, int.MaxValue);
         var flatEntries = new HeapEntry[Math.Max(totalCount, 1)];
         int writeOffset = 0;
-        foreach (List<HeapEntry> segList in allSegmentEntries)
+        foreach ((HeapEntry[] segBuf, int segCount) in allSegmentEntries)
         {
-            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(segList)
-                .CopyTo(flatEntries.AsSpan(writeOffset));
-            writeOffset += segList.Count;
+            segBuf.AsSpan(0, segCount).CopyTo(flatEntries.AsSpan(writeOffset));
+            writeOffset += segCount;
+            ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
         }
 
         stopwatch.Stop();

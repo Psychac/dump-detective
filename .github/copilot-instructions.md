@@ -262,6 +262,23 @@ Return type `AnalyzerDomainResult` is an abstract record.
 Each analyzer defines a strongly-typed subtype (e.g. `MemoryDomainResult`) and
 calls `result.Stamp(this)` at the end of `AnalyzeAsync` to attach name/category.
 
+## Adding a New Analyzer — Required Steps (in order)
+
+> Full guide with rules and examples: `docs/ReportStructure/AnalyzerCoverageAnalysis.md` Part 7.
+
+1. **`XxxDomainResult`** in `AnalyzerDomainModels.cs` — plain CLR types only; no ClrMD objects; cap/limit fields explicit
+2. **`XxxAnalyzer.cs`** implements `IAnalyzer`; stream heap via `foreach`; call `result.Stamp(this)`
+3. **`DefaultAnalyzerFactory`** — register `new XxxAnalyzer()`; `Name` string must be identical to `IAnalyzer.Name`
+4. **`XxxFindingGenerator.cs`** — implements `IFindingGenerator`; `AnalyzerName` must match exactly; register in `ServiceRegistration.cs`
+5. **`XxxTrendComparer.cs`** — implements `IAnalyzerTrendComparer`; `AnalyzerName` must match; register in `ServiceRegistration.cs`
+6. **`XxxSectionBuilder.cs`** — implements `IAnalyzerSectionBuilder`; `AnalyzerName` must match; add to `DefaultSectionBuilderFactory.CreateBuilders()`
+7. **`ReportSerializer.BuildConfidenceNotes()`** — add cap/limit signal case if `XxxDomainResult` exposes one
+8. **`InsightEngine`** — add cross-cutting input handling only if new cross-analyzer detections are needed
+9. **Tests** — add `CanHandle` + block structure tests to `SectionBuilderTests.cs`; run `UPDATE_GOLDENS=1` to re-baseline
+10. **Docs** — mark covered §sections ✅ in `AnalyzerCoverageAnalysis.md`; create `docs/ReportStructure/Analyzers/XxxAnalyzer.md`
+
+**`IAnalyzer`, `AnalysisContext`, `ReportSerializer` core, `HtmlReportRenderer`, and all formatters require no changes.**
+
 ---
 
 # 📊 Output Guidelines

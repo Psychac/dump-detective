@@ -1022,3 +1022,225 @@ On open:                 verify both fields match current dump file — if not, 
 
 This same validation is applied to all satellite index files (HandleSnapshot, RootIndex, etc.)
 via a shared `IndexHeader` struct that all writers produce and all readers verify.
+
+---
+
+---
+
+# Part 7 — Developer Guide: Adding a New Analyzer
+
+> This is the **canonical checklist** for adding any new analyzer after the reporting refactor
+> (Phases A–H complete). Every step is mandatory. Follow in order — each step builds on the previous.
+> See the per-analyzer spec files under `docs/ReportStructure/Analyzers/` for domain-specific decisions.
+
+---
+
+## Step 1 · Domain Result — `DumpDetective.Analysis`
+
+**File**: `src/DumpDetective.Analysis/Models/AnalyzerDomainModels.cs`
+
+Add a `public sealed record XxxDomainResult(...) : AnalyzerDomainResult` at the end of the file.
+
+Rules:
+- All fields must be **plain CLR types** (`int`, `ulong`, `string`, `IReadOnlyList<T>`) — no ClrMD objects.
+- Optional / expensive fields use `IReadOnlyList<T>? Property = null` — null until the analyzer populates them.
+- Cap/limit signals (`bool XxxCapped`, `int SkippedXxx`) must be explicit fields — `ReportSerializer` reads them for `ConfidenceNote` generation.
+- Use existing snapshot sub-types where possible (e.g. `TypeSnapshot`, `NameCountEntry`, `LohSegmentSnapshot`).
+
+```csharp
+// Example
+public sealed record XxxDomainResult(
+    int TotalFoo,
+    ulong TotalFooBytes,
+    bool FooCapped = false,
+    IReadOnlyList<NameCountEntry>? TopFooTypes = null) : AnalyzerDomainResult;
+```
+
+---
+
+## Step 2 · Analyzer — `DumpDetective.Analysis`
+
+**File**: `src/DumpDetective.Analysis/Analyzers/XxxAnalyzer.cs`
+
+Implement `IAnalyzer`. Follow the `// Copilot instructions` performance rules strictly:
+
+- `Name` must match the string used in `DefaultAnalyzerFactory` and `IAnalyzerSectionBuilder.AnalyzerName`.
+- Stream heap objects via `foreach (var obj in heap.EnumerateObjects())` — never `.ToList()`.
+- Use `ArrayPool<T>` for any temporary buffers.
+- Call `result.Stamp(this)` at the end of `AnalyzeAsync` to attach `AnalyzerName`/`Category`.
+- If using a satellite index (e.g. `HandleSnapshot.bin`), read it via `FileOptions.SequentialScan` + `ArrayPool<byte>`.
+
+```csharp
+internal sealed class XxxAnalyzer : IAnalyzer
+{
+    public string Name     => "Xxx Analysis";
+    public string Category => "Xxx";
+    // ...
+    public async ValueTask<AnalyzerDomainResult> AnalyzeAsync(
+        AnalysisContext context, CancellationToken ct)
+    {
+        // ... streaming logic ...
+        return new XxxDomainResult(totalFoo, totalFooBytes).Stamp(this);
+    }
+}
+```
+
+---
+
+## Step 3 · Register Analyzer — `DumpDetective.Analysis`
+
+**File**: `src/DumpDetective.Analysis/Analyzers/DefaultAnalyzerFactory.cs`
+
+Add `new XxxAnalyzer()` to `CreateAnalyzers()`. The `Name` string here must be **identical** to `IAnalyzer.Name`.
+
+---
+
+## Step 4 · Finding Generator — `DumpDetective.Reporting`
+
+**File**: `src/DumpDetective.Reporting/FindingGenerators/XxxFindingGenerator.cs`
+
+Implement `IFindingGenerator`. Maps `XxxDomainResult` → `IReadOnlyList<InsightFinding>`.
+
+Rules:
+- `AnalyzerName` property must match `XxxAnalyzer.Name` exactly — this is the routing key in `FindingGenerationPipeline`.
+- Emit `Critical` / `Warning` / `Info` findings only when evidence is substantial.
+- Each `InsightFinding.Fingerprint` must be deterministic (no GUIDs, no timestamps) — duplicates are deduplicated by `ReportSerializer` using this key.
+- `Evidence` must be a complete self-contained sentence — no placeholder strings.
+
+**Register in ServiceRegistration.cs**:
+```csharp
+services.AddSingleton<IFindingGenerator, XxxFindingGenerator>();
+```
+
+---
+
+## Step 5 · Trend Comparer — `DumpDetective.Analysis`
+
+**File**: `src/DumpDetective.Analysis/Trend/XxxTrendComparer.cs`
+
+Implement `IAnalyzerTrendComparer`. Defines which numeric fields from `XxxDomainResult` are tracked across dumps.
+
+Rules:
+- `AnalyzerName` must match `XxxAnalyzer.Name` exactly.
+- Only expose **stable scalar metrics** as trend points — not lists, not per-object data.
+- Set `MetricTrendDirection` correctly: `HigherIsWorse` for memory/count metrics, `LowerIsWorse` for coverage/efficiency metrics.
+
+**Register in ServiceRegistration.cs**:
+```csharp
+services.AddSingleton<IAnalyzerTrendComparer, XxxTrendComparer>();
+```
+
+---
+
+## Step 6 · Section Builder — `DumpDetective.Reporting`
+
+**File**: `src/DumpDetective.Reporting/SectionBuilders/XxxSectionBuilder.cs`
+
+Implement `IAnalyzerSectionBuilder`. Converts `XxxDomainResult` → `AnalyzerDetailSection` (a list of `SectionBlock`s).
+
+Rules:
+- `AnalyzerName` must match `XxxAnalyzer.Name` exactly — this is the routing key in `ReportSerializer`.
+- `CanHandle` must be `result is XxxDomainResult` — no duck typing.
+- `SortOrder` must be unique; consult the builder inventory table in this document.
+- Derive from `SectionBuilderBase` to use `H()`, `M()`, `T()`, `Li()`, `Divider()`, `Blank()`, `Cell()` helpers.
+- Use `CollapsibleSectionBeginBlock` / `CollapsibleSectionEndBlock` pairs for any list > 5 entries.
+- Provide `RawValue` on `MetricBlock` and `TableCell` whenever a numeric sort or chart is meaningful.
+
+```csharp
+internal sealed class XxxSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+{
+    public string AnalyzerName  => "Xxx Analysis";
+    public string DisplayTitle  => "Xxx Analysis";
+    public int    SortOrder     => 90;   // pick a unique value
+
+    public bool CanHandle(AnalyzerDomainResult result) => result is XxxDomainResult;
+
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
+    {
+        var domain = (XxxDomainResult)result;
+        var blocks = new List<SectionBlock>();
+
+        blocks.Add(H("SUMMARY"));
+        blocks.Add(M("Total Foo", $"{domain.TotalFoo:N0}", domain.TotalFoo));
+        // ...
+
+        return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks);
+    }
+}
+```
+
+**Register in `DefaultSectionBuilderFactory.CreateBuilders()`**:
+```csharp
+new XxxSectionBuilder(),
+```
+
+---
+
+## Step 7 · Confidence Notes — `ReportSerializer`
+
+**File**: `src/DumpDetective.Reporting/Services/ReportSerializer.cs`
+
+If `XxxDomainResult` exposes any cap/limit signal, add it to `BuildConfidenceNotes()`:
+
+```csharp
+case XxxDomainResult xxx when xxx.FooCapped:
+    notes.Add(new ConfidenceNote(
+        Analyzer: run.AnalyzerName,
+        Capped:   true,
+        Reason:   "Foo search was capped; results may be incomplete."));
+    break;
+```
+
+---
+
+## Step 8 · InsightEngine Inputs (if cross-cutting)
+
+**File**: `src/DumpDetective.Reporting/InsightEngine.cs` (or equivalent)
+
+If `XxxDomainResult` enables new **cross-cutting detections** (e.g. correlating with memory or thread results), add input processing to `InsightEngine.Analyze()` per the table in Part 4 above.
+
+This step is optional for analyzers whose findings are fully self-contained.
+
+---
+
+## Step 9 · Tests
+
+Add at minimum:
+
+| Test file | What to add |
+|-----------|-------------|
+| `SectionBuilderTests.cs` | 2–3 tests: `CanHandle` routing, block structure, key metric values |
+| `ReportDocumentSchemaTests.cs` | 1 test: round-trip with `XxxDomainResult`-populated `AnalyzerDetailSection` |
+
+Golden files (Text / Markdown / JSON) regenerate automatically via `UPDATE_GOLDENS=1` — no manual baseline updates needed unless the fixture data changes.
+
+---
+
+## Step 10 · Update Coverage Docs
+
+| File | Update |
+|------|--------|
+| `docs/ReportStructure/AnalyzerCoverageAnalysis.md` | Mark covered report sections ✅ in Part 1; add row to Part 5 priority table with `Completed`; update `Analyzer Deep-Dive Index` table |
+| `docs/ReportStructure/Analyzers/XxxAnalyzer.md` | Create the per-analyzer spec file (see existing files for format) |
+
+---
+
+## Checklist Summary
+
+```
+□ 1. XxxDomainResult in AnalyzerDomainModels.cs
+□ 2. XxxAnalyzer.cs implements IAnalyzer + calls result.Stamp(this)
+□ 3. DefaultAnalyzerFactory — add new XxxAnalyzer()
+□ 4. XxxFindingGenerator.cs + ServiceRegistration.cs
+□ 5. XxxTrendComparer.cs + ServiceRegistration.cs
+□ 6. XxxSectionBuilder.cs + DefaultSectionBuilderFactory.CreateBuilders()
+□ 7. ReportSerializer.BuildConfidenceNotes() — add cap signal if present
+□ 8. InsightEngine — add cross-cutting input if needed
+□ 9. SectionBuilderTests.cs + ReportDocumentSchemaTests.cs
+□ 10. AnalyzerCoverageAnalysis.md + Analyzers/XxxAnalyzer.md
+```
+
+> **No other files require changes.**
+> `IAnalyzer`, `AnalysisContext`, `ReportSerializer` core logic, `HtmlReportRenderer`,
+> `IReportFormatter`, `TextCanonicalReportFormatter`, `MarkdownCanonicalReportFormatter`,
+> and all golden test baselines are fully stable after Step 9 runs with `UPDATE_GOLDENS=1`.

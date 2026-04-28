@@ -37,6 +37,10 @@ internal sealed class SingleDumpPipelineState : IDisposable
     // ── Stage 4: GenerateFindingsStage ───────────────────────────────────────
     // Enriches Runs in-place with InsightFinding lists; no new properties required.
 
+    // ── Stage 5: InsightEngine (post-pipeline) ───────────────────────────────
+    /// <summary>Cross-cutting insight findings produced by <see cref="DumpDetective.Analysis.Insight.InsightEngine"/>.</summary>
+    public IReadOnlyList<InsightFinding> Insights { get; set; } = [];
+
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
     public string RenderedReport { get; set; } = string.Empty;
 

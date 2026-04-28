@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Pipeline;
 using DumpDetective.Cli.Pipeline.Stages;
@@ -56,6 +57,11 @@ internal sealed class SingleDumpOrchestrationService(
 
         await new StagedPipelineRunner().RunAsync(stages, state, cancellationToken);
 
+        // Run the cross-cutting insight engine after all analyzer findings are generated.
+        state.Insights = new InsightEngine().Analyze(state.Runs);
+        if (state.Insights.Count > 0)
+            PrintInsights(state.Insights, resolved.DiagnosticMode);
+
         if (resolved.DiagnosticMode)
         {
             ConsoleUx.Info($"Pipeline completed in {state.PipelineStopwatch.Elapsed.TotalSeconds:F1}s");
@@ -80,6 +86,33 @@ internal sealed class SingleDumpOrchestrationService(
         new BuildReportStage(_reportBuilderFacade),
         new WriteOutputStage()
     ];
+
+    private static void PrintInsights(IReadOnlyList<InsightFinding> insights, bool diagnosticMode)
+    {
+        if (diagnosticMode)
+            ConsoleUx.Info($"InsightEngine: {insights.Count} cross-cutting finding(s).");
+
+        for (int i = 0; i < insights.Count; i++)
+        {
+            InsightFinding f = insights[i];
+            string prefix = f.Severity switch
+            {
+                FindingSeverity.Critical => "[CRITICAL]",
+                FindingSeverity.Warning  => "[WARNING]",
+                _                        => "[INFO]"
+            };
+
+            if (f.Severity == FindingSeverity.Critical)
+                ConsoleUx.Error($"{prefix} {f.Title}");
+            else if (f.Severity == FindingSeverity.Warning)
+                ConsoleUx.Warning($"{prefix} {f.Title}");
+            else
+                ConsoleUx.Info($"{prefix} {f.Title}");
+
+            if (diagnosticMode)
+                ConsoleUx.Info($"  Evidence: {f.Evidence}");
+        }
+    }
 
     private static void PrintDiagnosticsSummary(IReadOnlyList<AnalyzerRunResult> runs)
     {

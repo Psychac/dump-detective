@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Dump;
+using DumpDetective.Analysis.Query;
 using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Pipeline;
@@ -21,4 +22,11 @@ internal sealed class RuntimeAnalysisContext : DumpDetective.Core.Abstractions.A
     /// (e.g., in unit tests that supply a lightweight <see cref="IHeapAnalysisCache"/> stub).
     /// </summary>
     public IHeapIndexBuilder? HeapIndexBuilder => Cache as IHeapIndexBuilder;
+
+    /// <summary>
+    /// Query engine that operates on the pre-built index — never on the raw heap.
+    /// Lazily instantiated on first access; <c>null</c> in unit tests that do not supply a real runtime.
+    /// </summary>
+    public IQueryEngine? Query => _query ??= new QueryEngine(Cache, Heap);
+    private IQueryEngine? _query;
 }

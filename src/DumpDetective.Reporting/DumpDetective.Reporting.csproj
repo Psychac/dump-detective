@@ -8,6 +8,12 @@
     <RootNamespace>DumpDetective.Reporting</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Templates\report.html" />
+    <EmbeddedResource Include="Templates\report.css" />
+    <EmbeddedResource Include="Templates\report.js" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
   </ItemGroup>

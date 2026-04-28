@@ -89,7 +89,7 @@ internal static class ServiceRegistration
         services.AddSingleton<ReportBuilderFacade>();
         services.AddSingleton<IReportFormatter, TextCanonicalReportFormatter>();
         services.AddSingleton<IReportFormatter, MarkdownCanonicalReportFormatter>();
-        services.AddSingleton<IReportFormatter, HtmlCanonicalReportFormatter>();
+        services.AddSingleton<IReportFormatter, HtmlReportRenderer>();
         services.AddSingleton<IReportFormatter, JsonCanonicalReportFormatter>();
 
         return builder.Build();

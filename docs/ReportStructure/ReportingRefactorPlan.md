@@ -2,7 +2,7 @@
 ## Printers → Section Builders + JSON Output Contract
 
 > **Branch**: `optimize`  
-> **Status**: Phase D + F1/F2/F3 Complete  
+> **Status**: Phase E Complete  
 
 ---
 
@@ -555,7 +555,7 @@ public string Render(AnalysisReportDocument doc) =>
 
 ---
 
-## Phase E — Create Embedded Resource Templates
+## Phase E — Create Embedded Resource Templates ✅ Complete
 
 > Extract all HTML/CSS/JS from `HtmlCanonicalReportFormatter` into proper source files.
 
@@ -571,9 +571,10 @@ public string Render(AnalysisReportDocument doc) =>
 
 ---
 
-### E1 · `report.html` — Page Skeleton
+### E1 · `report.html` — Page Skeleton ✅
 
-**File**: `src/DumpDetective.Reporting/Templates/report.html`
+**File**: `src/DumpDetective.Reporting/Templates/report.html`  
+**Action**: Created  
 
 Contains **exactly three** C#-side substitution placeholders:
 
@@ -600,9 +601,10 @@ All rendering logic is in `report.js`. The C# formatter only stamps in the three
 
 ---
 
-### E2 · `report.css` — Stylesheet
+### E2 · `report.css` — Stylesheet ✅
 
-**File**: `src/DumpDetective.Reporting/Templates/report.css`
+**File**: `src/DumpDetective.Reporting/Templates/report.css`  
+**Action**: Created — CSS extracted from `HtmlCanonicalReportFormatter.AppendCss()`, properly formatted.  
 
 Extracted from the current `HtmlCanonicalReportFormatter` (~100 CSS rules across ~100 `List<string>` entries). Unminified for editability.
 
@@ -625,9 +627,10 @@ Extracted from the current `HtmlCanonicalReportFormatter` (~100 CSS rules across
 
 ---
 
-### E3 · `report.js` — Client-Side Renderer
+### E3 · `report.js` — Client-Side Renderer ✅
 
-**File**: `src/DumpDetective.Reporting/Templates/report.js`
+**File**: `src/DumpDetective.Reporting/Templates/report.js`  
+**Action**: Created — full DOM-building renderer reading `window.__REPORT__`. All user strings use `textContent`. Implements: header, executive summary, developer plan, filter bar, finding cards, analyzer section dispatch (all 10 `SectionBlock` types), filter, table sort, copy-to-clipboard, JSON download, CSV export, print.  
 
 Reads `window.__REPORT__` (`AnalysisReportDocument` JSON) and builds the entire DOM.  
 **Security rule**: All user-originated strings (type names, stack frames, evidence text) use `textContent` assignment — never `innerHTML`.
@@ -653,9 +656,10 @@ Reads `window.__REPORT__` (`AnalysisReportDocument` JSON) and builds the entire 
 
 ---
 
-### E4 · Create `EmbeddedResourceLoader`
+### E4 · Create `EmbeddedResourceLoader` ✅
 
-**File**: `src/DumpDetective.Reporting/Formatters/EmbeddedResourceLoader.cs`
+**File**: `src/DumpDetective.Reporting/Formatters/EmbeddedResourceLoader.cs`  
+**Action**: Created in Phase D.  
 
 ```csharp
 internal static class EmbeddedResourceLoader
@@ -728,7 +732,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 ### F3 · Update `ServiceRegistration` ✅
 
 **File**: `src/DumpDetective.Cli/Hosting/ServiceRegistration.cs`  
-**Action**: Updated — `IAnalyzerReporterFactory` removed; `ISectionBuilderFactory`, `ReportSerializer`, and `JsonCanonicalReportFormatter` added. `HtmlCanonicalReportFormatter` kept until Phase E templates enable `HtmlReportRenderer` swap.  
+**Action**: Complete — `HtmlCanonicalReportFormatter` replaced by `HtmlReportRenderer` (Phase E templates now available). `IAnalyzerReporterFactory` removed; `ISectionBuilderFactory`, `ReportSerializer`, and `JsonCanonicalReportFormatter` registered.  
 
 | Registration | Before | After |
 |---|---|---|

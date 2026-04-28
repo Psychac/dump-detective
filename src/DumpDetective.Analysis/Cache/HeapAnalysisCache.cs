@@ -52,7 +52,7 @@ namespace DumpDetective.Analysis.Cache
                 yield break;
             }
 
-            foreach (HeapEntry entry in HeapIndexEntryReader.ReadDiskEntries(_heapIndex.IndexPath))
+            foreach (HeapEntry entry in ObjectIndexReader.Instance.ReadEntries(_heapIndex.IndexPath))
                 yield return entry;
         }
 

@@ -1,6 +1,9 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -26,10 +29,18 @@ namespace DumpDetective.Analysis.Analyzers
         {
             progress?.Report(new(0, "building memory snapshot"));
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
-            return BuildDomainResult(typeStats);
+
+            // Read Phase 1 GlobalSizeBuckets if available (zero extra heap scan)
+            long[]? globalBuckets = null;
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
+                globalBuckets = heapIndex.GlobalSizeBuckets;
+
+            return BuildDomainResult(typeStats, globalBuckets);
         }
 
-        private static MemoryDomainResult BuildDomainResult(Dictionary<string, CachedTypeStatistics> typeStats)
+        private static MemoryDomainResult BuildDomainResult(
+            Dictionary<string, CachedTypeStatistics> typeStats,
+            long[]? globalSizeBuckets)
         {
             ulong totalMemory = 0;
             ulong totalLohMemory = 0;
@@ -50,8 +61,40 @@ namespace DumpDetective.Analysis.Analyzers
             var byCount = new List<CachedTypeStatistics>(typeStats.Values);
             byCount.Sort((a, b) => b.Count.CompareTo(a.Count));
 
-            static TypeSnapshot ToSnapshot(CachedTypeStatistics s) =>
-                new(s.TypeName, s.Count, s.TotalSize, s.LohSize);
+            static TypeSnapshot ToSnapshot(CachedTypeStatistics s)
+            {
+                ulong avgSize = s.Count > 0 ? s.TotalSize / (ulong)s.Count : 0;
+                return new TypeSnapshot(s.TypeName, s.Count, s.TotalSize, s.LohSize,
+                    AverageSize: avgSize,
+                    EstimatedRetainedBytes: 0);
+            }
+
+            // Build size-bucket histogram from Phase 1 counters (zero heap scan)
+            IReadOnlyList<SizeBucketEntry>? histogram = null;
+            if (globalSizeBuckets is { Length: >= SizeBucketHelper.BucketCount })
+            {
+                var entries = new SizeBucketEntry[SizeBucketHelper.BucketCount];
+                // Compute per-bucket total bytes from typeStats for each bucket boundary
+                // GlobalSizeBuckets only stores object counts; derive TotalBytes from typeStats
+                // by distributing each type's average size into its bucket.
+                var bucketBytes = new ulong[SizeBucketHelper.BucketCount];
+                foreach (var stat in typeStats.Values)
+                {
+                    if (stat.Count <= 0) continue;
+                    ulong avgSize = stat.TotalSize / (ulong)stat.Count;
+                    int idx = SizeBucketHelper.GetBucketIndex(avgSize);
+                    bucketBytes[idx] += stat.TotalSize;
+                }
+
+                for (int i = 0; i < SizeBucketHelper.BucketCount; i++)
+                {
+                    entries[i] = new SizeBucketEntry(
+                        RangeLabel:   SizeBucketHelper.BucketLabels[i],
+                        ObjectCount:  globalSizeBuckets[i],
+                        TotalBytes:   bucketBytes[i]);
+                }
+                histogram = entries;
+            }
 
             return new MemoryDomainResult(
                 totalMemory,
@@ -62,8 +105,8 @@ namespace DumpDetective.Analysis.Analyzers
                 LohThresholdBytes,
                 typeStats.Count,
                 bySize.Take(20).Select(ToSnapshot).ToList(),
-                byCount.Take(20).Select(ToSnapshot).ToList());
+                byCount.Take(20).Select(ToSnapshot).ToList(),
+                SizeBucketHistogram: histogram);
         }
-
     }
 }

@@ -11,7 +11,15 @@ public abstract record AnalyzerDomainResult
 public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
 
 /// <summary>A snapshot of a CLR type's object count and byte footprint on the heap.</summary>
-public sealed record TypeSnapshot(string TypeName, int Count, ulong TotalBytes, ulong LohBytes);
+/// <param name="AverageSize">Average shallow object size in bytes (TotalBytes / Count). Zero when Count is zero.</param>
+/// <param name="EstimatedRetainedBytes">Approximate retained bytes including the reference sub-graph. Zero until populated by DominatorAnalyzer.</param>
+public sealed record TypeSnapshot(
+    string TypeName,
+    int Count,
+    ulong TotalBytes,
+    ulong LohBytes,
+    ulong AverageSize = 0,
+    ulong EstimatedRetainedBytes = 0);
 
 /// <summary>Shared primitive: a name paired with an object count. Used across multiple domain results.</summary>
 public sealed record NameCountEntry(string Name, int Count);

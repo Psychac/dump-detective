@@ -10,6 +10,12 @@ public sealed record LohSegmentSnapshot(
     ulong FreeBytes,
     ulong LargestFreeBlock);
 
+/// <summary>One bucket in the object-size histogram built from <see cref="HeapIndexBuildResult.GlobalSizeBuckets"/>.</summary>
+/// <param name="RangeLabel">Human-readable range label, e.g. "64–255 B".</param>
+/// <param name="ObjectCount">Total number of objects whose shallow size falls in this bucket.</param>
+/// <param name="TotalBytes">Sum of shallow sizes of all objects in this bucket.</param>
+public sealed record SizeBucketEntry(string RangeLabel, long ObjectCount, ulong TotalBytes);
+
 // ── Memory ───────────────────────────────────────────────────────────────────
 
 public sealed record MemoryDomainResult(
@@ -21,7 +27,8 @@ public sealed record MemoryDomainResult(
     ulong LohThresholdBytes,
     int UniqueTypes,
     IReadOnlyList<TypeSnapshot> TopTypesBySize,
-    IReadOnlyList<TypeSnapshot> TopTypesByCount) : AnalyzerDomainResult;
+    IReadOnlyList<TypeSnapshot> TopTypesByCount,
+    IReadOnlyList<SizeBucketEntry>? SizeBucketHistogram = null) : AnalyzerDomainResult;
 
 // ── GC Generation ────────────────────────────────────────────────────────────
 

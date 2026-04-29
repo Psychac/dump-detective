@@ -53,7 +53,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 |----------|--------|-------------|
 | SOH / LOH / POH proportions | ✅ | `SegmentAnalyzer` — `SegmentAnalysisDomainResult` with per-kind bytes |
 | Frozen segment proportion | ✅ | `SegmentAnalyzer` — includes Frozen kind |
-| Object size distribution (histogram) | ❌ | No analyzer produces a size-bucket histogram |
+| Object size distribution (histogram) | ✅ | `MemoryAnalyzer` — `SizeBucketHistogram` (8-bucket `SizeBucketEntry` list) |
 
 ### 2.2 Generation Pressure
 
@@ -81,7 +81,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 |----------|--------|-------------|
 | Count per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot` |
 | Shallow size per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot.TotalSize` |
-| Average size per type | 🟡 | Derivable from count + total size; not explicitly surfaced |
+| Average size per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot.AverageSize` (populated in `ToSnapshot`) |
 | **Estimated retained size** per type | ❌ | ➕ `DominatorAnalyzer` |
 | GC generation distribution per type (Gen0/1/2/LOH %) | ❌ | ➕ `GCGenerationAnalyzer` — `PerTypeGenerationProfile` (requires §4 change) |
 | `IsFinalizable` flag | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.IsFinalizable` |
@@ -230,25 +230,24 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Pending / Faulted / Canceled / Completed task counts | 🟡 | `HangAnalyzer` — `PendingTasks`, `FaultedTasks`, `CanceledTasks` present |
-| Task state distribution as first-class result | 🟡 | Buried inside `HangDomainResult`; mixed with blocking-thread data |
+| Pending / Faulted / Canceled / Completed task counts | ✅ | `AsyncTaskAnalyzer` — `AsyncTaskDomainResult` with full state breakdown |
+| Task state distribution as first-class result | ✅ | `AsyncTaskAnalyzer` — standalone result, no longer buried in `HangDomainResult` |
 
 ### 8.2 Orphaned Tasks
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Tasks with no continuation (never awaited) | ❌ | ✂️ `HangAnalyzer` does not classify orphaned vs awaited |
+| Tasks with no continuation (never awaited) | ✅ | `AsyncTaskAnalyzer` — `OrphanedTasks` count + `TopOrphanedTasks` snapshots |
 
 ### 8.3 Continuation Chains
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Top continuation types | 🟡 | `HangAnalyzer` — `TopContinuationTypes` present |
-| Async execution depth (chain length) | 🟡 | `ThreadAnalyzer` — `MaxAsyncChainDepth`; not per-task chain detail |
-| Continuation chain as structured path | ❌ | ✂️ Split needed |
+| Top continuation types | ✅ | `AsyncTaskAnalyzer` — `TopContinuationTypes` |
+| Async execution depth (chain length) | ✅ | `AsyncTaskAnalyzer` — `MaxContinuationDepth`, `AvgContinuationDepth` |
+| Continuation chain as structured path | ✅ | `AsyncTaskAnalyzer` — BFS depth-20 per task, top orphaned snapshots |
 
-**Verdict**: §8 needs `AsyncTaskAnalyzer` split from `HangAnalyzer`. Task data is present but
-conflated with hang/blocking data and lacks orphan detection.
+**Verdict**: §8 is now fully covered by `AsyncTaskAnalyzer` (split from `HangAnalyzer`).
 
 ---
 
@@ -402,7 +401,7 @@ conflated with hang/blocking data and lacks orphan detection.
 > This is a **report rendering concern**, not an analyzer concern.
 > Analyzers must expose structured data (histograms, distributions, ranked lists) that
 > renderers can consume. Key data gaps that block visualization:
-> - Object size histogram (§2.1) — ❌ missing
+- Object size histogram (§2.1) — ✅ `MemoryAnalyzer` `SizeBucketHistogram`
 > - Retention tree / dominator data (§4) — ❌ missing
 > - Root distribution chart data (§5.1) — ❌ missing
 
@@ -692,7 +691,7 @@ and **Related Analyzers** for that single analyzer.
 
 | Priority | Analyzer | File | Key Gap |
 |----------|----------|------|---------|
-| 3 | `MemoryAnalyzer` | [MemoryAnalyzer.md](Analyzers/MemoryAnalyzer.md) | `AverageSize`, `SizeBucketHistogram` |
+| 3 | `MemoryAnalyzer` | [MemoryAnalyzer.md](Analyzers/MemoryAnalyzer.md) | `AverageSize`, `SizeBucketHistogram` | ✅ **Completed** |
 | 4 | `GCGenerationAnalyzer` | [GCGenerationAnalyzer.md](Analyzers/GCGenerationAnalyzer.md) | `PerTypeGenerationProfile`, eliminate Phase 2 re-scan |
 | — | `SegmentAnalyzer` | [SegmentAnalyzer.md](Analyzers/SegmentAnalyzer.md) | POH type distribution, reserved memory |
 | 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` |
@@ -717,7 +716,7 @@ and **Related Analyzers** for that single analyzer.
 |----------|----------|------|-----------------|
 | 10 | `GCRootAnalyzer` | [GCRootAnalyzer.md](Analyzers/GCRootAnalyzer.md) | §5.1–5.3 |
 | 11 | `DominatorAnalyzer` | [DominatorAnalyzer.md](Analyzers/DominatorAnalyzer.md) | §3.1–3.2, §4.1–4.3 |
-| 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 |
+| 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 | ✅ **Completed** |
 | 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 |
 | 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 |
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
@@ -770,8 +769,8 @@ Additionally, `InsightEngine` must gain:
 | Priority | Item | Type | Effort | Phase 1 Prereq |
 |----------|------|------|--------|----------------|
 | 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low | ✅ `IsStringType` flag ready | ✅ **Completed** |
-| 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written |
-| 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready |
+| 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written | ✅ **Completed** |
+| 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready | ✅ **Completed** |
 | 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
 | 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written |
 | 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written |

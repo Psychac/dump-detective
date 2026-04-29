@@ -52,11 +52,58 @@ public sealed class SectionBuilderTests
         section.Blocks.OfType<MetricBlock>()
             .Should().Contain(m => m.RawValue > 0, "total bytes metric must carry raw value");
 
-        // At least two tables (top by size, top by count)
+        // At least two tables (top by size, top by count); no histogram when null
         section.Blocks.OfType<TableBlock>().Should().HaveCountGreaterThanOrEqualTo(2);
 
         TableBlock sizeTable = section.Blocks.OfType<TableBlock>().First();
         sizeTable.Rows[0].Cells[0].Display.Should().Contain("System.String");
+        // Avg Size column must be present (4 cells per row)
+        sizeTable.Rows[0].Cells.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public void MemorySectionBuilder_Build_EmitsHistogramTableWhenBucketsPresent()
+    {
+        var histogram = new List<SizeBucketEntry>
+        {
+            new("< 16 B",    1_000_000, 12_000_000),
+            new("16–63 B",   5_000_000, 200_000_000),
+            new("64–255 B",  2_000_000, 320_000_000),
+            new("256–1023 B",  500_000, 350_000_000),
+            new("1 KB–16 KB",  100_000, 800_000_000),
+            new("16 KB–85 KB",  10_000, 500_000_000),
+            new("85 KB–1 MB",    1_000, 200_000_000),
+            new("≥ 1 MB",          50, 100_000_000),
+        };
+
+        var domain = Stamped(new MemoryDomainResult(
+            TotalBytes:        2_482_000_000,
+            LohBytes:           300_000_000,
+            LohPercent:         12.1,
+            TotalObjects:       8_611_050,
+            LohObjects:          11_050,
+            LohThresholdBytes:    85_000,
+            UniqueTypes:           4_500,
+            TopTypesBySize:   [new TypeSnapshot("System.Byte[]", 11_050, 300_000_000, 300_000_000, AverageSize: 27_149)],
+            TopTypesByCount:  [new TypeSnapshot("System.String", 5_000_000, 200_000_000, 0, AverageSize: 40)],
+            SizeBucketHistogram: histogram),
+            "Memory Analysis", "Memory");
+
+        var builder = new MemorySectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        // Three tables: size-distribution histogram + top-by-size + top-by-count
+        section.Blocks.OfType<TableBlock>().Should().HaveCount(3);
+
+        TableBlock histTable = section.Blocks.OfType<TableBlock>().First();
+        histTable.Headers.Should().Contain("Size Range");
+        histTable.Rows.Should().HaveCount(8);
+        histTable.Rows[0].Cells[0].Display.Should().Be("< 16 B");
+        histTable.Rows[0].Cells[1].RawValue.Should().Be(1_000_000);
+
+        // Avg Size cell must carry a RawValue when AverageSize > 0
+        TableBlock sizeTable = section.Blocks.OfType<TableBlock>().Skip(1).First();
+        sizeTable.Rows[0].Cells[3].RawValue.Should().Be(27_149);
     }
 
     [Fact]

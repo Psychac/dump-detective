@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -34,12 +35,33 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ? T("LOH share is elevated; review large-object allocation and retention patterns.")
             : T("LOH share appears within expected range for this snapshot."));
 
+        // ── §2.1 Object Size Distribution Histogram ───────────────────────────
+        if (d.SizeBucketHistogram is { Count: > 0 })
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("OBJECT SIZE DISTRIBUTION"));
+            blocks.Add(Divider());
+            var rows = new List<TableRow>(d.SizeBucketHistogram.Count);
+            for (int i = 0; i < d.SizeBucketHistogram.Count; i++)
+            {
+                var bucket = d.SizeBucketHistogram[i];
+                rows.Add(new TableRow([
+                    new TableCell(bucket.RangeLabel),
+                    new TableCell($"{bucket.ObjectCount:N0}", bucket.ObjectCount),
+                    new TableCell(FormatHelper.FormatBytes(bucket.TotalBytes), (long)bucket.TotalBytes)]));
+            }
+            blocks.Add(new TableBlock(
+                Caption: "Object count and bytes by size range",
+                Headers: ["Size Range", "Object Count", "Total Bytes"],
+                Rows: rows));
+        }
+
         blocks.Add(Blank());
         blocks.Add(H("TOP 20 OBJECT TYPES BY MEMORY SIZE"));
         blocks.Add(Divider());
         blocks.Add(new TableBlock(
             Caption: "Top 20 object types by memory size",
-            Headers: ["Type", "Count", "Total Size"],
+            Headers: ["Type", "Count", "Total Size", "Avg Size"],
             Rows: BuildTypeRows(d.TopTypesBySize, TopItems)));
 
         blocks.Add(Blank());
@@ -47,7 +69,7 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
         blocks.Add(Divider());
         blocks.Add(new TableBlock(
             Caption: "Top 20 object types by count",
-            Headers: ["Type", "Count", "Total Size"],
+            Headers: ["Type", "Count", "Total Size", "Avg Size"],
             Rows: BuildTypeRows(d.TopTypesByCount, TopItems)));
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
@@ -60,10 +82,15 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
         for (int i = 0; i < limit; i++)
         {
             var t = types[i];
+            string avgDisplay = t.AverageSize > 0
+                ? FormatHelper.FormatBytes(t.AverageSize)
+                : t.Count > 0 ? FormatHelper.FormatBytes(t.TotalBytes / (ulong)t.Count) : "—";
+
             rows.Add(new TableRow([
                 new TableCell(t.TypeName),
                 new TableCell($"{t.Count:N0}", t.Count),
-                new TableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes)]));
+                new TableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes),
+                new TableCell(avgDisplay, t.AverageSize > 0 ? (long)t.AverageSize : null)]));
         }
         return rows;
     }

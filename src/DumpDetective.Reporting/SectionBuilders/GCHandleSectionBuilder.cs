@@ -23,10 +23,12 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
 
         blocks.Add(H("HANDLE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Handles",          $"{d.TotalHandles:N0}",                              d.TotalHandles));
-        blocks.Add(M("Strong-like Handles",    $"{d.StrongLikeHandles:N0}  ({strongPct:F1}%)",      d.StrongLikeHandles));
-        blocks.Add(M("Weak-like Handles",      $"{d.WeakLikeHandles:N0}  ({weakPct:F1}%)",          d.WeakLikeHandles));
-        blocks.Add(M("Pinned Handle Targets",  $"{d.PinnedHandleTargets:N0}  ({pinnedPct:F1}%)",    d.PinnedHandleTargets));
+        blocks.Add(M("Total Handles",           $"{d.TotalHandles:N0}",                              d.TotalHandles));
+        blocks.Add(M("Strong-like Handles",     $"{d.StrongLikeHandles:N0}  ({strongPct:F1}%)",      d.StrongLikeHandles));
+        blocks.Add(M("Weak-like Handles",       $"{d.WeakLikeHandles:N0}  ({weakPct:F1}%)",          d.WeakLikeHandles));
+        blocks.Add(M("Pinned Handle Targets",   $"{d.PinnedHandleTargets:N0}  ({pinnedPct:F1}%)",    d.PinnedHandleTargets));
+        if (d.PinnedRetainedBytes > 0)
+            blocks.Add(M("Pinned Retained Bytes", FormatHelper.FormatBytes(d.PinnedRetainedBytes),   (long)d.PinnedRetainedBytes));
 
         var byKind = d.HandlesByKind ?? [];
         if (byKind.Count > 0)
@@ -72,6 +74,27 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
             for (int i = 0; i < pinnedTypes.Count; i++)
                 ptRows.Add(new TableRow([Cell(pinnedTypes[i].Name), Cell($"{pinnedTypes[i].Count:N0}", pinnedTypes[i].Count)]));
             blocks.Add(new TableBlock("Pinned handle target types", ["Type", "Count"], ptRows));
+        }
+
+        var pinnedBySizeList = d.TopPinnedObjectsBySize ?? [];
+        if (pinnedBySizeList.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("TOP PINNED TYPES BY RETAINED BYTES"));
+            blocks.Add(Divider());
+
+            ulong totalPinned = d.PinnedRetainedBytes;
+            var pbRows = new List<TableRow>(pinnedBySizeList.Count);
+            for (int i = 0; i < pinnedBySizeList.Count; i++)
+            {
+                var entry = pinnedBySizeList[i];
+                double pct = totalPinned == 0 ? 0 : entry.Bytes * 100.0 / totalPinned;
+                pbRows.Add(new TableRow([
+                    Cell(entry.Name),
+                    Cell(FormatHelper.FormatBytes(entry.Bytes), (long)entry.Bytes),
+                    Cell($"{pct:F1}%")]));
+            }
+            blocks.Add(new TableBlock("Pinned types by retained bytes", ["Type", "Retained Bytes", "% Pinned"], pbRows));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);

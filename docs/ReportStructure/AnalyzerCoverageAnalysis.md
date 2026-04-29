@@ -271,8 +271,8 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
 | Pinned handle count | ✅ | `GCHandleAnalyzer` — `PinnedTypes`, `ByHandleKind["Pinned"]` |
-| Pinned object types and sizes | 🟡 | `GCHandleAnalyzer` — type counts present; retained bytes not computed |
-| GC blocking impact score | ❌ | `GCHandleAnalyzer` needs retained-size estimation for pinned objects |
+| Pinned object types and sizes | ✅ | `GCHandleAnalyzer` — `TopPinnedObjectsBySize` with retained bytes per type |
+| GC blocking impact score | 🟡 | `GCHandleAnalyzer` — `PinnedRetainedBytes` now computed; no formal GC-pressure score yet |
 
 ---
 
@@ -697,7 +697,7 @@ and **Related Analyzers** for that single analyzer.
 | 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` |
 | 1 | `MemoryLeakAnalyzer` | [MemoryLeakAnalyzer.md](Analyzers/MemoryLeakAnalyzer.md) | ✂️ Split — extract `StringAnalyzer`; add `SuspicionScore` |
 | — | `StaticRootLeakDetector` | [StaticRootLeakDetector.md](Analyzers/StaticRootLeakDetector.md) | `BfsCappedCount`, `RetentionPatternHints` |
-| 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 |
+| 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 | ✅ **Completed** |
 | — | `ThreadAnalyzer` | [ThreadAnalyzer.md](Analyzers/ThreadAnalyzer.md) | `ThreadsWithLargeStackRoots`, `LongLivedThreadCount` |
 | 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` |
 | 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` |
@@ -772,7 +772,7 @@ Additionally, `InsightEngine` must gain:
 | 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written | ✅ **Completed** |
 | 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready | ✅ **Completed** |
 | 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
-| 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written |
+| 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
 | 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written |
 | 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs |
 | 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready |

@@ -30,7 +30,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            var pinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
             var allTargetTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            ulong totalPinnedRetainedBytes = 0;
             // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
             // for handles whose target type has already been resolved. Collapses N handles of the
             // same type to a single heap dereference — same pattern as stringMethodTables in MemoryLeakAnalyzer.
@@ -56,12 +58,14 @@ namespace DumpDetective.Analysis.Analyzers
 
                 ulong targetAddress = GetTargetAddress(handle);
                 string? typeName;
+                ulong resolvedSize = 0;
                 if (heap is not null && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build))
                 {
                     // Fast-path: resolve type name from index's TypeAggregates by method-table if possible
                     ClrObject targetObject = heap.GetObject(targetAddress);
                     if (targetObject.IsValid)
                     {
+                        resolvedSize = targetObject.Size;
                         ulong mt = targetObject.Type?.MethodTable ?? 0;
                         if (mt != 0 && build.TypeAggregates.TryGetValue(mt, out var agg))
                         {
@@ -96,7 +100,17 @@ namespace DumpDetective.Analysis.Analyzers
                 Increment(allTargetTypes, typeName);
 
                 if (kind.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
+                {
                     Increment(pinnedTypes, typeName);
+                    if (resolvedSize > 0)
+                    {
+                        totalPinnedRetainedBytes += resolvedSize;
+                        if (pinnedBytesByType.TryGetValue(typeName, out ulong existingBytes))
+                            pinnedBytesByType[typeName] = existingBytes + resolvedSize;
+                        else
+                            pinnedBytesByType[typeName] = resolvedSize;
+                    }
+                }
             }
 
             scanCounter.Complete();
@@ -109,6 +123,13 @@ namespace DumpDetective.Analysis.Analyzers
                     list.Add(new NameCountEntry(kvp.Key, kvp.Value));
                 return list;
             }
+            static List<NameBytesEntry> ToTopByteEntries(Dictionary<string, ulong> source, int take)
+            {
+                var list = new List<NameBytesEntry>(Math.Min(source.Count, take));
+                foreach (var kvp in source.OrderByDescending(k => k.Value).Take(take))
+                    list.Add(new NameBytesEntry(kvp.Key, kvp.Value));
+                return list;
+            }
 
             return new GCHandleDomainResult(
                     totalHandles,
@@ -117,7 +138,9 @@ namespace DumpDetective.Analysis.Analyzers
                     pinnedHandleTargets,
                     ToTopEntries(byKind, TopTypeCount),
                     ToTopEntries(allTargetTypes, TopTypeCount),
-                    ToTopEntries(pinnedTypes, TopTypeCount));
+                    ToTopEntries(pinnedTypes, TopTypeCount),
+                    totalPinnedRetainedBytes,
+                    ToTopByteEntries(pinnedBytesByType, TopTypeCount));
         }
 
         private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)

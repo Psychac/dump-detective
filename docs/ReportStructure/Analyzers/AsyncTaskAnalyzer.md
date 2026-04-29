@@ -1,7 +1,7 @@
 # AsyncTaskAnalyzer — Design Spec
 
 ## Status
-**New** (split from `HangAnalyzer`) · Implementation Priority **2** · Effort: Medium
+**Completed** ✅ (split from `HangAnalyzer`) · Implementation Priority **2** · Effort: Medium
 
 ## Report Sections Served
 - §8.1 Task Summary (total tasks, status breakdown)

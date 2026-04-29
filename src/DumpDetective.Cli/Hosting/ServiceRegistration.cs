@@ -50,6 +50,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, GCHandleFindingGenerator>();
         services.AddSingleton<IFindingGenerator, LohFragmentationFindingGenerator>();
         services.AddSingleton<IFindingGenerator, HangFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, AsyncTaskFindingGenerator>();
         services.AddSingleton<IFindingGenerator, LockGraphFindingGenerator>();
         services.AddSingleton<IFindingGenerator, StaticRootFindingGenerator>();
         services.AddSingleton<IFindingGenerator, ReferenceChainFindingGenerator>();
@@ -74,6 +75,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, GCHandleTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, LohFragmentationTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, HangTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, AsyncTaskTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, LockGraphTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, StaticRootTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, ReferenceChainTrendComparer>();

@@ -210,4 +210,85 @@ public sealed class SectionBuilderTests
         segTable!.Rows.Should().HaveCount(1);
         segTable.Rows[0].Cells[0].Display.Should().StartWith("0x");
     }
+
+    // ── AsyncTask ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AsyncTaskSectionBuilder_CanHandle_ReturnsTrueForAsyncTaskDomainResult()
+    {
+        var domain = Stamped(new AsyncTaskDomainResult(
+            TotalTasks: 0, PendingTasks: 0, RunningTasks: 0, FaultedTasks: 0,
+            CanceledTasks: 0, CompletedTasks: 0, OrphanedTasks: 0,
+            MaxContinuationDepth: 0, AvgContinuationDepth: 0.0, TaskScanLimited: false,
+            TopPendingTaskTypes: [], TopFaultedTaskTypes: [],
+            TopContinuationTypes: [], TopOrphanedTasks: []),
+            "Async Task Analysis", "Async");
+
+        new AsyncTaskSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AsyncTaskSectionBuilder_CanHandle_ReturnsFalseForUnrelatedResult()
+    {
+        var unrelated = Stamped(new MemoryDomainResult(
+            TotalBytes: 0, LohBytes: 0, LohPercent: 0, TotalObjects: 0, LohObjects: 0,
+            LohThresholdBytes: 0, UniqueTypes: 0, TopTypesBySize: [], TopTypesByCount: []),
+            "Memory Analysis", "Memory");
+
+        new AsyncTaskSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AsyncTaskSectionBuilder_Build_EmitsSummaryMetricsTablesAndOrphans()
+    {
+        var orphaned = new List<OrphanedTaskSnapshot>
+        {
+            new(0xDEAD_BEEF_0001UL, "System.Threading.Tasks.Task`1[[System.String]]", "System.String", 120),
+            new(0xDEAD_BEEF_0002UL, "System.Threading.Tasks.Task",                   null,            96),
+        };
+
+        var domain = Stamped(new AsyncTaskDomainResult(
+            TotalTasks:           1_200,
+            PendingTasks:         450,
+            RunningTasks:         12,
+            FaultedTasks:         33,
+            CanceledTasks:        5,
+            CompletedTasks:       700,
+            OrphanedTasks:        orphaned.Count,
+            MaxContinuationDepth: 8,
+            AvgContinuationDepth: 3.4,
+            TaskScanLimited:      false,
+            TopPendingTaskTypes:  [new NameCountEntry("System.Threading.Tasks.Task`1[[Foo]]", 400)],
+            TopFaultedTaskTypes:  [new NameCountEntry("System.Threading.Tasks.Task",           33)],
+            TopContinuationTypes: [new NameCountEntry("System.Runtime.CompilerServices.AsyncTaskMethodBuilder", 120)],
+            TopOrphanedTasks:     orphaned),
+            "Async Task Analysis", "Async");
+
+        var builder = new AsyncTaskSectionBuilder();
+        builder.CanHandle(domain).Should().BeTrue();
+
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        section.AnalyzerName.Should().Be("Async Task Analysis");
+        section.DisplayTitle.Should().Be("Async & Task Analysis");
+        section.SortOrder.Should().Be(28);
+
+        // Must have at least one heading block
+        section.Blocks.OfType<HeadingBlock>().Should().NotBeEmpty();
+
+        // Total tasks metric must be present with correct raw value
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Total Tasks" && m.RawValue == 1_200);
+
+        // Max chain depth metric
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Max Chain Depth" && m.RawValue == 8);
+
+        // Orphaned tasks table must contain both entries
+        TableBlock? orphanTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("Orphaned", StringComparison.OrdinalIgnoreCase));
+        orphanTable.Should().NotBeNull("orphaned tasks table must be emitted when orphans exist");
+        orphanTable!.Rows.Should().HaveCount(2);
+        orphanTable.Rows[0].Cells[1].Display.Should().Contain("Task`1");
+    }
 }

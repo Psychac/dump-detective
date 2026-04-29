@@ -237,6 +237,14 @@ internal sealed class ReportSerializer
                     Capped: true,
                     Reason: "Task scan limited due to heap size; task totals may be partial."));
             }
+
+            if (run.Result is AsyncTaskDomainResult asyncTask && asyncTask.TaskScanLimited)
+            {
+                notes.Add(new ConfidenceNote(
+                    Analyzer: run.AnalyzerName,
+                    Capped: true,
+                    Reason: "Async task scan was capped at 50 000 entries; orphan counts and state totals may be partial."));
+            }
         }
 
         return notes;

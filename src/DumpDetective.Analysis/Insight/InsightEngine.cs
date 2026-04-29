@@ -47,6 +47,7 @@ internal sealed class InsightEngine
         SegmentAnalysisDomainResult? segments = FindResult<SegmentAnalysisDomainResult>(runs);
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
+        AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
         MemoryLeakDomainResult? leak = FindResult<MemoryLeakDomainResult>(runs);
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
@@ -62,6 +63,7 @@ internal sealed class InsightEngine
         DetectActiveCrash(findings, crash);
         DetectLeakSuspicion(findings, leak, strings);
         DetectWastefulCollections(findings, collections);
+        DetectOrphanedTaskAccumulation(findings, asyncTasks, threads);
         DetectAnalyzerFailures(findings, runs);
 
         // Sort by severity descending: Critical(2) > Warning(1) > Info(0)
@@ -366,6 +368,48 @@ internal sealed class InsightEngine
             Recommendation: "Call TrimExcess() after bulk-removing items from List<T> or Dictionary<K,V>. " +
                             "Use initial capacity hints in collection constructors to avoid over-allocation.",
             Tags: ["collections", "capacity", "wasted-memory"]));
+    }
+
+    private static void DetectOrphanedTaskAccumulation(
+        List<InsightFinding> findings,
+        AsyncTaskDomainResult? asyncTasks,
+        ThreadDomainResult? threads)
+    {
+        if (asyncTasks is null) return;
+
+        // Cross-cutting: orphaned faulted tasks + blocked finalizer = risk of starvation
+        if (asyncTasks.FaultedTasks > 0 && threads is { FinalizerThreadBlocked: true })
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Async",
+                Severity: FindingSeverity.Warning,
+                Title: "Faulted tasks combined with blocked finalizer thread",
+                Evidence: $"{asyncTasks.FaultedTasks:N0} faulted tasks detected while the finalizer thread is blocked. Unobserved task exceptions may prevent finalizable resources from being reclaimed.",
+                Recommendation: "Ensure task exceptions are observed (await, .Exception, or UnobservedTaskException handler). Unblock the finalizer thread to resume resource cleanup.",
+                Tags: ["async", "task", "fault", "finalizer"],
+                MetricValue: asyncTasks.FaultedTasks,
+                MetricUnit: "faulted-tasks"));
+        }
+
+        // Cross-cutting: large orphan count relative to total tasks
+        if (asyncTasks.TotalTasks > 0)
+        {
+            double orphanPct = asyncTasks.OrphanedTasks * 100.0 / asyncTasks.TotalTasks;
+            if (orphanPct >= 30.0 && asyncTasks.OrphanedTasks >= 50)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: Source,
+                    Category: "Async",
+                    Severity: FindingSeverity.Warning,
+                    Title: "High proportion of orphaned tasks indicates systemic fire-and-forget",
+                    Evidence: $"{asyncTasks.OrphanedTasks:N0} of {asyncTasks.TotalTasks:N0} tasks ({orphanPct:F1}%) have no continuation. This pattern prevents exception propagation and may mask faults.",
+                    Recommendation: "Audit call sites that produce tasks without await. Use Task.WhenAll for bulk orchestration and structured concurrency to ensure tasks are always observed.",
+                    Tags: ["async", "task", "orphan", "pattern"],
+                    MetricValue: orphanPct,
+                    MetricUnit: "% orphaned"));
+            }
+        }
     }
 
     private static void DetectAnalyzerFailures(

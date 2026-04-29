@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
@@ -20,23 +19,16 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
 
-        // Each segment gets its own entry list sized from its own byte length (see below).        // Each segment gets its own entry list sized from that segment's byte length.
-        // This is far more accurate than distributing a whole-heap estimate across threads:
-        // a per-thread list accumulates multiple segments and the threadCount divisor can
-        // undershoot badly, causing List<T> to double many times and discard large HeapEntry[]
-        // backing arrays (profiler showed ~955 MB wasted in discarded arrays).
         // Cap DOP so ClrMD's minidump page cache never holds more than this many segments'
-        // pages resident simultaneously. Uncapped (default -1) causes ProcessorCount threads
-        // to each hold a different segment's pages in cache concurrently, which multiplied the
-        // working-set footprint proportional to core count after the parallel rearchitecture.
-        // 4 concurrent segments gives ~4x speedup over sequential while bounding peak page pressure.
+        // pages resident simultaneously.
         const int MaxSegmentParallelism = 4;
 
         var masterBuilder  = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
-        var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<(HeapEntry[] Buffer, int Count)>();
-        var shapeCache = new ConcurrentDictionary<ulong, TypeShapeEntry>();
-        long objectCount = 0;
+        var shapeCache     = new ConcurrentDictionary<ulong, TypeShapeEntry>();
+        // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
+        // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
+        var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
 
         var parallelOptions = new ParallelOptions
         {
@@ -44,23 +36,55 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             MaxDegreeOfParallelism = MaxSegmentParallelism
         };
 
-        Parallel.ForEach(
-            heap.Segments,
+        // ── Phase 1: count-only parallel scan ────────────────────────────────────────────
+        // Enumerate each segment cheaply — IsValid check only, no type resolution, zero
+        // heap allocations.  The resulting per-segment counts feed exact-size prefix sums
+        // so Phase 2 can write directly into flatEntries without any intermediate buffers,
+        // trimming, or over-allocation.
+        ClrSegment[] segments = heap.Segments.ToArray();
+        int[] perSegmentCounts = new int[segments.Length];
+
+        Parallel.For(0, segments.Length, parallelOptions, i =>
+        {
+            int count = 0;
+            foreach (ClrObject obj in segments[i].EnumerateObjects())
+            {
+                if (obj.IsValid)
+                    count++;
+            }
+            perSegmentCounts[i] = count;
+        });
+
+        // Compute per-segment write offsets via prefix sums.
+        int[] segmentOffsets = new int[segments.Length];
+        int phase1Total = 0;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            segmentOffsets[i] = phase1Total;
+            phase1Total += perSegmentCounts[i];
+        }
+
+        // Allocate exactly the right number of slots — no over-allocation, no trim needed.
+        // Phase 1 counts obj.IsValid inclusively; Phase 2 may skip a small number of those
+        // (Type == null or MethodTable == 0).  actualCount tracks the true written count.
+        HeapEntry[] flatEntries = GC.AllocateUninitializedArray<HeapEntry>(Math.Max(phase1Total, 1));
+        long objectCount = 0;
+
+        // ── Phase 2: full parallel scan — direct write into flatEntries ────────────────
+        // Each segment writes into its own pre-computed contiguous slice of flatEntries at
+        // segmentOffsets[i], so there are no cross-thread writes and no per-segment buffers.
+        Parallel.For(
+            0,
+            segments.Length,
             parallelOptions,
             () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64)),
-            (segment, _, state) =>
+            (i, _, state) =>
             {
-                int segGen = MemorySegmentKindToGeneration(segment.Kind);
-                // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
-                // initial rent is guaranteed to hold all objects without resizing in the common case.
-                // Capped at 1_000_000 entries (~24 MB) to keep each ArrayPool loan reasonable;
-                // segments with more objects than the cap grow via pool doubling below — old buffers
-                // are returned to the pool rather than discarded as GC garbage, eliminating the
-                // ~800 MB of HeapEntry[] backing-array churn observed in profiling.
-                const int MaxInitialRent = 1_000_000;
-                int initCapacity = (int)Math.Min(Math.Max((long)segment.Length / 24, 64), MaxInitialRent);
-                HeapEntry[] segBuf = ArrayPool<HeapEntry>.Shared.Rent(initCapacity);
-                int segCount = 0;
+                ClrSegment segment = segments[i];
+                int segGen  = MemorySegmentKindToGeneration(segment.Kind);
+                int baseSlot = segmentOffsets[i];
+                int written  = 0;
+                int slotCap  = perSegmentCounts[i]; // safety: don't overrun this segment's slice
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
@@ -70,35 +94,34 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     if (mt == 0)
                         continue;
 
-                    if (segCount == segBuf.Length)
-                    {
-                        // Grow via pool: return old buffer, rent one twice as large.
-                        HeapEntry[] bigger = ArrayPool<HeapEntry>.Shared.Rent(segBuf.Length * 2);
-                        segBuf.AsSpan(0, segCount).CopyTo(bigger);
-                        ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
-                        segBuf = bigger;
-                    }
-
-                    // Compute type flags + shape once per unique MT (thread-local cache).
+                    // Compute type flags + shape once per unique MT globally.
                     TypeAggregateFlags flags;
                     if (!state.FlagsCache.TryGetValue(mt, out flags))
                     {
-                        flags = ComputeTypeFlags(obj.Type);
+                        if (!globalFlagsCache.TryGetValue(mt, out flags))
+                        {
+                            flags = ComputeTypeFlags(obj.Type);
+                            globalFlagsCache.TryAdd(mt, flags);
+                            shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
+                        }
                         state.FlagsCache[mt] = flags;
-                        shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
                     }
 
                     var entry    = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    segBuf[segCount++] = entry;
                     state.Builder.Add(entry, moduleId, flags, segGen);
+
+                    // Write directly into this segment's reserved slice — no intermediate buffer.
+                    if (written < slotCap)
+                        flatEntries[baseSlot + written] = entry;
+
+                    written++;
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (count % ProgressInterval == 0)
                         progress?.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                allSegmentEntries.Add((segBuf, segCount));
                 return state;
             },
             state =>
@@ -107,16 +130,15 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     masterBuilder.Merge(state.Builder);
             });
 
-        // Flatten per-segment pooled buffers into a single exact-sized array,
-        // then return each rented buffer to the pool so it can be reused.
-        int totalCount = (int)Math.Min(objectCount, int.MaxValue);
-        var flatEntries = new HeapEntry[Math.Max(totalCount, 1)];
-        int writeOffset = 0;
-        foreach ((HeapEntry[] segBuf, int segCount) in allSegmentEntries)
+        int actualCount = (int)Math.Min(objectCount, int.MaxValue);
+
+        // Phase 1 counts obj.IsValid; Phase 2 additionally filters Type==null / MT==0.
+        // For a static dump those counts should be identical, but trim the rare difference.
+        if (flatEntries.Length - actualCount > 50_000)
         {
-            segBuf.AsSpan(0, segCount).CopyTo(flatEntries.AsSpan(writeOffset));
-            writeOffset += segCount;
-            ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+            HeapEntry[] trimmed = GC.AllocateUninitializedArray<HeapEntry>(Math.Max(actualCount, 1));
+            flatEntries.AsSpan(0, actualCount).CopyTo(trimmed);
+            flatEntries = trimmed;
         }
 
         stopwatch.Stop();
@@ -125,7 +147,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Memory,
             IndexPath: "<memory>",
-            ObjectCount: objectCount,
+            ObjectCount: actualCount,
             Elapsed: stopwatch.Elapsed,
             TypeAggregates: masterBuilder.Build(),
             InMemoryEntries: flatEntries,

@@ -49,5 +49,12 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// <summary>Stopwatch started when the state is created; used to compute cumulative elapsed across stages.</summary>
     public Stopwatch PipelineStopwatch { get; } = Stopwatch.StartNew();
 
+    /// <summary>
+    /// Per-stage memory snapshots. Populated by <see cref="StagedPipelineRunner"/> when
+    /// <c>DiagnosticsOptions.EnableMemoryDiagnostics</c> is set. Empty otherwise.
+    /// Reuses <see cref="AnalyzerMemoryStats"/> — the same four counters apply to any timed scope.
+    /// </summary>
+    public List<(string StageName, AnalyzerMemoryStats Stats)> StageMemoryStats { get; } = [];
+
     public void Dispose() => LoadContext?.Dispose();
 }

@@ -191,6 +191,83 @@ internal static class ConsoleUx
         }
     }
 
+    // ── Memory diagnostics ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Prints the header row for the per-analyzer memory table.
+    /// </summary>
+    public static void MemoryTableHeader()
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]🧠  Memory usage per analyzer[/]");
+            PrintMemoryColumnHeader_NoLock();
+        }
+    }
+
+    /// <summary>
+    /// Prints the header row for the per-stage memory table.
+    /// </summary>
+    public static void MemoryStageTableHeader()
+    {
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"{Timestamp()} [deepskyblue1]🧠  Memory usage per pipeline stage[/]");
+            PrintMemoryColumnHeader_NoLock();
+        }
+    }
+
+    private static void PrintMemoryColumnHeader_NoLock()
+    {
+        AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{"Name",-42}  {"WS Δ",10}  {"WS After",10}  {"Managed Δ",10}[/]");
+        AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{new string('─', 42)}  {new string('─', 10)}  {new string('─', 10)}  {new string('─', 10)}[/]");
+    }
+
+    /// <summary>
+    /// Prints one row for an analyzer in the memory table.
+    /// <paramref name="wsDelta"/> and <paramref name="managedDelta"/> are raw byte values (signed).
+    /// </summary>
+    public static void MemoryTableRow(string analyzerName, long wsDelta, long wsAfter, long managedDelta)
+    {
+        string wsDeltaStr    = FormatSignedBytes(wsDelta);
+        string wsAfterStr    = FormatBytes((ulong)Math.Max(0, wsAfter));
+        string managedStr    = FormatSignedBytes(managedDelta);
+        string deltaColor    = wsDelta > 50 * 1024 * 1024 ? "yellow" : wsDelta > 200 * 1024 * 1024 ? "red" : "grey";
+
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine(
+                $"{IndentAnalyzer}[white]{Escape(analyzerName),-42}[/]" +
+                $"  [{deltaColor}]{Escape(wsDeltaStr),10}[/]" +
+                $"  [grey]{Escape(wsAfterStr),10}[/]" +
+                $"  [grey]{Escape(managedStr),10}[/]");
+        }
+    }
+
+    /// <summary>
+    /// Prints the process-level peak working set observed across the analysis run.
+    /// </summary>
+    public static void MemoryTableFooter(long peakWorkingSet, long baselineWorkingSet)
+    {
+        long totalDelta = peakWorkingSet - baselineWorkingSet;
+        string peakStr  = FormatBytes((ulong)Math.Max(0, peakWorkingSet));
+        string deltaStr = FormatSignedBytes(totalDelta);
+
+        lock (_consoleGate)
+        {
+            FlushScanLineIfNeeded_NoLock();
+            AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{new string('─', 78)}[/]");
+            AnsiConsole.MarkupLine(
+                $"{IndentAnalyzer}[grey]Peak process working set:[/]  [bold white]{Escape(peakStr)}[/]" +
+                $"  [grey](Δ from baseline: {Escape(deltaStr)})[/]");
+        }
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
 
     private static string Timestamp() => $"[grey][[{DateTime.Now:HH:mm:ss}]][/]";
@@ -217,5 +294,19 @@ internal static class ConsoleUx
         }
 
         return $"{elapsed.TotalMilliseconds:F0}ms";
+    }
+
+    private static string FormatBytes(ulong bytes)
+    {
+        if (bytes >= 1024UL * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+        if (bytes >= 1024UL * 1024)        return $"{bytes / (1024.0 * 1024):F1} MB";
+        if (bytes >= 1024UL)               return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes} B";
+    }
+
+    private static string FormatSignedBytes(long bytes)
+    {
+        string sign = bytes >= 0 ? "+" : "-";
+        return $"{sign}{FormatBytes((ulong)Math.Abs(bytes))}";
     }
 }

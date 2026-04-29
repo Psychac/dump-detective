@@ -46,8 +46,12 @@ namespace DumpDetective.Analysis.Cache
                     yield break;
 
                 // OPT-#14: Iterate over HeapEntry[] directly (was IReadOnlyList<HeapEntry>).
-                foreach (HeapEntry entry in _heapIndex.InMemoryEntries)
-                    yield return entry;
+                // Limit to ObjectCount to guard against any residual over-allocation from
+                // the pre-alloc + atomic-cursor strategy in MemoryBackedObjectIndexWriter.
+                int safeCount = (int)Math.Min(_heapIndex.ObjectCount, _heapIndex.InMemoryEntries.Length);
+                HeapEntry[] arr = _heapIndex.InMemoryEntries;
+                for (int i = 0; i < safeCount; i++)
+                    yield return arr[i];
 
                 yield break;
             }

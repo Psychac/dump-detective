@@ -21,7 +21,7 @@ namespace BenchmarkSuite1;
 ///   1. Load dump → DataTarget / ClrRuntime / ClrHeap
 ///   2. Prebuild heap index (Auto mode — same as BuildHeapIndexStage)
 ///   3. Build RuntimeAnalysisContext with all real options
-///   4. Execute AnalysisPipeline with all 16 real analyzers
+///   4. Execute AnalysisPipeline with all 18 real analyzers
 /// Report generation (FindingGenerationPipeline, ReportBuilderFacade, WriteOutputStage)
 /// is intentionally excluded — this benchmark isolates analysis memory and CPU.
 /// </summary>
@@ -87,10 +87,12 @@ public class FullPipelineBenchmark
         {
             new MemoryAnalyzer(),
             new GCGenerationAnalyzer(),
+            new SegmentAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
             new HangAnalyzer(),
             new MemoryLeakAnalyzer(),
+            new StringAnalyzer(),
             new CollectionAnalyzer(),
             new StaticRootLeakDetector(),
             new ReferenceChainAnalyzer(),
@@ -111,11 +113,11 @@ public class FullPipelineBenchmark
     }
 
     /// <summary>
-    /// Runs all 16 real analyzers against the real crash dump through the production pipeline.
+    /// Runs all 18 real analyzers against the real crash dump through the production pipeline.
     /// The context and cached index are reused across iterations so each iteration measures
     /// only the analysis cost — not dump loading or index building.
     /// </summary>
-    [Benchmark(Description = "Full analysis pipeline — all 16 real analyzers")]
+    [Benchmark(Description = "Full analysis pipeline — all 18 real analyzers")]
     public async Task<int> RunFullPipeline()
     {
         IReadOnlyList<AnalyzerRunResult> results =

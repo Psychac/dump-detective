@@ -138,9 +138,14 @@ namespace DumpDetective.Analysis.Analyzers
         private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers, IProgress<AnalyzerProgressReport>? progress)
         {
             var leaks = new List<EventLeakInfo>();
-            var processedObjects = new HashSet<ulong>();
-            var processedStaticMethodTables = new HashSet<ulong>();
-            var processedStaticDelegates = new HashSet<ulong>();
+            // FIX-3: processedObjects removed — heap-index enumeration and heap.EnumerateObjects() both
+            // yield each object address exactly once, so the deduplication HashSet was redundant.
+            // It grew to hold ALL scanned addresses (up to 20 M entries / ~320 MB) and triggered 30+
+            // Entry[] resize allocations accounting for most of the 386 MB HashSet<ulong> allocation cost.
+            // processedStaticMethodTables and processedStaticDelegates are still needed and are
+            // pre-sized to avoid resize churn (unique type count and static delegate count are small).
+            var processedStaticMethodTables = new HashSet<ulong>(capacity: 64);
+            var processedStaticDelegates    = new HashSet<ulong>(capacity: 64);
             var appDomains = heap.Runtime.AppDomains;
             var rootHints = BuildRootHintMap(heap, cache);
             var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
@@ -150,7 +155,7 @@ namespace DumpDetective.Analysis.Analyzers
                 scanCounter.Tick();
 
                 ulong objectAddress = entry.Address;
-                if (objectAddress == 0 || !processedObjects.Add(objectAddress))
+                if (objectAddress == 0)
                     continue;
 
                 ClrObject obj = heap.GetObject(objectAddress);

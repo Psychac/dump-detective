@@ -70,6 +70,9 @@ internal sealed class SingleDumpOrchestrationService(
             PrintDiagnosticsSummary(state.Runs);
         }
 
+        if (resolved.Diagnostics.EnableMemoryDiagnostics)
+            PrintMemorySummary(state.Runs, state.StageMemoryStats);
+
         totalStopwatch.Stop();
         ConsoleUx.Success($"Total analysis time: {totalStopwatch.Elapsed.TotalSeconds:F1}s");
 
@@ -113,6 +116,46 @@ internal sealed class SingleDumpOrchestrationService(
             if (diagnosticMode)
                 ConsoleUx.Info($"  Evidence: {f.Evidence}");
         }
+    }
+
+    private static void PrintMemorySummary(
+        IReadOnlyList<AnalyzerRunResult> runs,
+        List<(string StageName, AnalyzerMemoryStats Stats)> stageStats)
+    {
+        // ── Stage table ──────────────────────────────────────────────────────
+        if (stageStats.Count > 0)
+        {
+            ConsoleUx.MemoryStageTableHeader();
+            foreach ((string name, AnalyzerMemoryStats s) in stageStats)
+                ConsoleUx.MemoryTableRow(name, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+        }
+
+        // ── Analyzer table ───────────────────────────────────────────────────
+        var withStats = runs
+            .Where(r => r.MemoryStats is not null)
+            .ToList();
+
+        if (withStats.Count > 0)
+        {
+            ConsoleUx.MemoryTableHeader();
+            foreach (AnalyzerRunResult run in withStats)
+            {
+                AnalyzerMemoryStats s = run.MemoryStats!;
+                ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+            }
+        }
+
+        // ── Process peak across all measured scopes ──────────────────────────
+        long baseline = stageStats.Count > 0
+            ? stageStats[0].Stats.WorkingSetBefore
+            : withStats.Count > 0 ? withStats[0].MemoryStats!.WorkingSetBefore : 0;
+
+        long peakFromStages    = stageStats.Count > 0    ? stageStats.Max(s => s.Stats.WorkingSetAfter)    : 0;
+        long peakFromAnalyzers = withStats.Count > 0     ? withStats.Max(r => r.MemoryStats!.WorkingSetAfter) : 0;
+        long peak = Math.Max(peakFromStages, peakFromAnalyzers);
+
+        if (peak > 0)
+            ConsoleUx.MemoryTableFooter(peak, baseline);
     }
 
     private static void PrintDiagnosticsSummary(IReadOnlyList<AnalyzerRunResult> runs)

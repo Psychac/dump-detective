@@ -51,13 +51,25 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         var masterBuilder  = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
-        var allSegmentEntries = new System.Collections.Concurrent.ConcurrentBag<(HeapEntry[] Buffer, int Count)>();
-
         // Satellite data collected during parallel scan, written serially afterwards.
         var shapeCache      = new ConcurrentDictionary<ulong, TypeShapeEntry>();
+        // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
+        // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
+        var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
         var taskCandidates  = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
+
+        // OPT: open the index file before the parallel scan so each segment writes directly to
+        // disk as it completes — eliminating the post-scan bag + flat-array accumulation
+        // (~1.2 GB of pool buffers + flat array that were previously simultaneously live).
+        // Serialization (CPU) runs outside the lock; only stream.Write is serialized.
+        int serialChunkEntries = Math.Max(writeBuffer / RecordSize, 1);
+        int serialChunkBytes   = serialChunkEntries * RecordSize;
+        object streamWriteLock = new();
+        using FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read,
+            bufferSize: writeBuffer, FileOptions.SequentialScan);
+        WriteObjIndexHeader(stream, recordCount: 0); // placeholder — overwritten after scan
 
         var parallelOptions = new ParallelOptions
         {
@@ -104,13 +116,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         segBuf = bigger;
                     }
 
-                    // Compute type flags + shape once per unique MT (thread-local cache).
+                    // Compute type flags + shape once per unique MT.
                     TypeAggregateFlags flags;
                     if (!state.FlagsCache.TryGetValue(mt, out flags))
                     {
-                        flags = ComputeTypeFlags(obj.Type);
+                        if (!globalFlagsCache.TryGetValue(mt, out flags))
+                        {
+                            flags = ComputeTypeFlags(obj.Type);
+                            globalFlagsCache.TryAdd(mt, flags);
+                            shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
+                        }
                         state.FlagsCache[mt] = flags;
-                        shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
                     }
 
                     var entry    = new HeapEntry(obj.Address, mt, obj.Size);
@@ -131,7 +147,39 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                allSegmentEntries.Add((segBuf, segCount));
+                // Serialize segment entries to disk in fixed-size chunks.
+                // Each chunk is serialized to a pooled byte[] outside the lock, then flushed
+                // to the stream under the write lock.  The HeapEntry pool buffer is returned
+                // immediately after — at most MaxSegmentParallelism buffers are live at any instant.
+                {
+                    byte[] serialBuf = ArrayPool<byte>.Shared.Rent(serialChunkBytes);
+                    try
+                    {
+                        int srcIdx = 0;
+                        while (srcIdx < segCount)
+                        {
+                            int chunkEntries = Math.Min(serialChunkEntries, segCount - srcIdx);
+                            int chunkBytes = chunkEntries * RecordSize;
+                            for (int ci = 0; ci < chunkEntries; ci++)
+                            {
+                                int off = ci * RecordSize;
+                                ref HeapEntry e = ref segBuf[srcIdx + ci];
+                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off),      e.Address);
+                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 8),  e.MethodTable);
+                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 16), e.Size);
+                            }
+                            lock (streamWriteLock)
+                                stream.Write(serialBuf, 0, chunkBytes);
+                            srcIdx += chunkEntries;
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(serialBuf);
+                        ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+                    }
+                }
+
                 return state;
             },
             state =>
@@ -140,71 +188,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     masterBuilder.Merge(state.Builder);
             });
 
-        // Flatten per-segment pooled buffers into a single exact-sized array,
-        // then return each rented buffer to the pool so it can be reused.
-        int totalCount = (int)Math.Min(objectCount, int.MaxValue);
-        HeapEntry[] entries = new HeapEntry[Math.Max(totalCount, 1)];
-        int writeOffset = 0;
-        foreach ((HeapEntry[] segBuf, int segCount) in allSegmentEntries)
-        {
-            segBuf.AsSpan(0, segCount).CopyTo(entries.AsSpan(writeOffset));
-            writeOffset += segCount;
-            ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
-        }
-
-        // Now write flattened entries to disk using batched writes
-        using (FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: writeBuffer, FileOptions.SequentialScan))
-        {
-            WriteObjIndexHeader(stream, recordCount: 0);
-
-            // Rent a larger buffer so we can batch many records per single FileStream.Write
-            int batchSize = Math.Max(writeBuffer, RecordSize);
-            // Make batchSize a multiple of RecordSize to avoid partial-record writes
-            batchSize = (batchSize / RecordSize) * RecordSize;
-            if (batchSize == 0) batchSize = RecordSize;
-
-            byte[]? rented = ArrayPool<byte>.Shared.Rent(batchSize);
-            try
-            {
-                int offset = 0;
-                long writtenCount = 0;
-                foreach (HeapEntry entry in entries)
-                {
-                    var span = new Span<byte>(rented, offset, RecordSize);
-                    BinaryPrimitives.WriteUInt64LittleEndian(span, entry.Address);
-                    BinaryPrimitives.WriteUInt64LittleEndian(span[8..], entry.MethodTable);
-                    BinaryPrimitives.WriteUInt64LittleEndian(span[16..], entry.Size);
-
-                    offset += RecordSize;
-                    writtenCount++;
-
-                    if (writtenCount % ProgressReportEveryObjects == 0)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (progress is not null)
-                            progress.Report(new(writtenCount, "writing index", Detail: null, Elapsed: stopwatch.Elapsed));
-                    }
-
-                    if (offset == batchSize)
-                    {
-                        stream.Write(rented, 0, offset);
-                        offset = 0;
-                    }
-                }
-
-                if (offset > 0)
-                    stream.Write(rented, 0, offset);
-
-                stream.Flush();
-                stream.Position = 0;
-                WriteObjIndexHeader(stream, objectCount);
-            }
-            finally
-            {
-                if (rented is not null)
-                    ArrayPool<byte>.Shared.Return(rented);
-            }
-        }
+        // Seal the index: flush buffered data, rewind, and overwrite the placeholder header
+        // with the actual record count now that all segment writes have completed.
+        stream.Flush();
+        stream.Position = 0;
+        WriteObjIndexHeader(stream, objectCount);
+        stream.Flush();
 
         stopwatch.Stop();
         progress?.Report(new(objectCount, "index complete", Detail: null, Elapsed: stopwatch.Elapsed));

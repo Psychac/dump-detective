@@ -1,5 +1,19 @@
 namespace DumpDetective.Core.Models;
 
+/// <summary>
+/// Lightweight memory snapshot captured before and after a single analyzer run.
+/// All values are sampled without forcing a GC collection to keep overhead minimal.
+/// </summary>
+internal sealed record AnalyzerMemoryStats(
+    long WorkingSetBefore,
+    long WorkingSetAfter,
+    long ManagedHeapBefore,
+    long ManagedHeapAfter)
+{
+    public long WorkingSetDelta   => WorkingSetAfter   - WorkingSetBefore;
+    public long ManagedHeapDelta  => ManagedHeapAfter  - ManagedHeapBefore;
+}
+
 internal enum AnalyzerExecutionStatus
 {
     Success,
@@ -26,7 +40,12 @@ internal sealed record AnalyzerRunResult(
     /// <see cref="DumpDetective.Reporting.Pipeline.FindingGenerationPipeline"/> execution.
     /// Non-null means findings may be incomplete. Surfaced as a Warning in the report and console.
     /// </summary>
-    string? FindingGeneratorError = null)
+    string? FindingGeneratorError = null,
+    /// <summary>
+    /// Per-analyzer memory stats captured when <c>--memory-diagnostics</c> is enabled.
+    /// Null when memory diagnostics are disabled (default).
+    /// </summary>
+    AnalyzerMemoryStats? MemoryStats = null)
 {
     /// <summary>Generated findings for this run. Populated by <see cref="DumpDetective.Analysis.FindingGenerators"/> after the analyzer completes.</summary>
     public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? [];

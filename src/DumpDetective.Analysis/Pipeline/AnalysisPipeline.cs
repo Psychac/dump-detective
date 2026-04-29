@@ -2,12 +2,15 @@
 using System.Diagnostics;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 {
     private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
+    // Cached once per pipeline instance to avoid repeated OS round-trips per analyzer.
+    private static readonly Process _currentProcess = Process.GetCurrentProcess();
 
     public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(RuntimeAnalysisContext context, CancellationToken cancellationToken)
     {
@@ -77,6 +80,15 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             if (context.Cache is IHeapIndexBuilder cacheWithProgress)
                 cacheWithProgress.SetProgress(context.Progress);
 
+            AnalyzerMemoryStats? memoryStats = null;
+            long wsBefore = 0, managedBefore = 0;
+            if (context.Diagnostics.EnableMemoryDiagnostics)
+            {
+                _currentProcess.Refresh();
+                wsBefore      = _currentProcess.WorkingSet64;
+                managedBefore = GC.GetTotalMemory(false);
+            }
+
             try
             {
                 AnalyzerDomainResult analyzerResult = await ExecuteAnalyzerWithProgressAsync(
@@ -93,6 +105,16 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 
                 stopwatch.Stop();
 
+                if (context.Diagnostics.EnableMemoryDiagnostics)
+                {
+                    _currentProcess.Refresh();
+                    memoryStats = new AnalyzerMemoryStats(
+                        WorkingSetBefore:  wsBefore,
+                        WorkingSetAfter:   _currentProcess.WorkingSet64,
+                        ManagedHeapBefore: managedBefore,
+                        ManagedHeapAfter:  GC.GetTotalMemory(false));
+                }
+
                 AnalyzerRunResult success = new(
                     analyzer.Name,
                     AnalyzerExecutionStatus.Success,
@@ -105,7 +127,8 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     WarningCount: warningCount,
                     ObjectScanCount: objectScans,
                     CacheHits: cacheHits,
-                    CacheMisses: cacheMisses);
+                    CacheMisses: cacheMisses,
+                    MemoryStats: memoryStats);
 
                 runResults.Add(success);
 

@@ -1,4 +1,4 @@
-﻿# Analyzer Coverage Analysis
+﻿****# Analyzer Coverage Analysis
 ## Professional Tier Report — Section-to-Analyzer Mapping & Capability Gap Analysis
 
 > **Scope**: This document maps every section of `ProfessionalTierReport.md` to the existing
@@ -83,7 +83,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 | Shallow size per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot.TotalSize` |
 | Average size per type | ✅ | `MemoryAnalyzer` — `TypeSnapshot.AverageSize` (populated in `ToSnapshot`) |
 | **Estimated retained size** per type | ❌ | ➕ `DominatorAnalyzer` |
-| GC generation distribution per type (Gen0/1/2/LOH %) | ❌ | ➕ `GCGenerationAnalyzer` — `PerTypeGenerationProfile` (requires §4 change) |
+| GC generation distribution per type (Gen0/1/2/LOH %) | ✅ | `GCGenerationAnalyzer` — `PerTypeGenerationProfiles` (top 20 by count, built from Phase-1 `TypeAggregates`) |
 | `IsFinalizable` flag | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.IsFinalizable` |
 | `IsValueType` flag | ❌ | ➕ `ObjectShapeAnalyzer` — `ClrType.IsValueType` |
 | `IsArray` flag + component type | ❌ | ➕ `ArrayAnalyzer` — `ClrType.IsArray`, `ClrType.ComponentType` |
@@ -283,7 +283,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
 | LOH total size + segment count | ✅ | `LohFragmentationAnalyzer` + `GCGenerationAnalyzer` |
-| LOH object type distribution | 🟡 | `GCGenerationAnalyzer` — `TopLohTypes` (top by count/size) |
+| LOH object type distribution | ✅ | `GCGenerationAnalyzer` — `TopLohTypes` (top 15 by LOH bytes; non-nullable) |
 | POH summary | 🟡 | `SegmentAnalyzer` — POH bytes; no per-object POH breakdown |
 
 ### 10.2 Fragmentation

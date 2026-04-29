@@ -36,7 +36,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
         blocks.Add(M("Gen2 bytes", FormatHelper.FormatBytes(d.Gen2Bytes), (double)d.Gen2Bytes));
         blocks.Add(M("LOH bytes",  FormatHelper.FormatBytes(d.LohBytes),  (double)d.LohBytes));
 
-        var lohTypes = d.TopLohTypes ?? [];
+        var lohTypes = d.TopLohTypes;
         if (lohTypes.Count > 0)
         {
             blocks.Add(Blank());
@@ -50,9 +50,20 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
         blocks.Add(Blank());
         blocks.Add(H("LOH RISK SIGNAL"));
         blocks.Add(Divider());
+        blocks.Add(M("Gen2 long-lived objects", $"{d.Gen2Pct:F1}%", d.Gen2Pct));
         blocks.Add(d.LohPercent >= 35
             ? T("LOH footprint is elevated for this dump.")
             : T("LOH footprint is not elevated."));
+
+        if (d.PerTypeGenerationProfiles is { Count: > 0 } profiles)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("PER-TYPE GENERATION DISTRIBUTION (TOP 20 BY COUNT)"));
+            blocks.Add(new TableBlock(
+                Caption: "Per-type generation distribution",
+                Headers: ["Type", "Gen0", "Gen1", "Gen2", "LOH"],
+                Rows: BuildGenProfileRows(profiles)));
+        }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
     }
@@ -68,6 +79,21 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                 new TableCell(t.TypeName),
                 new TableCell($"{t.Count:N0}", t.Count),
                 new TableCell(FormatHelper.FormatBytes(t.TotalBytes), (long)t.TotalBytes)]));
+        }
+        return rows;
+    }
+
+    private static List<TableRow> BuildGenProfileRows(IReadOnlyList<TypeGenerationProfile> profiles)
+    {
+        var rows = new List<TableRow>(profiles.Count);
+        foreach (TypeGenerationProfile p in profiles)
+        {
+            rows.Add(new TableRow([
+                new TableCell(p.TypeName),
+                new TableCell($"{p.Gen0Count:N0}", p.Gen0Count),
+                new TableCell($"{p.Gen1Count:N0}", p.Gen1Count),
+                new TableCell($"{p.Gen2Count:N0}", p.Gen2Count),
+                new TableCell($"{p.LohCount:N0}", p.LohCount)]));
         }
         return rows;
     }

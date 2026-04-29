@@ -25,9 +25,9 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         MemoryLeakOptions options = context.GetOption<MemoryLeakOptions>();
         ulong totalManagedBytes = GetTotalManagedBytes(context);
-        HashSet<ulong> fohAddressRanges = BuildFohAddressSet(context.Heap);
+        List<(ulong Start, ulong End)> fohSegments = BuildFohSegments(context.Heap);
 
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, totalManagedBytes, fohAddressRanges, context.Progress).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, totalManagedBytes, fohSegments, context.Progress).Stamp(this));
     }
 
     private static AnalyzerDomainResult Analyze(
@@ -35,7 +35,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         IHeapAnalysisCache? cache,
         MemoryLeakOptions options,
         ulong totalManagedBytes,
-        HashSet<ulong> fohStartAddresses,
+        List<(ulong Start, ulong End)> fohSegments,
         IProgress<AnalyzerProgressReport>? progress)
     {
         // Build string MT set from TypeAggregates flags (Phase 1 fast path).
@@ -70,7 +70,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                 if (!IsStringMt(heap, mt, stringMts))
                     continue;
 
-                ProcessString(heap, address, size, options, stringStats, fohStartAddresses,
+                ProcessString(heap, address, size, options, stringStats, fohSegments,
                     ref totalStrings, ref totalStringMemory, ref lohStringBytes,
                     ref internedStringCount, ref internedStringBytes, veryLongStrings);
             }
@@ -89,7 +89,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                     continue;
 
                 stringMts.Add(obj.Type.MethodTable);
-                ProcessString(heap, obj.Address, obj.Size, options, stringStats, fohStartAddresses,
+                ProcessString(heap, obj.Address, obj.Size, options, stringStats, fohSegments,
                     ref totalStrings, ref totalStringMemory, ref lohStringBytes,
                     ref internedStringCount, ref internedStringBytes, veryLongStrings);
             }
@@ -188,7 +188,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         ulong size,
         MemoryLeakOptions options,
         Dictionary<StringFingerprint, StringLeakInfo> stringStats,
-        HashSet<ulong> fohStartAddresses,
+        List<(ulong Start, ulong End)> fohSegments,
         ref int totalStrings,
         ref ulong totalStringMemory,
         ref ulong lohStringBytes,
@@ -212,7 +212,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             veryLongStrings.Add(new LongStringEntry(address, estimatedCharLength, size));
 
         // Interned strings live in FOH (frozen object heap) segments.
-        if (fohStartAddresses.Count > 0 && IsInFoh(address, heap, fohStartAddresses))
+        if (fohSegments.Count > 0 && IsInFoh(address, fohSegments))
         {
             internedStringCount++;
             internedStringBytes += size;
@@ -243,13 +243,15 @@ internal sealed class StringAnalyzer : IAnalyzer
     }
 
     /// <summary>
-    /// Build a set of FOH segment address ranges from heap segments.
+    /// Build the list of FOH segment ranges (Start, End) from heap segments.
     /// Uses <c>ClrSegment.Kind</c> via reflection to detect Frozen segments
     /// (same approach as <see cref="SegmentAnalyzer"/>).
+    /// Only FOH segments are returned, so per-string range checks are O(foh_segments)
+    /// instead of O(total_segments).
     /// </summary>
-    private static HashSet<ulong> BuildFohAddressSet(ClrHeap heap)
+    private static List<(ulong Start, ulong End)> BuildFohSegments(ClrHeap heap)
     {
-        var set = new HashSet<ulong>(capacity: 4);
+        var list = new List<(ulong, ulong)>(capacity: 4);
         foreach (ClrSegment segment in heap.Segments)
         {
             string? kindName = segment.GetType()
@@ -258,17 +260,17 @@ internal sealed class StringAnalyzer : IAnalyzer
                 ?.ToString();
 
             if (kindName is not null && kindName.Contains("Frozen", StringComparison.OrdinalIgnoreCase))
-                set.Add(segment.Start);
+                list.Add((segment.Start, segment.End));
         }
-        return set;
+        return list;
     }
 
-    private static bool IsInFoh(ulong address, ClrHeap heap, HashSet<ulong> fohStartAddresses)
+    private static bool IsInFoh(ulong address, List<(ulong Start, ulong End)> fohSegments)
     {
-        foreach (ClrSegment segment in heap.Segments)
+        for (int i = 0; i < fohSegments.Count; i++)
         {
-            if (fohStartAddresses.Contains(segment.Start) &&
-                address >= segment.Start && address < segment.End)
+            (ulong start, ulong end) = fohSegments[i];
+            if (address >= start && address < end)
                 return true;
         }
         return false;

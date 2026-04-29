@@ -578,10 +578,12 @@ namespace DumpDetective.Analysis.Trend.Comparers
             [
                 MetricDeltaHelper.Compute("string.total", null, b.TotalStrings, c.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.total.bytes", null, b.TotalStringMemoryBytes, c.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.unique", null, b.UniqueStrings, c.UniqueStrings, "objects", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("string.duplicate.patterns", null, b.DuplicatePatternCount, c.DuplicatePatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.duplicate.wasted.bytes", null, b.DuplicateWastedBytes, c.DuplicateWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.duplication.ratio", null, b.DuplicationRatio, c.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.loh.bytes", null, b.LohStringBytes, c.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.pct.heap", null, b.PctOfManagedHeap, c.PctOfManagedHeap, "%", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.gen2.count", null, b.Gen2StringCount, c.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
             ];
         }

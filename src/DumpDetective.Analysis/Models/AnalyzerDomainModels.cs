@@ -10,6 +10,14 @@ public sealed record LohSegmentSnapshot(
     ulong FreeBytes,
     ulong LargestFreeBlock);
 
+/// <summary>One bucket in the free-gap size histogram for LOH fragmentation analysis.</summary>
+/// <param name="GapSizeRange">Human-readable size range, e.g. "1 KB – 64 KB".</param>
+/// <param name="GapCount">Number of free gaps whose size falls within this range.</param>
+public sealed record FreeGapBucket(string GapSizeRange, int GapCount);
+
+/// <summary>Snapshot of a single large (LOH) object captured during Phase 1 index build.</summary>
+public sealed record LargeObjectSnapshot(ulong Address, string TypeName, ulong Size);
+
 /// <summary>One bucket in the object-size histogram built from <see cref="HeapIndexBuildResult.GlobalSizeBuckets"/>.</summary>
 /// <param name="RangeLabel">Human-readable range label, e.g. "64–255 B".</param>
 /// <param name="ObjectCount">Total number of objects whose shallow size falls in this bucket.</param>
@@ -325,7 +333,11 @@ internal sealed record LohFragmentationDomainResult(
     int FreeBlockCount,
     double FragmentationPercent,
     ulong LargestFreeBlock,
-    IReadOnlyList<LohSegmentSnapshot>? TopFragmentedSegments = null) : AnalyzerDomainResult;
+    IReadOnlyList<LohSegmentSnapshot>? TopFragmentedSegments = null,
+    /// <summary>Distribution of free-gap sizes across all LOH segments.</summary>
+    IReadOnlyList<FreeGapBucket>? FreeGapHistogram = null,
+    /// <summary>Top large objects by size (up to 20), from Phase 1 LargeObjectIndex.bin.</summary>
+    IReadOnlyList<LargeObjectSnapshot>? TopLargeObjects = null) : AnalyzerDomainResult;
 
 // ── Segments ─────────────────────────────────────────────────────────────────
 

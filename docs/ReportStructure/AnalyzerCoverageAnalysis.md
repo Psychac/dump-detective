@@ -292,7 +292,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 |----------|--------|-------------|
 | Per-segment fragmentation % | ✅ | `LohFragmentationAnalyzer` — `LohSegmentSnapshot.FragmentationPercent` |
 | Largest free block per segment | ✅ | `LohFragmentationAnalyzer` — `LargestFreeBlock` |
-| Free gap distribution | 🟡 | `LohFragmentationAnalyzer` — total free bytes only; no gap histogram |
+| Free gap distribution | ✅ | `LohFragmentationAnalyzer` — `FreeGapHistogram` bucketed by gap size range |
 
 ### 10.3 Large Object Lifetimes
 
@@ -554,7 +554,7 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Top 10 largest individual LOH arrays | 🟡 | `LohFragmentationAnalyzer` — `TopLargeObjects` (post §6 change); no element type detail |
+| Top 10 largest individual LOH arrays | 🟡 | `LohFragmentationAnalyzer` — `TopLargeObjects` (top 20 by size, from Phase 1 index); no element type detail |
 | `byte[]` > 1 MB (pooling candidates) | ❌ | ➕ `ArrayAnalyzer` |
 | Multi-dimensional arrays > 85 KB | ❌ | ➕ `ArrayAnalyzer` |
 
@@ -694,7 +694,7 @@ and **Related Analyzers** for that single analyzer.
 | 3 | `MemoryAnalyzer` | [MemoryAnalyzer.md](Analyzers/MemoryAnalyzer.md) | `AverageSize`, `SizeBucketHistogram` | ✅ **Completed** |
 | 4 | `GCGenerationAnalyzer` | [GCGenerationAnalyzer.md](Analyzers/GCGenerationAnalyzer.md) | `PerTypeGenerationProfile`, eliminate Phase 2 re-scan |
 | — | `SegmentAnalyzer` | [SegmentAnalyzer.md](Analyzers/SegmentAnalyzer.md) | POH type distribution, reserved memory |
-| 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` |
+| 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` | ✅ **Completed** |
 | 1 | `MemoryLeakAnalyzer` | [MemoryLeakAnalyzer.md](Analyzers/MemoryLeakAnalyzer.md) | ✂️ Split — extract `StringAnalyzer`; add `SuspicionScore` |
 | — | `StaticRootLeakDetector` | [StaticRootLeakDetector.md](Analyzers/StaticRootLeakDetector.md) | `BfsCappedCount`, `RetentionPatternHints` |
 | 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 | ✅ **Completed** |
@@ -773,7 +773,7 @@ Additionally, `InsightEngine` must gain:
 | 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready | ✅ **Completed** |
 | 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
 | 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
-| 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written |
+| 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written | ✅ **Completed** |
 | 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs |
 | 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready |
 | 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready |

@@ -56,6 +56,45 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         else
             blocks.Add(T("LOH fragmentation is within normal range."));
 
+        var histogram = d.FreeGapHistogram ?? [];
+        if (histogram.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("FREE-GAP SIZE DISTRIBUTION"));
+            blocks.Add(Divider());
+            var hRows = new List<TableRow>(histogram.Count);
+            int totalGaps = 0;
+            for (int i = 0; i < histogram.Count; i++) totalGaps += histogram[i].GapCount;
+            for (int i = 0; i < histogram.Count; i++)
+            {
+                var bucket = histogram[i];
+                double pct = totalGaps == 0 ? 0 : bucket.GapCount * 100.0 / totalGaps;
+                hRows.Add(new TableRow([
+                    Cell(bucket.GapSizeRange),
+                    Cell($"{bucket.GapCount:N0}", bucket.GapCount),
+                    Cell($"{pct:F1}%")]));
+            }
+            blocks.Add(new TableBlock("Free-gap size distribution", ["Gap Size Range", "Count", "% of Gaps"], hRows));
+        }
+
+        var largeObjects = d.TopLargeObjects ?? [];
+        if (largeObjects.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("TOP LARGE OBJECTS (LOH)"));
+            blocks.Add(Divider());
+            var loRows = new List<TableRow>(largeObjects.Count);
+            for (int i = 0; i < largeObjects.Count; i++)
+            {
+                var lo = largeObjects[i];
+                loRows.Add(new TableRow([
+                    Cell(lo.TypeName),
+                    Cell(FormatHelper.FormatBytes(lo.Size), (long)lo.Size),
+                    Cell($"0x{lo.Address:x16}")]));
+            }
+            blocks.Add(new TableBlock("Top large objects by size", ["Type", "Size", "Address"], loRows));
+        }
+
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
     }
 }

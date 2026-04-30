@@ -21,6 +21,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new GCGenerationAnalyzer(),
             new AllocationPatternAnalyzer(),
             new ObjectShapeAnalyzer(),
+            new GCRootAnalyzer(),
             new SegmentAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),

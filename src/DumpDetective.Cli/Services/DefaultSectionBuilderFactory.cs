@@ -11,6 +11,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new GCGenerationSectionBuilder(),
         new AllocationPatternSectionBuilder(),
         new ObjectShapeSectionBuilder(),
+        new GCRootSectionBuilder(),
         new SegmentSectionBuilder(),
         new ModuleSectionBuilder(),
         new CrashSectionBuilder(),

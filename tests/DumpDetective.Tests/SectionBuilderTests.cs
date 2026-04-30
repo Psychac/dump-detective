@@ -638,5 +638,107 @@ public sealed class SectionBuilderTests
         valTable!.Rows.Should().HaveCount(1);
         valTable.Rows[0].Cells[0].Display.Should().Contain("Rectangle");
     }
+
+    // ── GCRootSectionBuilder tests ────────────────────────────────────────────
+
+    [Fact]
+    public void GCRootSectionBuilder_CanHandle_ReturnsTrue()
+    {
+        var domain = Stamped(new GCRootDomainResult(
+            TotalRoots: 0, ByKind: [], TopRootsBySeverity: [],
+            RootPaths: [], PathSearchCapped: false, PathSearchCappedCount: 0),
+            "GC Root Analysis", "Memory");
+
+        new GCRootSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void GCRootSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(new GCRootDomainResult(
+            TotalRoots: 0, ByKind: [], TopRootsBySeverity: [],
+            RootPaths: [], PathSearchCapped: false, PathSearchCappedCount: 0),
+            "Other", "Other");
+        // Use a clearly unrelated result type
+        new GCRootSectionBuilder().CanHandle(
+            Stamped(new ObjectShapeAnalyzerDomainResult([], [], 0, 0), "Other", "Other"))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void GCRootSectionBuilder_Build_EmitsSummaryMetricsWhenEmpty()
+    {
+        var domain = Stamped(new GCRootDomainResult(
+            TotalRoots: 0, ByKind: [], TopRootsBySeverity: [],
+            RootPaths: [], PathSearchCapped: false, PathSearchCappedCount: 0),
+            "GC Root Analysis", "Memory");
+
+        var builder = new GCRootSectionBuilder();
+        builder.CanHandle(domain).Should().BeTrue();
+
+        AnalyzerDetailSection section = builder.Build(domain);
+        section.AnalyzerName.Should().Be("GC Root Analysis");
+        section.DisplayTitle.Should().Be("GC Root Intelligence");
+        section.SortOrder.Should().Be(24);
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Total GC Roots" && m.RawValue == 0);
+    }
+
+    [Fact]
+    public void GCRootSectionBuilder_Build_EmitsKindAndFindingTablesWhenPopulated()
+    {
+        var byKind = new List<RootKindSummary>
+        {
+            new("StrongHandle",    120, 50_000_000, 25.0),
+            new("Stack",           800, 10_000_000, 5.0),
+            new("FinalizerQueue",   40,  1_000_000, 0.5),
+        };
+        var topFindings = new List<RootFinding>
+        {
+            new("StrongHandle", 0xABCD_0000_0001UL, null, "System.Collections.Generic.List`1", 0xDEAD_0001UL, 50_000_000, 300),
+            new("Stack",        0xABCD_0000_0002UL, null, "MyApp.SomeService",                 0xDEAD_0002UL,  5_000_000, 100),
+        };
+        var rootPaths = new List<RootPathFinding>
+        {
+            new(0xDEAD_0001UL, "System.Collections.Generic.List`1", "StrongHandle",
+                ["System.Object[]", "MyApp.SomeService"], 2, false),
+        };
+
+        var domain = Stamped(new GCRootDomainResult(
+            TotalRoots: 960,
+            ByKind: byKind,
+            TopRootsBySeverity: topFindings,
+            RootPaths: rootPaths,
+            PathSearchCapped: false,
+            PathSearchCappedCount: 0),
+            "GC Root Analysis", "Memory");
+
+        var builder = new GCRootSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        // Summary metric
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Total GC Roots" && m.RawValue == 960);
+
+        // Kind distribution table
+        TableBlock? kindTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("kind", StringComparison.OrdinalIgnoreCase));
+        kindTable.Should().NotBeNull("kind distribution table must be emitted");
+        kindTable!.Rows.Should().HaveCount(3);
+
+        // Top findings table
+        TableBlock? findingTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("severity", StringComparison.OrdinalIgnoreCase));
+        findingTable.Should().NotBeNull("findings table must be emitted");
+        findingTable!.Rows.Should().HaveCount(2);
+        findingTable.Rows[0].Cells[0].Display.Should().Be("StrongHandle");
+
+        // Root paths table
+        TableBlock? pathTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("path", StringComparison.OrdinalIgnoreCase));
+        pathTable.Should().NotBeNull("paths table must be emitted");
+        pathTable!.Rows.Should().HaveCount(1);
+    }
 }
 

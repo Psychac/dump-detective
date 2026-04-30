@@ -1,7 +1,7 @@
 # GCRootAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **10** · Effort: High · ⏳ **Pending**
+**New** · Implementation Priority **10** · Effort: High · ✅ **Completed**
 
 ## Report Sections Served
 - §5.1 Root Distribution (all root kinds, retained bytes per kind)

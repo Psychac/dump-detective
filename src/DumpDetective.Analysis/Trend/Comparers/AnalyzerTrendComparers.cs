@@ -699,6 +699,43 @@ namespace DumpDetective.Analysis.Trend.Comparers
             ];
         }
     }
+
+    internal sealed class GCRootTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "GC Root Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not GCRootDomainResult r) return [];
+            return
+            [
+                new("gcroot.total.roots",           null, r.TotalRoots,                     "roots",  MetricTrendDirection.Neutral),
+                new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? r.TopRootsBySeverity[0].SeverityScore : 0, "score", MetricTrendDirection.HigherIsWorse),
+                new("gcroot.path.capped.count",     null, r.PathSearchCappedCount,           "paths",  MetricTrendDirection.Neutral),
+                new("gcroot.strong.handle.count",   null, GetKindCount(r, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
+                new("gcroot.finalizer.count",       null, GetKindCount(r, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not GCRootDomainResult b || current is not GCRootDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("gcroot.total.roots",         null, b.TotalRoots,                                                                   c.TotalRoots,                                                                   "roots",  MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("gcroot.strong.handle.count", null, (double)GetKindCount(b, "StrongHandle"),   (double)GetKindCount(c, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gcroot.finalizer.count",     null, (double)GetKindCount(b, "FinalizerQueue"), (double)GetKindCount(c, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gcroot.path.capped.count",   null, (double)b.PathSearchCappedCount,           (double)c.PathSearchCappedCount,           "paths",  MetricTrendDirection.Neutral),
+            ];
+        }
+
+        private static int GetKindCount(GCRootDomainResult r, string kind)
+        {
+            foreach (RootKindSummary ks in r.ByKind)
+                if (ks.Kind == kind) return ks.Count;
+            return 0;
+        }
+    }
 }
 
 

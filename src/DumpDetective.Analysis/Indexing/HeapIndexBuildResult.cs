@@ -27,4 +27,21 @@ internal sealed record HeapIndexBuildResult(
     /// Mirrors the subset that <c>TaskIndex.bin</c> contains in disk-backed mode, allowing
     /// <see cref="Analyzers.AsyncTaskAnalyzer"/> to skip a full O(N) scan of <see cref="InMemoryEntries"/>.
     /// </summary>
-    (ulong Addr, ulong Mt)[]? InMemoryTaskCandidates = null);
+    (ulong Addr, ulong Mt)[]? InMemoryTaskCandidates = null,
+    /// <summary>
+    /// Pre-filtered list of MulticastDelegate / event-handler object addresses collected
+    /// during Phase 1 (memory-backed mode only).
+    /// Mirrors the content of <c>EventCandidateIndex.bin</c> in disk-backed mode.
+    /// <see cref="Analyzers.EventLeakAnalyzer"/> should prefer this over a full
+    /// <see cref="InMemoryEntries"/> scan when it is non-null.
+    /// </summary>
+    (ulong Addr, ulong Mt)[]? InMemoryEventCandidates = null,
+    /// <summary>
+    /// Pre-enumerated GC roots collected during Phase 1 (memory-backed mode only).
+    /// Mirrors the content of <c>RootIndex.bin</c> in disk-backed mode.
+    /// Each element: (<c>TargetAddress</c>, <c>RootAddress</c>, <c>Kind</c> byte matching
+    /// <c>Microsoft.Diagnostics.Runtime.GCRootKind</c>).
+    /// Consumers: <c>GCRootAnalyzer</c>, <c>FinalizableObjectAnalyzer</c>,
+    ///            <c>StaticRootLeakDetector</c>.
+    /// </summary>
+    (ulong TargetAddr, ulong RootAddr, byte Kind)[]? InMemoryRootCandidates = null);

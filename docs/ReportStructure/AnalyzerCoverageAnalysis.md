@@ -838,7 +838,8 @@ Additionally, `InsightEngine` must gain:
 | `Indexing/TypeIndexBuilder.cs` | `Add()` accepts `flags` + `generation`; tracks gen counts, size buckets; new `BuildSizeBuckets()` |
 | `Indexing/HeapIndexBuildResult.cs` | Added `GlobalSizeBuckets: long[8]`, `TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>`, and `InMemoryTaskCandidates: (ulong Addr, ulong Mt)[]` |
 | `Indexing/DiskBackedObjectIndexWriter.cs` | Per-segment type-flag + shape-cache population; satellite writers wired in; `DumpIndexPaths`-based paths replace the old `%TEMP%` path |
-| `Indexing/MemoryBackedObjectIndexWriter.cs` | Same flags / gen / bucket population; `GlobalSizeBuckets` + `TypeShapeCache` + `InMemoryTaskCandidates` returned in `HeapIndexBuildResult`; `InMemoryTaskCandidates` mirrors `TaskIndex.bin` content for full memory-mode parity |
+| `Indexing/HeapIndexBuildResult.cs` | Added `InMemoryEventCandidates: (ulong Addr, ulong Mt)[]?`, `InMemoryRootCandidates: (ulong TargetAddr, ulong RootAddr, byte Kind)[]?` |
+| `Indexing/MemoryBackedObjectIndexWriter.cs` | Same flags / gen / bucket population; `GlobalSizeBuckets` + `TypeShapeCache` + `InMemoryTaskCandidates` returned in `HeapIndexBuildResult`; `InMemoryTaskCandidates` mirrors `TaskIndex.bin` content for full memory-mode parity; `InMemoryEventCandidates` collected alongside task candidates in the parallel scan (mirrors `EventCandidateIndex.bin`); `InMemoryRootCandidates` collected post-scan via `heap.EnumerateRoots()` (mirrors `RootIndex.bin`) |
 
 ---
 
@@ -885,6 +886,10 @@ Additionally, `InsightEngine` must gain:
 │                                  Writer: RootIndexWriter.cs
 │                                  Per record (20 bytes): TargetAddress(8)|RootAddress(8)|Kind(1)|Pad(3)
 │                                  Consumers: GCRootAnalyzer, StaticRootLeakDetector, FinalizableObjectAnalyzer
+│                                  Memory-mode equivalent: HeapIndexBuildResult.InMemoryRootCandidates
+│                                  ✅ IMPLEMENTED — MemoryBackedObjectIndexWriter calls
+│                                  heap.EnumerateRoots() after the parallel scan and stores
+│                                  (TargetAddr, RootAddr, Kind)[] in HeapIndexBuildResult.
 │                                  Typical size: ~2MB
 │
 ├── TaskIndex.bin                ✅ IMPLEMENTED — Task/ValueTask object snapshot (disk mode only)
@@ -905,9 +910,9 @@ Additionally, `InsightEngine` must gain:
 │                                  Consumers: EventLeakAnalyzer (FUTURE — Priority 13, not yet consumed)
 │                                  Current state: EventLeakAnalyzer uses heapCache.EnumerateIndexedEntries()
 │                                  in both modes — equal parity achieved without reading this file.
-│                                  When Priority 13 is implemented: a memory-mode equivalent
-│                                  InMemoryEventCandidates must be added to MemoryBackedObjectIndexWriter
-│                                  (same pattern as InMemoryTaskCandidates) to maintain parity.
+│                                  Memory-mode equivalent: HeapIndexBuildResult.InMemoryEventCandidates
+│                                  ✅ IMPLEMENTED — collected in MemoryBackedObjectIndexWriter parallel
+│                                  scan alongside InMemoryTaskCandidates. Ready for Priority 13.
 │                                  Typical size: ~8MB
 │
 ├── LohFreeBlockIndex.bin        ✅ IMPLEMENTED — Free blocks inside LOH segments
@@ -974,6 +979,19 @@ HeapIndexBuildResult extensions:
     → AsyncTaskAnalyzer reads this directly (O(N_tasks)) instead of scanning InMemoryEntries (O(N_total)).
     → Falls back to TypeAggregates TaskMtSet scan when unavailable (old index files, benchmarks).
 
+  InMemoryEventCandidates: (ulong Addr, ulong Mt)[]                            ✅ IMPLEMENTED
+    → Collected during Phase 1 parallel scan in MemoryBackedObjectIndexWriter (same pass as InMemoryTaskCandidates).
+    → Contains all MulticastDelegate/event-handler addresses — mirrors EventCandidateIndex.bin for memory-mode parity.
+    → Stored in HeapIndexBuildResult.InMemoryEventCandidates.
+    → EventLeakAnalyzer (Priority 13) should prefer this over full InMemoryEntries scan.
+
+  InMemoryRootCandidates: (ulong TargetAddr, ulong RootAddr, byte Kind)[]      ✅ IMPLEMENTED
+    → Collected in MemoryBackedObjectIndexWriter POST-SCAN via heap.EnumerateRoots() (after parallel segment scan).
+    → Contains all GC roots — mirrors RootIndex.bin content for memory-mode parity.
+    → Stored in HeapIndexBuildResult.InMemoryRootCandidates.
+    → GCRootAnalyzer (Priority 10) and FinalizableObjectAnalyzer (Priority 15) should consume this
+       instead of re-calling heap.EnumerateRoots() directly.
+
   StringMtSet: derived on first access from TypeAggregates.Flags.IsStringType
     → Computed lazily from TypeAggregates — not stored separately.
 
@@ -988,10 +1006,13 @@ HeapIndexBuildResult extensions:
 | `TypeAggregates` dictionary (extended) | ~3.2MB | Memory |
 | `GlobalSizeBuckets` | 64 bytes | Memory (in HeapIndexBuildResult) |
 | `TypeShapeCache` | ~800KB | Memory (in HeapIndexBuildResult) |
+| `InMemoryTaskCandidates` | ~16KB–20MB (0–1M tasks) | Memory (in HeapIndexBuildResult) |
+| `InMemoryEventCandidates` | ~16KB–8MB (delegates) | Memory (in HeapIndexBuildResult) |
+| `InMemoryRootCandidates` | ~2MB (100K roots × 20B) | Memory (in HeapIndexBuildResult) |
 | `ObjectIndex.bin` write buffer | 4MB (Large tier) | Memory (transient, released after write) |
 | `TaskIndex.bin` write buffer | 256KB | Memory (transient) |
 | `EventCandidateIndex.bin` write buffer | 256KB | Memory (transient) |
-| **Total peak Phase 1 memory** | **~8.5MB** | — |
+| **Total peak Phase 1 memory** | **~10.5MB** | — |
 
 > The heap-streaming working set stays near-constant regardless of dump size because
 > per-object allocations are zero (struct-only `HeapEntry` in `ArrayPool<HeapEntry>` buffers)

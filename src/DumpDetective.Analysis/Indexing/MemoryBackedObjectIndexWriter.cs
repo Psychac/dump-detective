@@ -32,7 +32,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // Collected during Phase 2 scan — mirrors what DiskBackedObjectIndexWriter writes to TaskIndex.bin.
         // Stored in HeapIndexBuildResult so AsyncTaskAnalyzer can read the pre-filtered list directly
         // instead of scanning all InMemoryEntries (O(N_total) vs O(N_tasks)).
-        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var taskCandidates  = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        // Mirrors EventCandidateIndex.bin — pre-filtered delegate/event-handler addresses.
+        // EventLeakAnalyzer (Priority 13) should prefer this over an O(N) full-index scan.
+        var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
 
         var parallelOptions = new ParallelOptions
         {
@@ -119,6 +122,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
                         taskCandidates.Add((obj.Address, mt));
 
+                    // Collect delegate/event-handler candidates — mirrors EventCandidateIndex.bin.
+                    if ((flags & TypeAggregateFlags.IsDelegateType) != 0)
+                        eventCandidates.Add((obj.Address, mt));
+
                     // Write directly into this segment's reserved slice — no intermediate buffer.
                     if (written < slotCap)
                         flatEntries[baseSlot + written] = entry;
@@ -149,6 +156,17 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             flatEntries = trimmed;
         }
 
+        // Post-scan: enumerate GC roots — mirrors WriteSatelliteFiles/RootIndexWriter in disk mode.
+        // Stored in HeapIndexBuildResult so GCRootAnalyzer and FinalizableObjectAnalyzer can
+        // consume pre-enumerated root data without re-walking the heap.
+        progress?.Report(new(objectCount, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
+        var rootList = new List<(ulong TargetAddr, ulong RootAddr, byte Kind)>(capacity: 4096);
+        foreach (ClrRoot root in heap.EnumerateRoots())
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            rootList.Add((root.Object, root.Address, (byte)root.RootKind));
+        }
+
         stopwatch.Stop();
         progress?.Report(new(objectCount, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
 
@@ -162,7 +180,9 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             Modules: moduleRegistry.Modules,
             GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
             TypeShapeCache: shapeCache,
-            InMemoryTaskCandidates: taskCandidates.ToArray());
+            InMemoryTaskCandidates: taskCandidates.ToArray(),
+            InMemoryEventCandidates: eventCandidates.ToArray(),
+            InMemoryRootCandidates: rootList.ToArray());
     }
 
     // ── Type classification helpers (mirror DiskBackedObjectIndexWriter) ───────

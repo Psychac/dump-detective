@@ -718,7 +718,7 @@ and **Related Analyzers** for that single analyzer.
 | 11 | `DominatorAnalyzer` | [DominatorAnalyzer.md](Analyzers/DominatorAnalyzer.md) | §3.1–3.2, §4.1–4.3 | ⏳ **Pending** |
 | 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 | ✅ **Completed** |
 | 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 | ✅ **Completed** |
-| 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 | ⏳ **Pending** |
+| 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 | ✅ **Completed** |
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ⏳ **Pending** |
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
@@ -776,7 +776,7 @@ Additionally, `InsightEngine` must gain:
 | 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written | ✅ **Completed** |
 | 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 | 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready | ✅ **Completed** |
-| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
+| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready | ✅ **Completed** |
 | 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High | ✅ `RootIndex.bin` written | ⏳ **Pending** |
 | 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only | ⏳ **Pending** |
 | 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs | ⏳ **Pending** |

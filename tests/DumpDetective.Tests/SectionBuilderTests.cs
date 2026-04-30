@@ -542,4 +542,101 @@ public sealed class SectionBuilderTests
         longTable!.Rows.Should().HaveCount(1);
         longTable.Rows[0].Cells[0].Display.Should().Contain("List");
     }
+
+    // ── ObjectShapeAnalyzer ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ObjectShapeSectionBuilder_CanHandle_ReturnsTrue()
+    {
+        var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
+            TopReferenceHeavyTypes: [],
+            TopValueHeavyTypes:     [],
+            TotalTypesAnalyzed:     0,
+            AvgRefFieldsPerType:    0),
+            "Object Shape Analysis", "Memory");
+        new ObjectShapeSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ObjectShapeSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(new CrashDomainResult(0, 0,
+            new Dictionary<string, int>(), new Dictionary<string, int>()),
+            "Crash Analysis", "Crash");
+        new ObjectShapeSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ObjectShapeSectionBuilder_Build_EmitsSummaryMetricsWhenEmpty()
+    {
+        var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
+            TopReferenceHeavyTypes: [],
+            TopValueHeavyTypes:     [],
+            TotalTypesAnalyzed:     42,
+            AvgRefFieldsPerType:    3.7),
+            "Object Shape Analysis", "Memory");
+
+        var builder = new ObjectShapeSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        section.AnalyzerName.Should().Be("Object Shape Analysis");
+        section.SortOrder.Should().Be(33);
+        section.Blocks[0].Should().BeOfType<HeadingBlock>();
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Types Analyzed" && m.RawValue == 42.0);
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Avg Ref Fields / Type" && m.RawValue == 3.7);
+
+        // No type tables when both lists are empty
+        section.Blocks.OfType<TableBlock>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ObjectShapeSectionBuilder_Build_EmitsTypeTablesWhenPopulated()
+    {
+        var refHeavy = new List<TypeShapeProfile>
+        {
+            new("System.Collections.Generic.Dictionary`2",
+                TotalFields: 8, ReferenceFields: 6, ValueFields: 2,
+                ReferenceFieldRatio: 0.75, InstanceCount: 5000,
+                IsFinalizable: false, IsValueType: false,
+                BaseTypeChainDepth: 2, InterfaceCount: 3,
+                Category: ObjectShapeCategory.ReferenceHeavy),
+        };
+        var valHeavy = new List<TypeShapeProfile>
+        {
+            new("System.Drawing.Rectangle",
+                TotalFields: 4, ReferenceFields: 0, ValueFields: 4,
+                ReferenceFieldRatio: 0.0, InstanceCount: 20000,
+                IsFinalizable: false, IsValueType: true,
+                BaseTypeChainDepth: 1, InterfaceCount: 2,
+                Category: ObjectShapeCategory.ValueHeavy),
+        };
+
+        var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
+            TopReferenceHeavyTypes: refHeavy,
+            TopValueHeavyTypes:     valHeavy,
+            TotalTypesAnalyzed:     150,
+            AvgRefFieldsPerType:    2.4),
+            "Object Shape Analysis", "Memory");
+
+        var builder = new ObjectShapeSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        // Reference-heavy table
+        TableBlock? refTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("reference-heavy", StringComparison.OrdinalIgnoreCase));
+        refTable.Should().NotBeNull("reference-heavy type table must be emitted");
+        refTable!.Rows.Should().HaveCount(1);
+        refTable.Rows[0].Cells[0].Display.Should().Contain("Dictionary");
+
+        // Value-heavy table
+        TableBlock? valTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("value-heavy", StringComparison.OrdinalIgnoreCase));
+        valTable.Should().NotBeNull("value-heavy type table must be emitted");
+        valTable!.Rows.Should().HaveCount(1);
+        valTable.Rows[0].Cells[0].Display.Should().Contain("Rectangle");
+    }
 }
+

@@ -724,7 +724,7 @@ and **Related Analyzers** for that single analyzer.
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
-| 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ⏳ **Pending** |
+| 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ✅ **Completed** |
 | 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
 | 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ⏳ **Pending** |
@@ -783,8 +783,8 @@ Additionally, `InsightEngine` must gain:
 | 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ✅ **Completed** |
 | 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 | 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ✅ **Completed** |
-| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ⏳ **Pending** |
-| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ⏳ **Pending** |
+| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ✅ **Completed** |
+| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ⏳ **Pending** |
 | 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 | 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ⏳ **Pending** |

@@ -253,6 +253,14 @@ internal sealed class ReportSerializer
                     Capped: true,
                     Reason: "Async state machine type scan was capped at 200 candidate types; total counts and top-type list may be partial."));
             }
+
+            if (run.Result is ArrayDomainResult arr && arr.ScanLimited)
+            {
+                notes.Add(new ConfidenceNote(
+                    Analyzer: run.AnalyzerName,
+                    Capped: true,
+                    Reason: "Array sparse sampling was capped at 500 candidate arrays; sparse/wasteful array list may be partial."));
+            }
         }
 
         return notes;

@@ -983,6 +983,94 @@ public sealed class SectionBuilderTests
         suspendedTable.Should().NotBeNull("suspended method map table must be emitted");
         suspendedTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── ArraySectionBuilder tests ──────────────────────────────────────────────
+
+    [Fact]
+    public void ArraySectionBuilder_CanHandle_ReturnsTrueForArrayDomainResult()
+    {
+        var domain = Stamped(
+            new ArrayDomainResult(
+                TotalArrayObjects: 0, TotalArrayBytes: 0,
+                MultiDimArrayCount: 0, LohArrayCount: 0, LohArrayBytes: 0,
+                TopArrayTypesBySize: [], TopLargeArrays: [], TopSparseArrays: [],
+                ScanLimited: false),
+            "Array Analysis", "Memory");
+        new ArraySectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ArraySectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new EventLeakDomainResult(0, 0, 0, 0),
+            "Event Leak Analysis", "Events");
+        new ArraySectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ArraySectionBuilder_Build_EmitsSummaryMetricsAndTables()
+    {
+        var typeProfile = new ArrayTypeProfile(
+            ElementTypeName: "System.Byte",
+            Rank: 1,
+            Count: 5_000,
+            TotalBytes: 104_857_600,
+            IsMultiDimensional: false);
+
+        var largeEntry = new LargeArrayEntry(
+            Address: 0x1234_5678,
+            ElementTypeName: "System.Byte",
+            Length: 1_048_576,
+            Rank: 1,
+            Size: 1_048_600);
+
+        var sparseEntry = new SparseArrayEntry(
+            Address: 0x9ABC_DEF0,
+            ElementTypeName: "System.Object",
+            Length: 50_000,
+            NullOrZeroCount: 40_000,
+            SparseRatio: 0.80,
+            WastedBytes: 25_000_000);
+
+        var domain = Stamped(
+            new ArrayDomainResult(
+                TotalArrayObjects: 5_000,
+                TotalArrayBytes: 104_857_600,
+                MultiDimArrayCount: 12,
+                LohArrayCount: 3,
+                LohArrayBytes: 3_000_000,
+                TopArrayTypesBySize: [typeProfile],
+                TopLargeArrays: [largeEntry],
+                TopSparseArrays: [sparseEntry],
+                ScanLimited: false),
+            "Array Analysis", "Memory");
+
+        AnalyzerDetailSection section = new ArraySectionBuilder().Build(domain);
+
+        section.AnalyzerName.Should().Be("Array Analysis");
+        section.SortOrder.Should().Be(47);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total Array Objects" && m.RawValue == 5_000);
+        metrics.Should().Contain(m => m.Label == "LOH Arrays");
+        metrics.Should().Contain(m => m.Label == "Multi-Dimensional Arrays");
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(3, "should emit types, large arrays, and sparse arrays tables");
+
+        var typeTable = tables.FirstOrDefault(t => t.Caption!.Contains("array types by total bytes"));
+        typeTable.Should().NotBeNull("top array types table must be emitted");
+        typeTable!.Rows.Should().HaveCount(1);
+
+        var largeTable = tables.FirstOrDefault(t => t.Caption!.Contains("Largest individual"));
+        largeTable.Should().NotBeNull("large arrays table must be emitted");
+        largeTable!.Rows.Should().HaveCount(1);
+
+        var sparseTable = tables.FirstOrDefault(t => t.Caption!.Contains("Sparse arrays"));
+        sparseTable.Should().NotBeNull("sparse arrays table must be emitted");
+        sparseTable!.Rows.Should().HaveCount(1);
+    }
 }
 
 

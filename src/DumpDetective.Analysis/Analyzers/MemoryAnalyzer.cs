@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Models;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    internal class MemoryAnalyzer : IAnalyzer
+    internal sealed class MemoryAnalyzer : IAnalyzer
     {
         private const ulong LohThresholdBytes = 85000;
 
@@ -96,6 +96,16 @@ namespace DumpDetective.Analysis.Analyzers
                 histogram = entries;
             }
 
+            int topN = Math.Min(20, bySize.Count);
+            var topBySize = new List<TypeSnapshot>(topN);
+            for (int i = 0; i < topN; i++)
+                topBySize.Add(ToSnapshot(bySize[i]));
+
+            int topM = Math.Min(20, byCount.Count);
+            var topByCount = new List<TypeSnapshot>(topM);
+            for (int i = 0; i < topM; i++)
+                topByCount.Add(ToSnapshot(byCount[i]));
+
             return new MemoryDomainResult(
                 totalMemory,
                 totalLohMemory,
@@ -104,8 +114,8 @@ namespace DumpDetective.Analysis.Analyzers
                 lohObjects,
                 LohThresholdBytes,
                 typeStats.Count,
-                bySize.Take(20).Select(ToSnapshot).ToList(),
-                byCount.Take(20).Select(ToSnapshot).ToList(),
+                topBySize,
+                topByCount,
                 SizeBucketHistogram: histogram);
         }
     }

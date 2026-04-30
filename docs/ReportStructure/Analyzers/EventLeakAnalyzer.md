@@ -49,15 +49,21 @@
 ### Current Phase Assignment
 | Step | Current Phase | Location |
 |------|--------------|----------|
-| Find MulticastDelegate objects | Phase 2 | Full `heap.EnumerateObjects()` with MT filter |
+| Find MulticastDelegate objects | Phase 2 | `heapCache.EnumerateIndexedEntries()` when index available; else `heap.EnumerateObjects()` |
 | Inspect delegate fields | Phase 2 | Per-object ClrMD field access |
 
-### Proposed Phase Assignment
+**Both modes currently produce identical output.** `EnumerateIndexedEntries()` dispatches
+internally based on `StorageKind`: memory mode iterates `InMemoryEntries[]`, disk mode reads
+`ObjectIndex.bin` sequentially. Both yield the same `HeapEntry` stream. No `EventCandidateIndex.bin`
+consumption in the current implementation — see proposed assignment below for the planned
+optimisation.
+
+### Proposed Phase Assignment (future, Priority 13)
 | Step | Proposed Phase | Notes |
 |------|---------------|-------|
-| Tag delegate MTs | **Phase 1** | `Flags` byte bit 2 = `IsDelegateType` in TypeAggregateIndexEntry |
-| `EventCandidateIndex.bin` | **Phase 1** | Capture all delegate object addresses during segment scan |
-| Delegate field inspection | Phase 2 | Reads from EventCandidateIndex (not full heap scan) |
+| Tag delegate MTs | **Phase 1** (✅ done) | `Flags` byte bit 2 = `IsDelegateType` in TypeAggregateIndexEntry |
+| `EventCandidateIndex.bin` | **Phase 1** (✅ written by disk mode) | Captures all delegate object addresses; memory-mode equivalent `InMemoryEventCandidates` not yet implemented |
+| Delegate field inspection | Phase 2 | Future: read from EventCandidateIndex (not full index scan) |
 
 ### Phase 1 Extension — `EventCandidateIndex.bin`
 
@@ -71,7 +77,12 @@ Per record (16 bytes): Address(8) | MethodTable(8)
 ```
 
 Size estimate: 500K delegates × 16 bytes = 8MB. Conservative for large apps.
-Phase 2 `EventLeakAnalyzer` reads this index instead of walking the full heap.
+
+When this optimisation is implemented, a memory-mode equivalent `InMemoryEventCandidates`
+(same `(ulong Addr, ulong Mt)[]` pattern as `InMemoryTaskCandidates`) must be collected
+by `MemoryBackedObjectIndexWriter` during the Phase 1 scan to maintain mode parity.
+`DiskBackedObjectIndexWriter` already collects `eventCandidates` during the parallel scan;
+only `MemoryBackedObjectIndexWriter` needs to be extended.
 
 ---
 

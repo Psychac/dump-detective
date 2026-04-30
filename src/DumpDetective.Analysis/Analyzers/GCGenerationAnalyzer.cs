@@ -8,7 +8,7 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class GCGenerationAnalyzer : IAnalyzer
+    public sealed class GCGenerationAnalyzer : IAnalyzer
     {
         private const ulong LohThresholdBytes = 85_000;
         private const int TopLohTypeLimit = 15;
@@ -191,7 +191,11 @@ namespace DumpDetective.Analysis.Analyzers
                 && heapIdx.StorageKind == HeapIndexStorageKind.Memory
                 && heapIdx.InMemoryEntries is { } entries)
             {
-                Parallel.ForEach(entries, entry => Process(entry.Address, entry.Size));
+                // Cap at ObjectCount: InMemoryEntries may have up to 50 000 extra uninitialized
+                // slots past ObjectCount when the Phase-1 trim threshold was not reached.
+                // GC.AllocateUninitializedArray means those slots hold garbage addresses/sizes.
+                int safeCount = (int)Math.Min(heapIdx.ObjectCount, entries.Length);
+                Parallel.For(0, safeCount, i => Process(entries[i].Address, entries[i].Size));
             }
             else
             {
@@ -246,13 +250,17 @@ namespace DumpDetective.Analysis.Analyzers
             double lohPct  = totalManagedBytes == 0 ? 0.0 : lohBytes    * 100.0 / totalManagedBytes;
             double gen2Pct = totalObjects      == 0 ? 0.0 : gen2Objects  * 100.0 / totalObjects;
 
-            var topLohTypes = new List<TypeSnapshot>();
-            foreach (CachedTypeStatistics stat in typeStats.Values
-                         .OrderByDescending(s => s.LohSize)
-                         .Take(TopLohTypeLimit))
+            // No LINQ in hot paths — explicit sort + loop.
+            var lohList = new List<CachedTypeStatistics>(capacity: 32);
+            foreach (CachedTypeStatistics stat in typeStats.Values)
+                if (stat.LohCount > 0) lohList.Add(stat);
+            lohList.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
+            int lohTake = Math.Min(TopLohTypeLimit, lohList.Count);
+            var topLohTypes = new List<TypeSnapshot>(lohTake);
+            for (int i = 0; i < lohTake; i++)
             {
-                if (stat.LohCount > 0)
-                    topLohTypes.Add(new TypeSnapshot(stat.TypeName, stat.LohCount, stat.LohSize, stat.LohSize));
+                CachedTypeStatistics stat = lohList[i];
+                topLohTypes.Add(new TypeSnapshot(stat.TypeName, stat.LohCount, stat.LohSize, stat.LohSize));
             }
 
             return new GCGenerationDomainResult(

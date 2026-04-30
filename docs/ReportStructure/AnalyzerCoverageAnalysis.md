@@ -836,9 +836,9 @@ Additionally, `InsightEngine` must gain:
 |------|---------|
 | `Indexing/TypeAggregateIndexEntry.cs` | Added `Gen0Count`, `Gen1Count`, `Gen2Count` (int), `Flags` (`TypeAggregateFlags`) |
 | `Indexing/TypeIndexBuilder.cs` | `Add()` accepts `flags` + `generation`; tracks gen counts, size buckets; new `BuildSizeBuckets()` |
-| `Indexing/HeapIndexBuildResult.cs` | Added `GlobalSizeBuckets: long[8]` and `TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>` |
+| `Indexing/HeapIndexBuildResult.cs` | Added `GlobalSizeBuckets: long[8]`, `TypeShapeCache: IReadOnlyDictionary<ulong, TypeShapeEntry>`, and `InMemoryTaskCandidates: (ulong Addr, ulong Mt)[]` |
 | `Indexing/DiskBackedObjectIndexWriter.cs` | Per-segment type-flag + shape-cache population; satellite writers wired in; `DumpIndexPaths`-based paths replace the old `%TEMP%` path |
-| `Indexing/MemoryBackedObjectIndexWriter.cs` | Same flags / gen / bucket population; `GlobalSizeBuckets` + `TypeShapeCache` returned in `HeapIndexBuildResult` |
+| `Indexing/MemoryBackedObjectIndexWriter.cs` | Same flags / gen / bucket population; `GlobalSizeBuckets` + `TypeShapeCache` + `InMemoryTaskCandidates` returned in `HeapIndexBuildResult`; `InMemoryTaskCandidates` mirrors `TaskIndex.bin` content for full memory-mode parity |
 
 ---
 
@@ -875,7 +875,10 @@ Additionally, `InsightEngine` must gain:
 ├── HandleSnapshot.bin           ✅ IMPLEMENTED — GC handle enumeration snapshot
 │                                  Writer: HandleSnapshotWriter.cs
 │                                  Per record (20 bytes): ObjectAddress(8)|MT(8)|Kind(1)|Pad(3)
-│                                  Consumers: GCHandleAnalyzer, WeakReferenceAnalyzer
+│                                  Consumers: WeakReferenceAnalyzer (future, §24)
+│                                  Note: GCHandleAnalyzer does NOT read this file — it calls
+│                                  runtime.EnumerateHandles() directly in both memory and disk
+│                                  modes. HandleSnapshot.bin is reserved for WeakReferenceAnalyzer.
 │                                  Typical size: ~1MB
 │
 ├── RootIndex.bin                ✅ IMPLEMENTED — GC root enumeration snapshot
@@ -884,17 +887,27 @@ Additionally, `InsightEngine` must gain:
 │                                  Consumers: GCRootAnalyzer, StaticRootLeakDetector, FinalizableObjectAnalyzer
 │                                  Typical size: ~2MB
 │
-├── TaskIndex.bin                ✅ IMPLEMENTED — Task/ValueTask object snapshot
+├── TaskIndex.bin                ✅ IMPLEMENTED — Task/ValueTask object snapshot (disk mode only)
 │                                  Writer: TaskIndexWriter.cs
 │                                  Per record (20 bytes): Address(8)|MT(8)|StateFlags(4)
 │                                  Note: StateFlags written as 0; resolved in Phase 2 by AsyncTaskAnalyzer
+│                                  Memory-mode equivalent: HeapIndexBuildResult.InMemoryTaskCandidates
+│                                  (ulong Addr, ulong Mt)[] — collected during Phase 1 scan by
+│                                  MemoryBackedObjectIndexWriter at zero extra cost.
+│                                  AsyncTaskAnalyzer prefers InMemoryTaskCandidates (memory mode)
+│                                  or TaskIndex.bin (disk mode) — both produce identical output.
 │                                  Consumers: AsyncTaskAnalyzer
 │                                  Typical size: ~20MB (worst case 1M tasks)
 │
 ├── EventCandidateIndex.bin      ✅ IMPLEMENTED — MulticastDelegate/EventHandler object addresses
 │                                  Writer: EventCandidateIndexWriter.cs
 │                                  Per record (16 bytes): Address(8)|MT(8)
-│                                  Consumers: EventLeakAnalyzer
+│                                  Consumers: EventLeakAnalyzer (FUTURE — Priority 13, not yet consumed)
+│                                  Current state: EventLeakAnalyzer uses heapCache.EnumerateIndexedEntries()
+│                                  in both modes — equal parity achieved without reading this file.
+│                                  When Priority 13 is implemented: a memory-mode equivalent
+│                                  InMemoryEventCandidates must be added to MemoryBackedObjectIndexWriter
+│                                  (same pattern as InMemoryTaskCandidates) to maintain parity.
 │                                  Typical size: ~8MB
 │
 ├── LohFreeBlockIndex.bin        ✅ IMPLEMENTED — Free blocks inside LOH segments
@@ -954,11 +967,18 @@ HeapIndexBuildResult extensions:
     → TypeShapeEntry = readonly struct (6 bytes per entry, padded to 8)
     → 50K types × 16 bytes (key + value) = ~800KB. Always in memory.
 
+  InMemoryTaskCandidates: (ulong Addr, ulong Mt)[]                             ✅ IMPLEMENTED
+    → Collected during Phase 1 parallel scan in MemoryBackedObjectIndexWriter (same pass as InMemoryEntries).
+    → Contains all Task/ValueTask addresses — mirrors TaskIndex.bin content for memory-mode parity.
+    → Stored in HeapIndexBuildResult.InMemoryTaskCandidates.
+    → AsyncTaskAnalyzer reads this directly (O(N_tasks)) instead of scanning InMemoryEntries (O(N_total)).
+    → Falls back to TypeAggregates TaskMtSet scan when unavailable (old index files, benchmarks).
+
   StringMtSet: derived on first access from TypeAggregates.Flags.IsStringType
     → Computed lazily from TypeAggregates — not stored separately.
 
   TaskMtSet: derived on first access from TypeAggregates.Flags.IsTaskType
-    → Same pattern.
+    → Fallback only. Used by ScanHeapIndexForTasks when InMemoryTaskCandidates is unavailable.
 ```
 
 ## Phase 1 Memory Footprint Summary

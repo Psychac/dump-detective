@@ -105,10 +105,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not GCGenerationDomainResult b || current is not GCGenerationDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("gc.gen2.bytes", null, b.Gen2Bytes, c.Gen2Bytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gc.loh.bytes", null, b.LohBytes, c.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gc.loh.percent", null, b.LohPercent, c.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gc.loh.objects", null, b.LohObjects, c.LohObjects, "objects", MetricTrendDirection.HigherIsWorse)
+                MetricDeltaHelper.Compute("gc.gen2.bytes",     null, b.Gen2Bytes,     c.Gen2Bytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gc.loh.bytes",      null, b.LohBytes,      c.LohBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gc.loh.percent",    null, b.LohPercent,    c.LohPercent,    "%",       MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gc.total.objects",  null, b.TotalObjects,  c.TotalObjects,  "objects", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("gc.loh.objects",    null, b.LohObjects,    c.LohObjects,    "objects", MetricTrendDirection.HigherIsWorse)
             ];
         }
     }
@@ -363,9 +364,10 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (result is not GCHandleDomainResult r) return [];
             return
             [
-                new("gchandle.total", null, r.TotalHandles, "handles", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.strong", null, r.StrongLikeHandles, "handles", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.pinned.targets", null, r.PinnedHandleTargets, "targets", MetricTrendDirection.HigherIsWorse)
+                new("gchandle.total",              null, r.TotalHandles,          "handles", MetricTrendDirection.HigherIsWorse),
+                new("gchandle.strong",             null, r.StrongLikeHandles,     "handles", MetricTrendDirection.HigherIsWorse),
+                new("gchandle.pinned.targets",     null, r.PinnedHandleTargets,   "targets", MetricTrendDirection.HigherIsWorse),
+                new("gchandle.pinned.bytes",       null, r.PinnedRetainedBytes,   "bytes",   MetricTrendDirection.HigherIsWorse)
             ];
         }
 
@@ -374,8 +376,10 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not GCHandleDomainResult b || current is not GCHandleDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("gchandle.total", null, b.TotalHandles, c.TotalHandles, "handles", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gchandle.pinned.targets", null, b.PinnedHandleTargets, c.PinnedHandleTargets, "targets", MetricTrendDirection.HigherIsWorse)
+                MetricDeltaHelper.Compute("gchandle.total",          null, b.TotalHandles,        c.TotalHandles,        "handles", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gchandle.strong",         null, b.StrongLikeHandles,   c.StrongLikeHandles,   "handles", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gchandle.pinned.targets", null, b.PinnedHandleTargets, c.PinnedHandleTargets, "targets", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("gchandle.pinned.bytes",   null, b.PinnedRetainedBytes, c.PinnedRetainedBytes, "bytes",   MetricTrendDirection.HigherIsWorse)
             ];
         }
     }
@@ -402,9 +406,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not LohFragmentationDomainResult b || current is not LohFragmentationDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("loh.fragmentation.percent", null, b.FragmentationPercent, c.FragmentationPercent, "%", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("loh.free.bytes", null, b.FreeBytes, c.FreeBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("loh.total.bytes", null, b.TotalBytes, c.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
+                MetricDeltaHelper.Compute("loh.fragmentation.percent", null, b.FragmentationPercent, c.FragmentationPercent, "%",        MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("loh.free.bytes",            null, b.FreeBytes,             c.FreeBytes,             "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("loh.total.bytes",           null, b.TotalBytes,            c.TotalBytes,            "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("loh.largest.free.block",    null, b.LargestFreeBlock,      c.LargestFreeBlock,      "bytes",   MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("loh.segment.count",         null, b.SegmentCount,          c.SegmentCount,          "segments",MetricTrendDirection.Neutral)
             ];
         }
     }

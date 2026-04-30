@@ -78,8 +78,19 @@ Per record (24 bytes): Address(8) | MethodTable(8) | Size(8)
 Cap at 100 entries. Min-heap pattern keeps memory O(100) during Phase 1.
 
 ### Phase 2 Computation
-`LohFragmentationAnalyzer` reads the two index files. The per-segment `EnumerateObjects()` call
-in Phase 2 is eliminated entirely. Total LOH data is produced from pre-indexed records.
+**Disk mode**: `LohFragmentationAnalyzer` reads `LohFreeBlockIndex.bin` and `LargeObjectIndex.bin`
+from the `.dumpindex/` directory. The per-segment `EnumerateObjects()` call is eliminated
+entirely. Total LOH data is produced from pre-indexed records.
+
+**Memory mode**: `IndexPath = "<memory>"` so `Path.GetDirectoryName` returns `""` and both
+satellite files are absent. `AnalyzeFromIndex` detects this (`indexDir.Length == 0`) and
+immediately delegates to `AnalyzeFromHeap`, which does a full LOH segment scan. This produces
+exactly the same rich output (fragmentation %, free-gap histogram, top large objects, per-segment
+snapshots) as disk mode.
+
+**Both modes produce identical `LohFragmentationDomainResult`.** The only difference is
+execution path: disk mode reads pre-built indices (faster for large dumps); memory mode scans
+LOH segments directly (always ≤4GB, so the scan cost is bounded).
 
 ---
 

@@ -65,15 +65,17 @@ OrphanedTaskSnapshot(ulong Address, string TaskType, string? ResultType, ulong S
 | Step | Proposed Phase | Notes |
 |------|---------------|-------|
 | Tag Task/ValueTask MTs | **Phase 1** | `Flags` byte bit 1 = `IsTaskType` in TypeAggregateIndexEntry |
-| Build `TaskIndex.bin` | **Phase 1** | Lightweight index file capturing state per task object |
-| Classify task states | Phase 2 | Read TaskIndex, no heap re-scan for state classification |
+| Build `TaskIndex.bin` (disk mode) | **Phase 1** | Lightweight index file capturing task addresses; written by `DiskBackedObjectIndexWriter` |
+| Collect `InMemoryTaskCandidates` (memory mode) | **Phase 1** | `(ulong Addr, ulong Mt)[]` appended during the same parallel segment scan; stored in `HeapIndexBuildResult.InMemoryTaskCandidates`; mirrors `TaskIndex.bin` content |
+| Classify task states | Phase 2 | Read task address list from the appropriate source (see Phase 2 Computation below); no heap re-scan |
 | Continuation BFS | Phase 2 | Still requires ClrMD field access — bounded by MaxTasksToScan |
-| Orphan detection | Phase 2 | Read `m_continuationObject` field for each task in TaskIndex |
+| Orphan detection | Phase 2 | Read `m_continuationObject` field for each task in the candidate list |
 
-### Phase 1 Extension — `TaskIndex.bin`
+**Both modes produce identical output.** The only difference is how the initial task address list is sourced.
 
-During the parallel segment scan, when `TypeAggregateIndexEntry.Flags.IsTaskType` is set for
-a given MT, write a record to `TaskIndex.bin`:
+### Phase 1 Extension — `TaskIndex.bin` (disk mode) / `InMemoryTaskCandidates` (memory mode)
+
+**Disk mode** (`DiskBackedObjectIndexWriter`): During the parallel segment scan, when `TypeAggregateIndexEntry.Flags.IsTaskType` is set for a given MT, write a record to `TaskIndex.bin`:
 
 ```
 Header (16 bytes): Magic(4) | Version(4) | RecordCount(8)
@@ -85,15 +87,24 @@ Per record (20 bytes):
 If field not found (version differences), write `StateFlags = 0` and let Phase 2 re-resolve.
 Size estimate: 1M tasks × 20 bytes = 20MB (worst case).
 
+**Memory mode** (`MemoryBackedObjectIndexWriter`): During the same parallel Phase 2 scan that writes to `flatEntries`, task candidates are appended to a `ConcurrentBag<(ulong Addr, ulong Mt)>` when `IsTaskType` flag is set. The bag is converted to `(ulong Addr, ulong Mt)[]` and stored in `HeapIndexBuildResult.InMemoryTaskCandidates`. No extra heap pass, no disk I/O.
+
 ### Phase 2 Computation
 ```
 AsyncTaskAnalyzer.AnalyzeAsync(context):
-  1. Read TaskIndex.bin → task address list + pre-captured state flags
+  Candidate list sourcing (priority order):
+    1a. [memory mode] heapIndex.InMemoryTaskCandidates → direct (ulong Addr, ulong Mt)[] read
+    1b. [disk mode]   Read TaskIndex.bin → task address list + pre-captured state flags
+    1c. [fallback]    Scan InMemoryEntries[] filtered by TypeAggregates.IsTaskType
+    1d. [no index]    Full heap.EnumerateObjects() scan (ScanRawHeapForTasks)
   2. Classify each task by state from StateFlags (bit masks)
   3. For top N tasks: read m_continuationObject field → BFS chain depth
   4. Orphan = m_continuationObject is null or sentinel type
   5. Build AsyncTaskDomainResult
 ```
+
+All four paths produce identical `AsyncTaskDomainResult`. Paths 1a and 1b are preferred because
+they are O(N_tasks) rather than O(N_total_objects).
 
 > `TaskScanLimited` flag is preserved on `AsyncTaskDomainResult` for §17 Confidence output.
 

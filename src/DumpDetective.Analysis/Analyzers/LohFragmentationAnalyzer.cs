@@ -10,7 +10,7 @@ using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class LohFragmentationAnalyzer : IAnalyzer
+    public sealed class LohFragmentationAnalyzer : IAnalyzer
     {
         private const int TopSegments = 10;
         private const int TopLargeObjectsCount = 20;
@@ -144,38 +144,17 @@ namespace DumpDetective.Analysis.Analyzers
                 if (s.LargestFreeBlock > maxFreeBlock) maxFreeBlock = s.LargestFreeBlock;
             }
 
-            var topSegments = segmentStats
-                .OrderByDescending(s => s.FragmentationPercent)
-                .ThenByDescending(s => s.FreeBytes)
-                .Take(TopSegments)
-                .Select(s => new LohSegmentSnapshot(s.Address, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock))
-                .ToList();
+            segmentStats.Sort(static (a, b) =>
+            {
+                int cmp = b.FragmentationPercent.CompareTo(a.FragmentationPercent);
+                return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
+            });
+            int topN = Math.Min(TopSegments, segmentStats.Count);
+            var topSegments = new List<LohSegmentSnapshot>(topN);
+            for (int i = 0; i < topN; i++)
+                topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
 
             return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments);
-        }
-
-        private static InsightFinding CreateFinding(double fragmentationPercent, int segmentCount)
-        {
-            FindingSeverity severity = fragmentationPercent >= 30
-                ? FindingSeverity.Critical
-                : fragmentationPercent >= 15
-                    ? FindingSeverity.Warning
-                    : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(LohFragmentationAnalyzer),
-                Category: "Fragmentation",
-                Severity: severity,
-                Title: "LOH fragmentation assessment",
-                Evidence: $"{fragmentationPercent:F1}% overall free-space fragmentation across {segmentCount:N0} LOH segment(s).",
-                Recommendation: severity == FindingSeverity.Critical
-                    ? "Investigate large object allocation churn and retention; consider compaction strategies and pooling."
-                    : severity == FindingSeverity.Warning
-                        ? "Monitor LOH allocation patterns and reduce churn from short-lived large allocations."
-                        : "LOH fragmentation is currently within acceptable range.",
-                Tags: ["loh", "fragmentation", "memory"],
-                MetricValue: fragmentationPercent,
-                MetricUnit: "% fragmentation");
         }
 
         private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
@@ -279,6 +258,12 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
+
+            // Memory mode: IndexPath is "<memory>", so indexDir is "". The satellite files
+            // (LohFreeBlockIndex.bin, LargeObjectIndex.bin) only exist in disk mode.
+            // Fall back to the full segment scan so both modes produce identical rich output.
+            if (indexDir.Length == 0)
+                return AnalyzeFromHeap(heap, progress);
 
             progress?.Report(new(0, "reading LOH segment metadata", null, TimeSpan.Zero));
 

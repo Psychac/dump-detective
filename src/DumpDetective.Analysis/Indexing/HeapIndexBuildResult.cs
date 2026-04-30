@@ -21,4 +21,10 @@ internal sealed record HeapIndexBuildResult(
     /// Per-MethodTable field layout cache built during Phase 1.
     /// ~800 KB for 50 K types. Used by ObjectShapeAnalyzer, BoxingAnalyzer, and DominatorAnalyzer.
     /// </summary>
-    IReadOnlyDictionary<ulong, TypeShapeEntry>? TypeShapeCache = null);
+    IReadOnlyDictionary<ulong, TypeShapeEntry>? TypeShapeCache = null,
+    /// <summary>
+    /// Pre-filtered list of Task/ValueTask addresses collected during Phase 1 (memory-backed mode only).
+    /// Mirrors the subset that <c>TaskIndex.bin</c> contains in disk-backed mode, allowing
+    /// <see cref="Analyzers.AsyncTaskAnalyzer"/> to skip a full O(N) scan of <see cref="InMemoryEntries"/>.
+    /// </summary>
+    (ulong Addr, ulong Mt)[]? InMemoryTaskCandidates = null);

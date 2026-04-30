@@ -53,9 +53,14 @@
 ### Proposed Phase Assignment
 | Step | Proposed Phase | Notes |
 |------|---------------|-------|
-| Handle enumeration | **Phase 1** | Separate Phase 1 step (not heap streaming) |
-| Write `HandleSnapshot.bin` | **Phase 1** | One record per handle |
-| Pinned size accumulation | Phase 2 | Join HandleSnapshot with ObjectIndex for size |
+| Handle enumeration | **Phase 1** | `runtime.EnumerateHandles()` — separate CLR API, not heap streaming |
+| Write `HandleSnapshot.bin` | **Phase 1** | Written by `DiskBackedObjectIndexWriter`; consumed by `WeakReferenceAnalyzer` (not this analyzer) |
+| Pinned size accumulation | Phase 2 | `heap.GetObject(targetAddress).Size` per pinned handle — runs in both modes identically |
+
+**Both modes produce identical output.** `GCHandleAnalyzer` calls `runtime.EnumerateHandles()`
+directly in Phase 2 for both memory-backed and disk-backed sessions. It does NOT read
+`HandleSnapshot.bin` — that file is consumed by `WeakReferenceAnalyzer` for weak handle
+liveness analysis (§24). There is no mode-specific fast-path in the current implementation.
 
 ### Phase 1 Extension — `HandleSnapshot.bin`
 
@@ -76,11 +81,14 @@ Size estimate: 50K handles × 20 bytes = 1MB. Typically much smaller.
 ### Phase 2 Computation
 ```
 GCHandleAnalyzer.AnalyzeAsync(context):
-  1. Read HandleSnapshot.bin
-  2. For Pinned handles: look up Size in TypeAggregates by MethodTable
-  3. Accumulate PinnedRetainedBytes per MT
+  1. Call runtime.EnumerateHandles() — same in both memory and disk modes
+  2. For Pinned handles: call heap.GetObject(targetAddress) to resolve Size
+  3. Accumulate PinnedRetainedBytes per MT via methodTableNameCache
   4. Build GCHandleDomainResult including TopPinnedObjectsBySize
 ```
+
+No satellite file is read by this analyzer. `HandleSnapshot.bin` is written by Phase 1
+(disk mode only) for future consumption by `WeakReferenceAnalyzer`.
 
 ---
 

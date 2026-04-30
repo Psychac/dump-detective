@@ -100,10 +100,10 @@ respectively — fast enough that no additional progress reports are warranted.
 
 | File | Access Pattern | Purpose |
 |------|---------------|---------|
-| `ObjectIndex.bin` (via `EnumerateIndexedEntriesAsTuples`) | Sequential read | All-object enumeration, MT-filtered to strings |
+| `ObjectIndex.bin` / `InMemoryEntries[]` (via `EnumerateIndexedEntriesAsTuples`) | Sequential in both modes | All-object enumeration, MT-filtered to strings. Memory mode iterates `InMemoryEntries[]`; disk mode reads `ObjectIndex.bin` sequentially. Both paths yield the same `(Address, MethodTable, Size)` tuples — identical output. |
 | `TypeAggregateIndex` (in-memory) | Random read by MT key | `IsStringType` flag, `Gen2Count`, `TotalSize` |
 
-No new satellite files are written by this analyzer.
+No new satellite files are written by this analyzer. Both modes produce identical `StringDomainResult`.
 
 ---
 

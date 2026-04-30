@@ -29,6 +29,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
+        // Collected during Phase 2 scan — mirrors what DiskBackedObjectIndexWriter writes to TaskIndex.bin.
+        // Stored in HeapIndexBuildResult so AsyncTaskAnalyzer can read the pre-filtered list directly
+        // instead of scanning all InMemoryEntries (O(N_total) vs O(N_tasks)).
+        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
 
         var parallelOptions = new ParallelOptions
         {
@@ -111,6 +115,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
                     state.Builder.Add(entry, moduleId, flags, segGen);
 
+                    // Collect task candidates — same filter as DiskBackedObjectIndexWriter.
+                    if ((flags & TypeAggregateFlags.IsTaskType) != 0)
+                        taskCandidates.Add((obj.Address, mt));
+
                     // Write directly into this segment's reserved slice — no intermediate buffer.
                     if (written < slotCap)
                         flatEntries[baseSlot + written] = entry;
@@ -153,7 +161,8 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             InMemoryEntries: flatEntries,
             Modules: moduleRegistry.Modules,
             GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
-            TypeShapeCache: shapeCache);
+            TypeShapeCache: shapeCache,
+            InMemoryTaskCandidates: taskCandidates.ToArray());
     }
 
     // ── Type classification helpers (mirror DiskBackedObjectIndexWriter) ───────

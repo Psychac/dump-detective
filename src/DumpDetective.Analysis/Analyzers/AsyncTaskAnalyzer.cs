@@ -139,65 +139,63 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             {
                 if (isFaulted)
                     IncrementCount(faultedTypeCount, typeName);
-                else if (!isCompleted)
+                else
                     IncrementCount(pendingTypeCount, typeName);
             }
 
             // ── Orphan detection + continuation chain BFS ─────────────────────
-            // Limit BFS to top MaxTasksToScan tasks to stay bounded
-            if (depthSampleCount < MaxTasksToScan)
+            // taskEntries is already capped at MaxTasksToScan by all load paths;
+            // BFS runs for every task with a valid continuation.
+            ClrObject taskObj = heap.GetObject(address);
+            if (taskObj.IsValid && taskObj.Type != null)
             {
-                ClrObject taskObj = heap.GetObject(address);
-                if (taskObj.IsValid && taskObj.Type != null)
+                var continuationField = taskObj.Type.GetFieldByName("m_continuationObject");
+                if (continuationField != null)
                 {
-                    var continuationField = taskObj.Type.GetFieldByName("m_continuationObject");
-                    if (continuationField != null)
+                    ClrObject continuationObj = continuationField.ReadObject(taskObj, interior: false);
+
+                    bool isOrphan = !continuationObj.IsValid
+                        || continuationObj.Address == 0
+                        || string.Equals(continuationObj.Type?.Name, NoOpContinuationType, StringComparison.Ordinal);
+
+                    if (isOrphan && !isCompleted && !isCanceled)
                     {
-                        ClrObject continuationObj = continuationField.ReadObject(taskObj, interior: false);
-
-                        bool isOrphan = !continuationObj.IsValid
-                            || continuationObj.Address == 0
-                            || string.Equals(continuationObj.Type?.Name, NoOpContinuationType, StringComparison.Ordinal);
-
-                        if (isOrphan && !isCompleted && !isCanceled)
+                        orphaned++;
+                        if (orphanedSnapshots.Count < TopOrphanedToShow)
                         {
-                            orphaned++;
-                            if (orphanedSnapshots.Count < TopOrphanedToShow)
-                            {
-                                string? resultType = ExtractResultType(typeName);
-                                ulong size = taskObj.Size;
-                                orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size));
-                            }
+                            string? resultType = ExtractResultType(typeName);
+                            ulong size = taskObj.Size;
+                            orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size));
+                        }
+                    }
+
+                    // BFS chain depth
+                    if (continuationObj.IsValid && continuationObj.Address != 0)
+                    {
+                        int depth = 1;
+                        var visited = new HashSet<ulong>(capacity: 8) { address };
+                        ClrObject current = continuationObj;
+
+                        while (depth < MaxContinuationDepth && current.IsValid && current.Address != 0
+                               && visited.Add(current.Address))
+                        {
+                            // Track continuation type for top-N
+                            if (current.Type != null)
+                                IncrementCount(continuationCount, current.Type.Name ?? string.Empty);
+
+                            var nextField = current.Type?.GetFieldByName("m_continuationObject");
+                            if (nextField == null) break;
+
+                            ClrObject next = nextField.ReadObject(current, interior: false);
+                            if (!next.IsValid || next.Address == 0) break;
+
+                            current = next;
+                            depth++;
                         }
 
-                        // BFS chain depth
-                        if (continuationObj.IsValid && continuationObj.Address != 0)
-                        {
-                            int depth = 1;
-                            var visited = new HashSet<ulong>(capacity: 8) { address };
-                            ClrObject current = continuationObj;
-
-                            while (depth < MaxContinuationDepth && current.IsValid && current.Address != 0
-                                   && visited.Add(current.Address))
-                            {
-                                // Track continuation type for top-N
-                                if (current.Type != null)
-                                    IncrementCount(continuationCount, current.Type.Name ?? string.Empty);
-
-                                var nextField = current.Type?.GetFieldByName("m_continuationObject");
-                                if (nextField == null) break;
-
-                                ClrObject next = nextField.ReadObject(current, interior: false);
-                                if (!next.IsValid || next.Address == 0) break;
-
-                                current = next;
-                                depth++;
-                            }
-
-                            totalDepthSum += depth;
-                            if (depth > maxDepth) maxDepth = depth;
-                            depthSampleCount++;
-                        }
+                        totalDepthSum += depth;
+                        if (depth > maxDepth) maxDepth = depth;
+                        depthSampleCount++;
                     }
                 }
             }
@@ -241,6 +239,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         // Fast path: TaskIndex.bin exists
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {
+            // Memory-backed mode: InMemoryTaskCandidates was collected during Phase 1 at zero
+            // extra scanning cost — use it directly to avoid an O(N_total) scan of InMemoryEntries.
+            if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
+                return ConvertInMemoryTaskCandidates(inMemCandidates);
+
             string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
             string taskIndexPath = Path.Combine(indexDir, DumpIndexPaths.TaskIndexFile);
 
@@ -257,6 +260,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
 
         // No cache — full heap scan
         return ScanRawHeapForTasks(heap, progress, ct);
+    }
+
+    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates)
+    {
+        int cap = Math.Min(candidates.Length, MaxTasksToScan);
+        var result = new List<(ulong, ulong, int)>(cap);
+        for (int i = 0; i < cap; i++)
+            result.Add((candidates[i].Addr, candidates[i].Mt, 0)); // StateFlags resolved in Phase 2
+        return result;
     }
 
     private static List<(ulong, ulong, int)>? ReadTaskIndexFile(
@@ -371,7 +383,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             if (!obj.IsValid || obj.Type is null)
                 continue;
 
-            if (!obj.Type.Name.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
+            string? typeName = obj.Type.Name;
+            if (typeName is null || !typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 continue;
 
             result.Add((obj.Address, obj.Type.MethodTable, 0));

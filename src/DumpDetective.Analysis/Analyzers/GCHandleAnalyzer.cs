@@ -6,7 +6,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class GCHandleAnalyzer : IAnalyzer
+    public sealed class GCHandleAnalyzer : IAnalyzer
     {
         private const int TopTypeCount = 15;
 
@@ -61,29 +61,14 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong resolvedSize = 0;
                 if (heap is not null && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build))
                 {
-                    // Fast-path: resolve type name from index's TypeAggregates by method-table if possible
+                    // Fast-path: resolve type name via methodTableNameCache keyed on MT.
+                    // heap.GetObject is still needed to get the address + size, but we avoid
+                    // the extra sample-address lookup since the MT is already known.
                     ClrObject targetObject = heap.GetObject(targetAddress);
                     if (targetObject.IsValid)
                     {
                         resolvedSize = targetObject.Size;
-                        ulong mt = targetObject.Type?.MethodTable ?? 0;
-                        if (mt != 0 && build.TypeAggregates.TryGetValue(mt, out var agg))
-                        {
-                            // Resolve sample-based type name from heap when available
-                            if (agg.SampleAddress != 0)
-                            {
-                                ClrObject sample = heap.GetObject(agg.SampleAddress);
-                                typeName = sample.IsValid && sample.Type != null ? sample.Type.Name : ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                            }
-                            else
-                            {
-                                typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                            }
-                        }
-                        else
-                        {
-                            typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                        }
+                        typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
                     }
                     else
                     {
@@ -141,32 +126,6 @@ namespace DumpDetective.Analysis.Analyzers
                     ToTopEntries(pinnedTypes, TopTypeCount),
                     totalPinnedRetainedBytes,
                     ToTopByteEntries(pinnedBytesByType, TopTypeCount));
-        }
-
-        private static InsightFinding CreateFinding(int totalHandles, Dictionary<string, int> pinnedTypes)
-        {
-            int pinnedHandleTargets = 0;
-            foreach (var kv in pinnedTypes)
-            {
-                pinnedHandleTargets += kv.Value;
-            }
-
-            FindingSeverity severity = pinnedHandleTargets >= 1000 || totalHandles >= 10000
-                ? FindingSeverity.Warning
-                : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(GCHandleAnalyzer),
-                Category: "GC",
-                Severity: severity,
-                Title: "GC handle pressure summary",
-                Evidence: $"Total handles: {totalHandles:N0}; pinned-handle target count: {pinnedHandleTargets:N0}; pinned target types: {pinnedTypes.Count:N0}.",
-                Recommendation: severity == FindingSeverity.Warning
-                    ? "Inspect pinned-handle-heavy types and reduce long-lived pinning where possible."
-                    : "Handle distribution appears within expected bounds for this snapshot.",
-                Tags: ["gc-handle", "pinning", "retention"],
-                MetricValue: totalHandles,
-                MetricUnit: "total-handles");
         }
 
         private static bool IsWeakLike(string kind)

@@ -725,7 +725,7 @@ and **Related Analyzers** for that single analyzer.
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ⏳ **Pending** |
-| 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ⏳ **Pending** |
+| 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ✅ **Completed** |
 | 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
 | 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ⏳ **Pending** |
 

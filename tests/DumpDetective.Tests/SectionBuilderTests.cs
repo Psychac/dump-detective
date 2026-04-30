@@ -897,5 +897,92 @@ public sealed class SectionBuilderTests
         queueTable.Should().NotBeNull("queue entries table must be emitted");
         queueTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── AsyncStateMachineSectionBuilder tests ─────────────────────────────────
+
+    [Fact]
+    public void AsyncStateMachineSectionBuilder_CanHandle_ReturnsTrueForAsyncStateMachineDomainResult()
+    {
+        var domain = Stamped(
+            new AsyncStateMachineDomainResult(
+                TotalStateMachines: 0,
+                TotalStateMachineBytes: 0,
+                TopStateMachineTypes: [],
+                TopByCapturedSize: [],
+                SuspendedMethodMap: [],
+                ScanLimited: false),
+            "Async State Machine Analysis", "Memory");
+        new AsyncStateMachineSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AsyncStateMachineSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new EventLeakDomainResult(0, 0, 0, 0),
+            "Event Leak Analysis", "Events");
+        new AsyncStateMachineSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AsyncStateMachineSectionBuilder_Build_EmitsSummaryMetricsAndTables()
+    {
+        var typeProfile = new StateMachineTypeProfile(
+            TypeName: "MyApp.Service+<ProcessAsync>d__3",
+            OriginatingMethod: "ProcessAsync",
+            DeclaringType: "MyApp.Service",
+            Count: 250,
+            TotalBytes: 500_000,
+            AvgStateValue: -1,
+            ReferenceFieldCount: 4);
+
+        var highCapture = new HighCaptureStateMachine(
+            Address: 0xABCD_1234,
+            TypeName: "MyApp.Service+<ProcessAsync>d__3",
+            TotalCapturedRefBytes: 2_097_152,
+            LargeCaptures: ["_dbContext (MyApp.Data.AppDbContext, 1.8 MB)"]);
+
+        var suspendedEntry = new SuspendedMethodEntry(
+            DeclaringType: "MyApp.Service",
+            MethodName: "ProcessAsync",
+            SuspendedCount: 250,
+            TotalBytes: 500_000);
+
+        var domain = Stamped(
+            new AsyncStateMachineDomainResult(
+                TotalStateMachines: 250,
+                TotalStateMachineBytes: 500_000,
+                TopStateMachineTypes: [typeProfile],
+                TopByCapturedSize: [highCapture],
+                SuspendedMethodMap: [suspendedEntry],
+                ScanLimited: false),
+            "Async State Machine Analysis", "Memory");
+
+        AnalyzerDetailSection section = new AsyncStateMachineSectionBuilder().Build(domain);
+
+        section.AnalyzerName.Should().Be("Async State Machine Analysis");
+        section.SortOrder.Should().Be(48);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total State Machines" && m.RawValue == 250);
+        metrics.Should().Contain(m => m.Label == "Distinct Types");
+        metrics.Should().Contain(m => m.Label == "Suspended Methods");
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(3, "should emit types, captures, and suspended method tables");
+
+        var typeTable = tables.FirstOrDefault(t => t.Caption!.Contains("state machine types"));
+        typeTable.Should().NotBeNull("top state machine types table must be emitted");
+        typeTable!.Rows.Should().HaveCount(1);
+
+        var captureTable = tables.FirstOrDefault(t => t.Caption!.Contains("captured"));
+        captureTable.Should().NotBeNull("high-capture instances table must be emitted");
+        captureTable!.Rows.Should().HaveCount(1);
+
+        var suspendedTable = tables.FirstOrDefault(t => t.Caption!.Contains("Suspended"));
+        suspendedTable.Should().NotBeNull("suspended method map table must be emitted");
+        suspendedTable!.Rows.Should().HaveCount(1);
+    }
 }
+
 

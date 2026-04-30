@@ -39,7 +39,8 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new ThreadAnalyzer(),
             new LockGraphAnalyzer(),
             new EventLeakAnalyzer(),
-            new FinalizableObjectAnalyzer()
+            new FinalizableObjectAnalyzer(),
+            new AsyncStateMachineAnalyzer()
         ];
     }
 }

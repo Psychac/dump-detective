@@ -64,6 +64,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, ObjectShapeFindingGenerator>();
         services.AddSingleton<IFindingGenerator, GCRootFindingGenerator>();
         services.AddSingleton<IFindingGenerator, FinalizableObjectFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, AsyncStateMachineFindingGenerator>();
 
         // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
@@ -94,6 +95,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, ObjectShapeTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, GCRootTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, FinalizableObjectTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, AsyncStateMachineTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

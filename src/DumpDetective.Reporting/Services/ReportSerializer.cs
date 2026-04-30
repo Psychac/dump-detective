@@ -245,6 +245,14 @@ internal sealed class ReportSerializer
                     Capped: true,
                     Reason: "Async task scan was capped at 50 000 entries; orphan counts and state totals may be partial."));
             }
+
+            if (run.Result is AsyncStateMachineDomainResult asm && asm.ScanLimited)
+            {
+                notes.Add(new ConfidenceNote(
+                    Analyzer: run.AnalyzerName,
+                    Capped: true,
+                    Reason: "Async state machine type scan was capped at 200 candidate types; total counts and top-type list may be partial."));
+            }
         }
 
         return notes;

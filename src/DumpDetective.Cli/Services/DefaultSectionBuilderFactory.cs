@@ -29,6 +29,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new ThreadSectionBuilder(),
         new LockGraphSectionBuilder(),
         new EventLeakSectionBuilder(),
-        new FinalizableObjectSectionBuilder()
+        new FinalizableObjectSectionBuilder(),
+        new AsyncStateMachineSectionBuilder()
     ];
 }

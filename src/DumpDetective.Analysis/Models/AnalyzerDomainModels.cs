@@ -410,7 +410,9 @@ internal sealed record EventLeakDomainResult(
     int InstanceEventLeakCount,
     IReadOnlyList<NameCountEntry>? TopPublisherEventsBySubscribers = null,
     IReadOnlyList<EventLeakGroupSnapshot>? TopLeakGroups = null,
-    IReadOnlyList<EventLeakInstanceSnapshot>? TopLeakInstances = null) : AnalyzerDomainResult;
+    IReadOnlyList<EventLeakInstanceSnapshot>? TopLeakInstances = null,
+    int TotalEventsScanned = 0,
+    int TotalPublisherInstances = 0) : AnalyzerDomainResult;
 
 internal sealed record EventLeakGroupSnapshot(
     string PublisherType,
@@ -422,7 +424,8 @@ internal sealed record EventLeakGroupSnapshot(
     double AverageSubscribers,
     int MinSubscribers,
     int MaxSubscribers,
-    IReadOnlyList<NameCountEntry>? TopSubscriberTypes = null);
+    IReadOnlyList<NameCountEntry>? TopSubscriberTypes = null,
+    ulong EstimatedSubscriberRetainedBytes = 0);
 
 internal sealed record EventLeakInstanceSnapshot(
     string PublisherType,

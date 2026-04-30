@@ -700,7 +700,7 @@ and **Related Analyzers** for that single analyzer.
 | 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 | ✅ **Completed** |
 | — | `ThreadAnalyzer` | [ThreadAnalyzer.md](Analyzers/ThreadAnalyzer.md) | `ThreadsWithLargeStackRoots`, `LongLivedThreadCount` | ⏳ **Pending** |
 | 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` | ✅ **Completed** |
-| 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` | ⏳ **Pending** |
+| 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` | ✅ **Completed** |
 | — | `CollectionAnalyzer` | [CollectionAnalyzer.md](Analyzers/CollectionAnalyzer.md) | `CachePatternScore`, `Generation` field | ⏳ **Pending** |
 | 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` | ✅ **Completed** |
 | — | `ThreadStackClusterAnalyzer` | [ThreadStackClusterAnalyzer.md](Analyzers/ThreadStackClusterAnalyzer.md) | `LockHolderClusterCount`, `DominantWaitCategory` | ⏳ **Pending** |
@@ -780,7 +780,7 @@ Additionally, `InsightEngine` must gain:
 | 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High | ✅ `RootIndex.bin` written | ✅ **Completed** |
 | 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only | ⏳ **Pending** |
 | 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
-| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ⏳ **Pending** |
+| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ✅ **Completed** |
 | 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 | 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ⏳ **Pending** |
 | 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ⏳ **Pending** |

@@ -479,7 +479,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("event.leak.instances", null, r.TotalEventLeakInstances, "events", MetricTrendDirection.HigherIsWorse),
                 new("event.total.subscribers", null, r.TotalSubscribers, "subscribers", MetricTrendDirection.HigherIsWorse),
                 new("event.static.leaks", null, r.StaticEventLeakCount, "events", MetricTrendDirection.HigherIsWorse),
-                new("event.instance.leaks", null, r.InstanceEventLeakCount, "events", MetricTrendDirection.HigherIsWorse)
+                new("event.instance.leaks", null, r.InstanceEventLeakCount, "events", MetricTrendDirection.HigherIsWorse),
+                new("event.publisher.instances", null, r.TotalPublisherInstances, "publishers", MetricTrendDirection.Neutral)
             ];
         }
 
@@ -490,7 +491,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
             [
                 MetricDeltaHelper.Compute("event.leak.instances", null, b.TotalEventLeakInstances, c.TotalEventLeakInstances, "events", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("event.total.subscribers", null, b.TotalSubscribers, c.TotalSubscribers, "subscribers", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("event.static.leaks", null, b.StaticEventLeakCount, c.StaticEventLeakCount, "events", MetricTrendDirection.HigherIsWorse)
+                MetricDeltaHelper.Compute("event.static.leaks", null, b.StaticEventLeakCount, c.StaticEventLeakCount, "events", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("event.publisher.instances", null, b.TotalPublisherInstances, c.TotalPublisherInstances, "publishers", MetricTrendDirection.Neutral)
             ];
         }
     }

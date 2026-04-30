@@ -740,5 +740,81 @@ public sealed class SectionBuilderTests
         pathTable.Should().NotBeNull("paths table must be emitted");
         pathTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── EventLeakSectionBuilder tests ─────────────────────────────────────────
+
+    [Fact]
+    public void EventLeakSectionBuilder_CanHandle_ReturnsTrue()
+    {
+        var domain = Stamped(new EventLeakDomainResult(0, 0, 0, 0), "Event Leak Analysis", "Events");
+        new EventLeakSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void EventLeakSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(new GCRootDomainResult(
+            TotalRoots: 0, ByKind: [], TopRootsBySeverity: [],
+            RootPaths: [], PathSearchCapped: false, PathSearchCappedCount: 0),
+            "Other", "Other");
+        new EventLeakSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void EventLeakSectionBuilder_Build_EmitsSummaryMetricsWhenEmpty()
+    {
+        var domain = Stamped(
+            new EventLeakDomainResult(0, 0, 0, 0,
+                TotalEventsScanned: 42, TotalPublisherInstances: 10),
+            "Event Leak Analysis", "Events");
+
+        var builder = new EventLeakSectionBuilder();
+        builder.CanHandle(domain).Should().BeTrue();
+
+        AnalyzerDetailSection section = builder.Build(domain);
+        section.AnalyzerName.Should().Be("Event Leak Analysis");
+        section.DisplayTitle.Should().Be("Event & Delegate Analysis");
+        section.SortOrder.Should().Be(80);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Potential Leak Groups" && m.RawValue == 0);
+        metrics.Should().Contain(m => m.Label == "Events Scanned" && m.RawValue == 42);
+        metrics.Should().Contain(m => m.Label == "Publisher Instances" && m.RawValue == 10);
+    }
+
+    [Fact]
+    public void EventLeakSectionBuilder_Build_EmitsGroupDetailWithRetainedBytes()
+    {
+        var group = new EventLeakGroupSnapshot(
+            PublisherType: "MyApp.Service",
+            EventFieldName: "OnDataReceived",
+            IsStatic: false,
+            SeverityScore: 25,
+            InstanceCount: 3,
+            TotalSubscribers: 9,
+            AverageSubscribers: 3.0,
+            MinSubscribers: 2,
+            MaxSubscribers: 4,
+            TopSubscriberTypes: [new NameCountEntry("MyApp.Handler", 9)],
+            EstimatedSubscriberRetainedBytes: 4096);
+
+        var domain = Stamped(
+            new EventLeakDomainResult(
+                TotalEventLeakInstances: 1,
+                TotalSubscribers: 9,
+                StaticEventLeakCount: 0,
+                InstanceEventLeakCount: 1,
+                TopLeakGroups: [group]),
+            "Event Leak Analysis", "Events");
+
+        AnalyzerDetailSection section = new EventLeakSectionBuilder().Build(domain);
+
+        // Group details with retained bytes metric
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Est. Retained Bytes" && m.RawValue > 0);
+
+        // Subscriber type table inside group
+        section.Blocks.OfType<TableBlock>().Should().NotBeEmpty();
+    }
 }
 

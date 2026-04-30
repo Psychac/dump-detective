@@ -41,26 +41,57 @@ namespace DumpDetective.Analysis.Analyzers
         private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             int minSubscribers = options.MinSubscribers;
-            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers, progress);
+            bool includeNonLeaking = options.IncludeNonLeakingEvents;
+            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers, includeNonLeaking, progress,
+                out int eventsScanned, out int publisherInstances);
 
             if (eventLeaks.Count == 0)
             {
-                return new EventLeakDomainResult(0, 0, 0, 0);
+                return new EventLeakDomainResult(0, 0, 0, 0,
+                    TotalEventsScanned: eventsScanned,
+                    TotalPublisherInstances: publisherInstances);
             }
 
             var groupedLeaks = GroupEventLeaks(eventLeaks);
 
-            int totalSubscribers = groupedLeaks.Sum(g => g.TotalSubscribers);
-            int staticLeaks = groupedLeaks.Count(g => g.IsStatic);
-            int instanceLeaks = groupedLeaks.Count(g => !g.IsStatic);
-            var topPublisherEvents = groupedLeaks
-                .OrderByDescending(g => g.TotalSubscribers)
-                .Take(10)
-                .Select(g => new NameCountEntry($"{g.PublisherType}.{g.EventFieldName}", g.TotalSubscribers))
-                .ToList();
+            // Build type-size map once for EstimatedSubscriberRetainedBytes computation.
+            Dictionary<string, ulong> typeSizeMap = BuildTypeSizeMap(heap, cache);
 
-            var topLeakGroups = groupedLeaks
-                .Select(g => new EventLeakGroupSnapshot(
+            int totalSubscribers = 0;
+            int staticLeaks = 0;
+            int instanceLeaks = 0;
+            for (int i = 0; i < groupedLeaks.Count; i++)
+            {
+                totalSubscribers += groupedLeaks[i].TotalSubscribers;
+                if (groupedLeaks[i].IsStatic) staticLeaks++; else instanceLeaks++;
+            }
+
+            var topPublisherEvents = new List<NameCountEntry>(Math.Min(10, groupedLeaks.Count));
+            // Manual top-10 by TotalSubscribers (avoid LINQ on large lists)
+            var sortedGroups = new List<EventGroupInfo>(groupedLeaks);
+            sortedGroups.Sort((a, b) => b.TotalSubscribers.CompareTo(a.TotalSubscribers));
+            for (int i = 0; i < Math.Min(10, sortedGroups.Count); i++)
+                topPublisherEvents.Add(new NameCountEntry($"{sortedGroups[i].PublisherType}.{sortedGroups[i].EventFieldName}", sortedGroups[i].TotalSubscribers));
+
+            var topLeakGroups = new List<EventLeakGroupSnapshot>(groupedLeaks.Count);
+            for (int i = 0; i < groupedLeaks.Count; i++)
+            {
+                var g = groupedLeaks[i];
+                // Aggregate subscriber types across all instances for this group.
+                var subTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int j = 0; j < g.Instances.Count; j++)
+                {
+                    foreach (SubscriberInfo s in g.Instances[j].Subscribers)
+                    {
+                        subTypeCounts.TryGetValue(s.Type, out int cnt);
+                        subTypeCounts[s.Type] = cnt + 1;
+                    }
+                }
+                var topSubTypes = new List<NameCountEntry>(Math.Min(TopSubscriberTypesToShow, subTypeCounts.Count));
+                foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(TopSubscriberTypesToShow))
+                    topSubTypes.Add(new NameCountEntry(kvp.Key, kvp.Value));
+
+                topLeakGroups.Add(new EventLeakGroupSnapshot(
                     g.PublisherType,
                     g.EventFieldName,
                     g.IsStatic,
@@ -70,42 +101,80 @@ namespace DumpDetective.Analysis.Analyzers
                     g.AverageSubscribers,
                     g.MinSubscribers,
                     g.MaxSubscribers,
-                    g.Instances
-                        .SelectMany(i => i.Subscribers)
-                        .GroupBy(s => s.Type)
-                        .OrderByDescending(x => x.Count())
-                        .Take(TopSubscriberTypesToShow)
-                        .Select(x => new NameCountEntry(x.Key, x.Count()))
-                        .ToList()))
-                .ToList();
+                    topSubTypes,
+                    EstimateGroupRetainedBytes(g, typeSizeMap)));
+            }
 
-            var topLeakInstances = groupedLeaks
-                .SelectMany(g => g.Instances.Select(i => new EventLeakInstanceSnapshot(
-                    g.PublisherType,
-                    g.EventFieldName,
-                    g.IsStatic,
-                    i.PublisherAddress,
-                    i.SeverityScore,
-                    i.SubscriberCount,
-                    string.IsNullOrWhiteSpace(i.RootHint) ? null : i.RootHint,
-                    i.Subscribers
-                        .GroupBy(s => s.Type)
-                        .OrderByDescending(x => x.Count())
-                        .Take(TopSubscriberTypesToShow)
-                        .Select(x => $"{x.Key} ({x.Count():N0})")
-                        .ToList())))
-                .OrderByDescending(i => i.SeverityScore)
-                .ThenByDescending(i => i.SubscriberCount)
-                .ToList();
+            var topLeakInstances = new List<EventLeakInstanceSnapshot>();
+            for (int i = 0; i < groupedLeaks.Count; i++)
+            {
+                var g = groupedLeaks[i];
+                for (int j = 0; j < g.Instances.Count; j++)
+                {
+                    var inst = g.Instances[j];
+                    var subTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (SubscriberInfo s in inst.Subscribers)
+                    {
+                        subTypeCounts.TryGetValue(s.Type, out int cnt);
+                        subTypeCounts[s.Type] = cnt + 1;
+                    }
+                    var subTypeList = new List<string>(Math.Min(TopSubscriberTypesToShow, subTypeCounts.Count));
+                    foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(TopSubscriberTypesToShow))
+                        subTypeList.Add($"{kvp.Key} ({kvp.Value:N0})");
+
+                    topLeakInstances.Add(new EventLeakInstanceSnapshot(
+                        g.PublisherType,
+                        g.EventFieldName,
+                        g.IsStatic,
+                        inst.PublisherAddress,
+                        inst.SeverityScore,
+                        inst.SubscriberCount,
+                        string.IsNullOrWhiteSpace(inst.RootHint) ? null : inst.RootHint,
+                        subTypeList));
+                }
+            }
+            topLeakInstances.Sort((a, b) =>
+            {
+                int cmp = b.SeverityScore.CompareTo(a.SeverityScore);
+                return cmp != 0 ? cmp : b.SubscriberCount.CompareTo(a.SubscriberCount);
+            });
 
             return new EventLeakDomainResult(
-                    groupedLeaks.Count,
-                    totalSubscribers,
-                    staticLeaks,
-                    instanceLeaks,
-                    topPublisherEvents,
-                    topLeakGroups,
-                    topLeakInstances);
+                groupedLeaks.Count,
+                totalSubscribers,
+                staticLeaks,
+                instanceLeaks,
+                topPublisherEvents,
+                topLeakGroups,
+                topLeakInstances,
+                TotalEventsScanned: eventsScanned,
+                TotalPublisherInstances: publisherInstances);
+        }
+
+        private static Dictionary<string, ulong> BuildTypeSizeMap(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            if (cache is not HeapAnalysisCache heapCache)
+                return new Dictionary<string, ulong>(0, StringComparer.Ordinal);
+
+            Dictionary<string, CachedTypeStatistics> typeStats = heapCache.GetOrBuildTypeStatistics(heap);
+            var map = new Dictionary<string, ulong>(typeStats.Count, StringComparer.Ordinal);
+            foreach (KeyValuePair<string, CachedTypeStatistics> kvp in typeStats)
+            {
+                if (kvp.Value.Count > 0)
+                    map[kvp.Key] = kvp.Value.TotalSize / (ulong)kvp.Value.Count;
+            }
+            return map;
+        }
+
+        private static ulong EstimateGroupRetainedBytes(EventGroupInfo g, Dictionary<string, ulong> typeSizeMap)
+        {
+            ulong total = 0;
+            for (int i = 0; i < g.Instances.Count; i++)
+            {
+                foreach (SubscriberInfo s in g.Instances[i].Subscribers)
+                    total += typeSizeMap.TryGetValue(s.Type, out ulong sz) ? sz : 64UL;
+            }
+            return total;
         }
 
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)
@@ -135,8 +204,10 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers, IProgress<AnalyzerProgressReport>? progress)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers, bool includeNonLeaking, IProgress<AnalyzerProgressReport>? progress, out int eventsScanned, out int publisherInstances)
         {
+            eventsScanned = 0;
+            publisherInstances = 0;
             var leaks = new List<EventLeakInfo>();
             // FIX-3: processedObjects removed — heap-index enumeration and heap.EnumerateObjects() both
             // yield each object address exactly once, so the deduplication HashSet was redundant.
@@ -166,6 +237,8 @@ namespace DumpDetective.Analysis.Analyzers
                     || TypeFilterHelper.IsCompilerGenerated(obj.Type.Name))
                     continue;
 
+                bool hadEventField = false;
+
                 // Process instance event fields
                 foreach (ClrInstanceField field in obj.Type.Fields)
                 {
@@ -173,9 +246,11 @@ namespace DumpDetective.Analysis.Analyzers
                         && IsLikelyEventField(obj.Type, field.Name)
                         && !TypeFilterHelper.IsCompilerGenerated(field.Name))
                     {
+                        eventsScanned++;
+                        hadEventField = true;
                         var subscribers = GetEventSubscribers(heap, obj.Address, field);
 
-                        if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
+                        if (subscribers.Count > 0 && (includeNonLeaking || subscribers.Count >= minSubscribers))
                         {
                             leaks.Add(CreateLeakInfo(
                                 publisherAddress: obj.Address,
@@ -198,9 +273,11 @@ namespace DumpDetective.Analysis.Analyzers
                             && IsLikelyEventField(obj.Type, field.Name)
                             && !TypeFilterHelper.IsCompilerGenerated(field.Name))
                         {
+                            eventsScanned++;
+                            hadEventField = true;
                             var subscribers = GetStaticEventSubscribers(heap, field, appDomains, processedStaticDelegates);
 
-                            if (subscribers.Count > 0 && subscribers.Count >= minSubscribers)
+                            if (subscribers.Count > 0 && (includeNonLeaking || subscribers.Count >= minSubscribers))
                             {
                                 leaks.Add(CreateLeakInfo(
                                     publisherAddress: 0,
@@ -213,10 +290,12 @@ namespace DumpDetective.Analysis.Analyzers
                         }
                     }
                 }
+
+                if (hadEventField) publisherInstances++;
             }
 
             // Cover static-only publisher types by reading static roots directly.
-            FindStaticRootOnlyEventLeaks(heap, cache, processedStaticDelegates, rootHints, minSubscribers, leaks);
+            FindStaticRootOnlyEventLeaks(heap, cache, processedStaticDelegates, rootHints, minSubscribers, includeNonLeaking, leaks, ref eventsScanned);
 
             scanCounter.Complete();
 
@@ -443,7 +522,9 @@ namespace DumpDetective.Analysis.Analyzers
             HashSet<ulong> processedStaticDelegates,
             Dictionary<ulong, string> rootHints,
             int minSubscribers,
-            List<EventLeakInfo> leaks)
+            bool includeNonLeaking,
+            List<EventLeakInfo> leaks,
+            ref int eventsScanned)
         {
             IReadOnlyList<(string RootKind, ulong Address)> roots;
             if (cache is not null)
@@ -477,6 +558,8 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!processedStaticDelegates.Add(rootObj.Address))
                     continue;
 
+                eventsScanned++;
+
                 string rootDescription = cache?.GetRootDescription(rootAddress) ?? (rootKind + " @ 0x" + rootAddress.ToString("X"));
                 ParseRootPublisher(rootDescription, out string publisherType, out string eventFieldName);
 
@@ -487,7 +570,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 var subscribers = ExtractSubscribersFromDelegateAddress(heap, rootObj.Address);
-                if (subscribers.Count == 0 || subscribers.Count < minSubscribers)
+                if (subscribers.Count == 0 || (!includeNonLeaking && subscribers.Count < minSubscribers))
                     continue;
 
                 leaks.Add(CreateLeakInfo(

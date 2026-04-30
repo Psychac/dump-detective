@@ -191,9 +191,12 @@ internal sealed class ConfigurationResolver
             ?? request.EventLeakMinSubscribers
             ?? 0;
 
+        bool includeNonLeaking = config.EventLeak?.IncludeNonLeakingEvents ?? false;
+
         return new EventLeakOptions
         {
-            MinSubscribers = minSubscribers
+            MinSubscribers = minSubscribers,
+            IncludeNonLeakingEvents = includeNonLeaking
         };
     }
 

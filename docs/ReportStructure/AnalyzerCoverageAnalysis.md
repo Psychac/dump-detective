@@ -391,8 +391,8 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| New leaks not present in baseline | 🟡 | `TrendAnalyzer` — general metric deltas; no "new leak" semantic label |
-| Regression severity classification | ❌ | `TrendAnalyzer` produces `MetricTrendDirection`; no regression scoring |
+| New leaks not present in baseline | ✅ | `TrendAnalyzer` — `NewLeakSignals` on `AnalyzerTrendResult`; cross-snapshot type comparison |
+| Regression severity classification | ✅ | `TrendAnalyzer` — `RegressionSeverity` enum + `Severity` property on `MetricDelta` |
 
 ---
 
@@ -708,7 +708,7 @@ and **Related Analyzers** for that single analyzer.
 | — | `CrashAnalyzer` | [CrashAnalyzer.md](Analyzers/CrashAnalyzer.md) | Exception frame hotspots, origin classification | ⏳ **Pending** |
 | — | `ModuleAnalyzer` | [ModuleAnalyzer.md](Analyzers/ModuleAnalyzer.md) | `TotalRetainedEstimateBytes` post-pass | ⏳ **Pending** |
 | — | `DependentHandleAnalyzer` | [DependentHandleAnalyzer.md](Analyzers/DependentHandleAnalyzer.md) | `EstimatedRetainedBytes`, `IsPotentialEventSource` | ⏳ **Pending** |
-| 14 | `TrendAnalyzer` | [TrendAnalyzer.md](Analyzers/TrendAnalyzer.md) | `GrowthRatePercent`, `RegressionSeverity`, `NewLeakSignals` | ⏳ **Pending** |
+| 14 | `TrendAnalyzer` | [TrendAnalyzer.md](Analyzers/TrendAnalyzer.md) | `GrowthRatePercent`, `RegressionSeverity`, `NewLeakSignals` | ✅ **Completed** |
 
 ## New Analyzers — Add
 
@@ -781,7 +781,7 @@ Additionally, `InsightEngine` must gain:
 | 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only | ⏳ **Pending** |
 | 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 | 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ✅ **Completed** |
-| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 | 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ⏳ **Pending** |
 | 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ⏳ **Pending** |
 | 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ⏳ **Pending** |

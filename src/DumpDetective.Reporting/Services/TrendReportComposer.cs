@@ -96,7 +96,12 @@ internal sealed class TrendReportComposer(
             findings.Add(new InsightFinding(
                 Analyzer: "TrendAnalyzer",
                 Category: "Comparison",
-                Severity: FindingSeverity.Warning,
+                Severity: delta.Severity switch
+                {
+                    RegressionSeverity.Severe   => FindingSeverity.Critical,
+                    RegressionSeverity.Moderate => FindingSeverity.Warning,
+                    _                           => FindingSeverity.Info
+                },
                 Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Prioritize this regression in the trend timeline and correlate with dump-to-dump finding lifecycle changes.",
@@ -274,6 +279,25 @@ internal sealed class TrendReportComposer(
                         ? delta * 100.0 / firstVal
                         : null;
 
+                    // compute severity inline from the direction/delta/percent
+                    RegressionSeverity severity = RegressionSeverity.None;
+                    bool isRegression = (point.Direction == MetricTrendDirection.HigherIsWorse && delta > 0)
+                                     || (point.Direction == MetricTrendDirection.LowerIsWorse  && delta < 0);
+                    if (isRegression)
+                    {
+                        if (!deltaPercent.HasValue) severity = RegressionSeverity.Moderate;
+                        else
+                        {
+                            double absPct = Math.Abs(deltaPercent.Value);
+                            severity = absPct switch
+                            {
+                                < 10.0 => RegressionSeverity.Minor,
+                                < 50.0 => RegressionSeverity.Moderate,
+                                _      => RegressionSeverity.Severe
+                            };
+                        }
+                    }
+
                     string trendText = snapshots.Count <= 6
                         ? string.Join(" \u2192 ", point.Values.Select(v => FormatHelper.FormatMetricValue(v, point.Unit)))
                         : $"{FormatHelper.FormatMetricValue(firstVal, point.Unit)} \u2192 \u2026 \u2192 {FormatHelper.FormatMetricValue(lastVal, point.Unit)}";
@@ -287,9 +311,9 @@ internal sealed class TrendReportComposer(
 
                     string status = (point.Direction, delta > 0, delta < 0) switch
                     {
-                        (MetricTrendDirection.HigherIsWorse, true, _)  => "\u26a0 Regression",
+                        (MetricTrendDirection.HigherIsWorse, true, _)  => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
                         (MetricTrendDirection.HigherIsWorse, _, true)  => "\u2705 Improvement",
-                        (MetricTrendDirection.LowerIsWorse,  _, true)  => "\u26a0 Regression",
+                        (MetricTrendDirection.LowerIsWorse,  _, true)  => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
                         (MetricTrendDirection.LowerIsWorse,  true, _)  => "\u2705 Improvement",
                         _                                               => "\u2014 Stable"
                     };
@@ -331,6 +355,28 @@ internal sealed class TrendReportComposer(
             blocks.Add(new DividerBlock());
             foreach (InsightFinding f in lifecycle.ResolvedFindings.Take(5))
                 blocks.Add(new ListItemBlock($"[{f.Severity}] {f.Analyzer}: {f.Title}"));
+        }
+
+        // New leak signals from cross-snapshot type comparison
+        var allLeakSignals = overall
+            .Where(r => r.NewLeakSignals.Count > 0)
+            .SelectMany(r => r.NewLeakSignals.Select(s => (r.AnalyzerName, Signal: s)))
+            .OrderByDescending(x => x.Signal.CurrentBytes)
+            .Take(10)
+            .ToList();
+
+        if (allLeakSignals.Count > 0)
+        {
+            blocks.Add(new BlankBlock());
+            blocks.Add(new HeadingBlock("NEW LEAK SIGNALS:"));
+            blocks.Add(new DividerBlock());
+            foreach (var (analyzerName, signal) in allLeakSignals)
+            {
+                string baseline = FormatHelper.FormatMetricValue(signal.BaselineBytes, "bytes");
+                string current  = FormatHelper.FormatMetricValue(signal.CurrentBytes, "bytes");
+                blocks.Add(new ListItemBlock(
+                    $"[{signal.Source}] {signal.TypeName}: {baseline} \u2192 {current}"));
+            }
         }
 
         blocks.Add(new DividerBlock());

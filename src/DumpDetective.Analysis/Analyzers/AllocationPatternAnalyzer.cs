@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -64,34 +63,21 @@ namespace DumpDetective.Analysis.Analyzers
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
             long nonLohTotal  = totalObjects - lohObjects;
 
-            // Per-MT gen counts built by ephemeral fallback scan (null = use TypeAggregates directly).
-            Dictionary<ulong, (long Gen0, long Gen1, long Gen2)>? perMtGen = null;
+            // Approximate gen bytes using average non-LOH size × per-MT gen count.
+            // Phase 1 now resolves per-object generation for both server GC (dedicated
+            // per-gen segments) and workstation/ephemeral GC (segment.GetGeneration).
             ulong gen0Bytes = 0, gen1Bytes = 0, gen2Bytes = 0;
-
-            if (accountedGen == 0 && nonLohTotal > 0)
+            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
-                // Ephemeral/workstation GC: Phase-1 segment-kind gen counts are all 0 because
-                // ClrMD reports the ephemeral segment as GCSegmentKind.Ephemeral (not Generation0/1/2).
-                // Scan cached index entries and resolve generation per-object via seg.GetGeneration().
-                (perMtGen, gen0Objects, gen1Objects, gen2Objects, gen0Bytes, gen1Bytes, gen2Bytes) =
-                    BuildPerMtGenCounts(context.Heap!, heapCache, idx);
-            }
-            else if (accountedGen > 0)
-            {
-                // Server GC (dedicated per-generation segments): approximate gen bytes using
-                // average non-LOH size × per-MT gen count — same heuristic as GCGenerationAnalyzer.
-                foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
-                {
-                    TypeAggregateIndexEntry e = kv.Value;
-                    long nonLohCount = e.Count - e.LohCount;
-                    if (nonLohCount <= 0) continue;
-                    ulong nonLohSize = e.TotalSize >= e.LohSize ? e.TotalSize - e.LohSize : 0;
-                    if (nonLohSize == 0) continue;
-                    ulong avgSize = nonLohSize / (ulong)nonLohCount;
-                    gen0Bytes += (ulong)e.Gen0Count * avgSize;
-                    gen1Bytes += (ulong)e.Gen1Count * avgSize;
-                    gen2Bytes += (ulong)e.Gen2Count * avgSize;
-                }
+                TypeAggregateIndexEntry e = kv.Value;
+                long nonLohCount = e.Count - e.LohCount;
+                if (nonLohCount <= 0) continue;
+                ulong nonLohSize = e.TotalSize >= e.LohSize ? e.TotalSize - e.LohSize : 0;
+                if (nonLohSize == 0) continue;
+                ulong avgSize = nonLohSize / (ulong)nonLohCount;
+                gen0Bytes += (ulong)e.Gen0Count * avgSize;
+                gen1Bytes += (ulong)e.Gen1Count * avgSize;
+                gen2Bytes += (ulong)e.Gen2Count * avgSize;
             }
 
             // Count percentages (relative to total object count)
@@ -128,10 +114,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (e.Count == 0) continue;
 
                 long mtGen0, mtGen1, mtGen2;
-                if (perMtGen is not null && perMtGen.TryGetValue(mt, out var g))
-                    (mtGen0, mtGen1, mtGen2) = g;
-                else
-                    (mtGen0, mtGen1, mtGen2) = (e.Gen0Count, e.Gen1Count, e.Gen2Count);
+                (mtGen0, mtGen1, mtGen2) = (e.Gen0Count, e.Gen1Count, e.Gen2Count);
 
                 double longLivedRatio = (mtGen2 + e.LohCount) * 1.0 / e.Count;
                 double typeGen0Pct    = mtGen0 * 100.0 / e.Count;
@@ -184,76 +167,6 @@ namespace DumpDetective.Analysis.Analyzers
             if (score > 45.0) return GCPressureLevel.High;
             if (score > 20.0) return GCPressureLevel.Moderate;
             return GCPressureLevel.Low;
-        }
-
-        // ── Ephemeral GC fallback ──────────────────────────────────────────────────
-        // Called when Phase-1 segment-kind gen counts are all 0 (workstation/ephemeral GC).
-        // Scans the cached HeapEntry[] (or disk index) and resolves generation per-object
-        // via ClrSegment.GetGeneration — same approach as GCGenerationAnalyzer's fallback.
-        // Builds a per-MT gen count dictionary for the type-level breakdown.
-
-        private static (Dictionary<ulong, (long Gen0, long Gen1, long Gen2)> PerMt,
-                        long Gen0Total, long Gen1Total, long Gen2Total,
-                        ulong Gen0Bytes, ulong Gen1Bytes, ulong Gen2Bytes)
-            BuildPerMtGenCounts(ClrHeap heap, HeapAnalysisCache heapCache, HeapIndexBuildResult idx)
-        {
-            var perMt = new ConcurrentDictionary<ulong, long[]>(
-                concurrencyLevel: Environment.ProcessorCount,
-                capacity: idx.TypeAggregates.Count);
-            long g0 = 0, g1 = 0, g2 = 0;
-            long g0B = 0, g1B = 0, g2B = 0;
-
-            void Process(ulong address, ulong mt, ulong size)
-            {
-                if (address == 0 || mt == 0 || size >= LohThresholdBytes)
-                    return;
-
-                int gen = Math.Clamp(ResolveObjectGeneration(heap, address), 0, 2);
-
-                long[] counts = perMt.GetOrAdd(mt, static _ => new long[3]);
-                Interlocked.Increment(ref counts[gen]);
-
-                if (gen == 0)       { Interlocked.Increment(ref g0); Interlocked.Add(ref g0B, (long)size); }
-                else if (gen == 1)  { Interlocked.Increment(ref g1); Interlocked.Add(ref g1B, (long)size); }
-                else                { Interlocked.Increment(ref g2); Interlocked.Add(ref g2B, (long)size); }
-            }
-
-            if (idx.StorageKind == HeapIndexStorageKind.Memory && idx.InMemoryEntries is { } entries)
-            {
-                int safeCount = (int)Math.Min(idx.ObjectCount, entries.Length);
-                Parallel.For(0, safeCount, i =>
-                {
-                    HeapEntry e = entries[i];
-                    Process(e.Address, e.MethodTable, e.Size);
-                });
-            }
-            else
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    Process(entry.Address, entry.MethodTable, entry.Size);
-            }
-
-            var result = new Dictionary<ulong, (long Gen0, long Gen1, long Gen2)>(perMt.Count);
-            foreach (KeyValuePair<ulong, long[]> kv in perMt)
-                result[kv.Key] = (kv.Value[0], kv.Value[1], kv.Value[2]);
-            return (result, g0, g1, g2, (ulong)g0B, (ulong)g1B, (ulong)g2B);
-        }
-
-        // Uses ClrMD 3.x public API: heap.GetSegmentByAddress → segment.GetGeneration.
-        // Correctly handles Ephemeral segments where all generations share one segment.
-        private static int ResolveObjectGeneration(ClrHeap heap, ulong address)
-        {
-            ClrSegment? seg = heap.GetSegmentByAddress(address);
-            if (seg is null)
-                return 2;
-            try
-            {
-                return (int)seg.GetGeneration(address);
-            }
-            catch
-            {
-                return 2;
-            }
         }
     }
 }

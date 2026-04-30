@@ -513,10 +513,10 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| All `IsFinalizable` objects across heap (not just queue) | ❌ | ➕ `FinalizableObjectAnalyzer` — `ClrType.IsFinalizable` flag on all heap objects |
-| Finalizable objects by generation | ❌ | ➕ `FinalizableObjectAnalyzer` — generation correlation |
-| Top finalizable types by Gen2 count and size | ❌ | ➕ `FinalizableObjectAnalyzer` |
-| `IsFinalizable` + `IDisposable` + undisposed detection | ❌ | ➕ `FinalizableObjectAnalyzer` — `_disposed` field heuristic |
+| All `IsFinalizable` objects across heap (not just queue) | ✅ | `FinalizableObjectAnalyzer` — `ClrType.IsFinalizable` flag on all heap objects |
+| Finalizable objects by generation | ✅ | `FinalizableObjectAnalyzer` — generation correlation |
+| Top finalizable types by Gen2 count and size | ✅ | `FinalizableObjectAnalyzer` |
+| `IsFinalizable` + `IDisposable` + undisposed detection | ✅ | `FinalizableObjectAnalyzer` — `_disposed` field heuristic |
 
 ### 21.2 Finalizer Queue Analysis
 
@@ -524,8 +524,8 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 |----------|--------|-------------|
 | Finalizer queue depth (total count) | ✅ | `MemoryLeakAnalyzer` — `FinalizerQueueCount` |
 | Top types in finalizer queue | ✅ | `MemoryLeakAnalyzer` — `TopFinalizerTypes` |
-| Queue objects retaining large sub-graphs | ❌ | ➕ `FinalizableObjectAnalyzer` — bounded BFS from finalizer root |
-| Resurrection detection (`GC.ReRegisterForFinalize`) | ❌ | ➕ `FinalizableObjectAnalyzer` — heuristic pattern |
+| Queue objects retaining large sub-graphs | ✅ | `FinalizableObjectAnalyzer` — bounded BFS from finalizer root |
+| Resurrection detection (`GC.ReRegisterForFinalize`) | ✅ | `FinalizableObjectAnalyzer` — heuristic pattern |
 
 ### 21.3 Finalizer Thread Health
 
@@ -723,7 +723,7 @@ and **Related Analyzers** for that single analyzer.
 | 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ⏳ **Pending** |
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
-| 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ⏳ **Pending** |
+| 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ⏳ **Pending** |
 | 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ⏳ **Pending** |
 | 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
@@ -782,7 +782,7 @@ Additionally, `InsightEngine` must gain:
 | 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 | 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ✅ **Completed** |
 | 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
-| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ⏳ **Pending** |
+| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ⏳ **Pending** |
 | 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ⏳ **Pending** |
 | 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ⏳ **Pending** |

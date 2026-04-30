@@ -76,34 +76,21 @@ namespace DumpDetective.Analysis.Analyzers
             long nonLohTotal = totalObjects - lohObjects;
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
 
-            ulong gen0Bytes, gen1Bytes, gen2Bytes;
-
-            if (accountedGen == 0 && nonLohTotal > 0)
+            // Approximate gen bytes using average non-LOH size × per-MT gen count.
+            // Phase 1 now resolves per-object generation for both server GC (dedicated
+            // per-gen segments) and workstation/ephemeral GC (segment.GetGeneration).
+            ulong gen0Bytes = 0, gen1Bytes = 0, gen2Bytes = 0;
+            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
-                // Ephemeral segment (workstation GC): Phase-1 counts are all 0.
-                // Run a lightweight per-object generation scan against the cached index
-                // entries (HeapEntry[] already in memory) — not a fresh heap walk.
-                progress?.Report(new(0, "scanning GC generations (Ephemeral fallback)"));
-                (gen0Bytes, gen0Objects, gen1Bytes, gen1Objects, gen2Bytes, gen2Objects) =
-                    RunGenerationScanFromIndex(heap, heapCache, progress);
-            }
-            else
-            {
-                // Server GC (dedicated per-generation segments): approximate bytes from
-                // per-type avg non-LOH size × gen counts.
-                gen0Bytes = 0; gen1Bytes = 0; gen2Bytes = 0;
-                foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
-                {
-                    TypeAggregateIndexEntry e = kv.Value;
-                    long nonLohCount = e.Count - e.LohCount;
-                    if (nonLohCount <= 0) continue;
-                    ulong nonLohSize = e.TotalSize >= e.LohSize ? e.TotalSize - e.LohSize : 0;
-                    if (nonLohSize == 0) continue;
-                    ulong avgSize = nonLohSize / (ulong)nonLohCount;
-                    gen0Bytes += (ulong)e.Gen0Count * avgSize;
-                    gen1Bytes += (ulong)e.Gen1Count * avgSize;
-                    gen2Bytes += (ulong)e.Gen2Count * avgSize;
-                }
+                TypeAggregateIndexEntry e = kv.Value;
+                long nonLohCount = e.Count - e.LohCount;
+                if (nonLohCount <= 0) continue;
+                ulong nonLohSize = e.TotalSize >= e.LohSize ? e.TotalSize - e.LohSize : 0;
+                if (nonLohSize == 0) continue;
+                ulong avgSize = nonLohSize / (ulong)nonLohCount;
+                gen0Bytes += (ulong)e.Gen0Count * avgSize;
+                gen1Bytes += (ulong)e.Gen1Count * avgSize;
+                gen2Bytes += (ulong)e.Gen2Count * avgSize;
             }
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
@@ -121,7 +108,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topLohTypes.Add(new TypeSnapshot(name, (int)Math.Min(int.MaxValue, e.LohCount), e.LohSize, e.LohSize));
             }
 
-            // Per-type generation profiles — only meaningful when Phase-1 gen counts are populated.
+            // Per-type generation profiles.
             List<TypeGenerationProfile> profiles = [];
             if (accountedGen > 0)
             {
@@ -152,77 +139,6 @@ namespace DumpDetective.Analysis.Analyzers
                 topLohTypes,
                 gen2Pct,
                 profiles);
-        }
-
-        // ── Generation scan fallback (Ephemeral GC) ───────────────────────────────
-        // Scans the cached HeapEntry[] (in-memory) or disk index — NOT the raw heap.
-        // Only called when Phase-1 gen counts are all 0 (workstation / Ephemeral GC).
-
-        private static (ulong gen0Bytes, long gen0Objects,
-                        ulong gen1Bytes, long gen1Objects,
-                        ulong gen2Bytes, long gen2Objects)
-            RunGenerationScanFromIndex(
-                ClrHeap heap,
-                HeapAnalysisCache heapCache,
-                IProgress<AnalyzerProgressReport>? progress)
-        {
-            long gen0O = 0, gen1O = 0, gen2O = 0;
-            ulong gen0B = 0, gen1B = 0, gen2B = 0;
-            long scanned = 0;
-            const long progressInterval = 100_000;
-
-            void Process(ulong address, ulong size)
-            {
-                if (address == 0 || size >= LohThresholdBytes)
-                    return;
-
-                long s = Interlocked.Increment(ref scanned);
-                if (s % progressInterval == 0)
-                    progress?.Report(new(s, "scanning GC generations"));
-
-                int gen = ResolveGeneration(heap, address);
-
-                if (gen == 0)       { Interlocked.Increment(ref gen0O); Interlocked.Add(ref gen0B, size); }
-                else if (gen == 1)  { Interlocked.Increment(ref gen1O); Interlocked.Add(ref gen1B, size); }
-                else                { Interlocked.Increment(ref gen2O); Interlocked.Add(ref gen2B, size); }
-            }
-
-            if (heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIdx)
-                && heapIdx.StorageKind == HeapIndexStorageKind.Memory
-                && heapIdx.InMemoryEntries is { } entries)
-            {
-                // Cap at ObjectCount: InMemoryEntries may have up to 50 000 extra uninitialized
-                // slots past ObjectCount when the Phase-1 trim threshold was not reached.
-                // GC.AllocateUninitializedArray means those slots hold garbage addresses/sizes.
-                int safeCount = (int)Math.Min(heapIdx.ObjectCount, entries.Length);
-                Parallel.For(0, safeCount, i => Process(entries[i].Address, entries[i].Size));
-            }
-            else
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    Process(entry.Address, entry.Size);
-            }
-
-            return (gen0B, gen0O, gen1B, gen1O, gen2B, gen2O);
-        }
-
-        // Uses the ClrMD 3.x public API: heap.GetSegmentByAddress → segment.GetGeneration.
-        // This works correctly for Ephemeral segments (workstation GC) where all generations
-        // share a single segment. No reflection required.
-        private static int ResolveGeneration(ClrHeap heap, ulong address)
-        {
-            ClrSegment? seg = heap.GetSegmentByAddress(address);
-            if (seg is null)
-                return 2;
-
-            try
-            {
-                return (int)seg.GetGeneration(address);
-            }
-            catch
-            {
-                return 2;
-            }
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────

@@ -83,10 +83,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64)),
             (segment, _, state) =>
             {
-                // Determine generation from segment kind — avoids per-object reflection overhead.
-                // For Ephemeral segments (workstation GC), segGen = -1 (unknown) and per-type
-                // gen counts remain 0. Server GC has dedicated per-generation segments.
+                // Determine generation from segment kind — avoids per-object GetGeneration call
+                // for server GC where each segment is dedicated to a single generation.
+                // For Ephemeral segments (workstation GC) segGen = -1; generation is resolved
+                // per-object below via segment.GetGeneration(address).
                 int segGen = SegmentKindToGeneration(segment.Kind);
+                bool isEphemeral = segGen < 0;
 
                 // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
                 // initial rent is guaranteed to hold all objects without resizing in the common case.
@@ -131,8 +133,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
                     var entry    = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
+                    int objGen   = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
                     segBuf[segCount++] = entry;
-                    state.Builder.Add(entry, moduleId, flags, segGen);
+                    state.Builder.Add(entry, moduleId, flags, objGen);
 
                     // Collect satellite candidates (written serially after the parallel loop).
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
@@ -361,8 +364,15 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         GCSegmentKind.Generation0 => 0,
         GCSegmentKind.Generation1 => 1,
         GCSegmentKind.Generation2 => 2,
-        _ => -1,
+        _ => -1, // Ephemeral (workstation GC), LOH, POH — resolved per-object at call site
     };
+
+    // Used when segGen < 0 (Ephemeral segment): asks ClrMD which generation the object belongs to.
+    private static int ResolveObjectGeneration(ClrSegment segment, ulong address)
+    {
+        try   { return (int)segment.GetGeneration(address); }
+        catch { return -1; }
+    }
 
     // ── ObjectIndex.bin header ─────────────────────────────────────────────────
     // Uses the existing format (not IndexHeader) to preserve backward compatibility

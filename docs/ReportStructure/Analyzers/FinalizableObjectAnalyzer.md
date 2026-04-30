@@ -1,7 +1,7 @@
 # FinalizableObjectAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **15** · Effort: Medium · ⏳ **Pending**
+**New** · Implementation Priority **15** · Effort: Medium · ✅ **Completed**
 
 ## Report Sections Served
 - §21.1 Finalizable Object Population (all `IsFinalizable` objects, by generation, undisposed detection)

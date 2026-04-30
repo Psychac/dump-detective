@@ -42,10 +42,8 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             // ── Step 1: Population from TypeAggregates (Phase 1 index) ────────
-            HeapAnalysisCache? heapCache = cache as HeapAnalysisCache;
-            HeapIndexBuildResult? idx    = null;
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-            if (heapCache is not null && heapCache.TryGetHeapIndex(out idx))
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
                 typeAggregates = idx.TypeAggregates;
 
             long totalObjects = 0;
@@ -84,74 +82,6 @@ namespace DumpDetective.Analysis.Analyzers
                     if      (g == 0) gen0++;
                     else if (g == 1) gen1++;
                     else if (g == 2) gen2++;
-                }
-            }
-
-            // ── Step 1b: Ephemeral-GC gen count fallback ──────────────────────
-            // On workstation/ephemeral GC, ClrMD reports the ephemeral segment as
-            // GCSegmentKind.Ephemeral (not Generation0/1/2), so Phase-1 segment-kind
-            // gen counts are all 0.  When that happens, scan indexed entries for
-            // finalizable MTs only and resolve per-object generation via seg.GetGeneration.
-            if (gen0 + gen1 + gen2 == 0 && finalizableTypes.Count > 0 &&
-                heapCache is not null && idx is not null)
-            {
-                var finalizableMts = new HashSet<ulong>(finalizableTypes.Count);
-                foreach ((ulong mt, _) in finalizableTypes)
-                    finalizableMts.Add(mt);
-
-                // Dictionary: MT → [gen0, gen1, gen2] counts
-                var perMtGen = new Dictionary<ulong, int[]>(finalizableTypes.Count);
-
-                void Accumulate(ulong address, ulong mt, ulong size)
-                {
-                    if (address == 0 || mt == 0 || size >= 85_000 || !finalizableMts.Contains(mt))
-                        return;
-                    int g = ResolveGeneration(heap, address);
-                    if (g < 0 || g > 2) return;
-
-                    if (!perMtGen.TryGetValue(mt, out int[]? counts))
-                    {
-                        counts = new int[3];
-                        perMtGen[mt] = counts;
-                    }
-                    counts[g]++;
-                    if      (g == 0) gen0++;
-                    else if (g == 1) gen1++;
-                    else             gen2++;
-                }
-
-                if (idx.StorageKind == HeapIndexStorageKind.Memory && idx.InMemoryEntries is { } entries)
-                {
-                    int safeCount = (int)Math.Min(idx.ObjectCount, entries.Length);
-                    for (int i = 0; i < safeCount; i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        HeapEntry e = entries[i];
-                        Accumulate(e.Address, e.MethodTable, e.Size);
-                    }
-                }
-                else
-                {
-                    foreach (HeapEntry e in heapCache.EnumerateIndexedEntries())
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        Accumulate(e.Address, e.MethodTable, e.Size);
-                    }
-                }
-
-                // Update finalizableTypes list with per-object gen counts for Step 2
-                for (int i = 0; i < finalizableTypes.Count; i++)
-                {
-                    (ulong mt, TypeAggregateIndexEntry entry) = finalizableTypes[i];
-                    if (perMtGen.TryGetValue(mt, out int[]? c))
-                    {
-                        finalizableTypes[i] = (mt, entry with
-                        {
-                            Gen0Count = c[0],
-                            Gen1Count = c[1],
-                            Gen2Count = c[2],
-                        });
-                    }
                 }
             }
 

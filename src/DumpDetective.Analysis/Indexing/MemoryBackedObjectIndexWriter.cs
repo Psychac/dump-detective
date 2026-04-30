@@ -89,6 +89,9 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             {
                 ClrSegment segment = segments[i];
                 int segGen  = MemorySegmentKindToGeneration(segment.Kind);
+                // For Ephemeral segments (workstation GC), generation cannot be inferred from
+                // the segment kind — all of Gen0/1/2 share one segment.  Resolve per-object.
+                bool isEphemeral = segGen < 0;
                 int baseSlot = segmentOffsets[i];
                 int written  = 0;
                 int slotCap  = perSegmentCounts[i]; // safety: don't overrun this segment's slice
@@ -116,7 +119,8 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
 
                     var entry    = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    state.Builder.Add(entry, moduleId, flags, segGen);
+                    int objGen   = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
+                    state.Builder.Add(entry, moduleId, flags, objGen);
 
                     // Collect task candidates — same filter as DiskBackedObjectIndexWriter.
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
@@ -239,6 +243,14 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         GCSegmentKind.Generation0 => 0,
         GCSegmentKind.Generation1 => 1,
         GCSegmentKind.Generation2 => 2,
-        _ => -1,
+        _ => -1, // Ephemeral (workstation GC), LOH, POH — resolved per-object at call site
     };
+
+    // Used when segGen < 0 (Ephemeral segment): asks ClrMD which generation the object belongs to.
+    // Safe to call on all workstation-GC dumps; throws only if the address is completely invalid.
+    private static int ResolveObjectGeneration(ClrSegment segment, ulong address)
+    {
+        try   { return (int)segment.GetGeneration(address); }
+        catch { return -1; }
+    }
 }

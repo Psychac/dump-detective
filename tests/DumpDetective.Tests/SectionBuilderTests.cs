@@ -432,4 +432,114 @@ public sealed class SectionBuilderTests
         deadlockTable.Rows[0].Cells[0].Display.Should().Be("42");
         deadlockTable.Rows[1].Cells[1].Display.Should().Be("9801");
     }
+
+    // ── Allocation Pattern ────────────────────────────────────────────────────
+
+    [Fact]
+    public void AllocationPatternSectionBuilder_CanHandle_ReturnsTrue()
+    {
+        var domain = Stamped(new AllocationPatternDomainResult(
+            Gen0CountPct: 0, Gen1CountPct: 0, Gen2CountPct: 0, LohCountPct: 0,
+            Gen0SizePct: 0,  Gen1SizePct: 0,  Gen2SizePct: 0,  LohSizePct: 0,
+            Profile: AllocationProfile.Mixed,
+            GCPressure: GCPressureLevel.Low,
+            PromotionPressureScore: 0,
+            TopShortLivedTypes: [],
+            TopLongLivedTypes: []),
+            "Allocation Pattern Analysis", "GC");
+        new AllocationPatternSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AllocationPatternSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(new CrashDomainResult(0, 0,
+            new Dictionary<string, int>(), new Dictionary<string, int>()),
+            "Crash Analysis", "Crash");
+        new AllocationPatternSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AllocationPatternSectionBuilder_Build_EmitsSummaryMetricsAndPressureSignal()
+    {
+        var domain = Stamped(new AllocationPatternDomainResult(
+            Gen0CountPct: 75.0, Gen1CountPct: 12.0, Gen2CountPct: 10.0, LohCountPct: 0.1,
+            Gen0SizePct: 45.0,  Gen1SizePct: 18.0,  Gen2SizePct: 25.0,  LohSizePct: 2.0,
+            Profile: AllocationProfile.Transient,
+            GCPressure: GCPressureLevel.Low,
+            PromotionPressureScore: 8.4,
+            TopShortLivedTypes: [],
+            TopLongLivedTypes: []),
+            "Allocation Pattern Analysis", "GC");
+
+        var builder = new AllocationPatternSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        section.AnalyzerName.Should().Be("Allocation Pattern Analysis");
+        section.SortOrder.Should().Be(32);
+        section.Blocks[0].Should().BeOfType<HeadingBlock>();
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Allocation Profile" && m.Value == "Transient");
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "GC Pressure Level" && m.Value == "Low");
+
+        // Generation distribution table must always be present (4 rows: Gen0/1/2/LOH)
+        TableBlock? genTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("distribution", StringComparison.OrdinalIgnoreCase));
+        genTable.Should().NotBeNull("generation distribution table must always be emitted");
+        genTable!.Rows.Should().HaveCount(4);
+        genTable.Rows[0].Cells[0].Display.Should().Be("Gen0");
+        genTable.Rows[3].Cells[0].Display.Should().Be("LOH");
+
+        // No type tables when both lists are empty
+        section.Blocks.OfType<TableBlock>()
+            .Where(t => t != genTable)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AllocationPatternSectionBuilder_Build_EmitsTypeTablesWhenPopulated()
+    {
+        var shortLived = new List<TypeAllocationProfile>
+        {
+            new("System.String",                      5000, 200, 50, 0.05, AllocationProfile.Transient),
+            new("System.Byte[]",                      3000, 100, 20, 0.04, AllocationProfile.Transient),
+        };
+        var longLived = new List<TypeAllocationProfile>
+        {
+            new("System.Collections.Generic.List`1",  100,  50, 900, 0.88, AllocationProfile.Retained),
+        };
+
+        var domain = Stamped(new AllocationPatternDomainResult(
+            Gen0CountPct: 30.0, Gen1CountPct: 8.0, Gen2CountPct: 55.0, LohCountPct: 0.1,
+            Gen0SizePct: 25.0,  Gen1SizePct: 7.0,  Gen2SizePct: 50.0,  LohSizePct: 5.0,
+            Profile: AllocationProfile.Retained,
+            GCPressure: GCPressureLevel.High,
+            PromotionPressureScore: 42.0,
+            TopShortLivedTypes: shortLived,
+            TopLongLivedTypes: longLived),
+            "Allocation Pattern Analysis", "GC");
+
+        var builder = new AllocationPatternSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        // GC pressure level metric
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "GC Pressure Level" && m.Value == "High");
+
+        // Short-lived table
+        TableBlock? shortTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("short-lived", StringComparison.OrdinalIgnoreCase));
+        shortTable.Should().NotBeNull("short-lived type table must be emitted");
+        shortTable!.Rows.Should().HaveCount(2);
+        shortTable.Rows[0].Cells[0].Display.Should().Contain("String");
+
+        // Long-lived table
+        TableBlock? longTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("long-lived", StringComparison.OrdinalIgnoreCase));
+        longTable.Should().NotBeNull("long-lived type table must be emitted");
+        longTable!.Rows.Should().HaveCount(1);
+        longTable.Rows[0].Cells[0].Display.Should().Contain("List");
+    }
 }

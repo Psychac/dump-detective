@@ -629,6 +629,47 @@ namespace DumpDetective.Analysis.Trend.Comparers
             ];
         }
     }
+
+    internal sealed class AllocationPatternTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Allocation Pattern Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not AllocationPatternDomainResult r) return [];
+            return
+            [
+                new("alloc.gen0.count.pct",         null, r.Gen0CountPct,          "%",     MetricTrendDirection.Neutral),
+                new("alloc.gen1.count.pct",         null, r.Gen1CountPct,          "%",     MetricTrendDirection.Neutral),
+                new("alloc.gen2.count.pct",         null, r.Gen2CountPct,          "%",     MetricTrendDirection.HigherIsWorse),
+                new("alloc.loh.count.pct",          null, r.LohCountPct,           "%",     MetricTrendDirection.HigherIsWorse),
+                new("alloc.gen0.size.pct",          null, r.Gen0SizePct,           "%",     MetricTrendDirection.Neutral),
+                new("alloc.gen1.size.pct",          null, r.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
+                new("alloc.gen2.size.pct",          null, r.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
+                new("alloc.loh.size.pct",           null, r.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
+                new("alloc.gc.pressure",            null, (double)r.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
+                new("alloc.promotion.pressure",     null, r.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not AllocationPatternDomainResult b || current is not AllocationPatternDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("alloc.gen0.count.pct",     null, b.Gen0CountPct,          c.Gen0CountPct,          "%",     MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("alloc.gen1.count.pct",     null, b.Gen1CountPct,          c.Gen1CountPct,          "%",     MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("alloc.gen2.count.pct",     null, b.Gen2CountPct,          c.Gen2CountPct,          "%",     MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.loh.count.pct",      null, b.LohCountPct,           c.LohCountPct,           "%",     MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.gen0.size.pct",      null, b.Gen0SizePct,           c.Gen0SizePct,           "%",     MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("alloc.gen1.size.pct",      null, b.Gen1SizePct,           c.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("alloc.gen2.size.pct",      null, b.Gen2SizePct,           c.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.loh.size.pct",       null, b.LohSizePct,            c.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.gc.pressure",        null, (double)b.GCPressure,    (double)c.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.promotion.pressure", null, b.PromotionPressureScore,c.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+    }
 }
 
 

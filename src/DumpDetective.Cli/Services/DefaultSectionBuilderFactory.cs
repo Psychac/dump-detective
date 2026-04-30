@@ -9,6 +9,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     [
         new MemorySectionBuilder(),
         new GCGenerationSectionBuilder(),
+        new AllocationPatternSectionBuilder(),
         new SegmentSectionBuilder(),
         new ModuleSectionBuilder(),
         new CrashSectionBuilder(),

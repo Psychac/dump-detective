@@ -1,7 +1,7 @@
 # AppDomainAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **18** · Effort: Low
+**New** · Implementation Priority **18** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §18.1 AppDomain Inventory (domain names, IDs, memory attribution)

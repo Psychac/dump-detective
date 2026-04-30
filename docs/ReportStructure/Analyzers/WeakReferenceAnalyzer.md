@@ -1,7 +1,7 @@
 # WeakReferenceAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **20** · Effort: Low
+**New** · Implementation Priority **20** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §24.1 Weak GC Handle Population (alive vs dead targets, per-kind breakdown)

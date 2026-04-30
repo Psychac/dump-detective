@@ -1,7 +1,7 @@
 # SegmentAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Implementation Priority (no standalone priority; changes are low effort) · Effort: Low
+**Existing** · Modify · Implementation Priority (no standalone priority; changes are low effort) · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §2.1 Heap Composition (SOH/LOH/POH/FOH proportions, Server GC topology)

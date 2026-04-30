@@ -1,7 +1,7 @@
 # MemoryLeakAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Split + Modify · Implementation Priority **1** (split) · Effort: Low
+**Existing** · Split + Modify · Implementation Priority **1** (split) · Effort: Low · ✅ **Split Completed** · ⏳ **Modifications Pending**
 
 ## Report Sections Served (post-split)
 - §6.1 Leak Candidates (highly-referenced objects, finalizer queue candidates)

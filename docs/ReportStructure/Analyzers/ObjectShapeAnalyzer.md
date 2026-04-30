@@ -1,7 +1,7 @@
 # ObjectShapeAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **9** · Effort: Low
+**New** · Implementation Priority **9** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §3.3 Object Shape Analysis (reference-heavy vs value-heavy, field layout profiles)

@@ -1,7 +1,7 @@
 # StringAnalyzer — Design Spec
 
 ## Status
-**Implemented** (split from `MemoryLeakAnalyzer`) · Implementation Priority **1** · Effort: Low ✅
+**Existing** · Split from `MemoryLeakAnalyzer` · Implementation Priority **1** · Effort: Low · ✅ **Completed**
 
 ## Report Sections Served
 - §11.1 Duplicate Strings (count, ratio, top duplicates by waste and count)

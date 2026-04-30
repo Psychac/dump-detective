@@ -689,45 +689,45 @@ and **Related Analyzers** for that single analyzer.
 
 ## Existing Analyzers — Modify
 
-| Priority | Analyzer | File | Key Gap |
-|----------|----------|------|---------|
+| Priority | Analyzer | File | Key Gap | Status |
+|----------|----------|------|---------|--------|
 | 3 | `MemoryAnalyzer` | [MemoryAnalyzer.md](Analyzers/MemoryAnalyzer.md) | `AverageSize`, `SizeBucketHistogram` | ✅ **Completed** |
-| 4 | `GCGenerationAnalyzer` | [GCGenerationAnalyzer.md](Analyzers/GCGenerationAnalyzer.md) | `PerTypeGenerationProfile`, eliminate Phase 2 re-scan |
-| — | `SegmentAnalyzer` | [SegmentAnalyzer.md](Analyzers/SegmentAnalyzer.md) | POH type distribution, reserved memory |
+| 4 | `GCGenerationAnalyzer` | [GCGenerationAnalyzer.md](Analyzers/GCGenerationAnalyzer.md) | `PerTypeGenerationProfile`, eliminate Phase 2 re-scan | ✅ **Completed** |
+| — | `SegmentAnalyzer` | [SegmentAnalyzer.md](Analyzers/SegmentAnalyzer.md) | POH type distribution, reserved memory | ⏳ **Pending** |
 | 6 | `LohFragmentationAnalyzer` | [LohFragmentationAnalyzer.md](Analyzers/LohFragmentationAnalyzer.md) | `TopLargeObjects`, `FreeGapHistogram` | ✅ **Completed** |
-| 1 | `MemoryLeakAnalyzer` | [MemoryLeakAnalyzer.md](Analyzers/MemoryLeakAnalyzer.md) | ✂️ Split — extract `StringAnalyzer`; add `SuspicionScore` |
-| — | `StaticRootLeakDetector` | [StaticRootLeakDetector.md](Analyzers/StaticRootLeakDetector.md) | `BfsCappedCount`, `RetentionPatternHints` |
+| 1 | `MemoryLeakAnalyzer` | [MemoryLeakAnalyzer.md](Analyzers/MemoryLeakAnalyzer.md) | ✂️ Split — extract `StringAnalyzer`; add `SuspicionScore` | ⏳ **Pending** |
+| — | `StaticRootLeakDetector` | [StaticRootLeakDetector.md](Analyzers/StaticRootLeakDetector.md) | `BfsCappedCount`, `RetentionPatternHints` | ⏳ **Pending** |
 | 5 | `GCHandleAnalyzer` | [GCHandleAnalyzer.md](Analyzers/GCHandleAnalyzer.md) | `PinnedRetainedBytes`, `HandleSnapshot.bin` Phase 1 | ✅ **Completed** |
-| — | `ThreadAnalyzer` | [ThreadAnalyzer.md](Analyzers/ThreadAnalyzer.md) | `ThreadsWithLargeStackRoots`, `LongLivedThreadCount` |
-| 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` |
-| 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` |
-| — | `CollectionAnalyzer` | [CollectionAnalyzer.md](Analyzers/CollectionAnalyzer.md) | `CachePatternScore`, `Generation` field |
-| 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` |
-| — | `ThreadStackClusterAnalyzer` | [ThreadStackClusterAnalyzer.md](Analyzers/ThreadStackClusterAnalyzer.md) | `LockHolderClusterCount`, `DominantWaitCategory` |
-| — | `ReferenceChainAnalyzer` | [ReferenceChainAnalyzer.md](Analyzers/ReferenceChainAnalyzer.md) | `ChainSearchCapped`, shift to depth tool |
-| — | `CrashAnalyzer` | [CrashAnalyzer.md](Analyzers/CrashAnalyzer.md) | Exception frame hotspots, origin classification |
-| — | `ModuleAnalyzer` | [ModuleAnalyzer.md](Analyzers/ModuleAnalyzer.md) | `TotalRetainedEstimateBytes` post-pass |
-| — | `DependentHandleAnalyzer` | [DependentHandleAnalyzer.md](Analyzers/DependentHandleAnalyzer.md) | `EstimatedRetainedBytes`, `IsPotentialEventSource` |
-| 14 | `TrendAnalyzer` | [TrendAnalyzer.md](Analyzers/TrendAnalyzer.md) | `GrowthRatePercent`, `RegressionSeverity`, `NewLeakSignals` |
+| — | `ThreadAnalyzer` | [ThreadAnalyzer.md](Analyzers/ThreadAnalyzer.md) | `ThreadsWithLargeStackRoots`, `LongLivedThreadCount` | ⏳ **Pending** |
+| 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` | ✅ **Completed** |
+| 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` | ⏳ **Pending** |
+| — | `CollectionAnalyzer` | [CollectionAnalyzer.md](Analyzers/CollectionAnalyzer.md) | `CachePatternScore`, `Generation` field | ⏳ **Pending** |
+| 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` | ⏳ **Pending** |
+| — | `ThreadStackClusterAnalyzer` | [ThreadStackClusterAnalyzer.md](Analyzers/ThreadStackClusterAnalyzer.md) | `LockHolderClusterCount`, `DominantWaitCategory` | ⏳ **Pending** |
+| — | `ReferenceChainAnalyzer` | [ReferenceChainAnalyzer.md](Analyzers/ReferenceChainAnalyzer.md) | `ChainSearchCapped`, shift to depth tool | ⏳ **Pending** |
+| — | `CrashAnalyzer` | [CrashAnalyzer.md](Analyzers/CrashAnalyzer.md) | Exception frame hotspots, origin classification | ⏳ **Pending** |
+| — | `ModuleAnalyzer` | [ModuleAnalyzer.md](Analyzers/ModuleAnalyzer.md) | `TotalRetainedEstimateBytes` post-pass | ⏳ **Pending** |
+| — | `DependentHandleAnalyzer` | [DependentHandleAnalyzer.md](Analyzers/DependentHandleAnalyzer.md) | `EstimatedRetainedBytes`, `IsPotentialEventSource` | ⏳ **Pending** |
+| 14 | `TrendAnalyzer` | [TrendAnalyzer.md](Analyzers/TrendAnalyzer.md) | `GrowthRatePercent`, `RegressionSeverity`, `NewLeakSignals` | ⏳ **Pending** |
 
 ## New Analyzers — Add
 
-| Priority | Analyzer | File | Report Sections |
-|----------|----------|------|-----------------|
-| 10 | `GCRootAnalyzer` | [GCRootAnalyzer.md](Analyzers/GCRootAnalyzer.md) | §5.1–5.3 |
-| 11 | `DominatorAnalyzer` | [DominatorAnalyzer.md](Analyzers/DominatorAnalyzer.md) | §3.1–3.2, §4.1–4.3 |
+| Priority | Analyzer | File | Report Sections | Status |
+|----------|----------|------|-----------------|--------|
+| 10 | `GCRootAnalyzer` | [GCRootAnalyzer.md](Analyzers/GCRootAnalyzer.md) | §5.1–5.3 | ⏳ **Pending** |
+| 11 | `DominatorAnalyzer` | [DominatorAnalyzer.md](Analyzers/DominatorAnalyzer.md) | §3.1–3.2, §4.1–4.3 | ⏳ **Pending** |
 | 2 | `AsyncTaskAnalyzer` | [AsyncTaskAnalyzer.md](Analyzers/AsyncTaskAnalyzer.md) | §8.1–8.3 | ✅ **Completed** |
-| 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 |
-| 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 |
+| 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 | ⏳ **Pending** |
+| 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 | ⏳ **Pending** |
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
-| 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 |
-| 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 |
-| 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 |
-| 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 |
-| 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 |
-| 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 |
-| 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 |
-| 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 |
+| 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ⏳ **Pending** |
+| 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
+| 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
+| 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ⏳ **Pending** |
+| 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ⏳ **Pending** |
+| 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ⏳ **Pending** |
+| 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
+| 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ⏳ **Pending** |
 
 ---
 
@@ -766,30 +766,30 @@ Additionally, `InsightEngine` must gain:
 
 # Part 5 — Implementation Priority Order
 
-| Priority | Item | Type | Effort | Phase 1 Prereq |
-|----------|------|------|--------|----------------|
+| Priority | Item | Type | Effort | Phase 1 Prereq | Status |
+|----------|------|------|--------|----------------|--------|
 | 1 | `StringAnalyzer` split from `MemoryLeakAnalyzer` | ✂️ Split | Low | ✅ `IsStringType` flag ready | ✅ **Completed** |
 | 2 | `AsyncTaskAnalyzer` split from `HangAnalyzer` | ✂️ Split | Medium | ✅ `TaskIndex.bin` written | ✅ **Completed** |
 | 3 | `MemoryAnalyzer` — add `AverageSize`, `SizeBucketHistogram` | Modify | Low | ✅ `GlobalSizeBuckets` ready | ✅ **Completed** |
-| 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` |
+| 4 | `GCGenerationAnalyzer` — add `PerTypeGenerationProfile` | Modify | Medium | ✅ `Gen0/1/2Count` in `TypeAggregateIndexEntry` | ✅ **Completed** |
 | 5 | `GCHandleAnalyzer` — add `PinnedRetainedBytes` | Modify | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
 | 6 | `LohFragmentationAnalyzer` — add `TopLargeObjects`, `FreeGapHistogram` | Modify | Low | ✅ `LargeObjectIndex.bin` + `LohFreeBlockIndex.bin` written | ✅ **Completed** |
-| 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs |
-| 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready |
-| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready |
-| 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High | ✅ `RootIndex.bin` written |
-| 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only |
-| 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs |
-| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written |
-| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs |
-| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready |
-| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready |
-| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready |
-| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready |
-| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs |
-| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written |
-| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready |
-| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs |
+| 7 | `LockGraphAnalyzer` — add `DeadlockCandidateDetails` | Modify | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 8 | `AllocationPatternAnalyzer` (new, zero heap scan) | ➕ New | Low | ✅ `GlobalSizeBuckets` + gen counts ready | ⏳ **Pending** |
+| 9 | `ObjectShapeAnalyzer` (new, type metadata only) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
+| 10 | `GCRootAnalyzer` (new, uses existing `BoundedRootPathFinder`) | ➕ New | High | ✅ `RootIndex.bin` written | ⏳ **Pending** |
+| 11 | `DominatorAnalyzer` (new, bounded reverse-BFS) | ➕ New | Very High | 🟡 `IBoundedReferenceEdgeBuilder` interface only | ⏳ **Pending** |
+| 12 | `InsightEngine` — `ExecutiveSummary` + `ConfidenceSummary` + new inputs | Modify | Medium | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 13 | `EventLeakAnalyzer` — subscription graph mode | Modify | Medium | ✅ `EventCandidateIndex.bin` written | ⏳ **Pending** |
+| 14 | `TrendAnalyzer` — regression severity + growth rate % | Modify | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ⏳ **Pending** |
+| 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ⏳ **Pending** |
+| 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ⏳ **Pending** |
+| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ⏳ **Pending** |
+| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ⏳ **Pending** |
+| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
+| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 
 > **`DominatorAnalyzer`** is the highest-effort item and carries the most performance risk.
 > It must be implemented last, after all other analyzers are in place, with dedicated

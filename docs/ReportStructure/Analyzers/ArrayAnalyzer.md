@@ -1,7 +1,7 @@
 # ArrayAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **17** · Effort: Medium
+**New** · Implementation Priority **17** · Effort: Medium · ⏳ **Pending**
 
 ## Report Sections Served
 - §22.1 Array Population Overview (count, size, by element type, by rank, by generation)

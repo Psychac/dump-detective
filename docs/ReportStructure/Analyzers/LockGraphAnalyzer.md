@@ -1,7 +1,7 @@
 # LockGraphAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Implementation Priority **7** · Effort: Low
+**Existing** · Modify · Implementation Priority **7** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §7.2 Synchronization Patterns (contested locks, top contested types)

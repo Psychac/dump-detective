@@ -1,7 +1,7 @@
 # TrendAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Implementation Priority **14** · Effort: Low
+**Existing** · Modify · Implementation Priority **14** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §14.1 Growth Trends (per-type deltas, growth rate classification)

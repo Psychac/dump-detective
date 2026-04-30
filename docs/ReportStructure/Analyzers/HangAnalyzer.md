@@ -1,7 +1,7 @@
 # HangAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Split + Modify · Implementation Priority **2** (split) · Effort: Medium
+**Existing** · Split + Modify · Implementation Priority **2** (split) · Effort: Medium · ✅ **Split Completed**
 
 ## Report Sections Served (post-split — hang/blocking portion only)
 - §7.1 Thread Lifecycle (thread pool state: MinThreads/MaxThreads/QueueLength/CpuUtilization)

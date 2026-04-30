@@ -1,7 +1,7 @@
 # StaticRootLeakDetector — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Effort: Low
+**Existing** · Modify · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §4.3 Retention Patterns (static chain detection — partial)

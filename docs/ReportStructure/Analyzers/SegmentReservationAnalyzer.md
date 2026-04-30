@@ -1,7 +1,7 @@
 # SegmentReservationAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **19** · Effort: Low
+**New** · Implementation Priority **19** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §25.1 Committed vs Reserved Memory (total committed, total reserved, reservation gap)

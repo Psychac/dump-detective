@@ -1,7 +1,7 @@
 # AllocationPatternAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **8** · Effort: Low
+**New** · Implementation Priority **8** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §2.3 Allocation Patterns (heuristic classification: Accumulating/Churning/Balanced)

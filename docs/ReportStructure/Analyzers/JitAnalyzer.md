@@ -1,7 +1,7 @@
 # JitAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **22** · Effort: Low
+**New** · Implementation Priority **22** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §19.1 JIT Heap Usage (total JIT code heap size, manager count)

@@ -1,7 +1,7 @@
 # CrashAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Effort: Low
+**Existing** · Modify · Effort: Low · ⏳ **Pending**
 
 > Consider renaming to `ExceptionAnalyzer` in a future pass — the analyzer covers all
 > exceptions, not just crash-state ones.

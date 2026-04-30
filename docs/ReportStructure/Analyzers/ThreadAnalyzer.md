@@ -1,7 +1,7 @@
 # ThreadAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Effort: Medium
+**Existing** · Modify · Effort: Medium · ⏳ **Pending**
 
 ## Report Sections Served
 - §7.1 Thread Lifecycle (counts, finalizer, async chains, thread pool state)

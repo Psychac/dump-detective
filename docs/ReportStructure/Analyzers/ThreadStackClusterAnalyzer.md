@@ -1,7 +1,7 @@
 # ThreadStackClusterAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Effort: Low
+**Existing** · Modify · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §7.2 Synchronization Patterns (thread cluster / contention hotspot grouping)

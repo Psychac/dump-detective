@@ -1,7 +1,7 @@
 # BoxingAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **21** · Effort: Low
+**New** · Implementation Priority **21** · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §20.1 Boxed Value Type Inventory (boxed object count/size, boxed enums, structs in collections)

@@ -1,7 +1,7 @@
 # GCGenerationAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · **✅ Implemented** · Implementation Priority **4** · Effort: Medium
+**Existing** · Modify · Implementation Priority **4** · Effort: Medium · ✅ **Completed**
 
 ## Report Sections Served
 - §2.2 Generation Pressure (Gen0/1/2/LOH distribution)

@@ -1,7 +1,7 @@
 # ModuleAnalyzer — Coverage & Change Spec
 
 ## Status
-**Existing** · Modify · Effort: Low
+**Existing** · Modify · Effort: Low · ⏳ **Pending**
 
 ## Report Sections Served
 - §13.2 Failure Hotspots (exception origin classification — assembly source)

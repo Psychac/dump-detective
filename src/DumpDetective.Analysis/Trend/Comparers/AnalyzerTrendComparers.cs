@@ -738,6 +738,37 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return 0;
         }
     }
+
+    internal sealed class FinalizableObjectTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Finalizable Object Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not FinalizableObjectDomainResult r) return [];
+            return
+            [
+                new("finalizable.total",            null, r.TotalFinalizableObjects, "objects", MetricTrendDirection.HigherIsWorse),
+                new("finalizable.total.bytes",      null, r.TotalFinalizableBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("finalizable.gen2.count",       null, r.Gen2Count,               "objects", MetricTrendDirection.HigherIsWorse),
+                new("finalizable.queue.count",      null, r.FinalizerQueueCount,     "objects", MetricTrendDirection.HigherIsWorse),
+                new("finalizable.queue.retained",   null, r.FinalizerQueueRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not FinalizableObjectDomainResult b || current is not FinalizableObjectDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("finalizable.total",          null, b.TotalFinalizableObjects,    c.TotalFinalizableObjects,    "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.total.bytes",    null, b.TotalFinalizableBytes,      c.TotalFinalizableBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.gen2.count",     null, b.Gen2Count,                  c.Gen2Count,                  "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.queue.count",    null, b.FinalizerQueueCount,        c.FinalizerQueueCount,        "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.queue.retained", null, b.FinalizerQueueRetainedBytes, c.FinalizerQueueRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+    }
 }
 
 

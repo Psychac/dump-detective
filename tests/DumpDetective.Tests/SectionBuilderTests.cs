@@ -816,5 +816,86 @@ public sealed class SectionBuilderTests
         // Subscriber type table inside group
         section.Blocks.OfType<TableBlock>().Should().NotBeEmpty();
     }
+
+    // ── FinalizableObjectSectionBuilder tests ─────────────────────────────────
+
+    [Fact]
+    public void FinalizableObjectSectionBuilder_CanHandle_ReturnsTrueForFinalizableObjectDomainResult()
+    {
+        var domain = Stamped(
+            new FinalizableObjectDomainResult(
+                TotalFinalizableObjects: 0, TotalFinalizableBytes: 0,
+                Gen0Count: 0, Gen1Count: 0, Gen2Count: 0,
+                FinalizerQueueCount: 0, FinalizerQueueRetainedBytes: 0,
+                PotentialResurrectionDetected: false,
+                TopFinalizableTypesByGen2Count: [],
+                TopQueueEntriesByRetainedSize: []),
+            "Finalizable Object Analysis", "Memory");
+        new FinalizableObjectSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void FinalizableObjectSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new EventLeakDomainResult(0, 0, 0, 0),
+            "Event Leak Analysis", "Events");
+        new FinalizableObjectSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void FinalizableObjectSectionBuilder_Build_EmitsSummaryMetricsAndTables()
+    {
+        var queueEntry = new FinalizerQueueEntry(
+            Address: 0x1234_5678,
+            TypeName: "MyApp.Resource",
+            ShallowSize: 128,
+            EstimatedRetainedBytes: 4096,
+            IsDisposableType: true,
+            DisposedFieldFound: true,
+            DisposedFieldValue: false);
+
+        var typeProfile = new TypeGenerationProfile(
+            TypeName: "MyApp.Resource",
+            Gen0Count: 10,
+            Gen1Count: 5,
+            Gen2Count: 1500,
+            LohCount: 0);
+
+        var domain = Stamped(
+            new FinalizableObjectDomainResult(
+                TotalFinalizableObjects: 2000,
+                TotalFinalizableBytes: 256_000,
+                Gen0Count: 10,
+                Gen1Count: 5,
+                Gen2Count: 1500,
+                FinalizerQueueCount: 3,
+                FinalizerQueueRetainedBytes: 4096,
+                PotentialResurrectionDetected: true,
+                TopFinalizableTypesByGen2Count: [typeProfile],
+                TopQueueEntriesByRetainedSize: [queueEntry]),
+            "Finalizable Object Analysis", "Memory");
+
+        AnalyzerDetailSection section = new FinalizableObjectSectionBuilder().Build(domain);
+
+        section.AnalyzerName.Should().Be("Finalizable Object Analysis");
+        section.SortOrder.Should().Be(46);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total Finalizable Objects" && m.RawValue == 2000);
+        metrics.Should().Contain(m => m.Label == "Finalizer Queue Objects" && m.RawValue == 3);
+        metrics.Should().Contain(m => m.Label.Contains("Resurrection"));
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(2, "should emit type table and queue table");
+
+        var typeTable = tables.FirstOrDefault(t => t.Caption!.Contains("Gen2"));
+        typeTable.Should().NotBeNull("type-by-gen2 table must be emitted");
+        typeTable!.Rows.Should().HaveCount(1);
+
+        var queueTable = tables.FirstOrDefault(t => t.Caption!.Contains("queue"));
+        queueTable.Should().NotBeNull("queue entries table must be emitted");
+        queueTable!.Rows.Should().HaveCount(1);
+    }
 }
 

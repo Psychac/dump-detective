@@ -53,12 +53,13 @@ internal sealed class InsightEngine
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
         CollectionDomainResult? collections = FindResult<CollectionDomainResult>(runs);
         StringDomainResult? strings = FindResult<StringDomainResult>(runs);
+        FinalizableObjectDomainResult? finalizable = FindResult<FinalizableObjectDomainResult>(runs);
 
         DetectLohPressure(findings, memory, gcGen, segments);
         DetectLohFragmentation(findings, lohFrag, segments);
         DetectPohGrowth(findings, segments);
         DetectThreadContention(findings, threads, hang);
-        DetectFinalizerQueueBacklog(findings, threads, leak);
+        DetectFinalizerQueueBacklog(findings, threads, leak, finalizable);
         DetectPinnedHandlePressure(findings, handles, lohFrag);
         DetectActiveCrash(findings, crash);
         DetectLeakSuspicion(findings, leak, strings);
@@ -222,9 +223,10 @@ internal sealed class InsightEngine
     private static void DetectFinalizerQueueBacklog(
         List<InsightFinding> findings,
         ThreadDomainResult? threads,
-        MemoryLeakDomainResult? leak)
+        MemoryLeakDomainResult? leak,
+        FinalizableObjectDomainResult? finalizable)
     {
-        int queueCount = leak?.FinalizerQueueCount ?? 0;
+        int queueCount = finalizable?.FinalizerQueueCount ?? leak?.FinalizerQueueCount ?? 0;
         if (queueCount < FinalizerQueueWarning)
             return;
 
@@ -233,14 +235,23 @@ internal sealed class InsightEngine
             : FindingSeverity.Warning;
 
         bool finalizerBlocked = threads?.FinalizerThreadBlocked ?? false;
+        ulong retainedBytes = finalizable?.FinalizerQueueRetainedBytes ?? 0;
+
+        // Starvation risk: large retained sub-graphs + blocked finalizer thread
+        if (finalizerBlocked && retainedBytes > 0)
+            sev = FindingSeverity.Critical;
+
+        string retainedPart = retainedBytes > 0
+            ? $" Estimated retained memory in queue sub-graphs: {FormatBytes(retainedBytes)}."
+            : string.Empty;
 
         findings.Add(new InsightFinding(
             Analyzer: Source,
             Category: "Memory",
             Severity: sev,
             Title: "Large finalizer queue backlog detected",
-            Evidence: $"{queueCount:N0} objects are waiting in the finalizer queue. " +
-                      (finalizerBlocked ? "Finalizer thread is currently blocked. " : string.Empty),
+            Evidence: $"{queueCount:N0} objects are waiting in the finalizer queue.{retainedPart} " +
+                      (finalizerBlocked ? "Finalizer thread is currently blocked — starvation risk." : string.Empty),
             Recommendation: "Objects with finalizers hold memory for at least two GC cycles. " +
                             "Prefer IDisposable + using/Dispose over finalizers. " +
                             "Implement IDisposable in finalizable types and call GC.SuppressFinalize.",

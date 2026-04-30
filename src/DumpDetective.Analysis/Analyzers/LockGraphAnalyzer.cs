@@ -28,19 +28,54 @@ namespace DumpDetective.Analysis.Analyzers
         {
             var graph = BuildLockGraph(runtime, heap, progress);
 
-            var topContestedTypes = graph.ContestedLocks
-                .GroupBy(c => c.ObjectTypeName, StringComparer.Ordinal)
-                .Select(g => new NameCountEntry(g.Key, g.Sum(x => x.WaitingThreadCount)))
-                .OrderByDescending(x => x.Count)
-                .Take(MaxContestedLocksToShow)
-                .ToList();
+            var topContestedTypes = new List<NameCountEntry>(MaxContestedLocksToShow);
+            var typeWaiters = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var cl in graph.ContestedLocks)
+            {
+                typeWaiters.TryGetValue(cl.ObjectTypeName, out int existing);
+                typeWaiters[cl.ObjectTypeName] = existing + cl.WaitingThreadCount;
+            }
+            foreach (var kvp in typeWaiters.OrderByDescending(k => k.Value).Take(MaxContestedLocksToShow))
+                topContestedTypes.Add(new NameCountEntry(kvp.Key, kvp.Value));
+
+            var contestedLockDetails = new List<ContestedLockSnapshot>(Math.Min(graph.ContestedLocks.Count, MaxContestedLocksToShow));
+            int contestedLimit = Math.Min(graph.ContestedLocks.Count, MaxContestedLocksToShow);
+            for (int i = 0; i < contestedLimit; i++)
+            {
+                var cl = graph.ContestedLocks[i];
+                uint? ownerManagedId = cl.OwnerThread != null ? (uint)cl.OwnerThread.ManagedThreadId : null;
+                contestedLockDetails.Add(new ContestedLockSnapshot(
+                    cl.ObjectAddress,
+                    cl.ObjectTypeName,
+                    cl.WaitingThreadCount,
+                    ownerManagedId,
+                    cl.RecursionCount));
+            }
+
+            var deadlockDetails = new List<DeadlockCandidateSnapshot>(graph.DeadlockCandidates.Count);
+            foreach (var dc in graph.DeadlockCandidates)
+            {
+                var lockTypes = new List<string>(dc.LocksHeld.Count);
+                foreach (var lh in dc.LocksHeld)
+                    lockTypes.Add(lh.ObjectTypeName);
+
+                string summary = $"Thread {dc.Thread.ManagedThreadId} (OS: {dc.Thread.OSThreadId}) holds {dc.LocksHeld.Count} lock(s), blocked at: {dc.TopFrame}";
+
+                deadlockDetails.Add(new DeadlockCandidateSnapshot(
+                    (uint)dc.Thread.ManagedThreadId,
+                    (uint)dc.Thread.OSThreadId,
+                    lockTypes,
+                    summary));
+            }
 
             return new LockGraphDomainResult(
                     graph.AllHeldLocks.Count,
                     graph.ContestedLocks.Count,
                     graph.ContestedLocks.Count > 0 ? graph.ContestedLocks[0].WaitingThreadCount : 0,
                     graph.DeadlockCandidates.Count,
-                    topContestedTypes);
+                    topContestedTypes,
+                    deadlockDetails,
+                    contestedLockDetails);
         }
 
         private static InsightFinding CreateFinding(LockGraphAnalysis graph)

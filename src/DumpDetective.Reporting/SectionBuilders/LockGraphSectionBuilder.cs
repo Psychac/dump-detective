@@ -40,6 +40,31 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             blocks.Add(new TableBlock("Top contested lock types", ["Type", "Waiters"], ctRows));
         }
 
+        var contestedDetails = d.ContestedLockDetails ?? [];
+        if (contestedDetails.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("CONTESTED LOCK OBJECTS"));
+            blocks.Add(Divider());
+
+            var clRows = new List<TableRow>(contestedDetails.Count);
+            foreach (var cl in contestedDetails)
+            {
+                string owner = cl.OwnerManagedThreadId.HasValue
+                    ? $"thread {cl.OwnerManagedThreadId.Value}"
+                    : "unknown";
+                clRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(cl.ObjectTypeName, 60)),
+                    Cell($"0x{cl.ObjectAddress:x}"),
+                    Cell($"{cl.WaitingThreadCount:N0}", cl.WaitingThreadCount),
+                    Cell(owner),
+                    Cell($"{cl.RecursionCount:N0}")]));
+            }
+            blocks.Add(new TableBlock("Contested lock objects",
+                ["Type", "Address", "Waiters", "Owner Thread", "Recursion"],
+                clRows));
+        }
+
         blocks.Add(Blank());
         blocks.Add(H("DEADLOCK SIGNAL"));
         blocks.Add(Divider());
@@ -49,6 +74,30 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             blocks.Add(T("Lock contention present; monitor lock acquisition order."));
         else
             blocks.Add(T("No lock contention/deadlock candidates detected."));
+
+        var deadlockDetails = d.DeadlockCandidateDetails ?? [];
+        if (deadlockDetails.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("DEADLOCK CANDIDATE THREADS"));
+            blocks.Add(Divider());
+
+            var dcRows = new List<TableRow>(deadlockDetails.Count);
+            foreach (var dc in deadlockDetails)
+            {
+                string lockTypes = dc.LockObjectTypes.Count > 0
+                    ? string.Join(", ", dc.LockObjectTypes)
+                    : "(none)";
+                dcRows.Add(new TableRow([
+                    Cell($"{dc.ManagedThreadId}"),
+                    Cell($"{dc.OsThreadId}"),
+                    Cell(FormatHelper.TruncateString(lockTypes, 60)),
+                    Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
+            }
+            blocks.Add(new TableBlock("Deadlock candidate threads",
+                ["Managed ID", "OS Thread ID", "Held Lock Types", "Summary"],
+                dcRows));
+        }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
     }

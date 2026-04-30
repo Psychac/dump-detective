@@ -338,4 +338,98 @@ public sealed class SectionBuilderTests
         orphanTable!.Rows.Should().HaveCount(2);
         orphanTable.Rows[0].Cells[1].Display.Should().Contain("Task`1");
     }
+
+    // ── Lock Graph ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void LockGraphSectionBuilder_CanHandle_ReturnsTrue()
+    {
+        var domain = Stamped(new LockGraphDomainResult(0, 0, 0, 0), "Lock Graph Analysis", "Locks");
+        new LockGraphSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void LockGraphSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(new CrashDomainResult(0, 0,
+            new Dictionary<string, int>(), new Dictionary<string, int>()),
+            "Crash Analysis", "Crash");
+        new LockGraphSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void LockGraphSectionBuilder_Build_EmitsSummaryMetricsAndNoDetailTablesWhenEmpty()
+    {
+        var domain = Stamped(new LockGraphDomainResult(
+            TotalHeldLocks: 5,
+            ContestedLockCount: 0,
+            MaxWaitersOnSingleLock: 0,
+            DeadlockCandidateCount: 0),
+            "Lock Graph Analysis", "Locks");
+
+        var builder = new LockGraphSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        section.AnalyzerName.Should().Be("Lock Graph Analysis");
+        section.SortOrder.Should().Be(70);
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Held Locks" && m.RawValue == 5);
+
+        // No contested or deadlock detail tables when empty
+        section.Blocks.OfType<TableBlock>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LockGraphSectionBuilder_Build_EmitsContestedLockTableAndDeadlockCandidateTable()
+    {
+        var contestedDetails = new List<ContestedLockSnapshot>
+        {
+            new(0xABCD_1234UL, "System.Collections.Generic.Dictionary`2", 3, 42u, 1),
+            new(0xABCD_5678UL, "System.Object", 1, null, 0),
+        };
+        var deadlockDetails = new List<DeadlockCandidateSnapshot>
+        {
+            new(42u, 9800u, ["System.Object"], "Thread 42 (OS: 9800) holds 1 lock(s), blocked at: Monitor.Enter"),
+            new(43u, 9801u, ["System.Collections.Generic.Dictionary`2"], "Thread 43 (OS: 9801) holds 1 lock(s), blocked at: Monitor.Enter"),
+        };
+        var topTypes = new List<NameCountEntry>
+        {
+            new("System.Object", 4),
+        };
+
+        var domain = Stamped(new LockGraphDomainResult(
+            TotalHeldLocks: 4,
+            ContestedLockCount: 2,
+            MaxWaitersOnSingleLock: 3,
+            DeadlockCandidateCount: 2,
+            TopContestedLockTypes: topTypes,
+            DeadlockCandidateDetails: deadlockDetails,
+            ContestedLockDetails: contestedDetails),
+            "Lock Graph Analysis", "Locks");
+
+        var builder = new LockGraphSectionBuilder();
+        AnalyzerDetailSection section = builder.Build(domain);
+
+        // Summary metrics present
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Contested Locks" && m.RawValue == 2);
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Deadlock Candidates" && m.RawValue == 2);
+
+        // Contested lock objects table
+        TableBlock? contestedTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("Contested lock objects", StringComparison.OrdinalIgnoreCase));
+        contestedTable.Should().NotBeNull("contested lock details table must be emitted");
+        contestedTable!.Rows.Should().HaveCount(2);
+        contestedTable.Rows[0].Cells[0].Display.Should().Contain("Dictionary");
+
+        // Deadlock candidate threads table
+        TableBlock? deadlockTable = section.Blocks.OfType<TableBlock>()
+            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("Deadlock candidate threads", StringComparison.OrdinalIgnoreCase));
+        deadlockTable.Should().NotBeNull("deadlock candidate table must be emitted");
+        deadlockTable!.Rows.Should().HaveCount(2);
+        deadlockTable.Rows[0].Cells[0].Display.Should().Be("42");
+        deadlockTable.Rows[1].Cells[1].Display.Should().Be("9801");
+    }
 }

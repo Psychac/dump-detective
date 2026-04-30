@@ -16,6 +16,22 @@ internal sealed class LockGraphFindingGenerator : IFindingGenerator
             : r.ContestedLockCount > 0 ? FindingSeverity.Warning
             : FindingSeverity.Info;
 
+        string evidence = $"{r.TotalHeldLocks:N0} inflated monitor lock(s) held; {r.ContestedLockCount:N0} contested; {r.DeadlockCandidateCount:N0} deadlock candidate(s).";
+
+        var details = r.DeadlockCandidateDetails;
+        if (details is { Count: > 0 })
+        {
+            var sb = new System.Text.StringBuilder(evidence);
+            sb.Append(" Candidate thread(s): ");
+            for (int i = 0; i < details.Count; i++)
+            {
+                if (i > 0) sb.Append("; ");
+                sb.Append($"thread {details[i].ManagedThreadId} (OS: {details[i].OsThreadId})");
+            }
+            sb.Append('.');
+            evidence = sb.ToString();
+        }
+
         return
         [
             new InsightFinding(
@@ -23,7 +39,7 @@ internal sealed class LockGraphFindingGenerator : IFindingGenerator
                 Category: "Threading",
                 Severity: severity,
                 Title: "Lock contention and deadlock graph",
-                Evidence: $"{r.TotalHeldLocks:N0} inflated monitor lock(s) held; {r.ContestedLockCount:N0} contested; {r.DeadlockCandidateCount:N0} deadlock candidate(s).",
+                Evidence: evidence,
                 Recommendation: severity == FindingSeverity.Critical
                     ? "Deadlock candidates detected. Review lock acquisition order and confirm circular-wait cycle."
                     : r.ContestedLockCount > 0

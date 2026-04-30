@@ -702,7 +702,7 @@ and **Related Analyzers** for that single analyzer.
 | 2 | `HangAnalyzer` | [HangAnalyzer.md](Analyzers/HangAnalyzer.md) | ✂️ Split — extract `AsyncTaskAnalyzer` | ✅ **Completed** |
 | 13 | `EventLeakAnalyzer` | [EventLeakAnalyzer.md](Analyzers/EventLeakAnalyzer.md) | Subscription graph mode, `EventCandidateIndex.bin` | ⏳ **Pending** |
 | — | `CollectionAnalyzer` | [CollectionAnalyzer.md](Analyzers/CollectionAnalyzer.md) | `CachePatternScore`, `Generation` field | ⏳ **Pending** |
-| 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` | ⏳ **Pending** |
+| 7 | `LockGraphAnalyzer` | [LockGraphAnalyzer.md](Analyzers/LockGraphAnalyzer.md) | `DeadlockCandidateDetails`, `ContestedLockDetails` | ✅ **Completed** |
 | — | `ThreadStackClusterAnalyzer` | [ThreadStackClusterAnalyzer.md](Analyzers/ThreadStackClusterAnalyzer.md) | `LockHolderClusterCount`, `DominantWaitCategory` | ⏳ **Pending** |
 | — | `ReferenceChainAnalyzer` | [ReferenceChainAnalyzer.md](Analyzers/ReferenceChainAnalyzer.md) | `ChainSearchCapped`, shift to depth tool | ⏳ **Pending** |
 | — | `CrashAnalyzer` | [CrashAnalyzer.md](Analyzers/CrashAnalyzer.md) | Exception frame hotspots, origin classification | ⏳ **Pending** |

@@ -1140,6 +1140,68 @@ public sealed class SectionBuilderTests
         typeTable.Should().NotBeNull("type density table must be emitted");
         typeTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── SegmentReservationSectionBuilder tests ────────────────────────────────
+
+    [Fact]
+    public void SegmentReservationSectionBuilder_CanHandle_ReturnsTrueForSegmentReservationDomainResult()
+    {
+        var result = Stamped(
+            new SegmentReservationDomainResult(0, 0, 0, 0.0, 0, 0.0, 0, [], new Dictionary<int, ulong>(), false, string.Empty),
+            "Segment Reservation Analysis", "Memory");
+        new SegmentReservationSectionBuilder().CanHandle(result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void SegmentReservationSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new SegmentAnalysisDomainResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, []),
+            "Segment Analysis", "Memory");
+        new SegmentReservationSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void SegmentReservationSectionBuilder_Build_EmitsSummaryAndSegmentTable()
+    {
+        var entries = new List<SegmentReservationEntry>
+        {
+            new(0x1000_0000UL, HeapSegmentKind.SmallObjectHeap, 1024 * 1024, 4 * 1024 * 1024, true,  0, 25.0),
+            new(0x2000_0000UL, HeapSegmentKind.LargeObjectHeap, 2 * 1024 * 1024, 8 * 1024 * 1024, false, 0, 0.0),
+        };
+        var byHeap = new Dictionary<int, ulong> { [0] = 12 * 1024 * 1024UL };
+        var result = Stamped(
+            new SegmentReservationDomainResult(
+                TotalCommittedBytes:        3 * 1024 * 1024,
+                TotalReservedBytes:         12 * 1024 * 1024,
+                ReservationGapBytes:        9 * 1024 * 1024,
+                ReservedToCommittedRatio:   4.0,
+                EphemeralSegmentCount:      1,
+                AvgEphemeralFillPct:        25.0,
+                NonEphemeralSohSegmentCount: 0,
+                SegmentTable:               entries,
+                ReservedByLogicalHeap:      byHeap,
+                AddressSpacePressureRisk:   false,
+                PressureRiskReason:         string.Empty),
+            "Segment Reservation Analysis", "Memory");
+
+        AnalyzerDetailSection section = new SegmentReservationSectionBuilder().Build(result);
+
+        section.AnalyzerName.Should().Be("Segment Reservation Analysis");
+        section.SortOrder.Should().Be(36);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total committed");
+        metrics.Should().Contain(m => m.Label == "Total reserved");
+        metrics.Should().Contain(m => m.Label == "Avg ephemeral fill");
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(1, "segment table must be emitted");
+
+        var segTable = tables.FirstOrDefault(t => t.Caption!.Contains("segments by reserved"));
+        segTable.Should().NotBeNull("top-segments table must be emitted");
+        segTable!.Rows.Should().HaveCount(2);
+    }
 }
 
 

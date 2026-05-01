@@ -727,7 +727,7 @@ and **Related Analyzers** for that single analyzer.
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ✅ **Completed** |
 | 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
-| 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ⏳ **Pending** |
+| 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ✅ **Completed** |
 
 ---
 

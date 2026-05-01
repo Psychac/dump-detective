@@ -67,6 +67,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, AsyncStateMachineFindingGenerator>();
         services.AddSingleton<IFindingGenerator, ArrayFindingGenerator>();
         services.AddSingleton<IFindingGenerator, AppDomainFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, SegmentReservationFindingGenerator>();
 
         // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
@@ -100,6 +101,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, AsyncStateMachineTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, ArrayTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, AppDomainTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, SegmentReservationTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
 
@@ -19,8 +21,14 @@ internal static class HandleSnapshotWriter
     private const int Magic   = 0x53534448;
     private const int Version = 1;
     private const int RecordSize = 20; // 8 + 8 + 1 + 3 pad
+    private const int ProgressEveryHandles = 25_000;
 
-    public static long Write(string filePath, ClrRuntime runtime, CancellationToken cancellationToken)
+    public static long Write(
+        string filePath,
+        ClrRuntime runtime,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress = null,
+        Stopwatch? stopwatch = null)
     {
         using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
             FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
@@ -58,6 +66,10 @@ internal static class HandleSnapshotWriter
                     stream.Write(buf, 0, offset);
                     offset = 0;
                 }
+
+                if (progress is not null && recordCount % ProgressEveryHandles == 0)
+                    progress.Report(new(recordCount, "enumerating GC handles",
+                        Detail: $"{recordCount:N0} handles", Elapsed: stopwatch?.Elapsed));
             }
 
             if (offset > 0)

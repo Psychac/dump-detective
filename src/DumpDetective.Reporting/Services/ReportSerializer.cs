@@ -230,6 +230,14 @@ internal sealed class ReportSerializer
                     Reason: $"Reference tracking cap hit; {ml.SkippedReferenceAddresses:N0} addresses skipped — highly-referenced-object counts may be partial."));
             }
 
+            if (run.Result is MemoryLeakDomainResult mlCap && mlCap.ObjectScanCapped)
+            {
+                notes.Add(new ConfidenceNote(
+                    Analyzer: run.AnalyzerName,
+                    Capped: true,
+                    Reason: "Object scan cap reached; incoming-reference counts are based on a partial heap traversal — increase MaxLeakScanObjects for deeper coverage."));
+            }
+
             if (run.Result is HangDomainResult hang && hang.TaskScanLimited)
             {
                 notes.Add(new ConfidenceNote(

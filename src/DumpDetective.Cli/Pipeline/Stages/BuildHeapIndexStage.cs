@@ -3,25 +3,60 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
+using System.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
 internal sealed class BuildHeapIndexStage : IAnalysisStage
 {
+    private const int HeartbeatMs = 300;
+
     public string Name => "Scan + Index heap";
 
-    public Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
         HeapAnalysisCache heapCache = new();
         IHeapIndexBuilder heapBuilder = heapCache;
 
-        HeapIndexBuildResult heapIndex = heapBuilder.PrebuildHeapIndex(
-            state.LoadContext!.Heap,
-            state.Resolved.DumpPath,
-            cancellationToken,
-            progress: new Progress<AnalyzerProgressReport>(r =>
-                ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, r.Phase)),
-            mode: state.Resolved.IndexPrebuildMode);
+        // Wall-clock stopwatch owned by this stage so elapsed always ticks forward,
+        // regardless of whether the writer has stopped its own internal stopwatch.
+        Stopwatch wallClock = Stopwatch.StartNew();
+
+        // Shared state updated by the progress callback and read by the heartbeat.
+        long lastScanned = 0;
+        string lastPhase = "scanning heap";
+
+        var progress = new Progress<AnalyzerProgressReport>(r =>
+        {
+            Interlocked.Exchange(ref lastScanned, r.ScannedCount);
+            lastPhase = r.Phase;
+            ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, wallClock.Elapsed, r.Phase);
+        });
+
+        // Run the synchronous index build on a thread-pool thread so the heartbeat
+        // loop below can keep the spinner's elapsed counter live between progress events.
+        Task<HeapIndexBuildResult> buildTask = Task.Run(
+            () => heapBuilder.PrebuildHeapIndex(
+                state.LoadContext!.Heap,
+                state.Resolved.DumpPath,
+                cancellationToken,
+                progress: progress,
+                mode: state.Resolved.IndexPrebuildMode),
+            cancellationToken);
+
+        while (true)
+        {
+            Task done = await Task.WhenAny(buildTask, Task.Delay(HeartbeatMs, cancellationToken));
+            if (done == buildTask)
+                break;
+
+            // Heartbeat: re-render the spinner with the wall-clock elapsed so the
+            // timer keeps ticking even when the writer hasn't fired a progress event.
+            ConsoleUx.ObjectScanProgress(Name, Interlocked.Read(ref lastScanned), wallClock.Elapsed, lastPhase);
+        }
+
+        HeapIndexBuildResult heapIndex = await buildTask;
+        wallClock.Stop();
 
         ConsoleUx.ObjectScanComplete(Name, heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
 
@@ -40,8 +75,6 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
         state.HeapIndexBuilder = heapBuilder;
         state.HeapCache = heapCache;
         state.HeapIndex = heapIndex;
-
-        return Task.CompletedTask;
     }
 }
 

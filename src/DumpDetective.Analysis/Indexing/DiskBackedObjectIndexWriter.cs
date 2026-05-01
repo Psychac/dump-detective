@@ -240,17 +240,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // HandleSnapshot.bin — GC handle enumeration
         try
         {
-            progress?.Report(new(0, "writing HandleSnapshot.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            HandleSnapshotWriter.Write(DumpIndexPaths.HandleSnapshot(dumpPath), heap.Runtime, cancellationToken);
+            progress?.Report(new(0, "enumerating GC handles", Detail: null, Elapsed: stopwatch.Elapsed));
+            HandleSnapshotWriter.Write(DumpIndexPaths.HandleSnapshot(dumpPath), heap.Runtime, cancellationToken, progress, stopwatch);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { warnings.Add($"HandleSnapshot.bin: {ex.GetType().Name}: {ex.Message}"); }
 
-        // RootIndex.bin — GC root enumeration
+        // RootIndex.bin — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
         try
         {
-            progress?.Report(new(0, "writing RootIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            RootIndexWriter.Write(DumpIndexPaths.RootIndex(dumpPath), heap, cancellationToken);
+            progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
+            RootIndexWriter.Write(DumpIndexPaths.RootIndex(dumpPath), heap, cancellationToken, progress, stopwatch);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { warnings.Add($"RootIndex.bin: {ex.GetType().Name}: {ex.Message}"); }

@@ -43,7 +43,8 @@ namespace DumpDetective.Analysis.Analyzers
                     signals.HighlyReferencedObjectCount,
                     signals.SkippedReferenceAddresses,
                     finalizerResult.TopTypes,
-                    signals.TopHighlyReferencedObjects);
+                    signals.TopHighlyReferencedObjects,
+                    signals.ObjectScanCapped);
         }
 
         private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
@@ -83,6 +84,13 @@ namespace DumpDetective.Analysis.Analyzers
 
             var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
             long skippedReferenceAddresses = 0;
+            bool objectScanCapped = false;
+
+            // MaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which are
+            // the primary bottleneck on multi-GB dumps (each call reads object data from the dump file).
+            // 0 = unlimited. The cap applies to both disk and memory index paths.
+            int maxScan = options.MaxLeakScanObjects;
+            long objectsTraced = 0;
 
             var scanCounter = new ObjectScanCounter("scanning heap objects", progress);
 
@@ -100,7 +108,14 @@ namespace DumpDetective.Analysis.Analyzers
                     if (!hasRefs)
                         continue;
 
+                    if (maxScan > 0 && objectsTraced >= maxScan)
+                    {
+                        objectScanCapped = true;
+                        break;
+                    }
+
                     CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+                    objectsTraced++;
                 }
             }
             else
@@ -123,7 +138,14 @@ namespace DumpDetective.Analysis.Analyzers
                             continue;
                     }
 
+                    if (maxScan > 0 && objectsTraced >= maxScan)
+                    {
+                        objectScanCapped = true;
+                        break;
+                    }
+
                     CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+                    objectsTraced++;
                 }
             }
 
@@ -136,7 +158,8 @@ namespace DumpDetective.Analysis.Analyzers
             return new LeakSignals(
                 highlyReferencedCount,
                 skippedReferenceAddresses,
-                topHighlyReferencedObjects);
+                topHighlyReferencedObjects,
+                objectScanCapped);
         }
 
         private static IEnumerable<HeapEntry> EnumerateLeakEntries(ClrHeap heap, IHeapAnalysisCache? cache)
@@ -231,6 +254,20 @@ namespace DumpDetective.Analysis.Analyzers
                     Tags: ["analysis-quality", "references"],
                     MetricValue: signals.SkippedReferenceAddresses,
                     MetricUnit: "references"));
+            }
+
+            if (signals.ObjectScanCapped)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: nameof(MemoryLeakAnalyzer),
+                    Category: "Diagnostics",
+                    Severity: FindingSeverity.Info,
+                    Title: "Leak scan was limited by object count cap",
+                    Evidence: $"Reference-field enumeration stopped after {options.MaxLeakScanObjects:N0} objects. Highly-referenced-object results may be incomplete.",
+                    Recommendation: "Set MaxLeakScanObjects = 0 in options to disable the cap (use only on small dumps).",
+                    Tags: ["analysis-quality", "scan-cap"],
+                    MetricValue: options.MaxLeakScanObjects,
+                    MetricUnit: "objects"));
             }
         }
 
@@ -427,7 +464,9 @@ namespace DumpDetective.Analysis.Analyzers
         private readonly record struct LeakSignals(
             int HighlyReferencedObjectCount,
             long SkippedReferenceAddresses,
-            IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects);
+            IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
+            bool ObjectScanCapped = false,
+            bool ReferenceCountingSkipped = false);
         private readonly record struct FinalizerQueueResult(int TotalCount, IReadOnlyList<NameCountEntry> TopTypes);
     }
 }

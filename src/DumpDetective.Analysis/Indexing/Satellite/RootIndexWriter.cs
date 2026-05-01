@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
 
@@ -19,8 +21,14 @@ internal static class RootIndexWriter
     private const int Magic      = 0x58495452;
     private const int Version    = 1;
     private const int RecordSize = 20; // 8 + 8 + 1 + 3 pad
+    private const int ProgressEveryRoots = 50_000;
 
-    public static long Write(string filePath, ClrHeap heap, CancellationToken cancellationToken)
+    public static long Write(
+        string filePath,
+        ClrHeap heap,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress = null,
+        Stopwatch? stopwatch = null)
     {
         using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
             FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
@@ -56,6 +64,10 @@ internal static class RootIndexWriter
                     stream.Write(buf, 0, offset);
                     offset = 0;
                 }
+
+                if (progress is not null && recordCount % ProgressEveryRoots == 0)
+                    progress.Report(new(recordCount, "enumerating GC roots",
+                        Detail: $"{recordCount:N0} roots", Elapsed: stopwatch?.Elapsed));
             }
 
             if (offset > 0)

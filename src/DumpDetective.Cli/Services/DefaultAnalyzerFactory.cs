@@ -44,7 +44,8 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new ArrayAnalyzer(),
             new AppDomainAnalyzer(),
             new SegmentReservationAnalyzer(),
-            new WeakReferenceAnalyzer()
+            new WeakReferenceAnalyzer(),
+            new BoxingAnalyzer()
         ];
     }
 }

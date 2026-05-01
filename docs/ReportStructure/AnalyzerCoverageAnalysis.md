@@ -722,7 +722,7 @@ and **Related Analyzers** for that single analyzer.
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ✅ **Completed** |
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
-| 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
+| 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ✅ **Completed** |
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ✅ **Completed** |
@@ -788,7 +788,7 @@ Additionally, `InsightEngine` must gain:
 | 18 | `AppDomainAnalyzer` (new, `EnumerateTypeDefToMethodTableMap()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ✅ **Completed** |
 | 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 | 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
-| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
+| 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ✅ **Completed** |
 | 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 
 > **`DominatorAnalyzer`** is the highest-effort item and carries the most performance risk.

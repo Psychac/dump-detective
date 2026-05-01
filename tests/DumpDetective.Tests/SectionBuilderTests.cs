@@ -1265,6 +1265,72 @@ public sealed class SectionBuilderTests
         targetTable.Should().NotBeNull("top alive weak target types table must be emitted");
         targetTable!.Rows.Should().HaveCount(2);
     }
+
+    // ── BoxingSectionBuilder tests ────────────────────────────────────────────
+
+    [Fact]
+    public void BoxingSectionBuilder_CanHandle_ReturnsTrueForBoxingDomainResult()
+    {
+        var result = Stamped(
+            new BoxingDomainResult(0, 0, [], 0, 0, 0, [], false),
+            "Boxing Analysis", "Memory");
+        new BoxingSectionBuilder().CanHandle(result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BoxingSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new SegmentAnalysisDomainResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, []),
+            "Segment Analysis", "Memory");
+        new BoxingSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void BoxingSectionBuilder_Build_EmitsSummaryMetricsAndBoxedTypeTable()
+    {
+        var boxedTypes = new List<BoxedTypeEntry>
+        {
+            new("System.Int32",  5000, 80000, false),
+            new("System.Status", 2000, 16000, true),
+        };
+        var paddingTypes = new List<StructPaddingEntry>
+        {
+            new("MyApp.BigStruct", 12, 24, 12, 0.5),
+        };
+        var result = Stamped(
+            new BoxingDomainResult(
+                TotalBoxedObjects:       7000,
+                TotalBoxedBytes:         96000,
+                TopBoxedTypes:           boxedTypes,
+                BoxedEnumCount:          2000,
+                BoxedEnumBytes:          16000,
+                OversizedValueTypeCount: 50,
+                TopPaddingWasteTypes:    paddingTypes,
+                TypeScanCapped:          false),
+            "Boxing Analysis", "Memory");
+
+        AnalyzerDetailSection section = new BoxingSectionBuilder().Build(result);
+
+        section.AnalyzerName.Should().Be("Boxing Analysis");
+        section.SortOrder.Should().Be(50);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total boxed objects" && m.RawValue == 7000);
+        metrics.Should().Contain(m => m.Label == "Boxed enum instances" && m.RawValue == 2000);
+        metrics.Should().Contain(m => m.Label == "Oversized value types" && m.RawValue == 50);
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(2, "boxed types and padding waste tables must be emitted");
+
+        var boxedTable = tables.FirstOrDefault(t => t.Caption!.Contains("boxed types"));
+        boxedTable.Should().NotBeNull("top boxed types table must be emitted");
+        boxedTable!.Rows.Should().HaveCount(2);
+
+        var padTable = tables.FirstOrDefault(t => t.Caption!.Contains("padding waste"));
+        padTable.Should().NotBeNull("padding waste table must be emitted");
+        padTable!.Rows.Should().HaveCount(1);
+    }
 }
 
 

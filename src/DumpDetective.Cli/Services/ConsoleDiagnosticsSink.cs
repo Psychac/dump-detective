@@ -296,21 +296,31 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
         _currentAnalyzerLastElapsedMs = elapsedMs;
 
-        // Prefer semantic phase from the analyzer's own progress report (event Message field).
-        // Only fall back to the heuristic stall detection when the analyzer hasn't reported a phase.
-        string incomingPhase = string.IsNullOrWhiteSpace(diagnosticsEvent.Message)
-            ? (tickDelta == 0 && _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : _currentAnalyzerPhase)
-            : diagnosticsEvent.Message;
-
         if (tickDelta == 0)
             _currentAnalyzerNoGrowthTicks++;
         else
             _currentAnalyzerNoGrowthTicks = 0;
 
-        if (!string.Equals(_currentAnalyzerPhase, incomingPhase, StringComparison.Ordinal))
+        // Extract the base phase (part before " • ") for change detection.
+        // Only emit a ↳ phase line on genuine phase transitions — not when only the detail portion
+        // changes (e.g. "42 wasteful" → "43 wasteful", or "3/10 types" → "4/10 types").
+        // Without this guard those analyzers flood the console with a phase line every 125 ms,
+        // which causes the visible display artefacts (rapid line strobing) the user hears as beeps.
+        string basePhase;
+        if (string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
         {
-            _currentAnalyzerPhase = incomingPhase;
-            ConsoleUx.AnalyzerPhase(incomingPhase);
+            basePhase = _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : _currentAnalyzerPhase;
+        }
+        else
+        {
+            int phaseSep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
+            basePhase = phaseSep >= 0 ? diagnosticsEvent.Message[..phaseSep] : diagnosticsEvent.Message;
+        }
+
+        if (!string.Equals(_currentAnalyzerPhase, basePhase, StringComparison.Ordinal))
+        {
+            _currentAnalyzerPhase = basePhase;
+            ConsoleUx.AnalyzerPhase(basePhase);
         }
 
         // Parse detail out of the message if the analyzer embedded it as "phase • detail".

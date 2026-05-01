@@ -457,8 +457,6 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
-                    stats.TotalCollections++;
-                    stats.Dictionaries++;
                     var waste = AnalyzeDictionary(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -468,8 +466,6 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 else if (kind == CollectionKind.List)
                 {
-                    stats.TotalCollections++;
-                    stats.Lists++;
                     stats.TotalCollections++;
                     stats.Lists++;
                     var waste = AnalyzeList(heap, objectAddress);
@@ -483,8 +479,6 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
-                    stats.TotalCollections++;
-                    stats.HashSets++;
                     var waste = AnalyzeHashSet(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -494,8 +488,6 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 else if (kind == CollectionKind.Queue)
                 {
-                    stats.TotalCollections++;
-                    stats.Queues++;
                     stats.TotalCollections++;
                     stats.Queues++;
                     var qWaste = AnalyzeQueue(heap, objectAddress);

@@ -28,6 +28,16 @@ internal sealed class InsightEngine
     private const int PinnedHandleWarning = 100;
     private const int AnalyzerFailureWarning = 3;
 
+    // New thresholds for Part 4 additions
+    private const double StringDuplicationWarningRatio = 0.50;
+    private const double WeakRefDeadTargetWarningRatio  = 0.50;
+    private const double EphemeralFillCriticalPct = 90.0;
+    private const int    DynamicModuleWarning = 20;
+    private const ulong  JitHeapBloatThreshold = 500UL * 1024 * 1024;      // 500 MB
+    private const int    SuspendedMethodFireForgetThreshold = 100;
+    private const ulong  LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
+    private const ulong  GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
+
     private const string Source = "InsightEngine";
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -55,6 +65,18 @@ internal sealed class InsightEngine
         StringDomainResult? strings = FindResult<StringDomainResult>(runs);
         FinalizableObjectDomainResult? finalizable = FindResult<FinalizableObjectDomainResult>(runs);
 
+        // Part 4 — new domain result inputs
+        GCRootDomainResult? gcRoot                           = FindResult<GCRootDomainResult>(runs);
+        AllocationPatternDomainResult? allocPattern          = FindResult<AllocationPatternDomainResult>(runs);
+        ArrayDomainResult? arrays                            = FindResult<ArrayDomainResult>(runs);
+        AsyncStateMachineDomainResult? stateMachines         = FindResult<AsyncStateMachineDomainResult>(runs);
+        WeakReferenceDomainResult? weakRef                   = FindResult<WeakReferenceDomainResult>(runs);
+        SegmentReservationDomainResult? segReservation       = FindResult<SegmentReservationDomainResult>(runs);
+        AppDomainDomainResult? appDomains                    = FindResult<AppDomainDomainResult>(runs);
+        JitDomainResult? jit                                 = FindResult<JitDomainResult>(runs);
+        BoxingDomainResult? boxing                           = FindResult<BoxingDomainResult>(runs);
+
+        // Existing detection rules
         DetectLohPressure(findings, memory, gcGen, segments);
         DetectLohFragmentation(findings, lohFrag, segments);
         DetectPohGrowth(findings, segments);
@@ -66,6 +88,18 @@ internal sealed class InsightEngine
         DetectWastefulCollections(findings, collections);
         DetectOrphanedTaskAccumulation(findings, asyncTasks, threads);
         DetectAnalyzerFailures(findings, runs);
+
+        // Part 4 — new cross-cutting detection rules
+        DetectGCRootLargeRetention(findings, gcRoot);
+        DetectAllocationPressureCrossCorrelation(findings, allocPattern, threads);
+        DetectStringDuplicationRatio(findings, strings);
+        DetectLohArrayPressure(findings, arrays, lohFrag);
+        DetectAsyncStateMachineFireAndForget(findings, stateMachines, memory);
+        DetectStaleWeakReferenceAccumulation(findings, weakRef);
+        DetectAddressSpacePressure(findings, segReservation, segments);
+        DetectDynamicAssemblyAccumulation(findings, appDomains);
+        DetectJitHeapBloat(findings, jit, threads);
+        DetectBoxingGCCorrelation(findings, boxing, gcGen);
 
         // Sort by severity descending: Critical(2) > Warning(1) > Info(0)
         findings.Sort(static (a, b) => b.Severity.CompareTo(a.Severity));
@@ -447,6 +481,466 @@ internal sealed class InsightEngine
             Recommendation: "Check the diagnostic output for per-analyzer error messages. " +
                             "Re-run with --diagnostic flag for detailed error information.",
             Tags: ["analysis-quality", "failed-analyzer"]));
+    }
+
+    // ── Part 4: New cross-cutting detection methods ───────────────────────────
+
+    /// <summary>
+    /// Flags GC roots that each retain a large estimated sub-graph (≥ 50 MB).
+    /// A single powerful root with a large retained set is a primary leak pattern.
+    /// </summary>
+    private static void DetectGCRootLargeRetention(
+        List<InsightFinding> findings,
+        GCRootDomainResult? gcRoot)
+    {
+        if (gcRoot is null || gcRoot.TopRootsBySeverity.Count == 0)
+            return;
+
+        // Find the most impactful root overall
+        ulong maxRetained = 0;
+        string? rootKind = null;
+        string? targetType = null;
+
+        for (int i = 0; i < gcRoot.TopRootsBySeverity.Count; i++)
+        {
+            RootFinding r = gcRoot.TopRootsBySeverity[i];
+            if (r.EstimatedRetainedBytes > maxRetained)
+            {
+                maxRetained = r.EstimatedRetainedBytes;
+                rootKind    = r.RootKind;
+                targetType  = r.TargetTypeName;
+            }
+        }
+
+        if (maxRetained < GCRootLargeRetentionThreshold)
+            return;
+
+        // Also count how many roots exceed the threshold
+        int largeRootCount = 0;
+        for (int i = 0; i < gcRoot.TopRootsBySeverity.Count; i++)
+        {
+            if (gcRoot.TopRootsBySeverity[i].EstimatedRetainedBytes >= GCRootLargeRetentionThreshold)
+                largeRootCount++;
+        }
+
+        // Check if any by-kind summary shows a dominant large root kind
+        string? dominantKind = null;
+        ulong dominantKindBytes = 0;
+        for (int i = 0; i < gcRoot.ByKind.Count; i++)
+        {
+            RootKindSummary s = gcRoot.ByKind[i];
+            if (s.EstimatedRetainedBytes > dominantKindBytes)
+            {
+                dominantKindBytes = s.EstimatedRetainedBytes;
+                dominantKind = s.Kind;
+            }
+        }
+
+        string kindNote = dominantKind is not null
+            ? $" Dominant root kind: {dominantKind} ({FormatBytes(dominantKindBytes)} retained)."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "GC roots retaining large object sub-graphs detected",
+            Evidence: $"{largeRootCount:N0} root(s) each retain ≥ {FormatBytes(GCRootLargeRetentionThreshold)}. " +
+                      $"Largest root ({rootKind ?? "unknown"} → {targetType ?? "?"}) retains {FormatBytes(maxRetained)}.{kindNote}",
+            Recommendation: "Review the GC Root analyzer findings for specific retention paths. " +
+                            "Look for static fields, GC handles, or thread locals holding large collections.",
+            Tags: ["gc-root", "retention", "memory-leak"],
+            MetricValue: (double)maxRetained,
+            MetricUnit: "bytes"));
+    }
+
+    /// <summary>
+    /// Correlates high GC pressure (from AllocationPattern) with thread-blocking patterns.
+    /// When gen0 churn is extreme and threads are blocked, GC pauses are likely the bottleneck.
+    /// </summary>
+    private static void DetectAllocationPressureCrossCorrelation(
+        List<InsightFinding> findings,
+        AllocationPatternDomainResult? allocPattern,
+        ThreadDomainResult? threads)
+    {
+        if (allocPattern is null)
+            return;
+
+        // Standalone: GC pressure is Critical
+        if (allocPattern.GCPressure == GCPressureLevel.Critical)
+        {
+            bool threadImpact = threads is not null &&
+                                threads.AliveThreadCount > 0 &&
+                                threads.BlockedThreadCount * 100.0 / threads.AliveThreadCount >= 30.0;
+
+            string crossNote = threadImpact
+                ? $" Combined with {threads!.BlockedThreadCount:N0} blocked threads ({threads.BlockedThreadCount * 100.0 / threads.AliveThreadCount:F0}%), GC pauses may be causing thread stalls."
+                : string.Empty;
+
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Critical,
+                Title: "Critical GC allocation pressure detected",
+                Evidence: $"Allocation pattern: {allocPattern.Profile}. " +
+                          $"Gen0: {allocPattern.Gen0CountPct:F1}% of objects ({allocPattern.Gen0SizePct:F1}% of size). " +
+                          $"Promotion pressure score: {allocPattern.PromotionPressureScore:F2}.{crossNote}",
+                Recommendation: "Profile allocations with dotnet-trace. Reduce transient allocations with " +
+                                "object pooling (ArrayPool<T>, ObjectPool<T>), struct types, and Span<T>.",
+                Tags: ["gc-pressure", "allocation", "gen0"],
+                MetricValue: allocPattern.PromotionPressureScore,
+                MetricUnit: "score"));
+            return;
+        }
+
+        // Standalone: GC pressure is High
+        if (allocPattern.GCPressure == GCPressureLevel.High)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "High GC allocation pressure detected",
+                Evidence: $"Allocation pattern: {allocPattern.Profile}. " +
+                          $"Gen0: {allocPattern.Gen0CountPct:F1}% of objects. " +
+                          $"Promotion pressure score: {allocPattern.PromotionPressureScore:F2}.",
+                Recommendation: "Consider object pooling and reduced short-lived allocations on hot paths.",
+                Tags: ["gc-pressure", "allocation", "gen0"],
+                MetricValue: allocPattern.PromotionPressureScore,
+                MetricUnit: "score"));
+        }
+    }
+
+    /// <summary>
+    /// Flags high string duplication ratio (> 50%). Complements the per-waste-bytes check
+    /// already in <see cref="DetectLeakSuspicion"/> — this fires on ratio regardless of
+    /// absolute waste bytes.
+    /// </summary>
+    private static void DetectStringDuplicationRatio(
+        List<InsightFinding> findings,
+        StringDomainResult? strings)
+    {
+        if (strings is null || strings.TotalStrings == 0)
+            return;
+
+        if (strings.DuplicationRatio < StringDuplicationWarningRatio)
+            return;
+
+        // Avoid double-firing if DetectLeakSuspicion already emitted a finding for this.
+        // Only emit when the absolute waste is < 10 MB (otherwise DetectLeakSuspicion covered it).
+        if (strings.DuplicateWastedBytes >= 10 * 1024 * 1024)
+            return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "High string duplication ratio detected",
+            Evidence: $"{strings.DuplicationRatio:P0} of string instances are duplicates " +
+                      $"({strings.TotalStrings - strings.UniqueStrings:N0} duplicate out of {strings.TotalStrings:N0} total). " +
+                      $"Wasted: {FormatBytes(strings.DuplicateWastedBytes)}.",
+            Recommendation: "Consider string.Intern for frequently duplicated strings, " +
+                            "or use a string→int dictionary for repeated tokens.",
+            Tags: ["strings", "duplication", "memory"],
+            MetricValue: strings.DuplicationRatio,
+            MetricUnit: "ratio"));
+    }
+
+    /// <summary>
+    /// Cross-correlates LOH array pressure with LOH fragmentation — when large arrays dominate
+    /// the LOH AND the LOH is already fragmented, it is a compounding risk.
+    /// </summary>
+    private static void DetectLohArrayPressure(
+        List<InsightFinding> findings,
+        ArrayDomainResult? arrays,
+        LohFragmentationDomainResult? lohFrag)
+    {
+        if (arrays is null || arrays.LohArrayBytes < LohArrayPressureThreshold)
+            return;
+
+        bool fragCorrelation = lohFrag is not null &&
+                               lohFrag.FragmentationPercent >= LohFragWarningPct;
+
+        FindingSeverity sev = fragCorrelation ? FindingSeverity.Warning : FindingSeverity.Info;
+
+        string fragNote = fragCorrelation
+            ? $" Combined with LOH fragmentation of {lohFrag!.FragmentationPercent:F1}%, " +
+              "this indicates compounding heap pressure."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: sev,
+            Title: "Large arrays are a major LOH contributor",
+            Evidence: $"{FormatBytes(arrays.LohArrayBytes)} of LOH memory is held by " +
+                      $"{arrays.LohArrayCount:N0} large array object(s).{fragNote}",
+            Recommendation: "Rent large arrays from ArrayPool<T> instead of allocating them directly. " +
+                            "Pool buffers prevent LOH growth and associated fragmentation.",
+            Tags: ["loh", "arrays", "pooling"],
+            MetricValue: (double)arrays.LohArrayBytes,
+            MetricUnit: "bytes"));
+    }
+
+    /// <summary>
+    /// Detects fire-and-forget async patterns: a single originating method has > 100 suspended
+    /// state machines currently alive. This is a classic async leak pattern.
+    /// </summary>
+    private static void DetectAsyncStateMachineFireAndForget(
+        List<InsightFinding> findings,
+        AsyncStateMachineDomainResult? stateMachines,
+        MemoryDomainResult? memory)
+    {
+        if (stateMachines is null || stateMachines.SuspendedMethodMap.Count == 0)
+            return;
+
+        // Find the method with the highest suspended count
+        SuspendedMethodEntry? worst = null;
+        for (int i = 0; i < stateMachines.SuspendedMethodMap.Count; i++)
+        {
+            SuspendedMethodEntry e = stateMachines.SuspendedMethodMap[i];
+            if (worst is null || e.SuspendedCount > worst.SuspendedCount)
+                worst = e;
+        }
+
+        if (worst is null || worst.SuspendedCount < SuspendedMethodFireForgetThreshold)
+            return;
+
+        // Cross-reference: how much do state machines contribute to total managed memory?
+        string memNote = string.Empty;
+        if (memory is not null && memory.TotalBytes > 0)
+        {
+            double smPct = stateMachines.TotalStateMachineBytes * 100.0 / (double)memory.TotalBytes;
+            if (smPct >= 1.0)
+                memNote = $" State machines account for {smPct:F1}% of total managed heap.";
+        }
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Async",
+            Severity: FindingSeverity.Warning,
+            Title: "Likely fire-and-forget async accumulation detected",
+            Evidence: $"{worst.SuspendedCount:N0} suspended state machine instances for " +
+                      $"'{worst.DeclaringType}.{worst.MethodName}' — potential fire-and-forget pattern. " +
+                      $"Total state machines: {stateMachines.TotalStateMachines:N0} " +
+                      $"({FormatBytes(stateMachines.TotalStateMachineBytes)}).{memNote}",
+            Recommendation: "Ensure async methods are always awaited. " +
+                            "Use structured concurrency (Task.WhenAll / CancellationToken propagation) " +
+                            "to prevent unbounded accumulation of suspended state machines.",
+            Tags: ["async", "state-machine", "fire-and-forget", "memory-leak"],
+            MetricValue: worst.SuspendedCount,
+            MetricUnit: "instances"));
+    }
+
+    /// <summary>
+    /// Warns when the dead target ratio for weak references exceeds 50%.
+    /// High dead-target ratios mean the application is holding many stale wrappers —
+    /// objects that are gone but whose <see cref="WeakReference{T}"/> wrappers remain allocated.
+    /// </summary>
+    private static void DetectStaleWeakReferenceAccumulation(
+        List<InsightFinding> findings,
+        WeakReferenceDomainResult? weakRef)
+    {
+        if (weakRef is null || weakRef.TotalWeakHandles == 0)
+            return;
+
+        if (weakRef.DeadTargetRatio < WeakRefDeadTargetWarningRatio)
+            return;
+
+        FindingSeverity sev = weakRef.DeadTargetRatio >= 0.80
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        string staleNote = weakRef.StaleWrapperCount > 0
+            ? $" {weakRef.StaleWrapperCount:N0} stale WeakReference<T> wrapper object(s) detected."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: sev,
+            Title: "High dead-target ratio in weak GC handles",
+            Evidence: $"{weakRef.DeadWeakTargets:N0} of {weakRef.TotalWeakHandles:N0} weak handles " +
+                      $"({weakRef.DeadTargetRatio:P0}) point to already-collected objects.{staleNote}",
+            Recommendation: "Review code that creates WeakReference<T> objects and cleans up stale entries. " +
+                            "ConditionalWeakTable<TKey,TValue> manages lifetime automatically; " +
+                            "custom caches using WeakReference need periodic compaction.",
+            Tags: ["weak-reference", "stale", "gc-handles"],
+            MetricValue: weakRef.DeadTargetRatio,
+            MetricUnit: "ratio"));
+    }
+
+    /// <summary>
+    /// Surfaces address space pressure risk and near-full ephemeral segments.
+    /// The <see cref="SegmentReservationDomainResult.AddressSpacePressureRisk"/> flag is produced
+    /// by the SegmentReservationAnalyzer; the InsightEngine promotes it to a ranked finding.
+    /// </summary>
+    private static void DetectAddressSpacePressure(
+        List<InsightFinding> findings,
+        SegmentReservationDomainResult? segReservation,
+        SegmentAnalysisDomainResult? segments)
+    {
+        if (segReservation is null)
+            return;
+
+        // Address space exhaustion risk (set by the analyzer when reserved > threshold)
+        if (segReservation.AddressSpacePressureRisk)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "Managed heap virtual address space pressure",
+                Evidence: $"Reserved: {FormatBytes(segReservation.TotalReservedBytes)}, " +
+                          $"committed: {FormatBytes(segReservation.TotalCommittedBytes)}, " +
+                          $"ratio: {segReservation.ReservedToCommittedRatio:F1}×. " +
+                          $"Reason: {segReservation.PressureRiskReason}.",
+                Recommendation: "On 32-bit processes, reserved memory > 1.5 GB risks address space exhaustion. " +
+                                "Consider migrating to 64-bit, enabling Server GC, or reducing the number of " +
+                                "GC segments via heap hard limit configuration.",
+                Tags: ["segment", "address-space", "virtual-memory"],
+                MetricValue: (double)segReservation.TotalReservedBytes,
+                MetricUnit: "bytes"));
+        }
+
+        // Ephemeral segment fill critical (> 90% full)
+        if (segReservation.EphemeralSegmentCount > 0 &&
+            segReservation.AvgEphemeralFillPct >= EphemeralFillCriticalPct)
+        {
+            // Cross-correlate with segment count from segments result
+            string segNote = segments is not null
+                ? $" {segments.TotalSegments} total segments across heap."
+                : string.Empty;
+
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "Ephemeral GC segments critically full",
+                Evidence: $"Average ephemeral segment fill: {segReservation.AvgEphemeralFillPct:F1}% " +
+                          $"across {segReservation.EphemeralSegmentCount} ephemeral segment(s).{segNote} " +
+                          $"When ephemeral segments are nearly full, GC must commit new segments or trigger full compaction.",
+                Recommendation: "Reduce Gen0/Gen1 object survival rates. " +
+                                "Review long-lived objects promoted from Gen1 to Gen2 — " +
+                                "they fragment ephemeral segments and force premature full GC.",
+                Tags: ["segment", "ephemeral", "gc-pressure"],
+                MetricValue: segReservation.AvgEphemeralFillPct,
+                MetricUnit: "% full"));
+        }
+    }
+
+    /// <summary>
+    /// Detects dynamic assembly accumulation. Dynamic assemblies are generated at runtime and
+    /// never collected (in .NET 4.x) or collected only when their AssemblyLoadContext is freed.
+    /// A growing count indicates an ongoing leak of code-gen or reflection-emit patterns.
+    /// </summary>
+    private static void DetectDynamicAssemblyAccumulation(
+        List<InsightFinding> findings,
+        AppDomainDomainResult? appDomains)
+    {
+        if (appDomains is null || appDomains.TotalDynamicModules < DynamicModuleWarning)
+            return;
+
+        string anonNote = appDomains.AnonymousModuleCount > 0
+            ? $" {appDomains.AnonymousModuleCount:N0} anonymous module(s) detected (no file path)."
+            : string.Empty;
+
+        FindingSeverity sev = appDomains.TotalDynamicModules > 100
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Modules",
+            Severity: sev,
+            Title: "High dynamic/anonymous assembly count detected",
+            Evidence: $"{appDomains.TotalDynamicModules:N0} dynamic module(s) found " +
+                      $"across {appDomains.TotalDomains} AppDomain(s).{anonNote}",
+            Recommendation: "Dynamic assemblies created by Expression.Compile, Reflection.Emit, or " +
+                            "code generators accumulate until their AssemblyLoadContext is unloaded. " +
+                            "Cache compiled expressions / delegates; prefer collectible AssemblyLoadContext " +
+                            "for plugin or script scenarios.",
+            Tags: ["modules", "dynamic-assembly", "reflection", "memory-leak"],
+            MetricValue: appDomains.TotalDynamicModules,
+            MetricUnit: "modules"));
+    }
+
+    /// <summary>
+    /// Cross-correlates JIT heap size with active thread count.
+    /// A large JIT heap with many threads indicates concurrent JIT warm-up cost.
+    /// </summary>
+    private static void DetectJitHeapBloat(
+        List<InsightFinding> findings,
+        JitDomainResult? jit,
+        ThreadDomainResult? threads)
+    {
+        if (jit is null || jit.TotalJitHeapBytes < JitHeapBloatThreshold)
+            return;
+
+        // The per-analyzer JitFindingGenerator already warns on this; the InsightEngine only
+        // emits a cross-cutting finding when thread data correlates (many threads → JIT contention).
+        bool highThreadCount = threads is not null && threads.AliveThreadCount > 100;
+        if (!highThreadCount)
+            return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Performance",
+            Severity: FindingSeverity.Warning,
+            Title: "Large JIT heap combined with high thread count may indicate JIT warm-up contention",
+            Evidence: $"JIT code heap: {FormatBytes(jit.TotalJitHeapBytes)} across " +
+                      $"{jit.JitManagerCount} JIT manager(s). " +
+                      $"Alive threads: {threads!.AliveThreadCount:N0}. " +
+                      $"Concurrent JIT compilation under heavy load can increase latency spikes.",
+            Recommendation: "Use ReadyToRun (dotnet publish -r ...) or NativeAOT to pre-compile hot paths. " +
+                            "Profile startup with dotnet-trace to identify cold JIT paths.",
+            Tags: ["jit", "threads", "performance", "warm-up"],
+            MetricValue: (double)jit.TotalJitHeapBytes,
+            MetricUnit: "bytes"));
+    }
+
+    /// <summary>
+    /// Correlates boxing pressure with GC generation distribution.
+    /// Excessive boxing creates short-lived objects that inflate Gen0 and increase promotion pressure.
+    /// </summary>
+    private static void DetectBoxingGCCorrelation(
+        List<InsightFinding> findings,
+        BoxingDomainResult? boxing,
+        GCGenerationDomainResult? gcGen)
+    {
+        if (boxing is null || boxing.TotalBoxedObjects == 0)
+            return;
+
+        // High Gen0 is inferred from AllocationPattern (Gen0CountPct) if GCGeneration isn't available,
+        // or from GCGenerationDomainResult by computing gen0 fraction from raw counts.
+        bool highGen0Pct = gcGen is not null &&
+                           gcGen.TotalObjects > 0 &&
+                           (gcGen.Gen0Objects * 100.0 / gcGen.TotalObjects) >= 40.0;
+        bool highBoxedEnums = boxing.BoxedEnumCount > 10_000;
+
+        if (!highBoxedEnums && !highGen0Pct)
+            return;
+
+        string gen0Note = highGen0Pct
+            ? $" Gen0 holds {gcGen!.Gen0Objects * 100.0 / gcGen.TotalObjects:F1}% of managed heap objects — consistent with high transient boxing."
+            : string.Empty;
+
+        string enumNote = highBoxedEnums
+            ? $" {boxing.BoxedEnumCount:N0} boxed enum instances found."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "Boxing pressure correlates with elevated Gen0 churn",
+            Evidence: $"{boxing.TotalBoxedObjects:N0} boxed value type instances " +
+                      $"({FormatBytes(boxing.TotalBoxedBytes)}).{enumNote}{gen0Note}",
+            Recommendation: "Replace object/non-generic collection APIs with generic alternatives " +
+                            "(List<T>, Dictionary<TKey,TValue>). Use enum-typed parameters instead of object.",
+            Tags: ["boxing", "gen0", "gc-pressure", "value-type"],
+            MetricValue: boxing.TotalBoxedObjects,
+            MetricUnit: "objects"));
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────

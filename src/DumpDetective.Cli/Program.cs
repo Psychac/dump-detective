@@ -13,6 +13,14 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        // Set UTF-8 output encoding before any console writes.
+        // Without this, the Windows console host defaults to the OEM codepage (CP437/CP1252)
+        // and substitutes a BEL character (0x07) for Unicode glyphs it cannot represent —
+        // specifically the braille spinner frames, ↳, ◆, ▸, and emoji used by ConsoleUx.
+        // This is the direct cause of the audible beep heard during analysis runs.
+        System.Console.OutputEncoding = System.Text.Encoding.UTF8;
+        System.Console.InputEncoding  = System.Text.Encoding.UTF8;
+
         using IHost host = ServiceRegistration.BuildHost(args);
         using var cts = new CancellationTokenSource();
 

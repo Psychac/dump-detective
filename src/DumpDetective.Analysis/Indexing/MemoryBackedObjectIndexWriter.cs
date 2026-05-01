@@ -51,13 +51,20 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         ClrSegment[] segments = heap.Segments.ToArray();
         int[] perSegmentCounts = new int[segments.Length];
 
+        progress?.Report(new(0, "pre-scanning heap", Detail: null, Elapsed: stopwatch.Elapsed));
+        long phase1Count = 0;
         Parallel.For(0, segments.Length, parallelOptions, i =>
         {
             int count = 0;
             foreach (ClrObject obj in segments[i].EnumerateObjects())
             {
                 if (obj.IsValid)
+                {
                     count++;
+                    long c = Interlocked.Increment(ref phase1Count);
+                    if (c % ProgressInterval == 0)
+                        progress?.Report(new(c, "pre-scanning heap", Detail: null, Elapsed: stopwatch.Elapsed));
+                }
             }
             perSegmentCounts[i] = count;
         });
@@ -165,10 +172,13 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // consume pre-enumerated root data without re-walking the heap.
         progress?.Report(new(objectCount, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
         var rootList = new List<(ulong TargetAddr, ulong RootAddr, byte Kind)>(capacity: 4096);
+        long rootCount = 0;
         foreach (ClrRoot root in heap.EnumerateRoots())
         {
             if (cancellationToken.IsCancellationRequested) break;
             rootList.Add((root.Object, root.Address, (byte)root.RootKind));
+            if (++rootCount % 10_000 == 0)
+                progress?.Report(new(objectCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));
         }
 
         stopwatch.Stop();

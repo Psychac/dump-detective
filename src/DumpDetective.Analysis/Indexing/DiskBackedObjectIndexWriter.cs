@@ -198,28 +198,34 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         WriteObjIndexHeader(stream, objectCount);
         stream.Flush();
 
-        stopwatch.Stop();
-        progress?.Report(new(objectCount, "index complete", Detail: null, Elapsed: stopwatch.Elapsed));
+        // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
+        // We keep the stopwatch running during satellite file writes so their progress reports
+        // show a growing elapsed rather than a frozen timestamp.
+        TimeSpan scanElapsed = stopwatch.Elapsed;
+        progress?.Report(new(objectCount, "index complete", Detail: null, Elapsed: scanElapsed));
 
         // Write satellite index files serially after the parallel heap scan.
-        WriteSatelliteFiles(dumpPath, heap, taskCandidates, eventCandidates, largeCandidates,
+        IReadOnlyList<string> satelliteWarnings = WriteSatelliteFiles(dumpPath, heap, taskCandidates, eventCandidates, largeCandidates,
             cancellationToken, progress, stopwatch);
+
+        stopwatch.Stop();
 
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
             indexPath,
             objectCount,
-            stopwatch.Elapsed,
+            scanElapsed,
             masterBuilder.Build(),
             InMemoryEntries: null,
             Modules: moduleRegistry.Modules,
             GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
-            TypeShapeCache: shapeCache);
+            TypeShapeCache: shapeCache,
+            SatelliteWarnings: satelliteWarnings.Count > 0 ? satelliteWarnings : null);
     }
 
     // ── Satellite file writing ─────────────────────────────────────────────────
 
-    private static void WriteSatelliteFiles(
+    private static IReadOnlyList<string> WriteSatelliteFiles(
         string dumpPath,
         ClrHeap heap,
         ConcurrentBag<(ulong Addr, ulong Mt)> taskCandidates,
@@ -229,6 +235,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         IProgress<AnalyzerProgressReport>? progress,
         Stopwatch stopwatch)
     {
+        List<string> warnings = [];
+
         // HandleSnapshot.bin — GC handle enumeration
         try
         {
@@ -236,7 +244,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             HandleSnapshotWriter.Write(DumpIndexPaths.HandleSnapshot(dumpPath), heap.Runtime, cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch { /* non-critical satellite — continue on failure */ }
+        catch (Exception ex) { warnings.Add($"HandleSnapshot.bin: {ex.GetType().Name}: {ex.Message}"); }
 
         // RootIndex.bin — GC root enumeration
         try
@@ -245,7 +253,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             RootIndexWriter.Write(DumpIndexPaths.RootIndex(dumpPath), heap, cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex) { warnings.Add($"RootIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
 
         // TaskIndex.bin — Task objects collected during heap scan
         try
@@ -257,7 +265,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             tw.Flush();
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex) { warnings.Add($"TaskIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
 
         // EventCandidateIndex.bin — delegate/event objects collected during heap scan
         try
@@ -269,7 +277,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             ew.Flush();
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex) { warnings.Add($"EventCandidateIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
 
         // LargeObjectIndex.bin — top-100 LOH objects by size
         try
@@ -281,7 +289,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             tracker.Write(DumpIndexPaths.LargeObjectIndex(dumpPath));
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex) { warnings.Add($"LargeObjectIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
 
         // LohFreeBlockIndex.bin — free block gaps inside LOH/POH segments
         try
@@ -290,7 +298,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             LohFreeBlockWriter.Write(DumpIndexPaths.LohFreeBlockIndex(dumpPath), heap, cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex) { warnings.Add($"LohFreeBlockIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+
+        return warnings;
     }
 
     // ── Type classification helpers ────────────────────────────────────────────

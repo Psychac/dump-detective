@@ -20,10 +20,16 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
             state.Resolved.DumpPath,
             cancellationToken,
             progress: new Progress<AnalyzerProgressReport>(r =>
-                ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
+                ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, r.Phase)),
             mode: state.Resolved.IndexPrebuildMode);
 
         ConsoleUx.ObjectScanComplete(Name, heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
+
+        if (heapIndex.SatelliteWarnings is { Count: > 0 } satelliteWarnings)
+        {
+            foreach (string w in satelliteWarnings)
+                ConsoleUx.Warning($"Satellite index write failed — dependent analyzers may produce incomplete results: {w}");
+        }
 
         if (state.Resolved.DiagnosticMode)
         {

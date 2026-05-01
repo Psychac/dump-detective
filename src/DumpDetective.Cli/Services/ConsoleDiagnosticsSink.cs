@@ -51,11 +51,11 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         switch (diagnosticsEvent.EventType)
         {
             case AnalysisDiagnosticsEventType.RunStarted:
-                ConsoleUx.Info("Analysis run started.");
                 if (_stages.Count > 0)
                 {
                     int totalAnalyzers = _stages.Sum(s => s.AnalyzerCount);
-                    ConsoleUx.Info($"Analyzer pipeline: {_stages.Count} logical stage(s), {totalAnalyzers} analyzer(s).");
+                    string groups = _stages.Count == 1 ? "1 group" : $"{_stages.Count} groups";
+                    ConsoleUx.Info($"Running {totalAnalyzers} analyzer{(totalAnalyzers == 1 ? "" : "s")} in {groups}");
                 }
                 break;
 
@@ -191,7 +191,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             _currentStageStopwatch = Stopwatch.StartNew();
 
             AnalyzerStage stage = _stages[stageIndex];
-            ConsoleUx.StageStart(stageIndex + 1, _stages.Count, $"Analyzer stage: {stage.Name} ({stage.AnalyzerCount})");
+            ConsoleUx.AnalyzerGroupStart(stageIndex + 1, _stages.Count, stage.Name);
         }
     }
 
@@ -222,7 +222,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             }
 
             _currentStageStopwatch?.Stop();
-            ConsoleUx.StageComplete(stageIndex + 1, _stages.Count, $"Analyzer stage: {stage.Name}", _currentStageStopwatch?.Elapsed ?? TimeSpan.Zero);
+            ConsoleUx.AnalyzerGroupComplete(stageIndex + 1, _stages.Count, stage.Name, _currentStageStopwatch?.Elapsed ?? TimeSpan.Zero);
 
             _currentStageIndex = -1;
             _startedAnalyzersInCurrentStage = 0;
@@ -242,7 +242,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
             AnalyzerStage stage = _stages[_currentStageIndex];
             _currentStageStopwatch?.Stop();
-            ConsoleUx.StageComplete(_currentStageIndex + 1, _stages.Count, $"Analyzer stage: {stage.Name}", _currentStageStopwatch?.Elapsed ?? TimeSpan.Zero);
+            ConsoleUx.AnalyzerGroupComplete(_currentStageIndex + 1, _stages.Count, stage.Name, _currentStageStopwatch?.Elapsed ?? TimeSpan.Zero);
 
             _currentStageIndex = -1;
             _startedAnalyzersInCurrentStage = 0;

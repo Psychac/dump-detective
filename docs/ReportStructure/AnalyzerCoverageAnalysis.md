@@ -466,12 +466,12 @@ indicators. A dedicated report-layer component (not a pipeline analyzer) is need
 
 | Sub-item | Status | Analyzer(s) |
 |----------|--------|-------------|
-| Type count per module from `EnumerateTypes()` | ❌ | ➕ `AppDomainAnalyzer` — `ClrModule.EnumerateTypes()` |
+| Type count per module from `EnumerateTypeDefToMethodTableMap()` | ✅ | `AppDomainAnalyzer` — `ClrModule.EnumerateTypeDefToMethodTableMap()` |
 | Heap footprint per module | ✅ | `ModuleAnalyzer` — `ModuleHeapStats.TotalBytes` |
 | Type-to-object ratio (load overhead vs live usage) | 🟡 | `ModuleAnalyzer` — `ModuleTypeDensity` covers partially; no `EnumerateTypes()` count |
 | Modules with > 5 000 types (source gen / reflection heavy) | ❌ | ➕ `AppDomainAnalyzer` |
 
-**Verdict**: §18.2 is largely covered by `ModuleAnalyzer`. §18.1 (per-domain breakdown) and §18.3 (type count from `EnumerateTypes()`) require `AppDomainAnalyzer`.
+**Verdict**: §18.2 is largely covered by `ModuleAnalyzer`. §18.1 (per-domain breakdown) and §18.3 (type count from `EnumerateTypeDefToMethodTableMap()`) are now covered by `AppDomainAnalyzer`.
 
 ---
 
@@ -720,7 +720,7 @@ and **Related Analyzers** for that single analyzer.
 | 8 | `AllocationPatternAnalyzer` | [AllocationPatternAnalyzer.md](Analyzers/AllocationPatternAnalyzer.md) | §2.3, §9.1–9.2 | ✅ **Completed** |
 | 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 | ✅ **Completed** |
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
-| 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ⏳ **Pending** |
+| 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ✅ **Completed** |
 | 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ⏳ **Pending** |
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
@@ -785,7 +785,7 @@ Additionally, `InsightEngine` must gain:
 | 15 | `FinalizableObjectAnalyzer` (new, Phase 1 flag + Phase 2 sweep) | ➕ New | Medium | ✅ `IsFinalizableType` flag + `RootIndex.bin` ready | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ✅ **Completed** |
-| 18 | `AppDomainAnalyzer` (new, `ClrModule.EnumerateTypes()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ⏳ **Pending** |
+| 18 | `AppDomainAnalyzer` (new, `EnumerateTypeDefToMethodTableMap()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ✅ **Completed** |
 | 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 | 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ⏳ **Pending** |
 | 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
@@ -942,7 +942,7 @@ entirely from Phase 2 ClrMD metadata:
 
 | Analyzer | Index Used | Phase 2 ClrMD Calls |
 |---|---|---|
-| `AppDomainAnalyzer` | `TypeAggregates` (join only) | `ClrRuntime.AppDomains`, `ClrModule.EnumerateTypes()` |
+| `AppDomainAnalyzer` | `TypeAggregates` (join only) | `ClrRuntime.AppDomains`, `ClrModule.EnumerateTypeDefToMethodTableMap()` |
 | `JitAnalyzer` | None | `ClrRuntime.GetJitManagers()`, `ClrStackFrame.Method`, `ClrMethod.HotColdInfo` |
 | `BoxingAnalyzer` | `TypeAggregates`, `TypeShapeCache` | `ClrType.BaseType`, `ClrThread.EnumerateStackObjects()` |
 | `FinalizableObjectAnalyzer` | `ObjectIndex.bin` (Flags filter), `RootIndex.bin` | `ClrInstanceField.Read<bool>()` for `_disposed` |

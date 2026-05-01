@@ -1,17 +1,17 @@
 # AppDomainAnalyzer — Design Spec
 
 ## Status
-**New** · Implementation Priority **18** · Effort: Low · ⏳ **Pending**
+**New** · Implementation Priority **18** · Effort: Low · ✅ **Completed**
 
 ## Report Sections Served
 - §18.1 AppDomain Inventory (domain names, IDs, memory attribution)
-- §18.3 Type Density per Module (type count from `EnumerateTypes()`, load overhead)
+- §18.3 Type Density per Module (type count from `EnumerateTypeDefToMethodTableMap()`, load overhead)
 
 > §18.2 Assembly Version Conflicts is fully covered by `ModuleAnalyzer`. See [ModuleAnalyzer.md](ModuleAnalyzer.md).
 
 ## Rationale
 `ModuleAnalyzer` covers version conflicts and heap footprint per assembly. Per-`AppDomain`
-breakdown and type counts from `ClrModule.EnumerateTypes()` are not currently produced.
+breakdown and type counts from `ClrModule.EnumerateTypeDefToMethodTableMap()` are not currently produced.
 
 ---
 

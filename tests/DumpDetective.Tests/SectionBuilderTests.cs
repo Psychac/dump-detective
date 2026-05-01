@@ -1071,6 +1071,75 @@ public sealed class SectionBuilderTests
         sparseTable.Should().NotBeNull("sparse arrays table must be emitted");
         sparseTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── AppDomainSectionBuilder tests ─────────────────────────────────────────
+
+    [Fact]
+    public void AppDomainSectionBuilder_CanHandle_ReturnsTrueForAppDomainDomainResult()
+    {
+        var domain = Stamped(
+            new AppDomainDomainResult(0, [], 0, 0, []),
+            "AppDomain Analysis", "Modules");
+        new AppDomainSectionBuilder().CanHandle(domain).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AppDomainSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new EventLeakDomainResult(0, 0, 0, 0),
+            "Event Leak Analysis", "Events");
+        new AppDomainSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppDomainSectionBuilder_Build_EmitsSummaryInventoryAndTypeDensityTables()
+    {
+        var domainSnapshot = new AppDomainSnapshot(
+            Name: "DefaultDomain",
+            Address: 0x1000_0000,
+            DomainId: 1,
+            ModuleCount: 42,
+            EstimatedManagedBytes: 104_857_600);
+
+        var moduleEntry = new ModuleTypeCountEntry(
+            ModuleName:   "MyApp.Core.dll",
+            AssemblyName: "MyApp.Core, Version=1.0.0.0",
+            TypeCount:    850,
+            LiveTypeCount: 120,
+            ObjectCount:  50_000,
+            TotalBytes:   40_000_000);
+
+        var domain = Stamped(
+            new AppDomainDomainResult(
+                TotalDomains:          1,
+                Domains:               [domainSnapshot],
+                TotalDynamicModules:   3,
+                AnonymousModuleCount:  1,
+                TopModulesByTypeCount: [moduleEntry]),
+            "AppDomain Analysis", "Modules");
+
+        AnalyzerDetailSection section = new AppDomainSectionBuilder().Build(domain);
+
+        section.AnalyzerName.Should().Be("AppDomain Analysis");
+        section.SortOrder.Should().Be(41);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total AppDomains" && m.RawValue == 1);
+        metrics.Should().Contain(m => m.Label == "Dynamic Modules");
+        metrics.Should().Contain(m => m.Label == "Anonymous Modules");
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(2, "should emit domain inventory and type density tables");
+
+        var inventoryTable = tables.FirstOrDefault(t => t.Caption!.Contains("AppDomain inventory"));
+        inventoryTable.Should().NotBeNull("AppDomain inventory table must be emitted");
+        inventoryTable!.Rows.Should().HaveCount(1);
+
+        var typeTable = tables.FirstOrDefault(t => t.Caption!.Contains("type count"));
+        typeTable.Should().NotBeNull("type density table must be emitted");
+        typeTable!.Rows.Should().HaveCount(1);
+    }
 }
 
 

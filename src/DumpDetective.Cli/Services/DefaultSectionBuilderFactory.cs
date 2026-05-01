@@ -14,6 +14,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new GCRootSectionBuilder(),
         new SegmentSectionBuilder(),
         new ModuleSectionBuilder(),
+        new AppDomainSectionBuilder(),
         new CrashSectionBuilder(),
         new HangSectionBuilder(),
         new AsyncTaskSectionBuilder(),

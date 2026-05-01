@@ -7,7 +7,7 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class DependentHandleAnalyzer : IAnalyzer
+    public sealed class DependentHandleAnalyzer : IAnalyzer
     {
         private const int TopCount = 15;
 

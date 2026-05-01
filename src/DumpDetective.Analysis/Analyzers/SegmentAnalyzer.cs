@@ -1,5 +1,3 @@
-using System.Reflection;
-using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -15,37 +13,6 @@ namespace DumpDetective.Analysis.Analyzers;
 public sealed class SegmentAnalyzer : IAnalyzer
 {
     private const int TopSegmentsCount = 10;
-
-    // OPT: Cache reflection members per ClrSegment concrete type to avoid per-segment reflection overhead.
-    private static readonly ConcurrentDictionary<Type, SegmentReflectionCache> s_reflectionCache = new();
-
-    private sealed class SegmentReflectionCache
-    {
-        public PropertyInfo? Kind { get; init; }
-        public PropertyInfo? IsLargeObjectSegment { get; init; }
-        public PropertyInfo? IsPinned { get; init; }
-        public PropertyInfo? IsFrozen { get; init; }
-        public PropertyInfo? Address { get; init; }
-        public PropertyInfo? Start { get; init; }
-        public PropertyInfo? End { get; init; }
-        public PropertyInfo? ObjectRange { get; init; }
-        public PropertyInfo? CommittedMemory { get; init; }
-
-        public static SegmentReflectionCache Build(Type type) => new()
-        {
-            Kind = type.GetProperty("Kind", BindingFlags.Instance | BindingFlags.Public),
-            IsLargeObjectSegment = type.GetProperty("IsLargeObjectSegment", BindingFlags.Instance | BindingFlags.Public),
-            IsPinned = type.GetProperty("IsPinnedObjectHeap", BindingFlags.Instance | BindingFlags.Public)
-                      ?? type.GetProperty("IsPinned", BindingFlags.Instance | BindingFlags.Public),
-            IsFrozen = type.GetProperty("IsFrozenObjectHeap", BindingFlags.Instance | BindingFlags.Public)
-                      ?? type.GetProperty("IsFrozen", BindingFlags.Instance | BindingFlags.Public),
-            Address = type.GetProperty("Address", BindingFlags.Instance | BindingFlags.Public),
-            Start = type.GetProperty("Start", BindingFlags.Instance | BindingFlags.Public),
-            End = type.GetProperty("End", BindingFlags.Instance | BindingFlags.Public),
-            ObjectRange = type.GetProperty("ObjectRange", BindingFlags.Instance | BindingFlags.Public),
-            CommittedMemory = type.GetProperty("CommittedMemory", BindingFlags.Instance | BindingFlags.Public),
-        };
-    }
 
     public string Name => "Segment Analysis";
     public string Category => "Memory";
@@ -78,10 +45,10 @@ public sealed class SegmentAnalyzer : IAnalyzer
         {
             HeapSegmentKind kind = ClassifySegment(segment);
             ulong committed = GetCommittedBytes(segment);
-            ulong start = GetStart(segment);
-            ulong end = GetEnd(segment);
+            ulong start = segment.Start;
+            ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
-            int generation = GetGeneration(segment);
+            int generation = segment.SubHeap?.Index ?? -1;
 
             int objCount = CountObjects(segment, kind, ref totalObjectsScanned, progress);
 
@@ -92,7 +59,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
                 Detail: $"{segmentsProcessed} / {totalSegments} segments, {totalObjectsScanned:N0} objects"));
 
             snapshots.Add(new HeapSegmentSnapshot(
-                Address: GetAddress(segment),
+                Address: segment.Address,
                 Start: start,
                 End: end,
                 Length: length,
@@ -172,99 +139,17 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
     private static HeapSegmentKind ClassifySegment(ClrSegment segment)
     {
-        Type type = segment.GetType();
-        SegmentReflectionCache rc = s_reflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-        // Try strongly-typed Kind property first (available in newer ClrMD)
-        if (rc.Kind?.GetValue(segment) is { } kindValue)
-        {
-            string kindName = kindValue.ToString() ?? string.Empty;
-            if (kindName.Contains("Large", StringComparison.OrdinalIgnoreCase))
-                return HeapSegmentKind.LargeObjectHeap;
-            if (kindName.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
-                return HeapSegmentKind.PinnedObjectHeap;
-            if (kindName.Contains("Frozen", StringComparison.OrdinalIgnoreCase))
-                return HeapSegmentKind.Frozen;
-            if (kindName.Contains("Small", StringComparison.OrdinalIgnoreCase)
-                || kindName.Contains("Generation", StringComparison.OrdinalIgnoreCase)
-                || kindName.Contains("Soh", StringComparison.OrdinalIgnoreCase))
-                return HeapSegmentKind.SmallObjectHeap;
-        }
-
-        // Fallback to boolean properties
-        if (rc.IsFrozen?.GetValue(segment) is true)
-            return HeapSegmentKind.Frozen;
-        if (rc.IsPinned?.GetValue(segment) is true)
-            return HeapSegmentKind.PinnedObjectHeap;
-        if (rc.IsLargeObjectSegment?.GetValue(segment) is true)
-            return HeapSegmentKind.LargeObjectHeap;
-
+        string kindName = segment.Kind.ToString();
+        if (kindName.Contains("Large",  StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.LargeObjectHeap;
+        if (kindName.Contains("Pinned", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.PinnedObjectHeap;
+        if (kindName.Contains("Frozen", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.Frozen;
         return HeapSegmentKind.SmallObjectHeap;
-    }
-
-    private static ulong GetAddress(ClrSegment segment)
-    {
-        Type type = segment.GetType();
-        SegmentReflectionCache rc = s_reflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-        if (rc.Address?.GetValue(segment) is ulong addr)
-            return addr;
-
-        return GetStart(segment);
-    }
-
-    private static ulong GetStart(ClrSegment segment)
-    {
-        Type type = segment.GetType();
-        SegmentReflectionCache rc = s_reflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-        if (rc.Start?.GetValue(segment) is ulong start)
-            return start;
-
-        if (rc.ObjectRange?.GetValue(segment) is { } range)
-        {
-            var startProp = range.GetType().GetProperty("Start", BindingFlags.Instance | BindingFlags.Public);
-            if (startProp?.GetValue(range) is ulong s)
-                return s;
-        }
-
-        return 0;
-    }
-
-    private static ulong GetEnd(ClrSegment segment)
-    {
-        Type type = segment.GetType();
-        SegmentReflectionCache rc = s_reflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-        if (rc.End?.GetValue(segment) is ulong end)
-            return end;
-
-        if (rc.ObjectRange?.GetValue(segment) is { } range)
-        {
-            var endProp = range.GetType().GetProperty("End", BindingFlags.Instance | BindingFlags.Public);
-            if (endProp?.GetValue(range) is ulong e)
-                return e;
-        }
-
-        return 0;
     }
 
     private static ulong GetCommittedBytes(ClrSegment segment)
     {
-        Type type = segment.GetType();
-        SegmentReflectionCache rc = s_reflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-        if (rc.CommittedMemory?.GetValue(segment) is { } mem)
-        {
-            var lengthProp = mem.GetType().GetProperty("Length", BindingFlags.Instance | BindingFlags.Public);
-            if (lengthProp?.GetValue(mem) is ulong len)
-                return len;
-        }
-
-        // Fallback: derive from start/end
-        ulong start = GetStart(segment);
-        ulong end = GetEnd(segment);
-        return end > start ? end - start : 0;
+        MemoryRange mem = segment.CommittedMemory;
+        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
     }
 
     private static int CountObjects(
@@ -300,14 +185,5 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
         totalObjectsScanned += localScanned;
         return count;
-    }
-
-    private static int GetGeneration(ClrSegment segment)
-    {
-        var genProp = segment.GetType().GetProperty("LogicalHeap", BindingFlags.Instance | BindingFlags.Public)
-                  ?? segment.GetType().GetProperty("Generation", BindingFlags.Instance | BindingFlags.Public);
-        if (genProp?.GetValue(segment) is int gen)
-            return gen;
-        return -1;
     }
 }

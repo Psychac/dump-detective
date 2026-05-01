@@ -9,10 +9,9 @@ using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-public class ModuleAnalyzer : IAnalyzer
+    public sealed class ModuleAnalyzer : IAnalyzer
     {
         private const int TopLoadedAssembliesCount = 30;
-        private DumpDetective.Core.Options.ModuleAnalysisOptions _options = DumpDetective.Core.Options.ModuleAnalysisOptions.Default;
 
         public string Name => "Module Analysis";
         public string Category => "Modules";
@@ -20,9 +19,9 @@ public class ModuleAnalyzer : IAnalyzer
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _options = context.GetOption<DumpDetective.Core.Options.ModuleAnalysisOptions>();
+            var options = context.GetOption<DumpDetective.Core.Options.ModuleAnalysisOptions>();
             var modules = AnalyzeModules(context.Runtime);
-            var heapStats = BuildModuleHeapStats(context.Cache, _options);
+            var heapStats = BuildModuleHeapStats(context.Cache, options);
             return ValueTask.FromResult(BuildDomainResult(modules, heapStats).Stamp(this));
         }
 

@@ -77,21 +77,7 @@ namespace DumpDetective.Analysis.Analyzers
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
 
             // Approximate gen bytes using average non-LOH size × per-MT gen count.
-            // Phase 1 now resolves per-object generation for both server GC (dedicated
-            // per-gen segments) and workstation/ephemeral GC (segment.GetGeneration).
-            ulong gen0Bytes = 0, gen1Bytes = 0, gen2Bytes = 0;
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
-            {
-                TypeAggregateIndexEntry e = kv.Value;
-                long nonLohCount = e.Count - e.LohCount;
-                if (nonLohCount <= 0) continue;
-                ulong nonLohSize = e.TotalSize >= e.LohSize ? e.TotalSize - e.LohSize : 0;
-                if (nonLohSize == 0) continue;
-                ulong avgSize = nonLohSize / (ulong)nonLohCount;
-                gen0Bytes += (ulong)e.Gen0Count * avgSize;
-                gen1Bytes += (ulong)e.Gen1Count * avgSize;
-                gen2Bytes += (ulong)e.Gen2Count * avgSize;
-            }
+            AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
             double lohPct  = totalManagedBytes == 0 ? 0.0 : lohBytes   * 100.0 / totalManagedBytes;

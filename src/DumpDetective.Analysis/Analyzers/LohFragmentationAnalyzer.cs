@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
-using System.Reflection;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -14,10 +13,6 @@ namespace DumpDetective.Analysis.Analyzers
     {
         private const int TopSegments = 10;
         private const int TopLargeObjectsCount = 20;
-
-        // OPT-#4: Cache resolved PropertyInfo/MethodInfo per ClrSegment concrete type to avoid
-        // repeated reflection lookups (GetProperty calls) inside the per-segment hot loop.
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, SegmentReflectionCache> s_segmentReflectionCache = new();
 
         // Free-gap histogram bucket boundaries (minSize inclusive, maxSize exclusive).
         private static readonly (ulong Min, ulong Max, string Label)[] s_gapBuckets =
@@ -30,30 +25,6 @@ namespace DumpDetective.Analysis.Analyzers
             (10_485_760UL,   104_857_600UL,      "10 MB \u2013 100 MB"),
             (104_857_600UL,  ulong.MaxValue,     "\u2265 100 MB"),
         ];
-
-        private sealed class SegmentReflectionCache
-        {
-            public PropertyInfo? IsLargeObjectSegment { get; init; }
-            public PropertyInfo? Kind { get; init; }
-            public PropertyInfo? IsLarge { get; init; }
-            public PropertyInfo? Address { get; init; }
-            public PropertyInfo? Start { get; init; }
-            public PropertyInfo? End { get; init; }
-            public PropertyInfo? ObjectRange { get; init; }
-            public PropertyInfo? CommittedMemory { get; init; }
-
-            public static SegmentReflectionCache Build(Type type) => new()
-            {
-                IsLargeObjectSegment = type.GetProperty("IsLargeObjectSegment", BindingFlags.Instance | BindingFlags.Public),
-                Kind = type.GetProperty("Kind", BindingFlags.Instance | BindingFlags.Public),
-                IsLarge = type.GetProperty("IsLarge", BindingFlags.Instance | BindingFlags.Public),
-                Address = type.GetProperty("Address", BindingFlags.Instance | BindingFlags.Public),
-                Start = type.GetProperty("Start", BindingFlags.Instance | BindingFlags.Public),
-                End = type.GetProperty("End", BindingFlags.Instance | BindingFlags.Public),
-                ObjectRange = type.GetProperty("ObjectRange", BindingFlags.Instance | BindingFlags.Public),
-                CommittedMemory = type.GetProperty("CommittedMemory", BindingFlags.Instance | BindingFlags.Public),
-            };
-        }
 
         public string Name => "LOH Fragmentation Analysis";
         public string Category => "Memory";
@@ -171,49 +142,11 @@ namespace DumpDetective.Analysis.Analyzers
             return totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
         }
 
+        // Matches LohFreeBlockWriter.Write key which uses segment.Start.
         private static bool IsLohSegment(ClrSegment segment)
-        {
-            Type type = segment.GetType();
-            SegmentReflectionCache rc = s_segmentReflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
+            => segment.Kind.ToString().Contains("Large", StringComparison.OrdinalIgnoreCase);
 
-            if (rc.IsLargeObjectSegment?.GetValue(segment) is bool isLargeObjectSegment)
-                return isLargeObjectSegment;
-
-            if (rc.Kind?.GetValue(segment) is not null)
-            {
-                string kindName = rc.Kind.GetValue(segment)!.ToString() ?? string.Empty;
-                if (kindName.Contains("Large", StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-
-            if (rc.IsLarge?.GetValue(segment) is bool isLargeValue)
-                return isLargeValue;
-
-            return false;
-        }
-
-        private static ulong GetSegmentAddress(ClrSegment segment)
-        {
-            Type type = segment.GetType();
-            SegmentReflectionCache rc = s_segmentReflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-            // Prefer direct Start property (ClrMD 3.x standard; matches LohFreeBlockWriter.Write key).
-            if (rc.Start?.GetValue(segment) is ulong start)
-                return start;
-
-            if (rc.Address?.GetValue(segment) is ulong address)
-                return address;
-
-            if (rc.ObjectRange?.GetValue(segment) is not null)
-            {
-                object range = rc.ObjectRange.GetValue(segment)!;
-                var startProp = range.GetType().GetProperty("Start", BindingFlags.Instance | BindingFlags.Public);
-                if (startProp?.GetValue(range) is ulong rangeStart)
-                    return rangeStart;
-            }
-
-            return 0;
-        }
+        private static ulong GetSegmentAddress(ClrSegment segment) => segment.Start;
 
         private static void AccumulateSegmentObjectByAddress(
             ClrHeap heap,
@@ -354,32 +287,8 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static ulong GetSegmentTotalBytes(ClrSegment segment)
         {
-            Type type = segment.GetType();
-            SegmentReflectionCache rc = s_segmentReflectionCache.GetOrAdd(type, SegmentReflectionCache.Build);
-
-            // 1. CommittedMemory.Length (ClrMD 3.x MemoryRange struct).
-            if (rc.CommittedMemory?.GetValue(segment) is { } mem)
-            {
-                var lenProp = mem.GetType().GetProperty("Length", BindingFlags.Instance | BindingFlags.Public);
-                if (lenProp?.GetValue(mem) is ulong len && len > 0)
-                    return len;
-            }
-
-            // 2. Direct Start / End properties (ClrMD 3.x standard path).
-            if (rc.Start?.GetValue(segment) is ulong start && rc.End?.GetValue(segment) is ulong end && end > start)
-                return end - start;
-
-            // 3. ObjectRange.Start / ObjectRange.End fallback.
-            if (rc.ObjectRange?.GetValue(segment) is { } range)
-            {
-                var rt = range.GetType();
-                var sp = rt.GetProperty("Start", BindingFlags.Instance | BindingFlags.Public);
-                var ep = rt.GetProperty("End",   BindingFlags.Instance | BindingFlags.Public);
-                if (sp?.GetValue(range) is ulong rs && ep?.GetValue(range) is ulong re && re > rs)
-                    return re - rs;
-            }
-
-            return 0;
+            MemoryRange mem = segment.CommittedMemory;
+            return mem.End >= mem.Start ? mem.End - mem.Start : 0;
         }
 
         // ── Index readers ─────────────────────────────────────────────────────────

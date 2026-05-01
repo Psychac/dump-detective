@@ -1331,6 +1331,74 @@ public sealed class SectionBuilderTests
         padTable.Should().NotBeNull("padding waste table must be emitted");
         padTable!.Rows.Should().HaveCount(1);
     }
+
+    // ── JitSectionBuilder tests ───────────────────────────────────────────────
+
+    [Fact]
+    public void JitSectionBuilder_CanHandle_ReturnsTrueForJitDomainResult()
+    {
+        var result = Stamped(
+            new JitDomainResult(0, 0, 0.0, 0, [], [], 0, 0, 0),
+            "JIT Analysis", "Performance");
+        new JitSectionBuilder().CanHandle(result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void JitSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new BoxingDomainResult(0, 0, [], 0, 0, 0, [], false),
+            "Boxing Analysis", "Memory");
+        new JitSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void JitSectionBuilder_Build_EmitsSummaryMetricsAndTables()
+    {
+        var methods = new List<JitMethodSnapshot>
+        {
+            new("MyApp.Foo.HeavyMethod()", "MyApp.Foo", 0x1000, 80_000, 0, false),
+            new("MyApp.Bar.Process()",     "MyApp.Bar", 0x2000, 72_000, 5_000, false),
+        };
+        var frameTypes = new List<NameCountEntry>
+        {
+            new("MyApp.RequestHandler", 42),
+            new("MyApp.DataProcessor",  18),
+        };
+        var result = Stamped(
+            new JitDomainResult(
+                TotalJitHeapBytes:        200 * 1024 * 1024,
+                JitManagerCount:          2,
+                JitHeapPctOfTotalProcess: 0.0,
+                ActiveMethodsOnStacks:    100,
+                TopLargestMethods:        methods,
+                TopActiveFrameTypes:      frameTypes,
+                UnmanagedFrameCount:      15,
+                ManagedFrameCount:        85,
+                TieredMethodCount:        3),
+            "JIT Analysis", "Performance");
+
+        AnalyzerDetailSection section = new JitSectionBuilder().Build(result);
+
+        section.AnalyzerName.Should().Be("JIT Analysis");
+        section.SortOrder.Should().Be(51);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total JIT code heap");
+        metrics.Should().Contain(m => m.Label == "JIT manager count" && m.RawValue == 2);
+        metrics.Should().Contain(m => m.Label == "Active method instances on stacks" && m.RawValue == 100);
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(2, "active frame types and large methods tables must be emitted");
+
+        var frameTypesTable = tables.FirstOrDefault(t => t.Caption!.Contains("frame types"));
+        frameTypesTable.Should().NotBeNull("active frame types table must be emitted");
+        frameTypesTable!.Rows.Should().HaveCount(2);
+
+        var methodsTable = tables.FirstOrDefault(t => t.Caption!.Contains("method"));
+        methodsTable.Should().NotBeNull("large methods table must be emitted");
+        methodsTable!.Rows.Should().HaveCount(2);
+    }
 }
 
 

@@ -35,6 +35,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new ArraySectionBuilder(),
         new AsyncStateMachineSectionBuilder(),
         new WeakReferenceSectionBuilder(),
-        new BoxingSectionBuilder()
+        new BoxingSectionBuilder(),
+        new JitSectionBuilder()
     ];
 }

@@ -721,7 +721,7 @@ and **Related Analyzers** for that single analyzer.
 | 9 | `ObjectShapeAnalyzer` | [ObjectShapeAnalyzer.md](Analyzers/ObjectShapeAnalyzer.md) | §3.3 | ✅ **Completed** |
 | 1 | `StringAnalyzer` | [StringAnalyzer.md](Analyzers/StringAnalyzer.md) | §11.1–11.2 | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` | [AppDomainAnalyzer.md](Analyzers/AppDomainAnalyzer.md) | §18.1, §18.3 | ✅ **Completed** |
-| 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ⏳ **Pending** |
+| 22 | `JitAnalyzer` | [JitAnalyzer.md](Analyzers/JitAnalyzer.md) | §19.1–19.3 | ✅ **Completed** |
 | 21 | `BoxingAnalyzer` | [BoxingAnalyzer.md](Analyzers/BoxingAnalyzer.md) | §20.1–20.2 | ✅ **Completed** |
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ✅ **Completed** |
@@ -789,7 +789,7 @@ Additionally, `InsightEngine` must gain:
 | 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 | 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
 | 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ✅ **Completed** |
-| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
+| 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
 
 > **`DominatorAnalyzer`** is the highest-effort item and carries the most performance risk.
 > It must be implemented last, after all other analyzers are in place, with dedicated

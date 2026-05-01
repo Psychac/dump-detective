@@ -70,6 +70,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, SegmentReservationFindingGenerator>();
         services.AddSingleton<IFindingGenerator, WeakReferenceFindingGenerator>();
         services.AddSingleton<IFindingGenerator, BoxingFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, JitFindingGenerator>();
 
         // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
@@ -106,6 +107,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, SegmentReservationTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, WeakReferenceTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, BoxingTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, JitTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

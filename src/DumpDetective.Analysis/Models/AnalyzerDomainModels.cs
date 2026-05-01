@@ -749,3 +749,24 @@ internal sealed record BoxingDomainResult(
     int OversizedValueTypeCount,
     IReadOnlyList<StructPaddingEntry> TopPaddingWasteTypes,
     bool TypeScanCapped) : AnalyzerDomainResult;
+
+// ── JIT & Native Code ──────────────────────────────────────────────────────
+
+internal sealed record JitMethodSnapshot(
+    string Signature,
+    string DeclaringType,
+    ulong NativeCodeAddress,
+    uint HotSize,
+    uint ColdSize,
+    bool IsTiered);
+
+internal sealed record JitDomainResult(
+    ulong TotalJitHeapBytes,
+    int JitManagerCount,
+    double JitHeapPctOfTotalProcess,
+    int ActiveMethodsOnStacks,
+    IReadOnlyList<JitMethodSnapshot> TopLargestMethods,
+    IReadOnlyList<NameCountEntry> TopActiveFrameTypes,
+    int UnmanagedFrameCount,
+    int ManagedFrameCount,
+    int TieredMethodCount) : AnalyzerDomainResult;

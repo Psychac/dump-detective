@@ -1,0 +1,33 @@
+using DumpDetective.Core.Models;
+
+namespace DumpDetective.Analysis.Models;
+
+// Allocation Pattern
+
+public enum AllocationProfile { Transient, Steady, Retained, Mixed }
+public enum GCPressureLevel   { Low, Moderate, High, Critical }
+
+public sealed record TypeAllocationProfile(
+    string TypeName,
+    int Gen0Count,
+    int Gen1Count,
+    int Gen2Count,
+    double LongLivedRatio,
+    AllocationProfile Profile);
+
+internal sealed record AllocationPatternDomainResult(
+    // Object-count percentages (objects in generation / total objects)
+    double Gen0CountPct,
+    double Gen1CountPct,
+    double Gen2CountPct,
+    double LohCountPct,
+    // Byte-size percentages (bytes in generation / total managed bytes)
+    double Gen0SizePct,
+    double Gen1SizePct,
+    double Gen2SizePct,
+    double LohSizePct,
+    AllocationProfile Profile,
+    GCPressureLevel GCPressure,
+    double PromotionPressureScore,
+    IReadOnlyList<TypeAllocationProfile> TopShortLivedTypes,
+    IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes) : AnalyzerDomainResult;

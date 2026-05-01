@@ -1,0 +1,36 @@
+using DumpDetective.Core.Models;
+
+namespace DumpDetective.Analysis.Models;
+
+// GCRootAnalyzer domain models
+
+public sealed record RootKindSummary(
+    string Kind,
+    int Count,
+    ulong EstimatedRetainedBytes,
+    double PctOfManagedHeap);
+
+public sealed record RootFinding(
+    string RootKind,
+    ulong RootAddress,
+    string? FieldDescription,
+    string TargetTypeName,
+    ulong TargetAddress,
+    ulong EstimatedRetainedBytes,
+    int SeverityScore);
+
+public sealed record RootPathFinding(
+    ulong TargetAddress,
+    string TargetTypeName,
+    string RootKind,
+    IReadOnlyList<string> PathTypeNames,
+    int PathLength,
+    bool WasCapped);
+
+internal sealed record GCRootDomainResult(
+    int TotalRoots,
+    IReadOnlyList<RootKindSummary> ByKind,
+    IReadOnlyList<RootFinding> TopRootsBySeverity,
+    IReadOnlyList<RootPathFinding> RootPaths,
+    bool PathSearchCapped,
+    int PathSearchCappedCount) : AnalyzerDomainResult;

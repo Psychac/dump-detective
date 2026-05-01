@@ -33,6 +33,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new EventLeakSectionBuilder(),
         new FinalizableObjectSectionBuilder(),
         new ArraySectionBuilder(),
-        new AsyncStateMachineSectionBuilder()
+        new AsyncStateMachineSectionBuilder(),
+        new WeakReferenceSectionBuilder()
     ];
 }

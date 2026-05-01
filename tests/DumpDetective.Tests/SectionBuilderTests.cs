@@ -1202,6 +1202,69 @@ public sealed class SectionBuilderTests
         segTable.Should().NotBeNull("top-segments table must be emitted");
         segTable!.Rows.Should().HaveCount(2);
     }
+
+    // ── WeakReferenceSectionBuilder tests ────────────────────────────────────
+
+    [Fact]
+    public void WeakReferenceSectionBuilder_CanHandle_ReturnsTrueForWeakReferenceDomainResult()
+    {
+        var result = Stamped(
+            new WeakReferenceDomainResult(0, 0, 0, 0.0, 0, 0, 0, [], [], 0, false),
+            "Weak Reference Analysis", "Memory");
+        new WeakReferenceSectionBuilder().CanHandle(result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void WeakReferenceSectionBuilder_CanHandle_ReturnsFalseForUnrelated()
+    {
+        var unrelated = Stamped(
+            new SegmentAnalysisDomainResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, []),
+            "Segment Analysis", "Memory");
+        new WeakReferenceSectionBuilder().CanHandle(unrelated).Should().BeFalse();
+    }
+
+    [Fact]
+    public void WeakReferenceSectionBuilder_Build_EmitsSummaryAndTargetTable()
+    {
+        var topTargetTypes = new List<NameCountEntry>
+        {
+            new("System.String", 120),
+            new("System.Object", 40),
+        };
+        var result = Stamped(
+            new WeakReferenceDomainResult(
+                TotalWeakHandles:            200,
+                AliveWeakTargets:            80,
+                DeadWeakTargets:             120,
+                DeadTargetRatio:             0.6,
+                WeakReferenceObjectCount:    50,
+                WeakReferenceObjectBytes:    1024 * 1024,
+                StaleWrapperCount:           10,
+                TopWeakTargetTypes:          topTargetTypes,
+                TopStaleWrapperHolderTypes:  [],
+                DependentHandleDeadKeyCount: 5,
+                ScanCapped:                  false),
+            "Weak Reference Analysis", "Memory");
+
+        AnalyzerDetailSection section = new WeakReferenceSectionBuilder().Build(result);
+
+        section.AnalyzerName.Should().Be("Weak Reference Analysis");
+        section.SortOrder.Should().Be(49);
+
+        var metrics = section.Blocks.OfType<MetricBlock>().ToList();
+        metrics.Should().Contain(m => m.Label == "Total weak handles" && m.RawValue == 200);
+        metrics.Should().Contain(m => m.Label == "Dead targets" && m.RawValue == 120);
+        metrics.Should().Contain(m => m.Label == "Dead target ratio");
+        metrics.Should().Contain(m => m.Label == "Stale wrappers (m_handle=0)");
+        metrics.Should().Contain(m => m.Label == "Dependent handles with dead primary key" && m.RawValue == 5);
+
+        var tables = section.Blocks.OfType<TableBlock>().ToList();
+        tables.Should().HaveCountGreaterThanOrEqualTo(1, "top-target-types table must be emitted");
+
+        var targetTable = tables.FirstOrDefault(t => t.Caption!.Contains("alive weak target"));
+        targetTable.Should().NotBeNull("top alive weak target types table must be emitted");
+        targetTable!.Rows.Should().HaveCount(2);
+    }
 }
 
 

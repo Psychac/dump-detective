@@ -726,7 +726,7 @@ and **Related Analyzers** for that single analyzer.
 | 15 | `FinalizableObjectAnalyzer` | [FinalizableObjectAnalyzer.md](Analyzers/FinalizableObjectAnalyzer.md) | §21.1–21.2 | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` | [ArrayAnalyzer.md](Analyzers/ArrayAnalyzer.md) | §22.1–22.4 | ✅ **Completed** |
 | 16 | `AsyncStateMachineAnalyzer` | [AsyncStateMachineAnalyzer.md](Analyzers/AsyncStateMachineAnalyzer.md) | §23.1–23.3 | ✅ **Completed** |
-| 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ⏳ **Pending** |
+| 20 | `WeakReferenceAnalyzer` | [WeakReferenceAnalyzer.md](Analyzers/WeakReferenceAnalyzer.md) | §24.1–24.3 | ✅ **Completed** |
 | 19 | `SegmentReservationAnalyzer` | [SegmentReservationAnalyzer.md](Analyzers/SegmentReservationAnalyzer.md) | §25.1–25.3 | ✅ **Completed** |
 
 ---
@@ -786,8 +786,8 @@ Additionally, `InsightEngine` must gain:
 | 16 | `AsyncStateMachineAnalyzer` (new, type name pattern + field walk) | ➕ New | Medium | ✅ `TypeAggregates` name scan ready | ✅ **Completed** |
 | 17 | `ArrayAnalyzer` (new, Phase 1 flag + bounded element sampling) | ➕ New | Medium | ✅ `IsArrayType` flag + `LargeObjectIndex.bin` ready | ✅ **Completed** |
 | 18 | `AppDomainAnalyzer` (new, `EnumerateTypeDefToMethodTableMap()` + TypeAggregates join) | ➕ New | Low | ✅ `TypeAggregates` join ready | ✅ **Completed** |
-| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
-| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ⏳ **Pending** |
+| 19 | `SegmentReservationAnalyzer` (new, `ClrHeap.Segments` iteration only) | ➕ New | Low | ⬜ No Phase 1 prereqs | ✅ **Completed** |
+| 20 | `WeakReferenceAnalyzer` (new, `HandleSnapshot.bin` + `m_handle` field) | ➕ New | Low | ✅ `HandleSnapshot.bin` written | ✅ **Completed** |
 | 21 | `BoxingAnalyzer` (new, TypeAggregates scan + TypeShapeCache) | ➕ New | Low | ✅ `TypeShapeCache` ready | ⏳ **Pending** |
 | 22 | `JitAnalyzer` (new, `GetJitManagers()` + thread stack walk) | ➕ New | Low | ⬜ No Phase 1 prereqs | ⏳ **Pending** |
 

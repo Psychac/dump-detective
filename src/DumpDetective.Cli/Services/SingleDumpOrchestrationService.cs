@@ -35,18 +35,11 @@ internal sealed class SingleDumpOrchestrationService(
         Stopwatch totalStopwatch = Stopwatch.StartNew();
 
         ConsoleUx.Header("DumpDetective Analysis");
-        ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
+        ConsoleUx.DumpInfo(Path.GetFileName(resolved.DumpPath), TryGetFileSize(resolved.DumpPath));
+        ConsoleUx.Note(TemporaryAdaptiveIndexingNotice);
 
         if (resolved.DiagnosticMode)
-        {
-            ConsoleUx.Info($"Config source: {(resolved.UsedConfigFile ? $"file ({resolved.ConfigPath})" : "CLI fallback")}");
-            ConsoleUx.Info($"Active analyzers ({activeAnalyzers.Count}): {string.Join(", ", activeAnalyzers.Select(a => a.Name))}");
-        }
-        else
-        {
-            ConsoleUx.Info($"Analyzing dump: {Path.GetFileName(resolved.DumpPath)}");
-            ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers...");
-        }
+            ConsoleUx.Info($"Config: {(resolved.UsedConfigFile ? $"file ({resolved.ConfigPath})" : "CLI fallback")}  ·  {activeAnalyzers.Count} analyzers: {string.Join(", ", activeAnalyzers.Select(a => a.Name))}");
 
         IReadOnlyList<IAnalysisStage> stages = BuildStages();
 
@@ -65,8 +58,11 @@ internal sealed class SingleDumpOrchestrationService(
 
         if (resolved.DiagnosticMode)
         {
-            ConsoleUx.Info($"Pipeline completed in {state.PipelineStopwatch.Elapsed.TotalSeconds:F1}s");
-            ConsoleUx.Info($"Run summary: {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
+            int success  = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success);
+            int failed   = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
+            int skipped  = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped);
+            int findings = state.Runs.Sum(r => r.FindingCount);
+            ConsoleUx.RunStatusSummary(success, failed, skipped, findings);
             PrintDiagnosticsSummary(state.Runs);
         }
 
@@ -74,7 +70,7 @@ internal sealed class SingleDumpOrchestrationService(
             PrintMemorySummary(state.Runs, state.StageMemoryStats);
 
         totalStopwatch.Stop();
-        ConsoleUx.Success($"Total analysis time: {totalStopwatch.Elapsed.TotalSeconds:F1}s");
+        ConsoleUx.Footer(totalStopwatch.Elapsed);
 
         return state.Runs.Any(r => r.Status == AnalyzerExecutionStatus.Failed)
             ? ExitCodes.AnalysisFailure
@@ -93,29 +89,9 @@ internal sealed class SingleDumpOrchestrationService(
 
     private static void PrintInsights(IReadOnlyList<InsightFinding> insights, bool diagnosticMode)
     {
-        if (diagnosticMode)
-            ConsoleUx.Info($"InsightEngine: {insights.Count} cross-cutting finding(s).");
-
-        for (int i = 0; i < insights.Count; i++)
-        {
-            InsightFinding f = insights[i];
-            string prefix = f.Severity switch
-            {
-                FindingSeverity.Critical => "[CRITICAL]",
-                FindingSeverity.Warning  => "[WARNING]",
-                _                        => "[INFO]"
-            };
-
-            if (f.Severity == FindingSeverity.Critical)
-                ConsoleUx.Error($"{prefix} {f.Title}");
-            else if (f.Severity == FindingSeverity.Warning)
-                ConsoleUx.Warning($"{prefix} {f.Title}");
-            else
-                ConsoleUx.Info($"{prefix} {f.Title}");
-
-            if (diagnosticMode)
-                ConsoleUx.Info($"  Evidence: {f.Evidence}");
-        }
+        ConsoleUx.InsightsHeader(insights.Count);
+        foreach (InsightFinding f in insights)
+            ConsoleUx.InsightLine(f.Severity, f.Title, f.Evidence, diagnosticMode);
     }
 
     private static void PrintMemorySummary(
@@ -163,21 +139,17 @@ internal sealed class SingleDumpOrchestrationService(
         if (runs.Count == 0)
             return;
 
-        long totalScans = runs.Sum(r => r.ObjectScanCount);
-        long totalCacheHits = runs.Sum(r => r.CacheHits);
-        long totalCacheMisses = runs.Sum(r => r.CacheMisses);
-        long cacheTotal = totalCacheHits + totalCacheMisses;
-        double cacheHitRatio = cacheTotal == 0 ? 0 : totalCacheHits * 100.0 / cacheTotal;
-
-        ConsoleUx.Info($"Scan summary: object-scans={totalScans:N0}, cache-hits={totalCacheHits:N0}, cache-misses={totalCacheMisses:N0}, hit-ratio={cacheHitRatio:F1}%");
-
         IReadOnlyList<AnalyzerRunResult> topSlow = runs
             .OrderByDescending(r => r.Duration)
             .Take(5)
             .ToList();
 
-        ConsoleUx.Info("Top slow analyzers:");
-        foreach (AnalyzerRunResult run in topSlow)
-            ConsoleUx.Info($"  - {run.AnalyzerName}: {run.Duration.TotalMilliseconds:F0} ms, findings={run.FindingCount}, warnings={run.WarningCount}, scans={run.ObjectScanCount:N0}");
+        ConsoleUx.TopSlowAnalyzers(topSlow);
+    }
+
+    private static long? TryGetFileSize(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return null; }
     }
 }

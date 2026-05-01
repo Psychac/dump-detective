@@ -16,7 +16,7 @@ internal sealed class WriteOutputStage : IAnalysisStage
             if (!string.IsNullOrWhiteSpace(state.Resolved.OutputPath))
             {
                 await File.WriteAllTextAsync(state.Resolved.OutputPath, state.RenderedReport, cancellationToken);
-                ConsoleUx.Success($"Report written to: {state.Resolved.OutputPath}");
+                ConsoleUx.ReportWritten(state.Resolved.OutputPath);
             }
         }
         catch (OperationCanceledException)

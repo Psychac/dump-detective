@@ -94,14 +94,22 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         details.Add($"cache-hit {cacheHitRatio:F1}% ({cacheHits:N0}/{cacheMisses:N0})");
                     }
 
+                    // Reset before printing: closes the window where a stale AnalyzerProgress
+                    // callback (posted via Progress<T>/ThreadPool) could fire after ObjectScanComplete
+                    // sets _scanLineActive=false but before _currentAnalyzerName is cleared.
+                    // Any queued callback arriving after this point will fail the name guard.
+                    ResetAnalyzerTracking();
                     ConsoleUx.ObjectScanComplete(
                         diagnosticsEvent.AnalyzerName,
                         analyzerScanCount,
                         elapsed,
                         details.Count == 0 ? null : string.Join(" • ", details));
                 }
+                else
+                {
+                    ResetAnalyzerTracking();
+                }
 
-                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -113,11 +121,15 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         : TimeSpan.Zero;
                     long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
                     string details = analyzerScanCount == 0 ? "no heap walk • status failed" : "status failed";
+                    ResetAnalyzerTracking();
                     ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Error($"Analyzer failed: {diagnosticsEvent.AnalyzerName} ({diagnosticsEvent.ExceptionType}: {diagnosticsEvent.ExceptionMessage})");
                 }
+                else
+                {
+                    ResetAnalyzerTracking();
+                }
 
-                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
@@ -129,17 +141,21 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         : TimeSpan.Zero;
                     long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
                     string details = analyzerScanCount == 0 ? "no heap walk • status canceled" : "status canceled";
+                    ResetAnalyzerTracking();
                     ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Warning($"Analyzer canceled: {diagnosticsEvent.AnalyzerName}");
                 }
+                else
+                {
+                    ResetAnalyzerTracking();
+                }
 
-                ResetAnalyzerTracking();
                 CompleteAnalyzerInStage(diagnosticsEvent.AnalyzerName);
                 break;
 
             case AnalysisDiagnosticsEventType.RunCompleted:
+                ConsoleUx.AnalyzerRunSummary(diagnosticsEvent.ObjectScanCount, diagnosticsEvent.CacheHits, diagnosticsEvent.CacheMisses);
                 CompleteCurrentStageIfOpen();
-                ConsoleUx.Info($"Run diagnostics: scans={diagnosticsEvent.ObjectScanCount:N0}, cache-hits={diagnosticsEvent.CacheHits:N0}, cache-misses={diagnosticsEvent.CacheMisses:N0}");
                 break;
 
             default:
@@ -274,6 +290,12 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     private void PrintAnalyzerProgress(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
         if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+            return;
+
+        // Drop stale progress events that arrive after the analyzer has already completed.
+        // This happens when AnalyzerProgress is dispatched via Progress<T>/ThreadPool and a
+        // queued callback fires after AnalyzerCompleted has already reset _currentAnalyzerName.
+        if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
             return;
 
         DateTime utcNow = DateTime.UtcNow;

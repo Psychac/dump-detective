@@ -68,33 +68,56 @@ internal static class AnalyzerFilterService
         string typeName = analyzer.GetType().Name;
         return typeName switch
         {
+            // Stage 0 — Profiling heap and GC
             nameof(Analysis.Analyzers.MemoryAnalyzer)
             or nameof(Analysis.Analyzers.GCGenerationAnalyzer)
+            or nameof(Analysis.Analyzers.AllocationPatternAnalyzer)
+            or nameof(Analysis.Analyzers.ObjectShapeAnalyzer)
+            or nameof(Analysis.Analyzers.GCRootAnalyzer)
+            or nameof(Analysis.Analyzers.SegmentAnalyzer)
             or nameof(Analysis.Analyzers.ModuleAnalyzer)
                 => 0,
 
+            // Stage 1 — Analyzing crash and hang signals
             nameof(Analysis.Analyzers.CrashAnalyzer)
             or nameof(Analysis.Analyzers.HangAnalyzer)
+            or nameof(Analysis.Analyzers.AsyncTaskAnalyzer)
                 => 1,
 
+            // Stage 2+3 — Detecting memory leaks (both map to the same console stage name so they stay consecutive)
             nameof(Analysis.Analyzers.MemoryLeakAnalyzer)
             or nameof(Analysis.Analyzers.CollectionAnalyzer)
+            or nameof(Analysis.Analyzers.StringAnalyzer)
                 => 2,
 
             nameof(Analysis.Analyzers.StaticRootLeakDetector)
             or nameof(Analysis.Analyzers.ReferenceChainAnalyzer)
                 => 3,
 
+            // Stage 4 — Inspecting handles and fragmentation (ThreadStackClusterAnalyzer runs last in this
+            //            rank but maps to the next console stage, causing a clean break)
             nameof(Analysis.Analyzers.GCHandleAnalyzer)
             or nameof(Analysis.Analyzers.DependentHandleAnalyzer)
             or nameof(Analysis.Analyzers.LohFragmentationAnalyzer)
             or nameof(Analysis.Analyzers.ThreadStackClusterAnalyzer)
                 => 4,
 
+            // Stage 5 — Analyzing threads and concurrency (continues from ThreadStackClusterAnalyzer)
             nameof(Analysis.Analyzers.ThreadAnalyzer)
             or nameof(Analysis.Analyzers.LockGraphAnalyzer)
             or nameof(Analysis.Analyzers.EventLeakAnalyzer)
                 => 5,
+
+            // Stage 6 — Deep object and runtime inspection
+            nameof(Analysis.Analyzers.FinalizableObjectAnalyzer)
+            or nameof(Analysis.Analyzers.AsyncStateMachineAnalyzer)
+            or nameof(Analysis.Analyzers.ArrayAnalyzer)
+            or nameof(Analysis.Analyzers.AppDomainAnalyzer)
+            or nameof(Analysis.Analyzers.SegmentReservationAnalyzer)
+            or nameof(Analysis.Analyzers.WeakReferenceAnalyzer)
+            or nameof(Analysis.Analyzers.BoxingAnalyzer)
+            or nameof(Analysis.Analyzers.JitAnalyzer)
+                => 6,
 
             _ => 99
         };

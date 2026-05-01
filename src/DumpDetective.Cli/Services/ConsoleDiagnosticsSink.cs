@@ -473,31 +473,45 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         {
             nameof(DumpDetective.Analysis.Analyzers.MemoryAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.GCGenerationAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.AllocationPatternAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.ObjectShapeAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.GCRootAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.SegmentAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.ModuleAnalyzer)
-                => "Running core memory analyzers",
+                => "Profiling heap and GC",
 
             nameof(DumpDetective.Analysis.Analyzers.CrashAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.HangAnalyzer)
-                => "Analyzing for crashes and hangs",
+            or nameof(DumpDetective.Analysis.Analyzers.AsyncTaskAnalyzer)
+                => "Analyzing crash and hang signals",
 
             nameof(DumpDetective.Analysis.Analyzers.MemoryLeakAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.StringAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.CollectionAnalyzer)
-                => "Detecting memory leaks",
-
-            nameof(DumpDetective.Analysis.Analyzers.StaticRootLeakDetector)
+            or nameof(DumpDetective.Analysis.Analyzers.StaticRootLeakDetector)
             or nameof(DumpDetective.Analysis.Analyzers.ReferenceChainAnalyzer)
-                => "Analyzing static roots and event handlers",
+                => "Detecting memory leaks",
 
             nameof(DumpDetective.Analysis.Analyzers.GCHandleAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.DependentHandleAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.LohFragmentationAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.ThreadStackClusterAnalyzer)
-                => "Performing ClrMD deep analysis",
+                => "Inspecting handles and fragmentation",
 
-            nameof(DumpDetective.Analysis.Analyzers.ThreadAnalyzer)
+            nameof(DumpDetective.Analysis.Analyzers.ThreadStackClusterAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.ThreadAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.LockGraphAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.EventLeakAnalyzer)
-                => "Analyzing threads and events",
+                => "Analyzing threads and concurrency",
+
+            nameof(DumpDetective.Analysis.Analyzers.FinalizableObjectAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.AsyncStateMachineAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.ArrayAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.AppDomainAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.SegmentReservationAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.WeakReferenceAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.BoxingAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.JitAnalyzer)
+                => "Deep object and runtime inspection",
 
             _ => $"{analyzer.Category} analysis"
         };

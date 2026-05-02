@@ -12,9 +12,9 @@ namespace DumpDetective.Analysis.Indexing;
 internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 {
     // ObjectIndex.bin header constants (separate from IndexHeader to preserve existing format)
-    private const int ObjIndexMagic      = 0x58494444; // DDIX
-    private const int ObjIndexVersion    = 1;
-    private const int ObjIndexHeaderSize = 24;
+    internal const int ObjIndexMagic      = 0x58494444; // DDIX
+    private  const int ObjIndexVersion    = 1;
+    internal const int ObjIndexHeaderSize = 24;
     private const int RecordSize = sizeof(ulong) * 3;
     private const int ProgressReportEveryObjects = 100_000;
 
@@ -30,7 +30,20 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         // Use canonical per-dump .dumpindex/ directory for all index files.
         DumpIndexPaths.EnsureDirectory(dumpPath);
-        string indexPath = DumpIndexPaths.ObjectIndex(dumpPath);
+        string indexPath    = DumpIndexPaths.ObjectIndex(dumpPath);
+        string typeAggPath  = DumpIndexPaths.TypeAggregateIndex(dumpPath);
+
+        // ── Fast-path: skip full heap scan if a valid TypeAggregateIndex.bin exists ──
+        // TypeAggregateIndex.bin is written LAST, after all satellite files, so its
+        // presence guarantees the previous build completed successfully.
+        if (TryLoadFromCache(indexPath, typeAggPath, dumpPath, out var cachedResult))
+        {
+            progress?.Report(new(cachedResult!.ObjectCount, "index cache hit",
+                Detail: "loaded TypeAggregateIndex.bin — skipping heap scan",
+                Elapsed: stopwatch.Elapsed));
+            stopwatch.Stop();
+            return cachedResult!;
+        }
 
         long objectCount = 0;
 
@@ -43,11 +56,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Each segment gets its own entry list sized from its own byte length (see below).
 
         // Cap DOP so ClrMD's minidump page cache never holds more than this many segments'
-        // pages resident simultaneously. Uncapped (default -1) causes ProcessorCount threads
-        // to each hold a different segment's pages in cache concurrently, which multiplied the
-        // working-set footprint proportional to core count after the parallel rearchitecture.
-        // 4 concurrent segments gives ~4x speedup over sequential while bounding peak page pressure.
-        const int MaxSegmentParallelism = 4;
+        // pages resident simultaneously. For Large dumps on SSDs, up to 8 concurrent segments
+        // give additional throughput; smaller tiers use fewer to bound page-cache pressure.
+        int maxSegmentParallelism = sizeTier switch
+        {
+            DumpDetective.Core.Models.DumpSizeTier.Large  => Math.Min(Environment.ProcessorCount, 8),
+            DumpDetective.Core.Models.DumpSizeTier.Medium => Math.Min(Environment.ProcessorCount, 4),
+            _                                              => 2,
+        };
 
         var masterBuilder  = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
@@ -56,9 +72,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
-        var taskCandidates  = new ConcurrentBag<(ulong Addr, ulong Mt)>();
-        var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
-        var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
+        var taskCandidates         = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var eventCandidates        = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var largeCandidates        = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
+        // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
+        var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
 
         // OPT: open the index file before the parallel scan so each segment writes directly to
         // disk as it completes — eliminating the post-scan bag + flat-array accumulation
@@ -74,7 +92,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var parallelOptions = new ParallelOptions
         {
             CancellationToken = cancellationToken,
-            MaxDegreeOfParallelism = MaxSegmentParallelism
+            MaxDegreeOfParallelism = maxSegmentParallelism
         };
 
         Parallel.ForEach(
@@ -87,8 +105,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 // for server GC where each segment is dedicated to a single generation.
                 // For Ephemeral segments (workstation GC) segGen = -1; generation is resolved
                 // per-object below via segment.GetGeneration(address).
-                int segGen = SegmentKindToGeneration(segment.Kind);
+                int segGen    = SegmentKindToGeneration(segment.Kind);
                 bool isEphemeral = segGen < 0;
+                // LOH/POH: collect "Free" blob candidates to avoid a second segment walk.
+                bool isLohOrPoh = segment.Kind == GCSegmentKind.Large
+                               || segment.Kind == GCSegmentKind.Pinned;
+                ulong segStart = isLohOrPoh ? segment.Start : 0;
 
                 // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
                 // initial rent is guaranteed to hold all objects without resizing in the common case.
@@ -144,6 +166,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         eventCandidates.Add((obj.Address, mt));
                     if (entry.Size >= 85_000)
                         largeCandidates.Add((obj.Address, mt, entry.Size));
+                    // Collect LOH/POH free blocks during the scan — avoids a second segment walk
+                    // that LohFreeBlockWriter.Write(heap,...) would otherwise require.
+                    if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
+                        lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (progress is not null && count % ProgressReportEveryObjects == 0)
@@ -205,20 +231,39 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         progress?.Report(new(objectCount, "index complete", Detail: null, Elapsed: scanElapsed));
 
         // Write satellite index files serially after the parallel heap scan.
-        IReadOnlyList<string> satelliteWarnings = WriteSatelliteFiles(dumpPath, heap, taskCandidates, eventCandidates, largeCandidates,
+        IReadOnlyList<string> satelliteWarnings = WriteSatelliteFiles(dumpPath, heap,
+            taskCandidates, eventCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
 
         stopwatch.Stop();
+
+        // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
+        // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
+        var typeAggregates    = masterBuilder.Build();
+        var globalSizeBuckets = masterBuilder.BuildSizeBuckets();
+
+        // Write TypeAggregateIndex.bin LAST so its presence confirms a complete build.
+        // A future call to Build() will detect it and skip the full heap scan entirely.
+        try
+        {
+            TypeAggregateIndexWriter.Write(typeAggPath, dumpPath, typeAggregates,
+                moduleRegistry.Modules, globalSizeBuckets, shapeCache, objectCount);
+        }
+        catch
+        {
+            // Non-fatal: analysis proceeds without the cache. The file will be written on
+            // the next successful full build (e.g. after a disk-full condition clears).
+        }
 
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
             indexPath,
             objectCount,
             scanElapsed,
-            masterBuilder.Build(),
+            typeAggregates,
             InMemoryEntries: null,
             Modules: moduleRegistry.Modules,
-            GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
+            GlobalSizeBuckets: globalSizeBuckets,
             TypeShapeCache: shapeCache,
             SatelliteWarnings: satelliteWarnings.Count > 0 ? satelliteWarnings : null);
     }
@@ -231,6 +276,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         ConcurrentBag<(ulong Addr, ulong Mt)> taskCandidates,
         ConcurrentBag<(ulong Addr, ulong Mt)> eventCandidates,
         ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)> largeCandidates,
+        ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)> lohFreeBlockCandidates,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress,
         Stopwatch stopwatch)
@@ -291,11 +337,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { warnings.Add($"LargeObjectIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
 
-        // LohFreeBlockIndex.bin — free block gaps inside LOH/POH segments
+        // LohFreeBlockIndex.bin — free block gaps already collected during the main scan;
+        // no second segment walk required.
         try
         {
             progress?.Report(new(0, "writing LohFreeBlockIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            LohFreeBlockWriter.Write(DumpIndexPaths.LohFreeBlockIndex(dumpPath), heap, cancellationToken);
+            LohFreeBlockWriter.WriteFromCandidates(
+                DumpIndexPaths.LohFreeBlockIndex(dumpPath), lohFreeBlockCandidates, cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { warnings.Add($"LohFreeBlockIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
@@ -317,6 +365,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
             if (name.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 flags |= TypeAggregateFlags.IsTaskType;
+
+            if (name == "Free")
+                flags |= TypeAggregateFlags.IsFreeBlobType;
         }
 
         if (type.IsArray)
@@ -359,6 +410,51 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         return new TypeShapeEntry(refFields, valFields);
+    }
+
+    // ── Index cache fast-path ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Attempts to skip the full heap scan by loading a previous build's
+    /// <see cref="TypeAggregateIndex.bin"/> and <c>ObjectIndex.bin</c>.
+    /// Returns <c>true</c> and populates <paramref name="result"/> on success.
+    /// </summary>
+    private static bool TryLoadFromCache(
+        string indexPath,
+        string typeAggPath,
+        string dumpPath,
+        out HeapIndexBuildResult? result)
+    {
+        result = null;
+        if (!File.Exists(indexPath) || !File.Exists(typeAggPath))
+            return false;
+
+        if (!TryReadObjectCount(indexPath, out long objectCount))
+            return false;
+
+        return TypeAggregateIndexReader.TryLoad(typeAggPath, indexPath, dumpPath, objectCount, out result);
+    }
+
+    /// <summary>
+    /// Reads the <c>recordCount</c> field from an <c>ObjectIndex.bin</c> header.
+    /// Returns <c>false</c> if the file is missing, too short, or has a wrong magic number.
+    /// </summary>
+    private static bool TryReadObjectCount(string indexPath, out long objectCount)
+    {
+        objectCount = 0;
+        try
+        {
+            using var fs = new FileStream(indexPath, FileMode.Open, FileAccess.Read,
+                FileShare.Read, bufferSize: 64, FileOptions.SequentialScan);
+            Span<byte> hdr = stackalloc byte[ObjIndexHeaderSize];
+            if (fs.ReadAtLeast(hdr, ObjIndexHeaderSize, throwOnEndOfStream: false) < ObjIndexHeaderSize)
+                return false;
+            if (BinaryPrimitives.ReadInt32LittleEndian(hdr) != ObjIndexMagic)
+                return false;
+            objectCount = BinaryPrimitives.ReadInt64LittleEndian(hdr[16..]);
+            return objectCount > 0;
+        }
+        catch { return false; }
     }
 
     // ── Generation helpers ─────────────────────────────────────────────────────

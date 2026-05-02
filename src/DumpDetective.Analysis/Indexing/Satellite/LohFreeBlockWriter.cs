@@ -88,4 +88,56 @@ internal static class LohFreeBlockWriter
         IndexHeader.PatchRecordCount(stream, recordCount);
         return recordCount;
     }
+
+    /// <summary>
+    /// Writes <c>LohFreeBlockIndex.bin</c> from candidates already collected during the
+    /// main heap scan, avoiding a second walk of LOH/POH segments.
+    /// Each candidate is <c>(SegmentStart, FreeObjectOffset, FreeObjectSize)</c>.
+    /// </summary>
+    public static long WriteFromCandidates(
+        string filePath,
+        IEnumerable<(ulong SegStart, ulong Offset, ulong Size)> candidates,
+        CancellationToken cancellationToken)
+    {
+        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
+            FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
+
+        new IndexHeader(Magic, Version, recordCount: 0).WriteTo(stream);
+
+        byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 1024);
+        long recordCount = 0;
+        int offset = 0;
+
+        try
+        {
+            foreach ((ulong segAddr, ulong freeOffset, ulong freeSize) in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var span = buf.AsSpan(offset, RecordSize);
+                BinaryPrimitives.WriteUInt64LittleEndian(span,       segAddr);
+                BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  freeOffset);
+                BinaryPrimitives.WriteUInt64LittleEndian(span[16..], freeSize);
+
+                offset += RecordSize;
+                recordCount++;
+
+                if (offset + RecordSize > buf.Length)
+                {
+                    stream.Write(buf, 0, offset);
+                    offset = 0;
+                }
+            }
+
+            if (offset > 0) stream.Write(buf, 0, offset);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
+        }
+
+        stream.Flush();
+        IndexHeader.PatchRecordCount(stream, recordCount);
+        return recordCount;
+    }
 }

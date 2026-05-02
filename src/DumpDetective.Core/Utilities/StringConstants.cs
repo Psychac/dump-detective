@@ -13,4 +13,5 @@ public const string MulticastDelegateName = "MulticastDelegate";
 // Common patterns
 public const string StaticPattern = "Static";
 public const string UnknownType = "Unknown";
+public const string StaticMethodSubscriber = "<static method>";
 }

@@ -11,12 +11,7 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class EventLeakAnalyzer : IAnalyzer
     {
-        private const int TopSubscriberTypesToShow = 5;
-        private const int TopDetailedInstancesPerGroup = 5;
-        private const int SeveritySubscriberThreshold = 10;
-        private const int SeveritySubscriberBonus = 5;
-        private const int SeverityStaticPublisherBonus = 10;
-        private const int SeverityRootHintBonus = 5;
+        // Presentation and severity tuning moved to EventLeakOptions
 
         private readonly Dictionary<string, HashSet<string>> _eventNameCache = new(StringComparer.Ordinal);
         private readonly object _eventNameCacheLock = new();
@@ -40,9 +35,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            int minSubscribers = options.MinSubscribers;
-            bool includeNonLeaking = options.IncludeNonLeakingEvents;
-            var eventLeaks = FindEventLeaks(heap, cache, minSubscribers, includeNonLeaking, progress,
+            var eventLeaks = FindEventLeaks(heap, cache, options, progress,
                 out int eventsScanned, out int publisherInstances);
 
             if (eventLeaks.Count == 0)
@@ -87,8 +80,8 @@ namespace DumpDetective.Analysis.Analyzers
                         subTypeCounts[s.Type] = cnt + 1;
                     }
                 }
-                var topSubTypes = new List<NameCountEntry>(Math.Min(TopSubscriberTypesToShow, subTypeCounts.Count));
-                foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(TopSubscriberTypesToShow))
+                var topSubTypes = new List<NameCountEntry>(Math.Min(options.TopSubscriberTypesToShow, subTypeCounts.Count));
+                foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(options.TopSubscriberTypesToShow))
                     topSubTypes.Add(new NameCountEntry(kvp.Key, kvp.Value));
 
                 topLeakGroups.Add(new EventLeakGroupSnapshot(
@@ -118,8 +111,8 @@ namespace DumpDetective.Analysis.Analyzers
                         subTypeCounts.TryGetValue(s.Type, out int cnt);
                         subTypeCounts[s.Type] = cnt + 1;
                     }
-                    var subTypeList = new List<string>(Math.Min(TopSubscriberTypesToShow, subTypeCounts.Count));
-                    foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(TopSubscriberTypesToShow))
+                    var subTypeList = new List<string>(Math.Min(options.TopSubscriberTypesToShow, subTypeCounts.Count));
+                    foreach (var kvp in subTypeCounts.OrderByDescending(kv => kv.Value).Take(options.TopSubscriberTypesToShow))
                         subTypeList.Add($"{kvp.Key} ({kvp.Value:N0})");
 
                     topLeakInstances.Add(new EventLeakInstanceSnapshot(
@@ -177,6 +170,26 @@ namespace DumpDetective.Analysis.Analyzers
             return total;
         }
 
+        /// <summary>
+        /// Returns true if <paramref name="type"/> declares at least one instance or static field
+        /// whose base type is <c>System.MulticastDelegate</c> (i.e. a delegate / event backing field).
+        /// Called once per unique MethodTable to populate the MT pre-filter cache.
+        /// </summary>
+        private static bool HasDelegateFields(ClrType type)
+        {
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                if (TypeFilterHelper.IsDelegateType(field.Type))
+                    return true;
+            }
+            foreach (ClrStaticField field in type.StaticFields)
+            {
+                if (TypeFilterHelper.IsDelegateType(field.Type))
+                    return true;
+            }
+            return false;
+        }
+
         private static void AddFindings(List<InsightFinding> findings, List<EventGroupInfo> groupedLeaks)
         {
             int findingsToEmit = Math.Min(5, groupedLeaks.Count);
@@ -204,7 +217,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, int minSubscribers, bool includeNonLeaking, IProgress<AnalyzerProgressReport>? progress, out int eventsScanned, out int publisherInstances)
+        private List<EventLeakInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress, out int eventsScanned, out int publisherInstances)
         {
             eventsScanned = 0;
             publisherInstances = 0;
@@ -221,6 +234,11 @@ namespace DumpDetective.Analysis.Analyzers
             var rootHints = BuildRootHintMap(heap, cache);
             var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
 
+            // Per-MethodTable delegate-field presence cache: one ClrType field inspection per unique
+            // type (thousands), O(1) dictionary lookup for every subsequent object of the same type.
+            // Avoids heap.GetObject() for the ~99% of 87M objects whose type has no delegate fields.
+            var mtHasDelegateFields = new Dictionary<ulong, bool>(capacity: 4096);
+
             foreach (HeapEntry entry in EnumerateEventEntries(heap, cache))
             {
                 scanCounter.Tick();
@@ -228,6 +246,22 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong objectAddress = entry.Address;
                 if (objectAddress == 0)
                     continue;
+
+                // Fast-path: skip objects whose MethodTable is known to have no delegate fields.
+                ulong methodTableFast = entry.MethodTable;
+                if (methodTableFast != 0)
+                {
+                    if (!mtHasDelegateFields.TryGetValue(methodTableFast, out bool hasDelegateFields))
+                    {
+                        ClrType? mtType = heap.GetTypeByMethodTable(methodTableFast);
+                        hasDelegateFields = mtType != null
+                            && !TypeFilterHelper.IsCompilerGenerated(mtType.Name)
+                            && HasDelegateFields(mtType);
+                        mtHasDelegateFields[methodTableFast] = hasDelegateFields;
+                    }
+                    if (!hasDelegateFields)
+                        continue;
+                }
 
                 ClrObject obj = heap.GetObject(objectAddress);
                 if (!obj.IsValid)
@@ -238,6 +272,9 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 bool hadEventField = false;
+
+                int minSubscribers = options.MinSubscribers;
+                bool includeNonLeaking = options.IncludeNonLeakingEvents;
 
                 // Process instance event fields
                 foreach (ClrInstanceField field in obj.Type.Fields)
@@ -258,7 +295,8 @@ namespace DumpDetective.Analysis.Analyzers
                                 eventFieldName: field.Name ?? StringConstants.UnknownType,
                                 isStatic: false,
                                 subscribers,
-                                rootHints));
+                                rootHints,
+                                options));
                         }
                     }
                 }
@@ -285,7 +323,8 @@ namespace DumpDetective.Analysis.Analyzers
                                     eventFieldName: field.Name ?? StringConstants.UnknownType,
                                     isStatic: true,
                                     subscribers,
-                                    rootHints));
+                                    rootHints,
+                                    options));
                             }
                         }
                     }
@@ -295,7 +334,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Cover static-only publisher types by reading static roots directly.
-            FindStaticRootOnlyEventLeaks(heap, cache, processedStaticDelegates, rootHints, minSubscribers, includeNonLeaking, leaks, ref eventsScanned);
+            FindStaticRootOnlyEventLeaks(heap, cache, processedStaticDelegates, rootHints, options, leaks, ref eventsScanned);
 
             scanCounter.Complete();
 
@@ -325,7 +364,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventGroupInfo> GroupEventLeaks(List<EventLeakInfo> eventLeaks)
+        internal List<EventGroupInfo> GroupEventLeaks(List<EventLeakInfo> eventLeaks)
         {
             // Pre-allocate with expected capacity
             var groups = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), List<EventLeakInfo>>();
@@ -411,24 +450,36 @@ namespace DumpDetective.Analysis.Analyzers
         private static List<SubscriberInfo> GetStaticEventSubscribers(ClrHeap heap, ClrStaticField field, IReadOnlyList<ClrAppDomain> appDomains, HashSet<ulong>? processedStaticDelegates = null)
         {
             var subscribers = new List<SubscriberInfo>();
-            var seen = new HashSet<ulong>();
+            // Deduplicate at the DELEGATE-OBJECT level only: it is theoretically possible for two
+            // app domains to read the same delegate instance from a shared static field, in which
+            // case enumerating both would double-count its subscriptions.
+            // We do NOT deduplicate subscriber addresses across domains. In a multi-domain process
+            // each app domain owns its own copy of the static delegate chain. The same subscriber
+            // object (same heap address) subscribed in domain 1 AND domain 2 represents two
+            // independent GC retention paths — both must be counted. The previous per-subscriber
+            // deduplication was collapsing ~6 domains × N subscriptions down to just N, explaining
+            // the ~6× undercount vs tools that count per-domain subscriptions correctly.
+            var seenDelegateAddresses = new HashSet<ulong>(capacity: appDomains.Count);
 
             foreach (var appDomain in appDomains)
             {
                 try
                 {
                     ClrObject eventDelegate = field.ReadObject(appDomain);
-                    if (eventDelegate.IsValid)
-                        processedStaticDelegates?.Add(eventDelegate.Address);
+                    if (!eventDelegate.IsValid)
+                        continue;
+
+                    // Skip if this exact delegate object was already processed from another domain.
+                    if (!seenDelegateAddresses.Add(eventDelegate.Address))
+                        continue;
+
+                    processedStaticDelegates?.Add(eventDelegate.Address);
 
                     var domainSubscribers = ExtractSubscribersFromDelegateAddress(heap, eventDelegate.Address);
-
                     foreach (var subscriber in domainSubscribers)
                     {
-                        if (subscriber.Address != 0 && seen.Add(subscriber.Address))
-                        {
+                        if (subscriber.Address != 0)
                             subscribers.Add(subscriber);
-                        }
                     }
                 }
                 catch
@@ -446,6 +497,7 @@ namespace DumpDetective.Analysis.Analyzers
             bool isStatic,
             List<SubscriberInfo> subscribers,
             Dictionary<ulong, string> rootHints,
+            EventLeakOptions options,
             string? preferredRootHint = null)
         {
             string rootHint = preferredRootHint ?? string.Empty;
@@ -476,16 +528,16 @@ namespace DumpDetective.Analysis.Analyzers
                 SubscriberCount = subscribers.Count,
                 Subscribers = subscribers,
                 RootHint = rootHint,
-                SeverityScore = CalculateSeverity(isStatic, subscribers.Count, rootHint)
+                SeverityScore = CalculateSeverity(isStatic, subscribers.Count, rootHint, options)
             };
         }
 
-        private static int CalculateSeverity(bool isStatic, int subscriberCount, string rootHint)
+        internal static int CalculateSeverity(bool isStatic, int subscriberCount, string rootHint, EventLeakOptions options)
         {
             int score = subscriberCount;
-            if (subscriberCount >= SeveritySubscriberThreshold) score += SeveritySubscriberBonus;
-            if (isStatic) score += SeverityStaticPublisherBonus;
-            if (!string.IsNullOrEmpty(rootHint)) score += SeverityRootHintBonus;
+            if (subscriberCount >= options.SeveritySubscriberThreshold) score += options.SeveritySubscriberBonus;
+            if (isStatic) score += options.SeverityStaticPublisherBonus;
+            if (!string.IsNullOrEmpty(rootHint)) score += options.SeverityRootHintBonus;
             return score;
         }
 
@@ -521,8 +573,7 @@ namespace DumpDetective.Analysis.Analyzers
             IHeapAnalysisCache? cache,
             HashSet<ulong> processedStaticDelegates,
             Dictionary<ulong, string> rootHints,
-            int minSubscribers,
-            bool includeNonLeaking,
+            EventLeakOptions options,
             List<EventLeakInfo> leaks,
             ref int eventsScanned)
         {
@@ -570,7 +621,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 var subscribers = ExtractSubscribersFromDelegateAddress(heap, rootObj.Address);
-                if (subscribers.Count == 0 || (!includeNonLeaking && subscribers.Count < minSubscribers))
+                if (subscribers.Count == 0 || (!options.IncludeNonLeakingEvents && subscribers.Count < options.MinSubscribers))
                     continue;
 
                 leaks.Add(CreateLeakInfo(
@@ -580,11 +631,12 @@ namespace DumpDetective.Analysis.Analyzers
                     isStatic: true,
                     subscribers,
                     rootHints,
+                    options,
                     preferredRootHint: rootDescription));
             }
         }
 
-        private static void ParseRootPublisher(string rootDescription, out string publisherType, out string eventFieldName)
+        internal static void ParseRootPublisher(string rootDescription, out string publisherType, out string eventFieldName)
         {
             publisherType = "StaticRoot";
             eventFieldName = StringConstants.UnknownType;
@@ -621,31 +673,86 @@ namespace DumpDetective.Analysis.Analyzers
                 if (_eventNameCache.TryGetValue(cacheKey, out var cached))
                     return cached;
 
-                var addNames = new HashSet<string>(StringComparer.Ordinal);
-                var removeNames = new HashSet<string>(StringComparer.Ordinal);
+                // Step 1: collect only the concrete type's own add_/remove_ pairs.
+                // ClrType.Methods returns methods declared on this specific type only.
+                var ownAddNames    = new HashSet<string>(StringComparer.Ordinal);
+                var ownRemoveNames = new HashSet<string>(StringComparer.Ordinal);
 
                 foreach (var method in type.Methods)
                 {
                     var name = method.Name;
-                    if (name == null)
-                        continue;
+                    if (name == null) continue;
 
                     if (name.StartsWith("add_", StringComparison.Ordinal) && name.Length > 4)
-                        addNames.Add(name[4..]);
+                        ownAddNames.Add(name[4..]);
                     else if (name.StartsWith("remove_", StringComparison.Ordinal) && name.Length > 7)
-                        removeNames.Add(name[7..]);
+                        ownRemoveNames.Add(name[7..]);
                 }
 
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var eventName in addNames)
+                var ownEvents = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var e in ownAddNames)
+                    if (ownRemoveNames.Contains(e)) ownEvents.Add(e);
+
+                // Step 2: if this type declares NO own events, return empty so that
+                // IsLikelyEventField falls through to the all-pass branch.
+                // Walking the hierarchy here would convert previously-empty (all-pass) types
+                // into non-empty (strict) types, silently dropping all non-matching delegate
+                // fields (e.g. inherited backing fields whose add_/remove_ are only in the base
+                // type's method table and thus never visible for this concrete type lookup).
+                if (ownEvents.Count == 0)
                 {
-                    if (removeNames.Contains(eventName))
-                        names.Add(eventName);
+                    _eventNameCache[cacheKey] = ownEvents; // empty → all-pass
+                    return ownEvents;
                 }
+
+                // Step 3: the concrete type HAS its own events, so eventNames is non-empty and
+                // IsLikelyEventField will be strict. Walk the base hierarchy and add inherited
+                // events so that inherited delegate backing fields (which ARE in obj.Type.Fields
+                // because ClrMD exposes the full heap layout) are not incorrectly filtered out.
+                var allAddNames    = new HashSet<string>(ownAddNames,    StringComparer.Ordinal);
+                var allRemoveNames = new HashSet<string>(ownRemoveNames, StringComparer.Ordinal);
+
+                ClrType? current = type.BaseType;
+                while (current != null
+                    && current.Name != "System.Object"
+                    && current.Name != "System.Delegate"
+                    && current.Name != "System.MulticastDelegate")
+                {
+                    foreach (var method in current.Methods)
+                    {
+                        var name = method.Name;
+                        if (name == null) continue;
+
+                        if (name.StartsWith("add_", StringComparison.Ordinal) && name.Length > 4)
+                            allAddNames.Add(name[4..]);
+                        else if (name.StartsWith("remove_", StringComparison.Ordinal) && name.Length > 7)
+                            allRemoveNames.Add(name[7..]);
+                    }
+                    current = current.BaseType;
+                }
+
+                var names = BuildEventNameSet(allAddNames, allRemoveNames);
 
                 _eventNameCache[cacheKey] = names;
                 return names;
             }
+        }
+
+        /// <summary>
+        /// Pure logic core of <see cref="GetEventNames"/>: given two collections of method name
+        /// tokens (the "add" side and the "remove" side), returns the set of event names that
+        /// have a matching pair. Extracted so unit tests can exercise the logic without ClrMD.
+        /// </summary>
+        internal static HashSet<string> BuildEventNameSet(
+            IEnumerable<string> addNames,
+            IEnumerable<string> removeNames)
+        {
+            var removeSet = removeNames as HashSet<string>
+                ?? new HashSet<string>(removeNames, StringComparer.Ordinal);
+            var result = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in addNames)
+                if (removeSet.Contains(e)) result.Add(e);
+            return result;
         }
 
         // All C# delegates derive from MulticastDelegate. Dispatch is based on
@@ -720,6 +827,20 @@ namespace DumpDetective.Analysis.Analyzers
                     Address = target.Address,
                     Type = target.Type.Name ?? StringConstants.UnknownType
                 });
+            }
+            else
+            {
+                // _target is null for static method handlers. The delegate object itself
+                // has a unique heap address — use it so each static subscription is counted
+                // and deduplicated correctly in GetStaticEventSubscribers.
+                if (delegateObj.Address != 0)
+                {
+                    subscribers.Add(new SubscriberInfo
+                    {
+                        Address = delegateObj.Address,
+                        Type = StringConstants.StaticMethodSubscriber
+                    });
+                }
             }
         }
     }

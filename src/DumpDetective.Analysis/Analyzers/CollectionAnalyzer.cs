@@ -1,7 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
 using System;
-using System.Linq;
 using System.Collections.Generic;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
@@ -20,6 +19,39 @@ namespace DumpDetective.Analysis.Analyzers
     // Need to revisit the logic once again.
     public class CollectionAnalyzer : IAnalyzer
     {
+        // Cache of resolved interesting instance fields per MethodTable to avoid
+        // repeatedly enumerating ClrType.Fields for every object of the same type.
+        private static readonly ConcurrentDictionary<ulong, FieldLayout> s_fieldLayoutCache = new(concurrencyLevel: 4, capacity: 256);
+
+        private readonly struct FieldLayout
+        {
+            public readonly ClrInstanceField? SizeField;
+            public readonly ClrInstanceField? CountField;
+            public readonly ClrInstanceField? ItemsField;
+            public readonly ClrInstanceField? EntriesField;
+            public readonly ClrInstanceField? ArrayField;
+            public readonly ClrInstanceField? HeadField;
+            public readonly ClrInstanceField? TailField;
+            public readonly ClrInstanceField? AnyIntField;
+            public readonly ClrType? ComponentType;
+            public readonly int ComponentStaticSize;
+            public readonly ulong ComputedElementSize;
+
+            public FieldLayout(ClrInstanceField? sizeField, ClrInstanceField? countField, ClrInstanceField? itemsField, ClrInstanceField? entriesField, ClrInstanceField? arrayField, ClrInstanceField? headField, ClrInstanceField? tailField, ClrInstanceField? anyIntField, ClrType? componentType, int componentStaticSize, ulong computedElementSize)
+            {
+                SizeField = sizeField;
+                CountField = countField;
+                ItemsField = itemsField;
+                EntriesField = entriesField;
+                ArrayField = arrayField;
+                HeadField = headField;
+                TailField = tailField;
+                AnyIntField = anyIntField;
+                ComponentType = componentType;
+                ComponentStaticSize = componentStaticSize;
+                ComputedElementSize = computedElementSize;
+            }
+        }
         private CollectionAnalysisOptions _options;
         private readonly ILogger<CollectionAnalyzer>? _logger;
 
@@ -58,6 +90,30 @@ namespace DumpDetective.Analysis.Analyzers
         private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var collectionStats = AnalyzeCollections(heap, cache, progress, cancellationToken);
+            int topToShow = Math.Min(_options.TopWastefulCollectionsToShow, collectionStats.WastefulCollections.Count);
+            var topSnapshots = new List<WastefulCollectionSnapshot>(topToShow);
+            for (int i = 0; i < topToShow; i++)
+            {
+                WastefulCollection w = collectionStats.WastefulCollections[i];
+                topSnapshots.Add(new WastefulCollectionSnapshot(
+                    w.Type,
+                    (DumpDetective.Core.Models.CollectionKind)w.Kind,
+                    w.Count,
+                    w.Capacity,
+                    w.FillRate,
+                    w.WastedMemory,
+                    w.Address,
+                    w.Head,
+                    w.Tail,
+                    w.LargestContiguousFreeSegmentBytes,
+                    w.FreeSegmentCount,
+                    w.ElementSize,
+                    w.ElementType,
+                    w.SizeEstimateConfidence,
+                    w.DetectionMethod,
+                    w.RootDescription));
+            }
+
             var domainResult = new CollectionDomainResult(
                 collectionStats.TotalCollections,
                 collectionStats.Dictionaries,
@@ -69,27 +125,8 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.HashSets,
                 collectionStats.Queues,
                 collectionStats.TotalWastedMemory,
-                collectionStats.WastefulCollections.Count,
-                collectionStats.WastefulCollections
-                    .Take(_options.TopWastefulCollectionsToShow)
-                .Select(w => new WastefulCollectionSnapshot(
-                        w.Type,
-                        (DumpDetective.Core.Models.CollectionKind)w.Kind,
-                        w.Count,
-                        w.Capacity,
-                        w.FillRate,
-                        w.WastedMemory,
-                        w.Address,
-                        w.Head,
-                        w.Tail,
-                        w.LargestContiguousFreeSegmentBytes,
-                        w.FreeSegmentCount,
-                        w.ElementSize,
-                        w.ElementType,
-                        w.SizeEstimateConfidence,
-                        w.DetectionMethod,
-                        w.RootDescription))
-                    .ToList());
+                collectionStats.WastefulCollectionCount,
+                topSnapshots);
 
             // Copy metrics into domain result
             if (collectionStats.Metrics != null && collectionStats.Metrics.Count > 0)
@@ -127,13 +164,51 @@ namespace DumpDetective.Analysis.Analyzers
         {
             var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
                 concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 64);
-            var concurrentWasteful = new ConcurrentBag<WastefulCollection>();
+            int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
+            int kindCount = Enum.GetValues(typeof(CollectionKind)).Length;
+            var localWaste = new ThreadLocal<LocalWasteAccumulator>(() => new LocalWasteAccumulator(topCapacity, kindCount), trackAllValues: true);
             int totalCollections = 0, dictionaries = 0, lists = 0, arrayLists = 0, stacks = 0, sortedLists = 0, sortedSets = 0, hashSets = 0, queues = 0;
             int skippedDictionaries = 0, skippedHashSets = 0, skippedQueues = 0, skippedLists = 0, skippedArrayLists = 0, skippedStacks = 0, skippedSortedLists = 0, skippedSortedSets = 0;
+            int wastefulCount = 0;
+            ulong totalWastedMemory = 0;
+            int wasteUnder1Kb = 0, waste1To10Kb = 0, waste10To100Kb = 0, waste100KbTo1Mb = 0, wasteAtLeast1Mb = 0;
+            int[] wasteCountByKind = new int[kindCount];
+            ulong[] wasteBytesByKind = new ulong[kindCount];
             long scanned = 0;
             const long progressInterval = 50_000;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
             var heapLock = _options.SerializeHeapAccess ? new object() : null;
+
+            void TrackWasteful(WastefulCollection waste)
+            {
+                LocalWasteAccumulator? local = localWaste.Value;
+                if (local == null)
+                    return;
+
+                ulong wasteBytes = waste.WastedMemory;
+                local.WastefulCount++;
+                local.TotalWastedMemory += wasteBytes;
+
+                if (wasteBytes < 1 * 1024)
+                    local.WasteUnder1Kb++;
+                else if (wasteBytes < 10 * 1024)
+                    local.Waste1To10Kb++;
+                else if (wasteBytes < 100 * 1024)
+                    local.Waste10To100Kb++;
+                else if (wasteBytes < 1024 * 1024)
+                    local.Waste100KbTo1Mb++;
+                else
+                    local.WasteAtLeast1Mb++;
+
+                int kindIndex = (int)waste.Kind;
+                if ((uint)kindIndex < (uint)local.WasteCountByKind.Length)
+                {
+                    local.WasteCountByKind[kindIndex]++;
+                    local.WasteBytesByKind[kindIndex] += wasteBytes;
+                }
+
+                AddToTopWasteful(local.TopWasteful, waste, topCapacity);
+            }
 
             void ProcessEntry(ulong address, ulong mt)
             {
@@ -162,7 +237,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.Dictionary;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedDictionaries);
                 }
@@ -173,7 +248,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.List;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedLists);
                 }
@@ -184,7 +259,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.HashSet;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedHashSets);
                 }
@@ -195,7 +270,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedArrayLists);
                 }
@@ -206,7 +281,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedStacks);
                 }
@@ -217,7 +292,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedSortedLists);
                 }
@@ -228,7 +303,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
-                        concurrentWasteful.Add(waste);
+                        TrackWasteful(waste);
                     }
                     else if (waste == null) Interlocked.Increment(ref skippedSortedSets);
                 }
@@ -239,7 +314,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         qWaste.Kind = CollectionKind.Queue;
-                        concurrentWasteful.Add(qWaste);
+                        TrackWasteful(qWaste);
                     }
                     else if (qWaste == null) Interlocked.Increment(ref skippedQueues);
                 }
@@ -281,7 +356,29 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             progress?.Report(new(scanned, "aggregating results"));
-            var wastefulList = concurrentWasteful.OrderByDescending(w => w.WastedMemory).ToList();
+            var wastefulList = new List<WastefulCollection>(topCapacity);
+            foreach (LocalWasteAccumulator local in localWaste.Values)
+            {
+                wastefulCount += local.WastefulCount;
+                totalWastedMemory += local.TotalWastedMemory;
+                wasteUnder1Kb += local.WasteUnder1Kb;
+                waste1To10Kb += local.Waste1To10Kb;
+                waste10To100Kb += local.Waste10To100Kb;
+                waste100KbTo1Mb += local.Waste100KbTo1Mb;
+                wasteAtLeast1Mb += local.WasteAtLeast1Mb;
+
+                for (int i = 0; i < kindCount; i++)
+                {
+                    wasteCountByKind[i] += local.WasteCountByKind[i];
+                    wasteBytesByKind[i] += local.WasteBytesByKind[i];
+                }
+
+                for (int i = 0; i < local.TopWasteful.Count; i++)
+                    AddToTopWasteful(wastefulList, local.TopWasteful[i], topCapacity);
+            }
+            wastefulList.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
+            localWaste.Dispose();
+
             var stats = new CollectionStatistics
             {
                 TotalCollections = totalCollections,
@@ -294,7 +391,8 @@ namespace DumpDetective.Analysis.Analyzers
                 HashSets = hashSets,
                 Queues = queues,
                 WastefulCollections = wastefulList,
-                TotalWastedMemory = wastefulList.Aggregate(0UL, (acc, w) => acc + w.WastedMemory)
+                WastefulCollectionCount = wastefulCount,
+                TotalWastedMemory = totalWastedMemory
             };
 
             // Post-scan: populate root descriptions for top-N only — never during the scan loop.
@@ -310,28 +408,21 @@ namespace DumpDetective.Analysis.Analyzers
                 "probeNull (no fields/no waste): Dict={SkipD}, List={SkipL}, HashSet={SkipH}, Queue={SkipQ} | wasteful total={Wasteful}",
                 dictionaries, lists, hashSets, queues,
                 skippedDictionaries, skippedLists, skippedHashSets, skippedQueues,
-                wastefulList.Count);
+                stats.WastefulCollectionCount);
 
             // Aggregate metrics and simple percentiles for distributions
             try
             {
-                var wastes = wastefulList.Select(w => (double)w.WastedMemory).OrderByDescending(v => v).ToArray();
-                if (wastes.Length > 0)
+                int wasteCount = stats.WastefulCollectionCount;
+                if (wasteCount > 0)
                 {
-                    double avg = wastes.Average();
-                    double median = wastes[wastes.Length / 2];
-                    double p75 = wastes[(int)Math.Ceiling(wastes.Length * 0.75) - 1];
-                    double p90 = wastes[(int)Math.Ceiling(wastes.Length * 0.90) - 1];
-                    stats.TotalWastedMemory = wastefulList.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);
+                    double avg = stats.TotalWastedMemory / (double)wasteCount;
 
                     var metrics = new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
                         ["Waste.AvgBytes"] = avg,
-                        ["Waste.MedianBytes"] = median,
-                        ["Waste.P75Bytes"] = p75,
-                        ["Waste.P90Bytes"] = p90,
                         ["Waste.TotalBytes"] = stats.TotalWastedMemory,
-                        ["Waste.Count"] = wastes.Length
+                        ["Waste.Count"] = wasteCount
                     };
 
                     // Per-kind counts for reporting
@@ -352,40 +443,32 @@ namespace DumpDetective.Analysis.Analyzers
                     // Histogram buckets (overall)
                     var buckets = new Dictionary<string, int>(StringComparer.Ordinal)
                     {
-                        ["<1KB"] = 0,
-                        ["1KB-10KB"] = 0,
-                        ["10KB-100KB"] = 0,
-                        ["100KB-1MB"] = 0,
-                        [">=1MB"] = 0
+                        ["<1KB"] = wasteUnder1Kb,
+                        ["1KB-10KB"] = waste1To10Kb,
+                        ["10KB-100KB"] = waste10To100Kb,
+                        ["100KB-1MB"] = waste100KbTo1Mb,
+                        [">=1MB"] = wasteAtLeast1Mb
                     };
 
-                    // Per-kind buckets
-                    var kindBuckets = new Dictionary<CollectionKind, List<double>>();
-                    foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
-                        kindBuckets[k] = new List<double>();
-
-                    foreach (var w in wastefulList)
+                    // Per-kind running stats (count + average) to avoid retaining duplicate value arrays.
+                    var perKindRunning = new Dictionary<CollectionKind, (int Count, ulong Sum)>
                     {
-                        double v = w.WastedMemory;
-                        if (v < 1 * 1024) buckets["<1KB"]++;
-                        else if (v < 10 * 1024) buckets["1KB-10KB"]++;
-                        else if (v < 100 * 1024) buckets["10KB-100KB"]++;
-                        else if (v < 1024 * 1024) buckets["100KB-1MB"]++;
-                        else buckets[">=1MB"]++;
-
-                        if (kindBuckets.TryGetValue(w.Kind, out var kb))
-                        {
-                            kb.Add(v);
-                        }
-                    }
+                        [CollectionKind.Dictionary] = (wasteCountByKind[(int)CollectionKind.Dictionary], wasteBytesByKind[(int)CollectionKind.Dictionary]),
+                        [CollectionKind.List] = (wasteCountByKind[(int)CollectionKind.List], wasteBytesByKind[(int)CollectionKind.List]),
+                        [CollectionKind.ArrayList] = (wasteCountByKind[(int)CollectionKind.ArrayList], wasteBytesByKind[(int)CollectionKind.ArrayList]),
+                        [CollectionKind.Stack] = (wasteCountByKind[(int)CollectionKind.Stack], wasteBytesByKind[(int)CollectionKind.Stack]),
+                        [CollectionKind.SortedList] = (wasteCountByKind[(int)CollectionKind.SortedList], wasteBytesByKind[(int)CollectionKind.SortedList]),
+                        [CollectionKind.SortedSet] = (wasteCountByKind[(int)CollectionKind.SortedSet], wasteBytesByKind[(int)CollectionKind.SortedSet]),
+                        [CollectionKind.HashSet] = (wasteCountByKind[(int)CollectionKind.HashSet], wasteBytesByKind[(int)CollectionKind.HashSet]),
+                        [CollectionKind.Queue] = (wasteCountByKind[(int)CollectionKind.Queue], wasteBytesByKind[(int)CollectionKind.Queue]),
+                    };
 
                     metrics["Waste.Histogram"] = buckets;
-                    // Add per-kind histograms and percentiles
+                    // Add per-kind summary metrics without duplicating all waste values in memory.
                     var perKindMetrics = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    foreach (var kv in kindBuckets)
+                    foreach (var kv in perKindRunning)
                     {
-                        var arr = kv.Value.OrderByDescending(x => x).ToArray();
-                        if (arr.Length == 0)
+                        if (kv.Value.Count == 0)
                         {
                             perKindMetrics[kv.Key.ToString()] = new Dictionary<string, object?>
                             {
@@ -394,18 +477,12 @@ namespace DumpDetective.Analysis.Analyzers
                             continue;
                         }
 
-                        double kAvg = arr.Average();
-                        double kMedian = arr[arr.Length / 2];
-                        double kP75 = arr[(int)Math.Ceiling(arr.Length * 0.75) - 1];
-                        double kP90 = arr[(int)Math.Ceiling(arr.Length * 0.90) - 1];
+                        double kAvg = kv.Value.Sum / (double)kv.Value.Count;
 
                         perKindMetrics[kv.Key.ToString()] = new Dictionary<string, object?>
                         {
-                            ["Count"] = arr.Length,
-                            ["AvgBytes"] = kAvg,
-                            ["MedianBytes"] = kMedian,
-                            ["P75Bytes"] = kP75,
-                            ["P90Bytes"] = kP90
+                            ["Count"] = kv.Value.Count,
+                            ["AvgBytes"] = kAvg
                         };
                     }
 
@@ -424,10 +501,13 @@ namespace DumpDetective.Analysis.Analyzers
         private CollectionStatistics AnalyzeCollectionsSequentialDisk(ClrHeap heap, HeapAnalysisCache heapCache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var stats = new CollectionStatistics();
-            var wasteful = new List<WastefulCollection>();
+            int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
+            var wasteful = new List<WastefulCollection>(topCapacity);
             var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
             var scanCounter = new ObjectScanCounter("scanning collections", progress);
             var heapLock = _options.SerializeHeapAccess ? new object() : null;
+            int wastefulCount = 0;
+            ulong totalWasted = 0;
 
             foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
             {
@@ -461,7 +541,9 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.Dictionary;
-                        wasteful.Add(waste);
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
                     }
                 }
                 else if (kind == CollectionKind.List)
@@ -472,7 +554,9 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.List;
-                        wasteful.Add(waste);
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
                     }
                 }
                 else if (kind == CollectionKind.HashSet)
@@ -483,7 +567,9 @@ namespace DumpDetective.Analysis.Analyzers
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.HashSet;
-                        wasteful.Add(waste);
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
                     }
                 }
                 else if (kind == CollectionKind.Queue)
@@ -494,7 +580,9 @@ namespace DumpDetective.Analysis.Analyzers
                     if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         qWaste.Kind = CollectionKind.Queue;
-                        wasteful.Add(qWaste);
+                        wastefulCount++;
+                        totalWasted += qWaste.WastedMemory;
+                        AddToTopWasteful(wasteful, qWaste, topCapacity);
                     }
                 }
             }
@@ -502,8 +590,11 @@ namespace DumpDetective.Analysis.Analyzers
             scanCounter.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
             progress?.Report(new(scanCounter.Scanned, "aggregating results"));
 
-            stats.WastefulCollections = wasteful.OrderByDescending(w => w.WastedMemory).ToList();
-            stats.TotalWastedMemory = wasteful.Aggregate(0UL, (acc, w) => acc + w.WastedMemory);
+            wasteful.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
+
+            stats.WastefulCollections = wasteful;
+            stats.WastefulCollectionCount = wastefulCount;
+            stats.TotalWastedMemory = totalWasted;
 
             // Post-scan root descriptions for top-N — never per-item during the scan.
             PopulateRootDescriptions(heap, heapCache, stats.WastefulCollections, _options);
@@ -601,18 +692,191 @@ namespace DumpDetective.Analysis.Analyzers
                     resolved = CollectionKind.Stack;
                 else if (string.Equals(shortName, "SortedList", StringComparison.OrdinalIgnoreCase))
                     resolved = CollectionKind.SortedList;
-                else if (string.Equals(shortName, "ArrayList", StringComparison.OrdinalIgnoreCase))
-                    resolved = CollectionKind.ArrayList;
-                else if (string.Equals(shortName, "Stack", StringComparison.OrdinalIgnoreCase))
-                    resolved = CollectionKind.Stack;
-                else if (string.Equals(shortName, "SortedList", StringComparison.OrdinalIgnoreCase))
-                    resolved = CollectionKind.SortedList;
                 else if (string.Equals(shortName, "SortedSet", StringComparison.OrdinalIgnoreCase))
                     resolved = CollectionKind.SortedSet;
             }
 
             methodTableKinds[entry.MethodTable] = resolved;
             return resolved;
+        }
+
+        private static void AddToTopWasteful(List<WastefulCollection> topList, WastefulCollection candidate, int capacity)
+        {
+            if (topList.Count < capacity)
+            {
+                topList.Add(candidate);
+                return;
+            }
+
+            int minIndex = 0;
+            ulong minWaste = topList[0].WastedMemory;
+            for (int i = 1; i < topList.Count; i++)
+            {
+                ulong current = topList[i].WastedMemory;
+                if (current < minWaste)
+                {
+                    minWaste = current;
+                    minIndex = i;
+                }
+            }
+
+            if (candidate.WastedMemory <= minWaste)
+                return;
+
+            topList[minIndex] = candidate;
+        }
+
+        private static ClrInstanceField? FindFirstArrayField(ClrType? type)
+        {
+            if (type == null)
+                return null;
+
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                if (field.Type?.IsArray == true)
+                    return field;
+            }
+
+            return null;
+        }
+
+        private static ClrInstanceField? FindFirstInt32Field(ClrType? type)
+        {
+            if (type == null)
+                return null;
+
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                if (field.ElementType == ClrElementType.Int32)
+                    return field;
+            }
+
+            return null;
+        }
+
+        private static ClrInstanceField? FindFieldByNameContains(ClrType? type, string token)
+        {
+            if (type == null)
+                return null;
+
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                string? name = field.Name;
+                if (name != null && name.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return field;
+            }
+
+            return null;
+        }
+
+        private static ClrInstanceField? FindFieldByNameContainsAny(ClrType? type, string tokenA, string tokenB)
+        {
+            if (type == null)
+                return null;
+
+            foreach (ClrInstanceField field in type.Fields)
+            {
+                string? name = field.Name;
+                if (name == null)
+                    continue;
+
+                if (name.IndexOf(tokenA, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf(tokenB, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return field;
+            }
+
+            return null;
+        }
+
+        private static FieldLayout GetOrBuildFieldLayout(ClrType? type)
+        {
+            if (type == null)
+                return default;
+
+            ulong mt = type.MethodTable;
+            return s_fieldLayoutCache.GetOrAdd(mt, _ =>
+            {
+                // Prefer well-known field names first (fast path), then fall back to a single
+                // enumeration over fields to find reasonable candidates.
+                ClrInstanceField? sizeField = type.GetFieldByName("_size") ?? type.GetFieldByName("_count") ?? type.GetFieldByName("m_count");
+                ClrInstanceField? countField = type.GetFieldByName("_count") ?? type.GetFieldByName("m_count") ?? type.GetFieldByName("count");
+                ClrInstanceField? itemsField = type.GetFieldByName("_items") ?? type.GetFieldByName("_entries") ?? type.GetFieldByName("_array");
+                ClrInstanceField? entriesField = type.GetFieldByName("_entries");
+                ClrInstanceField? arrayField = type.GetFieldByName("_array");
+                ClrInstanceField? headField = type.GetFieldByName("_head");
+                ClrInstanceField? tailField = type.GetFieldByName("_tail");
+                ClrInstanceField? anyInt = null;
+                ClrType? compType = type.ComponentType;
+                int compStaticSize = compType != null ? compType.StaticSize : 0;
+                ulong computedElementSize = 0;
+                if (compType != null)
+                {
+                    computedElementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)IntPtr.Size;
+                }
+
+                if (sizeField == null || itemsField == null || entriesField == null || arrayField == null || headField == null || tailField == null || anyInt == null)
+                {
+                    foreach (ClrInstanceField f in type.Fields)
+                    {
+                        if (anyInt == null && f.ElementType == ClrElementType.Int32)
+                            anyInt = f;
+
+                        if (arrayField == null && f.Type?.IsArray == true)
+                            arrayField = f;
+
+                        string? name = f.Name;
+                        if (name == null)
+                            continue;
+
+                        if (itemsField == null && (name.IndexOf("items", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("entries", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("array", StringComparison.OrdinalIgnoreCase) >= 0))
+                            itemsField = f;
+
+                        if (entriesField == null && name.IndexOf("entries", StringComparison.OrdinalIgnoreCase) >= 0)
+                            entriesField = f;
+
+                        if (headField == null && name.IndexOf("head", StringComparison.OrdinalIgnoreCase) >= 0)
+                            headField = f;
+
+                        if (tailField == null && name.IndexOf("tail", StringComparison.OrdinalIgnoreCase) >= 0)
+                            tailField = f;
+
+                        if (sizeField == null && (name.IndexOf("size", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("count", StringComparison.OrdinalIgnoreCase) >= 0))
+                            sizeField = sizeField ?? f;
+                    }
+                }
+
+                // Normalize fallbacks: prefer itemsField -> arrayField; entriesField -> itemsField -> arrayField
+                ClrInstanceField? resolvedItems = itemsField ?? arrayField;
+                ClrInstanceField? resolvedEntries = entriesField ?? itemsField ?? arrayField;
+                ClrInstanceField? resolvedSize = sizeField ?? countField ?? anyInt;
+                ClrInstanceField? resolvedCount = countField ?? sizeField ?? anyInt;
+
+                return new FieldLayout(resolvedSize, resolvedCount, resolvedItems, resolvedEntries, arrayField, headField, tailField, anyInt, compType, compStaticSize, computedElementSize);
+            });
+        }
+
+        private static void TrySetComputedElementSize(ulong methodTable, ClrType? compType, ulong computedSize)
+        {
+            if (computedSize == 0)
+                return;
+
+            while (true)
+            {
+                if (!s_fieldLayoutCache.TryGetValue(methodTable, out var existing))
+                {
+                    var newLayout = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, compType, compType != null ? compType.StaticSize : 0, computedSize);
+                    if (s_fieldLayoutCache.TryAdd(methodTable, newLayout))
+                        return;
+                    continue;
+                }
+
+                if (existing.ComputedElementSize != 0)
+                    return;
+
+                var updated = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, existing.ComponentType ?? compType, existing.ComponentStaticSize != 0 ? existing.ComponentStaticSize : (compType != null ? compType.StaticSize : 0), computedSize);
+                if (s_fieldLayoutCache.TryUpdate(methodTable, updated, existing))
+                    return;
+            }
         }
 
         private static readonly char[] s_typeNameCutChars = ['`', '[', '<', '+'];
@@ -733,8 +997,9 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!obj.IsValid || obj.Type == null)
                     return null;
 
-                var sizeField = obj.Type.GetFieldByName("_size") ?? obj.Type.GetFieldByName("_count") ?? obj.Type.Fields.FirstOrDefault(f => f.ElementType == Microsoft.Diagnostics.Runtime.ClrElementType.Int32);
-                var itemsField = obj.Type.GetFieldByName("_items") ?? obj.Type.GetFieldByName("_entries") ?? obj.Type.Fields.FirstOrDefault(f => f.Type?.IsArray == true);
+                var layout = GetOrBuildFieldLayout(obj.Type);
+                var sizeField = layout.SizeField ?? layout.AnyIntField;
+                var itemsField = layout.ItemsField ?? layout.EntriesField ?? layout.ArrayField;
 
                 if (sizeField == null || itemsField == null)
                     return null;
@@ -751,12 +1016,17 @@ namespace DumpDetective.Analysis.Analyzers
                 double fillRate = (count / (double)capacity) * 100;
                 var compType = itemsObj.Type?.ComponentType ?? obj.Type?.ComponentType;
                 ulong elementSize = 0;
-                if (compType != null)
+                // Prefer cached computed size from the layout if available.
+                var layoutMt = obj.Type?.MethodTable ?? 0UL;
+                if (layout.ComputedElementSize != 0)
                 {
-                    if (compType.IsValueType)
-                        elementSize = (ulong)compType.StaticSize;
-                    else
-                        elementSize = (ulong)IntPtr.Size;
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)IntPtr.Size;
+                    // Try to cache this for future objects of the same MethodTable
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
                 }
                 else
                 {
@@ -805,14 +1075,9 @@ namespace DumpDetective.Analysis.Analyzers
                     return null;
                 }
 
-                var countField = dictObj.Type?.GetFieldByName("_count")
-                    ?? dictObj.Type?.GetFieldByName("count")     // .NET Framework
-                    ?? dictObj.Type?.GetFieldByName("m_count");  // some custom runtimes
-                var entriesField = dictObj.Type?.GetFieldByName("_entries");
-
-                // Fallback: look for any instance field that is an array if named field not found
-                if (entriesField == null)
-                    entriesField = dictObj.Type.Fields.FirstOrDefault(f => f.Type?.IsArray == true);
+                var layout = GetOrBuildFieldLayout(dictObj.Type);
+                var countField = layout.CountField ?? layout.SizeField ?? layout.AnyIntField;
+                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField;
 
                 if (countField == null)
                 {
@@ -846,13 +1111,16 @@ namespace DumpDetective.Analysis.Analyzers
                 double fillRate = (count / (double)capacity) * 100;
                 // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
                 ulong elementSize = 0;
-                var compType = entriesObj.Type?.ComponentType ?? dictObj.Type?.ComponentType;
-                if (compType != null)
+                var layoutMt = dictObj.Type?.MethodTable ?? 0UL;
+                var compType = entriesObj.Type?.ComponentType ?? dictObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
                 {
-                    if (compType.IsValueType)
-                        elementSize = (ulong)compType.StaticSize;
-                    else
-                        elementSize = (ulong)(IntPtr.Size);
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
                 }
                 else
                 {
@@ -899,11 +1167,11 @@ namespace DumpDetective.Analysis.Analyzers
                     return null;
 
                 // Common field names in BCL: _array, _head, _tail, _size (.NET Core/Framework varies)
-                var arrayField = queueObj.Type.GetFieldByName("_array") ?? queueObj.Type.Fields.FirstOrDefault(f => f.Type?.IsArray == true);
-                // head/tail are optional — used for contiguous-free-segment diagnostics only, not required for waste detection
-                var headField = queueObj.Type.GetFieldByName("_head") ?? queueObj.Type.Fields.FirstOrDefault(f => f.Name?.IndexOf("head", StringComparison.OrdinalIgnoreCase) >= 0);
-                var tailField = queueObj.Type.GetFieldByName("_tail") ?? queueObj.Type.Fields.FirstOrDefault(f => f.Name?.IndexOf("tail", StringComparison.OrdinalIgnoreCase) >= 0);
-                var sizeField = queueObj.Type.GetFieldByName("_size") ?? queueObj.Type.GetFieldByName("_count") ?? queueObj.Type.Fields.FirstOrDefault(f => f.Name?.IndexOf("size", StringComparison.OrdinalIgnoreCase) >= 0 || f.Name?.IndexOf("count", StringComparison.OrdinalIgnoreCase) >= 0);
+                var layout = GetOrBuildFieldLayout(queueObj.Type);
+                var arrayField = layout.ArrayField ?? layout.ItemsField ?? layout.EntriesField ?? FindFirstArrayField(queueObj.Type);
+                var headField = layout.HeadField ?? FindFieldByNameContains(queueObj.Type, "head");
+                var tailField = layout.TailField ?? FindFieldByNameContains(queueObj.Type, "tail");
+                var sizeField = layout.SizeField ?? layout.CountField ?? layout.AnyIntField ?? FindFieldByNameContainsAny(queueObj.Type, "size", "count");
 
                 // Only array + size are required to compute waste; head/tail are best-effort for diagnostics.
                 if (arrayField == null)
@@ -953,13 +1221,16 @@ namespace DumpDetective.Analysis.Analyzers
                 // compute fill rate and approximate element size similar to lists
                 double fillRate = (size / (double)capacity) * 100;
                 ulong elementSize = 0;
-                var compType = arrayObj.Type?.ComponentType ?? queueObj.Type?.ComponentType;
-                if (compType != null)
+                var layoutMt = queueObj.Type?.MethodTable ?? 0UL;
+                var compType = arrayObj.Type?.ComponentType ?? queueObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
                 {
-                    if (compType.IsValueType)
-                        elementSize = (ulong)compType.StaticSize;
-                    else
-                        elementSize = (ulong)(IntPtr.Size);
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
                 }
                 else
                 {
@@ -1011,8 +1282,9 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!listObj.IsValid || listObj.Type == null)
                     return null;
 
-                var sizeField = listObj.Type?.GetFieldByName("_size");
-                var itemsField = listObj.Type?.GetFieldByName("_items");
+                var layout = GetOrBuildFieldLayout(listObj.Type);
+                var sizeField = layout.SizeField ?? layout.AnyIntField;
+                var itemsField = layout.ItemsField ?? layout.EntriesField ?? layout.ArrayField;
 
                 if (sizeField == null || itemsField == null)
                     return null;
@@ -1032,13 +1304,16 @@ namespace DumpDetective.Analysis.Analyzers
                 double fillRate = (count / (double)capacity) * 100;
                 // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
                 ulong elementSize = 0;
-                var compType = itemsObj.Type?.ComponentType ?? listObj.Type?.ComponentType;
-                if (compType != null)
+                var layoutMt = listObj.Type?.MethodTable ?? 0UL;
+                var compType = itemsObj.Type?.ComponentType ?? listObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
                 {
-                    if (compType.IsValueType)
-                        elementSize = (ulong)compType.StaticSize;
-                    else
-                        elementSize = (ulong)(IntPtr.Size);
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
                 }
                 else
                 {
@@ -1087,14 +1362,9 @@ namespace DumpDetective.Analysis.Analyzers
                     return null;
                 }
 
-                var countField = hashSetObj.Type?.GetFieldByName("_count")
-                    ?? hashSetObj.Type?.GetFieldByName("count")     // .NET Framework
-                    ?? hashSetObj.Type?.GetFieldByName("m_count");  // some custom runtimes
-                var entriesField = hashSetObj.Type?.GetFieldByName("_entries");
-
-                // Fallback: look for any instance field that is an array if named field not found
-                if (entriesField == null)
-                    entriesField = hashSetObj.Type.Fields.FirstOrDefault(f => f.Type?.IsArray == true);
+                var layout = GetOrBuildFieldLayout(hashSetObj.Type);
+                var countField = layout.CountField ?? layout.SizeField ?? layout.AnyIntField;
+                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField ?? FindFirstArrayField(hashSetObj.Type);
 
                 if (countField == null)
                 {
@@ -1128,13 +1398,16 @@ namespace DumpDetective.Analysis.Analyzers
                 double fillRate = (count / (double)capacity) * 100;
                 // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
                 ulong elementSize = 0;
-                var compType = entriesObj.Type?.ComponentType ?? hashSetObj.Type?.ComponentType;
-                if (compType != null)
+                var layoutMt = hashSetObj.Type?.MethodTable ?? 0UL;
+                var compType = entriesObj.Type?.ComponentType ?? hashSetObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
                 {
-                    if (compType.IsValueType)
-                        elementSize = (ulong)compType.StaticSize;
-                    else
-                        elementSize = (ulong)(IntPtr.Size);
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
                 }
                 else
                 {
@@ -1171,6 +1444,27 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
+        private sealed class LocalWasteAccumulator
+        {
+            public readonly List<WastefulCollection> TopWasteful;
+            public readonly int[] WasteCountByKind;
+            public readonly ulong[] WasteBytesByKind;
+            public int WastefulCount;
+            public ulong TotalWastedMemory;
+            public int WasteUnder1Kb;
+            public int Waste1To10Kb;
+            public int Waste10To100Kb;
+            public int Waste100KbTo1Mb;
+            public int WasteAtLeast1Mb;
+
+            public LocalWasteAccumulator(int topCapacity, int kindCount)
+            {
+                TopWasteful = new List<WastefulCollection>(topCapacity);
+                WasteCountByKind = new int[kindCount];
+                WasteBytesByKind = new ulong[kindCount];
+            }
+        }
+
     }
 
     internal class CollectionStatistics
@@ -1185,6 +1479,7 @@ namespace DumpDetective.Analysis.Analyzers
         public int HashSets { get; set; }
         public int Queues { get; set; }
         public ulong TotalWastedMemory { get; set; }
+        public int WastefulCollectionCount { get; set; }
         public List<WastefulCollection> WastefulCollections { get; set; } = new();
         public IReadOnlyDictionary<string, object?> Metrics { get; set; } = new Dictionary<string, object?>();
     }

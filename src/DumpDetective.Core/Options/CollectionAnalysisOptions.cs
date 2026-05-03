@@ -34,7 +34,7 @@ namespace DumpDetective.Core.Options
         /// Number of top wasteful collections to include in the short report.
         /// Default is 15.
         /// </summary>
-        public int TopWastefulCollectionsToShow { get; init; } = 15;
+        public int TopWastefulCollectionsToShow { get; init; } = 50;
 
         /// <summary>
         /// Maximum degree of parallelism to use during heap scanning. Default is
@@ -62,7 +62,7 @@ namespace DumpDetective.Core.Options
         /// shortest-root-path searches. Fast = cheapest, Balanced = targeted deep search for top items,
         /// Deep = more exhaustive searches for top items.
         /// </summary>
-        public AnalysisProfile Profile { get; init; } = AnalysisProfile.Balanced;
+        public AnalysisProfile Profile { get; init; } = AnalysisProfile.Fast;
 
         /// <summary>
         /// Number of top wasteful items to run reference-path analysis for when the profile

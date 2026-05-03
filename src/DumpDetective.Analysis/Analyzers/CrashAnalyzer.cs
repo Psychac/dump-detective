@@ -36,13 +36,15 @@ public class CrashAnalyzer : IAnalyzer
         {
             var exceptionInfo = AnalyzeExceptions(heap, runtime, cache, progress);
 
+            var candidateSnapshots = BuildCrashThreadSnapshots(exceptionInfo);
             var domainResult = new CrashDomainResult(
                 exceptionInfo.TotalExceptions,
                 exceptionInfo.ActiveExceptions,
                 new Dictionary<string, int>(exceptionInfo.ExceptionTypeCounts),
                 new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts),
-                BuildCrashThreadSnapshots(exceptionInfo),
-                BuildExceptionInstanceSnapshots(exceptionInfo));
+                candidateSnapshots,
+                BuildExceptionInstanceSnapshots(exceptionInfo),
+                exceptionInfo.InferredTraceCount);
 
             if (exceptionInfo.TotalExceptions == 0)
             {
@@ -54,49 +56,240 @@ public class CrashAnalyzer : IAnalyzer
 
         private static IReadOnlyList<CrashThreadCandidateSnapshot> BuildCrashThreadSnapshots(ExceptionAnalysis analysis)
         {
-            return analysis.CrashThreadCandidates
-                .Take(TopCrashThreadCandidates)
-                .Select(c => new CrashThreadCandidateSnapshot(
+            // Flatten all exception instances once so inference loops are O(N) not O(N*K)
+            var allInstances = new List<ExceptionInstance>(capacity: 64);
+            foreach (var list in analysis.ExceptionsByType.Values)
+                allInstances.AddRange(list);
+
+            int inferredCount = 0;
+            int take = Math.Min(analysis.CrashThreadCandidates.Count, TopCrashThreadCandidates);
+            var snapshots = new List<CrashThreadCandidateSnapshot>(take);
+
+            for (int ci = 0; ci < take; ci++)
+            {
+                var c = analysis.CrashThreadCandidates[ci];
+                List<string>? original = null;
+                bool inferred = false;
+                string? inferredFrom = null;
+                var confidence = InferenceConfidence.None;
+
+                // Tier 1: candidate already has its own original stack (exact)
+                if (c.OriginalExceptionStack != null && c.OriginalExceptionStack.Count > 0)
+                {
+                    original = TakeNormalized(c.OriginalExceptionStack, MaxOriginalStackFramesToPrint);
+                    confidence = InferenceConfidence.Exact;
+                }
+
+                // Tier 2: match by ThreadId
+                if (original == null)
+                {
+                    for (int i = 0; i < allInstances.Count; i++)
+                    {
+                        var e = allInstances[i];
+                        if (e.ThreadId.HasValue && e.ThreadId.Value == c.ThreadId && e.OriginalStackTrace.Count > 0)
+                        {
+                            original = TakeNormalized(e.OriginalStackTrace, MaxOriginalStackFramesToPrint);
+                            inferred = true;
+                            inferredFrom = $"0x{e.Address:X} ({e.Type})";
+                            confidence = InferenceConfidence.ThreadId;
+                            break;
+                        }
+                    }
+                }
+
+                // Tier 3: match by Message + HResult
+                if (original == null && !string.IsNullOrWhiteSpace(c.SampleMessage))
+                {
+                    for (int i = 0; i < allInstances.Count; i++)
+                    {
+                        var e = allInstances[i];
+                        if (!string.IsNullOrWhiteSpace(e.Message)
+                            && e.Message == c.SampleMessage
+                            && e.HResult == c.SampleHResult
+                            && e.OriginalStackTrace.Count > 0)
+                        {
+                            original = TakeNormalized(e.OriginalStackTrace, MaxOriginalStackFramesToPrint);
+                            inferred = true;
+                            inferredFrom = $"0x{e.Address:X} ({e.Type})";
+                            confidence = InferenceConfidence.MessageHResult;
+                            break;
+                        }
+                    }
+                }
+
+                // Tier 4: match by PrimaryExceptionType + InnerExceptionType (last-resort)
+                if (original == null)
+                {
+                    for (int i = 0; i < allInstances.Count; i++)
+                    {
+                        var e = allInstances[i];
+                        if (e.Type == c.PrimaryExceptionType
+                            && e.OriginalStackTrace.Count > 0
+                            && (!string.IsNullOrWhiteSpace(c.SampleInnerExceptionType)
+                                ? e.InnerExceptionType == c.SampleInnerExceptionType
+                                : e.InnerExceptionType == null))
+                        {
+                            original = TakeNormalized(e.OriginalStackTrace, MaxOriginalStackFramesToPrint);
+                            inferred = true;
+                            inferredFrom = $"0x{e.Address:X} ({e.Type})";
+                            confidence = InferenceConfidence.TypeInnerType;
+                            break;
+                        }
+                    }
+                }
+
+                if (inferred) inferredCount++;
+
+                // Build top-frames list without LINQ
+                var topFrames = new List<string>(Math.Min(c.CurrentThreadStack.Count, MaxCurrentThreadFramesToPrint));
+                for (int f = 0; f < c.CurrentThreadStack.Count && f < MaxCurrentThreadFramesToPrint; f++)
+                {
+                    var frame = c.CurrentThreadStack[f];
+                    topFrames.Add(NormalizeFrame(frame.Method?.Signature ?? frame.FrameName ?? frame.ToString() ?? StringConstants.UnknownType));
+                }
+
+                snapshots.Add(new CrashThreadCandidateSnapshot(
                     c.ThreadId,
                     c.OSThreadId,
                     c.ActiveExceptionCount,
                     c.PrimaryExceptionType,
-                    c.CurrentThreadStack
-                        .Take(MaxCurrentThreadFramesToPrint)
-                        .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
-                        .ToList()))
-                .ToList();
+                    topFrames,
+                    original,
+                    inferred,
+                    inferredFrom,
+                    confidence));
+            }
+
+            analysis.InferredTraceCount = inferredCount;
+            return snapshots;
+        }
+
+        // Take up to max frames, normalizing each one (strips "at " prefix, simplifies async names)
+        private static List<string> TakeNormalized(List<string> frames, int max)
+        {
+            var result = new List<string>(Math.Min(frames.Count, max));
+            for (int i = 0; i < frames.Count && i < max; i++)
+                result.Add(NormalizeFrame(frames[i]));
+            return result;
+        }
+
+        // Normalize a single raw stack frame string:
+        //  - strips leading "   at " or "at " prefix (we re-add it during rendering)
+        //  - simplifies async state-machine names: Foo+<Bar>d__N.MoveNext() → Foo.Bar() [async]
+        //  - simplifies lambda names: Foo+<>c.<Bar>b__N_M() → Foo.Bar [lambda]
+        internal static string NormalizeFrame(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return raw;
+
+            ReadOnlySpan<char> s = raw.AsSpan().TrimStart();
+
+            // Strip "at " prefix (added by ToString() or _stackTraceString)
+            if (s.Length > 3 && s[0] == 'a' && s[1] == 't' && s[2] == ' ')
+                s = s[3..].TrimStart();
+
+            string frame = s.ToString();
+
+            // Async state machine: SomeNamespace.TypeName+<AsyncMethod>d__N.MoveNext()
+            int plus = frame.IndexOf('+');
+            if (plus > 0 && plus < frame.Length - 1)
+            {
+                ReadOnlySpan<char> rest = frame.AsSpan(plus + 1);
+                if (rest.StartsWith("<", StringComparison.Ordinal))
+                {
+                    // Find the closing >
+                    int close = frame.IndexOf('>', plus + 2);
+                    if (close > plus + 2)
+                    {
+                        string methodName = frame[(plus + 2)..close];
+                        ReadOnlySpan<char> suffix = frame.AsSpan(close + 1);
+
+                        if (suffix.StartsWith("d__", StringComparison.Ordinal) || suffix.StartsWith(">d__", StringComparison.Ordinal))
+                        {
+                            // Async: TypeName.MethodName() [async]
+                            string typePart = frame[..plus];
+                            return $"{typePart}.{methodName}() [async]";
+                        }
+
+                        if (suffix.StartsWith(">c.<", StringComparison.Ordinal) || (rest.StartsWith("<>c.<", StringComparison.Ordinal)))
+                        {
+                            // Lambda: TypeName.MethodName [lambda]  
+                            string typePart = frame[..plus];
+                            return $"{typePart}.{methodName} [lambda]";
+                        }
+                    }
+                }
+            }
+
+            return frame;
+        }
+
+        // Returns true if a (normalized) frame belongs to a runtime/framework namespace
+        internal static bool IsFrameworkFrame(string frame)
+        {
+            return frame.StartsWith("System.", StringComparison.Ordinal)
+                || frame.StartsWith("Microsoft.", StringComparison.Ordinal)
+                || frame.StartsWith("mscorlib.", StringComparison.Ordinal)
+                || frame.StartsWith("Windows.", StringComparison.Ordinal)
+                || frame.Contains("System.Runtime.", StringComparison.Ordinal)
+                || frame.Contains("System.Threading.", StringComparison.Ordinal);
         }
 
         private static IReadOnlyList<ExceptionInstanceSnapshot> BuildExceptionInstanceSnapshots(ExceptionAnalysis analysis)
         {
-            var instances = analysis.ExceptionsByType
-                .SelectMany(kvp => kvp.Value.Select(v => new { Type = kvp.Key, Instance = v }))
-                .OrderByDescending(x => x.Instance.ThreadId.HasValue)
-                .ThenByDescending(x => x.Instance.OriginalStackTrace.Count)
-                .ThenByDescending(x => !string.IsNullOrWhiteSpace(x.Instance.Message))
-                .Take(TopDetailedExceptionInstances)
-                .Select(x => new ExceptionInstanceSnapshot(
-                    x.Type,
-                    x.Instance.Address,
-                    string.IsNullOrWhiteSpace(x.Instance.Message) ? null : x.Instance.Message,
-                    x.Instance.HResult == 0 ? null : x.Instance.HResult,
-                    x.Instance.InnerExceptionType,
-                    x.Instance.ThreadId.HasValue,
-                    x.Instance.ThreadId,
-                    x.Instance.OSThreadId,
-                    x.Instance.CurrentThreadStack.Count == 0
-                        ? null
-                        : x.Instance.CurrentThreadStack
-                            .Take(MaxCurrentThreadFramesToPrint)
-                            .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
-                            .ToList(),
-                    x.Instance.OriginalStackTrace.Count == 0
-                        ? null
-                        : x.Instance.OriginalStackTrace.Take(MaxOriginalStackFramesToPrint).ToList()))
-                .ToList();
+            // Collect and sort without LINQ SelectMany+OrderBy allocation chain
+            var flat = new List<(string Type, ExceptionInstance Instance)>(capacity: 64);
+            foreach (var kvp in analysis.ExceptionsByType)
+                for (int i = 0; i < kvp.Value.Count; i++)
+                    flat.Add((kvp.Key, kvp.Value[i]));
 
-            return instances;
+            flat.Sort(static (a, b) =>
+            {
+                // Active first, then most frames, then has message
+                int cmp = (b.Instance.ThreadId.HasValue ? 1 : 0).CompareTo(a.Instance.ThreadId.HasValue ? 1 : 0);
+                if (cmp != 0) return cmp;
+                cmp = b.Instance.OriginalStackTrace.Count.CompareTo(a.Instance.OriginalStackTrace.Count);
+                if (cmp != 0) return cmp;
+                return (string.IsNullOrWhiteSpace(b.Instance.Message) ? 0 : 1)
+                    .CompareTo(string.IsNullOrWhiteSpace(a.Instance.Message) ? 0 : 1);
+            });
+
+            int limit = Math.Min(flat.Count, TopDetailedExceptionInstances);
+            var snapshots = new List<ExceptionInstanceSnapshot>(limit);
+
+            for (int i = 0; i < limit; i++)
+            {
+                var (typeName, inst) = flat[i];
+
+                List<string>? threadFrames = null;
+                if (inst.CurrentThreadStack.Count > 0)
+                {
+                    threadFrames = new List<string>(Math.Min(inst.CurrentThreadStack.Count, MaxCurrentThreadFramesToPrint));
+                    for (int f = 0; f < inst.CurrentThreadStack.Count && f < MaxCurrentThreadFramesToPrint; f++)
+                    {
+                        var fr = inst.CurrentThreadStack[f];
+                        threadFrames.Add(NormalizeFrame(fr.Method?.Signature ?? fr.FrameName ?? fr.ToString() ?? StringConstants.UnknownType));
+                    }
+                }
+
+                List<string>? origFrames = null;
+                if (inst.OriginalStackTrace.Count > 0)
+                    origFrames = TakeNormalized(inst.OriginalStackTrace, MaxOriginalStackFramesToPrint);
+
+                snapshots.Add(new ExceptionInstanceSnapshot(
+                    typeName,
+                    inst.Address,
+                    string.IsNullOrWhiteSpace(inst.Message) ? null : inst.Message,
+                    inst.HResult == 0 ? null : inst.HResult,
+                    inst.InnerExceptionType,
+                    inst.ThreadId.HasValue,
+                    inst.ThreadId,
+                    inst.OSThreadId,
+                    threadFrames,
+                    origFrames));
+            }
+
+            return snapshots;
         }
 
         private static InsightFinding CreateFinding(ExceptionAnalysis analysis)
@@ -208,6 +401,10 @@ public class CrashAnalyzer : IAnalyzer
                 exceptionTypeCounts.AddOrUpdate(typeName, 1, (_, c) => c + 1);
 
                 bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
+
+                // Extract exception info now so we can capture the ORIGINAL stack trace for crash candidates.
+                var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeCtx : null);
+
                 if (isActive)
                 {
                     Interlocked.Increment(ref activeExceptionsCount);
@@ -227,10 +424,21 @@ public class CrashAnalyzer : IAnalyzer
                             crashThreadCandidates[activeCtx.ThreadId] = candidate;
                         }
                         candidate.ActiveExceptionCount++;
+
+                        // Attach original exception stack (if any) so we can trace back to original call site.
+                        if (exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
+                        {
+                            candidate.OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
+                        }
+                        // store sample metadata for heuristic matching later
+                        if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
+                            candidate.SampleMessage = exceptionInstance.Message;
+                        candidate.SampleHResult = exceptionInstance.HResult;
+                        if (candidate.SampleInnerExceptionType == null)
+                            candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;
                     }
                 }
 
-                var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeCtx : null);
                 exceptionInstances.Add((typeName, exceptionInstance, isActive));
             }
 
@@ -375,7 +583,19 @@ public class CrashAnalyzer : IAnalyzer
                     }
                     if (list.Count < MaxExceptionsPerType || isActive)
                     {
-                        var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, activeExceptionContext);
+                        var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeExceptionContext : null);
+                        if (isActive && exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
+                        {
+                            // store original stack on the candidate so UI can show the trace back to original call site
+                            crashThreadCandidates[activeExceptionContext.ThreadId].OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
+                        }
+                        if (isActive)
+                        {
+                            var candidate = crashThreadCandidates[activeExceptionContext.ThreadId];
+                            if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
+                                candidate.SampleMessage = exceptionInstance.Message;
+                            candidate.SampleHResult = exceptionInstance.HResult;                        if (candidate.SampleInnerExceptionType == null)
+                            candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;                        }
                         list.Add(exceptionInstance);
                     }
                 }
@@ -614,6 +834,8 @@ public class CrashAnalyzer : IAnalyzer
         public Dictionary<string, int> ActiveExceptionTypeCounts { get; set; } = new();
         public Dictionary<string, List<ExceptionInstance>> ExceptionsByType { get; set; } = new();
         public List<CrashThreadCandidate> CrashThreadCandidates { get; set; } = new();
+        // Set by BuildCrashThreadSnapshots after inference pass
+        public int InferredTraceCount { get; set; }
     }
 
     internal class CrashThreadCandidate
@@ -623,6 +845,11 @@ public class CrashAnalyzer : IAnalyzer
         public int ActiveExceptionCount { get; set; }
         public string PrimaryExceptionType { get; set; } = string.Empty;
         public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
+        public List<string> OriginalExceptionStack { get; set; } = new();
+        // Representative metadata from the active exception (for inference heuristics)
+        public string SampleMessage { get; set; } = string.Empty;
+        public int SampleHResult { get; set; }
+        public string? SampleInnerExceptionType { get; set; }
     }
 
     internal class ActiveExceptionContext

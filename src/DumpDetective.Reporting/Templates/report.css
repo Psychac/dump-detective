@@ -60,6 +60,8 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 .detail-key   { color: #059669; font-weight: 600; }
 .detail-value { color: #374151; }
 .detail-path  { color: #b45309; font-weight: 600; }
+.detail-frame { color: #1f2937; }
+.detail-frame.framework { color: #6b7280; opacity: 0.95; }
 .detail-gap { height: 8px; }
 .detail-indent-1 { padding-left: 12px; }
 .detail-indent-2 { padding-left: 24px; }

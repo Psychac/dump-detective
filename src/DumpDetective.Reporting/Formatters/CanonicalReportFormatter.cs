@@ -134,6 +134,9 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                 case PathBlock p:
                     sb.AppendLine($"{Indent(p.IndentLevel)}{p.Label}: {p.Path}");
                     break;
+                case StackFrameBlock sf:
+                    sb.AppendLine($"{Indent(sf.IndentLevel)}   at {sf.Frame}");
+                    break;
                 case TextBlock t:
                     sb.AppendLine($"{Indent(t.IndentLevel)}{t.Text}");
                     break;
@@ -326,6 +329,9 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 case PathBlock p:
                     sb.AppendLine($"**{p.Label}**: `{p.Path}`");
                     sb.AppendLine();
+                    break;
+                case StackFrameBlock sf:
+                    sb.AppendLine($"- `{sf.Frame}`");
                     break;
                 case TextBlock t:
                     sb.AppendLine(t.Text);
@@ -553,6 +559,12 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 case PathBlock p:
                     sb.AppendLine($"<div class=\"detail-line{IndCss(p.IndentLevel)}\"><span class=\"detail-key\">{Enc(p.Label)}:</span> <span class=\"detail-path wrap\">{WrapAddr(Enc(p.Path))}</span></div>");
                     break;
+                case StackFrameBlock sf:
+                    {
+                        string fwCls = sf.IsFrameworkFrame ? " frame-fw" : " frame-app";
+                        sb.AppendLine($"<div class=\"detail-line detail-frame{fwCls}{IndCss(sf.IndentLevel)}\"><code class=\"frame-code\">{WrapAddr(Enc("at " + sf.Frame))}</code></div>");
+                        break;
+                    }
                 case TextBlock t:
                     sb.AppendLine($"<div class=\"detail-line{IndCss(t.IndentLevel)}\">{WrapAddr(Enc(t.Text))}</div>");
                     break;
@@ -653,6 +665,13 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine(".sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}");
         sb.AppendLine(".copy-btn{border:none;background:none;cursor:pointer;color:#64748b;font-size:11px;padding:1px 3px;border-radius:3px;vertical-align:middle;margin-left:3px;transition:background 0.15s,color 0.15s;line-height:1;}");
         sb.AppendLine(".copy-btn:hover{background:#eff6ff;color:#1d4ed8;}.addr{white-space:nowrap;display:inline;}");
+        // Stack frame rendering — app frames highlighted, framework frames muted with accent
+        sb.AppendLine(".detail-frame{margin:1px 0;border-radius:3px;padding:1px 4px 1px 6px;border-left:2px solid transparent;}");
+        sb.AppendLine(".frame-code{font-family:Consolas,\"Cascadia Mono\",monospace;font-size:12px;display:block;overflow-wrap:anywhere;word-break:break-all;}");
+        sb.AppendLine(".frame-app{border-left-color:#3b82f6;background:rgba(219,234,254,0.3);}");
+        sb.AppendLine(".frame-app .frame-code{color:#1e3a8a;font-weight:600;}");
+        sb.AppendLine(".frame-fw{border-left-color:#e2e8f0;}");
+        sb.AppendLine(".frame-fw .frame-code{color:#6b7280;}");
         sb.AppendLine(".filter-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0 6px 0;margin-bottom:6px;}");
         sb.AppendLine(".filter-group{display:flex;gap:4px;flex-wrap:wrap;}");
         sb.AppendLine(".filter-btn{padding:3px 12px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;white-space:nowrap;}");

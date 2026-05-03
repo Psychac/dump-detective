@@ -13,6 +13,7 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(HeadingBlock),                "heading")]
 [JsonDerivedType(typeof(MetricBlock),                 "metric")]
 [JsonDerivedType(typeof(PathBlock),                   "path")]
+[JsonDerivedType(typeof(StackFrameBlock),             "stackframe")]
 [JsonDerivedType(typeof(TextBlock),                   "text")]
 [JsonDerivedType(typeof(ListItemBlock),               "listItem")]
 [JsonDerivedType(typeof(DividerBlock),                "divider")]
@@ -25,6 +26,7 @@ internal abstract record SectionBlock;
 internal sealed record HeadingBlock(string Text, int IndentLevel = 0) : SectionBlock;
 internal sealed record MetricBlock(string Label, string Value, double? RawValue = null, int IndentLevel = 0) : SectionBlock;
 internal sealed record PathBlock(string Label, string Path, int IndentLevel = 0) : SectionBlock;
+internal sealed record StackFrameBlock(string Frame, int IndentLevel = 0, bool IsFrameworkFrame = false) : SectionBlock;
 internal sealed record TextBlock(string Text, int IndentLevel = 0) : SectionBlock;
 internal sealed record ListItemBlock(string Text, int IndentLevel = 0) : SectionBlock;
 internal sealed record DividerBlock : SectionBlock;

@@ -116,6 +116,15 @@
           wrapAddresses(d);
           break;
         }
+        case 'stackframe': {
+          const d = el('div', 'detail-line' + indentClass(block.indentLevel || 0));
+          const span = el('span', block.isFrameworkFrame ? 'detail-frame framework' : 'detail-frame');
+          span.textContent = block.frame || '';
+          d.appendChild(span);
+          top.appendChild(d);
+          wrapAddresses(d);
+          break;
+        }
         case 'text': {
           const d = el('div', 'detail-line' + indentClass(block.indentLevel || 0));
           d.textContent = block.text || '';

@@ -36,7 +36,7 @@ internal sealed class SingleDumpOrchestrationService(
 
         ConsoleUx.Header("DumpDetective Analysis");
         ConsoleUx.DumpInfo(Path.GetFileName(resolved.DumpPath), TryGetFileSize(resolved.DumpPath));
-        ConsoleUx.Note(TemporaryAdaptiveIndexingNotice);
+        //ConsoleUx.Note(TemporaryAdaptiveIndexingNotice);
 
         if (resolved.DiagnosticMode)
             ConsoleUx.Info($"Config: {(resolved.UsedConfigFile ? $"file ({resolved.ConfigPath})" : "CLI fallback")}  ·  {activeAnalyzers.Count} analyzers: {string.Join(", ", activeAnalyzers.Select(a => a.Name))}");

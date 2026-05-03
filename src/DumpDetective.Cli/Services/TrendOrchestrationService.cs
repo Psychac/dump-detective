@@ -46,7 +46,7 @@ internal sealed class TrendOrchestrationService(
         TimeSpan writeOutputElapsed = TimeSpan.Zero;
 
         ConsoleUx.Header("DumpDetective Trend Analysis");
-        ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
+        //ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
         ConsoleUx.Info($"Trend dumps ({trendDumpPaths.Count}): {string.Join(" -> ", trendDumpPaths.Select(Path.GetFileName))}");
         ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers per dump...");
 

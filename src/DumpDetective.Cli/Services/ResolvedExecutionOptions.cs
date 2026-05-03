@@ -1,4 +1,5 @@
 using DumpDetective.Core.Options;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Cli.Services;
@@ -14,6 +15,8 @@ internal sealed record ResolvedExecutionOptions(
     DiagnosticsOptions Diagnostics,
     ReportOptions Report,
     CollectionAnalysisOptions Collection,
+    StringAnalysisOptions StringAnalysis,
+    SegmentAnalysisOptions SegmentAnalysis,
     string? ConfigPath,
     bool UsedConfigFile,
     IReadOnlyCollection<string> IncludeAnalyzers,

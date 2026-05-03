@@ -39,6 +39,7 @@ internal static class DumpIndexPaths
     /// Phase 1 heap scan is skipped on subsequent analyses of the same dump.
     /// </summary>
     public const string TypeAggregateIndexFile   = "TypeAggregateIndex.bin";
+    public const string StringDedupIndexFile     = "StringDedupIndex.bin";
 
     // ── Directory ─────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ internal static class DumpIndexPaths
     public static string LargeObjectIndex(string dumpPath)    => Combine(dumpPath, LargeObjectIndexFile);
     public static string PartialRefEdgeIndex(string dumpPath) => Combine(dumpPath, PartialRefEdgeIndexFile);
     public static string TypeAggregateIndex(string dumpPath)  => Combine(dumpPath, TypeAggregateIndexFile);
+    public static string StringDedupIndex(string dumpPath)   => Combine(dumpPath, StringDedupIndexFile);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

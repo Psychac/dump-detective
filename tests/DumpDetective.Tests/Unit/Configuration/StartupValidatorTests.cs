@@ -77,6 +77,8 @@ public sealed class StartupValidatorTests
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },
             Collection: new CollectionAnalysisOptions(),
+            StringAnalysis: new StringAnalysisOptions(),
+            SegmentAnalysis: new SegmentAnalysisOptions(),
             ConfigPath: null,
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),

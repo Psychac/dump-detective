@@ -27,6 +27,8 @@ internal sealed class ConfigurationResolver
         ReportOptions report              = Resolve(usedConfigFile, BuildReportFromConfig,             BuildReportFromCli,             fileModel, request);
         HeapIndexPrebuildMode indexMode   = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig,  BuildIndexPrebuildModeFromCli,  fileModel, request);
         CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig,     BuildCollectionFromCli,         fileModel, request);
+        StringAnalysisOptions  stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, BuildStringAnalysisFromCli,     fileModel, request);
+        SegmentAnalysisOptions segmentAnalysis = Resolve(usedConfigFile, BuildSegmentAnalysisFromConfig, BuildSegmentAnalysisFromCli,  fileModel, request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
@@ -58,6 +60,8 @@ internal sealed class ConfigurationResolver
             diagnostics,
             report,
             collection,
+            stringAnalysis,
+            segmentAnalysis,
             configPath,
             usedConfigFile,
             request.IncludeAnalyzers,
@@ -275,6 +279,18 @@ internal sealed class ConfigurationResolver
     private static CollectionAnalysisOptions BuildCollectionFromCli(AnalysisCommandRequest request)
         => new CollectionAnalysisOptions();
 
+    private static StringAnalysisOptions BuildStringAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+        => config.StringAnalysis ?? new StringAnalysisOptions();
+
+    private static StringAnalysisOptions BuildStringAnalysisFromCli(AnalysisCommandRequest request)
+        => new StringAnalysisOptions();
+
+    private static SegmentAnalysisOptions BuildSegmentAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+        => config.SegmentAnalysis ?? new SegmentAnalysisOptions();
+
+    private static SegmentAnalysisOptions BuildSegmentAnalysisFromCli(AnalysisCommandRequest request)
+        => new SegmentAnalysisOptions();
+
     private static T Resolve<T>(
         bool fromFile,
         Func<CliConfigurationFileModel, AnalysisCommandRequest, T> fromConfig,
@@ -360,6 +376,8 @@ internal sealed class CliConfigurationFileModel
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }
     public CollectionAnalysisOptions? Collection { get; init; }
+    public StringAnalysisOptions? StringAnalysis { get; init; }
+    public SegmentAnalysisOptions? SegmentAnalysis { get; init; }
     public ReportOptionsModel? Report { get; init; }
 
     public int? HighReferenceThreshold { get; init; }
@@ -394,6 +412,8 @@ internal sealed class IndexingOptionsModel
     AllowTrailingCommas = true)]
 [JsonSerializable(typeof(CliConfigurationFileModel))]
 [JsonSerializable(typeof(CollectionAnalysisOptions))]
+[JsonSerializable(typeof(StringAnalysisOptions))]
+[JsonSerializable(typeof(SegmentAnalysisOptions))]
 [JsonSerializable(typeof(AnalysisProfile))]
 internal partial class CliConfigurationJsonSerializerContext : JsonSerializerContext
 {

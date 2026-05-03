@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Hashing;
+using System.Runtime.InteropServices;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
@@ -36,6 +38,12 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // Mirrors EventCandidateIndex.bin — pre-filtered delegate/event-handler addresses.
         // EventLeakAnalyzer (Priority 13) should prefer this over an O(N) full-index scan.
         var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        // String dedup index: built during phase 2 while dump pages are already hot.
+        // Key: XxHash64 of raw UTF-16 bytes. Each segment accumulates a local dict;
+        // merge is done under masterBuilder lock to avoid ConcurrentDictionary overhead.
+        const int MaxDedupUnique = 500_000; // hard cap on unique patterns tracked
+        const int MaxDedupStringLength = 1024;
+        var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
 
         var parallelOptions = new ParallelOptions
         {
@@ -91,7 +99,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64)),
             (i, _, state) =>
             {
                 ClrSegment segment = segments[i];
@@ -137,6 +145,20 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     if ((flags & TypeAggregateFlags.IsDelegateType) != 0)
                         eventCandidates.Add((obj.Address, mt));
 
+                    // Build string dedup index while dump pages are hot from type resolution.
+                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < MaxDedupUnique)
+                    {
+                        string? val = obj.AsString(maxLength: MaxDedupStringLength);
+                        if (val is { Length: > 0 })
+                        {
+                            ulong h = XxHash64.HashToUInt64(MemoryMarshal.AsBytes(val.AsSpan()));
+                            if (state.StringDedup.TryGetValue(h, out StringDedupEntry? e))
+                            { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                            else
+                            { state.StringDedup[h] = new StringDedupEntry(CreatePreview(val), obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                        }
+                    }
+
                     // Write directly into this segment's reserved slice — no intermediate buffer.
                     if (written < slotCap)
                         flatEntries[baseSlot + written] = entry;
@@ -153,7 +175,16 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             state =>
             {
                 lock (masterBuilder)
+                {
                     masterBuilder.Merge(state.Builder);
+                    foreach (var kvp in state.StringDedup)
+                    {
+                        if (masterStringDedup.TryGetValue(kvp.Key, out StringDedupEntry? me))
+                        { me.Count += kvp.Value.Count; me.TotalSize += kvp.Value.TotalSize; }
+                        else if (masterStringDedup.Count < MaxDedupUnique)
+                        { masterStringDedup[kvp.Key] = kvp.Value; }
+                    }
+                }
             });
 
         int actualCount = (int)Math.Min(objectCount, int.MaxValue);
@@ -196,10 +227,17 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             TypeShapeCache: shapeCache,
             InMemoryTaskCandidates: taskCandidates.ToArray(),
             InMemoryEventCandidates: eventCandidates.ToArray(),
-            InMemoryRootCandidates: rootList.ToArray());
+            InMemoryRootCandidates: rootList.ToArray(),
+            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null);
     }
 
     // ── Type classification helpers (mirror DiskBackedObjectIndexWriter) ───────
+
+    private static string CreatePreview(string value)
+    {
+        string s = value.Length > 47 ? value[..47] + "..." : value;
+        return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+    }
 
     private static TypeAggregateFlags ComputeTypeFlags(ClrType type)
     {

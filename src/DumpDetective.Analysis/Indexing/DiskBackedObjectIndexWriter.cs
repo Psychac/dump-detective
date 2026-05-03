@@ -2,6 +2,8 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Hashing;
+using System.Runtime.InteropServices;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
@@ -77,6 +79,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var largeCandidates        = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
         // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
         var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
+        // String dedup index built while dump pages are hot — zero extra I/O cost.
+        const int MaxDedupUnique = 500_000;
+        var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
 
         // OPT: open the index file before the parallel scan so each segment writes directly to
         // disk as it completes — eliminating the post-scan bag + flat-array accumulation
@@ -98,7 +103,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64)),
             (segment, _, state) =>
             {
                 // Determine generation from segment kind — avoids per-object GetGeneration call
@@ -168,8 +173,22 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         largeCandidates.Add((obj.Address, mt, entry.Size));
                     // Collect LOH/POH free blocks during the scan — avoids a second segment walk
                     // that LohFreeBlockWriter.Write(heap,...) would otherwise require.
-                    if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
+        if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
                         lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
+
+                    // Build string dedup index while dump pages are hot from type resolution.
+                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < 500_000)
+                    {
+                        string? val = obj.AsString(maxLength: 1024);
+                        if (val is { Length: > 0 })
+                        {
+                            ulong h = XxHash64.HashToUInt64(MemoryMarshal.AsBytes(val.AsSpan()));
+                            if (state.StringDedup.TryGetValue(h, out StringDedupEntry? e))
+                            { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                            else
+                            { state.StringDedup[h] = new StringDedupEntry(CreatePreview(val), obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                        }
+                    }
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (progress is not null && count % ProgressReportEveryObjects == 0)
@@ -214,7 +233,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             state =>
             {
                 lock (masterBuilder)
+                {
                     masterBuilder.Merge(state.Builder);
+                    foreach (var kvp in state.StringDedup)
+                    {
+                        if (masterStringDedup.TryGetValue(kvp.Key, out StringDedupEntry? me))
+                        {
+                            me.Count += kvp.Value.Count;
+                            me.TotalSize += kvp.Value.TotalSize;
+                            if (me.SampleAddresses is null && kvp.Value.SampleAddresses is not null)
+                                me.SampleAddresses = kvp.Value.SampleAddresses;
+                            else if (me.SampleAddresses is not null && kvp.Value.SampleAddresses is not null && me.SampleAddresses.Length < 2)
+                            {
+                                // attempt to add one more sample address
+                                foreach (var a in kvp.Value.SampleAddresses)
+                                {
+                                    if (me.SampleAddresses.Length == 1 && me.SampleAddresses[0] != a)
+                                    { me.SampleAddresses = new ulong[] { me.SampleAddresses[0], a }; break; }
+                                }
+                            }
+                            if (me.DominantMethodTable == 0 && kvp.Value.DominantMethodTable != 0)
+                                me.DominantMethodTable = kvp.Value.DominantMethodTable;
+                        }
+                        else if (masterStringDedup.Count < 500_000)
+                        { masterStringDedup[kvp.Key] = kvp.Value; }
+                    }
+                }
             });
 
         // Seal the index: flush buffered data, rewind, and overwrite the placeholder header
@@ -234,6 +278,75 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         IReadOnlyList<string> satelliteWarnings = WriteSatelliteFiles(dumpPath, heap,
             taskCandidates, eventCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
+
+        // Write StringDedupIndex satellite file (compact binary) so subsequent analyses
+        // can read prebuilt dedup data without re-scanning the heap.
+        try
+        {
+            string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
+            using var ds = new FileStream(dedupPath, FileMode.Create, FileAccess.Write, FileShare.Read,
+                bufferSize: 64 * 1024, FileOptions.SequentialScan);
+            Span<byte> hdr = stackalloc byte[12];
+            // Magic 'SDUP' (written little-endian), version=1, entryCount (int)
+            BinaryPrimitives.WriteInt32LittleEndian(hdr, 0x50554453);
+            BinaryPrimitives.WriteInt32LittleEndian(hdr[4..], 1);
+            BinaryPrimitives.WriteInt32LittleEndian(hdr[8..], masterStringDedup.Count);
+            ds.Write(hdr);
+
+            // Rent small reusable buffers to avoid large stack allocations inside the loop.
+            byte[] recBuf = ArrayPool<byte>.Shared.Rent(64);
+            byte[] addrBuf = ArrayPool<byte>.Shared.Rent(8);
+            try
+            {
+                foreach (var kvp in masterStringDedup)
+                {
+                    ulong hash = kvp.Key;
+                    var e = kvp.Value;
+                    // rec layout: hash(8) | count(4) | totalSize(8) | dominantMt(8) | sampleCount(1) | previewLen(2)
+                    Span<byte> rec = recBuf.AsSpan();
+                    BinaryPrimitives.WriteUInt64LittleEndian(rec, hash);
+                    BinaryPrimitives.WriteInt32LittleEndian(rec[8..], e.Count);
+                    BinaryPrimitives.WriteUInt64LittleEndian(rec[12..], e.TotalSize);
+                    BinaryPrimitives.WriteUInt64LittleEndian(rec[20..], e.DominantMethodTable);
+                    int sampleCount = e.SampleAddresses?.Length ?? 0;
+                    rec[28] = (byte)Math.Min(sampleCount, 2);
+                    ushort previewLen = 0;
+                    if (e.Preview is not null)
+                    {
+                        previewLen = (ushort)Math.Min(ushort.MaxValue, System.Text.Encoding.UTF8.GetByteCount(e.Preview));
+                    }
+                    BinaryPrimitives.WriteUInt16LittleEndian(rec[29..], previewLen);
+                    ds.Write(rec.Slice(0, 31));
+                    if (sampleCount > 0)
+                    {
+                        for (int i = 0; i < Math.Min(2, sampleCount); i++)
+                        {
+                            BinaryPrimitives.WriteUInt64LittleEndian(addrBuf, e.SampleAddresses![i]);
+                            ds.Write(addrBuf, 0, 8);
+                        }
+                    }
+                    if (previewLen > 0)
+                    {
+                        byte[] tmp = ArrayPool<byte>.Shared.Rent(previewLen);
+                        try
+                        {
+                            int written = System.Text.Encoding.UTF8.GetBytes(e.Preview, 0, e.Preview.Length, tmp, 0);
+                            ds.Write(tmp, 0, written);
+                        }
+                        finally { ArrayPool<byte>.Shared.Return(tmp); }
+                    }
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(recBuf);
+                ArrayPool<byte>.Shared.Return(addrBuf);
+            }
+        }
+        catch (Exception ex)
+        {
+            ((List<string>)satelliteWarnings).Add($"StringDedupIndex.bin: {ex.GetType().Name}: {ex.Message}");
+        }
 
         stopwatch.Stop();
 
@@ -265,7 +378,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             Modules: moduleRegistry.Modules,
             GlobalSizeBuckets: globalSizeBuckets,
             TypeShapeCache: shapeCache,
-            SatelliteWarnings: satelliteWarnings.Count > 0 ? satelliteWarnings : null);
+            SatelliteWarnings: satelliteWarnings.Count > 0 ? satelliteWarnings : null,
+            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null);
     }
 
     // ── Satellite file writing ─────────────────────────────────────────────────
@@ -352,6 +466,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     }
 
     // ── Type classification helpers ────────────────────────────────────────────
+
+    private static string CreatePreview(string value)
+    {
+        string s = value.Length > 47 ? value[..47] + "..." : value;
+        return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+    }
 
     private static TypeAggregateFlags ComputeTypeFlags(ClrType type)
     {

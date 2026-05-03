@@ -1,5 +1,42 @@
 namespace DumpDetective.Analysis.Indexing;
 
+/// <summary>
+/// One aggregated string pattern from the dedup index built during heap scan.
+/// Hash is XxHash64 over raw UTF-16 bytes. Preview is the first occurrence, truncated.
+/// </summary>
+internal sealed class StringDedupEntry
+{
+    public string Preview;
+    public int Count;
+    public ulong TotalSize;
+    // Representative sample addresses captured during index build (usually 1 or 2)
+    public ulong[]? SampleAddresses;
+    // Dominant MethodTable observed for this content (approximate)
+    public ulong DominantMethodTable;
+
+    public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0)
+    {
+        Preview   = preview;
+        Count     = 1;
+        TotalSize = size;
+        DominantMethodTable = dominantMt;
+        SampleAddresses = sampleAddress != 0 ? new ulong[] { sampleAddress } : null;
+    }
+    public void AddInstance(ulong size, ulong sampleAddress = 0, ulong mt = 0)
+    {
+        Count++;
+        TotalSize += size;
+        if (sampleAddress != 0)
+        {
+            if (SampleAddresses is null) SampleAddresses = new ulong[] { sampleAddress };
+            else if (SampleAddresses.Length == 1 && SampleAddresses[0] != sampleAddress)
+                SampleAddresses = new ulong[] { SampleAddresses[0], sampleAddress };
+        }
+        // Keep the first non-zero MT as dominant if unset
+        if (DominantMethodTable == 0 && mt != 0) DominantMethodTable = mt;
+    }
+}
+
 // OPT-#14: InMemoryEntries changed from IReadOnlyList<HeapEntry>? to HeapEntry[]?.
 // After build the list is never mutated; the array eliminates the List<T> wrapper indirection
 // and enables Span<HeapEntry>-based enumeration paths in future without reallocation.
@@ -50,4 +87,10 @@ internal sealed record HeapIndexBuildResult(
     /// Null when all satellite files were written successfully or in memory-backed mode.
     /// Consumers (e.g. <c>BuildHeapIndexStage</c>) should surface these via <c>ConsoleUx.Warning</c>.
     /// </summary>
-    IReadOnlyList<string>? SatelliteWarnings = null);
+    IReadOnlyList<string>? SatelliteWarnings = null,
+    /// <summary>
+    /// String dedup table built during heap scan — zero-cost for StringAnalyzer.
+    /// Key: XxHash64 over raw UTF-16 bytes. Value: count, total size, preview.
+    /// Null when string hashing was disabled or not yet implemented for the storage kind.
+    /// </summary>
+    IReadOnlyDictionary<ulong, StringDedupEntry>? StringDedupIndex = null);

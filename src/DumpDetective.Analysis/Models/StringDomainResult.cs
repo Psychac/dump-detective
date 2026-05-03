@@ -21,4 +21,9 @@ internal sealed record StringDomainResult(
     int InternedStringCount,
     ulong InternedStringBytes,
     int Gen2StringCount,
-    ulong Gen2StringBytes) : AnalyzerDomainResult;
+    ulong Gen2StringBytes,
+    bool DeduplicationSkipped,
+    int StringsSampled,
+    double SamplingCoverage = 0.0,
+    IReadOnlyList<DumpDetective.Core.Models.NameCountEntry>? TopDuplicateTypes = null,
+    int PreviewMaxLength = 0) : AnalyzerDomainResult;

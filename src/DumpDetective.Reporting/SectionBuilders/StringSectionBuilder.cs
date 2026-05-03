@@ -1,3 +1,4 @@
+using System.Linq;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -26,6 +27,10 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         blocks.Add(M("Total String Memory",     FormatHelper.FormatBytes(d.TotalStringMemoryBytes),       (double)d.TotalStringMemoryBytes));
         blocks.Add(M("% of Managed Heap",       $"{d.PctOfManagedHeap:F2}%",                             d.PctOfManagedHeap));
         blocks.Add(M("Unique Strings",          $"{d.UniqueStrings:N0}",                                 d.UniqueStrings));
+        string dedupLine = d.DeduplicationSkipped
+            ? "Skipped"
+            : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
+        blocks.Add(M("Deduplication",           dedupLine, d.DeduplicationSkipped ? 0 : d.StringsSampled));
         blocks.Add(M("Duplication Ratio",       $"{d.DuplicationRatio:P1}",                              d.DuplicationRatio));
         blocks.Add(M("Duplicate Waste",         FormatHelper.FormatBytes(d.DuplicateWastedBytes),         (double)d.DuplicateWastedBytes));
         blocks.Add(M("LOH String Bytes",        FormatHelper.FormatBytes(d.LohStringBytes),               (double)d.LohStringBytes));
@@ -42,12 +47,17 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < d.TopDuplicatesByWaste.Count; i++)
             {
                 var dup = d.TopDuplicatesByWaste[i];
+                double pct = d.TotalStringMemoryBytes > 0 ? dup.WastedBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
+                string preview = FormatHelper.TruncateString(dup.Preview, Math.Max(32, d.PreviewMaxLength));
+                string examples = dup.SampleAddresses is not null ? string.Join(", ", dup.SampleAddresses.Select(a => $"0x{a:X}")) : string.Empty;
                 rows.Add(Row(
-                    Cell(FormatHelper.TruncateString(dup.Preview, 80)),
+                    Cell(preview),
                     Cell($"{dup.Count:N0}", dup.Count),
-                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes)));
+                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes),
+                    Cell($"{pct:F1}%", null),
+                    Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by wasted bytes", ["String Preview", "Count", "Wasted"], rows));
+            blocks.Add(new TableBlock("Duplicates ranked by wasted bytes", ["String Preview", "Count", "Wasted", "% of strings", "Examples"], rows));
             blocks.Add(CollapseEnd());
         }
 
@@ -61,13 +71,29 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < d.TopDuplicatesByCount.Count; i++)
             {
                 var dup = d.TopDuplicatesByCount[i];
+                double pct = d.TotalStringMemoryBytes > 0 ? dup.WastedBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
+                string preview = FormatHelper.TruncateString(dup.Preview, Math.Max(32, d.PreviewMaxLength));
+                string examples = dup.SampleAddresses is not null ? string.Join(", ", dup.SampleAddresses.Select(a => $"0x{a:X}")) : string.Empty;
                 rows.Add(Row(
-                    Cell(FormatHelper.TruncateString(dup.Preview, 80)),
+                    Cell(preview),
                     Cell($"{dup.Count:N0}", dup.Count),
-                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes)));
+                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes),
+                    Cell($"{pct:F1}%", null),
+                    Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by count", ["String Preview", "Count", "Wasted"], rows));
+            blocks.Add(new TableBlock("Duplicates ranked by count", ["String Preview", "Count", "Wasted", "% of strings", "Examples"], rows));
             blocks.Add(CollapseEnd());
+        }
+
+        // ── Top types contributing to duplicates ─────────────────────────────────
+        if (d.TopDuplicateTypes is not null && d.TopDuplicateTypes.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("TOP TYPES CONTRIBUTING TO DUPLICATION"));
+            var rows = new List<TableRow>(d.TopDuplicateTypes.Count);
+            foreach (var t in d.TopDuplicateTypes)
+                rows.Add(Row(Cell(t.Name), Cell($"{t.Count:N0}", t.Count)));
+            blocks.Add(new TableBlock("Types by duplicate occurrence", ["Type", "Duplicate Count"], rows));
         }
 
         // ── Very Long Strings (LOH residents) ────────────────────────────────

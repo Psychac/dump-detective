@@ -8,4 +8,8 @@ internal struct StringLeakInfo
     public string? Preview;
     public int Count;
     public ulong TotalSize;
+    // Representative sample addresses captured when fingerprinting
+    public ulong[]? SampleAddresses;
+    // Dominant method-table observed for this fingerprint (approximate)
+    public ulong DominantMethodTable;
 }

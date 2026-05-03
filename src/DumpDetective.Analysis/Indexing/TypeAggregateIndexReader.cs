@@ -208,6 +208,67 @@ internal static class TypeAggregateIndexReader
             }
         }
 
+        // Attempt to load optional StringDedupIndex satellite file
+        IReadOnlyDictionary<ulong, StringDedupEntry>? stringDedup = null;
+        try
+        {
+            string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
+            if (File.Exists(dedupPath))
+            {
+                using var ds = new FileStream(dedupPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, FileOptions.SequentialScan);
+                Span<byte> hdr = stackalloc byte[12];
+                if (ds.Read(hdr) != 12) throw new InvalidDataException("short header");
+                int magic = BinaryPrimitives.ReadInt32LittleEndian(hdr);
+                int version = BinaryPrimitives.ReadInt32LittleEndian(hdr[4..]);
+                int entries = BinaryPrimitives.ReadInt32LittleEndian(hdr[8..]);
+                if (magic == 0x50554453 && version == 1 && entries > 0)
+                {
+                    var map = new Dictionary<ulong, StringDedupEntry>(entries);
+                    // Hoist fixed-size buffers outside the loop — stackalloc inside a loop
+                    // grows the stack frame by the allocation size on every iteration and
+                    // never releases it, causing a StackOverflowException for large entry counts.
+                    Span<byte> rec     = stackalloc byte[31];
+                    Span<byte> addrBuf = stackalloc byte[8];
+                    for (int i = 0; i < entries; i++)
+                    {
+                        if (ds.Read(rec) != rec.Length) throw new InvalidDataException("short record");
+                        ulong hash = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                        int cnt = BinaryPrimitives.ReadInt32LittleEndian(rec[8..]);
+                        ulong totalSize = BinaryPrimitives.ReadUInt64LittleEndian(rec[12..]);
+                        ulong dominantMt = BinaryPrimitives.ReadUInt64LittleEndian(rec[20..]);
+                        int sampleCount = rec[28];
+                        ushort previewLen = BinaryPrimitives.ReadUInt16LittleEndian(rec[29..]);
+
+                        ulong[]? samples = null;
+                        if (sampleCount > 0)
+                        {
+                            samples = new ulong[Math.Min(2, sampleCount)];
+                            for (int s = 0; s < Math.Min(2, sampleCount); s++)
+                            {
+                                if (ds.Read(addrBuf) != 8) throw new InvalidDataException("short addr");
+                                samples[s] = BinaryPrimitives.ReadUInt64LittleEndian(addrBuf);
+                            }
+                        }
+
+                        string preview = string.Empty;
+                        if (previewLen > 0)
+                        {
+                            byte[] pbuf = new byte[previewLen];
+                            if (ds.Read(pbuf, 0, previewLen) != previewLen) throw new InvalidDataException("short preview");
+                            preview = System.Text.Encoding.UTF8.GetString(pbuf);
+                        }
+
+                        var entry = new StringDedupEntry(preview, totalSize, samples is not null && samples.Length > 0 ? samples[0] : 0, dominantMt);
+                        entry.Count = cnt;
+                        entry.SampleAddresses = samples;
+                        map[hash] = entry;
+                    }
+                    stringDedup = map.Count > 0 ? map : null;
+                }
+            }
+        }
+        catch { stringDedup = null; }
+
         result = new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
             objectIndexPath,
@@ -218,7 +279,8 @@ internal static class TypeAggregateIndexReader
             Modules:          modules,
             GlobalSizeBuckets: sizeBuckets,
             TypeShapeCache:   shapeCache,
-            SatelliteWarnings: null);
+            SatelliteWarnings: null,
+            StringDedupIndex: stringDedup);
 
         return true;
     }

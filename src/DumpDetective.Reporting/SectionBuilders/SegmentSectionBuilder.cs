@@ -40,13 +40,20 @@ internal sealed class SegmentSectionBuilder : SectionBuilderBase, IAnalyzerSecti
         foreach (var k in d.KindSummaries)
         {
             if (k.SegmentCount == 0) continue;
+            string objDisplay = k.ObjectCount < 0 ? "N/A" : $"{k.ObjectCount:N0}";
+            long? objRaw = k.ObjectCount < 0 ? null : (long?)k.ObjectCount;
             kindRows.Add(new TableRow([
                 Cell(k.Kind.ToString()),
                 Cell($"{k.SegmentCount:N0}", k.SegmentCount),
-                Cell($"{k.ObjectCount:N0}",  k.ObjectCount),
+                Cell(objDisplay, objRaw),
                 Cell(FormatHelper.FormatBytes(k.TotalBytes), (long)k.TotalBytes)]));
         }
         blocks.Add(new TableBlock("Segment kind breakdown", ["Kind", "Segments", "Objects", "Committed"], kindRows));
+
+        // Surface a note when SOH object counts were skipped (the default for large dumps).
+        bool sohCounted = d.KindSummaries.FirstOrDefault(k => k.Kind == HeapSegmentKind.SmallObjectHeap)?.ObjectCount >= 0;
+        if (!sohCounted)
+            blocks.Add(T("SOH object count skipped for performance. Enable SegmentAnalysisOptions.CountSohObjects for exact counts."));
 
         var topSegments = d.TopSegmentsBySize ?? new List<HeapSegmentSnapshot>();
         if (topSegments.Count > 0)
@@ -64,7 +71,7 @@ internal sealed class SegmentSectionBuilder : SectionBuilderBase, IAnalyzerSecti
             for (int i = 0; i < topSegments.Count; i++)
             {
                 var s = topSegments[i];
-                if (s.CommittedBytes == 0) { densities[i] = 0.0; continue; }
+                if (s.CommittedBytes == 0 || s.ObjectCount < 0) { densities[i] = 0.0; continue; }
                 double mb = s.CommittedBytes / 1024.0 / 1024.0;
                 double densityVal = mb > 0 ? s.ObjectCount / mb : 0.0;
                 densities[i] = densityVal;
@@ -78,15 +85,17 @@ internal sealed class SegmentSectionBuilder : SectionBuilderBase, IAnalyzerSecti
                 var s = topSegments[i];
                 double pct = d.TotalCommittedBytes > 0 ? s.CommittedBytes * 100.0 / d.TotalCommittedBytes : 0.0;
                 double density = densities[i];
-                bool isSpike = avgDensity > 0 && density > avgDensity * SegmentAnalyzerOptions.SpikeDensityMultiplier;
+                bool isSpike = avgDensity > 0 && s.ObjectCount >= 0 && density > avgDensity * SegmentAnalyzerOptions.SpikeDensityMultiplier;
                 string spikeMarker = isSpike ? "⚠" : string.Empty;
+                string objDisplay = s.ObjectCount < 0 ? "N/A" : $"{s.ObjectCount:N0}";
+                long? objRaw = s.ObjectCount < 0 ? null : (long?)s.ObjectCount;
 
                 segRows.Add(new TableRow([
                     Cell($"0x{s.Address:x16}"),
                     Cell(s.Kind.ToString()),
                     Cell(FormatHelper.FormatBytes(s.CommittedBytes), (long)s.CommittedBytes),
                     Cell($"{pct:F1}%", null),
-                    Cell($"{s.ObjectCount:N0}", s.ObjectCount),
+                    Cell(objDisplay, objRaw),
                     Cell(spikeMarker)]));
             }
             blocks.Add(new TableBlock("Top segments by committed size", ["Address", "Kind", "Committed", "Committed (%)", "Objects", "Spike"], segRows));

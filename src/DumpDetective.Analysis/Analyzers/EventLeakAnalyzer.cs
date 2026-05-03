@@ -405,7 +405,7 @@ namespace DumpDetective.Analysis.Analyzers
             var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
 
             // ── Fast scanner: direct IMemoryReader.ReadPointer — no heap.GetObject ────
-            var fastScanner = new EventLeakFastScanner(heap, GetEventNames);
+            var fastScanner = new EventLeakFastScanner(heap, GetEventNames, progress);
 
             HeapEntry[]? inMemoryArray  = null;
             int objectCount             = 0;

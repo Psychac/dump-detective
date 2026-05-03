@@ -25,12 +25,14 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
         // Shared state updated by the progress callback and read by the heartbeat.
         long lastScanned = 0;
         string lastPhase = "scanning heap";
+        string? lastDetail = null;
 
         var progress = new Progress<AnalyzerProgressReport>(r =>
         {
             Interlocked.Exchange(ref lastScanned, r.ScannedCount);
             lastPhase = r.Phase;
-            ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, wallClock.Elapsed, r.Phase);
+            lastDetail = string.IsNullOrWhiteSpace(r.Detail) ? r.Phase : r.Detail;
+            ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, wallClock.Elapsed, lastDetail);
         });
 
         // Run the synchronous index build on a thread-pool thread so the heartbeat
@@ -52,7 +54,8 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
 
             // Heartbeat: re-render the spinner with the wall-clock elapsed so the
             // timer keeps ticking even when the writer hasn't fired a progress event.
-            ConsoleUx.ObjectScanProgress(Name, Interlocked.Read(ref lastScanned), wallClock.Elapsed, lastPhase);
+            string? details = string.IsNullOrWhiteSpace(lastDetail) ? lastPhase : lastDetail;
+            ConsoleUx.ObjectScanProgress(Name, Interlocked.Read(ref lastScanned), wallClock.Elapsed, details);
         }
 
         HeapIndexBuildResult heapIndex = await buildTask;

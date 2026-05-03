@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Threading;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -6,6 +9,7 @@ using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -80,6 +84,11 @@ internal sealed class EventLeakFastScanner
     private readonly IMemoryReader _reader;
     private readonly bool _readerIsThreadSafe;
     private readonly int _ptrSize;
+    private readonly IProgress<AnalyzerProgressReport>? _progress;
+    private readonly Stopwatch _reporterStopwatch;
+    private long _scannedObjects;
+    private long _lastReportMs;
+    private readonly int _reportEveryObjects = 100_000;
 
     /// <summary>
     /// Offset of element[0] within an <c>object[]</c> array:
@@ -100,7 +109,7 @@ internal sealed class EventLeakFastScanner
     // Construction
     // ──────────────────────────────────────────────────────────────────────────────
 
-    public EventLeakFastScanner(ClrHeap heap, Func<ClrType, HashSet<string>> getEventNames)
+    public EventLeakFastScanner(ClrHeap heap, Func<ClrType, HashSet<string>> getEventNames, IProgress<AnalyzerProgressReport>? progress = null)
     {
         _heap = heap;
         _getEventNames = getEventNames;
@@ -111,6 +120,11 @@ internal sealed class EventLeakFastScanner
         _readerIsThreadSafe = dr.IsThreadSafe;
         _ptrSize = dr.PointerSize;
         _arrayDataOffset = _ptrSize * 2;
+
+        _progress = progress;
+        _reporterStopwatch = Stopwatch.StartNew();
+        _scannedObjects = 0;
+        _lastReportMs = 0;
 
         // Proactively discover MulticastDelegate field layout before any scan starts.
         // Searching known System.* type names via modules is more reliable than waiting
@@ -202,7 +216,10 @@ internal sealed class EventLeakFastScanner
         }
 
         foreach (ulong mt in uniqueMts)
+        {
             _mtIndex.TryAdd(mt, BuildFieldLayouts(mt));
+            ReportProgressInterlocked();
+        }
     }
 
     private DelegateFieldLayout[]? BuildFieldLayouts(ulong mt)
@@ -424,6 +441,7 @@ internal sealed class EventLeakFastScanner
         for (int i = 0; i < count; i++)
         {
             HeapEntry entry = arr[i];
+            ReportProgressInterlocked();
             if (!_mtIndex.TryGetValue(entry.MethodTable, out DelegateFieldLayout[]? layouts) || layouts is null)
                 continue;
             ProcessPublisherEntry(entry, layouts, buf, groupAcc, rootHints, appDomains,
@@ -451,6 +469,7 @@ internal sealed class EventLeakFastScanner
         var buf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
         foreach (HeapEntry entry in entries)
         {
+            ReportProgressInterlocked();
             if (entry.MethodTable == 0) continue;
 
             // Lazily build field layouts on first encounter of this MT.
@@ -508,6 +527,7 @@ internal sealed class EventLeakFastScanner
             for (int i = start; i < end; i++)
             {
                 HeapEntry entry = arr[i];
+                ReportProgressInterlocked();
                 if (!_mtIndex.TryGetValue(entry.MethodTable, out DelegateFieldLayout[]? layouts)
                     || layouts is null) continue;
 
@@ -686,6 +706,7 @@ internal sealed class EventLeakFastScanner
         foreach (ref readonly DelegateFieldLayout layout in layouts.AsSpan())
         {
             eventsScanned++;
+            ReportProgressInterlocked();
             hadField = true;
 
             // One ReadPointer: reveals both null-ness and delegate address.
@@ -951,6 +972,26 @@ internal sealed class EventLeakFastScanner
         if (seg is null) return -1;
         try { return (int)seg.GetGeneration(address); }
         catch { return -1; }
+    }
+
+    private void ReportProgressInterlocked(string? detail = null)
+    {
+        if (_progress is null) return;
+        long newCount = Interlocked.Increment(ref _scannedObjects);
+        // Report by count or by elapsed time.
+        if (newCount % _reportEveryObjects == 0)
+        {
+            _progress.Report(new AnalyzerProgressReport((int)newCount, "scanning event handlers", detail ?? $"{newCount:N0} objects", _reporterStopwatch.Elapsed));
+            Interlocked.Exchange(ref _lastReportMs, _reporterStopwatch.ElapsedMilliseconds);
+            return;
+        }
+
+        long lastMs = Interlocked.Read(ref _lastReportMs);
+        if (_reporterStopwatch.ElapsedMilliseconds - lastMs >= 2000)
+        {
+            _progress.Report(new AnalyzerProgressReport((int)newCount, "scanning event handlers", detail ?? $"{newCount:N0} objects", _reporterStopwatch.Elapsed));
+            Interlocked.Exchange(ref _lastReportMs, _reporterStopwatch.ElapsedMilliseconds);
+        }
     }
 
     private bool CheckLifetimeMismatchDirect(List<SubscriberInfo> subscribers, EventLeakOptions options)

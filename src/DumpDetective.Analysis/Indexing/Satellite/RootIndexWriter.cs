@@ -21,7 +21,7 @@ internal static class RootIndexWriter
     private const int Magic      = 0x58495452;
     private const int Version    = 1;
     private const int RecordSize = 20; // 8 + 8 + 1 + 3 pad
-    private const int ProgressEveryRoots = 50_000;
+    private const int ProgressEveryRoots = 10_000;
 
     public static long Write(
         string filePath,
@@ -39,6 +39,8 @@ internal static class RootIndexWriter
         byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 4096);
         long recordCount = 0;
         int offset = 0;
+        var reporterStopwatch = stopwatch ?? Stopwatch.StartNew();
+        long lastReportMs = 0;
 
         try
         {
@@ -65,13 +67,27 @@ internal static class RootIndexWriter
                     offset = 0;
                 }
 
-                if (progress is not null && recordCount % ProgressEveryRoots == 0)
-                    progress.Report(new(recordCount, "enumerating GC roots",
-                        Detail: $"{recordCount:N0} roots", Elapsed: stopwatch?.Elapsed));
+                // Report either every N roots or at least every 2 seconds so long-running
+                // enumerations still show live counts even if root volume is low.
+                if (progress is not null)
+                {
+                    long nowMs = reporterStopwatch.ElapsedMilliseconds;
+                    if (recordCount % ProgressEveryRoots == 0 || nowMs - lastReportMs >= 2000)
+                    {
+                        progress.Report(new(recordCount, "enumerating GC roots",
+                            Detail: $"{recordCount:N0} roots", Elapsed: reporterStopwatch.Elapsed));
+                        lastReportMs = nowMs;
+                    }
+                }
             }
 
             if (offset > 0)
                 stream.Write(buf, 0, offset);
+
+            // Final progress snapshot so small dumps (below the reporting threshold)
+            // still display a completed root count in the UI.
+            if (progress is not null)
+                progress.Report(new(recordCount, "enumerating GC roots", Detail: $"{recordCount:N0} roots", Elapsed: reporterStopwatch.Elapsed));
         }
         finally
         {

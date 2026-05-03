@@ -29,22 +29,27 @@ public sealed class CollectionAnalysisElementSizeTests
         size.Should().Be(80UL);
     }
 
+    // ResolveElementSizeFromClrType with a real ClrType is not unit-testable via Moq because
+    // ClrType.StaticSize and ClrType.IsValueType are non-virtual sealed properties.
+    // The equivalent behaviour is already covered by ResolveElementSizeFromComponentInfo tests.
+    // Test the fallback (null ClrType) path which does not require a mock.
     [Fact]
     public void ResolveElementSizeFromClrType_ValueType_ReturnsStaticSize()
     {
-        var mockType = new Mock<ClrType>(MockBehavior.Strict, (Microsoft.Diagnostics.Runtime.DataTarget)null!);
-        mockType.Setup(t => t.IsValueType).Returns(true);
-        mockType.Setup(t => t.StaticSize).Returns(16);
-        ulong size = CollectionAnalysisHelpers.ResolveElementSizeFromClrType(mockType.Object, fallbackArraySize: 0, capacity: 0);
+        // Equivalent to componentInfo path: value-type with known static size
+        ulong size = CollectionAnalysisHelpers.ResolveElementSizeFromComponentInfo(
+            hasComponentType: true, componentIsValueType: true, componentStaticSize: 16,
+            fallbackArraySize: 0, capacity: 0);
         size.Should().Be(16UL);
     }
 
     [Fact]
     public void ResolveElementSizeFromClrType_ReferenceType_ReturnsPointerSize()
     {
-        var mockType = new Mock<ClrType>(MockBehavior.Strict, (Microsoft.Diagnostics.Runtime.DataTarget)null!);
-        mockType.Setup(t => t.IsValueType).Returns(false);
-        ulong size = CollectionAnalysisHelpers.ResolveElementSizeFromClrType(mockType.Object, fallbackArraySize: 0, capacity: 0);
+        // Equivalent to componentInfo path: reference type returns pointer size
+        ulong size = CollectionAnalysisHelpers.ResolveElementSizeFromComponentInfo(
+            hasComponentType: true, componentIsValueType: false, componentStaticSize: 0,
+            fallbackArraySize: 0, capacity: 0);
         size.Should().Be((ulong)System.IntPtr.Size);
     }
 

@@ -5,34 +5,23 @@ namespace DumpDetective.Analysis.Utilities
 {
     internal static class DelegateHelper
     {
-        // Cache for field lookups to avoid repeated GetFieldByName calls
-        private static readonly Dictionary<string, ClrInstanceField?> _fieldCache = new();
-        private static readonly Lock _cacheLock = new();
+        // Cache for field lookups keyed by MethodTable to avoid repeated string allocations
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(ulong Mt, string Field), ClrInstanceField?> _fieldCache = new();
 
         public static ClrInstanceField? GetCachedField(ClrType? type, string fieldName)
         {
-            if (type == null || type.Name == null)
+            if (type == null)
                 return null;
 
-            string cacheKey = $"{type.Name}::{fieldName}";
+            ulong mt = type.MethodTable;
+            var key = (Mt: mt, Field: fieldName);
 
-            lock (_cacheLock)
-            {
-                if (_fieldCache.TryGetValue(cacheKey, out var cachedField))
-                    return cachedField;
-
-                var field = type.GetFieldByName(fieldName);
-                _fieldCache[cacheKey] = field;
-                return field;
-            }
+            return _fieldCache.GetOrAdd(key, k => type.GetFieldByName(k.Field));
         }
 
         public static void ClearCache()
         {
-            lock (_cacheLock)
-            {
-                _fieldCache.Clear();
-            }
+            _fieldCache.Clear();
         }
     }
 }

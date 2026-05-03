@@ -16,6 +16,9 @@ namespace DumpDetective.Analysis.Cache
         private Dictionary<string, ulong>? _sampleInstances;
         private HeapIndexBuildResult? _heapIndex;
         private IReadOnlyList<(string RootKind, ulong Address)>? _validRoots;
+        // Full root.ToString() descriptions keyed by object address, used by FindStaticRootOnlyEventLeaks
+        // to parse publisher type and field name (e.g. "Static var MyClass._myEvent").
+        private Dictionary<ulong, string>? _rootDescriptions;
 
         private long _objectScanCount;
         private long _cacheHits;
@@ -445,6 +448,7 @@ namespace DumpDetective.Analysis.Cache
             // Initialize if needed with a reasonable capacity to avoid repeated resizes
             _staticRootedAddresses ??= new HashSet<ulong>(capacity: 4096);
             var roots = new List<(string RootKind, ulong Address)>(capacity: 4096);
+            _rootDescriptions ??= new Dictionary<ulong, string>(capacity: 4096);
 
             var scanCounter = new ObjectScanCounter("enumerating roots", _progress, reportEveryObjects: 10_000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -461,6 +465,10 @@ namespace DumpDetective.Analysis.Cache
                 string kind = root.RootKind.ToString();
                 roots.Add((kind, address));
 
+                // Store full description separately so ParseRootPublisher can extract TypeName.field.
+                string description = root.ToString() ?? kind;
+                _rootDescriptions.TryAdd(address, description);
+
                 if (kind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase) && root.Object.IsValid)
                 {
                     _staticRootedAddresses.Add(address);
@@ -473,16 +481,11 @@ namespace DumpDetective.Analysis.Cache
 
         public string? GetRootDescription(ulong address)
         {
-            if (_validRoots is null)
+            if (_rootDescriptions is null)
                 return null;
 
-            foreach (var (kind, addr) in _validRoots)
-            {
-                if (addr == address)
-                    return kind;
-            }
-
-            return null;
+            _rootDescriptions.TryGetValue(address, out string? desc);
+            return desc;
         }
 
         private void ReportProgress(string phase, long totalScans)

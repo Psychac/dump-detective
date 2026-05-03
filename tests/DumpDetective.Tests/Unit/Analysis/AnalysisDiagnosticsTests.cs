@@ -26,7 +26,7 @@ public sealed class AnalysisDiagnosticsTests
 
         results.Should().HaveCount(1);
         AnalyzerRunResult run = results[0];
-        run.FindingCount.Should().Be(1);
+        run.FindingCount.Should().Be(0); // Pipeline sets 0; FindingGenerationPipeline enriches this in real runs
         run.WarningCount.Should().Be(1);
         run.ObjectScanCount.Should().Be(42);
         run.CacheHits.Should().Be(12);

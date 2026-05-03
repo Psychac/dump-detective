@@ -3,9 +3,12 @@ DumpDetective Analysis Report
 Dump: C:/fixtures/RichEvidence.dmp
 Generated (UTC): 2026-01-01 12:00:00
 Elapsed: 9.8s
+Schema: 2.0
 
 Dedup: merged 0/0 candidate duplicates
 
+FINDINGS
+====================================================================================================
 [Warning] Rich evidence sample (Crash)
 ----------------------------------------------------------------------------------------------------
 Includes multiple evidence and remediation records.

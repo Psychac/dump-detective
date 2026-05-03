@@ -3,8 +3,11 @@
 > Dump: `C:/fixtures/DuplicateHeavy.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
 > Elapsed: `8.1s`
+> Schema: `2.0`
 
 > Dedup merged **3** section(s) from **3** candidate duplicate(s).
+
+## Findings
 
 ## [Critical] Duplicate-heavy merged section
 

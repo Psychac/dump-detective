@@ -32,7 +32,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (d.TotalPublisherInstances > 0)
             blocks.Add(M("Publisher Instances",   $"{d.TotalPublisherInstances:N0}",  d.TotalPublisherInstances));
 
-        var topPublishers = d.TopPublisherEventsBySubscribers ?? [];
+        var topPublishers = d.TopPublisherEvents ?? [];
         if (topPublishers.Count > 0)
         {
             blocks.Add(Blank());
@@ -41,10 +41,18 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             var pubRows = new List<TableRow>(topPublishers.Count);
             for (int i = 0; i < topPublishers.Count; i++)
+            {
+                var p = topPublishers[i];
                 pubRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(topPublishers[i].Name, 90)),
-                    Cell($"{topPublishers[i].Count:N0}", topPublishers[i].Count)]));
-            blocks.Add(new TableBlock("Publisher events by subscriber count", ["Event", "Subscribers"], pubRows));
+                    Cell(FormatHelper.TruncateString(p.PublisherType, 70)),
+                    Cell(FormatHelper.TruncateString(p.EventFieldName, 40)),
+                    Cell($"{p.TotalSubscribers:N0}", p.TotalSubscribers),
+                    Cell($"{p.InstanceCount:N0}", p.InstanceCount),
+                    Cell(p.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(p.EstimatedRetainedBytes) : "-")]));
+            }
+            blocks.Add(new TableBlock("Publisher events by subscriber count",
+                ["Publisher Type", "Event Field", "Subscribers", "Instances", "Est. Retained"],
+                pubRows));
         }
 
         var leakGroups = d.TopLeakGroups ?? [];
@@ -66,6 +74,12 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 blocks.Add(M("Min/Max Subscribers",  $"{group.MinSubscribers}/{group.MaxSubscribers}", indent: 1));
                 if (group.EstimatedSubscriberRetainedBytes > 0)
                     blocks.Add(M("Est. Retained Bytes",  FormatHelper.FormatBytes(group.EstimatedSubscriberRetainedBytes), (double)group.EstimatedSubscriberRetainedBytes, indent: 1));
+                if (group.HasDuplicateSubscriptions)
+                    blocks.Add(M("Duplicate Subscriptions", "YES \u2013 same subscriber registered multiple times", indent: 1));
+                if (group.HasLifetimeMismatch)
+                    blocks.Add(M("Lifetime Mismatch", "YES \u2013 Gen2 publisher retaining Gen0/Gen1 subscribers", indent: 1));
+                if (group.OrphanedSubscriberInstances > 0)
+                    blocks.Add(M("Orphaned Sub. Instances", $"{group.OrphanedSubscriberInstances:N0} instance(s) with dead-subscriber pattern", (double)group.OrphanedSubscriberInstances, indent: 1));
 
                 var subTypes = group.TopSubscriberTypes ?? [];
                 if (subTypes.Count > 0)
@@ -99,12 +113,29 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 blocks.Add(M("Severity Score",    $"{inst.SeverityScore:N0}",     inst.SeverityScore, indent: 1));
                 if (!string.IsNullOrWhiteSpace(inst.RootHint))
                     blocks.Add(M("Root Hint", inst.RootHint, indent: 1));
-                var subTypeList = inst.SubscriberTypes ?? [];
-                if (subTypeList.Count > 0)
+                if (inst.PublisherGeneration >= 0)
+                    blocks.Add(M("Publisher Generation", $"Gen{inst.PublisherGeneration}", inst.PublisherGeneration, indent: 1));
+                if (inst.DuplicateSubscriptionCount > 0)
+                    blocks.Add(M("Duplicate Subscriptions", $"{inst.DuplicateSubscriptionCount:N0} extra registration(s)", inst.DuplicateSubscriptionCount, indent: 1));
+                if (inst.OrphanedSubscriberCount > 0)
+                    blocks.Add(M("Orphaned Subscribers", $"{inst.OrphanedSubscriberCount:N0} not independently GC-rooted", inst.OrphanedSubscriberCount, indent: 1));
+                if (inst.HasLifetimeMismatch)
+                    blocks.Add(M("Lifetime Mismatch", "YES \u2013 Gen2 publisher retaining Gen0/Gen1 subscribers", indent: 1));
+
+                var subDetails = inst.SubscriberDetails ?? [];
+                if (subDetails.Count > 0)
                 {
-                    blocks.Add(H("Subscriber Types:", 1));
-                    for (int j = 0; j < subTypeList.Count; j++)
-                        blocks.Add(Li(subTypeList[j], 2));
+                    var detailRows = new List<TableRow>(subDetails.Count);
+                    for (int j = 0; j < subDetails.Count; j++)
+                    {
+                        var det = subDetails[j];
+                        detailRows.Add(new TableRow([
+                            Cell(FormatHelper.TruncateString(det.Type, 60)),
+                            Cell(det.MethodName != null ? FormatHelper.TruncateString(det.MethodName, 70) : "-"),
+                            Cell($"{det.Count:N0}", det.Count),
+                            Cell(det.Size > 0 ? FormatHelper.FormatBytes(det.Size) : "-")]));
+                    }
+                    blocks.Add(new TableBlock("Subscribers", ["Type", "Handler Method", "Count", "Avg Size"], detailRows));
                 }
                 blocks.Add(CollapseEnd());
             }

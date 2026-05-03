@@ -51,9 +51,9 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
 
             ulong committed = GetLength(segment.CommittedMemory);
             ulong reserved  = GetLength(segment.ReservedMemory);
-            bool isEphemeral = IsEphemeralSegment(segment);
+            bool isEphemeral = SegmentKindMapper.IsEphemeral(segment);
             int logicalHeap  = segment.SubHeap?.Index ?? 0;
-            HeapSegmentKind kind = ClassifyKind(segment);
+            HeapSegmentKind kind = SegmentKindMapper.Map(segment);
 
             totalCommitted += committed;
             totalReserved  += reserved;
@@ -132,27 +132,5 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     /// classic non-regions ephemeral segment; individual generation segments in a regions-based
     /// heap are classified as Small/SOH and have non-empty <c>Generation0</c> ranges.
     /// </summary>
-    private static bool IsEphemeralSegment(ClrSegment segment)
-    {
-        string kindName = segment.Kind.ToString();
-        if (kindName.Contains("Ephemeral", StringComparison.OrdinalIgnoreCase))
-            return true;
-        // Regions-based GC: generation0/1 region on a non-large, non-pinned, non-frozen segment.
-        if (!kindName.Contains("Large", StringComparison.OrdinalIgnoreCase)
-            && !kindName.Contains("Pinned", StringComparison.OrdinalIgnoreCase)
-            && !kindName.Contains("Frozen", StringComparison.OrdinalIgnoreCase)
-            && segment.Generation0.Length > 0)
-            return true;
-        return false;
-    }
-
-    /// <summary>Maps ClrMD's <c>GCSegmentKind</c> string to project-local <see cref="HeapSegmentKind"/>.</summary>
-    private static HeapSegmentKind ClassifyKind(ClrSegment segment)
-    {
-        string k = segment.Kind.ToString();
-        if (k.Contains("Large",   StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.LargeObjectHeap;
-        if (k.Contains("Pinned",  StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.PinnedObjectHeap;
-        if (k.Contains("Frozen",  StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.Frozen;
-        return HeapSegmentKind.SmallObjectHeap;
-    }
+    // Classification helpers moved to SegmentKindMapper
 }

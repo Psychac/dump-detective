@@ -12,7 +12,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// </summary>
 public sealed class SegmentAnalyzer : IAnalyzer
 {
-    private const int TopSegmentsCount = 10;
+    // Number of top segments to show — moved to SegmentAnalyzerOptions
 
     public string Name => "Segment Analysis";
     public string Category => "Memory";
@@ -25,11 +25,9 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
     private static AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
     {
-        // Count total segments upfront for accurate progress percentage.
-        // heap.Segments is an IEnumerable but in practice it materialises cheaply from a fixed list.
-        int totalSegments = 0;
-        foreach (ClrSegment _ in heap.Segments)
-            totalSegments++;
+        // Materialize segments to avoid re-enumeration and to get an exact count upfront.
+        var segments = heap.Segments.ToList();
+        int totalSegments = segments.Count;
 
         progress?.Report(new(0, "classifying heap segments", $"0 / {totalSegments} segments"));
 
@@ -41,9 +39,9 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
         var snapshots = new List<HeapSegmentSnapshot>(totalSegments);
 
-        foreach (ClrSegment segment in heap.Segments)
+        foreach (ClrSegment segment in segments)
         {
-            HeapSegmentKind kind = ClassifySegment(segment);
+            HeapSegmentKind kind = SegmentKindMapper.Map(segment);
             ulong committed = GetCommittedBytes(segment);
             ulong start = segment.Start;
             ulong end = segment.End;
@@ -112,7 +110,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
         var topBySize = snapshots
             .OrderByDescending(s => s.CommittedBytes)
-            .Take(TopSegmentsCount)
+            .Take(SegmentAnalyzerOptions.TopSegmentsCount)
             .ToList();
 
         progress?.Report(new(
@@ -172,7 +170,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
             localScanned++;
 
-            if (reportInner && (localScanned & 0x3FFF) == 0) // every ~16k objects
+            if (reportInner && (localScanned & (SegmentAnalyzerOptions.ReportObjectScanInterval - 1)) == 0) // every ~16k objects
             {
                 totalObjectsScanned += localScanned;
                 localScanned = 0;

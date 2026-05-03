@@ -468,5 +468,7 @@ namespace DumpDetective.Analysis.Analyzers
             bool ObjectScanCapped = false,
             bool ReferenceCountingSkipped = false);
         private readonly record struct FinalizerQueueResult(int TotalCount, IReadOnlyList<NameCountEntry> TopTypes);
+        
+        public void Dispose() { }
     }
 }

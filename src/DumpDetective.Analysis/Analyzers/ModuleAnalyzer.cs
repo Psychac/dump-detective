@@ -220,6 +220,8 @@ namespace DumpDetective.Analysis.Analyzers
             return analysis;
         }
 
+        
+        public void Dispose() { }
         }
 
     internal class ModuleAnalysis

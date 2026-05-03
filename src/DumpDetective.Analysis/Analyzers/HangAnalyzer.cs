@@ -542,9 +542,11 @@ public class HangAnalyzer : IAnalyzer
                 return new AsyncTypeProfile(typeName, isTask, isQueuedWorkItem, isContinuation);
             }
         }
-    }
+    
+            public void Dispose() { }
+        }
 
-    internal class HangAnalysis
+        internal class HangAnalysis
     {
         public int TotalAliveThreads { get; set; }
         public int ThreadsHoldingLocks { get; set; }
@@ -598,5 +600,7 @@ public class HangAnalyzer : IAnalyzer
         ThreadJoin
     }
 }
+
+// removed stray partial Dispose wrapper (Dispose implemented inside class)
 
 

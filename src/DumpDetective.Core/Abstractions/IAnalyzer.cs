@@ -4,7 +4,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Core.Abstractions;
 
-public interface IAnalyzer
+public interface IAnalyzer : IDisposable
 {
     string Name { get; }
     string Category => AnalyzerCategory.Infer(Name);
@@ -19,6 +19,13 @@ public interface IAnalyzer
     /// </summary>
     bool IsThreadSafe => false;
     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Default no-op dispose so existing analyzers remain source-compatible.
+    /// Implement <see cref="IDisposable"/> in analyzers that hold resources
+    /// (buffers, streams, native handles) and need deterministic cleanup.
+    /// </summary>
+    void IDisposable.Dispose() { }
 }
 
 internal static class AnalyzerCategory

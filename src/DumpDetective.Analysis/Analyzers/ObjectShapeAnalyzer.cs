@@ -133,5 +133,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             return depth;
         }
+        
+        public void Dispose() { }
     }
 }

@@ -19,6 +19,8 @@ namespace DumpDetective.Analysis.Analyzers;
 public sealed class SegmentReservationAnalyzer : IAnalyzer
 {
     // Address space pressure thresholds (§25.3).
+
+    public void Dispose() { }
     private const ulong ThirtyTwoBitPressureThreshold = 1_500_000_000UL; // 1.5 GB
     private const double RatioHighPressureThreshold    = 10.0;
 

@@ -853,8 +853,9 @@ public class CrashAnalyzer : IAnalyzer
             return stackFrames;
         }
 
-        
-    }
+            public void Dispose() { }
+
+        }
 
 }
 

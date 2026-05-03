@@ -377,5 +377,7 @@ namespace DumpDetective.Analysis.Analyzers
                 RootPaths: [],
                 PathSearchCapped: false,
                 PathSearchCappedCount: 0);
+    
+        public void Dispose() { }
+        }
     }
-}

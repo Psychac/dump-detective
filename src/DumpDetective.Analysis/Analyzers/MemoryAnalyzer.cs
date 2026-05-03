@@ -118,5 +118,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topByCount,
                 SizeBucketHistogram: histogram);
         }
+
+        public void Dispose() { }
     }
 }

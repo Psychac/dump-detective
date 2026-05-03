@@ -343,4 +343,6 @@ internal sealed class StringAnalyzer : IAnalyzer
     }
 
     private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
+
+    public void Dispose() { }
 }

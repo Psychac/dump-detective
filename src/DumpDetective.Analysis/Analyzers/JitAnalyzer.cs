@@ -207,4 +207,6 @@ public sealed class JitAnalyzer : IAnalyzer
         public readonly uint   HotSize         = hotSize;
         public readonly uint   ColdSize        = coldSize;
     }
+    
+    public void Dispose() { }
 }

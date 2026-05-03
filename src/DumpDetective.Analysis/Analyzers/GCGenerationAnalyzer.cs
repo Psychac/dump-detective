@@ -175,5 +175,7 @@ namespace DumpDetective.Analysis.Analyzers
                 gen2Pct,
                 PerTypeGenerationProfiles: []);
         }
+
+        public void Dispose() { }
     }
 }

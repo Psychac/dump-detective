@@ -135,6 +135,8 @@ public sealed class SegmentAnalyzer : IAnalyzer
             TopSegmentsBySize: topBySize);
     }
 
+    public void Dispose() { }
+
     private static HeapSegmentKind ClassifySegment(ClrSegment segment)
     {
         string kindName = segment.Kind.ToString();

@@ -575,6 +575,8 @@ namespace DumpDetective.Analysis.Analyzers
             obj = heap.GetObject(address);
             return obj.IsValid;
         }
+        public void Dispose() { }
+
     }
 
     // ── ReverseReferenceIndex ─────────────────────────────────────────────────

@@ -1401,6 +1401,8 @@ namespace DumpDetective.Analysis.Analyzers
         {
             return publisherGeneration == 2 && (subscriberGeneration == 0 || subscriberGeneration == 1);
         }
+
+        public void Dispose() { }
     }
 }
 

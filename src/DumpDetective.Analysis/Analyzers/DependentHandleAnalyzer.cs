@@ -194,6 +194,8 @@ namespace DumpDetective.Analysis.Analyzers
             else
                 counts[key] = 1;
         }
+
+        public void Dispose() { }
     }
 }
 

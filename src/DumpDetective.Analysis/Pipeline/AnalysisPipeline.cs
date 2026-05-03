@@ -1,6 +1,7 @@
 ﻿using DumpDetective.Core.Models;
 using System.Diagnostics;
 using DumpDetective.Core.Abstractions;
+using System.Runtime;
 using DumpDetective.Analysis.Cache;
 using System.Diagnostics.CodeAnalysis;
 
@@ -220,6 +221,34 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     cacheWithProgressCleanup.SetProgress(null);
 
                 context.Progress = null;
+            }
+
+            // After each analyzer, attempt to dispose it (if it holds resources) and optionally trigger GC.
+            try
+            {
+                if (analyzer is IDisposable disposable)
+                {
+                    try { disposable.Dispose(); } catch { }
+                }
+
+                if (context.Diagnostics is not null && context.Diagnostics.CollectAfterAnalyzerRun)
+                {
+                    try
+                    {
+                        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        GC.Collect();
+                    }
+                    catch
+                    {
+                        // best-effort only
+                    }
+                }
+            }
+            catch
+            {
+                // swallow errors from cleanup attempts
             }
         }
 

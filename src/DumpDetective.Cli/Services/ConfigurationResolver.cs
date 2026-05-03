@@ -218,10 +218,13 @@ internal sealed class ConfigurationResolver
             ?? config.EnablePerformanceDiagnostics
             ?? request.EnablePerformanceDiagnostics;
 
+        bool collectAfterAnalyzerRun = config.Diagnostics?.CollectAfterAnalyzerRun ?? false;
+
         return new DiagnosticsOptions
         {
             EnableMemoryDiagnostics = enableMemoryDiagnostics,
             EnablePerformanceDiagnostics = enablePerformanceDiagnostics
+            , CollectAfterAnalyzerRun = collectAfterAnalyzerRun
         };
     }
 
@@ -231,6 +234,7 @@ internal sealed class ConfigurationResolver
         {
             EnableMemoryDiagnostics = request.EnableMemoryDiagnostics,
             EnablePerformanceDiagnostics = request.EnablePerformanceDiagnostics
+            , CollectAfterAnalyzerRun = false
         };
     }
 

@@ -390,6 +390,8 @@ namespace DumpDetective.Analysis.Analyzers
             ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out _);
             count++;
         }
+        
+        public void Dispose() { }
     }
 
     internal class ThreadCategorization

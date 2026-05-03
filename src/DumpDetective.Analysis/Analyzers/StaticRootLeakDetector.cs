@@ -227,6 +227,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             return false;
         }
+        
+        public void Dispose() { }
     }
 
     internal class StaticRootAnalysis
@@ -249,5 +251,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ulong TotalSize { get; set; }
     }
 }
+
+// NOTE: analyzers implement IDisposable on IAnalyzer; add no-op Dispose to this analyzer as placeholder
 
 

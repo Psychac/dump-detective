@@ -195,6 +195,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             return obj.Type.Name ?? StringConstants.UnknownType;
         }
+        
+        public void Dispose() { }
     }
 
     internal class LockContention
@@ -221,6 +223,7 @@ namespace DumpDetective.Analysis.Analyzers
         public List<DeadlockCandidate> DeadlockCandidates { get; } = new();
         public Dictionary<ulong, ClrThread> ThreadByAddress { get; set; } = new();
     }
+
 }
 
 

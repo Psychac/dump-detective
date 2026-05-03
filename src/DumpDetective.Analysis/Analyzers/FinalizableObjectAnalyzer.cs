@@ -248,5 +248,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             return totalSize;
         }
+
+        public void Dispose() { }
     }
 }

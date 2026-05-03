@@ -176,8 +176,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         var visited = new HashSet<ulong>(capacity: 8) { address };
                         ClrObject current = continuationObj;
 
-                        while (depth < MaxContinuationDepth && current.IsValid && current.Address != 0
-                               && visited.Add(current.Address))
+                                     while (depth < MaxContinuationDepth && current.IsValid && current.Address != 0
+                                              && visited.Add(current.Address))
                         {
                             // Track continuation type for top-N
                             if (current.Type != null)
@@ -471,4 +471,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         result.Sort((a, b) => b.Count.CompareTo(a.Count));
         return result;
     }
+
+    public void Dispose() { }
 }

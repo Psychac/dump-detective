@@ -434,6 +434,8 @@ namespace DumpDetective.Analysis.Analyzers
                 FragmentationPercent = fragmentationPercent;
             }
         }
+        
+        public void Dispose() { }
     }
 }
 

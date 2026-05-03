@@ -169,5 +169,7 @@ namespace DumpDetective.Analysis.Analyzers
                 AssemblyName = assemblyName;
             }
         }
+        
+        public void Dispose() { }
     }
 }

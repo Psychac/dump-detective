@@ -154,5 +154,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (score > 20.0) return GCPressureLevel.Moderate;
             return GCPressureLevel.Low;
         }
+        
+        public void Dispose() { }
     }
 }

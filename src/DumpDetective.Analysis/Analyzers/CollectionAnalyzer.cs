@@ -511,6 +511,8 @@ namespace DumpDetective.Analysis.Analyzers
             return stats;
         }
 
+        public void Dispose() { }
+
         private static IEnumerable<HeapEntry> EnumerateCollectionEntries(ClrHeap heap, IHeapAnalysisCache? cache)
         {
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))

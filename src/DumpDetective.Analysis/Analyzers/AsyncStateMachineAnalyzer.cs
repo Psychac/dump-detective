@@ -229,6 +229,8 @@ namespace DumpDetective.Analysis.Analyzers
                 ScanLimited:            scanLimited);
         }
 
+        public void Dispose() { }
+
         // ── Helpers ───────────────────────────────────────────────────────────────
 
         private static bool ImplementsIAsyncStateMachine(ClrType type)

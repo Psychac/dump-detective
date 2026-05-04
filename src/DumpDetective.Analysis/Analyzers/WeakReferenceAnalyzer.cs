@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers
@@ -16,14 +17,11 @@ namespace DumpDetective.Analysis.Analyzers
     ///
     /// Reads <c>HandleSnapshot.bin</c> when the disk index is available to avoid a second
     /// <c>runtime.EnumerateHandles()</c> call. Falls back to live enumeration in memory mode.
-    /// Bounded to <see cref="HandleScanCap"/> handles to stay predictable on large dumps.
+    /// Bounded by configured options to stay predictable on large dumps.
     /// </summary>
     public sealed class WeakReferenceAnalyzer : IAnalyzer
     {
         // ── Constants ─────────────────────────────────────────────────────────
-        private const int HandleScanCap  = 50_000;
-        private const int TopTypeLimit   = 15;
-
         // ClrHandleKind enum values (Microsoft.Diagnostics.Runtime):
         //   WeakShort = 0, WeakLong = 1, Strong = 2, Pinned = 3,
         //   RefCounted = 5, Dependent = 6, AsyncPinned = 7, SizedRef = 8, WeakWinRT = 9
@@ -46,13 +44,15 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+            WeakReferenceAnalysisOptions options = context.GetOption<WeakReferenceAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrRuntime runtime,
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            WeakReferenceAnalysisOptions options,
             IProgress<AnalyzerProgressReport>? progress,
             CancellationToken cancellationToken)
         {
@@ -88,7 +88,7 @@ namespace DumpDetective.Analysis.Analyzers
                     ReadWeakHandlesFromFile(
                         snapshotPath, heap,
                         ref totalWeakHandles, ref aliveWeakTargets, ref deadWeakTargets,
-                        ref scanCapped, targetTypeHits,
+                        ref scanCapped, targetTypeHits, options.HandleScanCap,
                         cancellationToken);
                 }
             }
@@ -111,7 +111,7 @@ namespace DumpDetective.Analysis.Analyzers
                         continue;
 
                     totalWeakHandles++;
-                    if (totalWeakHandles > HandleScanCap) { scanCapped = true; break; }
+                    if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
                     ulong addr = handle.Object.Address;
                     if (addr == 0) { deadWeakTargets++; continue; }
@@ -225,8 +225,8 @@ namespace DumpDetective.Analysis.Analyzers
                 ? 0.0
                 : (double)deadWeakTargets / totalWeakHandles;
 
-            var topTargetTypes = BuildTopEntries(targetTypeHits, TopTypeLimit);
-            var topStaleTypes  = BuildTopEntries(staleHolderTypeHits, TopTypeLimit);
+            var topTargetTypes = BuildTopEntries(targetTypeHits, options.TopTypeLimit);
+            var topStaleTypes  = BuildTopEntries(staleHolderTypeHits, options.TopTypeLimit);
 
             return new WeakReferenceDomainResult(
                 TotalWeakHandles:               totalWeakHandles,
@@ -252,6 +252,7 @@ namespace DumpDetective.Analysis.Analyzers
             ref int deadWeakTargets,
             ref bool scanCapped,
             Dictionary<string, int> targetTypeHits,
+            int handleScanCap,
             CancellationToken cancellationToken)
         {
             using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
@@ -273,7 +274,7 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 totalWeakHandles++;
-                if (totalWeakHandles > HandleScanCap) { scanCapped = true; return; }
+                if (totalWeakHandles > handleScanCap) { scanCapped = true; return; }
 
                 ulong addr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
                 if (addr == 0) { deadWeakTargets++; continue; }

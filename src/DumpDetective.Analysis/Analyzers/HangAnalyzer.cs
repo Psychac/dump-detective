@@ -2,6 +2,7 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
@@ -10,29 +11,24 @@ namespace DumpDetective.Analysis.Analyzers
 {
 public class HangAnalyzer : IAnalyzer
     {
-        private const int LongWaitThreshold = 5; // threads waiting
-        private const int HighThreadPoolThreshold = 100;
-        private const int MaxTasksToScan = 50000;
-        private const int TopWaitingThreadsPerGroup = 5;
-        private const int TopContinuationTypesToShow = 5;
-
         public string Name => "Hang Analysis";
         public string Category => "Hang";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
+            HangAnalysisOptions options = context.GetOption<HangAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, cache: null, progress: null);
+            return Analyze(runtime, heap, cache: null, new HangAnalysisOptions(), progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            var hangInfo = AnalyzeForHang(runtime, heap, cache, progress);
+            var hangInfo = AnalyzeForHang(runtime, heap, cache, options, progress);
 
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var wt in hangInfo.WaitingThreads)
@@ -74,12 +70,12 @@ public class HangAnalyzer : IAnalyzer
                         .ToList(),
                     hangInfo.TaskContinuations
                         .OrderByDescending(k => k.Value)
-                        .Take(TopContinuationTypesToShow)
+                        .Take(options.TopContinuationTypesToShow)
                         .Select(k => new NameCountEntry(k.Key, k.Value))
                         .ToList());
         }
 
-        private static InsightFinding CreateFinding(HangAnalysis analysis)
+        private static InsightFinding CreateFinding(HangAnalysis analysis, HangAnalysisOptions options)
         {
             double waitingPct = analysis.TotalAliveThreads == 0
                 ? 0
@@ -87,7 +83,7 @@ public class HangAnalyzer : IAnalyzer
 
             FindingSeverity severity = waitingPct >= 80
                 ? FindingSeverity.Critical
-                : waitingPct >= 50 || analysis.ThreadPoolInfo.QueuedWorkItems > HighThreadPoolThreshold
+                : waitingPct >= 50 || analysis.ThreadPoolInfo.QueuedWorkItems > options.HighThreadPoolThreshold
                     ? FindingSeverity.Warning
                     : FindingSeverity.Info;
 
@@ -105,7 +101,7 @@ public class HangAnalyzer : IAnalyzer
                 MetricUnit: "% waiting threads");
         }
 
-        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             var analysis = new HangAnalysis();
             var waitingThreads = new List<WaitingThreadInfo>();
@@ -149,9 +145,9 @@ public class HangAnalyzer : IAnalyzer
             analysis.WaitingThreads = waitingThreads;
             ReadRuntimeThreadPool(runtime, analysis);
             progress?.Report(new(threadScanCounter.Scanned, "analyzing async work items"));
-            AnalyzeAsyncWork(heap, cache, analysis);
+            AnalyzeAsyncWork(heap, cache, analysis, options);
 
-            analysis.HealthScore = ComputeHealthScore(analysis);
+            analysis.HealthScore = ComputeHealthScore(analysis, options);
 
             return analysis;
         }
@@ -178,7 +174,7 @@ public class HangAnalyzer : IAnalyzer
         /// Produces a 0-100 composite score. Each penalty maps to a named, observable signal
         /// so the score degrades predictably â€” not arbitrarily.
         /// </summary>
-        private static int ComputeHealthScore(HangAnalysis analysis)
+        private static int ComputeHealthScore(HangAnalysis analysis, HangAnalysisOptions options)
         {
             int score = 100;
 
@@ -207,7 +203,7 @@ public class HangAnalyzer : IAnalyzer
             else if (saturated) score -= 10;
 
             // â”€â”€ Task backpressure (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            if (tp.PendingTasks > HighThreadPoolThreshold) score -= 5;
+            if (tp.PendingTasks > options.HighThreadPoolThreshold) score -= 5;
 
             // â”€â”€ Unobserved task faults (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (tp.FaultedTasks > 0) score -= 5;
@@ -281,29 +277,29 @@ public class HangAnalyzer : IAnalyzer
             return null;
         }
 
-        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis)
+        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis, HangAnalysisOptions options)
         {
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
             {
                 // In-memory index: parallel over the flat entry array
                 if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
                 {
-                    RunParallelAsyncScan(heap, inMemoryEntries: entries, analysis);
+                    RunParallelAsyncScan(heap, inMemoryEntries: entries, analysis, options);
                     return;
                 }
 
                 // Disk-backed index: sequential (I/O bound)
-                RunSequentialAsyncScan(heap, heapCache, analysis);
+                RunSequentialAsyncScan(heap, heapCache, analysis, options);
                 return;
             }
 
             // No cache: parallel over GC segments
-            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis);
+            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis, options);
         }
 
         // Unified parallel async-work scanner — drives either a flat in-memory HeapEntry[]
         // or a per-segment ClrObject walk.  The early scan-limit is honored via a volatile flag.
-        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis)
+        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis, HangAnalysisOptions options)
         {
             var profileByMethodTable = new ConcurrentDictionary<ulong, AsyncTypeProfile>(
                 concurrencyLevel: Environment.ProcessorCount, capacity: 64);
@@ -342,7 +338,7 @@ public class HangAnalyzer : IAnalyzer
                     int scanned = Interlocked.Increment(ref tasksScanned);
                     Interlocked.Increment(ref totalTasks);
 
-                    if (scanned <= MaxTasksToScan)
+                    if (scanned <= options.MaxTasksToScan)
                     {
                         var stateField = obj.Type.GetFieldByName("m_stateFlags");
                         if (stateField != null)
@@ -359,7 +355,7 @@ public class HangAnalyzer : IAnalyzer
                     }
 
                     // Honor scan limit: signal remaining threads to skip task processing
-                    if (scanned > MaxTasksToScan && Volatile.Read(ref queuedWorkItems) > 1000)
+                    if (scanned > options.MaxTasksToScan && Volatile.Read(ref queuedWorkItems) > 1000)
                         Volatile.Write(ref taskScanLimited, true);
                 }
 
@@ -408,7 +404,7 @@ public class HangAnalyzer : IAnalyzer
             analysis.TotalContinuations = totalContinuations;
         }
 
-        private void RunSequentialAsyncScan(ClrHeap heap, HeapAnalysisCache heapCache, HangAnalysis analysis)
+        private void RunSequentialAsyncScan(ClrHeap heap, HeapAnalysisCache heapCache, HangAnalysis analysis, HangAnalysisOptions options)
         {
             var threadPool = new ThreadPoolAnalysis();
             var taskContinuations = new Dictionary<string, int>();
@@ -436,9 +432,10 @@ public class HangAnalyzer : IAnalyzer
                     threadPool,
                     taskContinuations,
                     ref tasksScanned,
-                    ref totalContinuations);
+                    ref totalContinuations,
+                    options.MaxTasksToScan);
 
-                if (tasksScanned > MaxTasksToScan && threadPool.QueuedWorkItems > 1000)
+                if (tasksScanned > options.MaxTasksToScan && threadPool.QueuedWorkItems > 1000)
                 {
                     threadPool.TaskScanLimited = true;
                     break;
@@ -480,7 +477,8 @@ public class HangAnalyzer : IAnalyzer
             ThreadPoolAnalysis threadPool,
             Dictionary<string, int> taskContinuations,
             ref int tasksScanned,
-            ref int totalContinuations)
+            ref int totalContinuations,
+            int maxTasksToScan)
         {
             ClrObject obj = heap.GetObject(objectAddress);
             if (!obj.IsValid || obj.Type == null)
@@ -496,7 +494,7 @@ public class HangAnalyzer : IAnalyzer
                 tasksScanned++;
                 threadPool.TotalTasks++;
 
-                if (tasksScanned <= MaxTasksToScan)
+                if (tasksScanned <= maxTasksToScan)
                 {
                     var stateField = obj.Type.GetFieldByName("m_stateFlags");
                     if (stateField != null)

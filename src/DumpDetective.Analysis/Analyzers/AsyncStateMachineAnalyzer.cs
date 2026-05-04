@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -22,13 +23,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AsyncStateMachineAnalyzer : IAnalyzer
     {
-        private const int TopTypeLimit           = 20;
-        private const int TypeCandidateLimit     = 200;
-        private const int SuspendedMethodMapLimit = 20;
-
-        // Minimum captured reference bytes to include a type in TopByCapturedSize
-        private const ulong LargeCaptureThresholdBytes = 1_024 * 1_024; // 1 MB
-
         // Compiler-generated async state machine type suffix: <MethodName>d__N
         private static readonly Regex StateMachinePattern =
             new(@"<(.+?)>d__\d+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
@@ -41,12 +35,14 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+            AsyncStateMachineAnalysisOptions options = context.GetOption<AsyncStateMachineAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            AsyncStateMachineAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
@@ -86,7 +82,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 candidates.Add((kv.Key, kv.Value, methodName, declaringType));
 
-                if (candidates.Count >= TypeCandidateLimit)
+                if (candidates.Count >= options.TypeCandidateLimit)
                 {
                     scanLimited = true;
                     break;
@@ -110,7 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 3: Field metadata + sample-based analysis ───────────────────
             // Read ClrType.Fields and the SampleAddress for each candidate type.
-            int typeLimit = Math.Min(candidates.Count, TopTypeLimit);
+            int typeLimit = Math.Min(candidates.Count, options.TopTypeLimit);
             var topTypes  = new List<StateMachineTypeProfile>(typeLimit);
             var highCaptures = new List<(ulong Address, string TypeName, ulong CapturedBytes, List<string> LargeCaptures)>(16);
 
@@ -160,7 +156,7 @@ namespace DumpDetective.Analysis.Analyzers
                                 if (!refObj.IsValid || refObj.Address == 0) continue;
                                 ulong sz = refObj.Size;
                                 capturedBytes += sz;
-                                if (sz >= LargeCaptureThresholdBytes)
+                                if (sz >= options.LargeCaptureThresholdBytes)
                                     largeCaptures.Add($"{f.Name} ({refObj.Type?.Name ?? "?"}, {FormatBytes(sz)})");
                             }
                             catch { /* field unreadable */ }
@@ -186,7 +182,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 4: TopByCapturedSize ─────────────────────────────────────────
             highCaptures.Sort(static (a, b) => b.CapturedBytes.CompareTo(a.CapturedBytes));
-            int captureLimit = Math.Min(highCaptures.Count, 10);
+            int captureLimit = Math.Min(highCaptures.Count, options.TopCapturedSizeEntries);
             var topByCapturedSize = new List<HighCaptureStateMachine>(captureLimit);
             for (int i = 0; i < captureLimit; i++)
             {
@@ -217,8 +213,8 @@ namespace DumpDetective.Analysis.Analyzers
                 suspendedMap.Add(new SuspendedMethodEntry(kv.Key.Item1, kv.Key.Item2, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes));
 
             suspendedMap.Sort(static (a, b) => b.SuspendedCount.CompareTo(a.SuspendedCount));
-            if (suspendedMap.Count > SuspendedMethodMapLimit)
-                suspendedMap.RemoveRange(SuspendedMethodMapLimit, suspendedMap.Count - SuspendedMethodMapLimit);
+            if (suspendedMap.Count > options.SuspendedMethodMapLimit)
+                suspendedMap.RemoveRange(options.SuspendedMethodMapLimit, suspendedMap.Count - options.SuspendedMethodMapLimit);
 
             return new AsyncStateMachineDomainResult(
                 TotalStateMachines:     (int)Math.Min(totalCount, int.MaxValue),

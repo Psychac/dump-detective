@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -17,19 +18,17 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class ObjectShapeAnalyzer : IAnalyzer
     {
-        private const int InstanceCountCap = 200;
-        private const int TopListLimit     = 20;
-
         public string Name => "Object Shape Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
+            ObjectShapeAnalysisOptions options = context.GetOption<ObjectShapeAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
+        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, ObjectShapeAnalysisOptions options)
         {
             if (cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx)
@@ -46,7 +45,7 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
             // Collect MTs present in both shape cache and aggregates, sorted by descending
-            // instance count — cap at InstanceCountCap to bound ClrType metadata access.
+            // instance count — cap by options to bound ClrType metadata access.
             var candidates = new List<(ulong Mt, TypeShapeEntry Shape, long Count)>(shapes.Count);
             foreach (KeyValuePair<ulong, TypeShapeEntry> kv in shapes)
             {
@@ -56,10 +55,10 @@ namespace DumpDetective.Analysis.Analyzers
 
             candidates.Sort(static (a, b) => b.Count.CompareTo(a.Count));
 
-            int cap = Math.Min(candidates.Count, InstanceCountCap);
+            int cap = Math.Min(candidates.Count, options.InstanceCountCap);
 
-            var refHeavy = new List<TypeShapeProfile>(TopListLimit);
-            var valHeavy = new List<TypeShapeProfile>(TopListLimit);
+            var refHeavy = new List<TypeShapeProfile>(options.TopListLimit);
+            var valHeavy = new List<TypeShapeProfile>(options.TopListLimit);
 
             long totalRefFields  = 0;
             int  typesAnalyzed   = 0;
@@ -107,9 +106,9 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Rank by (refRatio × instanceCount) — types with many instances and
                 // many ref fields impose the highest GC scan cost.
-                if (category == ObjectShapeCategory.ReferenceHeavy && refHeavy.Count < TopListLimit)
+                if (category == ObjectShapeCategory.ReferenceHeavy && refHeavy.Count < options.TopListLimit)
                     refHeavy.Add(profile);
-                else if (category == ObjectShapeCategory.ValueHeavy && valHeavy.Count < TopListLimit)
+                else if (category == ObjectShapeCategory.ValueHeavy && valHeavy.Count < options.TopListLimit)
                     valHeavy.Add(profile);
             }
 

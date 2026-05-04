@@ -21,4 +21,11 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Update="config.sample.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -9,23 +10,22 @@ namespace DumpDetective.Analysis.Analyzers
 {
     internal sealed class MemoryAnalyzer : IAnalyzer
     {
-        private const ulong LohThresholdBytes = 85000;
-
         public string Name => "Memory Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
+            MemoryAnalysisOptions options = context.GetOption<MemoryAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            return Analyze(heap, cache, progress: null);
+            return Analyze(heap, cache, new MemoryAnalysisOptions(), progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, MemoryAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             progress?.Report(new(0, "building memory snapshot"));
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
@@ -35,12 +35,13 @@ namespace DumpDetective.Analysis.Analyzers
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
                 globalBuckets = heapIndex.GlobalSizeBuckets;
 
-            return BuildDomainResult(typeStats, globalBuckets);
+            return BuildDomainResult(typeStats, globalBuckets, options);
         }
 
         private static MemoryDomainResult BuildDomainResult(
             Dictionary<string, CachedTypeStatistics> typeStats,
-            long[]? globalSizeBuckets)
+            long[]? globalSizeBuckets,
+            MemoryAnalysisOptions options)
         {
             ulong totalMemory = 0;
             ulong totalLohMemory = 0;
@@ -96,12 +97,12 @@ namespace DumpDetective.Analysis.Analyzers
                 histogram = entries;
             }
 
-            int topN = Math.Min(20, bySize.Count);
+            int topN = Math.Min(options.TopBySizeCount, bySize.Count);
             var topBySize = new List<TypeSnapshot>(topN);
             for (int i = 0; i < topN; i++)
                 topBySize.Add(ToSnapshot(bySize[i]));
 
-            int topM = Math.Min(20, byCount.Count);
+            int topM = Math.Min(options.TopByCountCount, byCount.Count);
             var topByCount = new List<TypeSnapshot>(topM);
             for (int i = 0; i < topM; i++)
                 topByCount.Add(ToSnapshot(byCount[i]));
@@ -112,7 +113,7 @@ namespace DumpDetective.Analysis.Analyzers
                 lohPct,
                 totalObjects,
                 lohObjects,
-                LohThresholdBytes,
+                options.LohThresholdBytes,
                 typeStats.Count,
                 topBySize,
                 topByCount,

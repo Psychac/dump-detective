@@ -6,17 +6,13 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers;
 
 internal sealed class AsyncTaskAnalyzer : IAnalyzer
 {
-    private const int MaxTasksToScan        = 50_000;
-    private const int MaxContinuationDepth  = 20;
-    private const int TopTypesToShow        = 10;
-    private const int TopOrphanedToShow     = 20;
-
     // Task index record layout (20 bytes, little-endian):
     //   Address (8) | MT (8) | StateFlags (4)
     private const int TaskIndexMagic   = 0x58494B54; // "TKIX"
@@ -39,19 +35,21 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+        AsyncTaskAnalysisOptions options = context.GetOption<AsyncTaskAnalysisOptions>();
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
     }
 
     private static AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
+        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         // ── Step 1: Resolve task entries (TaskIndex.bin fast path or heap fallback) ──────
         progress?.Report(new(0, "loading task index"));
 
-        var taskEntries = LoadTaskEntries(heap, cache, progress, ct);
+        var taskEntries = LoadTaskEntries(heap, cache, progress, options, ct);
         int total = taskEntries.Count;
 
         if (total == 0)
@@ -73,7 +71,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 TopOrphanedTasks:      []);
         }
 
-        bool taskScanLimited = total >= MaxTasksToScan;
+        bool taskScanLimited = total >= options.MaxTasksToScan;
 
         // ── Step 2: Classify task states ─────────────────────────────────────────────────
         progress?.Report(new(0, "classifying task states", $"0 / {total:N0} tasks"));
@@ -161,7 +159,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                     if (isOrphan && !isCompleted && !isCanceled)
                     {
                         orphaned++;
-                        if (orphanedSnapshots.Count < TopOrphanedToShow)
+                        if (orphanedSnapshots.Count < options.TopOrphanedToShow)
                         {
                             string? resultType = ExtractResultType(typeName);
                             ulong size = taskObj.Size;
@@ -176,7 +174,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         var visited = new HashSet<ulong>(capacity: 8) { address };
                         ClrObject current = continuationObj;
 
-                                     while (depth < MaxContinuationDepth && current.IsValid && current.Address != 0
+                                     while (depth < options.MaxContinuationDepth && current.IsValid && current.Address != 0
                                               && visited.Add(current.Address))
                         {
                             // Track continuation type for top-N
@@ -217,9 +215,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             MaxContinuationDepth:  maxDepth,
             AvgContinuationDepth:  avgDepth,
             TaskScanLimited:       taskScanLimited,
-            TopPendingTaskTypes:   BuildTopN(pendingTypeCount),
-            TopFaultedTaskTypes:   BuildTopN(faultedTypeCount),
-            TopContinuationTypes:  BuildTopN(continuationCount),
+            TopPendingTaskTypes:   BuildTopN(pendingTypeCount, options.TopTypesToShow),
+            TopFaultedTaskTypes:   BuildTopN(faultedTypeCount, options.TopTypesToShow),
+            TopContinuationTypes:  BuildTopN(continuationCount, options.TopTypesToShow),
             TopOrphanedTasks:      orphanedSnapshots);
     }
 
@@ -234,6 +232,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
+        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         // Fast path: TaskIndex.bin exists
@@ -242,29 +241,29 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             // Memory-backed mode: InMemoryTaskCandidates was collected during Phase 1 at zero
             // extra scanning cost — use it directly to avoid an O(N_total) scan of InMemoryEntries.
             if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
-                return ConvertInMemoryTaskCandidates(inMemCandidates);
+                return ConvertInMemoryTaskCandidates(inMemCandidates, options.MaxTasksToScan);
 
             string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
             string taskIndexPath = Path.Combine(indexDir, DumpIndexPaths.TaskIndexFile);
 
             if (File.Exists(taskIndexPath))
             {
-                var entries = ReadTaskIndexFile(taskIndexPath, progress, ct);
+                var entries = ReadTaskIndexFile(taskIndexPath, progress, options.MaxTasksToScan, ct);
                 if (entries != null)
                     return entries;
             }
 
             // Fall back to typed scan via TypeAggregates flags
-            return ScanHeapIndexForTasks(heap, heapCache, heapIndex, progress, ct);
+            return ScanHeapIndexForTasks(heap, heapCache, heapIndex, progress, options.MaxTasksToScan, ct);
         }
 
         // No cache — full heap scan
-        return ScanRawHeapForTasks(heap, progress, ct);
+        return ScanRawHeapForTasks(heap, progress, options.MaxTasksToScan, ct);
     }
 
-    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates)
+    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates, int maxTasksToScan)
     {
-        int cap = Math.Min(candidates.Length, MaxTasksToScan);
+        int cap = Math.Min(candidates.Length, maxTasksToScan);
         var result = new List<(ulong, ulong, int)>(cap);
         for (int i = 0; i < cap; i++)
             result.Add((candidates[i].Addr, candidates[i].Mt, 0)); // StateFlags resolved in Phase 2
@@ -274,6 +273,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
     private static List<(ulong, ulong, int)>? ReadTaskIndexFile(
         string path,
         IProgress<AnalyzerProgressReport>? progress,
+        int maxTasksToScan,
         CancellationToken ct)
     {
         try
@@ -288,7 +288,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 return null;
 
             long recordCount = header.RecordCount;
-            int cap = (int)Math.Min(recordCount, MaxTasksToScan);
+            int cap = (int)Math.Min(recordCount, maxTasksToScan);
             var result = new List<(ulong, ulong, int)>(capacity: cap);
 
             byte[] buffer = ArrayPool<byte>.Shared.Rent(RecordSize * 4096);
@@ -311,7 +311,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         offset += RecordSize;
                         recordsRead++;
 
-                        if (recordsRead >= MaxTasksToScan)
+                        if (recordsRead >= maxTasksToScan)
                             goto done;
                     }
                 }
@@ -337,6 +337,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         HeapAnalysisCache heapCache,
         HeapIndexBuildResult heapIndex,
         IProgress<AnalyzerProgressReport>? progress,
+        int maxTasksToScan,
         CancellationToken ct)
     {
         // Build IsTaskType MT set from TypeAggregates flags (O(1) per lookup)
@@ -359,7 +360,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 continue;
 
             result.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
-            if (result.Count >= MaxTasksToScan)
+            if (result.Count >= maxTasksToScan)
                 break;
         }
 
@@ -370,6 +371,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
     private static List<(ulong, ulong, int)> ScanRawHeapForTasks(
         ClrHeap heap,
         IProgress<AnalyzerProgressReport>? progress,
+        int maxTasksToScan,
         CancellationToken ct)
     {
         var result = new List<(ulong, ulong, int)>(capacity: 512);
@@ -388,7 +390,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 continue;
 
             result.Add((obj.Address, obj.Type.MethodTable, 0));
-            if (result.Count >= MaxTasksToScan)
+            if (result.Count >= maxTasksToScan)
                 break;
         }
 
@@ -431,15 +433,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         dict[key] = count + 1;
     }
 
-    private static IReadOnlyList<NameCountEntry> BuildTopN(Dictionary<string, int> counts)
+    private static IReadOnlyList<NameCountEntry> BuildTopN(Dictionary<string, int> counts, int topTypesToShow)
     {
         if (counts.Count == 0) return [];
 
-        var result = new List<NameCountEntry>(capacity: Math.Min(counts.Count, TopTypesToShow));
+        var result = new List<NameCountEntry>(capacity: Math.Min(counts.Count, topTypesToShow));
         int threshold = 0;
 
         // Find top-N without LINQ — sort only if we must
-        if (counts.Count <= TopTypesToShow)
+        if (counts.Count <= topTypesToShow)
         {
             foreach (var kvp in counts)
                 result.Add(new(kvp.Key, kvp.Value));
@@ -450,7 +452,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         // Partial sort: track min in top-N bucket
         foreach (var kvp in counts)
         {
-            if (result.Count < TopTypesToShow)
+            if (result.Count < topTypesToShow)
             {
                 result.Add(new(kvp.Key, kvp.Value));
                 if (kvp.Value < threshold || result.Count == 1)

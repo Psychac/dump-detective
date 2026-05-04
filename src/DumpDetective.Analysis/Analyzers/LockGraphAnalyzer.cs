@@ -2,44 +2,44 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     public class LockGraphAnalyzer : IAnalyzer
     {
-        private const int MaxContestedLocksToShow = 15;
-
         public string Name => "Lock Graph Analysis";
         public string Category => "Locks";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress).Stamp(this));
+            LockGraphAnalysisOptions options = context.GetOption<LockGraphAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress, options).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, progress: null);
+            return Analyze(runtime, heap, progress: null, new LockGraphAnalysisOptions());
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, LockGraphAnalysisOptions options)
         {
             var graph = BuildLockGraph(runtime, heap, progress);
 
-            var topContestedTypes = new List<NameCountEntry>(MaxContestedLocksToShow);
+            var topContestedTypes = new List<NameCountEntry>(options.MaxContestedLocksToShow);
             var typeWaiters = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var cl in graph.ContestedLocks)
             {
                 typeWaiters.TryGetValue(cl.ObjectTypeName, out int existing);
                 typeWaiters[cl.ObjectTypeName] = existing + cl.WaitingThreadCount;
             }
-            foreach (var kvp in typeWaiters.OrderByDescending(k => k.Value).Take(MaxContestedLocksToShow))
+            foreach (var kvp in typeWaiters.OrderByDescending(k => k.Value).Take(options.MaxContestedLocksToShow))
                 topContestedTypes.Add(new NameCountEntry(kvp.Key, kvp.Value));
 
-            var contestedLockDetails = new List<ContestedLockSnapshot>(Math.Min(graph.ContestedLocks.Count, MaxContestedLocksToShow));
-            int contestedLimit = Math.Min(graph.ContestedLocks.Count, MaxContestedLocksToShow);
+            var contestedLockDetails = new List<ContestedLockSnapshot>(Math.Min(graph.ContestedLocks.Count, options.MaxContestedLocksToShow));
+            int contestedLimit = Math.Min(graph.ContestedLocks.Count, options.MaxContestedLocksToShow);
             for (int i = 0; i < contestedLimit; i++)
             {
                 var cl = graph.ContestedLocks[i];

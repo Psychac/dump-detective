@@ -1,6 +1,7 @@
 ﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -11,18 +12,16 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class ModuleAnalyzer : IAnalyzer
     {
-        private const int TopLoadedAssembliesCount = 30;
-
         public string Name => "Module Analysis";
         public string Category => "Modules";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var options = context.GetOption<DumpDetective.Core.Options.ModuleAnalysisOptions>();
+            ModuleAnalysisOptions options = context.GetOption<ModuleAnalysisOptions>();
             var modules = AnalyzeModules(context.Runtime);
             var heapStats = BuildModuleHeapStats(context.Cache, options);
-            return ValueTask.FromResult(BuildDomainResult(modules, heapStats).Stamp(this));
+            return ValueTask.FromResult(BuildDomainResult(modules, options, heapStats).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
@@ -34,11 +33,11 @@ namespace DumpDetective.Analysis.Analyzers
         {
             progress?.Report(new(0, "analyzing modules"));
             var modules = AnalyzeModules(runtime);
-            var domainResult = BuildDomainResult(modules, heapStats: null);
+            var domainResult = BuildDomainResult(modules, new ModuleAnalysisOptions(), heapStats: null);
             return domainResult;
         }
 
-        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis, (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)? heapStats)
+        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis, ModuleAnalysisOptions options, (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)? heapStats)
         {
             // Top modules by size — same selection logic as PrintLoadedAssemblies.
             var candidates = new List<ModuleInfo>(analysis.ModulesByName.Count);
@@ -55,8 +54,8 @@ namespace DumpDetective.Analysis.Analyzers
             }
             candidates.Sort((a, b) => b.Size.CompareTo(a.Size));
 
-            var topModules = new List<LoadedModuleSnapshot>(TopLoadedAssembliesCount);
-            for (int i = 0; i < candidates.Count && i < TopLoadedAssembliesCount; i++)
+            var topModules = new List<LoadedModuleSnapshot>(options.TopLoadedAssembliesCount);
+            for (int i = 0; i < candidates.Count && i < options.TopLoadedAssembliesCount; i++)
             {
                 var m = candidates[i];
                 topModules.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic));
@@ -85,7 +84,7 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         private static (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)?
-            BuildModuleHeapStats(IHeapAnalysisCache cache, DumpDetective.Core.Options.ModuleAnalysisOptions options)
+            BuildModuleHeapStats(IHeapAnalysisCache cache, ModuleAnalysisOptions options)
         {
             // Requires a prebuilt heap index with module registry data.
             if (cache is not IHeapIndexBuilder builder || !builder.TryGetHeapIndex(out var index))

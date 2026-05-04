@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -14,17 +15,11 @@ namespace DumpDetective.Analysis.Analyzers
     /// Population sweep (§21.1) uses <c>TypeAggregates</c> from Phase 1 filtered by
     /// <see cref="TypeAggregateFlags.IsFinalizableType"/> — no full heap re-scan.
     ///
-    /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c>, bounded to
-    /// <see cref="QueueScanLimit"/> objects, with bounded BFS for the top entries only.
+    /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c>, bounded by
+    /// configured options, with bounded BFS for the top entries only.
     /// </summary>
     public sealed class FinalizableObjectAnalyzer : IAnalyzer
     {
-        private const int TopTypeLimit     = 20;
-        private const int QueueScanLimit   = 500;
-        private const int TopQueueEntries  = 10;
-        private const int MaxBfsNodes      = 200;
-        private const int MaxBfsDepth      = 10;
-
         public string Name     => "Finalizable Object Analysis";
         public string Category => "Memory";
 
@@ -33,12 +28,14 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+            FinalizableObjectAnalysisOptions options = context.GetOption<FinalizableObjectAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            FinalizableObjectAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             // ── Step 1: Population from TypeAggregates (Phase 1 index) ────────
@@ -87,7 +84,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 2: Top finalizable types by Gen2Count ─────────────────────
             finalizableTypes.Sort(static (a, b) => b.Entry.Gen2Count.CompareTo(a.Entry.Gen2Count));
-            int typeLimit = Math.Min(finalizableTypes.Count, TopTypeLimit);
+            int typeLimit = Math.Min(finalizableTypes.Count, options.TopTypeLimit);
             var topTypesByGen2 = new List<TypeGenerationProfile>(typeLimit);
             for (int i = 0; i < typeLimit; i++)
             {
@@ -104,20 +101,20 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 3: Finalizer queue analysis ─────────────────────────────
             int queueCount = 0;
-            var queueSamples = new List<(ulong Addr, string TypeName, ulong ShallowSize)>(Math.Min(QueueScanLimit, 128));
+            var queueSamples = new List<(ulong Addr, string TypeName, ulong ShallowSize)>(Math.Min(options.QueueScanLimit, 128));
 
             foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 queueCount++;
-                if (queueSamples.Count < QueueScanLimit && obj.IsValid && obj.Type is not null)
+                if (queueSamples.Count < options.QueueScanLimit && obj.IsValid && obj.Type is not null)
                     queueSamples.Add((obj.Address, obj.Type.Name ?? "<unknown>", obj.Size));
             }
 
             // Sort by shallow size descending, analyse top N
             queueSamples.Sort(static (a, b) => b.ShallowSize.CompareTo(a.ShallowSize));
 
-            int entryLimit  = Math.Min(queueSamples.Count, TopQueueEntries);
+            int entryLimit  = Math.Min(queueSamples.Count, options.TopQueueEntries);
             var topEntries  = new List<FinalizerQueueEntry>(entryLimit);
             ulong totalQueueRetained = 0;
             bool potentialResurrection = false;
@@ -147,7 +144,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (isDisposable && disposedFound && !disposedValue)
                     potentialResurrection = true;
 
-                ulong retained = BfsEstimateRetained(heap, addr, MaxBfsNodes, MaxBfsDepth);
+                ulong retained = BfsEstimateRetained(heap, addr, options.MaxBfsNodes, options.MaxBfsDepth);
                 totalQueueRetained += retained;
 
                 topEntries.Add(new FinalizerQueueEntry(

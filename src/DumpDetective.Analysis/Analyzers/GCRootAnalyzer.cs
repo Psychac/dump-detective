@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -22,11 +23,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class GCRootAnalyzer : IAnalyzer
     {
-        private const int TopSeverityLimit  = 20;
-        private const int PathSearchTopN    = 25;
-        private const int MaxBfsNodes       = 500;
-        private const int MaxBfsDepth       = 20;
-
         // RootIndex.bin binary layout constants
         private const int  RootRecordSize   = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
         private const int  RootHeaderMagic  = 0x58495452; // "RTIX"
@@ -39,12 +35,14 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+            GCRootAnalysisOptions options = context.GetOption<GCRootAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            GCRootAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             if (cache is not HeapAnalysisCache heapCache
@@ -90,7 +88,7 @@ namespace DumpDetective.Analysis.Analyzers
             byKind.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
             // ── Step 4: Build per-root findings and score ──────────────────────
-            var findings = new List<RootFinding>(Math.Min(roots.Count, TopSeverityLimit * 4));
+            var findings = new List<RootFinding>(Math.Min(roots.Count, options.TopSeverityLimit * 4));
 
             for (int i = 0; i < roots.Count; i++)
             {
@@ -114,15 +112,15 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             findings.Sort(static (a, b) => b.SeverityScore.CompareTo(a.SeverityScore));
-            int topCount = Math.Min(findings.Count, TopSeverityLimit);
-            var topFindings = findings.Count <= TopSeverityLimit
+            int topCount = Math.Min(findings.Count, options.TopSeverityLimit);
+            var topFindings = findings.Count <= options.TopSeverityLimit
                 ? (IReadOnlyList<RootFinding>)findings
                 : findings.GetRange(0, topCount);
 
             // ── Step 5: BFS path tracing for top-N roots ──────────────────────
             int pathCappedCount = 0;
-            var pathFindings    = new List<RootPathFinding>(Math.Min(findings.Count, PathSearchTopN));
-            int pathN           = Math.Min(findings.Count, PathSearchTopN);
+            var pathFindings    = new List<RootPathFinding>(Math.Min(findings.Count, options.PathSearchTopN));
+            int pathN           = Math.Min(findings.Count, options.PathSearchTopN);
 
             for (int i = 0; i < pathN; i++)
             {
@@ -130,7 +128,7 @@ namespace DumpDetective.Analysis.Analyzers
                 var f = findings[i];
 
                 bool wasCapped = false;
-                var pathTypes = BfsForwardPath(heap, f.TargetAddress, MaxBfsNodes, MaxBfsDepth, out wasCapped);
+                var pathTypes = BfsForwardPath(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out wasCapped);
 
                 if (wasCapped)
                     pathCappedCount++;

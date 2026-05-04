@@ -1,8 +1,8 @@
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
-using DumpDetective.Analysis.Analyzers;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 

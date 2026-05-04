@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -24,13 +25,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class ArrayAnalyzer : IAnalyzer
     {
-        private const int TopTypeLimit        = 20;
-        private const int TopLargeLimit       = 20;
-        private const int TopSparseLimit      = 10;
-        private const int SparseSampleLimit   = 500;
-        private const int SparseSampleMinLength = 10_000;
-        private const int SampleStride        = 100;
-
         public string Name     => "Array Analysis";
         public string Category => "Memory";
 
@@ -39,14 +33,16 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ArrayAnalysisOptions options = context.GetOption<ArrayAnalysisOptions>();
             return ValueTask.FromResult(
-                Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+                Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
             IProgress<AnalyzerProgressReport>? progress,
+            ArrayAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
@@ -147,7 +143,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
-            int typeListLimit = Math.Min(typeList.Count, TopTypeLimit);
+            int typeListLimit = Math.Min(typeList.Count, options.TopTypeLimit);
             var topArrayTypes = new List<ArrayTypeProfile>(typeListLimit);
             for (int i = 0; i < typeListLimit; i++)
             {
@@ -159,7 +155,7 @@ namespace DumpDetective.Analysis.Analyzers
             // Try LargeObjectIndex.bin (disk mode) first; fall back to TypeAggregates LohSize
             progress?.Report(new(0, "analysing large arrays"));
 
-            var topLargeArrays = new List<LargeArrayEntry>(TopLargeLimit);
+            var topLargeArrays = new List<LargeArrayEntry>(options.TopLargeLimit);
 
             if (heapIndex is not null
                 && heapIndex.StorageKind == HeapIndexStorageKind.Disk
@@ -168,7 +164,7 @@ namespace DumpDetective.Analysis.Analyzers
                 string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
                 string largeObjPath = Path.Combine(indexDir, DumpIndexPaths.LargeObjectIndexFile);
                 if (File.Exists(largeObjPath))
-                    ReadLargeArraysFromIndex(heap, largeObjPath, arrayMtSet, topLargeArrays, cancellationToken);
+                    ReadLargeArraysFromIndex(heap, largeObjPath, arrayMtSet, topLargeArrays, options.TopLargeLimit, cancellationToken);
             }
 
             // If index wasn't available, use SampleAddress from TypeAggregates for top LOH array types
@@ -191,7 +187,7 @@ namespace DumpDetective.Analysis.Analyzers
                         Rank:            arr.Rank,
                         Size:            obj.Size));
 
-                    if (topLargeArrays.Count >= TopLargeLimit) break;
+                    if (topLargeArrays.Count >= options.TopLargeLimit) break;
                 }
             }
 
@@ -203,12 +199,12 @@ namespace DumpDetective.Analysis.Analyzers
 
             sparseCandidates.Sort(static (a, b) => b.TotalSize.CompareTo(a.TotalSize));
 
-            bool scanLimited = sparseCandidates.Count > SparseSampleLimit;
-            int candidateLimit = Math.Min(sparseCandidates.Count, SparseSampleLimit);
+            bool scanLimited = sparseCandidates.Count > options.SparseSampleLimit;
+            int candidateLimit = Math.Min(sparseCandidates.Count, options.SparseSampleLimit);
 
-            var topSparseArrays = new List<SparseArrayEntry>(TopSparseLimit);
+            var topSparseArrays = new List<SparseArrayEntry>(options.TopSparseLimit);
 
-            for (int ci = 0; ci < candidateLimit && topSparseArrays.Count < TopSparseLimit; ci++)
+            for (int ci = 0; ci < candidateLimit && topSparseArrays.Count < options.TopSparseLimit; ci++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -218,13 +214,13 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!obj.IsValid || obj.Type is null) continue;
 
                 ClrArray arr = obj.AsArray();
-                if (arr.Length < SparseSampleMinLength) continue;
+                if (arr.Length < options.SparseSampleMinLength) continue;
                 // Rank was already confirmed == 1 at collection time, but re-check for safety
                 if (arr.Rank > 1) continue;
 
                 int nullCount = 0;
                 int sampleLen = 0;
-                for (int i = 0; i < arr.Length; i += SampleStride)
+                for (int i = 0; i < arr.Length; i += options.SampleStride)
                 {
                     ClrObject elem = arr.GetObjectValue(i);
                     if (!elem.IsValid || elem.Address == 0) nullCount++;
@@ -269,6 +265,7 @@ namespace DumpDetective.Analysis.Analyzers
             string filePath,
             HashSet<ulong> arrayMtSet,
             List<LargeArrayEntry> result,
+            int topLargeLimit,
             CancellationToken cancellationToken)
         {
             const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
@@ -279,7 +276,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return;
 
             Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < header.RecordCount && result.Count < TopLargeLimit; i++)
+            for (long i = 0; i < header.RecordCount && result.Count < topLargeLimit; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);

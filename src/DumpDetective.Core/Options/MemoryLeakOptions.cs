@@ -2,6 +2,9 @@ namespace DumpDetective.Core.Options;
 
 public sealed class MemoryLeakOptions
 {
+    public int TopFinalizerTypesToShow { get; init; } = 10;
+    public int TopHighlyReferencedObjectsToShow { get; init; } = 15;
+
     public int HighReferenceThreshold { get; init; } = 50;
     public int MaxDuplicateStringLength { get; init; } = 500;
     public int MinDuplicateStringCount { get; init; } = 10;

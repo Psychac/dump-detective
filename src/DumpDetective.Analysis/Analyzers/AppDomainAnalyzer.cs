@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -19,12 +20,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AppDomainAnalyzer : IAnalyzer
     {
-        /// <summary>Maximum modules per domain whose types are enumerated (§18.3).</summary>
-        private const int ModuleEnumerationLimit = 50;
-
-        /// <summary>Maximum entries in <see cref="AppDomainDomainResult.TopModulesByTypeCount"/>.</summary>
-        private const int TopModuleTypeCountLimit = 20;
-
         public string Name     => "AppDomain Analysis";
         public string Category => "Modules";
 
@@ -33,13 +28,15 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            AppDomainAnalysisOptions options = context.GetOption<AppDomainAnalysisOptions>();
             return ValueTask.FromResult(
-                Analyze(context.Runtime, context.Cache, cancellationToken).Stamp(this));
+                Analyze(context.Runtime, context.Cache, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrRuntime runtime,
             IHeapAnalysisCache? cache,
+            AppDomainAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             // Resolve TypeAggregates once; may be null when no index was built.
@@ -70,14 +67,14 @@ namespace DumpDetective.Analysis.Analyzers
                 // Sort modules by size descending; only enumerate types on the top N.
                 // For small module counts (≤ limit) the sort is a no-op in practice.
                 ClrModule[]? sortedModules = null;
-                if (modules.Count > ModuleEnumerationLimit)
+                if (modules.Count > options.ModuleEnumerationLimit)
                 {
                     sortedModules = new ClrModule[modules.Count];
                     for (int i = 0; i < modules.Count; i++) sortedModules[i] = modules[i];
                     Array.Sort(sortedModules, static (a, b) => b.Size.CompareTo(a.Size));
                 }
 
-                int enumerationBound = Math.Min(modules.Count, ModuleEnumerationLimit);
+                int enumerationBound = Math.Min(modules.Count, options.ModuleEnumerationLimit);
 
                 for (int mi = 0; mi < enumerationBound; mi++)
                 {
@@ -140,7 +137,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             moduleEntries.Sort(static (a, b) => b.TypeCount.CompareTo(a.TypeCount));
 
-            int topLimit = Math.Min(moduleEntries.Count, TopModuleTypeCountLimit);
+            int topLimit = Math.Min(moduleEntries.Count, options.TopModuleTypeCountLimit);
             var topModules = new List<ModuleTypeCountEntry>(topLimit);
             for (int i = 0; i < topLimit; i++) topModules.Add(moduleEntries[i]);
 

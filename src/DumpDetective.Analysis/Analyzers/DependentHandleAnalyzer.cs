@@ -4,28 +4,28 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using System.Reflection;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class DependentHandleAnalyzer : IAnalyzer
     {
-        private const int TopCount = 15;
-
         public string Name => "Dependent Handle Analysis";
         public string Category => "Handles";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress).Stamp(this));
+            DependentHandleAnalysisOptions options = context.GetOption<DependentHandleAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null)
         {
-            return Analyze(runtime, heap, progress: null);
+            return Analyze(runtime, heap, new DependentHandleAnalysisOptions(), progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, DependentHandleAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             heap ??= runtime.Heap;
 
@@ -92,9 +92,9 @@ namespace DumpDetective.Analysis.Analyzers
                     resolvedEdgeCount,
                     unresolvedTargetCount,
                     unresolvedPct,
-                    ToTopEntries(sourceTypeCounts, TopCount),
-                    ToTopEntries(targetTypeCounts, TopCount),
-                    ToTopEntries(sourceTargetPairCounts, TopCount));
+                    ToTopEntries(sourceTypeCounts, options.TopCount),
+                    ToTopEntries(targetTypeCounts, options.TopCount),
+                    ToTopEntries(sourceTargetPairCounts, options.TopCount));
         }
 
         private static InsightFinding CreateFinding(int dependentHandleCount, int resolvedEdgeCount, int unresolvedTargetCount)

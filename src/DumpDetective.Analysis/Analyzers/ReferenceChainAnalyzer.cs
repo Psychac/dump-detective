@@ -10,14 +10,6 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class ReferenceChainAnalyzer : IAnalyzer
     {
-        private const int DefaultTopTypeCount = 10;
-        private const int MaxPathSearchObjects = 5000;
-        private const int DefaultMaxPathDepth = 25;
-
-        // Smart pruning defaults (configurable via ReferenceChainOptions)
-        // Fast-mode only: depth cap applied per BFS node during forward traversal.
-        private const int FastModeMaxDepth = 25;
-
         private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size);
 
         public string Name => "Reference Chain Analysis";
@@ -39,10 +31,10 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            int topCount = options.TopCount > 0 ? options.TopCount : DefaultTopTypeCount;
+            int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
             int maxPathSearchObjects = options.MaxPathSearchObjects > 0
                 ? options.MaxPathSearchObjects
-                : MaxPathSearchObjects;
+                : options.FallbackMaxPathSearchObjects;
             bool skipArrays = options.SkipArrays;
             int largeFanoutThreshold = options.LargeFanoutThreshold > 0 ? options.LargeFanoutThreshold : 100;
             var knownLeakPatterns = options.KnownLeakTypePatterns ?? Array.Empty<string>();
@@ -193,7 +185,7 @@ namespace DumpDetective.Analysis.Analyzers
             path = null;
             searchTruncated = false;
 
-            int maxPathSearchObjects = options.MaxPathSearchObjects > 0 ? options.MaxPathSearchObjects : MaxPathSearchObjects;
+            int maxPathSearchObjects = options.MaxPathSearchObjects > 0 ? options.MaxPathSearchObjects : options.FallbackMaxPathSearchObjects;
 
             // Preallocate once and reuse across all root iterations.
             var visited = new HashSet<ulong>(capacity: 1024);
@@ -205,7 +197,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 scanCounter.Tick();
                 if (TryBuildPath(heap, rootAddress, objectAddress, maxPathSearchObjects, visited, previous, queue,
-                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, telemetry,
+                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, options.MaxPathDepth, telemetry,
                     out List<ulong>? addresses, out bool pathSearchLimited))
                 {
                     scanCounter.Complete();
@@ -330,6 +322,7 @@ namespace DumpDetective.Analysis.Analyzers
             bool skipArrays,
             int largeFanoutThreshold,
             IReadOnlyList<string> knownLeakPatterns,
+            int maxPathDepth,
             TelemetryCounters telemetry,
             out List<ulong>? path,
             out bool searchLimitReached)
@@ -358,7 +351,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 (ulong current, int depth) = queue.Dequeue();
 
-                if (depth >= DefaultMaxPathDepth)
+                if (depth >= maxPathDepth)
                     continue;
 
                 foreach (ulong refAddress in EnumerateReferenceAddresses(heap, current, skipArrays, largeFanoutThreshold, knownLeakPatterns, telemetry))

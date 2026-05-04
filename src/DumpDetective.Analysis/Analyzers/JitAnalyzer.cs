@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -18,11 +19,6 @@ namespace DumpDetective.Analysis.Analyzers;
 /// </summary>
 public sealed class JitAnalyzer : IAnalyzer
 {
-    private const int MaxFramesPerThread  = 200;
-    private const int TopMethodsLimit     = 20;
-    private const int TopFrameTypesLimit  = 20;
-    private const uint LargeMethodThreshold = 64 * 1024; // 64 KB (hot + cold)
-
     public string Name     => "JIT Analysis";
     public string Category => "Performance";
 
@@ -31,10 +27,11 @@ public sealed class JitAnalyzer : IAnalyzer
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Runtime, cancellationToken).Stamp(this));
+        JitAnalysisOptions options = context.GetOption<JitAnalysisOptions>();
+        return ValueTask.FromResult(Analyze(context.Runtime, options, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrRuntime runtime, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(ClrRuntime runtime, JitAnalysisOptions options, CancellationToken cancellationToken)
     {
         // ── §19.1  JIT Code Heap Enumeration ────────────────────────────────
         ulong totalJitHeapBytes = 0;
@@ -74,7 +71,7 @@ public sealed class JitAnalyzer : IAnalyzer
             int frameIdx = 0;
             foreach (ClrStackFrame frame in thread.EnumerateStackTrace())
             {
-                if (frameIdx++ >= MaxFramesPerThread) break;
+                if (frameIdx++ >= options.MaxFramesPerThread) break;
 
                 if (frame.Kind == ClrStackFrameKind.ManagedMethod)
                 {
@@ -115,7 +112,7 @@ public sealed class JitAnalyzer : IAnalyzer
                         uint hotSize  = hcr.HotSize;
                         uint coldSize = hcr.ColdSize;
 
-                        if (hotSize + coldSize >= LargeMethodThreshold)
+                        if (hotSize + coldSize >= options.LargeMethodThresholdBytes)
                         {
                             methodCandidates[nativeCode] = new JitMethodEntry(
                                 method.Signature ?? typeName + "." + (method.Name ?? "?"),
@@ -134,8 +131,8 @@ public sealed class JitAnalyzer : IAnalyzer
         }
 
         // ── Build result lists ───────────────────────────────────────────────
-        var topMethods = BuildTopMethods(methodCandidates, TopMethodsLimit);
-        var topFrameTypes = BuildTopFrameTypes(frameTypeCounts, TopFrameTypesLimit);
+        var topMethods = BuildTopMethods(methodCandidates, options.TopMethodsLimit);
+        var topFrameTypes = BuildTopFrameTypes(frameTypeCounts, options.TopFrameTypesLimit);
 
         return new JitDomainResult(
             TotalJitHeapBytes:        totalJitHeapBytes,

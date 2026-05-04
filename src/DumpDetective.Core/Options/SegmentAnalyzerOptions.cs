@@ -1,8 +1,7 @@
-namespace DumpDetective.Analysis.Analyzers;
+namespace DumpDetective.Core.Options;
 
 /// <summary>
-/// Holds configurable constants for <see cref="SegmentAnalyzer"/>.
-/// Extracted from magic numbers to make tuning and testing easier.
+/// Holds configurable constants for segment analysis and reporting.
 /// </summary>
 public static class SegmentAnalyzerOptions
 {

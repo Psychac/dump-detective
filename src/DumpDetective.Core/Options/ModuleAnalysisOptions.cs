@@ -2,6 +2,9 @@ namespace DumpDetective.Core.Options;
 
 public sealed class ModuleAnalysisOptions
 {
+    // How many largest loaded assemblies to include in domain snapshots
+    public int TopLoadedAssembliesCount { get; init; } = 30;
+
     // How many top modules by heap memory to return
     public int TopModulesByHeapCount { get; init; } = 20;
 

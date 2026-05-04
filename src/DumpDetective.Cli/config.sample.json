@@ -1,0 +1,42 @@
+{
+  "Profile": "Balanced",
+  "Report": {
+    "Format": "Html",
+    "Audience": "All"
+  },
+  "Diagnostics": {
+    "EnableMemory": false,
+    "EnablePerformance": false,
+    "ContinueOnAnalyzerFailure": true
+  },
+  "Indexing": {
+    "Mode": "auto"
+  },
+  "Analyzers": {
+    "Crash": {
+      "Profile": "Full",
+      "TopDetailedExceptionInstances": 40,
+      "MaxOriginalStackFramesToPrint": 40
+    },
+    "Collection": {
+      "Profile": "Balanced",
+      "TopWastefulCollectionsToShow": 50
+    },
+    "String": {
+      "Profile": "Fast",
+      "MaxUniqueStringTracking": 50000,
+      "TopDuplicatesToShow": 10
+    },
+    "GCRoot": {
+      "Profile": "Balanced",
+      "PathSearchTopN": 25,
+      "MaxBfsNodes": 500,
+      "MaxBfsDepth": 20
+    },
+    "Module": {
+      "Profile": "Balanced",
+      "TopLoadedAssembliesCount": 30,
+      "TopModulesByHeapCount": 20
+    }
+  }
+}

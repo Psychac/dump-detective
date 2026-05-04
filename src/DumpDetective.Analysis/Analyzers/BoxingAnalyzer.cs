@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -22,11 +23,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class BoxingAnalyzer : IAnalyzer
     {
-        private const int TypeScanCap         = 10_000;
-        private const int TopBoxedTypeLimit   = 20;
-        private const int TopPaddingLimit     = 20;
-        private const int OversizedThreshold  = 64; // bytes — larger than 8 pointer-sizes
-
         public string Name     => "Boxing Analysis";
         public string Category => "Memory";
 
@@ -35,12 +31,14 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+            BoxingAnalysisOptions options = context.GetOption<BoxingAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            BoxingAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
@@ -75,7 +73,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++scanned > TypeScanCap) { scanCapped = true; break; }
+                if (++scanned > options.TypeScanCap) { scanCapped = true; break; }
 
                 TypeAggregateIndexEntry entry = kv.Value;
 
@@ -108,7 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 // Oversized value types — StaticSize reflects the value layout size
-                if (clrType.StaticSize > OversizedThreshold)
+                if (clrType.StaticSize > options.OversizedThresholdBytes)
                     oversizedCount += count;
 
                 if (boxedByTypeName.TryGetValue(typeName, out var existing))
@@ -134,7 +132,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
-            int topLimit = Math.Min(typeList.Count, TopBoxedTypeLimit);
+            int topLimit = Math.Min(typeList.Count, options.TopBoxedTypeLimit);
             var topBoxedTypes = new List<BoxedTypeEntry>(topLimit);
             for (int i = 0; i < topLimit; i++)
             {
@@ -150,7 +148,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return wastedB.CompareTo(wastedA);
             });
 
-            int padLimit = Math.Min(paddingCandidates.Count, TopPaddingLimit);
+            int padLimit = Math.Min(paddingCandidates.Count, options.TopPaddingLimit);
             var topPaddingWaste = new List<StructPaddingEntry>(padLimit);
             for (int i = 0; i < padLimit; i++)
             {

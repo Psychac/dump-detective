@@ -1,5 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
@@ -8,23 +9,22 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class GCHandleAnalyzer : IAnalyzer
     {
-        private const int TopTypeCount = 15;
-
         public string Name => "GC Handle Analysis";
         public string Category => "Handles";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
+            GCHandleAnalysisOptions options = context.GetOption<GCHandleAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
         {
-            return Analyze(runtime, heap, cache, progress: null);
+            return Analyze(runtime, heap, cache, new GCHandleAnalysisOptions(), progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IHeapAnalysisCache? cache, GCHandleAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             var scanCounter = new ObjectScanCounter("scanning GC handles", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -121,11 +121,11 @@ namespace DumpDetective.Analysis.Analyzers
                     strongLikeHandles,
                     weakLikeHandles,
                     pinnedHandleTargets,
-                    ToTopEntries(byKind, TopTypeCount),
-                    ToTopEntries(allTargetTypes, TopTypeCount),
-                    ToTopEntries(pinnedTypes, TopTypeCount),
+                    ToTopEntries(byKind, options.TopTypeCount),
+                    ToTopEntries(allTargetTypes, options.TopTypeCount),
+                    ToTopEntries(pinnedTypes, options.TopTypeCount),
                     totalPinnedRetainedBytes,
-                    ToTopByteEntries(pinnedBytesByType, TopTypeCount));
+                    ToTopByteEntries(pinnedBytesByType, options.TopTypeCount));
         }
 
             public void Dispose() { }

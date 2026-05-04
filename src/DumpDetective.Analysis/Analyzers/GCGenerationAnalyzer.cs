@@ -5,39 +5,37 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class GCGenerationAnalyzer : IAnalyzer
     {
-        private const ulong LohThresholdBytes = 85_000;
-        private const int TopLohTypeLimit = 15;
-        private const int TopGenProfileLimit = 20;
-
         public string Name => "GC Generation Analysis";
         public string Category => "GC";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
+            GCGenerationAnalysisOptions options = context.GetOption<GCGenerationAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            return Analyze(heap, cache, progress: null);
+            return Analyze(heap, cache, new GCGenerationAnalysisOptions(), progress: null);
         }
 
-        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, GCGenerationAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             progress?.Report(new(0, "reading type aggregates"));
 
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIdx))
-                return BuildFromIndex(heap, heapCache, heapIdx, progress);
+                return BuildFromIndex(heap, heapCache, heapIdx, options, progress);
 
             // No heap index available — fall back to type statistics (gen split will be Gen2-centric).
             progress?.Report(new(0, "reading type statistics (fallback)"));
-            return BuildFromTypeStatistics(heap, cache.GetOrBuildTypeStatistics(heap));
+            return BuildFromTypeStatistics(heap, cache.GetOrBuildTypeStatistics(heap), options);
         }
 
         // ── Fast path: TypeAggregates ──────────────────────────────────────────────
@@ -46,6 +44,7 @@ namespace DumpDetective.Analysis.Analyzers
             ClrHeap heap,
             HeapAnalysisCache heapCache,
             HeapIndexBuildResult heapIdx,
+            GCGenerationAnalysisOptions options,
             IProgress<AnalyzerProgressReport>? progress)
         {
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = heapIdx.TypeAggregates;
@@ -85,7 +84,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Top LOH types — resolve names only for top N.
             lohCandidates.Sort(static (a, b) => b.Entry.LohSize.CompareTo(a.Entry.LohSize));
-            int lohTake = Math.Min(TopLohTypeLimit, lohCandidates.Count);
+            int lohTake = Math.Min(options.TopLohTypeLimit, lohCandidates.Count);
             var topLohTypes = new List<TypeSnapshot>(lohTake);
             for (int i = 0; i < lohTake; i++)
             {
@@ -99,7 +98,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (accountedGen > 0)
             {
                 genCandidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
-                int genTake = Math.Min(TopGenProfileLimit, genCandidates.Count);
+                int genTake = Math.Min(options.TopGenProfileLimit, genCandidates.Count);
                 profiles = new List<TypeGenerationProfile>(genTake);
                 for (int i = 0; i < genTake; i++)
                 {
@@ -131,7 +130,8 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static GCGenerationDomainResult BuildFromTypeStatistics(
             ClrHeap heap,
-            Dictionary<string, CachedTypeStatistics> typeStats)
+            Dictionary<string, CachedTypeStatistics> typeStats,
+            GCGenerationAnalysisOptions options)
         {
             ulong lohBytes = 0;
             int totalObjects = 0, lohObjects = 0, gen2Objects = 0;
@@ -157,7 +157,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (CachedTypeStatistics stat in typeStats.Values)
                 if (stat.LohCount > 0) lohList.Add(stat);
             lohList.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
-            int lohTake = Math.Min(TopLohTypeLimit, lohList.Count);
+            int lohTake = Math.Min(options.TopLohTypeLimit, lohList.Count);
             var topLohTypes = new List<TypeSnapshot>(lohTake);
             for (int i = 0; i < lohTake; i++)
             {

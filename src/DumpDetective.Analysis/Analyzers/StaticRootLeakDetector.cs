@@ -1,6 +1,7 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 
@@ -8,13 +9,6 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class StaticRootLeakDetector : IAnalyzer
     {
-        private const int MaxRootsToReport = 15;
-        private const int TopRetainedTypesToReport = 5;
-        private const int SampleRetainedObjectsToInspect = 100;
-        private const ulong SignificantMemoryThresholdBytes = 1024 * 1024;
-        private const int SignificantObjectCountThreshold = 100;
-        private const int MaxRetainedObjectsToScan = 10000;
-
         private readonly record struct ObjectMetadata(bool IsValid, string TypeName, ulong Size, ulong MethodTable);
 
         public string Name => "Static Root Leak Detection";
@@ -23,24 +17,25 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress).Stamp(this));
+            StaticRootLeakAnalysisOptions options = context.GetOption<StaticRootLeakAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            return Analyze(heap, cache, progress: null);
+            return Analyze(heap, cache, new StaticRootLeakAnalysisOptions(), progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, progress);
+            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, options, progress);
             var significantStaticRoots = allStaticRootAnalysis
-                .Where(IsSignificant)
+                .Where(a => IsSignificant(a, options))
                 .ToList();
 
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
-                .Take(MaxRootsToReport)
+                .Take(options.MaxRootsToReport)
                 .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
                 .ToList();
 
@@ -56,10 +51,10 @@ namespace DumpDetective.Analysis.Analyzers
             return new StaticRootDomainResult(significantStaticRoots.Count, totalImpact, topRoots);
         }
 
-        private static bool IsSignificant(StaticRootAnalysis analysis)
+        private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
         {
-            return analysis.TotalMemoryImpact > SignificantMemoryThresholdBytes
-                || analysis.ObjectsKeptAlive > SignificantObjectCountThreshold;
+            return analysis.TotalMemoryImpact > options.SignificantMemoryThresholdBytes
+                || analysis.ObjectsKeptAlive > options.SignificantObjectCountThreshold;
         }
 
         private static InsightFinding CreateFinding(List<StaticRootAnalysis> staticRootAnalysis)
@@ -86,7 +81,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "retained-bytes");
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
@@ -114,7 +109,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!rootMetadata.IsValid)
                     continue;
 
-                var retainedObjects = cache.GetRetainedObjects(heap, rootAddress, MaxRetainedObjectsToScan);
+                var retainedObjects = cache.GetRetainedObjects(heap, rootAddress, options.MaxRetainedObjectsToScan);
 
                 var typeStats = new Dictionary<string, RetainedTypeInfo>();
                 var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
@@ -141,7 +136,7 @@ namespace DumpDetective.Analysis.Analyzers
                     info.Count++;
                     info.TotalSize += retainedMetadata.Size;
 
-                    if (sampledCount < SampleRetainedObjectsToInspect)
+                    if (sampledCount < options.SampleRetainedObjectsToInspect)
                     {
                         if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
                         {
@@ -165,7 +160,7 @@ namespace DumpDetective.Analysis.Analyzers
                     DirectObjectSize = rootMetadata.Size,
                     TotalMemoryImpact = totalSize,
                     ObjectsKeptAlive = retainedObjects.Count,
-                    TopRetainedTypes = GetTopRetainedTypes(typeStats),
+                    TopRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport),
                     ContainsCollections = containsCollections,
                     ContainsEventHandlers = containsEventHandlers
                 };
@@ -176,13 +171,13 @@ namespace DumpDetective.Analysis.Analyzers
             return results;
         }
 
-        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)
+        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats, int topRetainedTypesToReport)
         {
             // Manual sorting - no LINQ allocations
             var result = new List<RetainedTypeInfo>(typeStats.Values);
             result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-            if (result.Count > TopRetainedTypesToReport)
-                result.RemoveRange(TopRetainedTypesToReport, result.Count - TopRetainedTypesToReport);
+            if (result.Count > topRetainedTypesToReport)
+                result.RemoveRange(topRetainedTypesToReport, result.Count - topRetainedTypesToReport);
 
             return result;
         }

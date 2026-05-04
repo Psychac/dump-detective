@@ -13,9 +13,6 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class MemoryLeakAnalyzer : IAnalyzer
     {
-        private const int TopFinalizerTypesToShow = 10;
-        private const int TopHighlyReferencedObjectsToShow = 15;
-
         public string Name => "Memory Leak Analysis";
         public string Category => "Memory";
 
@@ -35,7 +32,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap, progress);
+            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap, options, progress);
             LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, progress);
 
             return new MemoryLeakDomainResult(
@@ -47,7 +44,7 @@ namespace DumpDetective.Analysis.Analyzers
                     signals.ObjectScanCapped);
         }
 
-        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
+        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             int finalizerCount = 0;
             var topTypes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -69,7 +66,7 @@ namespace DumpDetective.Analysis.Analyzers
                 finalizerCount,
                 topTypes
                     .OrderByDescending(k => k.Value)
-                    .Take(TopFinalizerTypesToShow)
+                    .Take(options.TopFinalizerTypesToShow)
                     .Select(k => new NameCountEntry(k.Key, k.Value))
                     .ToList());
         }
@@ -357,7 +354,7 @@ namespace DumpDetective.Analysis.Analyzers
                 var topAddresses = referenceCount
                     .Where(kvp => kvp.Value > threshold)
                     .OrderByDescending(kvp => kvp.Value)
-                    .Take(TopHighlyReferencedObjectsToShow)
+                    .Take(options.TopHighlyReferencedObjectsToShow)
                     .ToList();
 
                 if (topAddresses.Count == 0)
@@ -377,7 +374,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Use a fixed-size min-heap (PriorityQueue) to track top K addresses by incoming reference count for large inputs.
-            var pq = new PriorityQueue<KeyValuePair<ulong, int>, int>(TopHighlyReferencedObjectsToShow + 1);
+            var pq = new PriorityQueue<KeyValuePair<ulong, int>, int>(options.TopHighlyReferencedObjectsToShow + 1);
 
             foreach (KeyValuePair<ulong, int> kvp in referenceCount)
             {
@@ -385,7 +382,7 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 pq.Enqueue(kvp, kvp.Value);
-                if (pq.Count > TopHighlyReferencedObjectsToShow)
+                if (pq.Count > options.TopHighlyReferencedObjectsToShow)
                     pq.Dequeue(); // evict smallest
             }
 

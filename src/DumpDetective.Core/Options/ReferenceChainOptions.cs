@@ -25,7 +25,12 @@ public enum ReferenceChainSearchMode
 
 public sealed class ReferenceChainOptions
 {
+    public int FallbackTopCount { get; init; } = 10;
     public int TopCount { get; init; } = 5;
+
+    public int MaxPathDepth { get; init; } = 25;
+    public int FastModeMaxDepth { get; init; } = 25;
+    public int FallbackMaxPathSearchObjects { get; init; } = 5_000;
 
     /// <summary>
     /// Search strategy mode. Defaults to <see cref="ReferenceChainSearchMode.Balanced"/>.

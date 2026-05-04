@@ -2,30 +2,29 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     public class ThreadStackClusterAnalyzer : IAnalyzer
     {
-        private const int MaxFramesPerSignature = 6;
-        private const int MaxThreadIdsPerCluster = 8;
-
         public string Name => "Thread Stack Signature Clustering";
         public string Category => "Threads";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress).Stamp(this));
+            ThreadStackClusterAnalysisOptions options = context.GetOption<ThreadStackClusterAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress, options).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
-            return Analyze(runtime, progress: null);
+            return Analyze(runtime, progress: null, new ThreadStackClusterAnalysisOptions());
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress, ThreadStackClusterAnalysisOptions options)
         {
             var threads = runtime.Threads.ToList();
             var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Count);
@@ -47,7 +46,7 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 aliveThreads++;
-                string signature = BuildSignature(thread);
+                string signature = BuildSignature(thread, options.MaxFramesPerSignature);
 
                 if (!clusters.TryGetValue(signature, out StackCluster? cluster))
                 {
@@ -56,7 +55,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 cluster.Count++;
-                if (cluster.SampleThreadAddresses.Count < MaxThreadIdsPerCluster && thread.Address != 0)
+                if (cluster.SampleThreadAddresses.Count < options.MaxThreadIdsPerCluster && thread.Address != 0)
                     cluster.SampleThreadAddresses.Add(thread.Address);
             }
 
@@ -74,9 +73,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             int singletonSignatures = topClusters.Count(c => c.Count == 1);
-            var topSignatures = topClusters.Take(5).Select(c => c.Signature).ToList();
+            var topSignatures = topClusters.Take(options.TopSignaturesToShow).Select(c => c.Signature).ToList();
             var topClusterSnapshots = topClusters
-                .Take(12)
+                .Take(options.TopClustersToShow)
                 .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
                 .ToList();
             return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots);
@@ -113,9 +112,9 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "% signature-diversity");
         }
 
-        private static string BuildSignature(ClrThread thread)
+        private static string BuildSignature(ClrThread thread, int maxFramesPerSignature)
         {
-            var parts = new List<string>(MaxFramesPerSignature);
+            var parts = new List<string>(maxFramesPerSignature);
 
             foreach (ClrStackFrame frame in thread.EnumerateStackTrace())
             {
@@ -127,7 +126,7 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 parts.Add(name.Trim());
-                if (parts.Count >= MaxFramesPerSignature)
+                if (parts.Count >= maxFramesPerSignature)
                     break;
             }
 
@@ -141,7 +140,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             public string Signature { get; }
             public int Count { get; set; }
-            public List<ulong> SampleThreadAddresses { get; } = new(capacity: MaxThreadIdsPerCluster);
+            public List<ulong> SampleThreadAddresses { get; } = new();
 
             public StackCluster(string signature)
             {

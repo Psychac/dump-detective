@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -21,9 +22,6 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     // Address space pressure thresholds (§25.3).
 
     public void Dispose() { }
-    private const ulong ThirtyTwoBitPressureThreshold = 1_500_000_000UL; // 1.5 GB
-    private const double RatioHighPressureThreshold    = 10.0;
-
     public string Name     => "Segment Reservation Analysis";
     public string Category => "Memory";
 
@@ -32,10 +30,11 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, cancellationToken).Stamp(this));
+        SegmentReservationAnalysisOptions options = context.GetOption<SegmentReservationAnalysisOptions>();
+        return ValueTask.FromResult(Analyze(context.Heap, options, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap heap, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(ClrHeap heap, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
     {
         ulong totalCommitted = 0;
         ulong totalReserved  = 0;
@@ -97,15 +96,15 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         // Evaluate address space pressure (§25.3).
         bool pressureRisk = false;
         string pressureReason = string.Empty;
-        if (IntPtr.Size == 4 && totalReserved > ThirtyTwoBitPressureThreshold)
+        if (IntPtr.Size == 4 && totalReserved > options.ThirtyTwoBitPressureThresholdBytes)
         {
             pressureRisk   = true;
-            pressureReason = $"32-bit process has {totalReserved / (1024 * 1024):N0} MB reserved (>{ThirtyTwoBitPressureThreshold / (1024 * 1024):N0} MB threshold).";
+            pressureReason = $"32-bit process has {totalReserved / (1024 * 1024):N0} MB reserved (>{options.ThirtyTwoBitPressureThresholdBytes / (1024 * 1024):N0} MB threshold).";
         }
-        else if (ratio > RatioHighPressureThreshold)
+        else if (ratio > options.RatioHighPressureThreshold)
         {
             pressureRisk   = true;
-            pressureReason = $"Reserved-to-committed ratio is {ratio:F1}x (>{RatioHighPressureThreshold:F0}x threshold). GC is holding large uncommitted reservations.";
+            pressureReason = $"Reserved-to-committed ratio is {ratio:F1}x (>{options.RatioHighPressureThreshold:F0}x threshold). GC is holding large uncommitted reservations.";
         }
 
         return new SegmentReservationDomainResult(

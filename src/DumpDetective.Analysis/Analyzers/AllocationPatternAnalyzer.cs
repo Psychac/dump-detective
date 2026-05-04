@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -15,19 +16,17 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AllocationPatternAnalyzer : IAnalyzer
     {
-        private const int TopTypeLimit = 20;
-        private const ulong LohThresholdBytes = 85_000;
-
         public string Name => "Allocation Pattern Analysis";
         public string Category => "GC";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context).Stamp(this));
+            AllocationPatternAnalysisOptions options = context.GetOption<AllocationPatternAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context, options).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(AnalysisContext context)
+        private static AnalyzerDomainResult Analyze(AnalysisContext context, AllocationPatternAnalysisOptions options)
         {
             if (context.Cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
@@ -90,10 +89,10 @@ namespace DumpDetective.Analysis.Analyzers
                 sorted.Add((kv.Key, kv.Value));
             sorted.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
 
-            var shortLived = new List<TypeAllocationProfile>(TopTypeLimit);
-            var longLived  = new List<TypeAllocationProfile>(TopTypeLimit);
+            var shortLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var longLived  = new List<TypeAllocationProfile>(options.TopTypeLimit);
 
-            int scanLimit = Math.Min(sorted.Count, TopTypeLimit * 2);
+            int scanLimit = Math.Min(sorted.Count, options.TopTypeLimit * 2);
             for (int i = 0; i < scanLimit; i++)
             {
                 (ulong mt, TypeAggregateIndexEntry e) = sorted[i];
@@ -122,12 +121,12 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (longLivedRatio > 0.3)
                 {
-                    if (longLived.Count < TopTypeLimit)
+                    if (longLived.Count < options.TopTypeLimit)
                         longLived.Add(entry);
                 }
                 else
                 {
-                    if (shortLived.Count < TopTypeLimit)
+                    if (shortLived.Count < options.TopTypeLimit)
                         shortLived.Add(entry);
                 }
             }

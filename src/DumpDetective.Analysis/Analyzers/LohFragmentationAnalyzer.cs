@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
@@ -11,9 +12,6 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class LohFragmentationAnalyzer : IAnalyzer
     {
-        private const int TopSegments = 10;
-        private const int TopLargeObjectsCount = 20;
-
         // Free-gap histogram bucket boundaries (minSize inclusive, maxSize exclusive).
         private static readonly (ulong Min, ulong Max, string Label)[] s_gapBuckets =
         [
@@ -32,7 +30,8 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+            LohFragmentationAnalysisOptions options = context.GetOption<LohFragmentationAnalysisOptions>();
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
         }
 
         /// <summary>Entry point for benchmarks and direct callers (no cache — falls back to heap scan).</summary>
@@ -45,13 +44,27 @@ namespace DumpDetective.Analysis.Analyzers
         {
             // Fast path: use Phase 1 pre-built LOH indices — no per-segment EnumerateObjects call.
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-                return AnalyzeFromIndex(heap, heapIndex, progress, cancellationToken);
+            {
+                LohFragmentationAnalysisOptions options = new();
+                return AnalyzeFromIndex(heap, heapIndex, progress, options, cancellationToken);
+            }
 
             // Fallback: full segment object scan (benchmarks, tests, or no index available).
             return AnalyzeFromHeap(heap, progress);
         }
 
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, LohFragmentationAnalysisOptions options, CancellationToken cancellationToken)
+        {
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
+                return AnalyzeFromIndex(heap, heapIndex, progress, options, cancellationToken);
+
+            return AnalyzeFromHeap(heap, progress, options);
+        }
+
         private AnalyzerDomainResult AnalyzeFromHeap(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
+            => AnalyzeFromHeap(heap, progress, new LohFragmentationAnalysisOptions());
+
+        private AnalyzerDomainResult AnalyzeFromHeap(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, LohFragmentationAnalysisOptions options)
         {
             // NOTE: fallback path — used when no Phase 1 index is available.
 
@@ -120,7 +133,7 @@ namespace DumpDetective.Analysis.Analyzers
                 int cmp = b.FragmentationPercent.CompareTo(a.FragmentationPercent);
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
-            int topN = Math.Min(TopSegments, segmentStats.Count);
+            int topN = Math.Min(options.TopSegments, segmentStats.Count);
             var topSegments = new List<LohSegmentSnapshot>(topN);
             for (int i = 0; i < topN; i++)
                 topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
@@ -188,6 +201,7 @@ namespace DumpDetective.Analysis.Analyzers
             ClrHeap heap,
             HeapIndexBuildResult heapIndex,
             IProgress<AnalyzerProgressReport>? progress,
+            LohFragmentationAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
@@ -196,7 +210,7 @@ namespace DumpDetective.Analysis.Analyzers
             // (LohFreeBlockIndex.bin, LargeObjectIndex.bin) only exist in disk mode.
             // Fall back to the full segment scan so both modes produce identical rich output.
             if (indexDir.Length == 0)
-                return AnalyzeFromHeap(heap, progress);
+                return AnalyzeFromHeap(heap, progress, options);
 
             progress?.Report(new(0, "reading LOH segment metadata", null, TimeSpan.Zero));
 
@@ -261,7 +275,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
 
-            var topSegs = new List<LohSegmentSnapshot>(Math.Min(TopSegments, segStats.Count));
+            var topSegs = new List<LohSegmentSnapshot>(Math.Min(options.TopSegments, segStats.Count));
             for (int i = 0; i < topSegs.Capacity; i++)
                 topSegs.Add(new LohSegmentSnapshot(segStats[i].Address, segStats[i].FragPct, segStats[i].FreeBytes, segStats[i].LargestFree));
 
@@ -274,7 +288,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (File.Exists(largeObjPath))
             {
                 progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
-                topLargeObjects = ReadTopLargeObjects(heap, largeObjPath, cancellationToken);
+                topLargeObjects = ReadTopLargeObjects(heap, largeObjPath, options.TopLargeObjectsCount, cancellationToken);
             }
 
             return new LohFragmentationDomainResult(
@@ -338,6 +352,7 @@ namespace DumpDetective.Analysis.Analyzers
         private static List<LargeObjectSnapshot> ReadTopLargeObjects(
             ClrHeap heap,
             string filePath,
+                int topLargeObjectsCount,
             CancellationToken cancellationToken)
         {
             const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
@@ -347,7 +362,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (!IndexHeader.TryRead(stream, out IndexHeader header))
                 return [];
 
-            int cap = (int)Math.Min(header.RecordCount, TopLargeObjectsCount);
+            int cap = (int)Math.Min(header.RecordCount, topLargeObjectsCount);
             var result     = new List<LargeObjectSnapshot>(cap);
             var typeByAddr = new Dictionary<ulong, string>(capacity: cap);
 
@@ -369,7 +384,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (string.Equals(typeName, "Free", StringComparison.Ordinal)) continue;
 
                 result.Add(new LargeObjectSnapshot(address, typeName, size));
-                if (result.Count >= TopLargeObjectsCount) break;
+                if (result.Count >= topLargeObjectsCount) break;
             }
 
             return result;

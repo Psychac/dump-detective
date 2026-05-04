@@ -5,8 +5,8 @@
     "Audience": "All"
   },
   "Diagnostics": {
-    "EnableMemory": false,
-    "EnablePerformance": false,
+    "EnableMemoryDiagnostics": true,
+    "EnablePerformanceDiagnostics": true,
     "ContinueOnAnalyzerFailure": true
   },
   "Indexing": {
@@ -23,7 +23,7 @@
       "TopWastefulCollectionsToShow": 50
     },
     "String": {
-      "Profile": "Fast",
+      "Profile": "Balanced",
       "MaxUniqueStringTracking": 50000,
       "TopDuplicatesToShow": 10
     },
@@ -38,5 +38,6 @@
       "TopLoadedAssembliesCount": 30,
       "TopModulesByHeapCount": 20
     }
-  }
+  },
+  "IncludeAnalyzers": [ "Event Leak Analysis" ]
 }

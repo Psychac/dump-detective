@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="config.sample.json">
+    <None Update="config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>

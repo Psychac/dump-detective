@@ -23,8 +23,4 @@
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="BenchmarkSuite1" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Printers\" />
-  </ItemGroup>
 </Project>

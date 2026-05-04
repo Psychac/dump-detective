@@ -1,6 +1,7 @@
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Options;
 
 using FluentAssertions;
 
@@ -42,7 +43,7 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
-    public void Resolve_ShouldUseCliValue_WhenConfigMissingThatField()
+    public void Resolve_ShouldUseProfileBaseline_WhenConfigMissingThatField()
     {
         string tempDirectory = CreateTempDirectory();
         try
@@ -59,11 +60,13 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath);
             ConfigurationResolver resolver = new();
+            MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
+            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.MaxDuplicateStringLength.Should().Be(222);
-            resolved.ReferenceChain.TopCount.Should().Be(6);
+            resolved.MemoryLeak.MaxDuplicateStringLength.Should().Be(balancedMemoryLeak.MaxDuplicateStringLength);
+            resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
             resolved.Report.Format.Should().Be(ReportFormat.Text);
         }
         finally
@@ -73,18 +76,21 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
-    public void Resolve_ShouldFallbackToCli_WhenConfigMissing()
+    public void Resolve_ShouldUseProfileBaseline_WhenConfigMissing()
     {
         AnalysisCommandRequest request = CreateRequest(configPath: null);
         ConfigurationResolver resolver = new();
+        MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
+        ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
+        EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
 
         ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
         resolved.UsedConfigFile.Should().BeTrue();
         resolved.DumpPath.Should().Be(request.DumpPath);
-        resolved.MemoryLeak.HighReferenceThreshold.Should().Be(111);
-        resolved.ReferenceChain.TopCount.Should().Be(6);
-        resolved.EventLeak.MinSubscribers.Should().Be(3);
+        resolved.MemoryLeak.HighReferenceThreshold.Should().Be(balancedMemoryLeak.HighReferenceThreshold);
+        resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
+        resolved.EventLeak.MinSubscribers.Should().Be(balancedEventLeak.MinSubscribers);
         resolved.Report.Format.Should().Be(ReportFormat.Html);
     }
 
@@ -202,6 +208,77 @@ public sealed class ConfigurationResolverTests
             resolved.Crash.TopDetailedExceptionInstances.Should().Be(25);
             resolved.Collection.Profile.Should().Be(DumpDetective.Core.Options.AnalysisProfile.Balanced);
             resolved.Collection.PathAnalysisTopN.Should().Be(5);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldApplyGlobalProfileBaseline_WhenAnalyzerSectionsMissing()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "Profile": "Full"
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
+            resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(5_000_000);
+
+            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
+            resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(25);
+
+            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldIgnoreLegacyAliasFields_AndUseUniformAnalyzerFlow()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "Profile": "Full",
+              "HighReferenceThreshold": 123,
+              "ReferenceChainTopCount": 9,
+              "EventLeakMinSubscribers": 4
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(30);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
+
+            resolved.ReferenceChain.TopCount.Should().Be(20);
+            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
+
+            resolved.EventLeak.MinSubscribers.Should().Be(0);
+            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
         }
         finally
         {

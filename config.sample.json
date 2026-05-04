@@ -1,0 +1,22 @@
+{
+  "DumpPath": "D:\\DUMPS\\sample.dmp",
+  "BaselineDumpPath": null,
+  "TrendDumpPaths": [],
+  "Profile": "balanced",
+  "IncludeAnalyzers": [ "MemoryLeak", "ReferenceChain" ],
+  "ExcludeAnalyzers": [ "Thread" ],
+  "ReportFormat": "html",
+  "ReportAudience": "developer",
+  "Analyzers": {
+    "MemoryLeak": {
+      "Profile": "fast",
+      "HighReferenceThreshold": 100
+    },
+    "ReferenceChain": {
+      "TopCount": 10
+    }
+  },
+  "Indexing": {
+    "Mode": "auto"
+  }
+}

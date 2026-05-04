@@ -70,4 +70,5 @@ public sealed class EventLeakOptions
     };
 
     public static EventLeakOptions Default { get; } = Preset(AnalysisProfile.Balanced);
+
 }

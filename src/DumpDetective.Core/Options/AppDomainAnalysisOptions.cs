@@ -14,4 +14,13 @@ public sealed class AppDomainAnalysisOptions
     /// Maximum entries in top modules-by-type-count output.
     /// </summary>
     public int TopModuleTypeCountLimit { get; init; } = 20;
+
+    public static AppDomainAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new AppDomainAnalysisOptions { ModuleEnumerationLimit = 25, TopModuleTypeCountLimit = 10 },
+        AnalysisProfile.Full => new AppDomainAnalysisOptions { ModuleEnumerationLimit = 100, TopModuleTypeCountLimit = 40 },
+        _ => new AppDomainAnalysisOptions(),
+    };
+
+    public static AppDomainAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

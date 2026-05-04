@@ -14,4 +14,13 @@ public sealed class AllocationPatternAnalysisOptions
     /// LOH threshold used by downstream consumers expecting a configurable boundary.
     /// </summary>
     public ulong LohThresholdBytes { get; init; } = 85_000;
+
+    public static AllocationPatternAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new AllocationPatternAnalysisOptions { TopTypeLimit = 10 },
+        AnalysisProfile.Full => new AllocationPatternAnalysisOptions { TopTypeLimit = 50 },
+        _ => new AllocationPatternAnalysisOptions(),
+    };
+
+    public static AllocationPatternAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

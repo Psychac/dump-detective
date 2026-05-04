@@ -45,4 +45,29 @@ public sealed class EventLeakOptions
 
     // Publisher qualification: minimum subscribers for an object to be considered a publisher
     public int PublisherSubscriberThreshold { get; init; } = 1;
+
+    public static EventLeakOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new EventLeakOptions
+        {
+            MinSubscribers = 3,
+            IncludeNonLeakingEvents = false,
+            TopSubscriberTypesToShow = 3,
+            TopDetailedInstancesPerGroup = 3,
+            EnableDiagnostics = false,
+            PublisherSubscriberThreshold = 2
+        },
+        AnalysisProfile.Full => new EventLeakOptions
+        {
+            MinSubscribers = 0,
+            IncludeNonLeakingEvents = true,
+            TopSubscriberTypesToShow = 20,
+            TopDetailedInstancesPerGroup = 20,
+            EnableDiagnostics = true,
+            PublisherSubscriberThreshold = 1
+        },
+        _ => new EventLeakOptions(),
+    };
+
+    public static EventLeakOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

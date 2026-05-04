@@ -88,4 +88,39 @@ public sealed class ReferenceChainOptions
         ReferenceChainSearchMode.Deep => 25,
         _ => 12,
     };
+
+    public static ReferenceChainOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new ReferenceChainOptions
+        {
+            TopCount = 5,
+            MaxPathDepth = 12,
+            FastModeMaxDepth = 12,
+            MaxPathSearchObjects = 2_000,
+            SearchMode = ReferenceChainSearchMode.Fast,
+            MaxCandidateNodes = 10_000,
+            MaxCandidateDepth = 6,
+            MaxRootExpansionDepth = 8,
+            SkipArrays = true,
+            LargeFanoutThreshold = 150,
+            KnownLeakTypePatterns = ["System.Collections.Generic.List", "System.Collections.Generic.Dictionary", "Newtonsoft.Json"]
+        },
+        AnalysisProfile.Full => new ReferenceChainOptions
+        {
+            TopCount = 20,
+            MaxPathDepth = 40,
+            FastModeMaxDepth = 40,
+            MaxPathSearchObjects = 20_000,
+            SearchMode = ReferenceChainSearchMode.Deep,
+            MaxCandidateNodes = 200_000,
+            MaxCandidateDepth = 15,
+            MaxRootExpansionDepth = 25,
+            SkipArrays = false,
+            LargeFanoutThreshold = 200,
+            KnownLeakTypePatterns = ["System.Collections.Generic.List", "System.Collections.Generic.Dictionary", "Newtonsoft.Json"]
+        },
+        _ => new ReferenceChainOptions(),
+    };
+
+    public static ReferenceChainOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

@@ -172,30 +172,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "MemoryLeak", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            MemoryLeakOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new MemoryLeakOptions
-                {
-                    TopFinalizerTypesToShow = 5,
-                    TopHighlyReferencedObjectsToShow = 8,
-                    HighReferenceThreshold = 75,
-                    MaxDuplicateStringLength = 300,
-                    MinDuplicateStringCount = 20,
-                    MaxReferenceAddresses = 250_000,
-                    MaxLeakScanObjects = 500_000
-                },
-                AnalysisProfile.Full => new MemoryLeakOptions
-                {
-                    TopFinalizerTypesToShow = 25,
-                    TopHighlyReferencedObjectsToShow = 40,
-                    HighReferenceThreshold = 30,
-                    MaxDuplicateStringLength = 2_000,
-                    MinDuplicateStringCount = 5,
-                    MaxReferenceAddresses = 2_000_000,
-                    MaxLeakScanObjects = 5_000_000
-                },
-                _ => new MemoryLeakOptions(),
-            };
+            MemoryLeakOptions preset = MemoryLeakOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -245,38 +222,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "ReferenceChain", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            ReferenceChainOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new ReferenceChainOptions
-                {
-                    TopCount = 5,
-                    MaxPathDepth = 12,
-                    FastModeMaxDepth = 12,
-                    MaxPathSearchObjects = 2_000,
-                    SearchMode = ReferenceChainSearchMode.Fast,
-                    MaxCandidateNodes = 10_000,
-                    MaxCandidateDepth = 6,
-                    MaxRootExpansionDepth = 8,
-                    SkipArrays = true,
-                    LargeFanoutThreshold = 150,
-                    KnownLeakTypePatterns = ["System.Collections.Generic.List", "System.Collections.Generic.Dictionary", "Newtonsoft.Json"]
-                },
-                AnalysisProfile.Full => new ReferenceChainOptions
-                {
-                    TopCount = 20,
-                    MaxPathDepth = 40,
-                    FastModeMaxDepth = 40,
-                    MaxPathSearchObjects = 20_000,
-                    SearchMode = ReferenceChainSearchMode.Deep,
-                    MaxCandidateNodes = 200_000,
-                    MaxCandidateDepth = 15,
-                    MaxRootExpansionDepth = 25,
-                    SkipArrays = false,
-                    LargeFanoutThreshold = 200,
-                    KnownLeakTypePatterns = ["System.Collections.Generic.List", "System.Collections.Generic.Dictionary", "Newtonsoft.Json"]
-                },
-                _ => new ReferenceChainOptions(),
-            };
+            ReferenceChainOptions preset = ReferenceChainOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -312,28 +258,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "EventLeak", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            EventLeakOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new EventLeakOptions
-                {
-                    MinSubscribers = 3,
-                    IncludeNonLeakingEvents = false,
-                    TopSubscriberTypesToShow = 3,
-                    TopDetailedInstancesPerGroup = 3,
-                    EnableDiagnostics = false,
-                    PublisherSubscriberThreshold = 2
-                },
-                AnalysisProfile.Full => new EventLeakOptions
-                {
-                    MinSubscribers = 0,
-                    IncludeNonLeakingEvents = true,
-                    TopSubscriberTypesToShow = 20,
-                    TopDetailedInstancesPerGroup = 20,
-                    EnableDiagnostics = true,
-                    PublisherSubscriberThreshold = 1
-                },
-                _ => new EventLeakOptions(),
-            };
+            EventLeakOptions preset = EventLeakOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -470,12 +395,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "AsyncTask", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            AsyncTaskAnalysisOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new AsyncTaskAnalysisOptions { MaxTasksToScan = 20_000, MaxContinuationDepth = 10, TopTypesToShow = 8, TopOrphanedToShow = 10 },
-                AnalysisProfile.Full => new AsyncTaskAnalysisOptions { MaxTasksToScan = 100_000, MaxContinuationDepth = 40, TopTypesToShow = 20, TopOrphanedToShow = 40 },
-                _ => new AsyncTaskAnalysisOptions(),
-            };
+            AsyncTaskAnalysisOptions preset = AsyncTaskAnalysisOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -491,12 +411,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "AsyncStateMachine", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            AsyncStateMachineAnalysisOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new AsyncStateMachineAnalysisOptions { TopTypeLimit = 10, TypeCandidateLimit = 100, SuspendedMethodMapLimit = 10, LargeCaptureThresholdBytes = 2 * 1024 * 1024, TopCapturedSizeEntries = 5 },
-                AnalysisProfile.Full => new AsyncStateMachineAnalysisOptions { TopTypeLimit = 40, TypeCandidateLimit = 500, SuspendedMethodMapLimit = 40, LargeCaptureThresholdBytes = 512 * 1024, TopCapturedSizeEntries = 20 },
-                _ => new AsyncStateMachineAnalysisOptions(),
-            };
+            AsyncStateMachineAnalysisOptions preset = AsyncStateMachineAnalysisOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -512,12 +427,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "Array", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            ArrayAnalysisOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new ArrayAnalysisOptions { TopTypeLimit = 10, TopLargeLimit = 10, TopSparseLimit = 5, SparseSampleLimit = 200, SparseSampleMinLength = 20_000, SampleStride = 200 },
-                AnalysisProfile.Full => new ArrayAnalysisOptions { TopTypeLimit = 50, TopLargeLimit = 50, TopSparseLimit = 20, SparseSampleLimit = 1000, SparseSampleMinLength = 5_000, SampleStride = 50 },
-                _ => new ArrayAnalysisOptions(),
-            };
+            ArrayAnalysisOptions preset = ArrayAnalysisOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -533,12 +443,7 @@ internal sealed class ConfigurationResolver
         if (TryGetAnalyzerSection(config, "Boxing", out JsonElement section))
         {
             AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            BoxingAnalysisOptions preset = profile switch
-            {
-                AnalysisProfile.Fast => new BoxingAnalysisOptions { TypeScanCap = 5_000, TopBoxedTypeLimit = 10, TopPaddingLimit = 10, OversizedThresholdBytes = 96 },
-                AnalysisProfile.Full => new BoxingAnalysisOptions { TypeScanCap = 50_000, TopBoxedTypeLimit = 50, TopPaddingLimit = 50, OversizedThresholdBytes = 48 },
-                _ => new BoxingAnalysisOptions(),
-            };
+            BoxingAnalysisOptions preset = BoxingAnalysisOptions.Preset(profile);
 
             return ApplySectionOverrides(preset, section);
         }
@@ -554,12 +459,7 @@ internal sealed class ConfigurationResolver
             config,
             "String",
             config.StringAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new StringAnalysisOptions { MaxUniqueStringTracking = 50_000, MaxStringsToDedup = 10_000, TopDuplicatesToShow = 10, PreviewMaxLength = 64 },
-                AnalysisProfile.Full => new StringAnalysisOptions { MaxUniqueStringTracking = 500_000, MaxStringsToDedup = 200_000, TopDuplicatesToShow = 50, PreviewMaxLength = 120 },
-                _ => new StringAnalysisOptions(),
-            });
+            StringAnalysisOptions.Preset);
 
     private static StringAnalysisOptions BuildStringAnalysisFromCli(AnalysisCommandRequest request)
         => new StringAnalysisOptions();
@@ -569,12 +469,7 @@ internal sealed class ConfigurationResolver
             config,
             "Segment",
             config.SegmentAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new SegmentAnalysisOptions { CountSohObjects = false },
-                AnalysisProfile.Full => new SegmentAnalysisOptions { CountSohObjects = true },
-                _ => new SegmentAnalysisOptions(),
-            });
+            SegmentAnalysisOptions.Preset);
 
     private static SegmentAnalysisOptions BuildSegmentAnalysisFromCli(AnalysisCommandRequest request)
         => new SegmentAnalysisOptions();
@@ -584,12 +479,7 @@ internal sealed class ConfigurationResolver
             config,
             "AppDomain",
             config.AppDomainAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new AppDomainAnalysisOptions { ModuleEnumerationLimit = 25, TopModuleTypeCountLimit = 10 },
-                AnalysisProfile.Full => new AppDomainAnalysisOptions { ModuleEnumerationLimit = 100, TopModuleTypeCountLimit = 40 },
-                _ => new AppDomainAnalysisOptions(),
-            });
+            AppDomainAnalysisOptions.Preset);
 
     private static AppDomainAnalysisOptions BuildAppDomainAnalysisFromCli(AnalysisCommandRequest request)
         => new AppDomainAnalysisOptions();
@@ -599,12 +489,7 @@ internal sealed class ConfigurationResolver
             config,
             "AllocationPattern",
             config.AllocationPatternAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new AllocationPatternAnalysisOptions { TopTypeLimit = 10 },
-                AnalysisProfile.Full => new AllocationPatternAnalysisOptions { TopTypeLimit = 50 },
-                _ => new AllocationPatternAnalysisOptions(),
-            });
+            AllocationPatternAnalysisOptions.Preset);
 
     private static AllocationPatternAnalysisOptions BuildAllocationPatternAnalysisFromCli(AnalysisCommandRequest request)
         => new AllocationPatternAnalysisOptions();
@@ -614,12 +499,7 @@ internal sealed class ConfigurationResolver
             config,
             "ThreadStackCluster",
             config.ThreadStackClusterAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new ThreadStackClusterAnalysisOptions { MaxFramesPerSignature = 4, MaxThreadIdsPerCluster = 5, TopSignaturesToShow = 3, TopClustersToShow = 8 },
-                AnalysisProfile.Full => new ThreadStackClusterAnalysisOptions { MaxFramesPerSignature = 10, MaxThreadIdsPerCluster = 20, TopSignaturesToShow = 10, TopClustersToShow = 20 },
-                _ => new ThreadStackClusterAnalysisOptions(),
-            });
+            ThreadStackClusterAnalysisOptions.Preset);
 
     private static ThreadStackClusterAnalysisOptions BuildThreadStackClusterAnalysisFromCli(AnalysisCommandRequest request)
         => new ThreadStackClusterAnalysisOptions();
@@ -629,12 +509,7 @@ internal sealed class ConfigurationResolver
             config,
             "LockGraph",
             config.LockGraphAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new LockGraphAnalysisOptions { MaxContestedLocksToShow = 8 },
-                AnalysisProfile.Full => new LockGraphAnalysisOptions { MaxContestedLocksToShow = 40 },
-                _ => new LockGraphAnalysisOptions(),
-            });
+            LockGraphAnalysisOptions.Preset);
 
     private static LockGraphAnalysisOptions BuildLockGraphAnalysisFromCli(AnalysisCommandRequest request)
         => new LockGraphAnalysisOptions();
@@ -644,12 +519,7 @@ internal sealed class ConfigurationResolver
             config,
             "FinalizableObject",
             config.FinalizableObjectAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new FinalizableObjectAnalysisOptions { TopTypeLimit = 10, QueueScanLimit = 200, TopQueueEntries = 5, MaxBfsNodes = 100, MaxBfsDepth = 8 },
-                AnalysisProfile.Full => new FinalizableObjectAnalysisOptions { TopTypeLimit = 50, QueueScanLimit = 2_000, TopQueueEntries = 25, MaxBfsNodes = 1_000, MaxBfsDepth = 20 },
-                _ => new FinalizableObjectAnalysisOptions(),
-            });
+            FinalizableObjectAnalysisOptions.Preset);
 
     private static FinalizableObjectAnalysisOptions BuildFinalizableObjectAnalysisFromCli(AnalysisCommandRequest request)
         => new FinalizableObjectAnalysisOptions();
@@ -659,12 +529,7 @@ internal sealed class ConfigurationResolver
             config,
             "GCGeneration",
             config.GCGenerationAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new GCGenerationAnalysisOptions { TopLohTypeLimit = 8, TopGenProfileLimit = 10 },
-                AnalysisProfile.Full => new GCGenerationAnalysisOptions { TopLohTypeLimit = 30, TopGenProfileLimit = 40 },
-                _ => new GCGenerationAnalysisOptions(),
-            });
+            GCGenerationAnalysisOptions.Preset);
 
     private static GCGenerationAnalysisOptions BuildGCGenerationAnalysisFromCli(AnalysisCommandRequest request)
         => new GCGenerationAnalysisOptions();
@@ -674,12 +539,7 @@ internal sealed class ConfigurationResolver
             config,
             "GCRoot",
             config.GCRootAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new GCRootAnalysisOptions { TopSeverityLimit = 10, PathSearchTopN = 10, MaxBfsNodes = 250, MaxBfsDepth = 10 },
-                AnalysisProfile.Full => new GCRootAnalysisOptions { TopSeverityLimit = 40, PathSearchTopN = 60, MaxBfsNodes = 2_000, MaxBfsDepth = 30 },
-                _ => new GCRootAnalysisOptions(),
-            });
+            GCRootAnalysisOptions.Preset);
 
     private static GCRootAnalysisOptions BuildGCRootAnalysisFromCli(AnalysisCommandRequest request)
         => new GCRootAnalysisOptions();
@@ -689,12 +549,7 @@ internal sealed class ConfigurationResolver
             config,
             "LohFragmentation",
             config.LohFragmentationAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new LohFragmentationAnalysisOptions { TopSegments = 5, TopLargeObjectsCount = 10 },
-                AnalysisProfile.Full => new LohFragmentationAnalysisOptions { TopSegments = 25, TopLargeObjectsCount = 60 },
-                _ => new LohFragmentationAnalysisOptions(),
-            });
+            LohFragmentationAnalysisOptions.Preset);
 
     private static LohFragmentationAnalysisOptions BuildLohFragmentationAnalysisFromCli(AnalysisCommandRequest request)
         => new LohFragmentationAnalysisOptions();
@@ -704,12 +559,7 @@ internal sealed class ConfigurationResolver
             config,
             "SegmentReservation",
             config.SegmentReservationAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new SegmentReservationAnalysisOptions { ThirtyTwoBitPressureThresholdBytes = 2_000_000_000UL, RatioHighPressureThreshold = 12.0 },
-                AnalysisProfile.Full => new SegmentReservationAnalysisOptions { ThirtyTwoBitPressureThresholdBytes = 1_000_000_000UL, RatioHighPressureThreshold = 8.0 },
-                _ => new SegmentReservationAnalysisOptions(),
-            });
+            SegmentReservationAnalysisOptions.Preset);
 
     private static SegmentReservationAnalysisOptions BuildSegmentReservationAnalysisFromCli(AnalysisCommandRequest request)
         => new SegmentReservationAnalysisOptions();
@@ -719,12 +569,7 @@ internal sealed class ConfigurationResolver
             config,
             "Thread",
             config.ThreadAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new ThreadAnalysisOptions { MaxFramesForThreadScan = 4, MaxStackRootsToCount = 128 },
-                AnalysisProfile.Full => new ThreadAnalysisOptions { MaxFramesForThreadScan = 16, MaxStackRootsToCount = 1_024 },
-                _ => new ThreadAnalysisOptions(),
-            });
+            ThreadAnalysisOptions.Preset);
 
     private static ThreadAnalysisOptions BuildThreadAnalysisFromCli(AnalysisCommandRequest request)
         => new ThreadAnalysisOptions();
@@ -734,12 +579,7 @@ internal sealed class ConfigurationResolver
             config,
             "Hang",
             config.HangAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new HangAnalysisOptions { LongWaitThreshold = 8, HighThreadPoolThreshold = 150, MaxTasksToScan = 20_000, TopWaitingThreadsPerGroup = 3, TopContinuationTypesToShow = 3 },
-                AnalysisProfile.Full => new HangAnalysisOptions { LongWaitThreshold = 3, HighThreadPoolThreshold = 60, MaxTasksToScan = 150_000, TopWaitingThreadsPerGroup = 10, TopContinuationTypesToShow = 15 },
-                _ => new HangAnalysisOptions(),
-            });
+            HangAnalysisOptions.Preset);
 
     private static HangAnalysisOptions BuildHangAnalysisFromCli(AnalysisCommandRequest request)
         => new HangAnalysisOptions();
@@ -749,12 +589,7 @@ internal sealed class ConfigurationResolver
             config,
             "Jit",
             config.JitAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new JitAnalysisOptions { MaxFramesPerThread = 100, TopMethodsLimit = 10, TopFrameTypesLimit = 10, LargeMethodThresholdBytes = 96 * 1024 },
-                AnalysisProfile.Full => new JitAnalysisOptions { MaxFramesPerThread = 400, TopMethodsLimit = 50, TopFrameTypesLimit = 50, LargeMethodThresholdBytes = 32 * 1024 },
-                _ => new JitAnalysisOptions(),
-            });
+            JitAnalysisOptions.Preset);
 
     private static JitAnalysisOptions BuildJitAnalysisFromCli(AnalysisCommandRequest request)
         => new JitAnalysisOptions();
@@ -764,12 +599,7 @@ internal sealed class ConfigurationResolver
             config,
             "WeakReference",
             config.WeakReferenceAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new WeakReferenceAnalysisOptions { HandleScanCap = 20_000, TopTypeLimit = 8 },
-                AnalysisProfile.Full => new WeakReferenceAnalysisOptions { HandleScanCap = 200_000, TopTypeLimit = 40 },
-                _ => new WeakReferenceAnalysisOptions(),
-            });
+            WeakReferenceAnalysisOptions.Preset);
 
     private static WeakReferenceAnalysisOptions BuildWeakReferenceAnalysisFromCli(AnalysisCommandRequest request)
         => new WeakReferenceAnalysisOptions();
@@ -779,12 +609,7 @@ internal sealed class ConfigurationResolver
             config,
             "ObjectShape",
             config.ObjectShapeAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new ObjectShapeAnalysisOptions { InstanceCountCap = 100, TopListLimit = 10 },
-                AnalysisProfile.Full => new ObjectShapeAnalysisOptions { InstanceCountCap = 1_000, TopListLimit = 50 },
-                _ => new ObjectShapeAnalysisOptions(),
-            });
+            ObjectShapeAnalysisOptions.Preset);
 
     private static ObjectShapeAnalysisOptions BuildObjectShapeAnalysisFromCli(AnalysisCommandRequest request)
         => new ObjectShapeAnalysisOptions();
@@ -794,12 +619,7 @@ internal sealed class ConfigurationResolver
             config,
             "Module",
             config.ModuleAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new ModuleAnalysisOptions { TopLoadedAssembliesCount = 15, TopModulesByHeapCount = 10, HeavyModuleWarningThresholdBytes = 300UL * 1024UL * 1024UL, DensityAnomalyMinBytes = 100UL * 1024UL * 1024UL, DensityAnomalyMaxTypes = 3 },
-                AnalysisProfile.Full => new ModuleAnalysisOptions { TopLoadedAssembliesCount = 80, TopModulesByHeapCount = 50, HeavyModuleWarningThresholdBytes = 100UL * 1024UL * 1024UL, DensityAnomalyMinBytes = 20UL * 1024UL * 1024UL, DensityAnomalyMaxTypes = 10 },
-                _ => new ModuleAnalysisOptions(),
-            });
+            ModuleAnalysisOptions.Preset);
 
     private static ModuleAnalysisOptions BuildModuleAnalysisFromCli(AnalysisCommandRequest request)
         => new ModuleAnalysisOptions();
@@ -809,12 +629,7 @@ internal sealed class ConfigurationResolver
             config,
             "DependentHandle",
             config.DependentHandleAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new DependentHandleAnalysisOptions { TopCount = 8 },
-                AnalysisProfile.Full => new DependentHandleAnalysisOptions { TopCount = 40 },
-                _ => new DependentHandleAnalysisOptions(),
-            });
+            DependentHandleAnalysisOptions.Preset);
 
     private static DependentHandleAnalysisOptions BuildDependentHandleAnalysisFromCli(AnalysisCommandRequest request)
         => new DependentHandleAnalysisOptions();
@@ -824,12 +639,7 @@ internal sealed class ConfigurationResolver
             config,
             "GCHandle",
             config.GCHandleAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new GCHandleAnalysisOptions { TopTypeCount = 8 },
-                AnalysisProfile.Full => new GCHandleAnalysisOptions { TopTypeCount = 40 },
-                _ => new GCHandleAnalysisOptions(),
-            });
+            GCHandleAnalysisOptions.Preset);
 
     private static GCHandleAnalysisOptions BuildGCHandleAnalysisFromCli(AnalysisCommandRequest request)
         => new GCHandleAnalysisOptions();
@@ -839,12 +649,7 @@ internal sealed class ConfigurationResolver
             config,
             "StaticRootLeak",
             config.StaticRootLeakAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new StaticRootLeakAnalysisOptions { MaxRootsToReport = 8, TopRetainedTypesToReport = 3, SampleRetainedObjectsToInspect = 50, SignificantMemoryThresholdBytes = 2 * 1024 * 1024, SignificantObjectCountThreshold = 200, MaxRetainedObjectsToScan = 5_000 },
-                AnalysisProfile.Full => new StaticRootLeakAnalysisOptions { MaxRootsToReport = 40, TopRetainedTypesToReport = 15, SampleRetainedObjectsToInspect = 500, SignificantMemoryThresholdBytes = 512 * 1024, SignificantObjectCountThreshold = 50, MaxRetainedObjectsToScan = 50_000 },
-                _ => new StaticRootLeakAnalysisOptions(),
-            });
+            StaticRootLeakAnalysisOptions.Preset);
 
     private static StaticRootLeakAnalysisOptions BuildStaticRootLeakAnalysisFromCli(AnalysisCommandRequest request)
         => new StaticRootLeakAnalysisOptions();
@@ -854,12 +659,7 @@ internal sealed class ConfigurationResolver
             config,
             "Memory",
             config.MemoryAnalysis,
-            profile => profile switch
-            {
-                AnalysisProfile.Fast => new MemoryAnalysisOptions { TopBySizeCount = 10, TopByCountCount = 10 },
-                AnalysisProfile.Full => new MemoryAnalysisOptions { TopBySizeCount = 50, TopByCountCount = 50 },
-                _ => new MemoryAnalysisOptions(),
-            });
+            MemoryAnalysisOptions.Preset);
 
     private static MemoryAnalysisOptions BuildMemoryAnalysisFromCli(AnalysisCommandRequest request)
         => new MemoryAnalysisOptions();

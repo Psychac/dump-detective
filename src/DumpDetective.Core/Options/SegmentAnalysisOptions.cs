@@ -12,4 +12,13 @@ public sealed class SegmentAnalysisOptions
     /// Set to <see langword="true"/> when exact SOH object counts are required.
     /// </summary>
     public bool CountSohObjects { get; init; } = false;
+
+    public static SegmentAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new SegmentAnalysisOptions { CountSohObjects = false },
+        AnalysisProfile.Full => new SegmentAnalysisOptions { CountSohObjects = true },
+        _ => new SegmentAnalysisOptions(),
+    };
+
+    public static SegmentAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

@@ -51,4 +51,13 @@ public sealed class StringAnalysisOptions
     /// Maximum preview length (characters) used when rendering string previews in reports.
     /// </summary>
     public int PreviewMaxLength { get; init; } = 80;
+
+    public static StringAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new StringAnalysisOptions { MaxUniqueStringTracking = 50_000, MaxStringsToDedup = 10_000, TopDuplicatesToShow = 10, PreviewMaxLength = 64 },
+        AnalysisProfile.Full => new StringAnalysisOptions { MaxUniqueStringTracking = 500_000, MaxStringsToDedup = 200_000, TopDuplicatesToShow = 50, PreviewMaxLength = 120 },
+        _ => new StringAnalysisOptions(),
+    };
+
+    public static StringAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

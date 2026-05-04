@@ -5,4 +5,13 @@ public sealed class GCGenerationAnalysisOptions
     public ulong LohThresholdBytes { get; init; } = 85_000;
     public int TopLohTypeLimit { get; init; } = 15;
     public int TopGenProfileLimit { get; init; } = 20;
+
+    public static GCGenerationAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new GCGenerationAnalysisOptions { TopLohTypeLimit = 8, TopGenProfileLimit = 10 },
+        AnalysisProfile.Full => new GCGenerationAnalysisOptions { TopLohTypeLimit = 30, TopGenProfileLimit = 40 },
+        _ => new GCGenerationAnalysisOptions(),
+    };
+
+    public static GCGenerationAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

@@ -9,4 +9,13 @@ public sealed class ThreadStackClusterAnalysisOptions
     public int MaxThreadIdsPerCluster { get; init; } = 8;
     public int TopSignaturesToShow { get; init; } = 5;
     public int TopClustersToShow { get; init; } = 12;
+
+    public static ThreadStackClusterAnalysisOptions Preset(AnalysisProfile profile) => profile switch
+    {
+        AnalysisProfile.Fast => new ThreadStackClusterAnalysisOptions { MaxFramesPerSignature = 4, MaxThreadIdsPerCluster = 5, TopSignaturesToShow = 3, TopClustersToShow = 8 },
+        AnalysisProfile.Full => new ThreadStackClusterAnalysisOptions { MaxFramesPerSignature = 10, MaxThreadIdsPerCluster = 20, TopSignaturesToShow = 10, TopClustersToShow = 20 },
+        _ => new ThreadStackClusterAnalysisOptions(),
+    };
+
+    public static ThreadStackClusterAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

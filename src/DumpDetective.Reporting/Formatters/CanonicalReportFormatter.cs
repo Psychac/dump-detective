@@ -82,8 +82,26 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             {
                 sb.AppendLine($"[{f.Severity}] {f.Title} ({f.Category})");
                 sb.AppendLine(StringConstants.Separator80);
-                sb.AppendLine(f.Evidence);
-                if (!string.IsNullOrWhiteSpace(f.Recommendation))
+                // Evidence: prefer structured list when available
+                if (f.EvidenceItems is { Count: > 1 })
+                {
+                    foreach (string ev in f.EvidenceItems)
+                        sb.AppendLine($"- {ev}");
+                }
+                else
+                {
+                    sb.AppendLine(f.Evidence);
+                }
+
+                // Recommendation: render each recommendation item (fallback to scalar)
+                if (f.RecommendationItems is { Count: > 0 } && !string.IsNullOrWhiteSpace(string.Join("", f.RecommendationItems)))
+                {
+                    sb.AppendLine("Remediation:");
+                    foreach (var rec in f.RecommendationItems)
+                        foreach (string line in TableWrapHelper.Wrap(rec, 96))
+                            sb.AppendLine($"  - {line}");
+                }
+                else if (!string.IsNullOrWhiteSpace(f.Recommendation))
                 {
                     sb.AppendLine("Remediation:");
                     foreach (string line in TableWrapHelper.Wrap(f.Recommendation, 96))
@@ -277,7 +295,17 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine();
                 sb.AppendLine(f.Evidence);
                 sb.AppendLine();
-                if (!string.IsNullOrWhiteSpace(f.Recommendation))
+                if (f.RecommendationItems is { Count: > 0 } && !string.IsNullOrWhiteSpace(string.Join("", f.RecommendationItems)))
+                {
+                    sb.AppendLine("**Remediation**");
+                    sb.AppendLine();
+                    foreach (var rec in f.RecommendationItems)
+                    {
+                        sb.AppendLine($"- {rec}");
+                        sb.AppendLine();
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(f.Recommendation))
                 {
                     sb.AppendLine("**Remediation**");
                     sb.AppendLine();
@@ -496,14 +524,32 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         {
             FindingRecord f = doc.Findings[i];
             string sevCss  = SevCss(f.Severity);
-            string summary = Enc(f.Evidence.Length > 200 ? f.Evidence[..200] : f.Evidence);
-            sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
+            string evSummary = f.EvidenceItems is { Count: > 0 } ? f.EvidenceItems[0] : f.Evidence;
+            string summary = Enc(evSummary.Length > 200 ? evSummary[..200] : evSummary);
+                sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
             sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)}</h2><span class=\"category\">{Enc(f.Category)}</span></div>");
-            sb.AppendLine($"<p class=\"summary\">{Enc(f.Evidence)}</p>");
-            sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-            sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\">{WrapAddr(Enc(f.Evidence))}</td></tr>");
-            if (!string.IsNullOrWhiteSpace(f.Recommendation))
+
+            if (f.EvidenceItems is { Count: > 1 })
+            {
+                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.EvidenceItems.Select(Enc)) + "</div>");
+                sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
+                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.EvidenceItems.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
+            }
+            else
+            {
+                sb.AppendLine($"<p class=\"summary\">{Enc(f.Evidence)}</p>");
+                sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
+                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\">{WrapAddr(Enc(f.Evidence))}</td></tr>");
+            }
+
+            if (f.RecommendationItems is { Count: > 0 })
+            {
+                sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.RecommendationItems)))}</td></tr>");
+            }
+            else if (!string.IsNullOrWhiteSpace(f.Recommendation))
+            {
                 sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(f.Recommendation))}</td></tr>");
+            }
             sb.AppendLine("</tbody></table></section>");
         }
 

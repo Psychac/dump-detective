@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Console;
+using System.Text.Json;
 using DumpDetective.Cli.Services;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
@@ -35,6 +36,7 @@ internal sealed class WriteOutputStage : IAnalysisStage
                     string artifactsDir = Path.Combine(outDir, "artifacts", dumpBaseName);
                     Directory.CreateDirectory(artifactsDir);
 
+                    var artifactsIndex = new List<object>(capacity: doc.Artifacts!.Count);
                     foreach (var a in doc.Artifacts!)
                     {
                         try
@@ -88,12 +90,38 @@ internal sealed class WriteOutputStage : IAnalysisStage
                                 await File.WriteAllTextAsync(target, a.Content ?? string.Empty, cancellationToken);
                                 ConsoleUx.ReportWritten(target);
                             }
+                            // Collect artifact metadata for index.json
+                            try
+                            {
+                                var fi = new FileInfo(target);
+                                long size = fi.Exists ? fi.Length : 0L;
+                                artifactsIndex.Add(new
+                                {
+                                    Analyzer = a.Analyzer,
+                                    FileName = a.FileName,
+                                    ContentType = a.ContentType,
+                                    SizeBytes = size,
+                                    OriginalPath = string.IsNullOrEmpty(a.FilePath) ? null : a.FilePath,
+                                    ProducedAtUtc = DateTime.UtcNow
+                                });
+                            }
+                            catch { }
                         }
                         catch
                         {
                             // Non-fatal: continue writing remaining artifacts.
                         }
                     }
+
+                    // Write artifacts index for this dump
+                    try
+                    {
+                        string idxPath = Path.Combine(artifactsDir, "index.json");
+                        var opts = new JsonSerializerOptions { WriteIndented = true };
+                        await File.WriteAllTextAsync(idxPath, JsonSerializer.Serialize(artifactsIndex, opts), cancellationToken);
+                        ConsoleUx.ReportWritten(idxPath);
+                    }
+                    catch { }
                 }
             }
         }

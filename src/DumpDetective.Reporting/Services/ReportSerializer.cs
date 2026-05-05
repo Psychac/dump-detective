@@ -1,3 +1,4 @@
+using System.Linq;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -20,6 +21,35 @@ internal sealed class ReportSerializer
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
         List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, builders);
+
+        // If analyzers produced exported artifact files (NDJSON/CSV etc.), append
+        // a short informational note to the corresponding analyzer section so
+        // users are aware extra artifacts exist alongside the main report.
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Artifacts is null || run.Artifacts.Count == 0)
+                continue;
+
+            var dupArtifacts = run.Artifacts.Where(a =>
+                (a.FileName is not null && (a.FileName.Contains("ndjson", StringComparison.OrdinalIgnoreCase)
+                                           || a.FileName.Contains("duplicates", StringComparison.OrdinalIgnoreCase)
+                                           || a.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)))
+                || string.Equals(a.ContentType, "application/gzip", StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+
+            if (dupArtifacts.Count == 0)
+                continue;
+
+            int idx = analyzerSections.FindIndex(s => string.Equals(s.AnalyzerName, run.AnalyzerName, StringComparison.OrdinalIgnoreCase));
+            if (idx < 0)
+                continue;
+
+            AnalyzerDetailSection section = analyzerSections[idx];
+            var blocks = section.Blocks.ToList();
+            blocks.Add(new DividerBlock());
+            blocks.Add(new TextBlock($"Note: This analyzer produced {dupArtifacts.Count} artifact file(s) (e.g. NDJSON/CSV) containing exported snapshots or duplicate records. These artifacts are written to the report's artifacts folder and can be downloaded for deeper analysis."));
+            analyzerSections[idx] = section with { Blocks = blocks };
+        }
         analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
 
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
@@ -179,8 +209,16 @@ internal sealed class ReportSerializer
             mergedKeys.Add(f.Fingerprint);
 
             // Merge: take higher severity, combine evidence + recommendation (distinct)
-            string mergedEvidence = MergeText(existing.Evidence, f.Evidence);
-            string mergedRec      = MergeText(existing.Recommendation, f.Recommendation);
+            // Merge evidence/recommendation as lists (preserve order, dedupe exact entries)
+            var existingEvidence = existing.EvidenceItems ?? new[] { existing.Evidence };
+            var newEvidence = f.EvidenceItems ?? new[] { f.Evidence };
+            var mergedEvidenceList = existingEvidence.Concat(newEvidence).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
+            string mergedEvidence = string.Join(Environment.NewLine, mergedEvidenceList);
+
+            var existingRec = existing.RecommendationItems ?? new[] { existing.Recommendation };
+            var newRec = f.RecommendationItems ?? new[] { f.Recommendation };
+            var mergedRecList = existingRec.Concat(newRec).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
+            string mergedRec = string.Join(Environment.NewLine, mergedRecList);
             int    mergedSeverity = Math.Max(SeverityOrdinal(existing.Severity), SeverityOrdinal(f.Severity));
             string mergedSeverityStr = SeverityFromOrdinal(mergedSeverity);
 
@@ -196,7 +234,11 @@ internal sealed class ReportSerializer
                 Evidence:       mergedEvidence,
                 Recommendation: mergedRec,
                 Tags:           mergedTags,
-                Fingerprint:    existing.Fingerprint);
+                Fingerprint:    existing.Fingerprint)
+            {
+                EvidenceItems = mergedEvidenceList,
+                RecommendationItems = mergedRecList
+            };
         }
 
         duplicateCandidates = mergedKeys.Count;

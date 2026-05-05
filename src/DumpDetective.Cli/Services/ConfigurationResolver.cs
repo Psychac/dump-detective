@@ -69,11 +69,22 @@ internal sealed class ConfigurationResolver
         IReadOnlyCollection<string> effectiveInclude = configuredInclude ?? request.IncludeAnalyzers;
         IReadOnlyCollection<string> effectiveExclude = configuredExclude ?? request.ExcludeAnalyzers;
 
-        string? effectiveDumpPath = !string.IsNullOrWhiteSpace(configuredDumpPath)
-            ? configuredDumpPath
-            : !string.IsNullOrWhiteSpace(request.DumpPath)
+        // Determine effective dump path.
+        // If the user explicitly provided a config path, honor the configured DumpPath when present.
+        // Otherwise prefer the request-provided DumpPath (positional CLI) over any implicit config file value.
+        string? effectiveDumpPath;
+        if (!string.IsNullOrWhiteSpace(request.ConfigPath))
+        {
+            effectiveDumpPath = !string.IsNullOrWhiteSpace(configuredDumpPath)
+                ? configuredDumpPath
+                : !string.IsNullOrWhiteSpace(request.DumpPath) ? request.DumpPath : effectiveTrend?.LastOrDefault();
+        }
+        else
+        {
+            effectiveDumpPath = !string.IsNullOrWhiteSpace(request.DumpPath)
                 ? request.DumpPath
-                : effectiveTrend?.LastOrDefault();
+                : !string.IsNullOrWhiteSpace(configuredDumpPath) ? configuredDumpPath : effectiveTrend?.LastOrDefault();
+        }
         if (string.IsNullOrWhiteSpace(effectiveDumpPath))
         {
             throw new ArgumentException("Dump path is required. Provide positional dump-path, --trend, or DumpPath in config.");
@@ -150,6 +161,8 @@ internal sealed class ConfigurationResolver
         string samplePath = Path.Combine(baseDirectory, FallbackSampleConfigFileName);
         return File.Exists(samplePath) ? samplePath : null;
     }
+
+    
 
     private static CliConfigurationFileModel LoadConfigurationFile(string configPath)
     {

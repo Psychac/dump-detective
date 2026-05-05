@@ -26,7 +26,7 @@ internal sealed record AnalysisReportDocument
 }
 
 // Serializable projection of InsightFinding — InsightFinding itself is unchanged
-internal sealed record FindingRecord(
+internal sealed partial record FindingRecord(
     string Analyzer,
     string Category,
     string Severity,          // FindingSeverity.ToString()
@@ -35,6 +35,13 @@ internal sealed record FindingRecord(
     string Recommendation,
     IReadOnlyList<string> Tags,
     string Fingerprint);
+
+// Backwards-compatible list properties for richer evidence/recommendation handling.
+internal partial record FindingRecord
+{
+    public IReadOnlyList<string>? EvidenceItems { get; init; } = null;
+    public IReadOnlyList<string>? RecommendationItems { get; init; } = null;
+}
 
 internal sealed record ExecutiveSummaryRecord(
     long TotalManagedBytes,

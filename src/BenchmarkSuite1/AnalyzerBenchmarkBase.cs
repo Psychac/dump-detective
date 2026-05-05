@@ -46,7 +46,7 @@ namespace BenchmarkSuite1
         protected virtual string GetDumpPath()
         {
             return Environment.GetEnvironmentVariable("DD_BENCHMARK_DUMP")
-                ?? @"D:\DUmps\Crash_IIS_BALTSTPRD\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.dmp";
+                ?? @"D:\DUmps\Crash_IIS_BALTSTPRD\Date__03_23_2026__Time_06_21_21PM__Second_Chance_Exception_E0434352.dmp";
         }
 
         /// <summary>

@@ -27,7 +27,7 @@ internal sealed class ReportBuilderFacade(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AnalysisReportDocument doc = _serializer.Serialize(dumpPath, runs, elapsed, _builders, audience);
+        AnalysisReportDocument doc = BuildReportDocument(dumpPath, audience, runs, elapsed);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
@@ -51,6 +51,22 @@ internal sealed class ReportBuilderFacade(
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
+        return formatter.Render(doc);
+    }
+
+    public AnalysisReportDocument BuildReportDocument(
+        string dumpPath,
+        ReportAudience audience,
+        IReadOnlyList<AnalyzerRunResult> runs,
+        TimeSpan elapsed)
+    {
+        return _serializer.Serialize(dumpPath, runs, elapsed, _builders, audience);
+    }
+
+    public string RenderDocument(AnalysisReportDocument doc, ReportFormat format)
+    {
+        IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
+            ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         return formatter.Render(doc);
     }
 }

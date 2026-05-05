@@ -44,6 +44,7 @@ internal sealed class SingleDumpPipelineState : IDisposable
 
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
     public string RenderedReport { get; set; } = string.Empty;
+    public DumpDetective.Reporting.Models.AnalysisReportDocument? ReportDocument { get; set; }
 
     // ── Shared ───────────────────────────────────────────────────────────────
     /// <summary>Stopwatch started when the state is created; used to compute cumulative elapsed across stages.</summary>

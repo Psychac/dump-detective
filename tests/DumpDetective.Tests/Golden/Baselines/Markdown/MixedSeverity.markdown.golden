@@ -1,4 +1,4 @@
-# DumpDetective Analysis Report
+﻿# DumpDetective Analysis Report
 
 > Dump: `C:/fixtures/MixedSeverity.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
@@ -13,31 +13,23 @@
 
 Critical item
 
-| Label | Value | 
-|---|---|
-| Item | Critical |
-
 **Remediation**
+
 - Handle now
 
 ## [Warning] Warning leak
 
 Warning item
 
-| Label | Value | 
-|---|---|
-| Item | Warning |
-
 **Remediation**
+
 - Plan remediation
 
 ## [Info] Info signal
 
 Informational item
 
-| Label | Value | 
-|---|---|
-| Item | Info |
-
 **Remediation**
+
 - Observe
+

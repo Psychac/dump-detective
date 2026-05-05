@@ -93,4 +93,5 @@ internal sealed record HeapIndexBuildResult(
     /// Key: XxHash64 over raw UTF-16 bytes. Value: count, total size, preview.
     /// Null when string hashing was disabled or not yet implemented for the storage kind.
     /// </summary>
-    IReadOnlyDictionary<ulong, StringDedupEntry>? StringDedupIndex = null);
+    IReadOnlyDictionary<ulong, StringDedupEntry>? StringDedupIndex = null,
+    DistributionSummary? StringDedupDistribution = null);

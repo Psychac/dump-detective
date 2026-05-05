@@ -110,6 +110,8 @@ internal sealed class ReportSerializer
             DeveloperActionPlan = developerActionPlan,
             Confidence       = confidence,
             DedupDiagnostics = dedupRecord
+        ,
+            Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList()
         };
     }
 

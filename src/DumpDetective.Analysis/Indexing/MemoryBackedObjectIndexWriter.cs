@@ -44,6 +44,8 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         const int MaxDedupUnique = 500_000; // hard cap on unique patterns tracked
         const int MaxDedupStringLength = 1024;
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
+        var globalLengthSamples = new List<int>();
+        var globalLengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal);
 
         var parallelOptions = new ParallelOptions
         {
@@ -99,7 +101,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string,int>(StringComparer.Ordinal)),
             (i, _, state) =>
             {
                 ClrSegment segment = segments[i];
@@ -151,6 +153,25 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         string? val = obj.AsString(maxLength: MaxDedupStringLength);
                         if (val is { Length: > 0 })
                         {
+                            int charLen = val.Length;
+                            if (state.LengthSamples.Count < 100_000) state.LengthSamples.Add(charLen);
+                            string key = charLen switch
+                            {
+                                < 16 => "0-15",
+                                < 32 => "16-31",
+                                < 64 => "32-63",
+                                < 128 => "64-127",
+                                < 256 => "128-255",
+                                < 512 => "256-511",
+                                < 1024 => "512-1023",
+                                < 4096 => "1024-4095",
+                                < 16384 => "4096-16383",
+                                < 65536 => "16384-65535",
+                                _ => "65536+"
+                            };
+                            state.LengthBuckets.TryGetValue(key, out int kc);
+                            state.LengthBuckets[key] = kc + 1;
+
                             ulong h = XxHash64.HashToUInt64(MemoryMarshal.AsBytes(val.AsSpan()));
                             if (state.StringDedup.TryGetValue(h, out StringDedupEntry? e))
                             { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
@@ -184,6 +205,21 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         else if (masterStringDedup.Count < MaxDedupUnique)
                         { masterStringDedup[kvp.Key] = kvp.Value; }
                     }
+
+                    if (state.LengthSamples.Count > 0)
+                    {
+                        int remaining = Math.Max(0, 100_000 - globalLengthSamples.Count);
+                        if (remaining > 0)
+                        {
+                            int take = Math.Min(remaining, state.LengthSamples.Count);
+                            globalLengthSamples.AddRange(state.LengthSamples.Take(take));
+                        }
+                        foreach (var kv in state.LengthBuckets)
+                        {
+                            globalLengthBuckets.TryGetValue(kv.Key, out int cur);
+                            globalLengthBuckets[kv.Key] = cur + kv.Value;
+                        }
+                    }
                 }
             });
 
@@ -215,6 +251,45 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         stopwatch.Stop();
         progress?.Report(new(objectCount, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
 
+        // Build distribution summary from in-memory results
+        DistributionSummary? distribution = null;
+        try
+        {
+            var percentiles = new Dictionary<string,double>(StringComparer.Ordinal);
+            int sampleCount = globalLengthSamples.Count;
+            if (sampleCount > 0)
+            {
+                globalLengthSamples.Sort();
+                percentiles["p50"] = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.50)];
+                percentiles["p75"] = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.75)];
+                percentiles["p90"] = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.90)];
+                percentiles["p95"] = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.95)];
+            }
+
+            var freqBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+            {
+                ["1"] = 0,
+                ["2"] = 0,
+                ["3-10"] = 0,
+                ["11-100"] = 0,
+                ["101-1000"] = 0,
+                ["1001+"] = 0
+            };
+            foreach (var e in masterStringDedup.Values)
+            {
+                int c = e.Count;
+                if (c <= 1) freqBuckets["1"]++;
+                else if (c == 2) freqBuckets["2"]++;
+                else if (c <= 10) freqBuckets["3-10"]++;
+                else if (c <= 100) freqBuckets["11-100"]++;
+                else if (c <= 1000) freqBuckets["101-1000"]++;
+                else freqBuckets["1001+"]++;
+            }
+
+            distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string,int>(), freqBuckets, globalLengthSamples.Count);
+        }
+        catch { distribution = null; }
+
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Memory,
             IndexPath: "<memory>",
@@ -228,7 +303,8 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             InMemoryTaskCandidates: taskCandidates.ToArray(),
             InMemoryEventCandidates: eventCandidates.ToArray(),
             InMemoryRootCandidates: rootList.ToArray(),
-            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null);
+            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null,
+            StringDedupDistribution: distribution);
     }
 
     // ── Type classification helpers (mirror DiskBackedObjectIndexWriter) ───────

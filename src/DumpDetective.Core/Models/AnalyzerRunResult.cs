@@ -35,6 +35,7 @@ internal sealed record AnalyzerRunResult(
     long ObjectScanCount = 0,
     long CacheHits = 0,
     long CacheMisses = 0,
+    IReadOnlyList<ReportArtifact>? Artifacts = null,
     /// <summary>
     /// Set when the <see cref="IFindingGenerator"/> for this analyzer threw during
     /// <see cref="DumpDetective.Reporting.Pipeline.FindingGenerationPipeline"/> execution.
@@ -49,4 +50,5 @@ internal sealed record AnalyzerRunResult(
 {
     /// <summary>Generated findings for this run. Populated by <see cref="DumpDetective.Analysis.FindingGenerators"/> after the analyzer completes.</summary>
     public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? [];
+    public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = Artifacts ?? [];
 }

@@ -1,4 +1,4 @@
-# DumpDetective Analysis Report
+﻿# DumpDetective Analysis Report
 
 > Dump: `C:/fixtures/LongNames.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
@@ -12,11 +12,10 @@
 ## [Warning] Long member/type names
 
 Long identifiers are preserved end-to-end.
-
-| Label | Value | 
-|---|---|
-| Type | VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP |
-| Member | VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN |
+- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP
+- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN
 
 **Remediation**
+
 - Keep full value visibility; do not truncate.
+

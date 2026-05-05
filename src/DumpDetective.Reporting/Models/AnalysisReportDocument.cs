@@ -21,6 +21,8 @@ internal sealed record AnalysisReportDocument
 
     // Per-analyzer structured sections — ordered by SortOrder
     public IReadOnlyList<AnalyzerDetailSection> AnalyzerSections { get; init; } = [];
+    // Serialized raw artifacts produced by analyzers (CSV/JSON) when requested.
+    public IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts { get; init; } = [];
 }
 
 // Serializable projection of InsightFinding — InsightFinding itself is unchanged

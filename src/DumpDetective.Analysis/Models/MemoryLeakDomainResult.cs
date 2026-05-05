@@ -24,5 +24,5 @@ internal sealed record MemoryLeakDomainResult(
     /// </summary>
     bool ReferenceCountingSkipped = false) : AnalyzerDomainResult;
 
-internal sealed record DuplicateStringSnapshot(string Preview, int Count, ulong WastedBytes, IReadOnlyList<ulong>? SampleAddresses = null, ulong DominantMethodTable = 0);
+// DuplicateStringSnapshot moved to DumpDetective.Core.Models.DuplicateStringSnapshot
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences);

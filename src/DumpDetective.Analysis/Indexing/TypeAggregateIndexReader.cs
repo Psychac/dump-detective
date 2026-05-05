@@ -208,8 +208,9 @@ internal static class TypeAggregateIndexReader
             }
         }
 
-        // Attempt to load optional StringDedupIndex satellite file
+        // Attempt to load optional StringDedupIndex satellite file and metadata sidecar
         IReadOnlyDictionary<ulong, StringDedupEntry>? stringDedup = null;
+        DistributionSummary? stringDedupDistribution = null;
         try
         {
             string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
@@ -224,9 +225,6 @@ internal static class TypeAggregateIndexReader
                 if (magic == 0x50554453 && version == 1 && entries > 0)
                 {
                     var map = new Dictionary<ulong, StringDedupEntry>(entries);
-                    // Hoist fixed-size buffers outside the loop — stackalloc inside a loop
-                    // grows the stack frame by the allocation size on every iteration and
-                    // never releases it, causing a StackOverflowException for large entry counts.
                     Span<byte> rec     = stackalloc byte[31];
                     Span<byte> addrBuf = stackalloc byte[8];
                     for (int i = 0; i < entries; i++)
@@ -266,6 +264,19 @@ internal static class TypeAggregateIndexReader
                     stringDedup = map.Count > 0 ? map : null;
                 }
             }
+
+            // Attempt to load optional metadata sidecar
+            try
+            {
+                string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
+                if (File.Exists(metaPath))
+                {
+                    string txt = File.ReadAllText(metaPath);
+                    var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    stringDedupDistribution = System.Text.Json.JsonSerializer.Deserialize<DistributionSummary>(txt, opts);
+                }
+            }
+            catch { stringDedupDistribution = null; }
         }
         catch { stringDedup = null; }
 
@@ -280,7 +291,8 @@ internal static class TypeAggregateIndexReader
             GlobalSizeBuckets: sizeBuckets,
             TypeShapeCache:   shapeCache,
             SatelliteWarnings: null,
-            StringDedupIndex: stringDedup);
+            StringDedupIndex: stringDedup,
+            StringDedupDistribution: stringDedupDistribution);
 
         return true;
     }

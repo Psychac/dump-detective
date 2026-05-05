@@ -82,6 +82,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // String dedup index built while dump pages are hot — zero extra I/O cost.
         const int MaxDedupUnique = 500_000;
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
+        // Global distribution collectors (merged from per-thread state)
+        var globalLengthSamples = new List<int>();
+        var globalLengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal);
 
         // OPT: open the index file before the parallel scan so each segment writes directly to
         // disk as it completes — eliminating the post-scan bag + flat-array accumulation
@@ -103,7 +106,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string,int>(StringComparer.Ordinal)),
             (segment, _, state) =>
             {
                 // Determine generation from segment kind — avoids per-object GetGeneration call
@@ -177,11 +180,31 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
 
                     // Build string dedup index while dump pages are hot from type resolution.
-                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < 500_000)
+                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < MaxDedupUnique)
                     {
                         string? val = obj.AsString(maxLength: 1024);
                         if (val is { Length: > 0 })
                         {
+                            // record length sample (bounded per-thread)
+                            int charLen = val.Length;
+                            if (state.LengthSamples.Count < 100_000) state.LengthSamples.Add(charLen);
+                            string key = charLen switch
+                            {
+                                < 16 => "0-15",
+                                < 32 => "16-31",
+                                < 64 => "32-63",
+                                < 128 => "64-127",
+                                < 256 => "128-255",
+                                < 512 => "256-511",
+                                < 1024 => "512-1023",
+                                < 4096 => "1024-4095",
+                                < 16384 => "4096-16383",
+                                < 65536 => "16384-65535",
+                                _ => "65536+"
+                            };
+                            state.LengthBuckets.TryGetValue(key, out int kc);
+                            state.LengthBuckets[key] = kc + 1;
+
                             ulong h = XxHash64.HashToUInt64(MemoryMarshal.AsBytes(val.AsSpan()));
                             if (state.StringDedup.TryGetValue(h, out StringDedupEntry? e))
                             { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
@@ -235,6 +258,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 lock (masterBuilder)
                 {
                     masterBuilder.Merge(state.Builder);
+                    // merge per-thread string dedup
                     foreach (var kvp in state.StringDedup)
                     {
                         if (masterStringDedup.TryGetValue(kvp.Key, out StringDedupEntry? me))
@@ -245,7 +269,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                                 me.SampleAddresses = kvp.Value.SampleAddresses;
                             else if (me.SampleAddresses is not null && kvp.Value.SampleAddresses is not null && me.SampleAddresses.Length < 2)
                             {
-                                // attempt to add one more sample address
                                 foreach (var a in kvp.Value.SampleAddresses)
                                 {
                                     if (me.SampleAddresses.Length == 1 && me.SampleAddresses[0] != a)
@@ -255,8 +278,24 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                             if (me.DominantMethodTable == 0 && kvp.Value.DominantMethodTable != 0)
                                 me.DominantMethodTable = kvp.Value.DominantMethodTable;
                         }
-                        else if (masterStringDedup.Count < 500_000)
+                        else if (masterStringDedup.Count < MaxDedupUnique)
                         { masterStringDedup[kvp.Key] = kvp.Value; }
+                    }
+
+                    // merge length samples/buckets (bounded)
+                    if (state.LengthSamples.Count > 0)
+                    {
+                        int remaining = Math.Max(0, 100_000 - globalLengthSamples.Count);
+                        if (remaining > 0)
+                        {
+                            int take = Math.Min(remaining, state.LengthSamples.Count);
+                            globalLengthSamples.AddRange(state.LengthSamples.Take(take));
+                        }
+                        foreach (var kv in state.LengthBuckets)
+                        {
+                            globalLengthBuckets.TryGetValue(kv.Key, out int cur);
+                            globalLengthBuckets[kv.Key] = cur + kv.Value;
+                        }
                     }
                 }
             });
@@ -347,6 +386,56 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             ((List<string>)satelliteWarnings).Add($"StringDedupIndex.bin: {ex.GetType().Name}: {ex.Message}");
         }
+
+        // Persist lightweight distribution metadata to a small JSON sidecar so readers
+        // can populate a DistributionSummary without needing a full heap scan.
+        try
+        {
+            if (globalLengthSamples.Count > 0 || masterStringDedup.Count > 0)
+            {
+                // compute percentiles
+                IReadOnlyDictionary<string,double> percentiles = new Dictionary<string,double>(StringComparer.Ordinal);
+                int sampleCount = globalLengthSamples.Count;
+                if (sampleCount > 0)
+                {
+                    globalLengthSamples.Sort();
+                    double p50 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.50)];
+                    double p75 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.75)];
+                    double p90 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.90)];
+                    double p95 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.95)];
+                    percentiles = new Dictionary<string,double> { ["p50"] = p50, ["p75"] = p75, ["p90"] = p90, ["p95"] = p95 };
+                }
+
+                // frequency buckets from masterStringDedup counts
+                var freqBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+                {
+                    ["1"] = 0,
+                    ["2"] = 0,
+                    ["3-10"] = 0,
+                    ["11-100"] = 0,
+                    ["101-1000"] = 0,
+                    ["1001+"] = 0
+                };
+                foreach (var e in masterStringDedup.Values)
+                {
+                    int c = e.Count;
+                    if (c <= 1) freqBuckets["1"]++;
+                    else if (c == 2) freqBuckets["2"]++;
+                    else if (c <= 10) freqBuckets["3-10"]++;
+                    else if (c <= 100) freqBuckets["11-100"]++;
+                    else if (c <= 1000) freqBuckets["101-1000"]++;
+                    else freqBuckets["1001+"]++;
+                }
+
+                var distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string,int>(), freqBuckets, sampleCount);
+
+                string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
+                var jsOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+                string json = System.Text.Json.JsonSerializer.Serialize(distribution, jsOpts);
+                File.WriteAllText(metaPath, json);
+            }
+        }
+        catch { /* non-fatal */ }
 
         stopwatch.Stop();
 

@@ -12,4 +12,8 @@ internal struct StringLeakInfo
     public ulong[]? SampleAddresses;
     // Dominant method-table observed for this fingerprint (approximate)
     public ulong DominantMethodTable;
+    // 64-bit content fingerprint/hash (XxHash64)
+    public ulong FingerprintHash;
+    // Sampling source: "Prebuilt", "IndexScan", "HeapScan"
+    public string? SamplingSource;
 }

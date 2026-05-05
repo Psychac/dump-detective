@@ -10,13 +10,16 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        state.RenderedReport = reportBuilderFacade.BuildRenderedReport(
+        // Build the serializable report document and keep it in state for artifact persistence.
+        var doc = reportBuilderFacade.BuildReportDocument(
             state.Resolved.DumpPath,
-            state.Resolved.Report.Format,
             state.Resolved.Report.Audience,
             state.Runs,
-            state.AnalysisElapsed,
-            cancellationToken);
+            state.AnalysisElapsed);
+        state.ReportDocument = doc;
+
+        // Render the report string for the chosen output format.
+        state.RenderedReport = reportBuilderFacade.RenderDocument(doc, state.Resolved.Report.Format);
 
         return Task.CompletedTask;
     }

@@ -116,6 +116,23 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                         ManagedHeapAfter:  GC.GetTotalMemory(false));
                 }
 
+                // If the analyzer domain result exposes a `RawExports` property (some analyzers
+                // attach on-disk artifacts there), propagate them into the AnalyzerRunResult
+                // so the reporting serializer can collect and write them out.
+                IReadOnlyList<ReportArtifact>? propagatedArtifacts = null;
+                try
+                {
+                    var prop = analyzerResult.GetType().GetProperty("RawExports");
+                    if (prop is not null)
+                    {
+                        propagatedArtifacts = prop.GetValue(analyzerResult) as IReadOnlyList<ReportArtifact>;
+                    }
+                }
+                catch
+                {
+                    propagatedArtifacts = null;
+                }
+
                 AnalyzerRunResult success = new(
                     analyzer.Name,
                     AnalyzerExecutionStatus.Success,
@@ -129,6 +146,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     ObjectScanCount: objectScans,
                     CacheHits: cacheHits,
                     CacheMisses: cacheMisses,
+                    Artifacts: propagatedArtifacts,
                     MemoryStats: memoryStats);
 
                 runResults.Add(success);

@@ -30,7 +30,7 @@ internal static class GoldenReportFixtures
                 Category:       "Leak",
                 Severity:       "Warning",
                 Title:          "Leak pressure",
-                Evidence:       "Detected duplicate strings.",
+                Evidence:       "Detected duplicate strings.\n- Analyzer: MemoryLeakAnalyzer\n- Value: System.String duplicated",
                 Recommendation: "Pool repeated string payloads.",
                 Tags:           ["baseline-small"],
                 Fingerprint:    "baseline-small")
@@ -50,7 +50,7 @@ internal static class GoldenReportFixtures
                 Category:       "Leak",
                 Severity:       "Critical",
                 Title:          "Duplicate-heavy merged section",
-                Evidence:       "Merged duplicate leak evidence from multiple analyzers.",
+                Evidence:       "Merged duplicate leak evidence from multiple analyzers.\n- EvidenceA: A repeated payload instance\n- EvidenceB: Another repeated payload instance",
                 Recommendation: "Deduplicate payload cache keys. Review object retention roots.",
                 Tags:           ["dup-heavy"],
                 Fingerprint:    "dup-heavy")
@@ -70,7 +70,7 @@ internal static class GoldenReportFixtures
                 Category:       "Memory",
                 Severity:       "Warning",
                 Title:          "Long member/type names",
-                Evidence:       "Long identifiers are preserved end-to-end. Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN",
+                Evidence:       "Long identifiers are preserved end-to-end.\n- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP\n- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN",
                 Recommendation: "Keep full value visibility; do not truncate.",
                 Tags:           ["long-names"],
                 Fingerprint:    "long-names")
@@ -90,7 +90,7 @@ internal static class GoldenReportFixtures
                 Category:       "Crash",
                 Severity:       "Warning",
                 Title:          "Rich evidence sample",
-                Evidence:       "Includes multiple evidence and remediation records. Thread: 42 Exception: System.NullReferenceException StackTop: Service.ProcessRequest",
+                Evidence:       "Includes multiple evidence and remediation records.\n- Thread: 42\n- Exception: System.NullReferenceException\n- StackTop: Service.ProcessRequest",
                 Recommendation: "Guard null dereferences. Add targeted telemetry around request processing.",
                 Tags:           ["rich-evidence"],
                 Fingerprint:    "rich-evidence")

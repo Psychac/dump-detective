@@ -1,0 +1,31 @@
+﻿{
+  "schemaVersion": "2.0",
+  "dumpPath": "C:/fixtures/BaselineSmall.dmp",
+  "generatedAtUtc": "2026-01-01T12:00:00Z",
+  "elapsedSeconds": 12.3,
+  "isTrendReport": false,
+  "trendDumpCount": 0,
+  "findings": [
+    {
+      "analyzer": "MemoryLeakAnalyzer",
+      "category": "Leak",
+      "severity": "Warning",
+      "title": "Leak pressure",
+      "evidence": "Detected duplicate strings.\n- Analyzer: MemoryLeakAnalyzer\n- Value: System.String duplicated",
+      "recommendation": "Pool repeated string payloads.",
+      "tags": [
+        "baseline-small"
+      ],
+      "fingerprint": "baseline-small"
+    }
+  ],
+  "developerActionPlan": [],
+  "confidence": [],
+  "dedupDiagnostics": {
+    "mergedSections": 0,
+    "duplicateCandidates": 0,
+    "evidenceBeforeMerge": 2
+  },
+  "analyzerSections": [],
+  "artifacts": []
+}

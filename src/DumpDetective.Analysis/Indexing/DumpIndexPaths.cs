@@ -67,6 +67,9 @@ internal static class DumpIndexPaths
     public static string TypeAggregateIndex(string dumpPath)  => Combine(dumpPath, TypeAggregateIndexFile);
     public static string StringDedupIndex(string dumpPath)   => Combine(dumpPath, StringDedupIndexFile);
 
+    public const string StringDedupIndexMetadataFile = "StringDedupIndex.meta.json";
+    public static string StringDedupIndexMetadata(string dumpPath) => Combine(dumpPath, StringDedupIndexMetadataFile);
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string Combine(string dumpPath, string fileName) =>

@@ -1,6 +1,26 @@
 namespace DumpDetective.Core.Options;
 
 /// <summary>
+/// Controls deduplication path selection for the string analyzer.
+/// </summary>
+public enum DeduplicationMode
+{
+    Disabled,
+    PreferPrebuiltOnly,
+    FallbackToHeapScan
+}
+
+/// <summary>
+/// Sampling intent used to drive numeric caps for heap scanning.
+/// </summary>
+public enum StringSamplingMode
+{
+    Aggressive,
+    Moderate,
+    Full
+}
+
+/// <summary>
 /// Runtime-injectable options for string analysis behavior.
 /// </summary>
 public sealed class StringAnalysisOptions
@@ -52,11 +72,74 @@ public sealed class StringAnalysisOptions
     /// </summary>
     public int PreviewMaxLength { get; init; } = 80;
 
+    /// <summary>
+    /// Controls whether deduplication runs and how it falls back when indexes are missing.
+    /// </summary>
+    public DeduplicationMode DeduplicationMode { get; init; } = DeduplicationMode.FallbackToHeapScan;
+
+    /// <summary>
+    /// Semantic sampling mode hint that can be used to compute caps for heap scanning.
+    /// </summary>
+    public StringSamplingMode SamplingMode { get; init; } = StringSamplingMode.Moderate;
+
+    /// <summary>
+    /// Whether to attempt to detect interned strings by scanning FOH/other intern tables.
+    /// </summary>
+    public bool DetectInterning { get; init; } = true;
+
+    /// <summary>
+    /// When true emit raw CSV/JSON exports of duplicate findings to the report artifacts.
+    /// </summary>
+    public bool ProduceRawExports { get; init; } = false;
+
+    /// <summary>
+    /// Minimum character length for a duplicate to be considered (avoid tiny-noise duplicates).
+    /// </summary>
+    public int MinDuplicateCharLength { get; init; } = 4;
     public static StringAnalysisOptions Preset(AnalysisProfile profile) => profile switch
     {
-        AnalysisProfile.Fast => new StringAnalysisOptions { MaxUniqueStringTracking = 50_000, MaxStringsToDedup = 10_000, TopDuplicatesToShow = 10, PreviewMaxLength = 64 },
-        AnalysisProfile.Full => new StringAnalysisOptions { MaxUniqueStringTracking = 500_000, MaxStringsToDedup = 200_000, TopDuplicatesToShow = 50, PreviewMaxLength = 120 },
-        _ => new StringAnalysisOptions(),
+        AnalysisProfile.Fast => new StringAnalysisOptions
+        {
+            EnableDeduplication = true,
+            DeduplicationMode = DeduplicationMode.PreferPrebuiltOnly,
+            SamplingMode = StringSamplingMode.Aggressive,
+            MaxUniqueStringTracking = 50_000,
+            MaxStringsToDedup = 10_000,
+            TopDuplicatesToShow = 10,
+            PreviewMaxLength = 64,
+            DetectInterning = false,
+            ProduceRawExports = false,
+            MinDuplicateCharLength = 8
+        },
+
+        AnalysisProfile.Full => new StringAnalysisOptions
+        {
+            EnableDeduplication = true,
+            DeduplicationMode = DeduplicationMode.FallbackToHeapScan,
+            SamplingMode = StringSamplingMode.Full,
+            MaxUniqueStringTracking = 500_000,
+            MaxStringsToDedup = 200_000,
+            TopDuplicatesToShow = 50,
+            PreviewMaxLength = 120,
+            DetectInterning = true,
+            ProduceRawExports = true,
+            MinDuplicateCharLength = 1
+        },
+
+        _ => new StringAnalysisOptions
+        {
+            // Balanced / default matches previous defaults
+            EnableDeduplication = true,
+            DeduplicationMode = DeduplicationMode.FallbackToHeapScan,
+            SamplingMode = StringSamplingMode.Moderate,
+            MaxUniqueStringTracking = 200_000,
+            MaxStringsToDedup = 50_000,
+            TopDuplicatesToShow = 20,
+            PreviewMaxLength = 80,
+            DetectInterning = true,
+            ProduceRawExports = false,
+            MinDuplicateCharLength = 4
+        },
     };
 
     public static StringAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);

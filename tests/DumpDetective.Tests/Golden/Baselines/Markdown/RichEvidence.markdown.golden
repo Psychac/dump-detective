@@ -1,4 +1,4 @@
-# DumpDetective Analysis Report
+﻿# DumpDetective Analysis Report
 
 > Dump: `C:/fixtures/RichEvidence.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
@@ -12,13 +12,11 @@
 ## [Warning] Rich evidence sample
 
 Includes multiple evidence and remediation records.
-
-| Label | Value | 
-|---|---|
-| Thread | 42 |
-| Exception | System.NullReferenceException |
-| StackTop | Service.ProcessRequest |
+- Thread: 42
+- Exception: System.NullReferenceException
+- StackTop: Service.ProcessRequest
 
 **Remediation**
-- Guard null dereferences.
-- Add targeted telemetry around request processing.
+
+- Guard null dereferences. Add targeted telemetry around request processing.
+

@@ -1,0 +1,31 @@
+﻿{
+  "schemaVersion": "2.0",
+  "dumpPath": "C:/fixtures/DuplicateHeavy.dmp",
+  "generatedAtUtc": "2026-01-01T12:00:00Z",
+  "elapsedSeconds": 8.1,
+  "isTrendReport": false,
+  "trendDumpCount": 0,
+  "findings": [
+    {
+      "analyzer": "MemoryLeakAnalyzer",
+      "category": "Leak",
+      "severity": "Critical",
+      "title": "Duplicate-heavy merged section",
+      "evidence": "Merged duplicate leak evidence from multiple analyzers.\n- EvidenceA: A repeated payload instance\n- EvidenceB: Another repeated payload instance",
+      "recommendation": "Deduplicate payload cache keys. Review object retention roots.",
+      "tags": [
+        "dup-heavy"
+      ],
+      "fingerprint": "dup-heavy"
+    }
+  ],
+  "developerActionPlan": [],
+  "confidence": [],
+  "dedupDiagnostics": {
+    "mergedSections": 3,
+    "duplicateCandidates": 3,
+    "evidenceBeforeMerge": 8
+  },
+  "analyzerSections": [],
+  "artifacts": []
+}

@@ -1,0 +1,55 @@
+﻿{
+  "schemaVersion": "2.0",
+  "dumpPath": "C:/fixtures/MixedSeverity.dmp",
+  "generatedAtUtc": "2026-01-01T12:00:00Z",
+  "elapsedSeconds": 6.6,
+  "isTrendReport": false,
+  "trendDumpCount": 0,
+  "findings": [
+    {
+      "analyzer": "LeakAnalyzer",
+      "category": "Leak",
+      "severity": "Critical",
+      "title": "Critical leak",
+      "evidence": "Critical item",
+      "recommendation": "Handle now",
+      "tags": [
+        "sev-critical"
+      ],
+      "fingerprint": "sev-critical"
+    },
+    {
+      "analyzer": "LeakAnalyzer",
+      "category": "Leak",
+      "severity": "Warning",
+      "title": "Warning leak",
+      "evidence": "Warning item",
+      "recommendation": "Plan remediation",
+      "tags": [
+        "sev-warning"
+      ],
+      "fingerprint": "sev-warning"
+    },
+    {
+      "analyzer": "LeakAnalyzer",
+      "category": "Info",
+      "severity": "Info",
+      "title": "Info signal",
+      "evidence": "Informational item",
+      "recommendation": "Observe",
+      "tags": [
+        "sev-info"
+      ],
+      "fingerprint": "sev-info"
+    }
+  ],
+  "developerActionPlan": [],
+  "confidence": [],
+  "dedupDiagnostics": {
+    "mergedSections": 0,
+    "duplicateCandidates": 0,
+    "evidenceBeforeMerge": 3
+  },
+  "analyzerSections": [],
+  "artifacts": []
+}

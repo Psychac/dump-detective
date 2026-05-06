@@ -83,6 +83,13 @@ internal sealed record HeapIndexBuildResult(
     /// </summary>
     (ulong TargetAddr, ulong RootAddr, byte Kind)[]? InMemoryRootCandidates = null,
     /// <summary>
+    /// Pre-enumerated GC handle snapshot collected during Phase 1 when memory-backed
+    /// indexing is used. Mirrors the content of <c>HandleSnapshot.bin</c> in disk-backed
+    /// mode: one record per handle (Addr, MethodTable, Kind).
+    /// Consumers: <c>WeakReferenceAnalyzer</c>, <c>GCHandleAnalyzer</c>.
+    /// </summary>
+    (ulong Addr, ulong Mt, byte Kind)[]? InMemoryHandleSnapshot = null,
+    /// <summary>
     /// Non-fatal warnings emitted during satellite index file writes (disk-backed mode only).
     /// Null when all satellite files were written successfully or in memory-backed mode.
     /// Consumers (e.g. <c>BuildHeapIndexStage</c>) should surface these via <c>ConsoleUx.Warning</c>.

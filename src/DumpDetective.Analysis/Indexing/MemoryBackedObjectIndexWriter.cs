@@ -290,6 +290,29 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         }
         catch { distribution = null; }
 
+        // Enumerate GC handles into an in-memory snapshot so analyzers can reuse without
+        // re-enumerating runtime.EnumerateHandles() multiple times. Cap to a conservative
+        // upper bound to avoid unbounded memory use in pathological dumps.
+        const int MaxHandleSnapshot = 500_000;
+        var handleList = new List<(ulong Addr, ulong Mt, byte Kind)>();
+        try
+        {
+            var runtime = heap.Runtime;
+            foreach (var h in runtime.EnumerateHandles())
+            {
+                if (handleList.Count >= MaxHandleSnapshot) break;
+                ulong addr = h.Object.Address;
+                ulong mt = 0UL;
+                if (addr != 0)
+                {
+                    var o = heap.GetObject(addr);
+                    if (o.IsValid) mt = o.Type?.MethodTable ?? 0UL;
+                }
+                handleList.Add((addr, mt, (byte)h.HandleKind));
+            }
+        }
+        catch { }
+
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Memory,
             IndexPath: "<memory>",
@@ -297,6 +320,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             Elapsed: stopwatch.Elapsed,
             TypeAggregates: masterBuilder.Build(),
             InMemoryEntries: flatEntries,
+            InMemoryHandleSnapshot: handleList.Count > 0 ? handleList.ToArray() : null,
             Modules: moduleRegistry.Modules,
             GlobalSizeBuckets: masterBuilder.BuildSizeBuckets(),
             TypeShapeCache: shapeCache,

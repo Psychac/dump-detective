@@ -15,4 +15,5 @@ internal sealed record WeakReferenceDomainResult(
     IReadOnlyList<NameCountEntry> TopWeakTargetTypes,
     IReadOnlyList<NameCountEntry> TopStaleWrapperHolderTypes,
     int DependentHandleDeadKeyCount,
-    bool ScanCapped) : AnalyzerDomainResult;
+    bool ScanCapped,
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? RawExports = null) : AnalyzerDomainResult;

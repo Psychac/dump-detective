@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -73,47 +74,51 @@ namespace DumpDetective.Analysis.Analyzers
 
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
 
-            // Try disk-backed HandleSnapshot.bin first
-            bool handledViaFile = false;
-            if (heapIndex is not null
-                && heapIndex.StorageKind == HeapIndexStorageKind.Disk
-                && heapIndex.IndexPath.Length > 0)
+            // Optional exports
+            IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
+            string? tmpNdjsonPath = null;
+            System.IO.FileStream? tmpFs = null;
+            System.IO.Compression.GZipStream? tmpGz = null;
+            var sampleRecords = new List<object>();
+            var jsOpts = new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+            void WriteExportRecord(ulong a, ulong mt, byte k)
             {
-                string indexDir       = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-                string snapshotPath   = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
-
-                if (File.Exists(snapshotPath))
+                try
                 {
-                    handledViaFile = true;
-                    ReadWeakHandlesFromFile(
-                        snapshotPath, heap,
-                        ref totalWeakHandles, ref aliveWeakTargets, ref deadWeakTargets,
-                        ref scanCapped, targetTypeHits, options.HandleScanCap,
-                        cancellationToken);
+                    if (tmpGz is null) return;
+                    var obj = new { address = a, methodTable = mt, kind = k };
+                    System.Text.Json.JsonSerializer.Serialize(tmpGz, obj, jsOpts);
+                    tmpGz.WriteByte((byte)'\n');
+                    if (sampleRecords.Count < 100) sampleRecords.Add(obj);
                 }
+                catch { }
             }
 
-            // Fallback: live enumeration (memory mode or missing snapshot)
-            if (!handledViaFile)
+            // Prepare exporter if requested
+            if (options.ProduceRawExports)
             {
-                var scanCounter = new ObjectScanCounter("scanning weak handles", progress,
-                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-                foreach (ClrHandle handle in runtime.EnumerateHandles())
+                try
                 {
-                    scanCounter.Tick();
-                    cancellationToken.ThrowIfCancellationRequested();
+                    tmpNdjsonPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dumpdetective-weakrefs-{Guid.NewGuid():N}.ndjson.gz");
+                    tmpFs = System.IO.File.Create(tmpNdjsonPath);
+                    tmpGz = new System.IO.Compression.GZipStream(tmpFs, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: false);
+                }
+                catch { tmpGz = null; tmpFs = null; tmpNdjsonPath = null; }
+            }
 
-                    ClrHandleKind kind = handle.HandleKind;
-                    if (kind != ClrHandleKind.WeakShort &&
-                        kind != ClrHandleKind.WeakLong  &&
-                        kind != ClrHandleKind.WeakWinRT)
-                        continue;
+            // Try to reuse any pre-enumerated in-memory handle snapshot (memory-index mode)
+            if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMem)
+            {
+                foreach (var rec in inMem)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    // Only consider weak kinds
+                    if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
 
                     totalWeakHandles++;
                     if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
-                    ulong addr = handle.Object.Address;
+                    ulong addr = rec.Addr;
                     if (addr == 0) { deadWeakTargets++; continue; }
 
                     ClrObject obj = heap.GetObject(addr);
@@ -127,8 +132,63 @@ namespace DumpDetective.Analysis.Analyzers
                     {
                         deadWeakTargets++;
                     }
+                    if (options.ProduceRawExports)
+                        WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
                 }
-                scanCounter.Complete();
+            }
+            else
+            {
+                // Otherwise try disk-backed snapshot, or enumerate live handles via a memory reader.
+                string? snapshotPath = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath.Length > 0)
+                {
+                    string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
+                    snapshotPath = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
+                }
+
+                IHandleSnapshotReader? reader = (snapshotPath is not null && File.Exists(snapshotPath))
+                    ? new DiskHandleSnapshotReader(snapshotPath)
+                    : HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+
+                var scanCounter = new ObjectScanCounter("scanning weak handles", progress,
+                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+
+                if (reader is not null)
+                {
+                    using (reader)
+                    {
+                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
+                        {
+                            scanCounter.Tick();
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
+
+                            totalWeakHandles++;
+                            if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
+
+                            ulong addr = rec.Address;
+                            if (addr == 0) { deadWeakTargets++; continue; }
+
+                            ClrObject obj = heap.GetObject(addr);
+                            if (obj.IsValid)
+                            {
+                                aliveWeakTargets++;
+                                string typeName = obj.Type?.Name ?? "Unknown";
+                                IncrementDict(targetTypeHits, typeName);
+                            }
+                            else
+                            {
+                                deadWeakTargets++;
+                            }
+                            if (options.ProduceRawExports)
+                                WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
+                        }
+                        scanCounter.Complete();
+                    }
+                    try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
+                    catch { }
+                }
             }
 
             // ── Phase B: WeakReference<T> object analysis ─────────────────────
@@ -161,9 +221,15 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
+            // Bound the number of sample probes to avoid heavy per-type work.
+            int probeLimit = options.WeakRefProbeSampleLimit <= 0 ? int.MaxValue : options.WeakRefProbeSampleLimit;
+            int probesDone = 0;
+
             foreach ((ulong mt, TypeAggregateIndexEntry entry) in weakRefMtEntries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Respect the configured probe cap.
+                if (probesDone >= probeLimit) break;
 
                 weakRefObjCount += (int)Math.Min(entry.Count, int.MaxValue);
                 weakRefObjBytes += entry.TotalSize;
@@ -178,10 +244,11 @@ namespace DumpDetective.Analysis.Analyzers
                 ClrInstanceField? mHandleField = sample.Type.GetFieldByName("m_handle");
                 if (mHandleField is null) continue;
 
-                // Check each object address we can retrieve from the heap (bounded by entry.Count,
-                // but use only a sample because we don't have a full address list here).
-                // Use SampleAddress as a representative probe to detect the stale-wrapper pattern.
+                // Check a sample instance's m_handle field to detect stale wrappers.
+                // This probe is intentionally lightweight; we cap the number of probes with
+                // `WeakRefProbeSampleLimit` in the preset/options.
                 nint handleValue = mHandleField.Read<nint>(entry.SampleAddress, interior: false);
+                probesDone++;
                 if (handleValue == 0)
                 {
                     // Sample itself is stale — approximate all as stale (conservative estimate).
@@ -194,30 +261,82 @@ namespace DumpDetective.Analysis.Analyzers
 
             int dependentHandleDeadKeyCount = 0;
 
-            if (heapIndex is not null
-                && heapIndex.StorageKind == HeapIndexStorageKind.Disk
-                && heapIndex.IndexPath.Length > 0)
+            if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMemHandles)
             {
-                string indexDir     = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-                string snapshotPath = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
-
-                if (File.Exists(snapshotPath))
-                    dependentHandleDeadKeyCount = CountDependentHandleDeadKeys(snapshotPath, heap, cancellationToken);
-            }
-            else
-            {
-                // Fallback: enumerate live handles
-                foreach (ClrHandle handle in runtime.EnumerateHandles())
+                foreach (var rec in inMemHandles)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (handle.HandleKind != ClrHandleKind.Dependent) continue;
-
-                    ulong addr = handle.Object.Address;
+                    if (rec.Kind != KindDependent) continue;
+                    ulong addr = rec.Addr;
                     if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
-
                     ClrObject obj = heap.GetObject(addr);
                     if (!obj.IsValid) dependentHandleDeadKeyCount++;
                 }
+            }
+            else
+            {
+                string? snapshotPath = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath.Length > 0)
+                {
+                    string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
+                    snapshotPath = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
+                }
+
+                IHandleSnapshotReader? reader = (snapshotPath is not null && File.Exists(snapshotPath))
+                    ? new DiskHandleSnapshotReader(snapshotPath)
+                    : HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+
+                if (reader is not null)
+                {
+                    using (reader)
+                    {
+                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (rec.Kind != KindDependent) continue;
+                            ulong addr = rec.Address;
+                            if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
+                            ClrObject obj = heap.GetObject(addr);
+                            if (!obj.IsValid) dependentHandleDeadKeyCount++;
+                            if (options.ProduceRawExports)
+                                WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
+                        }
+                    }
+                    try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
+                    catch { }
+                }
+            }
+
+            // Attach artifacts if exports were requested and produced
+            if (options.ProduceRawExports)
+            {
+                try
+                {
+                    var artifacts = new List<DumpDetective.Core.Models.ReportArtifact>();
+                    try
+                    {
+                        var summary = new
+                        {
+                            totalWeakHandles,
+                            aliveWeakTargets,
+                            deadWeakTargets,
+                            dependentHandleDeadKeyCount,
+                            scanCapped,
+                            sampleRecords
+                        };
+                        string prettyJson = System.Text.Json.JsonSerializer.Serialize(summary, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Weak Reference Analysis", "weakrefs.json", prettyJson, "application/json"));
+                    }
+                    catch { }
+
+                    if (!string.IsNullOrEmpty(tmpNdjsonPath) && System.IO.File.Exists(tmpNdjsonPath))
+                    {
+                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Weak Reference Analysis", "weakrefs.ndjson.gz", null, "application/gzip", tmpNdjsonPath));
+                    }
+
+                    if (artifacts.Count > 0) rawExports = artifacts;
+                }
+                catch { rawExports = null; }
             }
 
             // ── Build output ──────────────────────────────────────────────────
@@ -239,7 +358,8 @@ namespace DumpDetective.Analysis.Analyzers
                 TopWeakTargetTypes:             topTargetTypes,
                 TopStaleWrapperHolderTypes:     topStaleTypes,
                 DependentHandleDeadKeyCount:    dependentHandleDeadKeyCount,
-                ScanCapped:                     scanCapped);
+                ScanCapped:                     scanCapped,
+                RawExports:                     rawExports);
         }
 
         // ── File reader helpers ───────────────────────────────────────────────

@@ -43,6 +43,8 @@ namespace DumpDetective.Analysis.Analyzers
             int strongLikeHandles = 0;
             int weakLikeHandles = 0;
 
+            // TODO: Prefer consuming a shared handle snapshot provider (HeapIndexBuildResult.InMemoryHandleSnapshot
+            // or IHandleSnapshotReader) when available to avoid repeated calls to runtime.EnumerateHandles().
             foreach (ClrHandle handle in runtime.EnumerateHandles())
             {
                 scanCounter.Tick();

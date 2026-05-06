@@ -39,6 +39,8 @@ namespace DumpDetective.Analysis.Analyzers
             var targetTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sourceTargetPairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
+            // TODO: Prefer consuming a shared handle snapshot provider (HeapIndexBuildResult.InMemoryHandleSnapshot
+            // or IHandleSnapshotReader) when available to avoid repeated calls to runtime.EnumerateHandles().
             foreach (ClrHandle handle in runtime.EnumerateHandles())
             {
                 scanCounter.Tick();

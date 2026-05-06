@@ -74,6 +74,25 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         blocks.Add(M("Dependent handles with dead primary key",
             $"{d.DependentHandleDeadKeyCount:N0}", d.DependentHandleDeadKeyCount));
 
+        // Exported artifacts note (if any)
+        if (d.RawExports is { Count: > 0 })
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("EXPORTS"));
+            blocks.Add(Divider());
+            blocks.Add(T("This analyzer produced on-disk exports for deeper offline inspection."));
+
+            foreach (var a in d.RawExports)
+            {
+                if (a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    blocks.Add(Li($"{a.FileName} — Pretty JSON; open in VS Code or any JSON viewer."));
+                else if (a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase))
+                    blocks.Add(Li($"{a.FileName} — NDJSON + gzip (streamable). To inspect: 'gzip -cd {a.FileName} | jq -C '.' or open in 7-Zip/VS Code after extraction."));
+                else
+                    blocks.Add(Li(a.FileName));
+            }
+        }
+
         return new AnalyzerDetailSection(AnalyzerName, "Weak Reference Analysis", SortOrder, blocks);
     }
 }

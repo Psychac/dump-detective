@@ -25,7 +25,7 @@ Preset files (one per analyzer):
 - [memory-analyzer-presets.md](docs/improvements/presets/memory-analyzer-presets.md)
 - [memory-leak-analyzer-presets.md](docs/improvements/presets/memory-leak-analyzer-presets.md)
 - [module-analyzer-presets.md](docs/improvements/presets/module-analyzer-presets.md)
-- [object-shape-analyzer-presets.md](docs/improvements/presets/object-shape-analyzer-presets.md)
+-- [object-shape-analyzer-presets.md](docs/improvements/presets/object-shape-analyzer-presets.md) — ✅ **COMPLETED**
 - [reference-chain-analyzer-presets.md](docs/improvements/presets/reference-chain-analyzer-presets.md)
 - [segment-analyzer-presets.md](docs/improvements/presets/segment-analyzer-presets.md)
 - [segment-reservation-analyzer-presets.md](docs/improvements/presets/segment-reservation-analyzer-presets.md)

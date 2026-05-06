@@ -30,9 +30,9 @@ Preset files (one per analyzer):
 - [segment-analyzer-presets.md](docs/improvements/presets/segment-analyzer-presets.md)
 - [segment-reservation-analyzer-presets.md](docs/improvements/presets/segment-reservation-analyzer-presets.md)
 - [string-analyzer-presets.md](docs/improvements/presets/string-analyzer-presets.md) — ✅ **COMPLETED**
-- [thread-analyzer-presets.md](docs/improvements/presets/thread-analyzer-presets.md)
  - [thread-analyzer-presets.md](docs/improvements/presets/thread-analyzer-presets.md) — ✅ **COMPLETED**
 - [thread-stack-cluster-analyzer-presets.md](docs/improvements/presets/thread-stack-cluster-analyzer-presets.md)
+ - [thread-stack-cluster-analyzer-presets.md](docs/improvements/presets/thread-stack-cluster-analyzer-presets.md) — ✅ **COMPLETED**
 - [weak-reference-analyzer-presets.md](docs/improvements/presets/weak-reference-analyzer-presets.md)
 
 If a file is missing or you want entries re-ordered, tell me and I will update this index.

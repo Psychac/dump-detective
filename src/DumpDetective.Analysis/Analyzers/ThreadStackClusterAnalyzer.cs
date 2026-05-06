@@ -1,4 +1,7 @@
 ﻿using Microsoft.Diagnostics.Runtime;
+using System.IO;
+using System.IO.Compression;
+using System.Text.Json;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -63,7 +66,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (clusters.Count == 0)
             {
-                return new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, []);
+                return new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, Array.Empty<string>(), null);
             }
 
             var topClusters = clusters.Values
@@ -74,11 +77,77 @@ namespace DumpDetective.Analysis.Analyzers
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             int singletonSignatures = topClusters.Count(c => c.Count == 1);
             var topSignatures = topClusters.Take(options.TopSignaturesToShow).Select(c => c.Signature).ToList();
-            var topClusterSnapshots = topClusters
+
+            // Apply MinClusterSize and MaxClusters before snapshot/export
+            var filteredClusters = topClusters.Where(c => c.Count >= Math.Max(1, options.MinClusterSize)).ToList();
+            if (filteredClusters.Count > options.MaxClusters)
+                filteredClusters = filteredClusters.Take(options.MaxClusters).ToList();
+
+            var topClusterSnapshots = filteredClusters
                 .Take(options.TopClustersToShow)
                 .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
                 .ToList();
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots);
+
+            IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
+            if (options.ProduceClusterExports)
+            {
+                try
+                {
+                    var artifacts = new List<DumpDetective.Core.Models.ReportArtifact>();
+                    // Produce a user-friendly pretty JSON export (inline content)
+                    try
+                    {
+                        var summary = filteredClusters.Select(c => new
+                        {
+                            count = c.Count,
+                            signature = c.Signature,
+                            sampleOsThreadIds = ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress)
+                        }).ToList();
+
+                        var prettyJsonOpts = new JsonSerializerOptions { WriteIndented = true };
+                        string prettyJson = JsonSerializer.Serialize(summary, prettyJsonOpts);
+                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Thread Stack Cluster", "thread-clusters.json", prettyJson, "application/json"));
+                    }
+                    catch { }
+
+                    // Produce NDJSON gz export for the filtered clusters (machine-friendly, streaming)
+                    string tmp = Path.Combine(Path.GetTempPath(), $"dumpdetective-thread-clusters-{Guid.NewGuid():N}.ndjson.gz");
+                    try
+                    {
+                        using (var fs = File.Create(tmp))
+                        using (var gz = new GZipStream(fs, CompressionLevel.Optimal, leaveOpen: false))
+                        {
+                            var jsOpts = new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+                            foreach (var c in filteredClusters)
+                            {
+                                var lineObj = new
+                                {
+                                    count = c.Count,
+                                    signature = c.Signature,
+                                    sampleThreadAddresses = c.SampleThreadAddresses,
+                                    sampleOsThreadIds = ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress)
+                                };
+                                JsonSerializer.Serialize(gz, lineObj, jsOpts);
+                                gz.WriteByte((byte)'\n');
+                            }
+                        }
+
+                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Thread Stack Cluster", "thread-clusters.ndjson.gz", null, "application/gzip", tmp));
+                    }
+                    catch
+                    {
+                        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                    }
+
+                    rawExports = artifacts;
+                }
+                catch
+                {
+                    rawExports = null;
+                }
+            }
+
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports);
         }
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
@@ -91,25 +160,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return sampleIds;
-        }
-
-        private static InsightFinding CreateFinding(int aliveThreads, int uniqueClusters)
-        {
-            double diversity = aliveThreads == 0 ? 0 : uniqueClusters * 100.0 / aliveThreads;
-            FindingSeverity severity = diversity <= 25 ? FindingSeverity.Warning : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(ThreadStackClusterAnalyzer),
-                Category: "Threading",
-                Severity: severity,
-                Title: "Thread stack-signature diversity",
-                Evidence: $"{uniqueClusters:N0} unique signatures across {aliveThreads:N0} alive threads ({diversity:F1}% diversity).",
-                Recommendation: severity == FindingSeverity.Warning
-                    ? "Low diversity suggests hotspot wait/execution patterns; inspect top clusters for bottlenecks."
-                    : "Thread stack diversity appears healthy for this snapshot.",
-                Tags: ["thread-cluster", "hotspot", "contention"],
-                MetricValue: diversity,
-                MetricUnit: "% signature-diversity");
         }
 
         private static string BuildSignature(ClrThread thread, int maxFramesPerSignature)

@@ -120,6 +120,13 @@ internal sealed class WriteOutputStage : IAnalysisStage
                         var opts = new JsonSerializerOptions { WriteIndented = true };
                         await File.WriteAllTextAsync(idxPath, JsonSerializer.Serialize(artifactsIndex, opts), cancellationToken);
                         ConsoleUx.ReportWritten(idxPath);
+                        // If there are NDJSON+gzip exports, print a small tip for users how to inspect them
+                        bool hasGz = doc.Artifacts!.Any(a => a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase));
+                        bool hasJson = doc.Artifacts!.Any(a => a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
+                        if (hasGz)
+                        {
+                            ConsoleUx.Info("One or more analyzers produced NDJSON+gzip exports. To stream and pretty-print: 'gzip -cd <file>.ndjson.gz | jq -C '.' (or extract with 7-Zip and open in VS Code). A human-friendly JSON is also provided when available.");
+                        }
                     }
                     catch { }
                 }

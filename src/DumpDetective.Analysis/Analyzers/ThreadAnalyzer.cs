@@ -35,18 +35,64 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             ThreadAnalysisOptions options = context.GetOption<ThreadAnalysisOptions>();
-            return ValueTask.FromResult(Analyze(context.Runtime, options, context.Progress).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, options, context.Progress, context.Cache).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
         {
-            return Analyze(runtime, new ThreadAnalysisOptions(), progress: null);
+            return Analyze(runtime, new ThreadAnalysisOptions(), progress: null, cache: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
         {
-            progress?.Report(new(0, "analyzing threads"));
-            var threadInfo = CategorizeThreads(runtime.Threads, options);
+            progress?.Report(new(0, "Starting thread analysis"));
+            var threadInfo = CategorizeThreads(runtime.Threads, options, progress, cache);
+
+            // Materialize limited snapshots without LINQ to avoid iterator allocations in hot paths.
+            var locksSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.ThreadsWithLocks.Count));
+            for (int i = 0; i < threadInfo.ThreadsWithLocks.Count && locksSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
+                locksSnapshots.Add(ToThreadStateSnapshot(threadInfo.ThreadsWithLocks[i], options.MaxFramesForThreadScan));
+
+            var blockedSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.PotentiallyBlockedThreads.Count));
+            for (int i = 0; i < threadInfo.PotentiallyBlockedThreads.Count && blockedSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
+                blockedSnapshots.Add(ToThreadStateSnapshot(threadInfo.PotentiallyBlockedThreads[i], options.MaxFramesForThreadScan));
+
+            var exceptionSnapshots = new List<ThreadExceptionSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.ThreadsWithExceptions.Count));
+            for (int i = 0; i < threadInfo.ThreadsWithExceptions.Count && exceptionSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
+                exceptionSnapshots.Add(ToThreadExceptionSnapshot(threadInfo.ThreadsWithExceptions[i], options.MaxFramesForThreadScan));
+
+            var topFrameHotspots = new List<NameCountEntry>(Math.Min(options.MaxTopHotspots, threadInfo.TopFrameHotspots.Count));
+            if (threadInfo.TopFrameHotspots.Count > 0)
+            {
+                var kvpList = new List<KeyValuePair<string, int>>(threadInfo.TopFrameHotspots);
+                kvpList.Sort((a, b) => b.Value.CompareTo(a.Value));
+                for (int i = 0; i < kvpList.Count && topFrameHotspots.Count < options.MaxTopHotspots; i++)
+                    topFrameHotspots.Add(new NameCountEntry(kvpList[i].Key, kvpList[i].Value));
+            }
+
+            var activeThreadHotspots = new List<NameCountEntry>(Math.Min(options.MaxTopHotspots, threadInfo.ActiveThreadHotspots.Count));
+            if (threadInfo.ActiveThreadHotspots.Count > 0)
+            {
+                var kvpList = new List<KeyValuePair<string, int>>(threadInfo.ActiveThreadHotspots);
+                kvpList.Sort((a, b) => b.Value.CompareTo(a.Value));
+                for (int i = 0; i < kvpList.Count && activeThreadHotspots.Count < options.MaxTopHotspots; i++)
+                    activeThreadHotspots.Add(new NameCountEntry(kvpList[i].Key, kvpList[i].Value));
+            }
+
+            var sampledSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxSampledStackSnapshots, threadInfo.SampledThreads?.Count ?? 0));
+            var sampledSource = threadInfo.SampledThreads ?? new List<ThreadWithStackTrace>();
+            for (int i = 0; i < sampledSource.Count && sampledSnapshots.Count < options.MaxSampledStackSnapshots; i++)
+                sampledSnapshots.Add(ToThreadStateSnapshot(sampledSource[i], options.MaxFramesForThreadScan));
+
+            var finalizerFrameStrings = new List<string>(Math.Min(options.MaxFramesForThreadScan, threadInfo.FinalizerFrames?.Count ?? 0));
+            if (threadInfo.FinalizerFrames != null)
+            {
+                for (int i = 0; i < threadInfo.FinalizerFrames.Count && finalizerFrameStrings.Count < options.MaxFramesForThreadScan; i++)
+                {
+                    var f = threadInfo.FinalizerFrames[i];
+                    finalizerFrameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
+                }
+            }
 
             return new ThreadDomainResult(
                     threadInfo.TotalCount,
@@ -61,38 +107,19 @@ namespace DumpDetective.Analysis.Analyzers
                     new Dictionary<string, int>(threadInfo.StateDistribution),
                     new Dictionary<string, int>(threadInfo.AppDomainDistribution),
                     new Dictionary<string, int>(threadInfo.GcModeDistribution),
-                    threadInfo.ThreadsWithLocks
-                        .Take(10)
-                        .Select(t => ToThreadStateSnapshot(t, options.MaxFramesForThreadScan))
-                        .ToList(),
-                    threadInfo.PotentiallyBlockedThreads
-                        .Take(10)
-                        .Select(t => ToThreadStateSnapshot(t, options.MaxFramesForThreadScan))
-                        .ToList(),
-                    threadInfo.ThreadsWithExceptions
-                        .Take(10)
-                        .Select(t => ToThreadExceptionSnapshot(t, options.MaxFramesForThreadScan))
-                        .ToList(),
-                    threadInfo.TopFrameHotspots
-                        .OrderByDescending(k => k.Value)
-                        .Take(10)
-                        .Select(k => new NameCountEntry(k.Key, k.Value))
-                        .ToList(),
-                    threadInfo.ActiveThreadHotspots
-                        .OrderByDescending(k => k.Value)
-                        .Take(10)
-                        .Select(k => new NameCountEntry(k.Key, k.Value))
-                        .ToList(),
+                    locksSnapshots,
+                    blockedSnapshots,
+                    exceptionSnapshots,
+                    topFrameHotspots,
+                    activeThreadHotspots,
+                    sampledSnapshots,
                     threadInfo.ThreadPoolCount,
                     threadInfo.FinalizerCount,
                     threadInfo.FinalizerIsBlocked,
                     threadInfo.FinalizerThread != null ? (uint?)threadInfo.FinalizerThread.ManagedThreadId : null,
                     threadInfo.FinalizerThread?.OSThreadId,
                     threadInfo.FinalizerThread != null ? (int)threadInfo.FinalizerThread.LockCount : 0,
-                    threadInfo.FinalizerFrames
-                        .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
-                        .Take(options.MaxFramesForThreadScan)
-                        .ToList(),
+                    finalizerFrameStrings,
                     threadInfo.AsyncChainThreadCount,
                     threadInfo.MaxAsyncChainDepth);
         }
@@ -130,22 +157,19 @@ namespace DumpDetective.Analysis.Analyzers
                     .ToList(),
                 source.StackRootCount);
         }
-        private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads, ThreadAnalysisOptions options)
+        private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
         {
             var threadList = threads as IList<ClrThread> ?? threads.ToList();
-            var threadByAddress = new Dictionary<ulong, ClrThread>(threadList.Count);
-            foreach (ClrThread thread in threadList)
-            {
-                if (thread.Address != 0)
-                    threadByAddress[thread.Address] = thread;
-            }
 
             var result = new ThreadCategorization();
             var threadsWithLocks = new List<ThreadWithStackTrace>();
             var blockedThreads = new List<ThreadWithStackTrace>();
             var threadsWithExceptions = new List<ThreadWithStackTrace>();
             var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
-            var scanCounter = new ObjectScanCounter("Thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            var scanCounter = new ObjectScanCounter("Scanning threads", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+
+            // Reservoir sampler for non-top thread snapshots
+            var sampler = new Utilities.ReservoirSampler<ThreadWithStackTrace>(options.MaxSampledStackSnapshots, options.SamplingSeed);
 
             foreach (var thread in threadList)
             {
@@ -171,38 +195,48 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     result.AliveCount++;
                     // Enumerate stack once and share the list across all categories for this thread
-                    var stackFrames = thread.EnumerateStackTrace().Take(options.MaxFramesForThreadScan).ToList();
+                    // Avoid LINQ Take in hot path; manually materialize up to max frames.
+                    var stackFrames = new List<ClrStackFrame>(options.MaxFramesForThreadScan);
+                    foreach (var f in thread.EnumerateStackTrace())
+                    {
+                        if (stackFrames.Count >= options.MaxFramesForThreadScan)
+                            break;
+                        stackFrames.Add(f);
+                    }
                     TrackTopFrameHotspot(result.TopFrameHotspots, stackFrames);
 
                     if (currentException != null)
                     {
+                        int exceptionStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount);
                         threadsWithExceptions.Add(new ThreadWithStackTrace
                         {
                             Thread = thread,
                             TopFrames = stackFrames,
                             ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
                             ExceptionMessage = currentException.Message,
-                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress, options.MaxStackRootsToCount)
+                            StackRootCount = exceptionStackRoots
                         });
                     }
 
                     // Check for locks
                     if (thread.LockCount > 0)
                     {
+                        int lockStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount);
                         threadsWithLocks.Add(new ThreadWithStackTrace
                         {
                             Thread = thread,
                             TopFrames = stackFrames,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress, options.MaxStackRootsToCount)
+                            StackRootCount = lockStackRoots
                         });
                     }
 
-                    // Detect wait/block patterns across all alive threads â€” cheap since frames are already materialized
-                    var waitDetection = DetectWaitPattern(stackFrames);
+                    // Detect wait/block patterns across all alive threads — cheap since frames are already materialized
+                    var waitDetection = options.DetectWaitPatterns ? DetectWaitPattern(stackFrames) : null;
                     if (waitDetection != null)
                     {
                         IncrementCount(result.WaitCategoryDistribution, waitDetection.Category);
+                        int blockedStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount);
                         blockedThreads.Add(new ThreadWithStackTrace
                         {
                             Thread = thread,
@@ -210,13 +244,14 @@ namespace DumpDetective.Analysis.Analyzers
                             WaitCategory = waitDetection.Category,
                             WaitReason = waitDetection.Reason,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRootsByAddress(thread.Address, threadByAddress, stackRootCountByThreadAddress, options.MaxStackRootsToCount)
+                            StackRootCount = blockedStackRoots
                         });
                     }
                     else if (!thread.IsGc && !thread.IsFinalizer)
                     {
                         // Non-blocked user thread â€” track top frame for the Active Processing group
-                        TrackTopFrameHotspot(result.ActiveThreadHotspots, stackFrames);
+                        if (options.IncludeStackSamples)
+                            TrackTopFrameHotspot(result.ActiveThreadHotspots, stackFrames);
                     }
 
                     // ThreadPool worker threads surface a recognisable dispatch frame;
@@ -229,16 +264,39 @@ namespace DumpDetective.Analysis.Analyzers
                     {
                         result.FinalizerThread = thread;
                         result.FinalizerFrames = stackFrames;
-                        result.FinalizerIsBlocked = DetectWaitPattern(stackFrames) != null;
+                        result.FinalizerIsBlocked = options.DetectWaitPatterns ? DetectWaitPattern(stackFrames) != null : false;
                     }
 
                     // Count MoveNext frames to measure async state-machine chain depth
-                    int moveNextDepth = CountMoveNextDepth(stackFrames);
-                    if (moveNextDepth > 0)
+                    if (options.AsyncChainDetection != AsyncChainDetectionMode.Disabled)
                     {
-                        result.AsyncChainThreadCount++;
-                        if (moveNextDepth > result.MaxAsyncChainDepth)
-                            result.MaxAsyncChainDepth = moveNextDepth;
+                        int moveNextDepth = CountMoveNextDepth(stackFrames);
+                        if (moveNextDepth > 0)
+                        {
+                            result.AsyncChainThreadCount++;
+                            if (moveNextDepth > result.MaxAsyncChainDepth)
+                                result.MaxAsyncChainDepth = moveNextDepth;
+                        }
+                    }
+
+                    // Sample non-top threads when enabled. Use reservoir sampling to cap selection.
+                    if (options.IncludeStackSamples && options.MaxSampledStackSnapshots > 0)
+                    {
+                        // Only consider threads not already recorded in locks/blocked/exceptions lists
+                        bool isAlreadyCaptured = thread.LockCount > 0 || waitDetection != null || currentException != null;
+                        if (!isAlreadyCaptured)
+                        {
+                            // candidate sample
+                            var candidate = new ThreadWithStackTrace
+                            {
+                                Thread = thread,
+                                TopFrames = stackFrames,
+                                ExceptionType = currentException?.Type?.Name,
+                                StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount)
+                            };
+
+                            sampler.Add(candidate);
+                        }
                     }
                 }
 
@@ -265,27 +323,46 @@ namespace DumpDetective.Analysis.Analyzers
                 .OrderByDescending(t => t.Thread.LockCount)
                 .ToList();
 
+            // materialize reservoir samples into the categorization result
+            if (sampler.Capacity > 0)
+            {
+                result.SampledThreads = sampler.Samples().ToList();
+                progress?.Report(new(scanCounter.Scanned, "Thread sampling complete"));
+            }
+
             scanCounter.Complete();
+
+            progress?.Report(new(scanCounter.Scanned, "Thread analysis complete"));
 
             return result;
         }
 
-        private static int GetOrCountStackRootsByAddress(ulong threadAddress, IReadOnlyDictionary<ulong, ClrThread> threadByAddress, Dictionary<ulong, int> cache, int maxStackRootsToCount)
+        private static int GetOrCountStackRoots(ClrThread thread, Dictionary<ulong, int> cache, IHeapAnalysisCache? sharedCache, int maxStackRootsToCount)
         {
-            if (threadAddress == 0)
+            if (thread.Address == 0)
                 return 0;
 
-            if (cache.TryGetValue(threadAddress, out int existing))
+            if (cache.TryGetValue(thread.Address, out int existing))
                 return existing;
 
-            if (!threadByAddress.TryGetValue(threadAddress, out ClrThread? thread))
-                return 0;
+            int count = sharedCache is not null
+                ? sharedCache.GetOrCountThreadStackRoots(thread, maxStackRootsToCount)
+                : CountStackRoots(thread, maxStackRootsToCount);
 
+            cache[thread.Address] = count;
+            return count;
+        }
+
+        private static int CountStackRoots(ClrThread thread, int maxStackRootsToCount)
+        {
             int count = 0;
-            foreach (var _ in thread.EnumerateStackRoots().Take(maxStackRootsToCount))
+            foreach (var _ in thread.EnumerateStackRoots())
+            {
+                if (count >= maxStackRootsToCount)
+                    break;
                 count++;
+            }
 
-            cache[threadAddress] = count;
             return count;
         }
 
@@ -314,6 +391,14 @@ namespace DumpDetective.Analysis.Analyzers
             return frame.Method?.Signature
                 ?? frame.FrameName
                 ?? string.Empty;
+        }
+
+        // Testable helper — sample integer candidate indices deterministically.
+        internal static IReadOnlyList<int> SampleCandidateIndices(int totalCandidates, int capacity, int seed)
+        {
+            var sampler = new Utilities.ReservoirSampler<int>(capacity, seed);
+            for (int i = 0; i < totalCandidates; i++) sampler.Add(i);
+            return sampler.Samples();
         }
 
         private static bool IsThreadPoolWorker(List<ClrStackFrame> frames)
@@ -418,6 +503,7 @@ namespace DumpDetective.Analysis.Analyzers
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();
         public List<ThreadWithStackTrace> ThreadsWithExceptions { get; set; } = new();
+        public List<ThreadWithStackTrace> SampledThreads { get; set; } = new();
         public Dictionary<string, int> StateDistribution { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> GcModeDistribution { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> AppDomainDistribution { get; set; } = new(StringComparer.Ordinal);

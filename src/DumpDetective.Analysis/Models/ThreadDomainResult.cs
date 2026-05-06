@@ -22,6 +22,7 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<ThreadExceptionSnapshot>? ThreadsWithActiveExceptions = null,
     IReadOnlyList<NameCountEntry>? TopStackHotspots = null,
     IReadOnlyList<NameCountEntry>? TopActiveThreadHotspots = null,
+    IReadOnlyList<ThreadStateSnapshot>? SampledThreads = null,
     int ThreadPoolWorkerCount = 0,
     int FinalizerThreadCount = 0,
     bool FinalizerThreadBlocked = false,

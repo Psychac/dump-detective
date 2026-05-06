@@ -44,7 +44,29 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
     private static RuntimeAnalysisContext BuildContext(SingleDumpPipelineState state)
     {
         ResolvedExecutionOptions resolved = state.Resolved;
-        return new RuntimeAnalysisContext
+            // Derive sampling seed from dump path when thread options request auto-derive (0)
+            var threadOptions = resolved.ThreadAnalysis;
+            if (threadOptions != null && threadOptions.SamplingSeed == 0 && state.LoadContext != null)
+            {
+                // Derive stable seed from dump path via SHA256 -> first 4 bytes
+                var pathBytes = System.Text.Encoding.UTF8.GetBytes(state.LoadContext.DumpPath ?? string.Empty);
+                var hash = System.Security.Cryptography.SHA256.HashData(pathBytes);
+                int derived = BitConverter.ToInt32(hash, 0);
+                threadOptions = new ThreadAnalysisOptions
+                {
+                    MaxFramesForThreadScan = threadOptions.MaxFramesForThreadScan,
+                    MaxStackRootsToCount = threadOptions.MaxStackRootsToCount,
+                    MaxThreadsToCaptureSnapshots = threadOptions.MaxThreadsToCaptureSnapshots,
+                    IncludeStackSamples = threadOptions.IncludeStackSamples,
+                    MaxSampledStackSnapshots = threadOptions.MaxSampledStackSnapshots,
+                    AsyncChainDetection = threadOptions.AsyncChainDetection,
+                    DetectWaitPatterns = threadOptions.DetectWaitPatterns,
+                    MaxTopHotspots = threadOptions.MaxTopHotspots,
+                    SamplingSeed = derived
+                };
+            }
+
+            return new RuntimeAnalysisContext
         {
             Runtime = state.LoadContext!.Runtime,
             Heap = state.LoadContext.Heap,
@@ -74,7 +96,7 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
                 [typeof(GCRootAnalysisOptions)] = resolved.GCRootAnalysis,
                 [typeof(LohFragmentationAnalysisOptions)] = resolved.LohFragmentationAnalysis,
                 [typeof(SegmentReservationAnalysisOptions)] = resolved.SegmentReservationAnalysis,
-                [typeof(ThreadAnalysisOptions)] = resolved.ThreadAnalysis,
+                [typeof(ThreadAnalysisOptions)] = threadOptions,
                 [typeof(HangAnalysisOptions)] = resolved.HangAnalysis,
                 [typeof(JitAnalysisOptions)] = resolved.JitAnalysis,
                 [typeof(WeakReferenceAnalysisOptions)] = resolved.WeakReferenceAnalysis,

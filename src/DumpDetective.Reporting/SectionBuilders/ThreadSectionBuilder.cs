@@ -77,6 +77,30 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             blocks.Add(new TableBlock("Top frame hotspots", ["Frame", "Count"], hsRows));
         }
 
+        // Sampled thread snapshots
+        var sampled = d.SampledThreads ?? [];
+        if (sampled.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("SAMPLED THREAD SNAPSHOTS"));
+            blocks.Add(Divider());
+
+            for (int i = 0; i < sampled.Count; i++)
+            {
+                var s = sampled[i];
+                blocks.Add(H($"Thread {s.ThreadId} (OS {s.OSThreadId})", 2));
+                blocks.Add(M("State", s.ThreadState));
+                if (!string.IsNullOrEmpty(s.WaitCategory))
+                    blocks.Add(M("Wait", s.WaitCategory ?? ""));
+                if (!string.IsNullOrEmpty(s.WaitReason))
+                    blocks.Add(M("Wait Reason", s.WaitReason ?? ""));
+                blocks.Add(M("Stack Root Count", $"{s.StackRootCount:N0}", s.StackRootCount));
+
+                for (int f = 0; f < s.TopFrames.Count; f++)
+                    blocks.Add(T(s.TopFrames[f], 2));
+            }
+        }
+
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
     }
 }

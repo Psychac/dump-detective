@@ -27,6 +27,7 @@ namespace DumpDetective.Analysis.Cache
         private DumpDetective.Core.Models.DumpSizeTier _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
         private Dictionary<ulong, HashSet<ulong>>? _retainedObjectsCache;
         private Dictionary<ulong, bool>? _methodTableHasRefs;
+        private Dictionary<(ulong ThreadAddress, int MaxStackRootsToCount), int>? _threadStackRootCountCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -114,6 +115,33 @@ namespace DumpDetective.Analysis.Cache
         }
 
         public DumpDetective.Core.Models.DumpSizeTier SizeTier => _sizeTier;
+
+        public int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount)
+        {
+            if (thread.Address == 0 || maxStackRootsToCount <= 0)
+                return 0;
+
+            _threadStackRootCountCache ??= new Dictionary<(ulong ThreadAddress, int MaxStackRootsToCount), int>(capacity: 256);
+            var key = (thread.Address, maxStackRootsToCount);
+            if (_threadStackRootCountCache.TryGetValue(key, out int cachedCount))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cachedCount;
+            }
+
+            Interlocked.Increment(ref _cacheMisses);
+
+            int count = 0;
+            foreach (var _ in thread.EnumerateStackRoots())
+            {
+                if (count >= maxStackRootsToCount)
+                    break;
+                count++;
+            }
+
+            _threadStackRootCountCache[key] = count;
+            return count;
+        }
 
         public bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable)
         {

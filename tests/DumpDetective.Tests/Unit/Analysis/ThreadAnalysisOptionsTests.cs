@@ -27,7 +27,7 @@ public class ThreadAnalysisOptionsTests
         full.MaxStackRootsToCount.Should().Be(1024);
         full.MaxThreadsToCaptureSnapshots.Should().Be(50);
         full.IncludeStackSamples.Should().BeTrue();
-        full.AsyncChainDetection.Should().Be(AsyncChainDetectionMode.FullWithPaths);
+        full.AsyncChainDetection.Should().Be(AsyncChainDetectionMode.Full);
         full.DetectWaitPatterns.Should().BeTrue();
         full.MaxTopHotspots.Should().Be(50);
     }

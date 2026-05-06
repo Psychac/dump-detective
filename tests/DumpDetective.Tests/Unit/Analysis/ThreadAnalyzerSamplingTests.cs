@@ -25,4 +25,11 @@ public class ThreadAnalyzerSamplingTests
         // With extremely small probability these could be equal; assert they are not equal in practice.
         a.Should().NotEqual(b);
     }
+
+    [Fact]
+    public void Sampling_With_Zero_Capacity_Returns_Empty()
+    {
+        var samples = ThreadAnalyzer.SampleCandidateIndices(totalCandidates: 100, capacity: 0, seed: 123);
+        samples.Should().BeEmpty();
+    }
 }

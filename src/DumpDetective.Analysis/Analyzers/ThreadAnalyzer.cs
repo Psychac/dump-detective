@@ -10,6 +10,27 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class ThreadAnalyzer : IAnalyzer
     {
+        internal static int ComputeSamplerCapacity(int maxSampled, DumpDetective.Core.Models.DumpSizeTier? tier, int totalThreads)
+        {
+            int capacity = maxSampled;
+            if (tier is not null)
+            {
+                switch (tier.Value)
+                {
+                    case DumpDetective.Core.Models.DumpSizeTier.Large:
+                        capacity = Math.Max(1, capacity / 4);
+                        break;
+                    case DumpDetective.Core.Models.DumpSizeTier.Medium:
+                        capacity = Math.Max(1, capacity / 2);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            capacity = Math.Min(capacity, Math.Max(0, totalThreads / 10));
+            return capacity;
+        }
         private static readonly WaitPattern[] WaitPatterns =
         [
             new("MonitorWait", "monitor.wait", "Thread waiting on monitor pulse/event."),
@@ -46,20 +67,61 @@ namespace DumpDetective.Analysis.Analyzers
         private AnalyzerDomainResult Analyze(ClrRuntime runtime, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
         {
             progress?.Report(new(0, "Starting thread analysis"));
+
+            // Prewarm stack-root counts either synchronously or in background
+            // depending on options. For Full preset we prefer background prewarm.
+            if (cache is not null && options.MaxThreadsToCaptureSnapshots > 0)
+            {
+                int prewarm = options.MaxThreadsToCaptureSnapshots;
+                if (options.PrewarmCacheInBackground)
+                {
+                    progress?.Report(new(0, "Starting background prewarm of thread stack-root counts"));
+                    _ = Task.Run(() =>
+                    {
+                        int idx = 0;
+                        foreach (var t in runtime.Threads)
+                        {
+                            cache.GetOrCountThreadStackRoots(t, options.MaxStackRootsToCount);
+                            if (++idx >= prewarm)
+                                break;
+                            if ((idx & 0xF) == 0)
+                                progress?.Report(new(idx, $"Background prewarm: {idx}/{prewarm}"));
+                        }
+                        progress?.Report(new(prewarm, $"Background prewarm complete: {Math.Min(prewarm, prewarm)} threads"));
+                    });
+                }
+                else if (cache.SizeTier != DumpDetective.Core.Models.DumpSizeTier.Large)
+                {
+                    progress?.Report(new(0, "Prewarming thread stack-root counts"));
+                    int idx = 0;
+                    foreach (var t in runtime.Threads)
+                    {
+                        cache.GetOrCountThreadStackRoots(t, options.MaxStackRootsToCount);
+                        if (++idx >= prewarm)
+                            break;
+                    }
+                    progress?.Report(new(0, $"Prewarmed {Math.Min(prewarm, idx)} threads"));
+                }
+            }
+
+            progress?.Report(new(0, "Starting thread sampling"));
             var threadInfo = CategorizeThreads(runtime.Threads, options, progress, cache);
+
+            // Decide effective frame window for snapshots (expand when Full requested)
+            int effectiveMaxFramesForSnapshot = ComputeEffectiveMaxFramesForSnapshot(options);
 
             // Materialize limited snapshots without LINQ to avoid iterator allocations in hot paths.
             var locksSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.ThreadsWithLocks.Count));
             for (int i = 0; i < threadInfo.ThreadsWithLocks.Count && locksSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
-                locksSnapshots.Add(ToThreadStateSnapshot(threadInfo.ThreadsWithLocks[i], options.MaxFramesForThreadScan));
+                locksSnapshots.Add(ToThreadStateSnapshot(threadInfo.ThreadsWithLocks[i], effectiveMaxFramesForSnapshot));
 
             var blockedSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.PotentiallyBlockedThreads.Count));
             for (int i = 0; i < threadInfo.PotentiallyBlockedThreads.Count && blockedSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
-                blockedSnapshots.Add(ToThreadStateSnapshot(threadInfo.PotentiallyBlockedThreads[i], options.MaxFramesForThreadScan));
+                blockedSnapshots.Add(ToThreadStateSnapshot(threadInfo.PotentiallyBlockedThreads[i], effectiveMaxFramesForSnapshot));
 
             var exceptionSnapshots = new List<ThreadExceptionSnapshot>(Math.Min(options.MaxThreadsToCaptureSnapshots, threadInfo.ThreadsWithExceptions.Count));
             for (int i = 0; i < threadInfo.ThreadsWithExceptions.Count && exceptionSnapshots.Count < options.MaxThreadsToCaptureSnapshots; i++)
-                exceptionSnapshots.Add(ToThreadExceptionSnapshot(threadInfo.ThreadsWithExceptions[i], options.MaxFramesForThreadScan));
+                exceptionSnapshots.Add(ToThreadExceptionSnapshot(threadInfo.ThreadsWithExceptions[i], effectiveMaxFramesForSnapshot));
 
             var topFrameHotspots = new List<NameCountEntry>(Math.Min(options.MaxTopHotspots, threadInfo.TopFrameHotspots.Count));
             if (threadInfo.TopFrameHotspots.Count > 0)
@@ -79,10 +141,12 @@ namespace DumpDetective.Analysis.Analyzers
                     activeThreadHotspots.Add(new NameCountEntry(kvpList[i].Key, kvpList[i].Value));
             }
 
+            progress?.Report(new(threadInfo.TotalCount, "Materializing snapshots"));
+
             var sampledSnapshots = new List<ThreadStateSnapshot>(Math.Min(options.MaxSampledStackSnapshots, threadInfo.SampledThreads?.Count ?? 0));
             var sampledSource = threadInfo.SampledThreads ?? new List<ThreadWithStackTrace>();
             for (int i = 0; i < sampledSource.Count && sampledSnapshots.Count < options.MaxSampledStackSnapshots; i++)
-                sampledSnapshots.Add(ToThreadStateSnapshot(sampledSource[i], options.MaxFramesForThreadScan));
+                sampledSnapshots.Add(ToThreadStateSnapshot(sampledSource[i], effectiveMaxFramesForSnapshot));
 
             var finalizerFrameStrings = new List<string>(Math.Min(options.MaxFramesForThreadScan, threadInfo.FinalizerFrames?.Count ?? 0));
             if (threadInfo.FinalizerFrames != null)
@@ -121,7 +185,11 @@ namespace DumpDetective.Analysis.Analyzers
                     threadInfo.FinalizerThread != null ? (int)threadInfo.FinalizerThread.LockCount : 0,
                     finalizerFrameStrings,
                     threadInfo.AsyncChainThreadCount,
-                    threadInfo.MaxAsyncChainDepth);
+                    threadInfo.MaxAsyncChainDepth,
+                    sampledSnapshots.Count,
+                    (locksSnapshots.Count + blockedSnapshots.Count + exceptionSnapshots.Count),
+                    options.MaxSampledStackSnapshots,
+                    options.SamplingSeed);
         }
 
         private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)
@@ -168,8 +236,11 @@ namespace DumpDetective.Analysis.Analyzers
             var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
             var scanCounter = new ObjectScanCounter("Scanning threads", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
+            // Adaptive sampler capacity: reduce sampling on very large dumps to limit work.
+            int samplerCapacity = ComputeSamplerCapacity(options.MaxSampledStackSnapshots, cache?.SizeTier, threadList.Count);
+
             // Reservoir sampler for non-top thread snapshots
-            var sampler = new Utilities.ReservoirSampler<ThreadWithStackTrace>(options.MaxSampledStackSnapshots, options.SamplingSeed);
+            var sampler = new Utilities.ReservoirSampler<ThreadWithStackTrace>(samplerCapacity, options.SamplingSeed);
 
             foreach (var thread in threadList)
             {
@@ -276,6 +347,35 @@ namespace DumpDetective.Analysis.Analyzers
                             result.AsyncChainThreadCount++;
                             if (moveNextDepth > result.MaxAsyncChainDepth)
                                 result.MaxAsyncChainDepth = moveNextDepth;
+
+                                // If configured for Full, attempt to capture additional
+                                // stack frames (async path) so reports can show representative
+                                // async-chain frames. This re-enumerates the thread's stack and
+                                // appends extra frames beyond the base `MaxFramesForThreadScan`.
+                            if (options.AsyncChainDetection == AsyncChainDetectionMode.Full)
+                            {
+                                int extraToCapture = options.MaxFramesForThreadScan; // capture an extra window
+                                int already = stackFrames.Count;
+                                try
+                                {
+                                    int seen = 0;
+                                    foreach (var f in thread.EnumerateStackTrace())
+                                    {
+                                        if (seen < already)
+                                        {
+                                            seen++;
+                                            continue;
+                                        }
+                                        stackFrames.Add(f);
+                                        if (stackFrames.Count >= already + extraToCapture)
+                                            break;
+                                    }
+                                }
+                                catch
+                                {
+                                    // If extra enumeration fails, silently continue with base frames
+                                }
+                            }
                         }
                     }
 
@@ -399,6 +499,26 @@ namespace DumpDetective.Analysis.Analyzers
             var sampler = new Utilities.ReservoirSampler<int>(capacity, seed);
             for (int i = 0; i < totalCandidates; i++) sampler.Add(i);
             return sampler.Samples();
+        }
+
+        // Internal helper: compute effective frame window for snapshot materialization.
+        internal static int ComputeEffectiveMaxFramesForSnapshot(ThreadAnalysisOptions options)
+        {
+            return (options.AsyncChainDetection == AsyncChainDetectionMode.Full)
+                ? Math.Min(64, options.MaxFramesForThreadScan * 2)
+                : options.MaxFramesForThreadScan;
+        }
+
+        // Internal test helper: count occurrences of MoveNext() in a list of frame signature strings.
+        internal static int CountMoveNextDepthFromSignatures(IReadOnlyList<string> frameSignatures)
+        {
+            int depth = 0;
+            foreach (var sig in frameSignatures)
+            {
+                if (!string.IsNullOrEmpty(sig) && sig.Contains(".MoveNext()", StringComparison.OrdinalIgnoreCase))
+                    depth++;
+            }
+            return depth;
         }
 
         private static bool IsThreadPoolWorker(List<ClrStackFrame> frames)

@@ -66,6 +66,12 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
                 };
             }
 
+            // Apply adaptive preset tuning based on the prebuilt heap cache size tier when available.
+            if (threadOptions != null && state.HeapCache != null)
+            {
+                threadOptions = ThreadAnalysisOptions.AdaptForSize(threadOptions, state.HeapCache.SizeTier);
+            }
+
             return new RuntimeAnalysisContext
         {
             Runtime = state.LoadContext!.Runtime,

@@ -78,6 +78,14 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         }
 
         // Sampled thread snapshots
+        // show sampling metadata if available
+        if (d.SamplingCapacity > 0 || d.SampledSnapshotCount > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(M("Sampled Snapshots", $"{d.SampledSnapshotCount:N0} sampled (capacity {d.SamplingCapacity:N0})", d.SampledSnapshotCount));
+            blocks.Add(M("Sampling Seed", $"0x{d.SamplingSeed:X8}"));
+        }
+
         var sampled = d.SampledThreads ?? [];
         if (sampled.Count > 0)
         {
@@ -88,7 +96,16 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < sampled.Count; i++)
             {
                 var s = sampled[i];
+                // Determine whether this snapshot was captured (top-N) or sampled.
+                bool isCaptured = false;
+                var locked = d.TopLockedThreads ?? new List<ThreadStateSnapshot>();
+                var blocked = d.TopBlockedThreads ?? new List<ThreadStateSnapshot>();
+                var exceptions = d.ThreadsWithActiveExceptions ?? new List<ThreadExceptionSnapshot>();
+                if (locked.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
+                if (blocked.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
+                if (exceptions.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
                 blocks.Add(H($"Thread {s.ThreadId} (OS {s.OSThreadId})", 2));
+                blocks.Add(M("Snapshot Type", isCaptured ? "Captured" : "Sampled"));
                 blocks.Add(M("State", s.ThreadState));
                 if (!string.IsNullOrEmpty(s.WaitCategory))
                     blocks.Add(M("Wait", s.WaitCategory ?? ""));

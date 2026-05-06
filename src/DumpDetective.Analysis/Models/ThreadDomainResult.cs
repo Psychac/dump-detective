@@ -31,7 +31,11 @@ internal sealed record ThreadDomainResult(
     int FinalizerLockCount = 0,
     IReadOnlyList<string>? FinalizerFrames = null,
     int AsyncChainThreadCount = 0,
-    int MaxAsyncChainDepth = 0) : AnalyzerDomainResult;
+    int MaxAsyncChainDepth = 0,
+    int SampledSnapshotCount = 0,
+    int CapturedSnapshotCount = 0,
+    int SamplingCapacity = 0,
+    int SamplingSeed = 0) : AnalyzerDomainResult;
 
 internal sealed record ThreadStateSnapshot(
     uint ThreadId,

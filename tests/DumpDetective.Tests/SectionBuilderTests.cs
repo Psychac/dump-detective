@@ -444,7 +444,8 @@ public sealed class SectionBuilderTests
             Profile: AllocationProfile.Mixed,
             GCPressure: GCPressureLevel.Low,
             PromotionPressureScore: 0,
-            TopShortLivedTypes: [],
+            TopTransientTypes: [],
+            TopShortishTypes: [],
             TopLongLivedTypes: []),
             "Allocation Pattern Analysis", "GC");
         new AllocationPatternSectionBuilder().CanHandle(domain).Should().BeTrue();
@@ -468,7 +469,8 @@ public sealed class SectionBuilderTests
             Profile: AllocationProfile.Transient,
             GCPressure: GCPressureLevel.Low,
             PromotionPressureScore: 8.4,
-            TopShortLivedTypes: [],
+            TopTransientTypes: [],
+            TopShortishTypes: [],
             TopLongLivedTypes: []),
             "Allocation Pattern Analysis", "GC");
 
@@ -517,7 +519,8 @@ public sealed class SectionBuilderTests
             Profile: AllocationProfile.Retained,
             GCPressure: GCPressureLevel.High,
             PromotionPressureScore: 42.0,
-            TopShortLivedTypes: shortLived,
+            TopTransientTypes: shortLived,
+            TopShortishTypes: [],
             TopLongLivedTypes: longLived),
             "Allocation Pattern Analysis", "GC");
 
@@ -528,12 +531,13 @@ public sealed class SectionBuilderTests
         section.Blocks.OfType<MetricBlock>()
             .Should().Contain(m => m.Label == "GC Pressure Level" && m.Value == "High");
 
-        // Short-lived table
-        TableBlock? shortTable = section.Blocks.OfType<TableBlock>()
-            .FirstOrDefault(t => t.Caption != null && t.Caption.Contains("short-lived", StringComparison.OrdinalIgnoreCase));
-        shortTable.Should().NotBeNull("short-lived type table must be emitted");
-        shortTable!.Rows.Should().HaveCount(2);
-        shortTable.Rows[0].Cells[0].Display.Should().Contain("String");
+        // Short/transient tables — pick any non-distribution table that contains the short-lived types
+        var otherTables = section.Blocks.OfType<TableBlock>()
+            .Where(t => t.Caption == null || !t.Caption.Contains("distribution", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        otherTables.Should().NotBeEmpty("type tables must be emitted when populated");
+        otherTables.Any(t => t.Rows.Count == 2 && t.Rows[0].Cells[0].Display.Contains("String")).Should().BeTrue("short-lived types must appear in one of the type tables");
 
         // Long-lived table
         TableBlock? longTable = section.Blocks.OfType<TableBlock>()

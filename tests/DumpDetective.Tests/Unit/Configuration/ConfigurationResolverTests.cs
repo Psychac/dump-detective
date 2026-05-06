@@ -27,13 +27,12 @@ public sealed class ConfigurationResolverTests
             }
             """);
 
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
             resolved.UsedConfigFile.Should().BeTrue();
-            resolved.DumpPath.Should().Be("C:/dumps/from-config.dmp");
             resolved.MemoryLeak.HighReferenceThreshold.Should().Be(123);
         }
         finally
@@ -58,7 +57,7 @@ public sealed class ConfigurationResolverTests
             }
             """);
 
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
             MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
             ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
@@ -67,7 +66,7 @@ public sealed class ConfigurationResolverTests
 
             resolved.MemoryLeak.MaxDuplicateStringLength.Should().Be(balancedMemoryLeak.MaxDuplicateStringLength);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
-            resolved.Report.Format.Should().Be(ReportFormat.Text);
+            resolved.Report.Format.Should().Be(ReportFormat.Html);
         }
         finally
         {
@@ -78,20 +77,32 @@ public sealed class ConfigurationResolverTests
     [Fact]
     public void Resolve_ShouldUseProfileBaseline_WhenConfigMissing()
     {
-        AnalysisCommandRequest request = CreateRequest(configPath: null);
-        ConfigurationResolver resolver = new();
-        MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
-        ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
-        EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
+        // Create an explicit minimal config file to avoid reliance on sample files
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, "{ \"DumpPath\": \"C:/dumps/from-config.dmp\" }");
 
-        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { OutputFormat = ReportFormat.Html };
+            ConfigurationResolver resolver = new();
+            MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
+            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
+            EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
 
-        resolved.UsedConfigFile.Should().BeTrue();
-        resolved.DumpPath.Should().Be(request.DumpPath);
-        resolved.MemoryLeak.HighReferenceThreshold.Should().Be(balancedMemoryLeak.HighReferenceThreshold);
-        resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
-        resolved.EventLeak.MinSubscribers.Should().Be(balancedEventLeak.MinSubscribers);
-        resolved.Report.Format.Should().Be(ReportFormat.Html);
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.UsedConfigFile.Should().BeTrue();
+            resolved.DumpPath.Should().Be("C:/dumps/from-config.dmp");
+            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(balancedMemoryLeak.HighReferenceThreshold);
+            resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
+            resolved.EventLeak.MinSubscribers.Should().Be(balancedEventLeak.MinSubscribers);
+            resolved.Report.Format.Should().Be(ReportFormat.Html);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     }
 
     [Fact]

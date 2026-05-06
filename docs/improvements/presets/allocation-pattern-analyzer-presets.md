@@ -1,85 +1,57 @@
-**Allocation Pattern Analyzer — Presets**
+**Allocation Pattern Analyzer — Presets (current state)**
 
-- **Fast:** `TopTypeLimit`: 10
-- **Balanced (default):** `TopTypeLimit`: 20
-- **Full:** `TopTypeLimit`: 50
+- **Fast:** `TopTypeLimit = 10`, `ScanMultiplier = 2`
+- **Balanced (default):** `TopTypeLimit = 20`, `ScanMultiplier = 2`
+- **Full:** `TopTypeLimit = 50`, `ScanMultiplier = 2`
 
-Notes: values derived from `AllocationPatternAnalysisOptions.Preset(AnalysisProfile)` and the analyzer's `TopTypeLimit` usage.
+Notes: these mappings reflect the values defined by `AllocationPatternAnalysisOptions.Preset(AnalysisProfile)` in code.
 
-# AllocationPatternAnalyzer — Preset Design
+# AllocationPatternAnalyzer — Preset Design & Current Behavior
 
-Purpose: analyze `TypeAggregates` to classify allocation profiles (Transient/Steady/Retained), compute a GC pressure score, and list top short- and long-lived types.
+Purpose: read `HeapIndexBuildResult.TypeAggregates` (Phase‑2 only), compute generation and LOH percentages, derive a GC pressure score, and produce top-type lists for short/transient and long-lived candidates.
 
 Where to look in the repo:
-- Analyzer: [src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs](src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L1)
-- Section builder: [src/DumpDetective.Reporting/SectionBuilders/AllocationPatternSectionBuilder.cs](src/DumpDetective.Reporting/SectionBuilders/AllocationPatternSectionBuilder.cs#L1)
+- Analyzer: `src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs`
+- Section builder: `src/DumpDetective.Reporting/SectionBuilders/AllocationPatternSectionBuilder.cs`
 
-Current working (summary)
+What the analyzer returns
 
-- `AllocationPatternAnalyzer` is a pure Phase‑2 post-processor: it reads `HeapIndexBuildResult.TypeAggregates` (no heap enumeration) and computes generation/LOH percentages, a heuristic GC pressure score, and top type lists based on `TopTypeLimit`.
-- Key heuristics in the analyzer:
-	- `Transient` if type Gen0% > 70%
-	- `Retained` if type long‑lived ratio (Gen2+LOH)/Count > 0.5
-	- Analyzer-level profile classification: `Transient`/`Retained`/`Steady`/`Mixed` (see `ClassifyProfile`).
-	- Pressure score = `(gen0CountPct * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2)` and mapped to `GCPressureLevel` by cutoffs.
+- Percentages are rounded to two decimals for clarity (rendered as `F2`).
+- Domain result contains three per-type lists: `TopTransientTypes`, `TopShortishTypes`, and `TopLongLivedTypes`.
 
-Summary of recent implementations
+Selection knobs and units
 
-- Analyzer computes both count% and estimated size% (calls `AnalyzerHelpers.ComputeApproxGenBytes`) and returns `AllocationPatternDomainResult` including `TopShortLivedTypes` and `TopLongLivedTypes`.
-- `AllocationPatternSectionBuilder` renders summary blocks, generation distribution table, pressure signal text and top-type tables using `TopTypeRows = 15` for table truncation and `FormatHelper.TruncateString` for display.
+- `TopTypeLimit` (int): how many entries to include per result list.
+- `ScanMultiplier` (int): how many top entries to scan. Effective candidate scan limit = `Min(sorted.Count, TopTypeLimit * ScanMultiplier)`.
+- `LongLivedSelectionThreshold` (ratio 0.0–1.0): select a type into long-lived results when `(Gen2 + LOH)/Count > LongLivedSelectionThreshold` (default 0.3).
+- `LongLivedClassificationThreshold` (ratio 0.0–1.0): used to classify `AllocationProfile.Retained` (default 0.5).
+- `TransientClassificationThreshold` (percent 0–100): a type is classified `Transient` when `Gen0% > TransientClassificationThreshold` (default 70.0).
+- `ShortLivedSelectionThreshold` (percent 0–100): types with `Gen0% >= ShortLivedSelectionThreshold` (and not long-lived) are eligible for the short-ish table (default 25.0).
 
-Goals for preset-driven flow
+Note: long-lived thresholds are ratios (0..1) while transient/short thresholds are percentages (0..100).
 
-- Keep presets responsible for numeric knobs that affect analysis cost and output size (notably `TopTypeLimit`).
-- Preserve analyzer's streaming/phase‑2 behavior — presets should not trigger additional heap scans.
-- Allow teams to tune how many candidate types are returned for quick triage (`Fast`) vs deep postmortem (`Full`).
+Rendering behavior
 
-Suggested new options
+- The section builder emits separate tables for transient, short-ish, and long-lived lists only when the corresponding lists are non-empty.
+- Table truncation: `TopTypeRows = 15` in the section builder (display limit per table).
+- Formatting: generation and size percentages use two decimals (`F2`); long-lived ratio is shown as percent (`P2`).
 
-- `int TopTypeLimit` — how many types to return for each short/long-lived list (existing knob; primary preset target).
-- `int ScanMultiplier` (optional) — how many top entries to scan (currently: `TopTypeLimit * 2`), expose to tune scanning breadth.
-- `double LongLivedThreshold` (optional) — threshold used to consider a type as long‑lived when `(Gen2 + LOH)/Count` > threshold (default 0.3 used in selection, 0.5 for classification); exposing it allows sensitivity tuning.
+Troubleshooting guidance
 
-How analyzer flow should respect presets
+- If your Balanced report omits transient/short-ish tables, no types met the configured thresholds. Remedies:
+  - Lower `ShortLivedSelectionThreshold` (e.g. from 25.0 → 10.0).
+  - Increase `TopTypeLimit` (Balanced → Full) to examine more candidates.
+  - Increase `ScanMultiplier` to widen the candidate window scanned.
 
-- `TopTypeLimit` controls both the capacity of result lists and the `scanLimit = Min(sorted.Count, TopTypeLimit * 2)` used for candidate selection.
-- `LongLivedThreshold` (if added) should govern both selection for `longLived` vs `shortLived` buckets and the `typeProfile` classification branch to keep behavior consistent.
+Code references
 
-Concrete preset mappings (recommended)
+- Analyzer selection and thresholds: `AllocationPatternAnalyzer.Analyze`.
+- Render and truncation: `AllocationPatternSectionBuilder.Build` (`TopTypeRows = 15`).
 
-- Fast
-	- `TopTypeLimit = 10`
-	- `ScanMultiplier = 2` (implicit; `scanLimit = TopTypeLimit * 2`)
-	- Rationale: minimal candidate set for quick triage on very large TypeAggregates.
+Optional suggestion
 
-- Balanced (baseline / existing defaults)
-	- `TopTypeLimit = 20`
-	- `ScanMultiplier = 2`
-	- Rationale: default behavior in repo; balances coverage vs output size.
+- Consider unifying threshold units (all ratios or all percentages) to reduce confusion. This is purely a UX/doc improvement but will require small changes and test updates.
 
-- Full
-	- `TopTypeLimit = 50`
-	- `ScanMultiplier = 2`
-	- Rationale: broad candidate set for deep investigations.
-
-Minimal code changes (implementation plan)
-
-1. Verify `AllocationPatternAnalysisOptions` exposes `TopTypeLimit` and `Preset(AnalysisProfile)` sets it appropriately (already present per docs).
-2. (Optional) Add `ScanMultiplier` and `LongLivedThreshold` to `AllocationPatternAnalysisOptions` and update `Preset(...)` mappings.
-3. Update `AllocationPatternAnalyzer` to read optional `ScanMultiplier`/`LongLivedThreshold` and use them in candidate selection and classification: replace hardcoded `options.TopTypeLimit * 2` and `longLivedRatio > 0.3` with configured values.
-4. Update unit tests to cover preset-driven behavior and edge cases.
-
-Tests and validation
-
-- Unit tests: synthesize `TypeAggregateIndexEntry` maps with varied gen counts and LOH to validate:
-	- global count%/size% calculations;
-	- `ClassifyProfile` behaviour for boundary gen0/gen2 ratios;
-	- top-N selection respects `TopTypeLimit` and `ScanMultiplier`.
-- Integration: run the analyzer in the pipeline after `GCGenerationAnalyzer` on a representative heap index to confirm stable outputs across presets.
-
-Next steps I can take
-
-- Implement the small optional options (`ScanMultiplier`, `LongLivedThreshold`) and wire them into `AllocationPatternAnalyzer` and `Preset(...)`.
-- Add unit tests for preset behavior and update docs.
+---
 
 Which next step do you want me to take? I can implement the options change and update the `Preset` factory first.

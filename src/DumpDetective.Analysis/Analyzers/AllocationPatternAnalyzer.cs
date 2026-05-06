@@ -37,7 +37,8 @@ namespace DumpDetective.Analysis.Analyzers
                     Profile: AllocationProfile.Mixed,
                     GCPressure: GCPressureLevel.Low,
                     PromotionPressureScore: 0,
-                    TopShortLivedTypes: [],
+                    TopTransientTypes: [],
+                    TopShortishTypes: [],
                     TopLongLivedTypes: []);
             }
 
@@ -65,16 +66,16 @@ namespace DumpDetective.Analysis.Analyzers
             // Approximate gen bytes using average non-LOH size × per-MT gen count.
             AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 
-            // Count percentages (relative to total object count)
-            double gen0CountPct = totalObjects > 0 ? gen0Objects * 100.0 / totalObjects : 0.0;
-            double gen1CountPct = totalObjects > 0 ? gen1Objects * 100.0 / totalObjects : 0.0;
-            double gen2CountPct = totalObjects > 0 ? gen2Objects * 100.0 / totalObjects : 0.0;
-            double lohCountPct  = totalObjects > 0 ? lohObjects  * 100.0 / totalObjects : 0.0;
-            // Size percentages (relative to total managed bytes)
-            double gen0SizePct  = totalSize > 0 ? gen0Bytes * 100.0 / (double)totalSize : 0.0;
-            double gen1SizePct  = totalSize > 0 ? gen1Bytes * 100.0 / (double)totalSize : 0.0;
-            double gen2SizePct  = totalSize > 0 ? gen2Bytes * 100.0 / (double)totalSize : 0.0;
-            double lohSizePct   = totalSize > 0 ? lohBytes  * 100.0 / (double)totalSize : 0.0;
+            // Count percentages (relative to total object count) — round to two decimals for clarity
+            double gen0CountPct = totalObjects > 0 ? Math.Round(gen0Objects * 100.0 / totalObjects, 2) : 0.0;
+            double gen1CountPct = totalObjects > 0 ? Math.Round(gen1Objects * 100.0 / totalObjects, 2) : 0.0;
+            double gen2CountPct = totalObjects > 0 ? Math.Round(gen2Objects * 100.0 / totalObjects, 2) : 0.0;
+            double lohCountPct  = totalObjects > 0 ? Math.Round(lohObjects  * 100.0 / totalObjects, 2) : 0.0;
+            // Size percentages (relative to total managed bytes) — round to two decimals for clarity
+            double gen0SizePct  = totalSize > 0 ? Math.Round(gen0Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double gen1SizePct  = totalSize > 0 ? Math.Round(gen1Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double gen2SizePct  = totalSize > 0 ? Math.Round(gen2Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double lohSizePct   = totalSize > 0 ? Math.Round(lohBytes  * 100.0 / (double)totalSize, 2) : 0.0;
 
             AllocationProfile profile  = ClassifyProfile(gen0CountPct, gen2CountPct);
             // Pressure uses count% for gen0/2 (reflects GC collection frequency) and
@@ -89,10 +90,11 @@ namespace DumpDetective.Analysis.Analyzers
                 sorted.Add((kv.Key, kv.Value));
             sorted.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
 
-            var shortLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var longLived  = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var shortish  = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
 
-            int scanLimit = Math.Min(sorted.Count, options.TopTypeLimit * 2);
+            int scanLimit = Math.Min(sorted.Count, options.TopTypeLimit * options.ScanMultiplier);
             for (int i = 0; i < scanLimit; i++)
             {
                 (ulong mt, TypeAggregateIndexEntry e) = sorted[i];
@@ -103,9 +105,9 @@ namespace DumpDetective.Analysis.Analyzers
 
                 double longLivedRatio = (mtGen2 + e.LohCount) * 1.0 / e.Count;
                 double typeGen0Pct    = mtGen0 * 100.0 / e.Count;
-                AllocationProfile typeProfile = typeGen0Pct > 70.0
+                AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
                     ? AllocationProfile.Transient
-                    : longLivedRatio > 0.5
+                    : longLivedRatio > options.LongLivedClassificationThreshold
                         ? AllocationProfile.Retained
                         : AllocationProfile.Mixed;
 
@@ -119,15 +121,20 @@ namespace DumpDetective.Analysis.Analyzers
                     longLivedRatio,
                     typeProfile);
 
-                if (longLivedRatio > 0.3)
+                if (longLivedRatio > options.LongLivedSelectionThreshold)
                 {
                     if (longLived.Count < options.TopTypeLimit)
                         longLived.Add(entry);
                 }
-                else
+                else if (typeGen0Pct >= options.TransientClassificationThreshold)
                 {
-                    if (shortLived.Count < options.TopTypeLimit)
-                        shortLived.Add(entry);
+                    if (transient.Count < options.TopTypeLimit)
+                        transient.Add(entry);
+                }
+                else if (typeGen0Pct >= options.ShortLivedSelectionThreshold)
+                {
+                    if (shortish.Count < options.TopTypeLimit)
+                        shortish.Add(entry);
                 }
             }
 
@@ -135,7 +142,7 @@ namespace DumpDetective.Analysis.Analyzers
                 gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,
                 gen0SizePct,  gen1SizePct,  gen2SizePct,  lohSizePct,
                 profile, pressure, promotionScore,
-                shortLived, longLived);
+                transient, shortish, longLived);
         }
 
         private static AllocationProfile ClassifyProfile(double gen0Pct, double gen2Pct)

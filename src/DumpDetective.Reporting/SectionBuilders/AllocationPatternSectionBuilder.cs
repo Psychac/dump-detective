@@ -34,10 +34,10 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
             Headers: ["Generation", "Objects %", "Size %"],
             Rows:
             [
-                new([ Cell("Gen0"), Cell($"{d.Gen0CountPct:F1}%"), Cell($"{d.Gen0SizePct:F1}%") ]),
-                new([ Cell("Gen1"), Cell($"{d.Gen1CountPct:F1}%"), Cell($"{d.Gen1SizePct:F1}%") ]),
-                new([ Cell("Gen2"), Cell($"{d.Gen2CountPct:F1}%"), Cell($"{d.Gen2SizePct:F1}%") ]),
-                new([ Cell("LOH"),  Cell($"{d.LohCountPct:F1}%"),  Cell($"{d.LohSizePct:F1}%")  ]),
+                new([ Cell("Gen0"), Cell($"{d.Gen0CountPct:F2}%"), Cell($"{d.Gen0SizePct:F2}%") ]),
+                new([ Cell("Gen1"), Cell($"{d.Gen1CountPct:F2}%"), Cell($"{d.Gen1SizePct:F2}%") ]),
+                new([ Cell("Gen2"), Cell($"{d.Gen2CountPct:F2}%"), Cell($"{d.Gen2SizePct:F2}%") ]),
+                new([ Cell("LOH"),  Cell($"{d.LohCountPct:F2}%"),  Cell($"{d.LohSizePct:F2}%")  ]),
             ]));
 
         // ── Pressure signal ───────────────────────────────────────────────────
@@ -57,15 +57,26 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         });
 
         // ── Short-lived types ─────────────────────────────────────────────────
-        var shortLived = d.TopShortLivedTypes ?? [];
-        if (shortLived.Count > 0)
+        var transient = d.TopTransientTypes ?? [];
+        if (transient.Count > 0)
         {
             blocks.Add(Blank());
-            blocks.Add(H("TOP SHORT-LIVED TYPES (HIGH GEN0 RATIO)"));
+            blocks.Add(H("TOP STRICTLY TRANSIENT TYPES (HIGH GEN0 RATIO)"));
             blocks.Add(new TableBlock(
-                Caption: "Top short-lived types",
+                Caption: "Top transient types",
                 Headers: ["Type", "Gen0", "Gen1", "Gen2", "Long-Lived Ratio"],
-                Rows: BuildTypeRows(shortLived)));
+                Rows: BuildTypeRows(transient)));
+        }
+
+        var shortish = d.TopShortishTypes ?? [];
+        if (shortish.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("TOP SHORT-ISH TYPES (OTHER TOP TYPES NOT LONG-LIVED)"));
+            blocks.Add(new TableBlock(
+                Caption: "Top short-ish types",
+                Headers: ["Type", "Gen0", "Gen1", "Gen2", "Long-Lived Ratio"],
+                Rows: BuildTypeRows(shortish)));
         }
 
         // ── Long-lived types ──────────────────────────────────────────────────
@@ -95,7 +106,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Cell($"{t.Gen0Count:N0}", t.Gen0Count),
                 Cell($"{t.Gen1Count:N0}", t.Gen1Count),
                 Cell($"{t.Gen2Count:N0}", t.Gen2Count),
-                Cell($"{t.LongLivedRatio:P1}")]));
+                Cell($"{t.LongLivedRatio:P2}")]));
         }
         return rows;
     }

@@ -29,5 +29,6 @@ internal sealed record AllocationPatternDomainResult(
     AllocationProfile Profile,
     GCPressureLevel GCPressure,
     double PromotionPressureScore,
-    IReadOnlyList<TypeAllocationProfile> TopShortLivedTypes,
+    IReadOnlyList<TypeAllocationProfile> TopTransientTypes,
+    IReadOnlyList<TypeAllocationProfile> TopShortishTypes,
     IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes) : AnalyzerDomainResult;

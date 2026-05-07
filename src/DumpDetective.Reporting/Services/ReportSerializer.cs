@@ -118,8 +118,41 @@ internal sealed class ReportSerializer
         List<ConfidenceNote> confidence = BuildConfidenceNotes(runs);
 
         // ── 5. Audience-specific projections ─────────────────────────────────
-        ExecutiveSummaryRecord? executiveSummary = audience == ReportAudience.Executive
-            ? BuildExecutiveSummary(deduped)
+        // Compute total managed bytes from available analyzer domain results (Memory, GC generation, AppDomain)
+        long totalManagedBytes = 0;
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem)
+            {
+                totalManagedBytes = (long)mem.TotalBytes;
+                break;
+            }
+            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc)
+            {
+                try
+                {
+                    ulong sum = gc.Gen0Bytes + gc.Gen1Bytes + gc.Gen2Bytes + gc.LohBytes;
+                    totalManagedBytes = (long)Math.Min((ulong)long.MaxValue, sum);
+                    break;
+                }
+                catch { /* ignore overflow, continue */ }
+            }
+            if (run.Result is DumpDetective.Analysis.Models.AppDomainDomainResult app)
+            {
+                try
+                {
+                    ulong sum = 0;
+                    foreach (var d in app.Domains) sum += d.EstimatedManagedBytes;
+                    totalManagedBytes = (long)Math.Min((ulong)long.MaxValue, sum);
+                    break;
+                }
+                catch { }
+            }
+        }
+
+        // Include Executive summary for explicit Executive audience or when Audience==All
+        ExecutiveSummaryRecord? executiveSummary = (audience == ReportAudience.Executive || audience == ReportAudience.All)
+            ? BuildExecutiveSummary(deduped, totalManagedBytes)
             : null;
 
         IReadOnlyList<DeveloperActionRecord> developerActionPlan = audience == ReportAudience.Developer
@@ -320,9 +353,9 @@ internal sealed class ReportSerializer
 
     // ── Executive summary ─────────────────────────────────────────────────────
 
-    private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings)
+    private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings, long totalManagedBytes)
     {
-        long totalManagedBytes = 0;
+        // totalManagedBytes provided by caller when available
 
         int criticalCount = 0, warningCount = 0;
         for (int i = 0; i < findings.Count; i++)

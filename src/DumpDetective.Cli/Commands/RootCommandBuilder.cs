@@ -57,6 +57,8 @@ internal sealed class RootCommandBuilder
         Description = "Indexing mode: auto, memory, or disk."
     };
     private readonly Option<string?> _outputPathOption = new("--output");
+    private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
+    private readonly Option<bool> _separateJsonOption = new("--separate-json") { Description = "Write report.html and report.json side-by-side; client will load external JSON." };
 
     public RootCommand Build()
     {
@@ -80,6 +82,8 @@ internal sealed class RootCommandBuilder
             _excludeAnalyzersOption,
             _reportFormatOption,
             _reportAudienceOption,
+            _preRenderOption,
+            _separateJsonOption,
             _indexModeOption,
             _outputPathOption
         };
@@ -109,7 +113,9 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportAudience(parseResult.GetValue(_reportAudienceOption)),
-            ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)));
+            ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)),
+            parseResult.GetValue(_preRenderOption),
+            parseResult.GetValue(_separateJsonOption));
     }
 
     private static IReadOnlyList<string>? ParseTrend(string? value)

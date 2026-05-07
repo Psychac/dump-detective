@@ -14,7 +14,7 @@ internal sealed record AnalysisReportDocument
 
     // Cross-cutting outputs
     public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
-    public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive
+    public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
     public IReadOnlyList<DeveloperActionRecord> DeveloperActionPlan { get; init; } = [];
     public IReadOnlyList<ConfidenceNote> Confidence { get; init; } = [];
     public DedupRecord DedupDiagnostics { get; init; } = new(0, 0, 0);

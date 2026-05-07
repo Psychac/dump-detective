@@ -19,7 +19,16 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
         state.ReportDocument = doc;
 
         // Render the report string for the chosen output format.
-        state.RenderedReport = reportBuilderFacade.RenderDocument(doc, state.Resolved.Report.Format);
+        // Honor explicit pre-render request for template-driven renderer.
+        try
+        {
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = state.Resolved.Report.PreRender;
+            state.RenderedReport = reportBuilderFacade.RenderDocument(doc, state.Resolved.Report.Format);
+        }
+        finally
+        {
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = false;
+        }
 
         return Task.CompletedTask;
     }

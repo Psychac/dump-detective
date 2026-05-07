@@ -17,8 +17,39 @@ internal sealed class WriteOutputStage : IAnalysisStage
             if (!string.IsNullOrWhiteSpace(state.Resolved.OutputPath))
             {
                 string outPath = state.Resolved.OutputPath!;
-                await File.WriteAllTextAsync(outPath, state.RenderedReport, cancellationToken);
-                ConsoleUx.ReportWritten(outPath);
+                // If --separate-json requested and HTML output, extract embedded JSON and write separate files.
+                if (state.Resolved.Report.SeparateJson && state.Resolved.Report.Format == DumpDetective.Core.Configuration.ReportFormat.Html)
+                {
+                    string html = state.RenderedReport ?? string.Empty;
+                    // Extract the JSON inside <script id="report-json" type="application/json">...</script>
+                    var m = System.Text.RegularExpressions.Regex.Match(html, "<script[^>]*id=\\\"report-json\\\"[^>]*>([\\s\\S]*?)</script>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    string json = m.Success ? m.Groups[1].Value : string.Empty;
+                    string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
+                    string jsonPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(outPath) + ".json");
+                    if (!string.IsNullOrWhiteSpace(json))
+                    {
+                        await File.WriteAllTextAsync(jsonPath, json, cancellationToken);
+                        ConsoleUx.ReportWritten(jsonPath);
+                        // Replace embedded JSON with small marker telling client to fetch external JSON
+                        string replacement = "<script id=\"report-json\" type=\"application/json\">{\"_external\": \"" + Path.GetFileName(jsonPath) + "\"}</script>";
+                        if (m.Success)
+                            html = html.Substring(0, m.Index) + replacement + html.Substring(m.Index + m.Length);
+                        // Write modified HTML
+                        await File.WriteAllTextAsync(outPath, html, cancellationToken);
+                        ConsoleUx.ReportWritten(outPath);
+                    }
+                    else
+                    {
+                        // Fallback: write original rendered report
+                        await File.WriteAllTextAsync(outPath, state.RenderedReport, cancellationToken);
+                        ConsoleUx.ReportWritten(outPath);
+                    }
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(outPath, state.RenderedReport, cancellationToken);
+                    ConsoleUx.ReportWritten(outPath);
+                }
 
                 // Persist any analyzer-produced artifacts alongside the report.
                 var doc = state.ReportDocument;

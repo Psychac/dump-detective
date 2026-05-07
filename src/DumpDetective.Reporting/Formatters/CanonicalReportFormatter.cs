@@ -241,6 +241,36 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"> Dedup merged **{doc.DedupDiagnostics.MergedSections}** section(s) from **{doc.DedupDiagnostics.DuplicateCandidates}** candidate duplicate(s).");
         sb.AppendLine();
 
+        // Table Of Contents (Markdown)
+        if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
+        {
+            sb.AppendLine("## Table of Contents");
+            sb.AppendLine();
+            if (doc.Findings.Count > 0)
+            {
+                sb.AppendLine("### Findings");
+                sb.AppendLine();
+                for (int ti = 0; ti < doc.Findings.Count; ti++)
+                {
+                    var tf = doc.Findings[ti];
+                    sb.AppendLine($"- [{Esc(tf.Title)}](#finding-{ti})");
+                }
+                sb.AppendLine();
+            }
+
+            if (doc.AnalyzerSections.Count > 0)
+            {
+                sb.AppendLine("### Analyzer Sections");
+                sb.AppendLine();
+                for (int si = 0; si < doc.AnalyzerSections.Count; si++)
+                {
+                    var s = doc.AnalyzerSections[si];
+                    sb.AppendLine($"- [{Esc(s.DisplayTitle)}](#detail-{si})");
+                }
+                sb.AppendLine();
+            }
+        }
+
         if (doc.IsTrendReport)
         {
             sb.AppendLine($"> Dumps analyzed: **{doc.TrendDumpCount}**");
@@ -289,9 +319,11 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("## Findings");
             sb.AppendLine();
-            foreach (FindingRecord f in doc.Findings)
+            for (int i = 0; i < doc.Findings.Count; i++)
             {
-                sb.AppendLine($"## [{f.Severity}] {f.Title}");
+                FindingRecord f = doc.Findings[i];
+                sb.AppendLine($"<a id=\"finding-{i}\"></a>");
+                sb.AppendLine($"## [{f.Severity}] {Esc(f.Title)}");
                 sb.AppendLine();
                 sb.AppendLine(f.Evidence);
                 sb.AppendLine();
@@ -328,9 +360,11 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("## Detailed Analyzer Sections");
             sb.AppendLine();
-            foreach (AnalyzerDetailSection section in doc.AnalyzerSections)
+            for (int si = 0; si < doc.AnalyzerSections.Count; si++)
             {
-                sb.AppendLine($"### {section.DisplayTitle}");
+                AnalyzerDetailSection section = doc.AnalyzerSections[si];
+                sb.AppendLine($"<a id=\"detail-{si}\"></a>");
+                sb.AppendLine($"### {Esc(section.DisplayTitle)}");
                 sb.AppendLine();
                 RenderBlocksMd(section.Blocks, sb);
                 sb.AppendLine();
@@ -470,8 +504,29 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             if (doc.TrendDumpPaths is { Count: > 0 })
             {
                 string dumpList = string.Join("<br/>", doc.TrendDumpPaths.Select(p => $"&bull; {Enc(p)}"));
-                sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
+                    sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
             }
+        }
+
+        // ── Table Of Contents (HTML) ───────────────────────────────────────
+        if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
+        {
+            sb.AppendLine("<nav class=\"toc\" aria-label=\"Report table of contents\">\n<div class=\"toc-title\">Table of contents</div>");
+            if (doc.Findings.Count > 0)
+            {
+                sb.AppendLine("<div class=\"toc-section\"><strong>Findings</strong><ol>");
+                for (int fi = 0; fi < doc.Findings.Count; fi++)
+                    sb.AppendLine($"<li><a href=\"#finding-{fi}\">{Enc(doc.Findings[fi].Title)}</a></li>");
+                sb.AppendLine("</ol></div>");
+            }
+            if (doc.AnalyzerSections.Count > 0)
+            {
+                sb.AppendLine("<div class=\"toc-section\"><strong>Analyzer sections</strong><ol>");
+                for (int si = 0; si < doc.AnalyzerSections.Count; si++)
+                    sb.AppendLine($"<li><a href=\"#detail-{si}\">{Enc(doc.AnalyzerSections[si].DisplayTitle)}</a></li>");
+                sb.AppendLine("</ol></div>");
+            }
+            sb.AppendLine("</nav>");
         }
 
         // ── Executive summary ───────────────────────────────────────────────
@@ -527,7 +582,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             string evSummary = f.EvidenceItems is { Count: > 0 } ? f.EvidenceItems[0] : f.Evidence;
             string summary = Enc(evSummary.Length > 200 ? evSummary[..200] : evSummary);
                 sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
-            sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)}</h2><span class=\"category\">{Enc(f.Category)}</span></div>");
+                sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)} <a class=\"permalink\" href=\"#finding-{i}\" aria-label=\"Permalink\">🔗</a></h2><span class=\"category\">{Enc(f.Category)}</span></div>");
 
             if (f.EvidenceItems is { Count: > 1 })
             {
@@ -568,7 +623,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             string colorClass = $"detail-color-{i % 6}";
             sb.AppendLine($"<section id=\"detail-{i}\" class=\"analyzer-section {colorClass}\">");
             sb.AppendLine("<details>");
-            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)}</summary>");
+            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)} <a class=\"permalink\" href=\"#detail-{i}\" aria-label=\"Permalink\">🔗</a></summary>");
             sb.AppendLine("<div class=\"detail-block\">");
             RenderBlocksHtml(section.Blocks, sb);
             sb.AppendLine("</div></details></section>");
@@ -585,80 +640,32 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
 
     private static void RenderBlocksHtml(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)
     {
-        static string Enc(string v) => System.Net.WebUtility.HtmlEncode(v);
-        static string IndCss(int lvl) => lvl switch { 1 => " detail-indent-1", 2 => " detail-indent-2", >= 3 => " detail-indent-2", _ => string.Empty };
-        static string WrapAddr(string html) =>
-            Regex.Replace(html, @"0x[0-9A-Fa-f]{4,}",
-                m => $"<span class=\"addr\">{m.Value}<button class=\"copy-btn\" type=\"button\" aria-label=\"Copy {m.Value}\" data-copy=\"{m.Value}\" title=\"Copy\">&#x2398;</button></span>",
-                RegexOptions.CultureInvariant);
-
-        foreach (SectionBlock block in blocks)
-        {
-            switch (block)
-            {
-                case HeadingBlock h:
-                    sb.AppendLine($"<div class=\"detail-subheading{IndCss(h.IndentLevel)}\">{Enc(h.Text)}</div>");
-                    break;
-                case MetricBlock m:
-                    sb.AppendLine($"<div class=\"detail-line{IndCss(m.IndentLevel)}\"><span class=\"detail-key\">{Enc(m.Label)}:</span> <span class=\"detail-value wrap\">{WrapAddr(Enc(m.Value))}</span></div>");
-                    break;
-                case PathBlock p:
-                    sb.AppendLine($"<div class=\"detail-line{IndCss(p.IndentLevel)}\"><span class=\"detail-key\">{Enc(p.Label)}:</span> <span class=\"detail-path wrap\">{WrapAddr(Enc(p.Path))}</span></div>");
-                    break;
-                case StackFrameBlock sf:
-                    {
-                        string fwCls = sf.IsFrameworkFrame ? " frame-fw" : " frame-app";
-                        sb.AppendLine($"<div class=\"detail-line detail-frame{fwCls}{IndCss(sf.IndentLevel)}\"><code class=\"frame-code\">{WrapAddr(Enc("at " + sf.Frame))}</code></div>");
-                        break;
-                    }
-                case TextBlock t:
-                    sb.AppendLine($"<div class=\"detail-line{IndCss(t.IndentLevel)}\">{WrapAddr(Enc(t.Text))}</div>");
-                    break;
-                case ListItemBlock l:
-                    sb.AppendLine($"<div class=\"detail-line{IndCss(l.IndentLevel)}\">&#x2022; {WrapAddr(Enc(l.Text))}</div>");
-                    break;
-                case DividerBlock:
-                    sb.AppendLine("<div class=\"detail-divider\"></div>");
-                    break;
-                case BlankBlock:
-                    sb.AppendLine("<div class=\"detail-gap\"></div>");
-                    break;
-                case TableBlock tbl:
-                    RenderTableHtml(tbl, sb);
-                    break;
-                case CollapsibleSectionBeginBlock cs:
-                    sb.AppendLine($"<details class=\"detail-nested\"><summary>{Enc(cs.Title)}</summary><div class=\"detail-nested-content\">");
-                    break;
-                case CollapsibleSectionEndBlock:
-                    sb.AppendLine("</div></details>");
-                    break;
-            }
-        }
+        ReportHtmlShared.RenderBlocksHtml(blocks, sb);
     }
 
     private static void RenderTableHtml(TableBlock tbl, StringBuilder sb)
     {
-        static string Enc(string v) => System.Net.WebUtility.HtmlEncode(v);
-        sb.Append("<table>");
-        if (tbl.Caption is not null) sb.Append($"<caption>{Enc(tbl.Caption)}</caption>");
-        sb.Append("<thead><tr>");
-        foreach (string h in tbl.Headers) sb.Append($"<th scope=\"col\">{Enc(h)}</th>");
-        sb.Append("</tr></thead><tbody>");
-        foreach (TableRow row in tbl.Rows)
-        {
-            sb.Append("<tr>");
-            foreach (TableCell cell in row.Cells)
-            {
-                string da = cell.RawValue.HasValue ? $" data-value=\"{cell.RawValue.Value}\"" : string.Empty;
-                sb.Append($"<td{da}>{Enc(cell.Display)}</td>");
-            }
-            sb.Append("</tr>");
-        }
-        sb.AppendLine("</tbody></table>");
+        ReportHtmlShared.RenderTableHtml(tbl, sb);
     }
 
     private static void AppendCss(StringBuilder sb)
     {
+        string baseDir = AppContext.BaseDirectory ?? string.Empty;
+        string[] candidates = new[] {
+            Path.Combine(baseDir, "Templates", "report.css"),
+            Path.Combine(baseDir, "DumpDetective.Reporting", "Templates", "report.css"),
+            Path.Combine(baseDir, "src", "DumpDetective.Reporting", "Templates", "report.css")
+        };
+        foreach (var p in candidates)
+        {
+            if (File.Exists(p))
+            {
+                sb.AppendLine(File.ReadAllText(p));
+                return;
+            }
+        }
+
+        // fallback: inline CSS (preserve previous content)
         sb.AppendLine("body{margin:0;padding:0;background:#f5f7fb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif;line-height:1.45;}");
         sb.AppendLine(".container{max-width:1200px;margin:0 auto;padding:24px;}");
         sb.AppendLine(".header-card,.section-card{background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05);}");
@@ -680,84 +687,87 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine(".analyzer-section{background:#fff;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;border-radius:10px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}");
         sb.AppendLine(".detail-color-0{border-left-color:#3b82f6;}.detail-color-1{border-left-color:#7c3aed;}.detail-color-2{border-left-color:#0891b2;}");
         sb.AppendLine(".detail-color-3{border-left-color:#059669;}.detail-color-4{border-left-color:#d97706;}.detail-color-5{border-left-color:#e11d48;}");
-        sb.AppendLine(".analyzer-section>details>summary{display:flex;align-items:center;gap:10px;padding:13px 16px;font-weight:600;font-size:14px;color:#1e293b;cursor:pointer;list-style:none;user-select:none;}");
-        sb.AppendLine(".analyzer-section>details>summary::-webkit-details-marker{display:none;}");
-        sb.AppendLine(".analyzer-section>details>summary:hover{background:rgba(0,0,0,0.02);}");
-        sb.AppendLine(".analyzer-section>details[open]>summary{background:rgba(0,0,0,0.02);border-bottom:1px solid #e2e8f0;}");
+        sb.AppendLine(".analyzer-section>details>summary{display:flex;align-items:center;gap:10px;padding:13px 16px;font-weight:600;font-size:14px;color:#1e293b;cursor:pointer;list-style:none;user-select:none;} ");
+        sb.AppendLine(".analyzer-section>details>summary::-webkit-details-marker{display:none;} ");
+        sb.AppendLine(".analyzer-section>details>summary:hover{background:rgba(0,0,0,0.02);} ");
+        sb.AppendLine(".analyzer-section>details[open]>summary{background:rgba(0,0,0,0.02);border-bottom:1px solid #e2e8f0;} ");
         sb.AppendLine(".analyzer-section>details>summary::before{content:'';flex-shrink:0;display:inline-block;width:8px;height:8px;border-right:2px solid #94a3b8;border-bottom:2px solid #94a3b8;transform:rotate(-45deg);transition:transform 0.2s;margin-bottom:1px;}");
-        sb.AppendLine(".analyzer-section>details[open]>summary::before{transform:rotate(45deg) translate(-2px,-2px);border-color:#3b82f6;}");
-        sb.AppendLine(".detail-color-1>details[open]>summary::before{border-color:#7c3aed;}.detail-color-2>details[open]>summary::before{border-color:#0891b2;}");
-        sb.AppendLine(".detail-color-3>details[open]>summary::before{border-color:#059669;}.detail-color-4>details[open]>summary::before{border-color:#d97706;}.detail-color-5>details[open]>summary::before{border-color:#e11d48;}");
-        sb.AppendLine(".analyzer-section .detail-block{border-radius:0 0 6px 6px;margin:0;}");
-        sb.AppendLine(".detail-block{background:#f8fafc;color:#1f2937;border-radius:8px;padding:12px;overflow:auto;font-family:Consolas,\"Cascadia Mono\",monospace;font-size:13px;line-height:1.5;}");
-        sb.AppendLine(".detail-subheading{font-weight:700;color:#1d4ed8;margin:8px 0 4px 0;}");
-        sb.AppendLine(".detail-divider{height:1px;background:#e2e8f0;margin:6px 0;}.detail-line{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}");
-        sb.AppendLine(".detail-key{color:#059669;font-weight:600;}.detail-value{color:#374151;}.detail-path{color:#b45309;font-weight:600;}");
-        sb.AppendLine(".detail-gap{height:8px;}.detail-indent-1{padding-left:12px;}.detail-indent-2{padding-left:24px;}");
-        sb.AppendLine(".detail-block table{background:transparent;border-collapse:collapse;width:100%;margin:8px 0;color:#1f2937;}");
-        sb.AppendLine(".detail-block thead th{background:#f1f5f9;color:#1e293b;font-weight:600;border:1px solid #e2e8f0;padding:6px 8px;text-align:left;}");
-        sb.AppendLine(".detail-block tbody td{border:1px solid #e2e8f0;padding:5px 8px;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;}");
-        sb.AppendLine(".detail-block tbody tr:nth-child(even){background:rgba(0,0,0,0.02);}");
-        sb.AppendLine(".detail-block caption{color:#6b7280;font-size:13px;font-weight:600;text-align:left;padding:2px 0 4px 0;caption-side:top;}");
-        sb.AppendLine(".detail-nested{margin:6px 0;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;}");
-        sb.AppendLine(".detail-nested>summary{display:flex;align-items:center;gap:8px;padding:8px 10px;color:#374151;font-weight:600;font-size:13px;cursor:pointer;list-style:none;user-select:none;}");
-        sb.AppendLine(".detail-nested>summary::-webkit-details-marker{display:none;}.detail-nested>summary:hover{background:rgba(0,0,0,0.03);}");
-        sb.AppendLine(".detail-nested[open]>summary{background:rgba(0,0,0,0.03);border-bottom:1px solid #e2e8f0;}");
-        sb.AppendLine(".detail-nested>summary::before{content:'';flex-shrink:0;display:inline-block;width:7px;height:7px;border-right:1.5px solid #94a3b8;border-bottom:1.5px solid #94a3b8;transform:rotate(-45deg);transition:transform 0.2s;margin-bottom:1px;}");
-        sb.AppendLine(".detail-nested[open]>summary::before{transform:rotate(45deg) translate(-1px,-1px);border-color:#3b82f6;}");
-        sb.AppendLine(".detail-nested-content{padding:8px 4px;}");
-        sb.AppendLine(".skip-link{position:absolute;left:-9999px;top:8px;z-index:999;padding:8px 16px;background:#1d4ed8;color:#fff;border-radius:6px;font-weight:600;text-decoration:none;white-space:nowrap;}");
-        sb.AppendLine(".skip-link:focus{left:8px;}:focus-visible{outline:2px solid #2563eb;outline-offset:2px;border-radius:2px;}");
-        sb.AppendLine(".sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}");
-        sb.AppendLine(".copy-btn{border:none;background:none;cursor:pointer;color:#64748b;font-size:11px;padding:1px 3px;border-radius:3px;vertical-align:middle;margin-left:3px;transition:background 0.15s,color 0.15s;line-height:1;}");
-        sb.AppendLine(".copy-btn:hover{background:#eff6ff;color:#1d4ed8;}.addr{white-space:nowrap;display:inline;}");
-        // Stack frame rendering — app frames highlighted, framework frames muted with accent
-        sb.AppendLine(".detail-frame{margin:1px 0;border-radius:3px;padding:1px 4px 1px 6px;border-left:2px solid transparent;}");
-        sb.AppendLine(".frame-code{font-family:Consolas,\"Cascadia Mono\",monospace;font-size:12px;display:block;overflow-wrap:anywhere;word-break:break-all;}");
-        sb.AppendLine(".frame-app{border-left-color:#3b82f6;background:rgba(219,234,254,0.3);}");
-        sb.AppendLine(".frame-app .frame-code{color:#1e3a8a;font-weight:600;}");
-        sb.AppendLine(".frame-fw{border-left-color:#e2e8f0;}");
-        sb.AppendLine(".frame-fw .frame-code{color:#6b7280;}");
-        sb.AppendLine(".filter-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0 6px 0;margin-bottom:6px;}");
-        sb.AppendLine(".filter-group{display:flex;gap:4px;flex-wrap:wrap;}");
-        sb.AppendLine(".filter-btn{padding:3px 12px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;white-space:nowrap;}");
-        sb.AppendLine(".filter-btn:hover{background:#f1f5f9;border-color:#94a3b8;}.filter-btn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8;}");
-        sb.AppendLine(".filter-btn.filter-critical.active{background:#b91c1c;border-color:#b91c1c;}.filter-btn.filter-warning.active{background:#92400e;border-color:#b45309;}");
-        sb.AppendLine(".filter-search{flex:1;min-width:180px;max-width:360px;padding:5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#1f2937;background:#fff;}");
-        sb.AppendLine(".filter-count{font-size:12px;color:#6b7280;white-space:nowrap;padding:0 4px;}");
-        sb.AppendLine("thead th.sortable{cursor:pointer;user-select:none;}.thead th.sortable:hover{background:#e9ebef;}");
-        sb.AppendLine("thead th.sortable::after{content:' \u21c5';font-size:11px;opacity:0.35;margin-left:3px;}");
-        sb.AppendLine("thead th.sortable[aria-sort=\"ascending\"]::after{content:' \u2191';opacity:1;}thead th.sortable[aria-sort=\"descending\"]::after{content:' \u2193';opacity:1;}");
-        sb.AppendLine(".action-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}");
-        sb.AppendLine(".action-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;}");
-        sb.AppendLine(".action-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#1e293b;}");
-        sb.AppendLine("@media print{.skip-link,.action-bar,.filter-bar,.copy-btn{display:none!important;}body{background:#fff;}");
-        sb.AppendLine(".header-card,.section-card,.analyzer-section{box-shadow:none!important;border:1px solid #d1d5db!important;page-break-inside:avoid;}");
-        sb.AppendLine(".analyzer-section>details{display:block!important;}.detail-block{border:1px solid #e2e8f0!important;}}");
+        sb.AppendLine(".analyzer-section>details[open]>summary::before{transform:rotate(45deg) translate(-2px,-2px);border-color:#3b82f6;} ");
+        sb.AppendLine(".detail-color-1>details[open]>summary::before{border-color:#7c3aed;} .detail-color-2>details[open]>summary::before{border-color:#0891b2;} ");
+        sb.AppendLine(".detail-color-3>details[open]>summary::before{border-color:#059669;} .detail-color-4>details[open]>summary::before{border-color:#d97706;} .detail-color-5>details[open]>summary::before{border-color:#e11d48;} ");
+        sb.AppendLine(".analyzer-section .detail-block{border-radius:0 0 6px 6px;margin:0;} ");
+        sb.AppendLine(".detail-block{background:#f8fafc;color:#1f2937;border-radius:8px;padding:12px;overflow:auto;font-family:Consolas,\"Cascadia Mono\",monospace;font-size:13px;line-height:1.5;} ");
+        sb.AppendLine(".detail-subheading{font-weight:700;color:#1d4ed8;margin:8px 0 4px 0;} ");
+        sb.AppendLine(".detail-divider{height:1px;background:#e2e8f0;margin:6px 0;} .detail-line{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;} ");
+        sb.AppendLine(".detail-key{color:#059669;font-weight:600;} .detail-value{color:#374151;} .detail-path{color:#b45309;font-weight:600;} ");
+        sb.AppendLine(".detail-gap{height:8px;} .detail-indent-1{padding-left:12px;} .detail-indent-2{padding-left:24px;} ");
+        sb.AppendLine(".detail-block table{background:transparent;border-collapse:collapse;width:100%;margin:8px 0;color:#1f2937;} ");
+        sb.AppendLine(".detail-block thead th{background:#f1f5f9;color:#1e293b;font-weight:600;border:1px solid #e2e8f0;padding:6px 8px;text-align:left;} ");
+        sb.AppendLine(".detail-block tbody td{border:1px solid #e2e8f0;padding:5px 8px;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;} ");
+        sb.AppendLine(".detail-block tbody tr:nth-child(even){background:rgba(0,0,0,0.02);} ");
+        sb.AppendLine(".detail-block caption{color:#6b7280;font-size:13px;font-weight:600;text-align:left;padding:2px 0 4px 0;caption-side:top;} ");
+        sb.AppendLine(".detail-nested{margin:6px 0;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;} ");
+        sb.AppendLine(".detail-nested>summary{display:flex;align-items:center;gap:8px;padding:8px 10px;color:#374151;font-weight:600;font-size:13px;cursor:pointer;list-style:none;user-select:none;} ");
+        sb.AppendLine(".detail-nested>summary::-webkit-details-marker{display:none;} .detail-nested>summary:hover{background:rgba(0,0,0,0.03);} ");
+        sb.AppendLine(".detail-nested[open]>summary{background:rgba(0,0,0,0.03);border-bottom:1px solid #e2e8f0;} ");
+        sb.AppendLine(".detail-nested>summary::before{content:'';flex-shrink:0;display:inline-block;width:7px;height:7px;border-right:1.5px solid #94a3b8;border-bottom:1.5px solid #94a3b8;transform:rotate(-45deg);transition:transform 0.2s;margin-bottom:1px;} ");
+        sb.AppendLine(".detail-nested[open]>summary::before{transform:rotate(45deg) translate(-1px,-1px);border-color:#3b82f6;} ");
+        sb.AppendLine(".detail-nested-content{padding:8px 4px;} ");
+        sb.AppendLine(".skip-link{position:absolute;left:-9999px;top:8px;z-index:999;padding:8px 16px;background:#1d4ed8;color:#fff;border-radius:6px;font-weight:600;text-decoration:none;white-space:nowrap;} ");
+        sb.AppendLine(".skip-link:focus{left:8px;} :focus-visible{outline:2px solid #2563eb;outline-offset:2px;border-radius:2px;} ");
+        sb.AppendLine(".sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;} ");
+        sb.AppendLine(".copy-btn{border:none;background:none;cursor:pointer;color:#64748b;font-size:11px;padding:1px 3px;border-radius:3px;vertical-align:middle;margin-left:3px;transition:background 0.15s,color 0.15s;line-height:1;} ");
+        sb.AppendLine(".copy-btn:hover{background:#eff6ff;color:#1d4ed8;} .addr{white-space:nowrap;display:inline;} ");
+        sb.AppendLine(".detail-frame{margin:1px 0;border-radius:3px;padding:1px 4px 1px 6px;border-left:2px solid transparent;} ");
+        sb.AppendLine(".frame-code{font-family:Consolas,\"Cascadia Mono\",monospace;font-size:12px;display:block;overflow-wrap:anywhere;word-break:break-all;} ");
+        sb.AppendLine(".frame-app{border-left-color:#3b82f6;background:rgba(219,234,254,0.3);} ");
+        sb.AppendLine(".frame-app .frame-code{color:#1e3a8a;font-weight:600;} ");
+        sb.AppendLine(".frame-fw{border-left-color:#e2e8f0;} .frame-fw .frame-code{color:#6b7280;} ");
+        sb.AppendLine(".filter-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0 6px 0;margin-bottom:6px} ");
+        sb.AppendLine(".filter-group{display:flex;gap:4px;flex-wrap:wrap} ");
+        sb.AppendLine(".filter-btn{padding:3px 12px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;white-space:nowrap;} ");
+        sb.AppendLine(".filter-btn:hover{background:#f1f5f9;border-color:#94a3b8} .filter-btn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8} ");
+        sb.AppendLine(".filter-btn.filter-critical.active{background:#b91c1c;border-color:#b91c1c} .filter-btn.filter-warning.active{background:#92400e;border-color:#b45309} ");
+        sb.AppendLine(".filter-search{flex:1;min-width:180px;max-width:360px;padding:5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#1f2937;background:#fff;} ");
+        sb.AppendLine(".toc{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;}" );
+        sb.AppendLine(".toc-title{font-weight:700;margin-bottom:8px;color:#111827;}" );
+        sb.AppendLine(".toc-section{margin:6px 0;padding-left:8px;}" );
+        sb.AppendLine(".toc-section ol{margin:6px 0 0 18px;padding:0;}" );
+        sb.AppendLine(".permalink{margin-left:8px;font-size:0.9em;color:#6b7280;text-decoration:none;}" );
+        sb.AppendLine(".permalink:hover{color:#111827;}" );
+        sb.AppendLine(".toc a.active{font-weight:700;color:#111827;}" );
+        sb.AppendLine(".filter-count{font-size:12px;color:#6b7280;white-space:nowrap;padding:0 4px;}" );
+        sb.AppendLine("thead th.sortable{cursor:pointer;user-select:none;} thead th.sortable:hover{background:#e9ebef;}" );
+        sb.AppendLine("thead th.sortable::after{content:' \u21c5';font-size:11px;opacity:0.35;margin-left:3px;}" );
+        sb.AppendLine("thead th.sortable[aria-sort=\"ascending\"]::after{content:' \u2191';opacity:1;} thead th.sortable[aria-sort=\"descending\"]::after{content:' \u2193';opacity:1;}" );
+        sb.AppendLine(".action-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}" );
+        sb.AppendLine(".action-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;}" );
+        sb.AppendLine(".action-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#1e293b;}" );
+        sb.AppendLine("@media print{.skip-link,.action-bar,.filter-bar,.copy-btn{display:none!important;}body{background:#fff;}" );
+        sb.AppendLine(".header-card,.section-card,.analyzer-section{box-shadow:none!important;border:1px solid #d1d5db!important;page-break-inside:avoid;}" );
+        sb.AppendLine(".analyzer-section>details{display:block!important;} .detail-block{border:1px solid #e2e8f0!important;} }" );
     }
 
     private static void AppendJs(StringBuilder sb, string exportFn)
     {
-        sb.AppendLine("<script>(function(){");
-        sb.AppendLine("document.querySelectorAll('.analyzer-section details').forEach(function(d){var s=d.querySelector('summary');if(s)s.setAttribute('aria-expanded',d.open);d.addEventListener('toggle',function(){if(s)s.setAttribute('aria-expanded',d.open);});});");
-        sb.AppendLine("var sr=document.getElementById('clipboard-status');");
-        sb.AppendLine("function flash(m){if(sr){sr.textContent=m;setTimeout(function(){sr.textContent='';},2000);}}");
-        sb.AppendLine("document.querySelectorAll('.copy-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(navigator.clipboard)navigator.clipboard.writeText(btn.dataset.copy||'').then(function(){flash('Copied: '+btn.dataset.copy);});});});");
-        sb.AppendLine($"var btnJson=document.getElementById('btn-download-json');if(btnJson)btnJson.addEventListener('click',function(){{var el=document.getElementById('report-data');if(!el)return;var blob=new Blob([el.textContent],{{type:'application/json'}});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='{exportFn}.json';a.click();URL.revokeObjectURL(a.href);}});");
-        sb.AppendLine($"var btnCsv=document.getElementById('btn-export-csv');if(btnCsv)btnCsv.addEventListener('click',function(){{var el=document.getElementById('report-data');if(!el)return;try{{var d=JSON.parse(el.textContent);var rows=[['ID','Severity','Category','Title','Evidence','Recommendation']];(d.findings||[]).forEach(function(f){{rows.push([f.fingerprint||'',f.severity||'',f.category||'',f.title||'',f.evidence||'',f.recommendation||'']);}});var csv=rows.map(function(r){{return r.map(function(c){{return'\"'+(c||'').replace(/\"/g,'\"\"')+'\"';}}).join(',');}}).join('\\r\\n');var blob=new Blob(['\\uFEFF'+csv],{{type:'text/csv;charset=utf-8'}});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='{exportFn}-findings.csv';a.click();URL.revokeObjectURL(a.href);}}catch(e){{}}}});");
-        sb.AppendLine("var btnPrint=document.getElementById('btn-print');if(btnPrint)btnPrint.addEventListener('click',function(){window.print();});");
-        sb.AppendLine("var fbs=document.querySelectorAll('.filter-btn[data-sev]');var fsi=document.getElementById('filter-search');var fco=document.getElementById('filter-count');");
-        sb.AppendLine("function applyFilter(){var txt=fsi?fsi.value.trim().toLowerCase():'';var asev='all';fbs.forEach(function(b){if(b.classList.contains('active'))asev=b.dataset.sev;});");
-        sb.AppendLine("var cards=document.querySelectorAll('.section-card[data-severity]');var vis=0;cards.forEach(function(c){var s=(c.dataset.severity||'').toLowerCase();var ok=(asev==='all'||s===asev)&&(!txt||(c.dataset.title||'').toLowerCase().indexOf(txt)>=0||(c.dataset.summary||'').toLowerCase().indexOf(txt)>=0);c.hidden=!ok;if(ok)vis++;});");
-        sb.AppendLine("if(fco)fco.textContent=cards.length?vis+' of '+cards.length+' finding(s)':'';}");
-        sb.AppendLine("fbs.forEach(function(b){b.addEventListener('click',function(){fbs.forEach(function(x){x.classList.remove('active');x.setAttribute('aria-pressed','false');});b.classList.add('active');b.setAttribute('aria-pressed','true');applyFilter();});});");
-        sb.AppendLine("if(fsi)fsi.addEventListener('input',applyFilter);applyFilter();");
-        sb.AppendLine("document.querySelectorAll('table').forEach(function(tbl){var ths=tbl.querySelectorAll('thead th');ths.forEach(function(th,col){th.classList.add('sortable');th.setAttribute('tabindex','0');var dir=1;");
-        sb.AppendLine("function doSort(){var tb=tbl.querySelector('tbody');if(!tb)return;var rows=Array.from(tb.querySelectorAll('tr'));");
-        sb.AppendLine("rows.sort(function(a,b){var ac=a.cells[col],bc=b.cells[col];var av=ac&&ac.dataset.value!==undefined&&ac.dataset.value!==''?parseFloat(ac.dataset.value):NaN;var bv=bc&&bc.dataset.value!==undefined&&bc.dataset.value!==''?parseFloat(bc.dataset.value):NaN;");
-        sb.AppendLine("if(!isNaN(av)&&!isNaN(bv))return dir*(av-bv);var at=(ac?ac.textContent:'').toLowerCase(),bt=(bc?bc.textContent:'').toLowerCase();return dir*(at<bt?-1:at>bt?1:0);});");
-        sb.AppendLine("rows.forEach(function(r){tb.appendChild(r);});ths.forEach(function(h){h.removeAttribute('aria-sort');});th.setAttribute('aria-sort',dir>0?'ascending':'descending');dir=-dir;}");
-        sb.AppendLine("th.addEventListener('click',doSort);th.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();doSort();}});});});");
-        sb.AppendLine("})();</script>");
+        string baseDir = AppContext.BaseDirectory ?? string.Empty;
+        string[] candidates = new[] {
+            Path.Combine(baseDir, "Templates", "report.js"),
+            Path.Combine(baseDir, "DumpDetective.Reporting", "Templates", "report.js"),
+            Path.Combine(baseDir, "src", "DumpDetective.Reporting", "Templates", "report.js")
+        };
+        foreach (var p in candidates)
+        {
+            if (File.Exists(p))
+            {
+                sb.AppendLine("<script>");
+                sb.AppendLine(File.ReadAllText(p));
+                sb.AppendLine("</script>");
+                return;
+            }
+        }
+
+        // fallback: no inline JS included here (templates/report.js expected in Templates/). Keep a minimal marker script.
+        sb.AppendLine("<script>/* report.js not found — use Templates/report.js or rely on inline fallbacks in previous releases */</script>");
     }
 }

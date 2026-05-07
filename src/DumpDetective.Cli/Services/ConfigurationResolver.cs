@@ -244,7 +244,9 @@ internal sealed class ConfigurationResolver
         return new ReportOptions
         {
             Format = config.Report?.Format ?? ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html,
-            Audience = config.Report?.Audience ?? ParseReportAudience(config.ReportAudience) ?? request.ReportAudience ?? ReportAudience.All
+            Audience = config.Report?.Audience ?? ParseReportAudience(config.ReportAudience) ?? request.ReportAudience ?? ReportAudience.All,
+            PreRender = config.Report?.PreRender ?? request.PreRender,
+            SeparateJson = config.Report?.SeparateJson ?? request.SeparateJson
         };
     }
 

@@ -318,10 +318,37 @@ internal sealed class TrendReportComposer(
                         _                                               => "\u2014 Stable"
                     };
 
+                    // Determine snapshot index with largest adjacent change to link to the likely originating dump
+                    int linkSnapshot = snapshots.Count - 1; // default: latest
+                    try
+                    {
+                        double best = 0.0; int bestIdx = -1;
+                        double? prev = null;
+                        for (int si = 0; si < point.Values.Count; si++)
+                        {
+                            double v = point.Values[si];
+                            if (double.IsNaN(v)) continue;
+                            if (prev.HasValue)
+                            {
+                                double d = Math.Abs(v - prev.Value);
+                                if (d > best) { best = d; bestIdx = si; }
+                            }
+                            prev = v;
+                        }
+                        if (bestIdx >= 0) linkSnapshot = Math.Min(bestIdx, snapshots.Count - 1);
+                    }
+                    catch { }
+
+                    // Embed sparkline payload as JSON in a special display token; link token appended to metric cell via ||__LINK__detail-{index}
+                    string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new { values = point.Values, unit = point.Unit });
+                    string sparkToken = "__SPARK__" + sparkPayload;
+                    // Use zero-based snapshot index to match `detail-{i}` IDs generated in the report
+                    string metricDisplay = point.Key + "||__LINK__detail-" + linkSnapshot;
+
                     rows.Add(new TableRow(
                     [
-                        new TableCell(point.Key),
-                        new TableCell(trendText),
+                        new TableCell(metricDisplay),
+                        new TableCell(sparkToken),
                         new TableCell(deltaDisplay, delta == 0 ? 0L : (long)Math.Round(Math.Abs(delta))),
                         new TableCell(status)
                     ]));

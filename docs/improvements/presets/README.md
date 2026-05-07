@@ -5,7 +5,7 @@ This directory contains per-analyzer preset guidance (`Fast` / `Balanced` / `Ful
 Preset files (one per analyzer):
 
 - [allocation-pattern-analyzer-presets.md](docs/improvements/presets/allocation-pattern-analyzer-presets.md) — ✅ **COMPLETED**
-- [appdomain-analyzer-presets.md](docs/improvements/presets/appdomain-analyzer-presets.md)
+- [appdomain-analyzer-presets.md](docs/improvements/presets/appdomain-analyzer-presets.md) — ✅ **COMPLETED**
 - [array-analyzer-presets.md](docs/improvements/presets/array-analyzer-presets.md)
 - [async-state-machine-analyzer-presets.md](docs/improvements/presets/async-state-machine-analyzer-presets.md)
 - [async-task-analyzer-presets.md](docs/improvements/presets/async-task-analyzer-presets.md)

@@ -28,6 +28,23 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
         blocks.Add(M("Dynamic Modules",      $"{d.TotalDynamicModules:N0}",  d.TotalDynamicModules));
         blocks.Add(M("Anonymous Modules",    $"{d.AnonymousModuleCount:N0}", d.AnonymousModuleCount));
 
+        // Optional: render warnings and excluded-module summary when present in the domain result
+        if (d.Warnings is not null && d.Warnings.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("NOTES"));
+            foreach (string w in d.Warnings)
+                blocks.Add(T(w));
+        }
+
+        if (d.Metrics is not null && d.Metrics.TryGetValue("ExcludedModuleCount", out var excl) && excl is int exclCount && exclCount > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("EXCLUDED MODULES"));
+            blocks.Add(T($"{exclCount:N0} modules were excluded from type enumeration due to configuration or budget."));
+            blocks.Add(M("Excluded Modules", $"{exclCount:N0}", exclCount));
+        }
+
         // ── AppDomain inventory ───────────────────────────────────────────────
         if (d.Domains.Count > 0)
         {

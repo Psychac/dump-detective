@@ -6,8 +6,6 @@ public sealed class MemoryLeakOptions
     public int TopHighlyReferencedObjectsToShow { get; init; } = 15;
 
     public int HighReferenceThreshold { get; init; } = 50;
-    public int MaxDuplicateStringLength { get; init; } = 500;
-    public int MinDuplicateStringCount { get; init; } = 10;
     public int MaxReferenceAddresses { get; init; } = 1_000_000;
 
     /// <summary>
@@ -28,8 +26,6 @@ public sealed class MemoryLeakOptions
             TopFinalizerTypesToShow = 5,
             TopHighlyReferencedObjectsToShow = 8,
             HighReferenceThreshold = 75,
-            MaxDuplicateStringLength = 300,
-            MinDuplicateStringCount = 20,
             MaxReferenceAddresses = 250_000,
             MaxLeakScanObjects = 500_000
         },
@@ -38,8 +34,6 @@ public sealed class MemoryLeakOptions
             TopFinalizerTypesToShow = 25,
             TopHighlyReferencedObjectsToShow = 40,
             HighReferenceThreshold = 30,
-            MaxDuplicateStringLength = 2_000,
-            MinDuplicateStringCount = 5,
             MaxReferenceAddresses = 2_000_000,
             MaxLeakScanObjects = 5_000_000
         },

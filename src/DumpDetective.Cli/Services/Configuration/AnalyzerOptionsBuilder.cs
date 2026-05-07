@@ -11,7 +11,42 @@ internal static class AnalyzerOptionsBuilder
         AnalysisCommandRequest _,
         Func<AnalysisProfile, T> presetFactory)
         where T : class
-        => presetFactory(AnalysisProfile.Balanced);
+    {
+        T preset = presetFactory(AnalysisProfile.Balanced);
+
+        // Special-case: allow CLI to override a couple of StringAnalysis options
+        if (typeof(T) == typeof(StringAnalysisOptions) && _ is not null)
+        {
+            var req = _ as AnalysisCommandRequest;
+            var s = preset as StringAnalysisOptions ?? StringAnalysisOptions.Default;
+
+            if (req?.MaxDuplicateStringLength is not null || req?.MinDuplicateStringCount is not null)
+            {
+                var overridden = new StringAnalysisOptions
+                {
+                    EnableDeduplication = s.EnableDeduplication,
+                    DeduplicationStringCountThreshold = s.DeduplicationStringCountThreshold,
+                    MaxUniqueStringTracking = s.MaxUniqueStringTracking,
+                    MaxStringsToDedup = s.MaxStringsToDedup,
+                    TopDuplicatesToShow = s.TopDuplicatesToShow,
+                    VeryLongStringThresholdBytes = s.VeryLongStringThresholdBytes,
+                    LohThresholdBytes = s.LohThresholdBytes,
+                    PreviewMaxLength = s.PreviewMaxLength,
+                    MaxDuplicateStringLength = req.MaxDuplicateStringLength ?? s.MaxDuplicateStringLength,
+                    MinDuplicateStringCount = req.MinDuplicateStringCount ?? s.MinDuplicateStringCount,
+                    DeduplicationMode = s.DeduplicationMode,
+                    SamplingMode = s.SamplingMode,
+                    DetectInterning = s.DetectInterning,
+                    ProduceRawExports = s.ProduceRawExports,
+                    MinDuplicateCharLength = s.MinDuplicateCharLength
+                };
+
+                return overridden as T;
+            }
+        }
+
+        return preset;
+    }
 
     public static T BuildValidatedBalancedPresetFromCli<T>(
         AnalysisCommandRequest _,

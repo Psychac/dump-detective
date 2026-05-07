@@ -71,6 +71,16 @@ public sealed class StringAnalysisOptions
     /// Maximum preview length (characters) used when rendering string previews in reports.
     /// </summary>
     public int PreviewMaxLength { get; init; } = 80;
+    /// <summary>
+    /// Maximum duplicate string length (characters) to read when sampling content.
+    /// Used to avoid materializing very large strings during deduplication.
+    /// </summary>
+    public int MaxDuplicateStringLength { get; init; } = 500;
+
+    /// <summary>
+    /// Minimum duplicate occurrence count for a string pattern to be considered a duplicate.
+    /// </summary>
+    public int MinDuplicateStringCount { get; init; } = 10;
 
     /// <summary>
     /// Controls whether deduplication runs and how it falls back when indexes are missing.
@@ -107,6 +117,8 @@ public sealed class StringAnalysisOptions
             MaxStringsToDedup = 10_000,
             TopDuplicatesToShow = 10,
             PreviewMaxLength = 64,
+            MaxDuplicateStringLength = 300,
+            MinDuplicateStringCount = 20,
             DetectInterning = false,
             ProduceRawExports = false,
             MinDuplicateCharLength = 8
@@ -121,6 +133,8 @@ public sealed class StringAnalysisOptions
             MaxStringsToDedup = 200_000,
             TopDuplicatesToShow = 50,
             PreviewMaxLength = 120,
+            MaxDuplicateStringLength = 2_000,
+            MinDuplicateStringCount = 5,
             DetectInterning = true,
             ProduceRawExports = true,
             MinDuplicateCharLength = 1
@@ -136,6 +150,8 @@ public sealed class StringAnalysisOptions
             MaxStringsToDedup = 50_000,
             TopDuplicatesToShow = 20,
             PreviewMaxLength = 80,
+            MaxDuplicateStringLength = 500,
+            MinDuplicateStringCount = 10,
             DetectInterning = true,
             ProduceRawExports = false,
             MinDuplicateCharLength = 4

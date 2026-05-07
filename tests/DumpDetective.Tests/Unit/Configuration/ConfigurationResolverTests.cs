@@ -64,7 +64,8 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.MaxDuplicateStringLength.Should().Be(balancedMemoryLeak.MaxDuplicateStringLength);
+            var balancedString = StringAnalysisOptions.Preset(AnalysisProfile.Balanced);
+            resolved.StringAnalysis.MaxDuplicateStringLength.Should().Be(balancedString.MaxDuplicateStringLength);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
             resolved.Report.Format.Should().Be(ReportFormat.Html);
         }
@@ -309,7 +310,7 @@ public sealed class ConfigurationResolverTests
                             "DumpPath": "C:/dumps/from-config.dmp",
                             "Profile": "Fast",
                             "Analyzers": {
-                                "MemoryLeak": {
+                                "String": {
                                     "Profile": "Full",
                                     "MinDuplicateStringCount": 11
                                 }
@@ -322,8 +323,8 @@ public sealed class ConfigurationResolverTests
 
                         ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-                        resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
-                        resolved.MemoryLeak.MinDuplicateStringCount.Should().Be(11);
+                        resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(8);
+                        resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
                 }
                 finally
                 {

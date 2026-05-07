@@ -174,7 +174,6 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         // ── Mutable accumulator (local use only) ──────────────────────────────
-
         private sealed class ModuleTypeAccumulator
         {
             public readonly string ModuleName;

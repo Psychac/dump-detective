@@ -44,6 +44,7 @@ internal sealed class StartupValidator
         }
 
         ValidateMemoryLeakOptions(options.MemoryLeak, errors);
+        ValidateStringAnalysisOptions(options.StringAnalysis, errors);
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
         ValidateEventLeakOptions(options.EventLeak, errors);
 
@@ -67,20 +68,22 @@ internal sealed class StartupValidator
         {
             errors.Add("MemoryLeak.HighReferenceThreshold must be greater than zero.");
         }
+        if (options.MaxReferenceAddresses <= 0)
+        {
+            errors.Add("MemoryLeak.MaxReferenceAddresses must be greater than zero.");
+        }
+    }
 
+    private static void ValidateStringAnalysisOptions(DumpDetective.Core.Options.StringAnalysisOptions options, List<string> errors)
+    {
         if (options.MaxDuplicateStringLength <= 0)
         {
-            errors.Add("MemoryLeak.MaxDuplicateStringLength must be greater than zero.");
+            errors.Add("StringAnalysis.MaxDuplicateStringLength must be greater than zero.");
         }
 
         if (options.MinDuplicateStringCount <= 0)
         {
-            errors.Add("MemoryLeak.MinDuplicateStringCount must be greater than zero.");
-        }
-
-        if (options.MaxReferenceAddresses <= 0)
-        {
-            errors.Add("MemoryLeak.MaxReferenceAddresses must be greater than zero.");
+            errors.Add("StringAnalysis.MinDuplicateStringCount must be greater than zero.");
         }
     }
 

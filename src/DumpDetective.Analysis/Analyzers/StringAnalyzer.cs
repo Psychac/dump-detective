@@ -35,12 +35,11 @@ internal sealed class StringAnalyzer : IAnalyzer
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        MemoryLeakOptions options = context.GetOption<MemoryLeakOptions>();
         StringAnalysisOptions stringOptions = context.GetOption<StringAnalysisOptions>();
         ulong totalManagedBytes = GetTotalManagedBytes(context);
         List<(ulong Start, ulong End)> fohSegments = BuildFohSegments(context.Heap);
 
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, stringOptions, totalManagedBytes, fohSegments, context.Progress).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, stringOptions, totalManagedBytes, fohSegments, context.Progress).Stamp(this));
     }
 
     /// <summary>
@@ -50,7 +49,6 @@ internal sealed class StringAnalyzer : IAnalyzer
     private static AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
-        MemoryLeakOptions options,
         StringAnalysisOptions stringOptions,
         ulong totalManagedBytes,
         List<(ulong Start, ulong End)> fohSegments,
@@ -162,7 +160,6 @@ internal sealed class StringAnalyzer : IAnalyzer
             {
                 if (prebuilt is not null && prebuilt.Count > 0)
                 {
-                    // Use the prebuilt string dedup index produced at index-build time.
                     foreach (var kvp in prebuilt)
                     {
                         if (kvp.Value.Count <= 1) continue; // singletons aren't duplicates
@@ -251,9 +248,9 @@ internal sealed class StringAnalyzer : IAnalyzer
                             veryLongStrings.Add(new LongStringEntry(address, ecl, size));
                         }
                         if (stringsRead >= maxToDedup) continue;
-                        if (!IsStringSizeInBounds(size, options)) continue;
+                        if (!IsStringSizeInBounds(size, stringOptions)) continue;
                         stringsRead++;
-                        FingerprintAddress(heap, address, size, options, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "IndexScan");
+                        FingerprintAddress(heap, address, size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "IndexScan");
                     }
                     sc.Complete();
                     progress?.Report(new(totalStrings, "string dedup complete",
@@ -283,10 +280,10 @@ internal sealed class StringAnalyzer : IAnalyzer
                         if (stringOptions.DetectInterning && fohSegments.Count > 0 && IsInFoh(obj.Address, fohSegments))
                         { internedStringCount++; internedStringBytes += obj.Size; continue; }
 
-                        if (stringsRead < maxToDedup && IsStringSizeInBounds(obj.Size, options))
+                        if (stringsRead < maxToDedup && IsStringSizeInBounds(obj.Size, stringOptions))
                         {
                             stringsRead++;
-                            FingerprintAddress(heap, obj.Address, obj.Size, options, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "HeapScan");
+                            FingerprintAddress(heap, obj.Address, obj.Size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "HeapScan");
                         }
                     }
                     sc.Complete();
@@ -325,7 +322,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         var byWasteHeap = new PriorityQueue<StringLeakInfo, ulong>(stringOptions.TopDuplicatesToShow + 1);
         var byCountHeap = new PriorityQueue<StringLeakInfo, int>(stringOptions.TopDuplicatesToShow + 1);
 
-        int minCount = options.MinDuplicateStringCount;
+        int minCount = stringOptions.MinDuplicateStringCount;
         foreach (StringLeakInfo info in stringStats.Values)
         {
             if (info.Count <= minCount) continue;
@@ -676,7 +673,6 @@ internal sealed class StringAnalyzer : IAnalyzer
         ClrHeap heap,
         ulong address,
         ulong size,
-        MemoryLeakOptions options,
         StringAnalysisOptions stringOptions,
         Dictionary<StringFingerprint, StringLeakInfo> stringStats,
         int maxUniqueTracking,
@@ -689,7 +685,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         if (!obj.IsValid) return;
 
         // Pass maxLength so ClrMD never allocates more than we're willing to process.
-        string? value = obj.AsString(maxLength: options.MaxDuplicateStringLength - 1);
+        string? value = obj.AsString(maxLength: stringOptions.MaxDuplicateStringLength - 1);
         if (value is null || value.Length == 0) return;
         if (value.Length < stringOptions.MinDuplicateCharLength) return;
 
@@ -710,7 +706,6 @@ internal sealed class StringAnalyzer : IAnalyzer
         }
         else
         {
-            // capture up to two sample addresses
             if (info.SampleAddresses is null) info.SampleAddresses = new ulong[] { address };
             else if (info.SampleAddresses.Length == 1 && info.SampleAddresses[0] != address)
                 info.SampleAddresses = new ulong[] { info.SampleAddresses[0], address };
@@ -772,14 +767,14 @@ internal sealed class StringAnalyzer : IAnalyzer
     /// a string whose character length is within the configured maximum.
     /// Uses the same approximate formula elsewhere in the code: chars ~= (size-26)/2.
     /// </summary>
-    private static bool IsStringSizeInBounds(ulong size, MemoryLeakOptions options)
+    private static bool IsStringSizeInBounds(ulong size, StringAnalysisOptions stringOptions)
     {
-        if (options.MaxDuplicateStringLength <= 0) return true;
+        if (stringOptions.MaxDuplicateStringLength <= 0) return true;
         if (size <= 26) return true; // empty/very small strings
         try
         {
             ulong estChars = (size - 26) / 2;
-            return estChars <= (ulong)options.MaxDuplicateStringLength;
+            return estChars <= (ulong)stringOptions.MaxDuplicateStringLength;
         }
         catch
         {

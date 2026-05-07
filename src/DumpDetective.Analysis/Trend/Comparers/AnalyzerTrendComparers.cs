@@ -226,7 +226,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (result is not MemoryLeakDomainResult r) return [];
             return
             [
-                new("leak.finalizer.count", null, r.FinalizerQueueCount, "objects", MetricTrendDirection.HigherIsWorse),
                 new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
             ];
         }
@@ -236,7 +235,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not MemoryLeakDomainResult b || current is not MemoryLeakDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("leak.finalizer.count", null, b.FinalizerQueueCount, c.FinalizerQueueCount, "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("leak.highly.referenced", null, b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
             ];
         }

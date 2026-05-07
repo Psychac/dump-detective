@@ -17,27 +17,7 @@ internal sealed class MemoryLeakSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var d = (MemoryLeakDomainResult)result;
         var blocks = new List<SectionBlock>();
 
-        // Finalizer queue
-        blocks.Add(Blank());
-        blocks.Add(H("FINALIZER QUEUE"));
-        blocks.Add(Divider());
-        blocks.Add(M("Finalizer Queue Objects", $"{d.FinalizerQueueCount:N0}", d.FinalizerQueueCount));
-
-        var finalizerTypes = d.TopFinalizerTypes ?? [];
-        if (finalizerTypes.Count > 0)
-        {
-            var ftRows = new List<TableRow>(finalizerTypes.Count);
-            for (int i = 0; i < finalizerTypes.Count; i++)
-            {
-                var t = finalizerTypes[i];
-                double pct = d.FinalizerQueueCount == 0 ? 0 : t.Count * 100.0 / d.FinalizerQueueCount;
-                ftRows.Add(new TableRow([
-                    Cell(t.Name),
-                    Cell($"{t.Count:N0}", t.Count),
-                    Cell($"{pct:F1}%")]));
-            }
-            blocks.Add(new TableBlock("Top types in finalizer queue", ["Type", "Count", "% Queue"], ftRows));
-        }
+        // Finalizer queue: moved to FinalizableObjectSectionBuilder (single source of truth)
 
         // Highly referenced objects
         blocks.Add(Blank());

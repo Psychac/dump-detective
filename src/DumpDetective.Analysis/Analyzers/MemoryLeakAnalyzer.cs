@@ -32,44 +32,20 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
-            FinalizerQueueResult finalizerResult = AnalyzeFinalizerQueue(heap, options, progress);
+            // Finalizer queue analysis has been moved to FinalizableObjectAnalyzer.
+            // Keep MemoryLeakAnalyzer focused on incoming-reference leak signals only.
             LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, progress);
 
             return new MemoryLeakDomainResult(
-                    finalizerResult.TotalCount,
-                    signals.HighlyReferencedObjectCount,
-                    signals.SkippedReferenceAddresses,
-                    finalizerResult.TopTypes,
-                    signals.TopHighlyReferencedObjects,
-                    signals.ObjectScanCapped);
+                    FinalizerQueueCount: 0,
+                    HighlyReferencedObjectCount: signals.HighlyReferencedObjectCount,
+                    SkippedReferenceAddresses: signals.SkippedReferenceAddresses,
+                    TopFinalizerTypes: null,
+                    TopHighlyReferencedObjects: signals.TopHighlyReferencedObjects,
+                    ObjectScanCapped: signals.ObjectScanCapped);
         }
 
-        private FinalizerQueueResult AnalyzeFinalizerQueue(ClrHeap heap, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
-        {
-            int finalizerCount = 0;
-            var topTypes = new Dictionary<string, int>(StringComparer.Ordinal);
-            var scanCounter = new ObjectScanCounter("scanning finalizer queue", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-            foreach (var obj in heap.EnumerateFinalizableObjects())
-            {
-                scanCounter.Tick();
-                finalizerCount++;
-
-                string typeName = obj.Type?.Name ?? StringConstants.UnknownType;
-                topTypes.TryGetValue(typeName, out int count);
-                topTypes[typeName] = count + 1;
-            }
-
-            scanCounter.Complete();
-
-            return new FinalizerQueueResult(
-                finalizerCount,
-                topTypes
-                    .OrderByDescending(k => k.Value)
-                    .Take(options.TopFinalizerTypesToShow)
-                    .Select(k => new NameCountEntry(k.Key, k.Value))
-                    .ToList());
-        }
+        // Finalizer queue analysis removed — handled by FinalizableObjectAnalyzer.
 
         private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
@@ -391,7 +367,6 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
             bool ObjectScanCapped = false,
             bool ReferenceCountingSkipped = false);
-        private readonly record struct FinalizerQueueResult(int TotalCount, IReadOnlyList<NameCountEntry> TopTypes);
         
         public void Dispose() { }
     }

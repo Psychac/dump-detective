@@ -260,7 +260,7 @@ internal sealed class InsightEngine
         MemoryLeakDomainResult? leak,
         FinalizableObjectDomainResult? finalizable)
     {
-        int queueCount = finalizable?.FinalizerQueueCount ?? leak?.FinalizerQueueCount ?? 0;
+        int queueCount = finalizable?.FinalizerQueueCount ?? 0;
         if (queueCount < FinalizerQueueWarning)
             return;
 

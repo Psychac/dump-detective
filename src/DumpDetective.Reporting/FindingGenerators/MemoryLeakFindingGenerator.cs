@@ -15,32 +15,7 @@ internal sealed class MemoryLeakFindingGenerator : IFindingGenerator
 
         var findings = new List<InsightFinding>(capacity: 4);
 
-        if (r.FinalizerQueueCount >= 1000)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Leak",
-                Severity: FindingSeverity.Critical,
-                Title: "Finalizer queue backlog is very high",
-                Evidence: $"{r.FinalizerQueueCount:N0} objects are waiting for finalization.",
-                Recommendation: "Investigate finalizers and implement IDisposable/using patterns to reduce finalizer pressure.",
-                Tags: ["finalizer", "memory-leak", "gc"],
-                MetricValue: r.FinalizerQueueCount,
-                MetricUnit: "finalizer-objects"));
-        }
-        else if (r.FinalizerQueueCount > 0)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Leak",
-                Severity: FindingSeverity.Warning,
-                Title: "Finalizer queue contains pending objects",
-                Evidence: $"{r.FinalizerQueueCount:N0} objects are waiting for finalization.",
-                Recommendation: "Review top finalizable types and avoid unnecessary finalizers.",
-                Tags: ["finalizer", "memory"],
-                MetricValue: r.FinalizerQueueCount,
-                MetricUnit: "finalizer-objects"));
-        }
+        // Finalizer-related findings are emitted by FinalizableObjectFindingGenerator.
 
         if (r.HighlyReferencedObjectCount > 0)
         {

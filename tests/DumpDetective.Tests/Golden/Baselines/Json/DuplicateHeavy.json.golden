@@ -1,4 +1,4 @@
-﻿{
+{
   "schemaVersion": "2.0",
   "dumpPath": "C:/fixtures/DuplicateHeavy.dmp",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
@@ -7,7 +7,7 @@
   "trendDumpCount": 0,
   "findings": [
     {
-      "analyzer": "MemoryLeakAnalyzer",
+      "analyzer": "RetentionAnalyzer",
       "category": "Leak",
       "severity": "Critical",
       "title": "Duplicate-heavy merged section",

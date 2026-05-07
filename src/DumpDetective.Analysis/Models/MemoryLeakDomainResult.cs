@@ -4,7 +4,7 @@ namespace DumpDetective.Analysis.Models;
 
 // Memory Leak
 
-internal sealed record MemoryLeakDomainResult(
+internal sealed record RetentionDomainResult(
     int FinalizerQueueCount,
     int HighlyReferencedObjectCount,
     long SkippedReferenceAddresses,
@@ -12,7 +12,7 @@ internal sealed record MemoryLeakDomainResult(
     IReadOnlyList<HighlyReferencedObjectSnapshot>? TopHighlyReferencedObjects = null,
     /// <summary>
     /// True when the incoming-reference-count pass was stopped early because the number
-    /// of objects traced reached <see cref="DumpDetective.Core.Options.MemoryLeakOptions.MaxLeakScanObjects"/>.
+    /// of objects traced reached <see cref="DumpDetective.Core.Options.RetentionOptions.MaxLeakScanObjects"/>.
     /// Highly-referenced-object results are partial when this is set.
     /// </summary>
     bool ObjectScanCapped = false,
@@ -22,7 +22,24 @@ internal sealed record MemoryLeakDomainResult(
     /// Highly-referenced-object detection is unavailable; use memory index mode on this
     /// dump if you need it (requires a machine with enough RAM).
     /// </summary>
-    bool ReferenceCountingSkipped = false) : AnalyzerDomainResult;
+    bool ReferenceCountingSkipped = false,
+    /// <summary>
+    /// Aggregated retention hotspots derived from the top highly-referenced objects.
+    /// This provides type-level insight (count, bytes, incoming refs) beyond per-object rows.
+    /// </summary>
+    IReadOnlyList<RetentionTypeSnapshot>? TopRetentionTypes = null,
+    /// <summary>
+    /// Total shallow bytes represented by <see cref="TopHighlyReferencedObjects"/>.
+    /// This is a scoped footprint metric for headline reporting/trending.
+    /// </summary>
+    ulong TopHighlyReferencedTotalBytes = 0) : AnalyzerDomainResult;
 
 // DuplicateStringSnapshot moved to DumpDetective.Core.Models.DuplicateStringSnapshot
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences);
+
+internal sealed record RetentionTypeSnapshot(
+    string TypeName,
+    int ObjectCount,
+    ulong TotalBytes,
+    long TotalIncomingReferences,
+    int MaxIncomingReferences);

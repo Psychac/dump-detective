@@ -70,7 +70,7 @@ public sealed class StartupValidatorTests
             OutputPath: Path.ChangeExtension(dumpPath, ".txt")!,
             BaselineDumpPath: null,
             TrendDumpPaths: trendDumpPaths,
-            MemoryLeak: new MemoryLeakOptions(),
+            MemoryLeak: new RetentionOptions(),
             ReferenceChain: new ReferenceChainOptions(),
             EventLeak: new EventLeakOptions(),
             Diagnostics: new DiagnosticsOptions(),

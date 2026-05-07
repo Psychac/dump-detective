@@ -193,7 +193,7 @@ internal sealed class TrendOrchestrationService(
             Diagnostics = resolved.Diagnostics,
             Options = new Dictionary<Type, object?>
             {
-                [typeof(Core.Options.MemoryLeakOptions)]              = resolved.MemoryLeak,
+                [typeof(Core.Options.RetentionOptions)]              = resolved.MemoryLeak,
                 [typeof(Core.Options.ReferenceChainOptions)]          = resolved.ReferenceChain,
                 [typeof(Core.Options.EventLeakOptions)]               = resolved.EventLeak,
                 [typeof(Core.Options.DiagnosticsOptions)]             = resolved.Diagnostics,

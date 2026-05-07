@@ -274,7 +274,7 @@ internal abstract class SectionBuilderBase
 | B4 | `ModuleSectionBuilder.cs` | `ModulePrinter.cs` | `Module Analysis` | `ModuleDomainResult` | 40 |
 | B5 | `CrashSectionBuilder.cs` | `CrashPrinter.cs` | `Crash Analysis` | `CrashDomainResult` | 10 |
 | B6 | `HangSectionBuilder.cs` | `HangPrinter.cs` | `Hang Analysis` | `HangDomainResult` | 15 |
-| B7 | `MemoryLeakSectionBuilder.cs` | `MemoryLeakPrinter.cs` | `Memory Leak Analysis` | `MemoryLeakDomainResult` | 25 |
+| B7 | `RetentionSectionBuilder.cs` | `MemoryLeakPrinter.cs` | `Retention Analysis` | `RetentionDomainResult` | 25 |
 | B8 | `CollectionSectionBuilder.cs` | `CollectionPrinter.cs` | `Collection Analysis` | `CollectionDomainResult` | 50 |
 | B9 | `StaticRootSectionBuilder.cs` | `StaticRootPrinter.cs` | `Static Root Leak Detection` | `StaticRootLeakDomainResult` | 27 |
 | B10 | `ReferenceChainSectionBuilder.cs` | `ReferenceChainPrinter.cs` | `Reference Chain Analysis` | `ReferenceChainDomainResult` | 60 |
@@ -322,7 +322,7 @@ internal abstract class SectionBuilderBase
 - `TableBlock` blocking threads (ThreadId / FrameCount / TopFrame)
 - `TableBlock` top continuation types
 
-**B7 — `MemoryLeakSectionBuilder`**
+**B7 — `RetentionSectionBuilder`**
 - `MetricBlock` × 4: TotalStrings, TotalStringMemoryBytes, UniqueStrings, DuplicateStringWastedBytes
 - `TableBlock` top duplicate strings (Value / Count / WastedBytes)
 - `MetricBlock` FinalizerQueueCount; `TableBlock` top finalizer types
@@ -419,7 +419,7 @@ internal sealed class ReportSerializer
 5. Build `ExecutiveSummaryRecord` from top-3 Critical/Warning findings when `audience == Executive`
 6. Build `DeveloperActionRecord` list when `audience == Developer`
 7. Build `ConfidenceNote` list from runs that expose cap/limit signals:
-   - `MemoryLeakDomainResult.SkippedReferenceAddresses > 0`
+   - `RetentionDomainResult.SkippedReferenceAddresses > 0`
    - `HangDomainResult.TaskScanLimited == true`
    - `StaticRootLeakDomainResult.BfsCappedCount > 0` (added at Priority 1)
 8. Add `AnalyzerRunResult` failure/finding-generator-error entries as `FindingRecord` with `Severity = "Warning"`
@@ -700,7 +700,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new ModuleSectionBuilder(),
         new CrashSectionBuilder(),
         new HangSectionBuilder(),
-        new MemoryLeakSectionBuilder(),
+        new RetentionSectionBuilder(),
         new CollectionSectionBuilder(),
         new StaticRootSectionBuilder(),
         new ReferenceChainSectionBuilder(),

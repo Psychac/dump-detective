@@ -168,9 +168,9 @@ Characteristics:
 
 ## 5.5 Analysis Layer
 
-### MemoryLeakAnalyzer (+ StaticRootLeakDetector)
+### RetentionAnalyzer (+ StaticRootLeakDetector)
 Together implement the `LeakDetector` role described in guidelines:
-- `MemoryLeakAnalyzer` — finalizer queue, duplicate strings, highly-referenced objects
+- `RetentionAnalyzer` — finalizer queue, duplicate strings, highly-referenced objects
 - `StaticRootLeakDetector` — identifies large object graphs retained by static roots
 - Uses heuristic scoring: retained size, root type, object lifetime
 

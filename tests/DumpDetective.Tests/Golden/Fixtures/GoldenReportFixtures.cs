@@ -26,11 +26,11 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
-                Analyzer:       "MemoryLeakAnalyzer",
+                Analyzer:       "RetentionAnalyzer",
                 Category:       "Leak",
                 Severity:       "Warning",
                 Title:          "Leak pressure",
-                Evidence:       "Detected duplicate strings.\n- Analyzer: MemoryLeakAnalyzer\n- Value: System.String duplicated",
+                Evidence:       "Detected duplicate strings.\n- Analyzer: RetentionAnalyzer\n- Value: System.String duplicated",
                 Recommendation: "Pool repeated string payloads.",
                 Tags:           ["baseline-small"],
                 Fingerprint:    "baseline-small")
@@ -46,7 +46,7 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
-                Analyzer:       "MemoryLeakAnalyzer",
+                Analyzer:       "RetentionAnalyzer",
                 Category:       "Leak",
                 Severity:       "Critical",
                 Title:          "Duplicate-heavy merged section",

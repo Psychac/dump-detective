@@ -217,25 +217,27 @@ namespace DumpDetective.Analysis.Trend.Comparers
         }
     }
 
-    internal sealed class MemoryLeakTrendComparer : IAnalyzerTrendComparer
+    internal sealed class RetentionTrendComparer : IAnalyzerTrendComparer
     {
-        public string AnalyzerName => "Memory Leak Analysis";
+        public string AnalyzerName => "Retention Analysis";
 
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
-            if (result is not MemoryLeakDomainResult r) return [];
+            if (result is not RetentionDomainResult r) return [];
             return
             [
-                new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
+                new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("leak.highly.referenced.bytes", null, r.TopHighlyReferencedTotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
             ];
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
-            if (baseline is not MemoryLeakDomainResult b || current is not MemoryLeakDomainResult c) return [];
+            if (baseline is not RetentionDomainResult b || current is not RetentionDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("leak.highly.referenced", null, b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)
+                MetricDeltaHelper.Compute("leak.highly.referenced", null, b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("leak.highly.referenced.bytes", null, b.TopHighlyReferencedTotalBytes, c.TopHighlyReferencedTotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
             ];
         }
     }

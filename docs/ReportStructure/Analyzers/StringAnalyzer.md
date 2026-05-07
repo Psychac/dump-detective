@@ -1,7 +1,7 @@
 # StringAnalyzer — Design Spec
 
 ## Status
-**Existing** · Split from `MemoryLeakAnalyzer` · Implementation Priority **1** · Effort: Low · ✅ **Completed**
+**Existing** · Split from `RetentionAnalyzer` · Implementation Priority **1** · Effort: Low · ✅ **Completed**
 
 ## Report Sections Served
 - §11.1 Duplicate Strings (count, ratio, top duplicates by waste and count)
@@ -9,7 +9,7 @@
 
 ## Rationale
 String analysis is a standalone §11 report section. Its data is currently embedded in
-`MemoryLeakDomainResult`, making it inaccessible to §11 report renderers without coupling
+`RetentionDomainResult`, making it inaccessible to §11 report renderers without coupling
 them to leak analysis.
 
 ---
@@ -108,7 +108,7 @@ No new satellite files are written by this analyzer. Both modes produce identica
 ---
 
 ## Related Analyzers
-- **`MemoryLeakAnalyzer`** — source of the split; string fields removed from `MemoryLeakDomainResult`
+- **`RetentionAnalyzer`** — source of the split; string fields removed from `RetentionDomainResult`
 - **`SegmentAnalyzer`** — FOH segment address detection reuses same `ClrSegment.Kind` reflection pattern
 - **`InsightEngine`** — consumes `DuplicationRatio > 0.5` as a high-duplication alert finding
 - **`StringFindingGenerator`** — emits Critical/Warning/Info findings from `StringDomainResult`

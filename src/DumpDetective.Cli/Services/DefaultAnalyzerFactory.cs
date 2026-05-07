@@ -27,7 +27,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new CrashAnalyzer(),
             new HangAnalyzer(),
             new AsyncTaskAnalyzer(),
-            new MemoryLeakAnalyzer(),
+            new RetentionAnalyzer(),
             new StringAnalyzer(),
             new CollectionAnalyzer(_loggerFactory.CreateLogger<CollectionAnalyzer>()),
             new StaticRootLeakDetector(),

@@ -15,7 +15,7 @@ internal sealed class CliConfigurationFileModel
     public string? Profile { get; init; }
     public AnalyzerOptionsModel? Analyzers { get; init; }
 
-    public MemoryLeakOptions? MemoryLeak { get; init; }
+    public RetentionOptions? MemoryLeak { get; init; }
     public ReferenceChainOptions? ReferenceChain { get; init; }
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }

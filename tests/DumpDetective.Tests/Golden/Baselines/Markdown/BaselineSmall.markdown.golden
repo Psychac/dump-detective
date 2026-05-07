@@ -1,4 +1,4 @@
-﻿# DumpDetective Analysis Report
+# DumpDetective Analysis Report
 
 > Dump: `C:/fixtures/BaselineSmall.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
@@ -12,7 +12,7 @@
 ## [Warning] Leak pressure
 
 Detected duplicate strings.
-- Analyzer: MemoryLeakAnalyzer
+- Analyzer: RetentionAnalyzer
 - Value: System.String duplicated
 
 **Remediation**

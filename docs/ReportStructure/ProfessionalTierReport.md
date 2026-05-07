@@ -208,7 +208,7 @@ Trace retention to actual causes.
 
 ---
 
-# 🧪 6. Memory Leak Analysis
+# 🧪 6. Retention Analysis
 
 ## 🔹 6.1 Leak Candidates
 ### 📦
@@ -1009,7 +1009,7 @@ This report:
 | `MemoryAnalyzer` | §1, §2.1, §3.1 |
 | `GCGenerationAnalyzer` | §2.2, §9.1, §9.2, §10.1 |
 | `SegmentAnalyzer` | §2.1 (FOH/POH/Server GC), §9.2, §10.4, §10.5, §25.1, §25.2 |
-| `MemoryLeakAnalyzer` | §6.1–6.4, §11.1–11.2 |
+| `RetentionAnalyzer` | §6.1–6.4, §11.1–11.2 |
 | `StaticRootLeakDetector` | §4.3, §5.1–5.3, §6.2 |
 | `LohFragmentationAnalyzer` | §10.1–10.3 |
 | `ThreadAnalyzer` | §7.1–7.2 |

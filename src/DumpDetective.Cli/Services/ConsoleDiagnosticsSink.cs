@@ -507,7 +507,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             or nameof(DumpDetective.Analysis.Analyzers.AsyncTaskAnalyzer)
                 => "Analyzing crash and hang signals",
 
-            nameof(DumpDetective.Analysis.Analyzers.MemoryLeakAnalyzer)
+            nameof(DumpDetective.Analysis.Analyzers.RetentionAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.StringAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.CollectionAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.StaticRootLeakDetector)

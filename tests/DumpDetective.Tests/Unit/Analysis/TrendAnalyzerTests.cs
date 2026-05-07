@@ -84,13 +84,13 @@ public sealed class TrendAnalyzerTests
     [Fact]
     public void CompareAll_PopulatesNewLeakSignals_WhenTypeAppearsInCurrent()
     {
-        MemoryLeakDomainResult baselineResult = new(
+        RetentionDomainResult baselineResult = new(
             FinalizerQueueCount: 0,
             HighlyReferencedObjectCount: 0,
             SkippedReferenceAddresses: 0,
             TopHighlyReferencedObjects: []);
 
-        MemoryLeakDomainResult currentResult = new(
+        RetentionDomainResult currentResult = new(
             FinalizerQueueCount: 0,
             HighlyReferencedObjectCount: 1,
             SkippedReferenceAddresses: 0,
@@ -99,13 +99,13 @@ public sealed class TrendAnalyzerTests
                 new HighlyReferencedObjectSnapshot(0x1000, "MyApp.CachedService", 512_000, 50)
             ]);
 
-        var baselineSnap = MakeSnapshot(0, "Memory Leak Analysis", baselineResult);
-        var currentSnap  = MakeSnapshot(1, "Memory Leak Analysis", currentResult);
+        var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
+        var currentSnap  = MakeSnapshot(1, "Retention Analysis", currentResult);
 
-        TrendAnalyzer analyzer = new([new MemoryLeakTrendComparer()]);
+        TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
         var results = analyzer.CompareAll(baselineSnap, currentSnap);
 
-        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Memory Leak Analysis");
+        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Retention Analysis");
         leakResult.Should().NotBeNull();
         leakResult!.NewLeakSignals.Should().ContainSingle(s => s.TypeName == "MyApp.CachedService");
     }
@@ -115,23 +115,23 @@ public sealed class TrendAnalyzerTests
     {
         var existing = new HighlyReferencedObjectSnapshot(0x1000, "System.String", 100_000, 5);
 
-        MemoryLeakDomainResult baselineResult = new(0, 1, 0,
+        RetentionDomainResult baselineResult = new(0, 1, 0,
             TopHighlyReferencedObjects: [existing]);
 
         // current has same type with only a tiny increase — not a new signal
-        MemoryLeakDomainResult currentResult = new(0, 1, 0,
+        RetentionDomainResult currentResult = new(0, 1, 0,
             TopHighlyReferencedObjects:
             [
                 new HighlyReferencedObjectSnapshot(0x1000, "System.String", 101_000, 5)
             ]);
 
-        var baselineSnap = MakeSnapshot(0, "Memory Leak Analysis", baselineResult);
-        var currentSnap  = MakeSnapshot(1, "Memory Leak Analysis", currentResult);
+        var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
+        var currentSnap  = MakeSnapshot(1, "Retention Analysis", currentResult);
 
-        TrendAnalyzer analyzer = new([new MemoryLeakTrendComparer()]);
+        TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
         var results = analyzer.CompareAll(baselineSnap, currentSnap);
 
-        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Memory Leak Analysis");
+        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Retention Analysis");
         leakResult?.NewLeakSignals.Should().BeEmpty();
     }
 
@@ -173,20 +173,20 @@ public sealed class TrendAnalyzerTests
             GeneratedAtUtc: DateTime.UtcNow);
     }
 
-    // Minimal comparer stub so TrendAnalyzer can find the "Memory Leak Analysis" entry
-    private sealed class MemoryLeakTrendComparer : IAnalyzerTrendComparer
+    // Minimal comparer stub so TrendAnalyzer can find the "Retention Analysis" entry
+    private sealed class RetentionTrendComparer : IAnalyzerTrendComparer
     {
-        public string AnalyzerName => "Memory Leak Analysis";
+        public string AnalyzerName => "Retention Analysis";
 
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
-            if (result is not MemoryLeakDomainResult r) return [];
+            if (result is not RetentionDomainResult r) return [];
             return [new AnalyzerMetric("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)];
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
-            if (baseline is not MemoryLeakDomainResult b || current is not MemoryLeakDomainResult c)
+            if (baseline is not RetentionDomainResult b || current is not RetentionDomainResult c)
                 return [];
             double delta = c.HighlyReferencedObjectCount - b.HighlyReferencedObjectCount;
             double? pct  = Math.Abs(b.HighlyReferencedObjectCount) > double.Epsilon

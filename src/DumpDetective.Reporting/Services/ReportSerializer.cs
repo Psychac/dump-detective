@@ -266,7 +266,7 @@ internal sealed class ReportSerializer
             AnalyzerRunResult run = runs[i];
             if (run.Result is null) continue;
 
-            if (run.Result is MemoryLeakDomainResult ml && ml.SkippedReferenceAddresses > 0)
+            if (run.Result is RetentionDomainResult ml && ml.SkippedReferenceAddresses > 0)
             {
                 notes.Add(new ConfidenceNote(
                     Analyzer: run.AnalyzerName,
@@ -274,7 +274,7 @@ internal sealed class ReportSerializer
                     Reason: $"Reference tracking cap hit; {ml.SkippedReferenceAddresses:N0} addresses skipped — highly-referenced-object counts may be partial."));
             }
 
-            if (run.Result is MemoryLeakDomainResult mlCap && mlCap.ObjectScanCapped)
+            if (run.Result is RetentionDomainResult mlCap && mlCap.ObjectScanCapped)
             {
                 notes.Add(new ConfidenceNote(
                     Analyzer: run.AnalyzerName,

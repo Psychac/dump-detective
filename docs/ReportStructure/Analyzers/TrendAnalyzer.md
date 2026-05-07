@@ -34,7 +34,7 @@
    metric crosses a threshold in the wrong direction. Thresholds configurable.
 3. **Add `NewLeakSignals`** — `IReadOnlyList<NewLeakSignal>` on `AnalyzerTrendResult` — a type
    that appears in `current` leak results but was absent or negligible in `baseline`.
-   Requires that `MemoryLeakDomainResult` and `StaticRootDomainResult` expose type-level
+   Requires that `RetentionDomainResult` and `StaticRootDomainResult` expose type-level
    data comparable across snapshots (they partially do via `TopRootsByRetainedBytes`).
 
 ---
@@ -57,6 +57,6 @@ are pure Phase 2 computations on deserialized snapshot pairs. No new index files
 ---
 
 ## Related Analyzers
-- **`MemoryLeakAnalyzer`** — leak candidate list is a primary signal for `NewLeakSignals`
+- **`RetentionAnalyzer`** — leak candidate list is a primary signal for `NewLeakSignals`
 - **`StaticRootLeakDetector`** — `TopRootsByRetainedBytes` feeds cross-snapshot root comparison
 - **`InsightEngine`** — consumes trend results for §14.2 regression severity escalation findings

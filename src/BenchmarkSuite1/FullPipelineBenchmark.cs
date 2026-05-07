@@ -74,7 +74,7 @@ public class FullPipelineBenchmark
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
             Options = new Dictionary<Type, object?>
             {
-                [typeof(MemoryLeakOptions)]         = new MemoryLeakOptions(),
+                [typeof(RetentionOptions)]         = new RetentionOptions(),
                 [typeof(ReferenceChainOptions)]     = new ReferenceChainOptions(),
                 [typeof(EventLeakOptions)]          = new EventLeakOptions(),
                 [typeof(DiagnosticsOptions)]        = diagnostics,
@@ -91,7 +91,7 @@ public class FullPipelineBenchmark
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
             new HangAnalyzer(),
-            new MemoryLeakAnalyzer(),
+            new RetentionAnalyzer(),
             new StringAnalyzer(),
             new CollectionAnalyzer(),
             new StaticRootLeakDetector(),

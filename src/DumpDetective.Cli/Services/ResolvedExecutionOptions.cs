@@ -8,7 +8,7 @@ internal sealed record ResolvedExecutionOptions(
     string OutputPath,
     string? BaselineDumpPath,
     IReadOnlyList<string>? TrendDumpPaths,
-    MemoryLeakOptions MemoryLeak,
+    RetentionOptions MemoryLeak,
     ReferenceChainOptions ReferenceChain,
     EventLeakOptions EventLeak,
     DiagnosticsOptions Diagnostics,

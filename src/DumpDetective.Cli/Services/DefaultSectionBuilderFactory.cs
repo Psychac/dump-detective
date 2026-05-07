@@ -19,7 +19,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new CrashSectionBuilder(),
         new HangSectionBuilder(),
         new AsyncTaskSectionBuilder(),
-        new MemoryLeakSectionBuilder(),
+        new RetentionSectionBuilder(),
         new StringSectionBuilder(),
         new CollectionSectionBuilder(),
         new StaticRootSectionBuilder(),

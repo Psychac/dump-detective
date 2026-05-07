@@ -59,7 +59,7 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
             ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
@@ -87,7 +87,7 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            MemoryLeakOptions balancedMemoryLeak = MemoryLeakOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
             ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
             EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
 

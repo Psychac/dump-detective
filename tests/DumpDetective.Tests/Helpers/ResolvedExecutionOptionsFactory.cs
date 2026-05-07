@@ -12,7 +12,7 @@ internal static class ResolvedExecutionOptionsFactory
             OutputPath: outputPath,
             BaselineDumpPath: null,
             TrendDumpPaths: null,
-            MemoryLeak: new MemoryLeakOptions(),
+            MemoryLeak: new RetentionOptions(),
             ReferenceChain: new DumpDetective.Core.Options.ReferenceChainOptions(),
             EventLeak: new DumpDetective.Core.Options.EventLeakOptions(),
             Diagnostics: new DumpDetective.Core.Options.DiagnosticsOptions(),

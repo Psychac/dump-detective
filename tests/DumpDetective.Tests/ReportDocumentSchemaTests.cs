@@ -30,7 +30,7 @@ public sealed class ReportDocumentSchemaTests
             Findings         =
             [
                 new FindingRecord(
-                    Analyzer:       "MemoryLeakAnalyzer",
+                    Analyzer:       "RetentionAnalyzer",
                     Category:       "Leak",
                     Severity:       "Critical",
                     Title:          "Duplicate strings",
@@ -41,7 +41,7 @@ public sealed class ReportDocumentSchemaTests
             ],
             AnalyzerSections =
             [
-                new AnalyzerDetailSection("MemoryLeakAnalyzer", "Memory Leak Analysis", 25,
+                new AnalyzerDetailSection("RetentionAnalyzer", "Retention Analysis", 25,
                 [
                     new HeadingBlock("OVERALL SUMMARY"),
                     new MetricBlock("Total Strings", "1,000,000", 1_000_000),
@@ -70,7 +70,7 @@ public sealed class ReportDocumentSchemaTests
 
         restored.Findings.Should().HaveCount(1);
         FindingRecord f = restored.Findings[0];
-        f.Analyzer.Should().Be("MemoryLeakAnalyzer");
+        f.Analyzer.Should().Be("RetentionAnalyzer");
         f.Severity.Should().Be("Critical");
         f.Title.Should().Be("Duplicate strings");
         f.Fingerprint.Should().Be("dup-strings-01");

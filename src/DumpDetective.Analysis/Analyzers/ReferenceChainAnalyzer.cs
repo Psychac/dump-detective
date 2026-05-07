@@ -552,7 +552,7 @@ namespace DumpDetective.Analysis.Analyzers
             "Pinned" => 4,
             "AsyncPinnedHandle" => 4,
             "RefCountedHandle" => 5,
-            // Finalizer roots are already reported by MemoryLeakAnalyzer — deprioritize.
+            // Finalizer roots are already reported by FinalizableObjectAnalyzer — deprioritize.
             "Finalizer" => 10,
             // Unknown kinds go last.
             _ => 6

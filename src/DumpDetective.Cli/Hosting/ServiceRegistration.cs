@@ -42,7 +42,7 @@ internal static class ServiceRegistration
 
         // Finding generators — one per analyzer, registered as IFindingGenerator
         services.AddSingleton<IFindingGenerator, MemoryFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, MemoryLeakFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, RetentionFindingGenerator>();
         services.AddSingleton<IFindingGenerator, StringFindingGenerator>();
         services.AddSingleton<IFindingGenerator, GCGenerationFindingGenerator>();
         services.AddSingleton<IFindingGenerator, CrashFindingGenerator>();
@@ -79,7 +79,7 @@ internal static class ServiceRegistration
         // TrendAnalyzer consumes IEnumerable<IAnalyzerTrendComparer> via DI.
         // Keep this list in sync with DefaultAnalyzerFactory and the finding generators above.
         services.AddSingleton<IAnalyzerTrendComparer, MemoryAnalyzerTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, MemoryLeakTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, RetentionTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, GCGenerationTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, CrashTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, EventLeakTrendComparer>();

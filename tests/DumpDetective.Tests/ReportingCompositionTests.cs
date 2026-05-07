@@ -15,7 +15,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldMergeDuplicateFindings_AndPreserveEvidenceAndRemediation()
     {
         InsightFinding findingA = new(
-            Analyzer: "MemoryLeakAnalyzer",
+            Analyzer: "RetentionAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Duplicate strings detected",
@@ -25,7 +25,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "dup-key");
 
         InsightFinding findingB = new(
-            Analyzer: "MemoryLeakAnalyzer",
+            Analyzer: "RetentionAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "Duplicate strings detected",
@@ -34,8 +34,8 @@ public sealed class ReportingCompositionTests
             Tags: ["memory", "string"],
             Fingerprint: "dup-key");
 
-        AnalyzerRunResult runA = CreateRun("MemoryLeakAnalyzer", findingA);
-        AnalyzerRunResult runB = CreateRun("MemoryLeakAnalyzer", findingB);
+        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", findingA);
+        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", findingB);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/test.dmp",

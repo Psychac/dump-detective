@@ -1,4 +1,4 @@
-﻿using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
@@ -27,7 +27,7 @@ public sealed class ReportFlowIntegrationTests
         };
 
         InsightFinding findingA = new(
-            Analyzer: "MemoryLeakAnalyzer",
+            Analyzer: "RetentionAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "UNIQUE_DUP_TITLE",
@@ -37,7 +37,7 @@ public sealed class ReportFlowIntegrationTests
             Fingerprint: "same-key");
 
         InsightFinding findingB = new(
-            Analyzer: "MemoryLeakAnalyzer",
+            Analyzer: "RetentionAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "UNIQUE_DUP_TITLE",
@@ -46,8 +46,8 @@ public sealed class ReportFlowIntegrationTests
             Tags: ["dup"],
             Fingerprint: "same-key");
 
-        AnalyzerRunResult runA = CreateRun("MemoryLeakAnalyzer", findingA);
-        AnalyzerRunResult runB = CreateRun("MemoryLeakAnalyzer", findingB);
+        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", findingA);
+        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", findingB);
 
         ReportBuilderFacade facade = new(
         [
@@ -78,7 +78,7 @@ public sealed class ReportFlowIntegrationTests
     public void BuildRenderedReport_ShouldHonorCancellationToken()
     {
         InsightFinding finding = new(
-            Analyzer: "MemoryLeakAnalyzer",
+            Analyzer: "RetentionAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Canceled",
@@ -87,7 +87,7 @@ public sealed class ReportFlowIntegrationTests
             Tags: ["cancel"],
             Fingerprint: "cancel");
 
-        AnalyzerRunResult run = CreateRun("MemoryLeakAnalyzer", finding);
+        AnalyzerRunResult run = CreateRun("RetentionAnalyzer", finding);
         ReportBuilderFacade facade = new(
         [
             new TextCanonicalReportFormatter(),

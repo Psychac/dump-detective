@@ -26,7 +26,7 @@ internal sealed class ConfigurationResolver
 
         bool usedConfigFile = fileModel is not null;
 
-        MemoryLeakOptions memoryLeak      = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,         req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, MemoryLeakOptions.Preset),                fileModel, request);
+        RetentionOptions memoryLeak      = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,         req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset),                fileModel, request);
         ReferenceChainOptions refChain    = Resolve(usedConfigFile, BuildReferenceChainFromConfig,     req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ReferenceChainOptions.Preset),            fileModel, request);
         EventLeakOptions eventLeak        = Resolve(usedConfigFile, BuildEventLeakFromConfig,          req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset),                 fileModel, request);
         DiagnosticsOptions diagnostics    = Resolve(usedConfigFile, BuildDiagnosticsFromConfig,        AnalyzerOptionsBuilder.BuildDiagnosticsFromCli,        fileModel, request);
@@ -190,12 +190,12 @@ internal sealed class ConfigurationResolver
         return model;
     }
 
-    private static MemoryLeakOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
+    private static RetentionOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(
             config,
             "MemoryLeak",
             config.MemoryLeak,
-            MemoryLeakOptions.Preset);
+            RetentionOptions.Preset);
 
 
 

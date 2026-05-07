@@ -1,10 +1,13 @@
-﻿using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend
 {
     internal sealed class TrendAnalyzer(IEnumerable<IAnalyzerTrendComparer> comparers)
     {
+        private const string RetentionAnalyzerName = "Retention Analysis";
+        private const string LegacyLeakAnalyzerName = "Memory Leak Analysis";
+
         private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers =
             comparers.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
 
@@ -18,43 +21,57 @@ namespace DumpDetective.Analysis.Trend
             {
                 if (!current.DomainResults.TryGetValue(analyzerName, out var currentDomain))
                     continue;
+
                 if (!_comparers.TryGetValue(analyzerName, out var comparer))
-                    continue;
-                var deltas = comparer.Compare(baselineDomain, currentDomain);
-                if (deltas.Count > 0)
                 {
-                    leakSignalsByAnalyzer.TryGetValue(analyzerName, out var signals);
-                    results.Add(new AnalyzerTrendResult(analyzerName, deltas)
+                    // Backward compatibility for snapshots produced before analyzer naming was updated.
+                    if (!string.Equals(analyzerName, LegacyLeakAnalyzerName, StringComparison.Ordinal) ||
+                        !_comparers.TryGetValue(RetentionAnalyzerName, out comparer))
                     {
-                        NewLeakSignals = signals ?? []
-                    });
+                        continue;
+                    }
                 }
+
+                string outputAnalyzerName = string.Equals(analyzerName, LegacyLeakAnalyzerName, StringComparison.Ordinal)
+                    ? RetentionAnalyzerName
+                    : analyzerName;
+
+                IReadOnlyList<MetricDelta> deltas = comparer.Compare(baselineDomain, currentDomain);
+                if (deltas.Count == 0)
+                    continue;
+
+                leakSignalsByAnalyzer.TryGetValue(outputAnalyzerName, out var signals);
+                results.Add(new AnalyzerTrendResult(outputAnalyzerName, deltas)
+                {
+                    NewLeakSignals = signals ?? []
+                });
             }
+
             return results;
         }
 
         private static Dictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignals(
-            AnalysisSnapshot baseline, AnalysisSnapshot current)
+            AnalysisSnapshot baseline,
+            AnalysisSnapshot current)
         {
             var result = new Dictionary<string, IReadOnlyList<NewLeakSignal>>(StringComparer.Ordinal);
 
-            // Memory Leak Analysis — compare TopHighlyReferencedObjects by type
-            if (baseline.DomainResults.TryGetValue("Memory Leak Analysis", out var bLeakRaw) &&
-                current.DomainResults.TryGetValue("Memory Leak Analysis", out var cLeakRaw) &&
-                bLeakRaw is MemoryLeakDomainResult bLeak && cLeakRaw is MemoryLeakDomainResult cLeak)
+            // Retention Analysis (legacy alias: Memory Leak Analysis) — compare TopHighlyReferencedObjects by type.
+            if (TryGetRetentionResult(baseline, out RetentionDomainResult bLeak) &&
+                TryGetRetentionResult(current, out RetentionDomainResult cLeak))
             {
                 var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
                 foreach (HighlyReferencedObjectSnapshot obj in bLeak.TopHighlyReferencedObjects ?? [])
                 {
                     baselineByType.TryGetValue(obj.TypeName, out double prev);
-                    baselineByType[obj.TypeName] = prev + (double)obj.Size;
+                    baselineByType[obj.TypeName] = prev + obj.Size;
                 }
 
                 var currentByType = new Dictionary<string, double>(StringComparer.Ordinal);
                 foreach (HighlyReferencedObjectSnapshot obj in cLeak.TopHighlyReferencedObjects ?? [])
                 {
                     currentByType.TryGetValue(obj.TypeName, out double prev);
-                    currentByType[obj.TypeName] = prev + (double)obj.Size;
+                    currentByType[obj.TypeName] = prev + obj.Size;
                 }
 
                 var signals = new List<NewLeakSignal>();
@@ -62,10 +79,11 @@ namespace DumpDetective.Analysis.Trend
                 {
                     baselineByType.TryGetValue(typeName, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(typeName, baseBytes, currentBytes, "MemoryLeakAnalyzer"));
+                        signals.Add(new NewLeakSignal(typeName, baseBytes, currentBytes, "RetentionAnalyzer"));
                 }
+
                 if (signals.Count > 0)
-                    result["Memory Leak Analysis"] = signals;
+                    result[RetentionAnalyzerName] = signals;
             }
 
             // Static Root Leak Detection — compare TopRootsByRetainedBytes
@@ -75,21 +93,42 @@ namespace DumpDetective.Analysis.Trend
             {
                 var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
                 foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes ?? [])
-                    baselineByName[entry.Name] = (double)entry.Bytes;
+                    baselineByName[entry.Name] = entry.Bytes;
 
                 var signals = new List<NewLeakSignal>();
                 foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes ?? [])
                 {
-                    double currentBytes = (double)entry.Bytes;
+                    double currentBytes = entry.Bytes;
                     baselineByName.TryGetValue(entry.Name, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
                         signals.Add(new NewLeakSignal(entry.Name, baseBytes, currentBytes, "StaticRootLeakDetector"));
                 }
+
                 if (signals.Count > 0)
                     result["Static Root Leak Detection"] = signals;
             }
 
             return result;
+        }
+
+        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out RetentionDomainResult result)
+        {
+            if (snapshot.DomainResults.TryGetValue(RetentionAnalyzerName, out AnalyzerDomainResult? retentionRaw) &&
+                retentionRaw is RetentionDomainResult retention)
+            {
+                result = retention;
+                return true;
+            }
+
+            if (snapshot.DomainResults.TryGetValue(LegacyLeakAnalyzerName, out AnalyzerDomainResult? leakRaw) &&
+                leakRaw is RetentionDomainResult leak)
+            {
+                result = leak;
+                return true;
+            }
+
+            result = null!;
+            return false;
         }
 
         public IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> CompareSeries(IReadOnlyList<AnalysisSnapshot> snapshots)
@@ -100,6 +139,7 @@ namespace DumpDetective.Analysis.Trend
             var steps = new List<IReadOnlyList<AnalyzerTrendResult>>(snapshots.Count - 1);
             for (int i = 1; i < snapshots.Count; i++)
                 steps.Add(CompareAll(snapshots[i - 1], snapshots[i]));
+
             return steps;
         }
 
@@ -113,7 +153,6 @@ namespace DumpDetective.Analysis.Trend
 
             foreach (var (analyzerName, comparer) in _comparers)
             {
-                // Build per-snapshot metric lookup: key â†’ value
                 var snapshotLookups = new List<Dictionary<string, double>>(snapshots.Count);
                 var allKeys = new Dictionary<string, (string Unit, MetricTrendDirection Direction)>(StringComparer.Ordinal);
                 bool anyFound = false;
@@ -124,14 +163,16 @@ namespace DumpDetective.Analysis.Trend
                     if (snapshot.DomainResults.TryGetValue(analyzerName, out var domainResult))
                     {
                         anyFound = true;
-                        foreach (var metric in comparer.ExtractMetrics(domainResult))
+                        foreach (AnalyzerMetric metric in comparer.ExtractMetrics(domainResult))
                         {
-                            if (metric.Scope != null)
-                                continue;  // skip per-type / per-exception scoped metrics
+                            if (metric.Scope is not null)
+                                continue;
+
                             lookup[metric.Key] = metric.Value;
                             allKeys.TryAdd(metric.Key, (metric.Unit, metric.Direction));
                         }
                     }
+
                     snapshotLookups.Add(lookup);
                 }
 
@@ -153,8 +194,5 @@ namespace DumpDetective.Analysis.Trend
 
             return result;
         }
-
-            }
-        }
-
-
+    }
+}

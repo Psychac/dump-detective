@@ -6,7 +6,7 @@ using System;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class MemoryLeakAnalyzerBenchmark : AnalyzerBenchmarkBase<MemoryLeakAnalyzer>
+    public class RetentionAnalyzerBenchmark : AnalyzerBenchmarkBase<RetentionAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

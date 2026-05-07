@@ -11,43 +11,47 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class MemoryLeakAnalyzer : IAnalyzer
+    public class RetentionAnalyzer : IAnalyzer
     {
-        public string Name => "Memory Leak Analysis";
+        public string Name => "Retention Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            MemoryLeakOptions options = context.GetOption<MemoryLeakOptions>();
+            RetentionOptions options = context.GetOption<RetentionOptions>();
 
             return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, context.Progress).Stamp(this));
         }
 
-        public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
+        public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, RetentionOptions options)
         {
             return Analyze(heap, runtime, cache: null, options, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             // Finalizer queue analysis has been moved to FinalizableObjectAnalyzer.
-            // Keep MemoryLeakAnalyzer focused on incoming-reference leak signals only.
+            // Keep RetentionAnalyzer focused on incoming-reference retention signals only.
             LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, progress);
+            IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(signals.TopHighlyReferencedObjects);
+            ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(signals.TopHighlyReferencedObjects);
 
-            return new MemoryLeakDomainResult(
+            return new RetentionDomainResult(
                     FinalizerQueueCount: 0,
                     HighlyReferencedObjectCount: signals.HighlyReferencedObjectCount,
                     SkippedReferenceAddresses: signals.SkippedReferenceAddresses,
                     TopFinalizerTypes: null,
                     TopHighlyReferencedObjects: signals.TopHighlyReferencedObjects,
-                    ObjectScanCapped: signals.ObjectScanCapped);
+                ObjectScanCapped: signals.ObjectScanCapped,
+                TopRetentionTypes: topRetentionTypes,
+                TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes);
         }
 
         // Finalizer queue analysis removed — handled by FinalizableObjectAnalyzer.
 
-        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, MemoryLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             // Single-pass: enumerate the index (or heap) once, counting incoming references.
             // String analysis is handled by StringAnalyzer.
@@ -158,7 +162,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
+        private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, RetentionOptions options)
         {
             // OPT-#8: Replace LINQ .Count(predicate) with a plain foreach to avoid boxed IEnumerator allocation.
             int threshold = options.HighReferenceThreshold;
@@ -247,7 +251,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, MemoryLeakOptions options)
+        private IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, RetentionOptions options)
         {
             int threshold = options.HighReferenceThreshold;
             // Heuristic: for small dictionaries the LINQ-based path is faster (no heap overhead).
@@ -328,6 +332,57 @@ namespace DumpDetective.Analysis.Analyzers
                 incomingReferences);
         }
 
+        private static ulong SumTopHighlyReferencedBytes(IReadOnlyList<HighlyReferencedObjectSnapshot> objects)
+        {
+            ulong total = 0;
+            for (int i = 0; i < objects.Count; i++)
+                total += objects[i].Size;
+
+            return total;
+        }
+
+        private static IReadOnlyList<RetentionTypeSnapshot> BuildTopRetentionTypes(IReadOnlyList<HighlyReferencedObjectSnapshot> objects)
+        {
+            if (objects.Count == 0)
+                return Array.Empty<RetentionTypeSnapshot>();
+
+            var byType = new Dictionary<string, RetentionTypeAccumulator>(StringComparer.Ordinal);
+            for (int i = 0; i < objects.Count; i++)
+            {
+                HighlyReferencedObjectSnapshot obj = objects[i];
+                if (byType.TryGetValue(obj.TypeName, out RetentionTypeAccumulator acc))
+                {
+                    acc.ObjectCount++;
+                    acc.TotalBytes += obj.Size;
+                    acc.TotalIncomingReferences += obj.IncomingReferences;
+                    if (obj.IncomingReferences > acc.MaxIncomingReferences)
+                        acc.MaxIncomingReferences = obj.IncomingReferences;
+                    byType[obj.TypeName] = acc;
+                }
+                else
+                {
+                    byType[obj.TypeName] = new RetentionTypeAccumulator
+                    {
+                        ObjectCount = 1,
+                        TotalBytes = obj.Size,
+                        TotalIncomingReferences = obj.IncomingReferences,
+                        MaxIncomingReferences = obj.IncomingReferences
+                    };
+                }
+            }
+
+            return byType
+                .Select(static kvp => new RetentionTypeSnapshot(
+                    TypeName: kvp.Key,
+                    ObjectCount: kvp.Value.ObjectCount,
+                    TotalBytes: kvp.Value.TotalBytes,
+                    TotalIncomingReferences: kvp.Value.TotalIncomingReferences,
+                    MaxIncomingReferences: kvp.Value.MaxIncomingReferences))
+                .OrderByDescending(static t => t.TotalIncomingReferences)
+                .ThenByDescending(static t => t.TotalBytes)
+                .ToList();
+        }
+
         private static bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable, Dictionary<ulong, bool> cache)
         {
             if (methodTable == 0)
@@ -367,6 +422,14 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
             bool ObjectScanCapped = false,
             bool ReferenceCountingSkipped = false);
+
+        private struct RetentionTypeAccumulator
+        {
+            public int ObjectCount;
+            public ulong TotalBytes;
+            public long TotalIncomingReferences;
+            public int MaxIncomingReferences;
+        }
         
         public void Dispose() { }
     }

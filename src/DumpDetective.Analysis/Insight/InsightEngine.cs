@@ -58,7 +58,7 @@ internal sealed class InsightEngine
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
         AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
-        MemoryLeakDomainResult? leak = FindResult<MemoryLeakDomainResult>(runs);
+        RetentionDomainResult? leak = FindResult<RetentionDomainResult>(runs);
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
         CollectionDomainResult? collections = FindResult<CollectionDomainResult>(runs);
@@ -257,7 +257,7 @@ internal sealed class InsightEngine
     private static void DetectFinalizerQueueBacklog(
         List<InsightFinding> findings,
         ThreadDomainResult? threads,
-        MemoryLeakDomainResult? leak,
+        RetentionDomainResult? leak,
         FinalizableObjectDomainResult? finalizable)
     {
         int queueCount = finalizable?.FinalizerQueueCount ?? 0;
@@ -359,7 +359,7 @@ internal sealed class InsightEngine
 
     private static void DetectLeakSuspicion(
         List<InsightFinding> findings,
-        MemoryLeakDomainResult? leak,
+        RetentionDomainResult? leak,
         StringDomainResult? strings)
     {
         if (leak is not null && leak.HighlyReferencedObjectCount > 0)
@@ -372,7 +372,7 @@ internal sealed class InsightEngine
                 Evidence: $"{leak.HighlyReferencedObjectCount:N0} objects have an abnormally high number of " +
                           "incoming references, indicating potential retention through event handlers, " +
                           "static collections, or observer patterns.",
-                Recommendation: "Review the Memory Leak analyzer findings for specific types. " +
+                Recommendation: "Review the Retention analyzer findings for specific types. " +
                                 "Common causes: static event subscriptions, global caches, and long-lived delegates " +
                                 "capturing closures over short-lived objects.",
                 Tags: ["memory-leak", "retention", "references"]));

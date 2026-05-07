@@ -43,7 +43,7 @@ internal sealed class StartupValidator
             }
         }
 
-        ValidateMemoryLeakOptions(options.MemoryLeak, errors);
+        ValidateRetentionOptions(options.MemoryLeak, errors);
         ValidateStringAnalysisOptions(options.StringAnalysis, errors);
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
         ValidateEventLeakOptions(options.EventLeak, errors);
@@ -62,7 +62,7 @@ internal sealed class StartupValidator
         }
     }
 
-    private static void ValidateMemoryLeakOptions(MemoryLeakOptions options, List<string> errors)
+    private static void ValidateRetentionOptions(RetentionOptions options, List<string> errors)
     {
         if (options.HighReferenceThreshold <= 0)
         {

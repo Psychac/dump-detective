@@ -85,7 +85,7 @@ namespace BenchmarkSuite1
 
             // Build context once — matches the Options dictionary DumpAnalysisService populates
             // so analyzers resolve their typed options rather than falling back to defaults.
-            var memoryLeakOptions = new MemoryLeakOptions();
+            var memoryLeakOptions = new RetentionOptions();
             var referenceChainOptions = new ReferenceChainOptions();
             var eventLeakOptions = new EventLeakOptions();
             var diagnosticsOptions = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
@@ -99,7 +99,7 @@ namespace BenchmarkSuite1
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
                 Options = new Dictionary<Type, object?>
                 {
-                    [typeof(MemoryLeakOptions)]    = memoryLeakOptions,
+                    [typeof(RetentionOptions)]    = memoryLeakOptions,
                     [typeof(ReferenceChainOptions)] = referenceChainOptions,
                     [typeof(EventLeakOptions)]      = eventLeakOptions,
                     [typeof(DiagnosticsOptions)]    = diagnosticsOptions,

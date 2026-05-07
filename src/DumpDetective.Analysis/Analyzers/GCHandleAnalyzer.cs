@@ -35,7 +35,7 @@ namespace DumpDetective.Analysis.Analyzers
             ulong totalPinnedRetainedBytes = 0;
             // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
             // for handles whose target type has already been resolved. Collapses N handles of the
-            // same type to a single heap dereference — same pattern as stringMethodTables in MemoryLeakAnalyzer.
+            // same type to a single heap dereference — same pattern as stringMethodTables in RetentionAnalyzer.
             var methodTableNameCache = new Dictionary<ulong, string>(capacity: 128);
             // use passed-in cache when available
 

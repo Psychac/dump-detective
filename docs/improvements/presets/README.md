@@ -23,7 +23,7 @@ Preset files (one per analyzer):
 - [lock-graph-analyzer-presets.md](docs/improvements/presets/lock-graph-analyzer-presets.md)
 - [loh-fragmentation-analyzer-presets.md](docs/improvements/presets/loh-fragmentation-analyzer-presets.md)
 - [memory-analyzer-presets.md](docs/improvements/presets/memory-analyzer-presets.md)
-- [memory-leak-analyzer-presets.md](docs/improvements/presets/memory-leak-analyzer-presets.md)
+- [retention-analyzer-presets.md](docs/improvements/presets/retention-analyzer-presets.md)
 - [module-analyzer-presets.md](docs/improvements/presets/module-analyzer-presets.md)
 -- [object-shape-analyzer-presets.md](docs/improvements/presets/object-shape-analyzer-presets.md) — ✅ **COMPLETED**
 - [reference-chain-analyzer-presets.md](docs/improvements/presets/reference-chain-analyzer-presets.md)

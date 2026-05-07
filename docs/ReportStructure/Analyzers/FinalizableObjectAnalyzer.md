@@ -6,12 +6,12 @@
 ## Report Sections Served
 - §21.1 Finalizable Object Population (all `IsFinalizable` objects, by generation, undisposed detection)
 - §21.2 Finalizer Queue Analysis — deep sub-graph retention and resurrection detection
-  (§21.2 queue count and top types are already covered by `MemoryLeakAnalyzer`)
+  (§21.2 queue count and top types are already covered by `RetentionAnalyzer`)
 
 > §21.3 Finalizer Thread Health is fully covered by `ThreadAnalyzer`. See [ThreadAnalyzer.md](ThreadAnalyzer.md).
 
 ## Rationale
-`MemoryLeakAnalyzer` counts the finalizer queue but does not enumerate all finalizable objects
+`RetentionAnalyzer` counts the finalizer queue but does not enumerate all finalizable objects
 across the heap or detect sub-graph retention. §21.1 requires a full population sweep.
 
 ---
@@ -70,7 +70,7 @@ FinalizerQueueEntry(
 ---
 
 ## Related Analyzers
-- **`MemoryLeakAnalyzer`** — provides queue count and top types; this analyzer extends to full population and sub-graphs
+- **`RetentionAnalyzer`** — provides queue count and top types; this analyzer extends to full population and sub-graphs
 - **`ThreadAnalyzer`** — §21.3 finalizer thread health (blocked, frames) fully covered there
 - **`GCRootAnalyzer`** (new) — `RootIndex.bin` `Kind == 2` provides finalizer queue root set without re-enumeration
 - **`GCGenerationAnalyzer`** — `PerTypeGenerationProfile` provides gen breakdown for finalizable types

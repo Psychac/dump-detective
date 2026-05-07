@@ -55,7 +55,7 @@
    - [MINOR-10 — Duplicate iteration code in `HeapAnalysisCache`](#minor-10--duplicate-iteration-code-in-heapanalysiscache)
    - [MINOR-11 — `AnalyzerCategory.Infer()` relies on fragile name matching](#minor-11--analyzercategoryinfer-relies-on-fragile-name-matching)
    - [MINOR-12 — `ConfigurationResolver` has mechanical duplication](#minor-12--configurationresolver-has-mechanical-duplication)
-   - [MINOR-13 — `MemoryLeakAnalyzer` and `ReferenceChainAnalyzer` are `public`](#minor-13--memoryleakanalyzer-and-referencechainanalyzer-are-public)
+    - [MINOR-13 — `RetentionAnalyzer` and `ReferenceChainAnalyzer` are `public`](#minor-13--retentionanalyzer-and-referencechainanalyzer-are-public)
    - [MINOR-14 — `SingleDumpPipelineState` stage comment gap](#minor-14--singledumppipelinestate-stage-comment-gap)
    - [MINOR-15 — `ClrReferenceProvider` and `LazyReferenceGraph` are redundant](#minor-15--clrreferenceprovider-and-lazygraph-are-redundant)
 3. [What's Working Well (Strengths)](#3-whats-working-well-strengths)
@@ -108,12 +108,12 @@ Core       → ClrMD (Microsoft.Diagnostics.Runtime)
 **File:** `src/DumpDetective.Core/Models/AnalyzerDomainResult.cs`
 
 #### What *(was)*
-`Core` defined the abstract base `AnalyzerDomainResult` **and** every single concrete subtype for all 16 analyzers: `MemoryDomainResult`, `GCGenerationDomainResult`, `MemoryLeakDomainResult`, `ThreadDomainResult`, `CrashDomainResult`, etc. This was a >300-line file that grew with every new analyzer.
+`Core` defined the abstract base `AnalyzerDomainResult` **and** every single concrete subtype for all 16 analyzers: `MemoryDomainResult`, `GCGenerationDomainResult`, `RetentionDomainResult`, `ThreadDomainResult`, `CrashDomainResult`, etc. This was a >300-line file that grew with every new analyzer.
 
 #### Why it was a problem *(archived)*
 - **SRP violation:** `Core` is supposed to be the contract/abstraction layer. It should not know about `FinalizerQueueResult`, `ReferenceTypeSampleSnapshot`, or `LohSegmentSnapshot` — those are `Analysis` concerns.
 - **Coupling:** Any change to an analyzer's output shape required modifying `Core`, which then recompiled `Analysis`, `Reporting`, and `Cli`. A low-level change propagated to every layer.
-- **Root cause:** `Reporting`'s `FindingGenerators` needed to read `MemoryLeakDomainResult` to produce `InsightFinding` objects. Since `Reporting` did not reference `Analysis`, the types had to be moved to the shared `Core` layer.
+- **Root cause:** `Reporting`'s `FindingGenerators` needed to read `RetentionDomainResult` to produce `InsightFinding` objects. Since `Reporting` did not reference `Analysis`, the types had to be moved to the shared `Core` layer.
 
 #### What was done
 
@@ -127,7 +127,7 @@ Core       → ClrMD (Microsoft.Diagnostics.Runtime)
 
 **Zero individual `.cs` files** in `Analysis` or `Reporting` were touched — the two `GlobalUsings.cs` files resolved the namespace transition automatically across all 48 consuming files.
 
-**Visibility note:** `Analysis.csproj` already declared `<InternalsVisibleTo Include="DumpDetective.Reporting" />`, so all `internal` domain types (`MemoryLeakDomainResult`, `ModuleDomainResult`, etc.) are visible to `Reporting` with no additional changes.
+**Visibility note:** `Analysis.csproj` already declared `<InternalsVisibleTo Include="DumpDetective.Reporting" />`, so all `internal` domain types (`RetentionDomainResult`, `ModuleDomainResult`, etc.) are visible to `Reporting` with no additional changes.
 
 #### Dependency graph after fix
 ```
@@ -252,7 +252,7 @@ Every new routing mode, output format, or validation rule now touches exactly on
 
 > **Implemented (Option A, key changed to `Type`).** See [Changelog](#changelog) for details.
 
-**Files:** `Analysis/Analyzers/MemoryLeakAnalyzer.cs`, `ReferenceChainAnalyzer.cs`, `EventLeakAnalyzer.cs`, `CollectionAnalyzer.cs`, `RunAnalyzersPipelineStage.cs`
+**Files:** `Analysis/Analyzers/RetentionAnalyzer.cs`, `ReferenceChainAnalyzer.cs`, `EventLeakAnalyzer.cs`, `CollectionAnalyzer.cs`, `RunAnalyzersPipelineStage.cs`
 
 #### What *(was)*
 Three analyzers used `context.Options.TryGetValue(nameof(XxxOptions), ...)` with a string key. Renaming the options class silently fell through to the default. `CollectionAnalyzer` was separately wired via constructor, bypassing the context entirely.
@@ -263,9 +263,9 @@ Three analyzers used `context.Options.TryGetValue(nameof(XxxOptions), ...)` with
 |------|--------|
 | `Core/Abstractions/IAnalyzer.cs` | `Options` dict key changed from `string` to `Type`; doc comment added explaining `GetOption<T>()` |
 | `Analysis/Pipeline/AnalysisContextExtensions.cs` | **New file** — `GetOption<T>()` extension; returns `new T()` when not registered |
-| `Analysis/Pipeline/RuntimeAnalysisContext.cs` | Removed `MemoryLeakOptions`, `ReferenceChainOptions`, `EventLeakOptions`, `DiagnosticsOptions` redundant properties; stripped `Core.Options` using |
+| `Analysis/Pipeline/RuntimeAnalysisContext.cs` | Removed `RetentionOptions`, `ReferenceChainOptions`, `EventLeakOptions`, `DiagnosticsOptions` redundant properties; stripped `Core.Options` using |
 | `Analysis/GlobalUsings.cs` | Added `global using DumpDetective.Analysis.Pipeline;` so `GetOption<T>()` is visible to all 16 analyzer files |
-| `Analysis/Analyzers/MemoryLeakAnalyzer.cs` | `context.GetOption<MemoryLeakOptions>()` |
+| `Analysis/Analyzers/RetentionAnalyzer.cs` | `context.GetOption<RetentionOptions>()` |
 | `Analysis/Analyzers/ReferenceChainAnalyzer.cs` | `context.GetOption<ReferenceChainOptions>()` |
 | `Analysis/Analyzers/EventLeakAnalyzer.cs` | `context.GetOption<EventLeakOptions>()` |
 | `Analysis/Analyzers/CollectionAnalyzer.cs` | `_options` made non-readonly; `AnalyzeAsync` sets `_options = context.GetOption<CollectionAnalyzerOptions>()`; logger-only constructor added |
@@ -412,7 +412,7 @@ All 16 built-in analyzers now carry an explicit `public string Category => "..."
 | Lock Graph Analysis | Locks |
 | LOH Fragmentation Analysis | Memory |
 | Memory Analysis | Memory |
-| Memory Leak Analysis | Memory |
+| Retention Analysis | Memory |
 | Module Analysis | Modules |
 | Reference Chain Analysis | Memory |
 | Static Root Leak Detection | Memory |
@@ -430,7 +430,7 @@ All 16 built-in analyzers now carry an explicit `public string Category => "..."
 A private static `Resolve<T>()` helper was added. All 7 ternary option-building blocks in `Resolve()` are now single-line calls:
 
 ```csharp
-MemoryLeakOptions memoryLeak   = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,   BuildMemoryLeakFromCli,   fileModel, request);
+RetentionOptions memoryLeak   = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,   BuildMemoryLeakFromCli,   fileModel, request);
 ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, BuildReferenceChainFromCli, fileModel, request);
 // ... all 7 options follow the same pattern
 ```
@@ -439,16 +439,16 @@ Behavior is unchanged; the pattern is now expressed once.
 
 ---
 
-### MINOR-13 — `MemoryLeakAnalyzer` and `ReferenceChainAnalyzer` are `public`
+### MINOR-13 — `RetentionAnalyzer` and `ReferenceChainAnalyzer` are `public`
 
-**Files:** `Analysis/Analyzers/MemoryLeakAnalyzer.cs`, `Analysis/Analyzers/ReferenceChainAnalyzer.cs`
+**Files:** `Analysis/Analyzers/RetentionAnalyzer.cs`, `Analysis/Analyzers/ReferenceChainAnalyzer.cs`
 
 #### What
 Both classes are declared `public class` and expose secondary `Analyze()` overloads without the `cache` and `progress` parameters — intended as test-friendly entry points:
 
 ```csharp
 // Intended for test use — bypasses cache and progress
-public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeakOptions options)
+public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, RetentionOptions options)
 {
     return Analyze(heap, runtime, cache: null, options, progress: null);
 }
@@ -461,7 +461,7 @@ public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, MemoryLeak
 #### How to fix
 ```csharp
 // Mark both classes internal
-internal class MemoryLeakAnalyzer : IAnalyzer { ... }
+internal class RetentionAnalyzer : IAnalyzer { ... }
 internal class ReferenceChainAnalyzer : IAnalyzer { ... }
 ```
 
@@ -549,7 +549,7 @@ Issues are ordered by impact. Within each tier, order by effort (low effort firs
 |---|---|---|---|
 | ~~CRITICAL-01~~ | ~~Add `Reporting → Analysis` project reference; move domain types out of `Core`~~ | ~~`Reporting.csproj`, `Core/Models/AnalyzerDomainResult.cs`, all `Reporting/FindingGenerators/`~~ | ✅ **Done** |
 | ~~MAJOR-06~~ | ~~Extract `IHeapIndexBuilder` interface; split `HeapCache` state bag property~~ | ~~`Core/Abstractions/` (new file), `Cli/Pipeline/SingleDumpPipelineState.cs`, `BuildHeapIndexStage.cs`~~ | ✅ **Done** |
-| MINOR-13 | Mark `MemoryLeakAnalyzer`, `ReferenceChainAnalyzer` as `internal` | 2 files | XS |
+| MINOR-13 | Mark `RetentionAnalyzer`, `ReferenceChainAnalyzer` as `internal` | 2 files | XS |
 | ~~MINOR-11~~ | ~~Add explicit `Category` override to each analyzer; keep `Infer()` as fallback only~~ | ~~16 analyzer files (2-line change each)~~ | ✅ **Done** |
 
 ### 🟢 Tier 3 — Quality / Maintainability

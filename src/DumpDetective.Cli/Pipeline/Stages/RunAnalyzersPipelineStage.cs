@@ -81,7 +81,7 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
             Diagnostics = resolved.Diagnostics,
             Options = new Dictionary<Type, object?>
             {
-                [typeof(MemoryLeakOptions)]         = resolved.MemoryLeak,
+                [typeof(RetentionOptions)]         = resolved.MemoryLeak,
                 [typeof(ReferenceChainOptions)]     = resolved.ReferenceChain,
                 [typeof(EventLeakOptions)]          = resolved.EventLeak,
                 [typeof(DiagnosticsOptions)]        = resolved.Diagnostics,

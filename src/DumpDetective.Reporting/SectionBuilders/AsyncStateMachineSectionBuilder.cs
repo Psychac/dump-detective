@@ -44,6 +44,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top async state machine types by instance count",
                 Headers: ["Type Name", "Originating Method", "Declaring Type", "Count", "Total Size", "Avg State", "Ref Fields"],
                 Rows: BuildTypeRows(d.TopStateMachineTypes, limit)));
+            if (d.TopStateMachineTypes.Count > limit)
+                blocks.Add(T($"Showing top {limit} async state machine types. {d.TopStateMachineTypes.Count - limit} additional type(s) omitted."));
         }
 
         // ── High-capture instances ─────────────────────────────────────────────
@@ -58,6 +60,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top async state machine instances by captured reference bytes",
                 Headers: ["Address", "Type Name", "Captured Ref Bytes", "Large Captures"],
                 Rows: BuildCaptureRows(d.TopByCapturedSize, limit)));
+            if (d.TopByCapturedSize.Count > limit)
+                blocks.Add(T($"Showing top {limit} captured-state-machine instances. {d.TopByCapturedSize.Count - limit} additional instance(s) omitted."));
         }
 
         // ── Suspended method map ───────────────────────────────────────────────
@@ -72,6 +76,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Suspended async methods by instance count",
                 Headers: ["Declaring Type", "Method Name", "Suspended Count", "Total Size"],
                 Rows: BuildSuspendedRows(d.SuspendedMethodMap, limit)));
+            if (d.SuspendedMethodMap.Count > limit)
+                blocks.Add(T($"Showing top {limit} suspended methods. {d.SuspendedMethodMap.Count - limit} additional method(s) omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "Async State Machine Analysis", SortOrder, blocks);

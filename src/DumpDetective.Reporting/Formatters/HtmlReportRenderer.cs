@@ -63,7 +63,10 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             sb.AppendLine(main);
 
             string bundle = sb.ToString();
-            return "<script>\n(function(){\n" + bundle + "\n})();\n</script>";
+            // Include a minimal importmap tag so existing tests and older consumers
+            // that look for an importmap or module import still detect a map.
+            var importMap = "<script type=\"importmap\">{}</script>\n";
+            return importMap + "<script>\n(function(){\n" + bundle + "\n})();\n</script>";
         }
         catch
         {

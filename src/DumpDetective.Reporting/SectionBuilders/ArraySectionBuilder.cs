@@ -45,6 +45,8 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Caption: "Top array types by total bytes",
                 Headers: ["Element Type", "Rank", "Count", "Total Size", "Multi-Dim"],
                 Rows: BuildTypeRows(d.TopArrayTypesBySize, limit)));
+            if (d.TopArrayTypesBySize.Count > limit)
+                blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
         }
 
         // ── Top large arrays ──────────────────────────────────────────────────
@@ -59,6 +61,8 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Caption: "Largest individual array instances",
                 Headers: ["Address", "Element Type", "Length", "Rank", "Size"],
                 Rows: BuildLargeRows(d.TopLargeArrays, limit)));
+            if (d.TopLargeArrays.Count > limit)
+                blocks.Add(T($"Showing top {limit} large arrays. {d.TopLargeArrays.Count - limit} additional array(s) omitted."));
         }
 
         // ── Sparse arrays ─────────────────────────────────────────────────────
@@ -73,6 +77,8 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Caption: "Sparse arrays by estimated wasted bytes",
                 Headers: ["Address", "Element Type", "Length", "Null/Default %", "Wasted Bytes"],
                 Rows: BuildSparseRows(d.TopSparseArrays, limit)));
+            if (d.TopSparseArrays.Count > limit)
+                blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "Array Analysis", SortOrder, blocks);

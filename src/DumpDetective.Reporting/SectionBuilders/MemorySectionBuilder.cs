@@ -63,6 +63,8 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
             Caption: "Top 20 object types by memory size",
             Headers: ["Type", "Count", "Total Size", "Avg Size"],
             Rows: BuildTypeRows(d.TopTypesBySize, TopItems)));
+        if (d.TopTypesBySize.Count > TopItems)
+            blocks.Add(T($"Showing top {TopItems} object types by memory size. {d.TopTypesBySize.Count - TopItems} additional type(s) omitted."));
 
         blocks.Add(Blank());
         blocks.Add(H("TOP 20 OBJECT TYPES BY COUNT"));
@@ -71,6 +73,8 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
             Caption: "Top 20 object types by count",
             Headers: ["Type", "Count", "Total Size", "Avg Size"],
             Rows: BuildTypeRows(d.TopTypesByCount, TopItems)));
+        if (d.TopTypesByCount.Count > TopItems)
+            blocks.Add(T($"Showing top {TopItems} object types by count. {d.TopTypesByCount.Count - TopItems} additional type(s) omitted."));
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
     }

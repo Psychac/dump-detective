@@ -66,6 +66,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top transient types",
                 Headers: ["Type", "Gen0", "Gen1", "Gen2", "Long-Lived Ratio"],
                 Rows: BuildTypeRows(transient)));
+            if (transient.Count > TopTypeRows)
+                blocks.Add(T($"Showing top {TopTypeRows} transient types. {transient.Count - TopTypeRows} additional type(s) omitted."));
         }
 
         var shortish = d.TopShortishTypes ?? [];
@@ -77,6 +79,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top short-ish types",
                 Headers: ["Type", "Gen0", "Gen1", "Gen2", "Long-Lived Ratio"],
                 Rows: BuildTypeRows(shortish)));
+            if (shortish.Count > TopTypeRows)
+                blocks.Add(T($"Showing top {TopTypeRows} short-ish types. {shortish.Count - TopTypeRows} additional type(s) omitted."));
         }
 
         // ── Long-lived types ──────────────────────────────────────────────────
@@ -89,6 +93,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top long-lived types",
                 Headers: ["Type", "Gen0", "Gen1", "Gen2", "Long-Lived Ratio"],
                 Rows: BuildTypeRows(longLived)));
+            if (longLived.Count > TopTypeRows)
+                blocks.Add(T($"Showing top {TopTypeRows} long-lived types. {longLived.Count - TopTypeRows} additional type(s) omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "GC & Allocation Patterns", SortOrder, blocks);

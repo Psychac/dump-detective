@@ -28,6 +28,7 @@ async function bootstrap() {
   if (!main) return;
 
   main.appendChild(R.buildHeader(doc));
+
   const execBanner = R.buildExecutiveBanner(doc); if (execBanner) main.appendChild(execBanner);
   const exSec = R.buildExecutiveSummary(doc); if (exSec) main.appendChild(exSec);
   const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
@@ -35,16 +36,11 @@ async function bootstrap() {
   const filterBar = R.buildFilterBar(doc);
   const toc = R.buildTOC(doc);
 
-  if (filterBar) main.appendChild(filterBar);
-
-  const sidebar = UI.buildSidebar(toc);
-  if (sidebar) {
-    const parent = main.parentElement || document.body;
-    parent.classList.add('page-shell');
-    parent.insertBefore(sidebar, main);
-  }
+  UI.buildSidebar(toc);
 
   const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
+
+  if (filterBar) main.appendChild(filterBar);
 
   const findingsPaged = R.renderFindingsPaged(doc, announce); if (findingsPaged) main.appendChild(findingsPaged);
 

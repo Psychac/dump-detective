@@ -58,6 +58,8 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 Caption: "AppDomain inventory",
                 Headers: ["Domain Name", "ID", "Address", "Module Count", "Estimated Managed Bytes"],
                 Rows: BuildDomainRows(d.Domains, limit)));
+            if (d.Domains.Count > limit)
+                blocks.Add(T($"Showing top {limit} AppDomains. {d.Domains.Count - limit} additional domain(s) omitted."));
         }
 
         // ── Type density per module ───────────────────────────────────────────
@@ -73,6 +75,8 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 Caption: "Top modules by defined type count",
                 Headers: ["Module", "Assembly", "Defined Types", "Live Types", "Object Count", "Total Bytes"],
                 Rows: BuildModuleRows(d.TopModulesByTypeCount, limit)));
+            if (d.TopModulesByTypeCount.Count > limit)
+                blocks.Add(T($"Showing top {limit} modules. {d.TopModulesByTypeCount.Count - limit} additional module(s) omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "AppDomain Analysis", SortOrder, blocks);

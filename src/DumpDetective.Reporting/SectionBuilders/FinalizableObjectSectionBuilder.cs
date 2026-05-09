@@ -43,6 +43,8 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top finalizable types by Gen2 object count",
                 Headers: ["Type Name", "Gen 0", "Gen 1", "Gen 2", "LOH"],
                 Rows: BuildTypeRows(d.TopFinalizableTypesByGen2Count, limit)));
+            if (d.TopFinalizableTypesByGen2Count.Count > limit)
+                blocks.Add(T($"Showing top {limit} finalizable types by Gen2 count. {d.TopFinalizableTypesByGen2Count.Count - limit} additional type(s) omitted."));
         }
 
         // ── Top finalizer queue entries by retained size ──────────────────────
@@ -56,6 +58,8 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
                 Caption: "Top finalizer queue entries by estimated retained size",
                 Headers: ["Type Name", "Shallow Size", "Est. Retained", "IDisposable", "Disposed"],
                 Rows: BuildQueueRows(d.TopQueueEntriesByRetainedSize, limit)));
+            if (d.TopQueueEntriesByRetainedSize.Count > limit)
+                blocks.Add(T($"Showing top {limit} finalizer queue entries. {d.TopQueueEntriesByRetainedSize.Count - limit} additional entries omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "Finalizable Object Analysis", SortOrder, blocks);

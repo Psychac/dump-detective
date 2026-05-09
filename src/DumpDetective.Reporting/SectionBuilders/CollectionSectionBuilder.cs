@@ -52,6 +52,8 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(FormatHelper.FormatBytes(c.WastedMemory), (long)c.WastedMemory)]));
             }
             blocks.Add(new TableBlock("Wasteful collections", ["Type", "Count", "Capacity", "Fill Rate", "Wasted"], wcRows));
+            if (topWasteful.Count > limit)
+                blocks.Add(T($"Showing top {limit} wasteful collections. {topWasteful.Count - limit} additional collection(s) omitted."));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);

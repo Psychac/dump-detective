@@ -2,15 +2,67 @@ import { renderSparklines } from './report.renderers.js';
 
 export function buildSidebar(tocNode) {
   if (!tocNode) return null;
-  const aside = document.createElement('aside'); aside.className = 'sidebar'; aside.setAttribute('role', 'navigation'); aside.setAttribute('aria-label', 'Report sidebar');
-  const content = document.createElement('div'); content.className = 'sidebar-content'; const panelTOC = document.createElement('div'); panelTOC.className = 'sidebar-panel sidebar-panel-toc'; panelTOC.appendChild(tocNode); content.appendChild(panelTOC); aside.appendChild(content);
-  const toggle = document.createElement('button'); toggle.className = 'sidebar-toggle'; toggle.type = 'button'; toggle.setAttribute('aria-expanded', 'true'); toggle.setAttribute('aria-label', 'Toggle sidebar');
-  try { const ns = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('width', '16'); svg.setAttribute('height', '16'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); const r1 = document.createElementNS(ns, 'rect'); r1.setAttribute('x','3'); r1.setAttribute('y','6'); r1.setAttribute('width','18'); r1.setAttribute('height','2'); r1.setAttribute('rx','1'); r1.setAttribute('fill','currentColor'); const r2 = document.createElementNS(ns, 'rect'); r2.setAttribute('x','3'); r2.setAttribute('y','11'); r2.setAttribute('width','18'); r2.setAttribute('height','2'); r2.setAttribute('rx','1'); r2.setAttribute('fill','currentColor'); const r3 = document.createElementNS(ns, 'rect'); r3.setAttribute('x','3'); r3.setAttribute('y','16'); r3.setAttribute('width','18'); r3.setAttribute('height','2'); r3.setAttribute('rx','1'); r3.setAttribute('fill','currentColor'); svg.appendChild(r1); svg.appendChild(r2); svg.appendChild(r3); toggle.appendChild(svg); } catch (e) { toggle.textContent = '☰'; }
-  aside.insertBefore(toggle, content);
-  function setExpanded(expanded) { if (expanded) { aside.classList.add('expanded'); aside.classList.remove('collapsed'); toggle.setAttribute('aria-expanded', 'true'); } else { aside.classList.remove('expanded'); aside.classList.add('collapsed'); toggle.setAttribute('aria-expanded', 'false'); } try { sessionStorage.setItem('dumpdetective:sidebar-expanded', expanded ? '1' : '0'); } catch (e) { } }
-  toggle.addEventListener('click', function () { setExpanded(!aside.classList.contains('expanded')); });
-  try { const stored = sessionStorage.getItem('dumpdetective:sidebar-expanded'); const expanded = stored === null ? true : (stored === '1'); setExpanded(expanded); } catch (e) { }
-  document.addEventListener('keydown', function (ev) { if (ev.key === 't' || ev.key === 'T') { ev.preventDefault(); setExpanded(!aside.classList.contains('expanded')); } });
+
+  const aside = document.getElementById('report-navbar') || document.querySelector('.report-navbar') || document.createElement('header');
+  if (!aside.id) {
+    aside.id = 'report-navbar';
+    aside.className = 'report-navbar';
+    aside.setAttribute('role', 'navigation');
+    aside.setAttribute('aria-label', 'Report navigation');
+  }
+
+  const content = aside.querySelector('.report-navbar__toc') || tocNode;
+  if (content && !content.classList.contains('report-navbar__toc')) content.classList.add('report-navbar__toc');
+
+  if (content && content !== tocNode) {
+    content.replaceChildren(...Array.from(tocNode.childNodes));
+  }
+
+  let quickLinks = aside.querySelector('.report-navbar__links');
+  if (!quickLinks) {
+    quickLinks = document.createElement('nav');
+    quickLinks.className = 'report-navbar__links';
+    quickLinks.setAttribute('aria-label', 'Quick links');
+    quickLinks.innerHTML = '<div class="report-navbar__links-title">Quick links</div>';
+    const summaryLink = document.createElement('a');
+    summaryLink.href = '#executive-summary';
+    summaryLink.textContent = 'Executive Summary';
+    quickLinks.appendChild(summaryLink);
+    const actionLink = document.createElement('a');
+    actionLink.href = '#developer-action-plan';
+    actionLink.textContent = 'Developer Action Plan';
+    quickLinks.appendChild(actionLink);
+    aside.insertBefore(quickLinks, aside.querySelector('.report-navbar__palette') || tocNode);
+  }
+
+  aside.classList.add('expanded');
+  aside.classList.remove('collapsed', 'is-open');
+
+  const search = document.getElementById('toc-search');
+  if (search && !search.dataset.bound) {
+    search.dataset.bound = '1';
+    search.addEventListener('input', function () {
+      const query = search.value.trim().toLowerCase();
+      const items = aside.querySelectorAll('.toc a');
+      let visibleCount = 0;
+      items.forEach(function (item) {
+        const text = item.textContent ? item.textContent.toLowerCase() : '';
+        const match = !query || text.includes(query);
+        item.closest('li')?.toggleAttribute('hidden', !match);
+        if (match) visibleCount++;
+      });
+      const title = aside.querySelector('.toc-title');
+      if (title) title.textContent = query ? ('Sections ' + '(' + visibleCount + ')') : 'Sections';
+    });
+    search.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+        ev.stopPropagation();
+      }
+    });
+  }
+
   return aside;
 }
 

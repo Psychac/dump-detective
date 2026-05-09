@@ -60,6 +60,8 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Cell(activeCount > 0 ? $"{activeCount:N0}" : "-", activeCount)]));
         }
         blocks.Add(new TableBlock("Top exception types", ["Exception Type", "Count", "Active"], excRows));
+        if (sortedTypes.Count > TopExceptionTypes)
+            blocks.Add(T($"Showing top {TopExceptionTypes} exception types. {sortedTypes.Count - TopExceptionTypes} additional type(s) omitted."));
 
         var candidates = d.TopCrashThreadCandidates ?? [];
         var instances = d.TopExceptionInstances ?? [];

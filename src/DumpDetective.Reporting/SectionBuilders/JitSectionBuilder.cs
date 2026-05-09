@@ -62,6 +62,8 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             }
             blocks.Add(new TableBlock("Active frame types (stack hotspots)",
                 ["Type", "Stack Hits"], typeRows));
+            if (d.TopActiveFrameTypes.Count > TopFrameTypesToShow)
+                blocks.Add(T($"Showing top {TopFrameTypesToShow} frame types. {d.TopActiveFrameTypes.Count - TopFrameTypesToShow} additional type(s) omitted."));
         }
 
         // Top largest methods (native code ≥ 64 KB) found on stacks
@@ -82,6 +84,8 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             }
             blocks.Add(new TableBlock("Large JIT-compiled methods (native code size)",
                 ["Signature", "Hot", "Cold", "Total"], methodRows));
+            if (d.TopLargestMethods.Count > TopMethodsToShow)
+                blocks.Add(T($"Showing top {TopMethodsToShow} JIT methods. {d.TopLargestMethods.Count - TopMethodsToShow} additional method(s) omitted."));
         }
 
         // ── §19.3  Tiered Compilation & ReadyToRun ────────────────────────────

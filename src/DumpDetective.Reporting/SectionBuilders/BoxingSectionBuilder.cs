@@ -52,6 +52,8 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             }
             blocks.Add(new TableBlock("Top boxed types by total size",
                 ["Type", "Kind", "Count", "Total Size"], rows));
+            if (d.TopBoxedTypes.Count > TopTypesToShow)
+                blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
         }
 
         // ── §20.2 Value Type Shape Issues ────────────────────────────────────
@@ -76,6 +78,8 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             }
             blocks.Add(new TableBlock("Struct types with highest padding waste",
                 ["Type", "Size", "Field Bytes", "Wasted", "Waste %"], padRows));
+            if (d.TopPaddingWasteTypes.Count > TopPaddingToShow)
+                blocks.Add(T($"Showing top {TopPaddingToShow} padding-waste types. {d.TopPaddingWasteTypes.Count - TopPaddingToShow} additional type(s) omitted."));
         }
         else
         {

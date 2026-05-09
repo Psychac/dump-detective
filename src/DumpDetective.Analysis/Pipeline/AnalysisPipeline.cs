@@ -86,7 +86,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             if (context.Diagnostics.EnableMemoryDiagnostics)
             {
                 _currentProcess.Refresh();
-                wsBefore      = _currentProcess.WorkingSet64;
+                wsBefore = _currentProcess.WorkingSet64;
                 managedBefore = GC.GetTotalMemory(false);
             }
 
@@ -110,10 +110,10 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                 {
                     _currentProcess.Refresh();
                     memoryStats = new AnalyzerMemoryStats(
-                        WorkingSetBefore:  wsBefore,
-                        WorkingSetAfter:   _currentProcess.WorkingSet64,
+                        WorkingSetBefore: wsBefore,
+                        WorkingSetAfter: _currentProcess.WorkingSet64,
                         ManagedHeapBefore: managedBefore,
-                        ManagedHeapAfter:  GC.GetTotalMemory(false));
+                        ManagedHeapAfter: GC.GetTotalMemory(false));
                 }
 
                 // If the analyzer domain result exposes a `RawExports` property (some analyzers

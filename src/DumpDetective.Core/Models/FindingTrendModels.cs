@@ -1,9 +1,10 @@
 ﻿namespace DumpDetective.Core.Models;
+
 internal enum FindingTrendState
 {
-New,
-Persistent,
-Resolved
+    New,
+    Persistent,
+    Resolved
 }
 
 internal sealed record FindingTrendDelta(
@@ -23,17 +24,17 @@ int BaselineCriticalCount,
 int CurrentWarningCount,
 int BaselineWarningCount)
 {
-public IReadOnlyList<FindingTrendDelta> NewFindings =>
-    Deltas.Where(d => d.State == FindingTrendState.New).ToList();
+    public IReadOnlyList<FindingTrendDelta> NewFindings =>
+        Deltas.Where(d => d.State == FindingTrendState.New).ToList();
 
-public IReadOnlyList<FindingTrendDelta> PersistentFindings =>
-    Deltas.Where(d => d.State == FindingTrendState.Persistent).ToList();
+    public IReadOnlyList<FindingTrendDelta> PersistentFindings =>
+        Deltas.Where(d => d.State == FindingTrendState.Persistent).ToList();
 
-public IReadOnlyList<FindingTrendDelta> ResolvedFindings =>
-    Deltas.Where(d => d.State == FindingTrendState.Resolved).ToList();
+    public IReadOnlyList<FindingTrendDelta> ResolvedFindings =>
+        Deltas.Where(d => d.State == FindingTrendState.Resolved).ToList();
 
-public IReadOnlyList<FindingTrendDelta> MetricComparedFindings =>
-    Deltas.Where(d => d.HasMetricComparison).ToList();
+    public IReadOnlyList<FindingTrendDelta> MetricComparedFindings =>
+        Deltas.Where(d => d.HasMetricComparison).ToList();
 }
 
 internal sealed record TrendStepComparison(

@@ -17,7 +17,7 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
 
         // ── Large static/strong root retention ─────────────────────────────
         ulong staticBytes = 0;
-        int   staticCount = 0;
+        int staticCount = 0;
         foreach (RootKindSummary ks in r.ByKind)
         {
             if (ks.Kind is "StrongHandle")
@@ -92,8 +92,8 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
     private static string FormatBytes(ulong bytes) => bytes switch
     {
         >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576     => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1_024         => $"{bytes / 1_024.0:F1} KB",
-        _                => $"{bytes} B"
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
     };
 }

@@ -140,9 +140,9 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_3_ReportDocument_PopulatesAnalyzerRunStatuses()
     {
-        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer",   FindingSeverity.Critical, "Leak1");
-        AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", FindingSeverity.Warning,  "ThreadBlock");
-        AnalyzerRunResult run3 = MakeRun("FailedAnalyzer", FindingSeverity.Info,     "NotUsed", AnalyzerExecutionStatus.Failed);
+        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
+        AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", FindingSeverity.Warning, "ThreadBlock");
+        AnalyzerRunResult run3 = MakeRun("FailedAnalyzer", FindingSeverity.Info, "NotUsed", AnalyzerExecutionStatus.Failed);
 
         ReportSerializer serializer = new();
         AnalysisReportDocument doc = serializer.Serialize(
@@ -186,8 +186,8 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_3_HtmlReport_ContainsAnalyzerStatusData()
     {
-        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer",   FindingSeverity.Critical, "Leak1");
-        AnalyzerRunResult run2 = MakeRun("FailedAnalyzer", FindingSeverity.Info,     "X", AnalyzerExecutionStatus.Failed);
+        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
+        AnalyzerRunResult run2 = MakeRun("FailedAnalyzer", FindingSeverity.Info, "X", AnalyzerExecutionStatus.Failed);
 
         ReportSerializer serializer = new();
         AnalysisReportDocument doc = serializer.Serialize(

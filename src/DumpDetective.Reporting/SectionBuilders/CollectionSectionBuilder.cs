@@ -19,18 +19,18 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
 
         blocks.Add(H("COLLECTION SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Collections",   $"{d.TotalCollections:N0}",   d.TotalCollections));
-        blocks.Add(M("Dictionaries",         $"{d.Dictionaries:N0}",       d.Dictionaries,  indent: 1));
-        blocks.Add(M("Lists",                $"{d.Lists:N0}",              d.Lists,          indent: 1));
-        blocks.Add(M("ArrayLists",           $"{d.ArrayLists:N0}",         d.ArrayLists,     indent: 1));
-        blocks.Add(M("Stacks",               $"{d.Stacks:N0}",             d.Stacks,         indent: 1));
-        blocks.Add(M("SortedLists",          $"{d.SortedLists:N0}",        d.SortedLists,    indent: 1));
-        blocks.Add(M("SortedSets",           $"{d.SortedSets:N0}",         d.SortedSets,     indent: 1));
-        blocks.Add(M("HashSets",             $"{d.HashSets:N0}",           d.HashSets,       indent: 1));
-        blocks.Add(M("Queues",               $"{d.Queues:N0}",             d.Queues,         indent: 1));
+        blocks.Add(M("Total Collections", $"{d.TotalCollections:N0}", d.TotalCollections));
+        blocks.Add(M("Dictionaries", $"{d.Dictionaries:N0}", d.Dictionaries, indent: 1));
+        blocks.Add(M("Lists", $"{d.Lists:N0}", d.Lists, indent: 1));
+        blocks.Add(M("ArrayLists", $"{d.ArrayLists:N0}", d.ArrayLists, indent: 1));
+        blocks.Add(M("Stacks", $"{d.Stacks:N0}", d.Stacks, indent: 1));
+        blocks.Add(M("SortedLists", $"{d.SortedLists:N0}", d.SortedLists, indent: 1));
+        blocks.Add(M("SortedSets", $"{d.SortedSets:N0}", d.SortedSets, indent: 1));
+        blocks.Add(M("HashSets", $"{d.HashSets:N0}", d.HashSets, indent: 1));
+        blocks.Add(M("Queues", $"{d.Queues:N0}", d.Queues, indent: 1));
         blocks.Add(Blank());
         blocks.Add(M("Wasteful Collections", $"{d.WastefulCollectionCount:N0}", d.WastefulCollectionCount));
-        blocks.Add(M("Total Wasted Memory",  FormatHelper.FormatBytes(d.TotalWastedMemory),   (double)d.TotalWastedMemory));
+        blocks.Add(M("Total Wasted Memory", FormatHelper.FormatBytes(d.TotalWastedMemory), (double)d.TotalWastedMemory));
 
         var topWasteful = d.TopWastefulCollections ?? [];
         if (topWasteful.Count > 0)

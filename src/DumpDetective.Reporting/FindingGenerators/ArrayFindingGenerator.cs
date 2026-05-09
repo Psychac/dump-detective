@@ -6,8 +6,8 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class ArrayFindingGenerator : IFindingGenerator
 {
-    private const ulong LohWarningBytes   =   500_000_000UL; // 500 MB
-    private const ulong LohCriticalBytes  = 2_000_000_000UL; // 2 GB
+    private const ulong LohWarningBytes = 500_000_000UL; // 500 MB
+    private const ulong LohCriticalBytes = 2_000_000_000UL; // 2 GB
     private const int MultiDimWarningCount = 1_000;
     private const double SparseRatioThreshold = 0.70;
     private const ulong SparseWastedWarningBytes = 10_000_000UL; // 10 MB
@@ -96,8 +96,8 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
     private static string FormatBytes(ulong bytes) => bytes switch
     {
         >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576     => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1_024         => $"{bytes / 1_024.0:F1} KB",
-        _                => $"{bytes} B"
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
     };
 }

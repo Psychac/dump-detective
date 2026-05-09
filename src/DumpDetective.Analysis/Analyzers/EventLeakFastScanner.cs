@@ -390,7 +390,7 @@ internal sealed class EventLeakFastScanner
                 ClrInstanceField? ilf = cur.GetFieldByName("_invocationList");
                 if (ilf != null)
                 {
-                    _delegateInvListOffset  = ilf.Offset + _ptrSize;
+                    _delegateInvListOffset = ilf.Offset + _ptrSize;
                     // _invocationCount is the nint field immediately after _invocationList
                     // (both pointer-sized; they are always declared consecutively in the CLR source).
                     _delegateInvCountOffset = _delegateInvListOffset + _ptrSize;
@@ -414,8 +414,8 @@ internal sealed class EventLeakFastScanner
         //   Absolute = interior + ptrSize, so multiply field-index by ptrSize.
         if (!_delegateLayoutDiscovered)
         {
-            _delegateTargetOffset   = _ptrSize;           // field 0 → absolute 8 (64-bit)
-            _delegateInvListOffset  = _ptrSize * 5;       // field 4 → absolute 40
+            _delegateTargetOffset = _ptrSize;           // field 0 → absolute 8 (64-bit)
+            _delegateInvListOffset = _ptrSize * 5;       // field 4 → absolute 40
             _delegateInvCountOffset = _ptrSize * 6;       // field 5 → absolute 48
             _delegateLayoutDiscovered = true;
         }
@@ -504,24 +504,24 @@ internal sealed class EventLeakFastScanner
         ref int eventsScanned,
         ref int publisherInstances)
     {
-        int degree    = Math.Max(1, Environment.ProcessorCount);
+        int degree = Math.Max(1, Environment.ProcessorCount);
         int chunkSize = Math.Max(4096, (objectCount + degree - 1) / degree);
         int numChunks = (objectCount + chunkSize - 1) / chunkSize;
 
-        var partialAccs      = new ConcurrentBag<Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>>();
+        var partialAccs = new ConcurrentBag<Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>>();
         var seenMtsDuringPar = new ConcurrentBag<HashSet<ulong>>();
-        long totalEvents     = 0;
+        long totalEvents = 0;
         long totalPublishers = 0;
 
         Parallel.For(0, numChunks, chunkIdx =>
         {
             int start = chunkIdx * chunkSize;
-            int end   = Math.Min(start + chunkSize, objectCount);
+            int end = Math.Min(start + chunkSize, objectCount);
 
-            var localAcc     = new Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>();
+            var localAcc = new Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>();
             var localSeenMTs = new HashSet<ulong>();
-            var localBuf     = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
-            int localEvents    = 0;
+            var localBuf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
+            int localEvents = 0;
             int localPublishers = 0;
 
             for (int i = start; i < end; i++)
@@ -548,7 +548,7 @@ internal sealed class EventLeakFastScanner
             Interlocked.Add(ref totalPublishers, localPublishers);
         });
 
-        eventsScanned     += (int)totalEvents;
+        eventsScanned += (int)totalEvents;
         publisherInstances += (int)totalPublishers;
 
         // Merge partial accumulators.
@@ -594,9 +594,9 @@ internal sealed class EventLeakFastScanner
                     bool mismatch = CheckLifetimeMismatchDirect(subs, options);
                     EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                         publisherAddress: 0,
-                        publisherType:    type.Name ?? StringConstants.UnknownType,
-                        eventFieldName:   sField.Name!,
-                        isStatic:         true,
+                        publisherType: type.Name ?? StringConstants.UnknownType,
+                        eventFieldName: sField.Name!,
+                        isStatic: true,
                         subs, rootHints, options, heap: _heap,
                         publisherGeneration: 2,
                         hasLifetimeMismatch: mismatch);
@@ -666,9 +666,9 @@ internal sealed class EventLeakFastScanner
                     bool mismatch = CheckLifetimeMismatchDirect(subs, options);
                     EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                         publisherAddress: 0,
-                        publisherType:    type.Name ?? StringConstants.UnknownType,
-                        eventFieldName:   sField.Name!,
-                        isStatic:         true,
+                        publisherType: type.Name ?? StringConstants.UnknownType,
+                        eventFieldName: sField.Name!,
+                        isStatic: true,
                             subs, rootHints, options, heap: _heap,
                         publisherGeneration: 2,
                         hasLifetimeMismatch: mismatch);
@@ -696,12 +696,12 @@ internal sealed class EventLeakFastScanner
         EventLeakOptions options,
         ref int eventsScanned)
     {
-        bool hadField  = false;
-        int  minSubs   = options.MinSubscribers;
+        bool hadField = false;
+        int minSubs = options.MinSubscribers;
         bool includeNonLeaking = options.IncludeNonLeakingEvents;
         // PERF: publisherGen computed lazily — most publisher objects have all-null events.
         // GetSegmentByAddress is cheap (binary search) but not free; skip it when not needed.
-        int  publisherGen = -2;  // -2 = not yet computed; -1 = computed but unknown
+        int publisherGen = -2;  // -2 = not yet computed; -1 = computed but unknown
 
         foreach (ref readonly DelegateFieldLayout layout in layouts.AsSpan())
         {
@@ -743,14 +743,14 @@ internal sealed class EventLeakFastScanner
 
             EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                 publisherAddress: entry.Address,
-                publisherType:    layout.PublisherTypeName,
-                eventFieldName:   layout.FieldName,
-                isStatic:         false,
+                publisherType: layout.PublisherTypeName,
+                eventFieldName: layout.FieldName,
+                isStatic: false,
                     subscribers,
                     rootHints,
                     options, heap: null,   // skip low-incoming-refs heap scan on hot path
-                    publisherGeneration:  publisherGen,
-                    hasLifetimeMismatch:  mismatch);
+                    publisherGeneration: publisherGen,
+                    hasLifetimeMismatch: mismatch);
 
             // IsLikelyPublisher: subscriber count and gen already validated above.
             // Still call to honour any future threshold changes.
@@ -810,8 +810,8 @@ internal sealed class EventLeakFastScanner
         for (int i = 0; i < invCount; i++)
         {
             ClrObject elem = arr.GetObjectValue(i);
-                if (elem.IsValid && elem.Address != 0)
-                    ExtractSingleTargetDirect(elem.Address, results);
+            if (elem.IsValid && elem.Address != 0)
+                ExtractSingleTargetDirect(elem.Address, results);
         }
     }
 

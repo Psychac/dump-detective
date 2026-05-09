@@ -14,9 +14,9 @@ public sealed class GoldenFileTests
         string[] fixtures = ["BaselineSmall", "DuplicateHeavy", "LongNames", "RichEvidence", "MixedSeverity"];
         foreach (string fixture in fixtures)
         {
-            yield return [fixture, 0, "Text",     $"{fixture}.text.golden"];
+            yield return [fixture, 0, "Text", $"{fixture}.text.golden"];
             yield return [fixture, 1, "Markdown", $"{fixture}.markdown.golden"];
-            yield return [fixture, 2, "Json",     $"{fixture}.json.golden"];   // H1: JSON golden instead of HTML string
+            yield return [fixture, 2, "Json", $"{fixture}.json.golden"];   // H1: JSON golden instead of HTML string
         }
     }
 

@@ -1,6 +1,7 @@
 ﻿using DumpDetective.Core.Models;
 
 namespace DumpDetective.Core.Utilities;
+
 internal static class FindingTagger
 {
     public static void Normalize(List<InsightFinding> findings)

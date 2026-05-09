@@ -26,19 +26,20 @@ internal sealed class ConfigurationResolver
 
         bool usedConfigFile = fileModel is not null;
 
-        RetentionOptions memoryLeak      = Resolve(usedConfigFile, BuildMemoryLeakFromConfig,         req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset),                fileModel, request);
-        ReferenceChainOptions refChain    = Resolve(usedConfigFile, BuildReferenceChainFromConfig,     req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ReferenceChainOptions.Preset),            fileModel, request);
-        EventLeakOptions eventLeak        = Resolve(usedConfigFile, BuildEventLeakFromConfig,          req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset),                 fileModel, request);
-        DiagnosticsOptions diagnostics    = Resolve(usedConfigFile, BuildDiagnosticsFromConfig,        AnalyzerOptionsBuilder.BuildDiagnosticsFromCli,        fileModel, request);
-        ReportOptions report              = Resolve(usedConfigFile, BuildReportFromConfig,             AnalyzerOptionsBuilder.BuildReportFromCli,             fileModel, request);
-        HeapIndexPrebuildMode indexMode   = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig,  AnalyzerOptionsBuilder.BuildIndexPrebuildModeFromCli,  fileModel, request);
+        RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset), fileModel, request);
+        ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ReferenceChainOptions.Preset), fileModel, request);
+        EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset), fileModel, request);
+        DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
+        ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
+        HeapIndexPrebuildMode indexMode = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig, AnalyzerOptionsBuilder.BuildIndexPrebuildModeFromCli, fileModel, request);
+        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak, refChain, indexMode);
         CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CrashAnalysisOptions.Preset, CrashAnalysisOptions.Validate), fileModel, request);
         AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
         AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncStateMachineAnalysisOptions.Preset), fileModel, request);
         ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ArrayAnalysisOptions.Preset), fileModel, request);
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, BoxingAnalysisOptions.Preset), fileModel, request);
         CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CollectionAnalysisOptions.Preset, CollectionAnalysisOptions.Validate), fileModel, request);
-        StringAnalysisOptions  stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StringAnalysisOptions.Preset), fileModel, request);
+        StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StringAnalysisOptions.Preset), fileModel, request);
         SegmentAnalysisOptions segmentAnalysis = Resolve(usedConfigFile, BuildSegmentAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, SegmentAnalysisOptions.Preset), fileModel, request);
         AppDomainAnalysisOptions appDomainAnalysis = Resolve(usedConfigFile, BuildAppDomainAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AppDomainAnalysisOptions.Preset), fileModel, request);
         AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
@@ -136,7 +137,10 @@ internal sealed class ConfigurationResolver
                 effectiveInclude,
                 effectiveExclude,
             request.DiagnosticMode,
-            indexMode);
+            indexMode)
+        {
+            ExecutionPolicy = executionPolicy
+        };
     }
 
     private static string? ResolveConfigPath(string? cliConfigPath)
@@ -162,7 +166,7 @@ internal sealed class ConfigurationResolver
         return File.Exists(samplePath) ? samplePath : null;
     }
 
-    
+
 
     private static CliConfigurationFileModel LoadConfigurationFile(string configPath)
     {
@@ -233,7 +237,8 @@ internal sealed class ConfigurationResolver
         {
             EnableMemoryDiagnostics = enableMemoryDiagnostics,
             EnablePerformanceDiagnostics = enablePerformanceDiagnostics
-            , CollectAfterAnalyzerRun = collectAfterAnalyzerRun
+            ,
+            CollectAfterAnalyzerRun = collectAfterAnalyzerRun
         };
     }
 
@@ -254,10 +259,29 @@ internal sealed class ConfigurationResolver
 
     private static HeapIndexPrebuildMode BuildIndexPrebuildModeFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        return ParseHeapIndexMode(config.Indexing?.Mode)
+        return config.ExecutionPolicy?.IndexPrebuildMode
+            ?? ParseHeapIndexMode(config.Indexing?.Mode)
             ?? ParseHeapIndexMode(config.IndexMode)
             ?? request.IndexPrebuildMode
             ?? HeapIndexPrebuildMode.Auto;
+    }
+
+    private static ExecutionPolicy BuildExecutionPolicy(
+        CliConfigurationFileModel? config,
+        RetentionOptions memoryLeak,
+        ReferenceChainOptions referenceChain,
+        HeapIndexPrebuildMode indexMode)
+    {
+        ExecutionPolicyModel? policy = config?.ExecutionPolicy;
+
+        return new ExecutionPolicy
+        {
+            MaxLeakScanObjects = PositiveOrNull(policy?.MaxLeakScanObjects) ?? memoryLeak.MaxLeakScanObjects,
+            MaxReferenceAddresses = PositiveOrNull(policy?.MaxReferenceAddresses) ?? memoryLeak.MaxReferenceAddresses,
+            ReferenceChainMaxPathDepth = PositiveOrNull(policy?.ReferenceChainMaxPathDepth) ?? referenceChain.MaxPathDepth,
+            ReferenceChainFastModeMaxDepth = PositiveOrNull(policy?.ReferenceChainFastModeMaxDepth) ?? referenceChain.FastModeMaxDepth,
+            ReferenceChainMaxPathSearchObjects = PositiveOrNull(policy?.ReferenceChainMaxPathSearchObjects) ?? referenceChain.MaxPathSearchObjects
+        };
     }
 
 

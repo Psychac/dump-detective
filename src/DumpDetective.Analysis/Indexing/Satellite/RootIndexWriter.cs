@@ -18,8 +18,8 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal static class RootIndexWriter
 {
     // File magic: "RTIX" = Root Index
-    private const int Magic      = 0x58495452;
-    private const int Version    = 1;
+    private const int Magic = 0x58495452;
+    private const int Version = 1;
     private const int RecordSize = 20; // 8 + 8 + 1 + 3 pad
     private const int ProgressEveryRoots = 10_000;
 
@@ -49,12 +49,12 @@ internal static class RootIndexWriter
                 cancellationToken.ThrowIfCancellationRequested();
 
                 ulong targetAddr = root.Object;
-                ulong rootAddr   = root.Address;
-                byte  kind       = (byte)root.RootKind;
+                ulong rootAddr = root.Address;
+                byte kind = (byte)root.RootKind;
 
                 var span = buf.AsSpan(offset, RecordSize);
-                BinaryPrimitives.WriteUInt64LittleEndian(span,       targetAddr);
-                BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  rootAddr);
+                BinaryPrimitives.WriteUInt64LittleEndian(span, targetAddr);
+                BinaryPrimitives.WriteUInt64LittleEndian(span[8..], rootAddr);
                 span[16] = kind;
                 span[17] = 0; span[18] = 0; span[19] = 0;
 

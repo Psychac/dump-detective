@@ -25,16 +25,16 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // pages resident simultaneously.
         const int MaxSegmentParallelism = 4;
 
-        var masterBuilder  = new TypeIndexBuilder();
+        var masterBuilder = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
-        var shapeCache     = new ConcurrentDictionary<ulong, TypeShapeEntry>();
+        var shapeCache = new ConcurrentDictionary<ulong, TypeShapeEntry>();
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
         // Collected during Phase 2 scan — mirrors what DiskBackedObjectIndexWriter writes to TaskIndex.bin.
         // Stored in HeapIndexBuildResult so AsyncTaskAnalyzer can read the pre-filtered list directly
         // instead of scanning all InMemoryEntries (O(N_total) vs O(N_tasks)).
-        var taskCandidates  = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         // Mirrors EventCandidateIndex.bin — pre-filtered delegate/event-handler addresses.
         // EventLeakAnalyzer (Priority 13) should prefer this over an O(N) full-index scan.
         var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
@@ -45,7 +45,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         const int MaxDedupStringLength = 1024;
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
         var globalLengthSamples = new List<int>();
-        var globalLengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal);
+        var globalLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal);
 
         var parallelOptions = new ParallelOptions
         {
@@ -101,17 +101,17 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string,int>(StringComparer.Ordinal)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
             (i, _, state) =>
             {
                 ClrSegment segment = segments[i];
-                int segGen  = MemorySegmentKindToGeneration(segment.Kind);
+                int segGen = MemorySegmentKindToGeneration(segment.Kind);
                 // For Ephemeral segments (workstation GC), generation cannot be inferred from
                 // the segment kind — all of Gen0/1/2 share one segment.  Resolve per-object.
                 bool isEphemeral = segGen < 0;
                 int baseSlot = segmentOffsets[i];
-                int written  = 0;
-                int slotCap  = perSegmentCounts[i]; // safety: don't overrun this segment's slice
+                int written = 0;
+                int slotCap = perSegmentCounts[i]; // safety: don't overrun this segment's slice
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
@@ -134,9 +134,9 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         state.FlagsCache[mt] = flags;
                     }
 
-                    var entry    = new HeapEntry(obj.Address, mt, obj.Size);
+                    var entry = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    int objGen   = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
+                    int objGen = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
                     state.Builder.Add(entry, moduleId, flags, objGen);
 
                     // Collect task candidates — same filter as DiskBackedObjectIndexWriter.
@@ -255,7 +255,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         DistributionSummary? distribution = null;
         try
         {
-            var percentiles = new Dictionary<string,double>(StringComparer.Ordinal);
+            var percentiles = new Dictionary<string, double>(StringComparer.Ordinal);
             int sampleCount = globalLengthSamples.Count;
             if (sampleCount > 0)
             {
@@ -266,7 +266,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                 percentiles["p95"] = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.95)];
             }
 
-            var freqBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+            var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["1"] = 0,
                 ["2"] = 0,
@@ -286,7 +286,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                 else freqBuckets["1001+"]++;
             }
 
-            distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string,int>(), freqBuckets, globalLengthSamples.Count);
+            distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string, int>(), freqBuckets, globalLengthSamples.Count);
         }
         catch { distribution = null; }
 
@@ -398,7 +398,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
     // Safe to call on all workstation-GC dumps; throws only if the address is completely invalid.
     private static int ResolveObjectGeneration(ClrSegment segment, ulong address)
     {
-        try   { return (int)segment.GetGeneration(address); }
+        try { return (int)segment.GetGeneration(address); }
         catch { return -1; }
     }
 }

@@ -21,12 +21,12 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var blocks = new List<SectionBlock>();
 
         blocks.Add(H("OVERALL SUMMARY"));
-        blocks.Add(M("Total Memory",  FormatHelper.FormatBytes(d.TotalBytes),   (double)d.TotalBytes));
-        blocks.Add(M("Total Objects", $"{d.TotalObjects:N0}",                   d.TotalObjects));
-        blocks.Add(M("LOH Memory",    $"{FormatHelper.FormatBytes(d.LohBytes)} ({d.LohPercent:F1}%)", (double)d.LohBytes));
-        blocks.Add(M("LOH Objects",   $"{d.LohObjects:N0}",                     d.LohObjects));
-        blocks.Add(M("LOH Threshold", $"{d.LohThresholdBytes:N0} bytes",        (double)d.LohThresholdBytes));
-        blocks.Add(M("Unique Types",  $"{d.UniqueTypes:N0}",                    d.UniqueTypes));
+        blocks.Add(M("Total Memory", FormatHelper.FormatBytes(d.TotalBytes), (double)d.TotalBytes));
+        blocks.Add(M("Total Objects", $"{d.TotalObjects:N0}", d.TotalObjects));
+        blocks.Add(M("LOH Memory", $"{FormatHelper.FormatBytes(d.LohBytes)} ({d.LohPercent:F1}%)", (double)d.LohBytes));
+        blocks.Add(M("LOH Objects", $"{d.LohObjects:N0}", d.LohObjects));
+        blocks.Add(M("LOH Threshold", $"{d.LohThresholdBytes:N0} bytes", (double)d.LohThresholdBytes));
+        blocks.Add(M("Unique Types", $"{d.UniqueTypes:N0}", d.UniqueTypes));
 
         blocks.Add(Blank());
         blocks.Add(H("HEAP COMPOSITION SIGNALS"));

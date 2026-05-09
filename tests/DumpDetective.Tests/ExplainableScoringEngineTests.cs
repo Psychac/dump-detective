@@ -103,8 +103,8 @@ public sealed class ExplainableScoringEngineTests
 
     [Theory]
     [InlineData("Critical", 40)]
-    [InlineData("Warning",  20)]
-    [InlineData("Info",      5)]
+    [InlineData("Warning", 20)]
+    [InlineData("Info", 5)]
     public void ComputeScores_SeverityPoints_MappedCorrectly(string severity, int expectedPoints)
     {
         var findings = new[]

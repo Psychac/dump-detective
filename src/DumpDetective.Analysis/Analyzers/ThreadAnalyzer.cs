@@ -348,10 +348,10 @@ namespace DumpDetective.Analysis.Analyzers
                             if (moveNextDepth > result.MaxAsyncChainDepth)
                                 result.MaxAsyncChainDepth = moveNextDepth;
 
-                                // If configured for Full, attempt to capture additional
-                                // stack frames (async path) so reports can show representative
-                                // async-chain frames. This re-enumerates the thread's stack and
-                                // appends extra frames beyond the base `MaxFramesForThreadScan`.
+                            // If configured for Full, attempt to capture additional
+                            // stack frames (async path) so reports can show representative
+                            // async-chain frames. This re-enumerates the thread's stack and
+                            // appends extra frames beyond the base `MaxFramesForThreadScan`.
                             if (options.AsyncChainDetection == AsyncChainDetectionMode.Full)
                             {
                                 int extraToCapture = options.MaxFramesForThreadScan; // capture an extra window
@@ -594,7 +594,7 @@ namespace DumpDetective.Analysis.Analyzers
             ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out _);
             count++;
         }
-        
+
         public void Dispose() { }
     }
 

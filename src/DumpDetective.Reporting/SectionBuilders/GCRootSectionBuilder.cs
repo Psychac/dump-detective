@@ -8,10 +8,10 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopKindRows     = 10;
-    private const int TopFindingRows  = 20;
-    private const int TopPathRows     = 10;
-    private const int PathTypesCap    = 8; // max type names to show per path
+    private const int TopKindRows = 10;
+    private const int TopFindingRows = 20;
+    private const int TopPathRows = 10;
+    private const int PathTypesCap = 8; // max type names to show per path
 
     public string AnalyzerName => "GC Root Analysis";
     public int SortOrder => 24; // §5 root intelligence — between GCHandle (§9.3) and memory leak (§6)
@@ -26,10 +26,10 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         // ── Summary ───────────────────────────────────────────────────────────
         blocks.Add(H("GC ROOT INTELLIGENCE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total GC Roots",          $"{d.TotalRoots:N0}",            d.TotalRoots));
-        blocks.Add(M("Root Kinds Identified",    $"{d.ByKind.Count}",             d.ByKind.Count));
-        blocks.Add(M("Top Suspects Ranked",      $"{d.TopRootsBySeverity.Count}", d.TopRootsBySeverity.Count));
-        blocks.Add(M("Path Searches Capped",     d.PathSearchCapped ? $"Yes ({d.PathSearchCappedCount})" : "No",
+        blocks.Add(M("Total GC Roots", $"{d.TotalRoots:N0}", d.TotalRoots));
+        blocks.Add(M("Root Kinds Identified", $"{d.ByKind.Count}", d.ByKind.Count));
+        blocks.Add(M("Top Suspects Ranked", $"{d.TopRootsBySeverity.Count}", d.TopRootsBySeverity.Count));
+        blocks.Add(M("Path Searches Capped", d.PathSearchCapped ? $"Yes ({d.PathSearchCappedCount})" : "No",
                                                  d.PathSearchCapped ? 1.0 : 0.0));
 
         // ── Root kind distribution ─────────────────────────────────────────
@@ -112,8 +112,8 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         {
             RootPathFinding p = paths[i];
 
-            int   showCount  = Math.Min(p.PathTypeNames.Count, PathTypesCap);
-            var   typeList   = new System.Text.StringBuilder();
+            int showCount = Math.Min(p.PathTypeNames.Count, PathTypesCap);
+            var typeList = new System.Text.StringBuilder();
             for (int j = 0; j < showCount; j++)
             {
                 if (j > 0) typeList.Append(" → ");

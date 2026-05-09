@@ -90,9 +90,9 @@ namespace DumpDetective.Analysis.Analyzers
                 for (int i = 0; i < SizeBucketHelper.BucketCount; i++)
                 {
                     entries[i] = new SizeBucketEntry(
-                        RangeLabel:   SizeBucketHelper.BucketLabels[i],
-                        ObjectCount:  globalSizeBuckets[i],
-                        TotalBytes:   bucketBytes[i]);
+                        RangeLabel: SizeBucketHelper.BucketLabels[i],
+                        ObjectCount: globalSizeBuckets[i],
+                        TotalBytes: bucketBytes[i]);
                 }
                 histogram = entries;
             }

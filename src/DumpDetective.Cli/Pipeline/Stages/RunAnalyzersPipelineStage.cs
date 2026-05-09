@@ -44,55 +44,57 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
     private static RuntimeAnalysisContext BuildContext(SingleDumpPipelineState state)
     {
         ResolvedExecutionOptions resolved = state.Resolved;
-            // Derive sampling seed from dump path when thread options request auto-derive (0)
-            var threadOptions = resolved.ThreadAnalysis;
-            if (threadOptions != null && threadOptions.SamplingSeed == 0 && state.LoadContext != null)
+        // Derive sampling seed from dump path when thread options request auto-derive (0)
+        var threadOptions = resolved.ThreadAnalysis;
+        if (threadOptions != null && threadOptions.SamplingSeed == 0 && state.LoadContext != null)
+        {
+            // Derive stable seed from dump path via SHA256 -> first 4 bytes
+            var pathBytes = System.Text.Encoding.UTF8.GetBytes(state.LoadContext.DumpPath ?? string.Empty);
+            var hash = System.Security.Cryptography.SHA256.HashData(pathBytes);
+            int derived = BitConverter.ToInt32(hash, 0);
+            threadOptions = new ThreadAnalysisOptions
             {
-                // Derive stable seed from dump path via SHA256 -> first 4 bytes
-                var pathBytes = System.Text.Encoding.UTF8.GetBytes(state.LoadContext.DumpPath ?? string.Empty);
-                var hash = System.Security.Cryptography.SHA256.HashData(pathBytes);
-                int derived = BitConverter.ToInt32(hash, 0);
-                threadOptions = new ThreadAnalysisOptions
-                {
-                    MaxFramesForThreadScan = threadOptions.MaxFramesForThreadScan,
-                    MaxStackRootsToCount = threadOptions.MaxStackRootsToCount,
-                    MaxThreadsToCaptureSnapshots = threadOptions.MaxThreadsToCaptureSnapshots,
-                    IncludeStackSamples = threadOptions.IncludeStackSamples,
-                    MaxSampledStackSnapshots = threadOptions.MaxSampledStackSnapshots,
-                    AsyncChainDetection = threadOptions.AsyncChainDetection,
-                    DetectWaitPatterns = threadOptions.DetectWaitPatterns,
-                    MaxTopHotspots = threadOptions.MaxTopHotspots,
-                    SamplingSeed = derived
-                };
-            }
+                MaxFramesForThreadScan = threadOptions.MaxFramesForThreadScan,
+                MaxStackRootsToCount = threadOptions.MaxStackRootsToCount,
+                MaxThreadsToCaptureSnapshots = threadOptions.MaxThreadsToCaptureSnapshots,
+                IncludeStackSamples = threadOptions.IncludeStackSamples,
+                MaxSampledStackSnapshots = threadOptions.MaxSampledStackSnapshots,
+                AsyncChainDetection = threadOptions.AsyncChainDetection,
+                DetectWaitPatterns = threadOptions.DetectWaitPatterns,
+                MaxTopHotspots = threadOptions.MaxTopHotspots,
+                SamplingSeed = derived
+            };
+        }
 
-            // Apply adaptive preset tuning based on the prebuilt heap cache size tier when available.
-            if (threadOptions != null && state.HeapCache != null)
-            {
-                threadOptions = ThreadAnalysisOptions.AdaptForSize(threadOptions, state.HeapCache.SizeTier);
-            }
+        // Apply adaptive preset tuning based on the prebuilt heap cache size tier when available.
+        if (threadOptions != null && state.HeapCache != null)
+        {
+            threadOptions = ThreadAnalysisOptions.AdaptForSize(threadOptions, state.HeapCache.SizeTier);
+        }
 
-            return new RuntimeAnalysisContext
+        return new RuntimeAnalysisContext
         {
             Runtime = state.LoadContext!.Runtime,
             Heap = state.LoadContext.Heap,
             Cache = state.HeapCache!,
             RuntimeFacade = new RuntimeFacade(state.LoadContext.Runtime, state.LoadContext.Heap),
             Diagnostics = resolved.Diagnostics,
+            ExecutionPolicy = resolved.ExecutionPolicy,
             Options = new Dictionary<Type, object?>
             {
-                [typeof(RetentionOptions)]         = resolved.MemoryLeak,
-                [typeof(ReferenceChainOptions)]     = resolved.ReferenceChain,
-                [typeof(EventLeakOptions)]          = resolved.EventLeak,
-                [typeof(DiagnosticsOptions)]        = resolved.Diagnostics,
-                [typeof(CrashAnalysisOptions)]      = resolved.Crash,
+                [typeof(RetentionOptions)] = resolved.MemoryLeak,
+                [typeof(ReferenceChainOptions)] = resolved.ReferenceChain,
+                [typeof(EventLeakOptions)] = resolved.EventLeak,
+                [typeof(DiagnosticsOptions)] = resolved.Diagnostics,
+                [typeof(ExecutionPolicy)] = resolved.ExecutionPolicy,
+                [typeof(CrashAnalysisOptions)] = resolved.Crash,
                 [typeof(AsyncTaskAnalysisOptions)] = resolved.AsyncTaskAnalysis,
                 [typeof(AsyncStateMachineAnalysisOptions)] = resolved.AsyncStateMachineAnalysis,
                 [typeof(ArrayAnalysisOptions)] = resolved.ArrayAnalysis,
                 [typeof(BoxingAnalysisOptions)] = resolved.BoxingAnalysis,
                 [typeof(CollectionAnalysisOptions)] = resolved.Collection,
-                [typeof(StringAnalysisOptions)]     = resolved.StringAnalysis,
-                [typeof(SegmentAnalysisOptions)]    = resolved.SegmentAnalysis,
+                [typeof(StringAnalysisOptions)] = resolved.StringAnalysis,
+                [typeof(SegmentAnalysisOptions)] = resolved.SegmentAnalysis,
                 [typeof(AppDomainAnalysisOptions)] = resolved.AppDomainAnalysis,
                 [typeof(AllocationPatternAnalysisOptions)] = resolved.AllocationPatternAnalysis,
                 [typeof(ThreadStackClusterAnalysisOptions)] = resolved.ThreadStackClusterAnalysis,

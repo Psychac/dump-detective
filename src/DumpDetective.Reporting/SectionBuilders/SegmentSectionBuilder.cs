@@ -23,12 +23,12 @@ internal sealed class SegmentSectionBuilder : SectionBuilderBase, IAnalyzerSecti
 
         blocks.Add(H("SEGMENT SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total segments",  $"{d.TotalSegments:N0}",                             d.TotalSegments));
-        blocks.Add(M("Total committed", FormatHelper.FormatBytes(d.TotalCommittedBytes),      (double)d.TotalCommittedBytes));
+        blocks.Add(M("Total segments", $"{d.TotalSegments:N0}", d.TotalSegments));
+        blocks.Add(M("Total committed", FormatHelper.FormatBytes(d.TotalCommittedBytes), (double)d.TotalCommittedBytes));
         blocks.Add(Blank());
-        blocks.Add(M("SOH segments",    $"{d.SohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.SohBytes)})",                        d.SohSegmentCount));
-        blocks.Add(M("LOH segments",    $"{d.LohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.LohBytes)}, {d.LohPercent:F1}%)",     d.LohSegmentCount));
-        blocks.Add(M("POH segments",    $"{d.PohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.PohBytes)}, {d.PohPercent:F1}%)",     d.PohSegmentCount));
+        blocks.Add(M("SOH segments", $"{d.SohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.SohBytes)})", d.SohSegmentCount));
+        blocks.Add(M("LOH segments", $"{d.LohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.LohBytes)}, {d.LohPercent:F1}%)", d.LohSegmentCount));
+        blocks.Add(M("POH segments", $"{d.PohSegmentCount:N0}  ({FormatHelper.FormatBytes(d.PohBytes)}, {d.PohPercent:F1}%)", d.PohSegmentCount));
         if (d.FrozenSegmentCount > 0)
             blocks.Add(M("Frozen segments", $"{d.FrozenSegmentCount:N0}  ({FormatHelper.FormatBytes(d.FrozenBytes)})", d.FrozenSegmentCount));
 

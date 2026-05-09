@@ -26,18 +26,18 @@ namespace DumpDetective.Analysis.Analyzers
         // ClrHandleKind enum values (Microsoft.Diagnostics.Runtime):
         //   WeakShort = 0, WeakLong = 1, Strong = 2, Pinned = 3,
         //   RefCounted = 5, Dependent = 6, AsyncPinned = 7, SizedRef = 8, WeakWinRT = 9
-        private const byte KindWeakShort  = 0;
-        private const byte KindWeakLong   = 1;
-        private const byte KindDependent  = 6;
-        private const byte KindWeakWinRT  = 9;
+        private const byte KindWeakShort = 0;
+        private const byte KindWeakLong = 1;
+        private const byte KindDependent = 6;
+        private const byte KindWeakWinRT = 9;
 
-        private const string WeakRefGenericName   = "System.WeakReference`1";
+        private const string WeakRefGenericName = "System.WeakReference`1";
         private const string WeakRefNonGenericName = "System.WeakReference";
 
         // HandleSnapshot.bin record size: Address(8) | MT(8) | Kind(1) | Pad(3) = 20 bytes
         private const int RecordSize = 20;
 
-        public string Name     => "Weak Reference Analysis";
+        public string Name => "Weak Reference Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -69,8 +69,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             int totalWeakHandles = 0;
             int aliveWeakTargets = 0;
-            int deadWeakTargets  = 0;
-            bool scanCapped      = false;
+            int deadWeakTargets = 0;
+            bool scanCapped = false;
 
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -194,9 +194,9 @@ namespace DumpDetective.Analysis.Analyzers
             // ── Phase B: WeakReference<T> object analysis ─────────────────────
             progress?.Report(new(0, "scanning WeakReference objects"));
 
-            int  weakRefObjCount = 0;
+            int weakRefObjCount = 0;
             ulong weakRefObjBytes = 0;
-            int  staleWrapperCount = 0;
+            int staleWrapperCount = 0;
             var staleHolderTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
 
             // Find WeakReference MT candidates from TypeAggregates
@@ -213,7 +213,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (name is null) continue;
 
                     // Match "System.WeakReference`1[...]" or "System.WeakReference"
-                    bool isGenericWR    = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
+                    bool isGenericWR = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
                     bool isNonGenericWR = string.Equals(name, WeakRefNonGenericName, StringComparison.Ordinal);
 
                     if (isGenericWR || isNonGenericWR)
@@ -345,21 +345,21 @@ namespace DumpDetective.Analysis.Analyzers
                 : (double)deadWeakTargets / totalWeakHandles;
 
             var topTargetTypes = BuildTopEntries(targetTypeHits, options.TopTypeLimit);
-            var topStaleTypes  = BuildTopEntries(staleHolderTypeHits, options.TopTypeLimit);
+            var topStaleTypes = BuildTopEntries(staleHolderTypeHits, options.TopTypeLimit);
 
             return new WeakReferenceDomainResult(
-                TotalWeakHandles:               totalWeakHandles,
-                AliveWeakTargets:               aliveWeakTargets,
-                DeadWeakTargets:                deadWeakTargets,
-                DeadTargetRatio:                deadRatio,
-                WeakReferenceObjectCount:       weakRefObjCount,
-                WeakReferenceObjectBytes:       weakRefObjBytes,
-                StaleWrapperCount:              staleWrapperCount,
-                TopWeakTargetTypes:             topTargetTypes,
-                TopStaleWrapperHolderTypes:     topStaleTypes,
-                DependentHandleDeadKeyCount:    dependentHandleDeadKeyCount,
-                ScanCapped:                     scanCapped,
-                RawExports:                     rawExports);
+                TotalWeakHandles: totalWeakHandles,
+                AliveWeakTargets: aliveWeakTargets,
+                DeadWeakTargets: deadWeakTargets,
+                DeadTargetRatio: deadRatio,
+                WeakReferenceObjectCount: weakRefObjCount,
+                WeakReferenceObjectBytes: weakRefObjBytes,
+                StaleWrapperCount: staleWrapperCount,
+                TopWeakTargetTypes: topTargetTypes,
+                TopStaleWrapperHolderTypes: topStaleTypes,
+                DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
+                ScanCapped: scanCapped,
+                RawExports: rawExports);
         }
 
         // ── File reader helpers ───────────────────────────────────────────────
@@ -467,7 +467,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             return list;
         }
-        
+
         public void Dispose() { }
     }
 }

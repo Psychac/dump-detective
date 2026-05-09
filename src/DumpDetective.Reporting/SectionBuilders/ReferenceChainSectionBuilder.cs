@@ -22,9 +22,9 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
 
         blocks.Add(H("REFERENCE CHAIN ANALYSIS"));
         blocks.Add(Divider());
-        blocks.Add(M("Analyzed Samples",   $"{d.AnalyzedSamples:N0}", d.AnalyzedSamples));
-        blocks.Add(M("Retained Samples",   $"{d.RetainedSamples:N0}", d.RetainedSamples));
-        blocks.Add(M("Retained Percentage",$"{d.RetainedPercent:F1}%", d.RetainedPercent));
+        blocks.Add(M("Analyzed Samples", $"{d.AnalyzedSamples:N0}", d.AnalyzedSamples));
+        blocks.Add(M("Retained Samples", $"{d.RetainedSamples:N0}", d.RetainedSamples));
+        blocks.Add(M("Retained Percentage", $"{d.RetainedPercent:F1}%", d.RetainedPercent));
 
         var traces = d.TopTypeSampleTraces ?? [];
         if (traces.Count > 0)
@@ -44,12 +44,12 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
                         : "No GC root (may be eligible for collection)";
 
                 blocks.Add(CollapseBegin($"[{i + 1}] {trace.TypeName} — {trace.Count:N0} objects, {FormatHelper.FormatBytes(trace.TotalSizeBytes)}"));
-                blocks.Add(M("Count",  $"{trace.Count:N0}",                        trace.Count,   indent: 1));
+                blocks.Add(M("Count", $"{trace.Count:N0}", trace.Count, indent: 1));
                 blocks.Add(M("Total Size", FormatHelper.FormatBytes(trace.TotalSizeBytes), (double)trace.TotalSizeBytes, indent: 1));
                 if (trace.SampleAddress.HasValue)
                 {
                     blocks.Add(M("Sample Instance", $"0x{trace.SampleAddress.Value:X}", indent: 1));
-                    blocks.Add(M("Size",   FormatHelper.FormatBytes(trace.SampleObjectSize), (double)trace.SampleObjectSize, indent: 1));
+                    blocks.Add(M("Size", FormatHelper.FormatBytes(trace.SampleObjectSize), (double)trace.SampleObjectSize, indent: 1));
                     blocks.Add(M("Status", status, indent: 1));
                     if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
                         blocks.Add(new PathBlock("Root Path", trace.RootPath, 1));

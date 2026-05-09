@@ -10,8 +10,8 @@ internal sealed record AnalyzerMemoryStats(
     long ManagedHeapBefore,
     long ManagedHeapAfter)
 {
-    public long WorkingSetDelta   => WorkingSetAfter   - WorkingSetBefore;
-    public long ManagedHeapDelta  => ManagedHeapAfter  - ManagedHeapBefore;
+    public long WorkingSetDelta => WorkingSetAfter - WorkingSetBefore;
+    public long ManagedHeapDelta => ManagedHeapAfter - ManagedHeapBefore;
 }
 
 internal enum AnalyzerExecutionStatus

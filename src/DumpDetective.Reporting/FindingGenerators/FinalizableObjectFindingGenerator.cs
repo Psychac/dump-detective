@@ -6,10 +6,10 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
 {
-    private const int Gen2WarningThreshold  =  1_000;
+    private const int Gen2WarningThreshold = 1_000;
     private const int Gen2CriticalThreshold = 10_000;
-    private const ulong QueueRetainedWarningBytes   =  10_000_000UL;  // 10 MB
-    private const ulong QueueRetainedCriticalBytes  = 100_000_000UL;  // 100 MB
+    private const ulong QueueRetainedWarningBytes = 10_000_000UL;  // 10 MB
+    private const ulong QueueRetainedCriticalBytes = 100_000_000UL;  // 100 MB
 
     public string AnalyzerName => "Finalizable Object Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is FinalizableObjectDomainResult;
@@ -103,8 +103,8 @@ internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
     private static string FormatBytes(ulong bytes) => bytes switch
     {
         >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576     => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1_024         => $"{bytes / 1_024.0:F1} KB",
-        _                => $"{bytes} B"
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
     };
 }

@@ -9,18 +9,18 @@ internal static class GoldenReportFixtures
     {
         return fixtureName switch
         {
-            "BaselineSmall"  => BaselineSmall(),
+            "BaselineSmall" => BaselineSmall(),
             "DuplicateHeavy" => DuplicateHeavy(),
-            "LongNames"      => LongNames(),
-            "RichEvidence"   => RichEvidence(),
-            "MixedSeverity"  => MixedSeverity(),
+            "LongNames" => LongNames(),
+            "RichEvidence" => RichEvidence(),
+            "MixedSeverity" => MixedSeverity(),
             _ => throw new ArgumentOutOfRangeException(nameof(fixtureName), fixtureName, "Unknown golden fixture")
         };
     }
 
     private static AnalysisReportDocument BaselineSmall() => new()
     {
-        DumpPath       = "C:/fixtures/BaselineSmall.dmp",
+        DumpPath = "C:/fixtures/BaselineSmall.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         ElapsedSeconds = 12.3,
         Findings =
@@ -40,7 +40,7 @@ internal static class GoldenReportFixtures
 
     private static AnalysisReportDocument DuplicateHeavy() => new()
     {
-        DumpPath       = "C:/fixtures/DuplicateHeavy.dmp",
+        DumpPath = "C:/fixtures/DuplicateHeavy.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         ElapsedSeconds = 8.1,
         Findings =
@@ -60,7 +60,7 @@ internal static class GoldenReportFixtures
 
     private static AnalysisReportDocument LongNames() => new()
     {
-        DumpPath       = "C:/fixtures/LongNames.dmp",
+        DumpPath = "C:/fixtures/LongNames.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         ElapsedSeconds = 4.2,
         Findings =
@@ -80,7 +80,7 @@ internal static class GoldenReportFixtures
 
     private static AnalysisReportDocument RichEvidence() => new()
     {
-        DumpPath       = "C:/fixtures/RichEvidence.dmp",
+        DumpPath = "C:/fixtures/RichEvidence.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         ElapsedSeconds = 9.8,
         Findings =
@@ -100,7 +100,7 @@ internal static class GoldenReportFixtures
 
     private static AnalysisReportDocument MixedSeverity() => new()
     {
-        DumpPath       = "C:/fixtures/MixedSeverity.dmp",
+        DumpPath = "C:/fixtures/MixedSeverity.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         ElapsedSeconds = 6.6,
         Findings =

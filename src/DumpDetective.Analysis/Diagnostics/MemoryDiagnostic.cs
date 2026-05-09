@@ -23,19 +23,19 @@ namespace DumpDetective.Analysis.Diagnostics
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            
+
             long currentMemory = GC.GetTotalMemory(false);
             long deltaMemory = currentMemory - _baselineMemory;
-            
+
             var process = Process.GetCurrentProcess();
             long workingSet = process.WorkingSet64;
             long privateMemory = process.PrivateMemorySize64;
-            
+
             writer.WriteLine($"\nðŸ” MEMORY CHECKPOINT: {checkpointName}");
             writer.WriteLine($"   Managed Heap: {FormatHelper.FormatBytes((ulong)currentMemory)} (Î” {FormatHelper.FormatBytes((ulong)Math.Abs(deltaMemory))})");
             writer.WriteLine($"   Working Set: {FormatHelper.FormatBytes((ulong)workingSet)}");
             writer.WriteLine($"   Private Memory: {FormatHelper.FormatBytes((ulong)privateMemory)}");
-            
+
             Console.WriteLine($"[MEMORY] {checkpointName}: Working Set = {FormatHelper.FormatBytes((ulong)workingSet)}, Private = {FormatHelper.FormatBytes((ulong)privateMemory)}");
         }
 
@@ -44,9 +44,9 @@ namespace DumpDetective.Analysis.Diagnostics
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            
+
             var process = Process.GetCurrentProcess();
-            
+
             return new MemorySnapshot
             {
                 Label = label,

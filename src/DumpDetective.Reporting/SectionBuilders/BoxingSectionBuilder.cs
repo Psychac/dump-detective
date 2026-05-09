@@ -9,8 +9,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypesToShow    = 15;
-    private const int TopPaddingToShow  = 10;
+    private const int TopTypesToShow = 15;
+    private const int TopPaddingToShow = 10;
 
     public string AnalyzerName => "Boxing Analysis";
     public int SortOrder => 50; // §20 — after WeakReferenceSectionBuilder (49)
@@ -25,11 +25,11 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         // ── §20.1 Boxed Value Type Inventory ─────────────────────────────────
         blocks.Add(H("BOXED VALUE TYPE INVENTORY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total boxed objects",    $"{d.TotalBoxedObjects:N0}",               d.TotalBoxedObjects));
-        blocks.Add(M("Total boxed bytes",      FormatHelper.FormatBytes(d.TotalBoxedBytes), (double)d.TotalBoxedBytes));
-        blocks.Add(M("Boxed enum instances",   $"{d.BoxedEnumCount:N0}",                  d.BoxedEnumCount));
-        blocks.Add(M("Boxed enum bytes",       FormatHelper.FormatBytes(d.BoxedEnumBytes), (double)d.BoxedEnumBytes));
-        blocks.Add(M("Oversized value types",  $"{d.OversizedValueTypeCount:N0}",         d.OversizedValueTypeCount));
+        blocks.Add(M("Total boxed objects", $"{d.TotalBoxedObjects:N0}", d.TotalBoxedObjects));
+        blocks.Add(M("Total boxed bytes", FormatHelper.FormatBytes(d.TotalBoxedBytes), (double)d.TotalBoxedBytes));
+        blocks.Add(M("Boxed enum instances", $"{d.BoxedEnumCount:N0}", d.BoxedEnumCount));
+        blocks.Add(M("Boxed enum bytes", FormatHelper.FormatBytes(d.BoxedEnumBytes), (double)d.BoxedEnumBytes));
+        blocks.Add(M("Oversized value types", $"{d.OversizedValueTypeCount:N0}", d.OversizedValueTypeCount));
 
         if (d.TypeScanCapped)
             blocks.Add(T("⚠ Type scan was capped at 10 000 entries — totals may be underestimated."));

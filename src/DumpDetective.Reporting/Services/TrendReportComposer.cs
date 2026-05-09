@@ -60,14 +60,14 @@ internal sealed class TrendReportComposer(
 
         return new AnalysisReportDocument
         {
-            SchemaVersion       = baseDoc.SchemaVersion,
-            DumpPath            = baseDoc.DumpPath,
-            GeneratedAtUtc      = baseDoc.GeneratedAtUtc,
-            ElapsedSeconds      = baseDoc.ElapsedSeconds,
-            IsTrendReport       = true,
-            TrendDumpCount      = trendData.Snapshots.Count,
-            TrendDumpPaths      = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
-            IncidentContext     = currentIncidentContext is null
+            SchemaVersion = baseDoc.SchemaVersion,
+            DumpPath = baseDoc.DumpPath,
+            GeneratedAtUtc = baseDoc.GeneratedAtUtc,
+            ElapsedSeconds = baseDoc.ElapsedSeconds,
+            IsTrendReport = true,
+            TrendDumpCount = trendData.Snapshots.Count,
+            TrendDumpPaths = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
+            IncidentContext = currentIncidentContext is null
                 ? baseDoc.IncidentContext
                 : currentIncidentContext with
                 {
@@ -81,12 +81,12 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1)).ToList()
                 },
-            Findings            = baseDoc.Findings,
-            ExecutiveSummary    = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
+            Findings = baseDoc.Findings,
+            ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
-            Confidence          = baseDoc.Confidence,
-            DedupDiagnostics    = baseDoc.DedupDiagnostics,
-            AnalyzerSections    = analyzerSections
+            Confidence = baseDoc.Confidence,
+            DedupDiagnostics = baseDoc.DedupDiagnostics,
+            AnalyzerSections = analyzerSections
         };
     }
 
@@ -113,9 +113,9 @@ internal sealed class TrendReportComposer(
                 Category: "Comparison",
                 Severity: delta.Severity switch
                 {
-                    RegressionSeverity.Severe   => FindingSeverity.Critical,
+                    RegressionSeverity.Severe => FindingSeverity.Critical,
                     RegressionSeverity.Moderate => FindingSeverity.Warning,
-                    _                           => FindingSeverity.Info
+                    _ => FindingSeverity.Info
                 },
                 Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
@@ -180,7 +180,7 @@ internal sealed class TrendReportComposer(
 
         AnalysisReportDocument firstDoc = _serializer.Serialize(
             snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), TimeSpan.Zero, [], audience);
-        AnalysisReportDocument lastDoc  = _serializer.Serialize(
+        AnalysisReportDocument lastDoc = _serializer.Serialize(
             snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), TimeSpan.Zero, [], audience);
 
         if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
@@ -188,8 +188,8 @@ internal sealed class TrendReportComposer(
 
         return summary with
         {
-            LeakScoreDelta             = last.LeakLikelihoodScore   - first.LeakLikelihoodScore,
-            GcPressureScoreDelta       = last.GcPressureScore       - first.GcPressureScore,
+            LeakScoreDelta = last.LeakLikelihoodScore - first.LeakLikelihoodScore,
+            GcPressureScoreDelta = last.GcPressureScore - first.GcPressureScore,
             ThreadContentionScoreDelta = last.ThreadContentionScore - first.ThreadContentionScore,
         };
     }
@@ -298,7 +298,7 @@ internal sealed class TrendReportComposer(
         IReadOnlyList<AnalyzerMetricTimeline> timeline,
         IReadOnlyList<AnalysisSnapshot> snapshots)
     {
-        int totalRegressions  = overall.Sum(r => r.Regressions.Count);
+        int totalRegressions = overall.Sum(r => r.Regressions.Count);
         int totalImprovements = overall.Sum(r => r.Improvements.Count);
 
         var blocks = new List<SectionBlock>();
@@ -306,12 +306,12 @@ internal sealed class TrendReportComposer(
         blocks.Add(new HeadingBlock("TREND COMPARISON"));
         blocks.Add(new HeadingBlock("LIFECYCLE SUMMARY:"));
         blocks.Add(new DividerBlock());
-        blocks.Add(new MetricBlock("Dumps analyzed",       snapshots.Count.ToString()));
-        blocks.Add(new MetricBlock("New findings",         lifecycle.NewFindings.Count.ToString()));
-        blocks.Add(new MetricBlock("Persistent findings",  lifecycle.PersistentFindings.Count.ToString()));
-        blocks.Add(new MetricBlock("Resolved findings",    lifecycle.ResolvedFindings.Count.ToString()));
-        blocks.Add(new MetricBlock("Metric regressions",   totalRegressions.ToString()));
-        blocks.Add(new MetricBlock("Metric improvements",  totalImprovements.ToString()));
+        blocks.Add(new MetricBlock("Dumps analyzed", snapshots.Count.ToString()));
+        blocks.Add(new MetricBlock("New findings", lifecycle.NewFindings.Count.ToString()));
+        blocks.Add(new MetricBlock("Persistent findings", lifecycle.PersistentFindings.Count.ToString()));
+        blocks.Add(new MetricBlock("Resolved findings", lifecycle.ResolvedFindings.Count.ToString()));
+        blocks.Add(new MetricBlock("Metric regressions", totalRegressions.ToString()));
+        blocks.Add(new MetricBlock("Metric improvements", totalImprovements.ToString()));
 
         if (timeline.Count > 0)
         {
@@ -335,8 +335,8 @@ internal sealed class TrendReportComposer(
                     if (point.Values.All(double.IsNaN)) continue;
 
                     double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
-                    double lastVal  = point.Values.Last(v => !double.IsNaN(v));
-                    double delta    = lastVal - firstVal;
+                    double lastVal = point.Values.Last(v => !double.IsNaN(v));
+                    double delta = lastVal - firstVal;
                     double? deltaPercent = Math.Abs(firstVal) > double.Epsilon
                         ? delta * 100.0 / firstVal
                         : null;
@@ -344,7 +344,7 @@ internal sealed class TrendReportComposer(
                     // compute severity inline from the direction/delta/percent
                     RegressionSeverity severity = RegressionSeverity.None;
                     bool isRegression = (point.Direction == MetricTrendDirection.HigherIsWorse && delta > 0)
-                                     || (point.Direction == MetricTrendDirection.LowerIsWorse  && delta < 0);
+                                     || (point.Direction == MetricTrendDirection.LowerIsWorse && delta < 0);
                     if (isRegression)
                     {
                         if (!deltaPercent.HasValue) severity = RegressionSeverity.Moderate;
@@ -355,7 +355,7 @@ internal sealed class TrendReportComposer(
                             {
                                 < 10.0 => RegressionSeverity.Minor,
                                 < 50.0 => RegressionSeverity.Moderate,
-                                _      => RegressionSeverity.Severe
+                                _ => RegressionSeverity.Severe
                             };
                         }
                     }
@@ -373,11 +373,11 @@ internal sealed class TrendReportComposer(
 
                     string status = (point.Direction, delta > 0, delta < 0) switch
                     {
-                        (MetricTrendDirection.HigherIsWorse, true, _)  => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
-                        (MetricTrendDirection.HigherIsWorse, _, true)  => "\u2705 Improvement",
-                        (MetricTrendDirection.LowerIsWorse,  _, true)  => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
-                        (MetricTrendDirection.LowerIsWorse,  true, _)  => "\u2705 Improvement",
-                        _                                               => "\u2014 Stable"
+                        (MetricTrendDirection.HigherIsWorse, true, _) => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
+                        (MetricTrendDirection.HigherIsWorse, _, true) => "\u2705 Improvement",
+                        (MetricTrendDirection.LowerIsWorse, _, true) => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
+                        (MetricTrendDirection.LowerIsWorse, true, _) => "\u2705 Improvement",
+                        _ => "\u2014 Stable"
                     };
 
                     // Determine snapshot index with largest adjacent change to link to the likely originating dump
@@ -462,7 +462,7 @@ internal sealed class TrendReportComposer(
             foreach (var (analyzerName, signal) in allLeakSignals)
             {
                 string baseline = FormatHelper.FormatMetricValue(signal.BaselineBytes, "bytes");
-                string current  = FormatHelper.FormatMetricValue(signal.CurrentBytes, "bytes");
+                string current = FormatHelper.FormatMetricValue(signal.CurrentBytes, "bytes");
                 blocks.Add(new ListItemBlock(
                     $"[{signal.Source}] {signal.TypeName}: {baseline} \u2192 {current}"));
             }

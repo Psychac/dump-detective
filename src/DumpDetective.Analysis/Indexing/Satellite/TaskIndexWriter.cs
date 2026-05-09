@@ -17,8 +17,8 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal sealed class TaskIndexWriter : IDisposable
 {
     // File magic: "TKIX" = Task Index
-    private const int Magic      = 0x58494B54;
-    private const int Version    = 1;
+    private const int Magic = 0x58494B54;
+    private const int Version = 1;
     private const int RecordSize = 20; // 8 + 8 + 4
 
     private readonly FileStream _stream;
@@ -39,9 +39,9 @@ internal sealed class TaskIndexWriter : IDisposable
     public void Add(ulong address, ulong methodTable, int stateFlags)
     {
         var span = _buf.AsSpan(_offset, RecordSize);
-        BinaryPrimitives.WriteUInt64LittleEndian(span,       address);
-        BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  methodTable);
-        BinaryPrimitives.WriteInt32LittleEndian(span[16..],  stateFlags);
+        BinaryPrimitives.WriteUInt64LittleEndian(span, address);
+        BinaryPrimitives.WriteUInt64LittleEndian(span[8..], methodTable);
+        BinaryPrimitives.WriteInt32LittleEndian(span[16..], stateFlags);
 
         _offset += RecordSize;
         _recordCount++;

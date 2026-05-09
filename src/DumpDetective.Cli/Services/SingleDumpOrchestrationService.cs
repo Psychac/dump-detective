@@ -58,9 +58,9 @@ internal sealed class SingleDumpOrchestrationService(
 
         if (resolved.DiagnosticMode)
         {
-            int success  = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success);
-            int failed   = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
-            int skipped  = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped);
+            int success = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success);
+            int failed = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
+            int skipped = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped);
             int findings = state.Runs.Sum(r => r.FindingCount);
             ConsoleUx.RunStatusSummary(success, failed, skipped, findings);
             PrintDiagnosticsSummary(state.Runs);
@@ -126,8 +126,8 @@ internal sealed class SingleDumpOrchestrationService(
             ? stageStats[0].Stats.WorkingSetBefore
             : withStats.Count > 0 ? withStats[0].MemoryStats!.WorkingSetBefore : 0;
 
-        long peakFromStages    = stageStats.Count > 0    ? stageStats.Max(s => s.Stats.WorkingSetAfter)    : 0;
-        long peakFromAnalyzers = withStats.Count > 0     ? withStats.Max(r => r.MemoryStats!.WorkingSetAfter) : 0;
+        long peakFromStages = stageStats.Count > 0 ? stageStats.Max(s => s.Stats.WorkingSetAfter) : 0;
+        long peakFromAnalyzers = withStats.Count > 0 ? withStats.Max(r => r.MemoryStats!.WorkingSetAfter) : 0;
         long peak = Math.Max(peakFromStages, peakFromAnalyzers);
 
         if (peak > 0)

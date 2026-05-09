@@ -11,9 +11,9 @@ internal static class SegmentKindMapper
     public static HeapSegmentKind Map(ClrSegment segment)
     {
         string k = segment.Kind.ToString();
-        if (k.Contains("Large",   StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.LargeObjectHeap;
-        if (k.Contains("Pinned",  StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.PinnedObjectHeap;
-        if (k.Contains("Frozen",  StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.Frozen;
+        if (k.Contains("Large", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.LargeObjectHeap;
+        if (k.Contains("Pinned", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.PinnedObjectHeap;
+        if (k.Contains("Frozen", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.Frozen;
         return HeapSegmentKind.SmallObjectHeap;
     }
 

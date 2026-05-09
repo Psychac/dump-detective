@@ -220,7 +220,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (!IsLohSegment(segment))
                     continue;
-                ulong addr  = GetSegmentAddress(segment);
+                ulong addr = GetSegmentAddress(segment);
                 ulong bytes = GetSegmentTotalBytes(segment);
                 if (addr != 0)
                     segmentTotalBytes[addr] = bytes;
@@ -232,7 +232,7 @@ namespace DumpDetective.Analysis.Analyzers
             // Step 2: Read LohFreeBlockIndex.bin.
             string lohFreeBlockPath = Path.Combine(indexDir, DumpIndexPaths.LohFreeBlockIndexFile);
             var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, int Count)>();
-            var allFreeSizes  = new List<ulong>(capacity: 256);
+            var allFreeSizes = new List<ulong>(capacity: 256);
             if (File.Exists(lohFreeBlockPath))
             {
                 progress?.Report(new(0, "reading LohFreeBlockIndex.bin", null, TimeSpan.Zero));
@@ -241,23 +241,23 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Step 3: Compute per-segment and global stats.
             ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
-            int   totalFreeBlocks = 0;
-            var   segStats = new List<(ulong Address, double FragPct, ulong FreeBytes, ulong LargestFree)>(segmentTotalBytes.Count);
+            int totalFreeBlocks = 0;
+            var segStats = new List<(ulong Address, double FragPct, ulong FreeBytes, ulong LargestFree)>(segmentTotalBytes.Count);
 
             foreach ((ulong addr, ulong totalBytes) in segmentTotalBytes)
             {
                 ulong segFree = 0, segLargest = 0;
-                int   segFreeCount = 0;
+                int segFreeCount = 0;
                 if (freeBySegment.TryGetValue(addr, out var fb))
                 {
-                    segFree     = fb.TotalFree;
-                    segLargest  = fb.Largest;
+                    segFree = fb.TotalFree;
+                    segLargest = fb.Largest;
                     segFreeCount = fb.Count;
                 }
-                ulong  segUsed  = totalBytes > segFree ? totalBytes - segFree : 0;
-                double fragPct  = totalBytes == 0 ? 0 : segFree * 100.0 / totalBytes;
+                ulong segUsed = totalBytes > segFree ? totalBytes - segFree : 0;
+                double fragPct = totalBytes == 0 ? 0 : segFree * 100.0 / totalBytes;
 
-                totalAllBytes  += totalBytes;
+                totalAllBytes += totalBytes;
                 totalFreeBytes += segFree;
                 totalUsedBytes += segUsed;
                 totalFreeBlocks += segFreeCount;
@@ -330,10 +330,10 @@ namespace DumpDetective.Analysis.Analyzers
                     int records = bytesRead / RecordSize;
                     for (int i = 0; i < records; i++)
                     {
-                        int   off     = i * RecordSize;
+                        int off = i * RecordSize;
                         ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
                         // offset field at off+8 is unused for aggregation
-                        ulong size    = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 16));
+                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 16));
 
                         allSizes.Add(size);
                         if (bySegment.TryGetValue(segAddr, out var ex))
@@ -363,7 +363,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return [];
 
             int cap = (int)Math.Min(header.RecordCount, topLargeObjectsCount);
-            var result     = new List<LargeObjectSnapshot>(cap);
+            var result = new List<LargeObjectSnapshot>(cap);
             var typeByAddr = new Dictionary<ulong, string>(capacity: cap);
 
             Span<byte> rec = stackalloc byte[RecordSize];
@@ -375,7 +375,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
                 // MT field (rec[8..]) unused — resolve via heap
-                ulong size    = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
 
                 ClrObject obj = heap.GetObject(address);
                 if (!obj.IsValid) continue;
@@ -449,7 +449,7 @@ namespace DumpDetective.Analysis.Analyzers
                 FragmentationPercent = fragmentationPercent;
             }
         }
-        
+
         public void Dispose() { }
     }
 }

@@ -9,9 +9,9 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string AnalyzerName  => "String Analysis";
-    public string DisplayTitle  => "String & Duplicate Analysis";
-    public int    SortOrder     => 26;
+    public string AnalyzerName => "String Analysis";
+    public string DisplayTitle => "String & Duplicate Analysis";
+    public int SortOrder => 26;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is StringDomainResult;
 
@@ -23,27 +23,27 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         // ── Summary ──────────────────────────────────────────────────────────
         blocks.Add(H("SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Strings",           $"{d.TotalStrings:N0}",                                  d.TotalStrings));
-        blocks.Add(M("Total String Memory",     FormatHelper.FormatBytes(d.TotalStringMemoryBytes),       (double)d.TotalStringMemoryBytes));
-        blocks.Add(M("% of Managed Heap",       $"{d.PctOfManagedHeap:F2}%",                             d.PctOfManagedHeap));
-        blocks.Add(M("Unique Strings",          $"{d.UniqueStrings:N0}",                                 d.UniqueStrings));
+        blocks.Add(M("Total Strings", $"{d.TotalStrings:N0}", d.TotalStrings));
+        blocks.Add(M("Total String Memory", FormatHelper.FormatBytes(d.TotalStringMemoryBytes), (double)d.TotalStringMemoryBytes));
+        blocks.Add(M("% of Managed Heap", $"{d.PctOfManagedHeap:F2}%", d.PctOfManagedHeap));
+        blocks.Add(M("Unique Strings", $"{d.UniqueStrings:N0}", d.UniqueStrings));
         // New sampling/dedup metadata
-        blocks.Add(M("Sampling Mode",           d.SamplingMode ?? "(unknown)",                           null));
-        blocks.Add(M("Dedup Mode",              d.DeduplicationMode ?? "(unknown)",                     null));
-        blocks.Add(M("Dedup Threshold",         $"{d.DeduplicationThreshold:N0}",                        d.DeduplicationThreshold));
-        blocks.Add(M("Max To Dedup",            $"{d.MaxStringsToDedup:N0}",                            d.MaxStringsToDedup));
+        blocks.Add(M("Sampling Mode", d.SamplingMode ?? "(unknown)", null));
+        blocks.Add(M("Dedup Mode", d.DeduplicationMode ?? "(unknown)", null));
+        blocks.Add(M("Dedup Threshold", $"{d.DeduplicationThreshold:N0}", d.DeduplicationThreshold));
+        blocks.Add(M("Max To Dedup", $"{d.MaxStringsToDedup:N0}", d.MaxStringsToDedup));
         string dedupLine = d.DeduplicationSkipped
             ? "Skipped"
             : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
-        blocks.Add(M("Deduplication",           dedupLine, d.DeduplicationSkipped ? 0 : d.StringsSampled));
-        blocks.Add(M("Dedup Source",            d.DedupSource ?? "(none)",                              null));
-        blocks.Add(M("Analysis Duration",       d.AnalysisDurationMs > 0 ? $"{d.AnalysisDurationMs} ms" : "(n/a)",  (double)d.AnalysisDurationMs));
+        blocks.Add(M("Deduplication", dedupLine, d.DeduplicationSkipped ? 0 : d.StringsSampled));
+        blocks.Add(M("Dedup Source", d.DedupSource ?? "(none)", null));
+        blocks.Add(M("Analysis Duration", d.AnalysisDurationMs > 0 ? $"{d.AnalysisDurationMs} ms" : "(n/a)", (double)d.AnalysisDurationMs));
         if (!string.IsNullOrEmpty(d.DedupSkipReason)) blocks.Add(M("Dedup Skip Reason", d.DedupSkipReason, null));
-        blocks.Add(M("Duplication Ratio",       $"{d.DuplicationRatio:P1}",                              d.DuplicationRatio));
-        blocks.Add(M("Duplicate Waste",         FormatHelper.FormatBytes(d.DuplicateWastedBytes),         (double)d.DuplicateWastedBytes));
-        blocks.Add(M("LOH String Bytes",        FormatHelper.FormatBytes(d.LohStringBytes),               (double)d.LohStringBytes));
-        blocks.Add(M("Gen2 String Count",       $"{d.Gen2StringCount:N0}",                               d.Gen2StringCount));
-        blocks.Add(M("Interned Strings (FOH)",  $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount));
+        blocks.Add(M("Duplication Ratio", $"{d.DuplicationRatio:P1}", d.DuplicationRatio));
+        blocks.Add(M("Duplicate Waste", FormatHelper.FormatBytes(d.DuplicateWastedBytes), (double)d.DuplicateWastedBytes));
+        blocks.Add(M("LOH String Bytes", FormatHelper.FormatBytes(d.LohStringBytes), (double)d.LohStringBytes));
+        blocks.Add(M("Gen2 String Count", $"{d.Gen2StringCount:N0}", d.Gen2StringCount));
+        blocks.Add(M("Interned Strings (FOH)", $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount));
 
         // ── Distribution summary (percentiles + histogram) ─────────────────────────
         if (d.Distribution is not null && d.Distribution.SampleCount > 0)
@@ -53,7 +53,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             blocks.Add(Divider());
             blocks.Add(M("Samples", $"{d.Distribution.SampleCount:N0}", d.Distribution.SampleCount));
 
-            var p = d.Distribution.Percentiles ?? new System.Collections.Generic.Dictionary<string,double>();
+            var p = d.Distribution.Percentiles ?? new System.Collections.Generic.Dictionary<string, double>();
             if (p.Count > 0)
             {
                 blocks.Add(M("p50 (median)", $"{p.GetValueOrDefault("p50", 0):F0} chars", (double)p.GetValueOrDefault("p50", 0)));
@@ -63,7 +63,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             }
 
             // Length buckets table
-            var lb = d.Distribution.LengthBuckets ?? new System.Collections.Generic.Dictionary<string,int>();
+            var lb = d.Distribution.LengthBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
             if (lb.Count > 0)
             {
                 blocks.Add(Blank());
@@ -77,7 +77,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             }
 
             // Frequency buckets (how many patterns appear X times)
-            var fb = d.Distribution.FrequencyBuckets ?? new System.Collections.Generic.Dictionary<string,int>();
+            var fb = d.Distribution.FrequencyBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
             if (fb.Count > 0)
             {
                 blocks.Add(Blank());
@@ -120,7 +120,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(dup.SamplingSource ?? string.Empty),
                     Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by wasted bytes", ["Fingerprint","Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
+            blocks.Add(new TableBlock("Duplicates ranked by wasted bytes", ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
             blocks.Add(CollapseEnd());
         }
 
@@ -152,7 +152,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(dup.SamplingSource ?? string.Empty),
                     Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by count", ["Fingerprint","Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
+            blocks.Add(new TableBlock("Duplicates ranked by count", ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
             blocks.Add(CollapseEnd());
         }
 

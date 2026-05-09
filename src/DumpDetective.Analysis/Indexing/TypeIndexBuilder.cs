@@ -45,7 +45,7 @@ internal sealed class TypeIndexBuilder
                 case 0: aggregate.Gen0Count++; break;
                 case 1: aggregate.Gen1Count++; break;
                 case 2: aggregate.Gen2Count++; break;
-                // generation == -1 (unknown) or 3 (LOH fallback) — no per-gen increment
+                    // generation == -1 (unknown) or 3 (LOH fallback) — no per-gen increment
             }
         }
 
@@ -66,13 +66,13 @@ internal sealed class TypeIndexBuilder
             {
                 aggregate.SampleAddress = otherAgg.SampleAddress;
                 aggregate.ModuleId = otherAgg.ModuleId;
-                aggregate.Flags    = otherAgg.Flags;
+                aggregate.Flags = otherAgg.Flags;
             }
 
-            aggregate.Count     += otherAgg.Count;
+            aggregate.Count += otherAgg.Count;
             aggregate.TotalSize += otherAgg.TotalSize;
-            aggregate.LohCount  += otherAgg.LohCount;
-            aggregate.LohSize   += otherAgg.LohSize;
+            aggregate.LohCount += otherAgg.LohCount;
+            aggregate.LohSize += otherAgg.LohSize;
             aggregate.Gen0Count += otherAgg.Gen0Count;
             aggregate.Gen1Count += otherAgg.Gen1Count;
             aggregate.Gen2Count += otherAgg.Gen2Count;

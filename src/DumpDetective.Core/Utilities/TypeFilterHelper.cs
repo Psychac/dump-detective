@@ -1,6 +1,7 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Core.Utilities;
+
 internal static class TypeFilterHelper
 {
     private static readonly string[] SystemNamespaces =

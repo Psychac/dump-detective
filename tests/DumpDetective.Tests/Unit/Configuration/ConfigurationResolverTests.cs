@@ -298,14 +298,14 @@ public sealed class ConfigurationResolverTests
         }
     }
 
-        [Fact]
-        public void Resolve_ShouldApplyAnalyzerProfileThenFieldOverrides_ForMemoryLeak()
+    [Fact]
+    public void Resolve_ShouldApplyAnalyzerProfileThenFieldOverrides_ForMemoryLeak()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
         {
-                string tempDirectory = CreateTempDirectory();
-                try
-                {
-                        string configPath = Path.Combine(tempDirectory, "config.json");
-                        File.WriteAllText(configPath, """
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
                         {
                             "DumpPath": "C:/dumps/from-config.dmp",
                             "Profile": "Fast",
@@ -318,28 +318,28 @@ public sealed class ConfigurationResolverTests
                         }
                         """);
 
-                        AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-                        ConfigurationResolver resolver = new();
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
 
-                        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-                        resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(8);
-                        resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
-                }
-                finally
-                {
-                        Directory.Delete(tempDirectory, recursive: true);
-                }
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(8);
+            resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
         }
-
-        [Fact]
-        public void Resolve_ShouldUseGlobalProfile_WhenAnalyzerProfileMissing_ForReferenceChain()
+        finally
         {
-                string tempDirectory = CreateTempDirectory();
-                try
-                {
-                        string configPath = Path.Combine(tempDirectory, "config.json");
-                        File.WriteAllText(configPath, """
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldUseGlobalProfile_WhenAnalyzerProfileMissing_ForReferenceChain()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
                         {
                             "DumpPath": "C:/dumps/from-config.dmp",
                             "Profile": "Fast",
@@ -351,28 +351,28 @@ public sealed class ConfigurationResolverTests
                         }
                         """);
 
-                        AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-                        ConfigurationResolver resolver = new();
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
 
-                        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-                        resolved.ReferenceChain.SearchMode.Should().Be(DumpDetective.Core.Options.ReferenceChainSearchMode.Fast);
-                        resolved.ReferenceChain.TopCount.Should().Be(9);
-                }
-                finally
-                {
-                        Directory.Delete(tempDirectory, recursive: true);
-                }
+            resolved.ReferenceChain.SearchMode.Should().Be(DumpDetective.Core.Options.ReferenceChainSearchMode.Fast);
+            resolved.ReferenceChain.TopCount.Should().Be(9);
         }
-
-        [Fact]
-        public void Resolve_ShouldApplyAnalyzerProfile_ForEventLeak()
+        finally
         {
-                string tempDirectory = CreateTempDirectory();
-                try
-                {
-                        string configPath = Path.Combine(tempDirectory, "config.json");
-                        File.WriteAllText(configPath, """
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldApplyAnalyzerProfile_ForEventLeak()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
                         {
                             "DumpPath": "C:/dumps/from-config.dmp",
                             "Profile": "Fast",
@@ -384,19 +384,19 @@ public sealed class ConfigurationResolverTests
                         }
                         """);
 
-                        AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-                        ConfigurationResolver resolver = new();
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
 
-                        ResolvedExecutionOptions resolved = resolver.Resolve(request);
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-                        resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
-                        resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
-                }
-                finally
-                {
-                        Directory.Delete(tempDirectory, recursive: true);
-                }
+            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
         }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
 
     private static string CreateTempDirectory()
     {

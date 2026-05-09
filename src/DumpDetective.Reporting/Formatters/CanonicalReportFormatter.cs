@@ -22,7 +22,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
 
     public string Render(AnalysisReportDocument doc)
     {
-        string title    = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string title = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
         string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
 
         var sb = new StringBuilder();
@@ -82,9 +82,9 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine("EXECUTIVE SUMMARY");
             sb.AppendLine(StringConstants.Equals80);
             sb.AppendLine($"- Total Managed Bytes: {FormatHelper.FormatBytes((ulong)ex.TotalManagedBytes)}");
-            AppendScore(sb, "Leak Likelihood Score",   ex.LeakLikelihoodScore,   ex.LeakScoreDelta,
+            AppendScore(sb, "Leak Likelihood Score", ex.LeakLikelihoodScore, ex.LeakScoreDelta,
                 ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "Leak"));
-            AppendScore(sb, "GC Pressure Score",       ex.GcPressureScore,       ex.GcPressureScoreDelta,
+            AppendScore(sb, "GC Pressure Score", ex.GcPressureScore, ex.GcPressureScoreDelta,
                 ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "GcPressure"));
             AppendScore(sb, "Thread Contention Score", ex.ThreadContentionScore, ex.ThreadContentionScoreDelta,
                 ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "ThreadContention"));
@@ -283,7 +283,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
 
     public string Render(AnalysisReportDocument doc)
     {
-        string title    = doc.IsTrendReport ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
+        string title = doc.IsTrendReport ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
         string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
 
         var sb = new StringBuilder();
@@ -553,17 +553,17 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         static string SevCss(string s) => s.ToLowerInvariant() switch
         {
             "critical" => "severity-critical",
-            "warning"  => "severity-warning",
-            _          => "severity-info"
+            "warning" => "severity-warning",
+            _ => "severity-info"
         };
         static string WrapAddr(string html) =>
             Regex.Replace(html, @"0x[0-9A-Fa-f]{4,}",
                 m => $"<span class=\"addr\">{m.Value}<button class=\"copy-btn\" type=\"button\" aria-label=\"Copy {m.Value}\" data-copy=\"{m.Value}\" title=\"Copy to clipboard\">&#x2398;</button></span>",
                 RegexOptions.CultureInvariant);
 
-        string title    = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string title = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
         string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
-        string exportFn  = Enc(System.IO.Path.GetFileNameWithoutExtension(doc.DumpPath));
+        string exportFn = Enc(System.IO.Path.GetFileNameWithoutExtension(doc.DumpPath));
 
         var sb = new StringBuilder();
 
@@ -596,7 +596,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             if (doc.TrendDumpPaths is { Count: > 0 })
             {
                 string dumpList = string.Join("<br/>", doc.TrendDumpPaths.Select(p => $"&bull; {Enc(p)}"));
-                    sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
+                sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
             }
         }
 
@@ -710,11 +710,11 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         for (int i = 0; i < doc.Findings.Count; i++)
         {
             FindingRecord f = doc.Findings[i];
-            string sevCss  = SevCss(f.Severity);
+            string sevCss = SevCss(f.Severity);
             string evSummary = f.EvidenceItems is { Count: > 0 } ? f.EvidenceItems[0] : f.Evidence;
             string summary = Enc(evSummary.Length > 200 ? evSummary[..200] : evSummary);
-                sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
-                sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)} <a class=\"permalink\" href=\"#finding-{i}\" aria-label=\"Permalink\">🔗</a></h2><span class=\"category\">{Enc(f.Category)}</span></div>");
+            sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
+            sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)} <a class=\"permalink\" href=\"#finding-{i}\" aria-label=\"Permalink\">🔗</a></h2><span class=\"category\">{Enc(f.Category)}</span></div>");
 
             if (f.EvidenceItems is { Count: > 1 })
             {
@@ -867,23 +867,23 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine(".filter-btn:hover{background:#f1f5f9;border-color:#94a3b8} .filter-btn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8} ");
         sb.AppendLine(".filter-btn.filter-critical.active{background:#b91c1c;border-color:#b91c1c} .filter-btn.filter-warning.active{background:#92400e;border-color:#b45309} ");
         sb.AppendLine(".filter-search{flex:1;min-width:180px;max-width:360px;padding:5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#1f2937;background:#fff;} ");
-        sb.AppendLine(".toc{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;}" );
-        sb.AppendLine(".toc-title{font-weight:700;margin-bottom:8px;color:#111827;}" );
-        sb.AppendLine(".toc-section{margin:6px 0;padding-left:8px;}" );
-        sb.AppendLine(".toc-section ol{margin:6px 0 0 18px;padding:0;}" );
-        sb.AppendLine(".permalink{margin-left:8px;font-size:0.9em;color:#6b7280;text-decoration:none;}" );
-        sb.AppendLine(".permalink:hover{color:#111827;}" );
-        sb.AppendLine(".toc a.active{font-weight:700;color:#111827;}" );
-        sb.AppendLine(".filter-count{font-size:12px;color:#6b7280;white-space:nowrap;padding:0 4px;}" );
-        sb.AppendLine("thead th.sortable{cursor:pointer;user-select:none;} thead th.sortable:hover{background:#e9ebef;}" );
-        sb.AppendLine("thead th.sortable::after{content:' \u21c5';font-size:11px;opacity:0.35;margin-left:3px;}" );
-        sb.AppendLine("thead th.sortable[aria-sort=\"ascending\"]::after{content:' \u2191';opacity:1;} thead th.sortable[aria-sort=\"descending\"]::after{content:' \u2193';opacity:1;}" );
-        sb.AppendLine(".action-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}" );
-        sb.AppendLine(".action-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;}" );
-        sb.AppendLine(".action-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#1e293b;}" );
-        sb.AppendLine("@media print{.skip-link,.action-bar,.filter-bar,.copy-btn{display:none!important;}body{background:#fff;}" );
-        sb.AppendLine(".header-card,.section-card,.analyzer-section{box-shadow:none!important;border:1px solid #d1d5db!important;page-break-inside:avoid;}" );
-        sb.AppendLine(".analyzer-section>details{display:block!important;} .detail-block{border:1px solid #e2e8f0!important;} }" );
+        sb.AppendLine(".toc{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;}");
+        sb.AppendLine(".toc-title{font-weight:700;margin-bottom:8px;color:#111827;}");
+        sb.AppendLine(".toc-section{margin:6px 0;padding-left:8px;}");
+        sb.AppendLine(".toc-section ol{margin:6px 0 0 18px;padding:0;}");
+        sb.AppendLine(".permalink{margin-left:8px;font-size:0.9em;color:#6b7280;text-decoration:none;}");
+        sb.AppendLine(".permalink:hover{color:#111827;}");
+        sb.AppendLine(".toc a.active{font-weight:700;color:#111827;}");
+        sb.AppendLine(".filter-count{font-size:12px;color:#6b7280;white-space:nowrap;padding:0 4px;}");
+        sb.AppendLine("thead th.sortable{cursor:pointer;user-select:none;} thead th.sortable:hover{background:#e9ebef;}");
+        sb.AppendLine("thead th.sortable::after{content:' \u21c5';font-size:11px;opacity:0.35;margin-left:3px;}");
+        sb.AppendLine("thead th.sortable[aria-sort=\"ascending\"]::after{content:' \u2191';opacity:1;} thead th.sortable[aria-sort=\"descending\"]::after{content:' \u2193';opacity:1;}");
+        sb.AppendLine(".action-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}");
+        sb.AppendLine(".action-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;}");
+        sb.AppendLine(".action-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#1e293b;}");
+        sb.AppendLine("@media print{.skip-link,.action-bar,.filter-bar,.copy-btn{display:none!important;}body{background:#fff;}");
+        sb.AppendLine(".header-card,.section-card,.analyzer-section{box-shadow:none!important;border:1px solid #d1d5db!important;page-break-inside:avoid;}");
+        sb.AppendLine(".analyzer-section>details{display:block!important;} .detail-block{border:1px solid #e2e8f0!important;} }");
     }
 
     private static void AppendJs(StringBuilder sb, string exportFn)

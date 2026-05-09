@@ -39,7 +39,7 @@ public sealed class EventLeakOptions
     public int LifetimeMismatchProbeLimit { get; init; } = 50;
     // Minimum fraction (0.0–1.0) of probed Gen0/Gen1 subscribers to declare a mismatch
     public double LifetimeMismatchGen01Threshold { get; init; } = 0.5;
-    
+
     // Diagnostics: when true, the analyzer will emit timing counters for hotspots.
     public bool EnableDiagnostics { get; init; } = true;
 

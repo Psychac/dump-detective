@@ -51,8 +51,8 @@ public class FullPipelineBenchmark
 
         // Stage 1: load dump — identical to LoadDumpStage
         _dataTarget = DataTarget.LoadDump(_dumpPath);
-        _runtime    = _dataTarget.ClrVersions[0].CreateRuntime();
-        _heap       = _runtime.Heap;
+        _runtime = _dataTarget.ClrVersions[0].CreateRuntime();
+        _heap = _runtime.Heap;
 
         // Stage 2: build heap index — identical to BuildHeapIndexStage (Auto mode)
         _cache = new HeapAnalysisCache();
@@ -67,17 +67,17 @@ public class FullPipelineBenchmark
         var diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
         _context = new RuntimeAnalysisContext
         {
-            Runtime        = _runtime,
-            Heap           = _heap,
-            Cache          = _cache,
-            Diagnostics    = diagnostics,
+            Runtime = _runtime,
+            Heap = _heap,
+            Cache = _cache,
+            Diagnostics = diagnostics,
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
             Options = new Dictionary<Type, object?>
             {
-                [typeof(RetentionOptions)]         = new RetentionOptions(),
-                [typeof(ReferenceChainOptions)]     = new ReferenceChainOptions(),
-                [typeof(EventLeakOptions)]          = new EventLeakOptions(),
-                [typeof(DiagnosticsOptions)]        = diagnostics,
+                [typeof(RetentionOptions)] = new RetentionOptions(),
+                [typeof(ReferenceChainOptions)] = new ReferenceChainOptions(),
+                [typeof(EventLeakOptions)] = new EventLeakOptions(),
+                [typeof(DiagnosticsOptions)] = diagnostics,
                 [typeof(CollectionAnalysisOptions)] = CollectionAnalysisOptions.Default,
             }
         };

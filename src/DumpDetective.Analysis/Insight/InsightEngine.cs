@@ -30,13 +30,13 @@ internal sealed class InsightEngine
 
     // New thresholds for Part 4 additions
     private const double StringDuplicationWarningRatio = 0.50;
-    private const double WeakRefDeadTargetWarningRatio  = 0.50;
+    private const double WeakRefDeadTargetWarningRatio = 0.50;
     private const double EphemeralFillCriticalPct = 90.0;
-    private const int    DynamicModuleWarning = 20;
-    private const ulong  JitHeapBloatThreshold = 500UL * 1024 * 1024;      // 500 MB
-    private const int    SuspendedMethodFireForgetThreshold = 100;
-    private const ulong  LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
-    private const ulong  GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
+    private const int DynamicModuleWarning = 20;
+    private const ulong JitHeapBloatThreshold = 500UL * 1024 * 1024;      // 500 MB
+    private const int SuspendedMethodFireForgetThreshold = 100;
+    private const ulong LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
+    private const ulong GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
 
     private const string Source = "InsightEngine";
 
@@ -66,15 +66,15 @@ internal sealed class InsightEngine
         FinalizableObjectDomainResult? finalizable = FindResult<FinalizableObjectDomainResult>(runs);
 
         // Part 4 — new domain result inputs
-        GCRootDomainResult? gcRoot                           = FindResult<GCRootDomainResult>(runs);
-        AllocationPatternDomainResult? allocPattern          = FindResult<AllocationPatternDomainResult>(runs);
-        ArrayDomainResult? arrays                            = FindResult<ArrayDomainResult>(runs);
-        AsyncStateMachineDomainResult? stateMachines         = FindResult<AsyncStateMachineDomainResult>(runs);
-        WeakReferenceDomainResult? weakRef                   = FindResult<WeakReferenceDomainResult>(runs);
-        SegmentReservationDomainResult? segReservation       = FindResult<SegmentReservationDomainResult>(runs);
-        AppDomainDomainResult? appDomains                    = FindResult<AppDomainDomainResult>(runs);
-        JitDomainResult? jit                                 = FindResult<JitDomainResult>(runs);
-        BoxingDomainResult? boxing                           = FindResult<BoxingDomainResult>(runs);
+        GCRootDomainResult? gcRoot = FindResult<GCRootDomainResult>(runs);
+        AllocationPatternDomainResult? allocPattern = FindResult<AllocationPatternDomainResult>(runs);
+        ArrayDomainResult? arrays = FindResult<ArrayDomainResult>(runs);
+        AsyncStateMachineDomainResult? stateMachines = FindResult<AsyncStateMachineDomainResult>(runs);
+        WeakReferenceDomainResult? weakRef = FindResult<WeakReferenceDomainResult>(runs);
+        SegmentReservationDomainResult? segReservation = FindResult<SegmentReservationDomainResult>(runs);
+        AppDomainDomainResult? appDomains = FindResult<AppDomainDomainResult>(runs);
+        JitDomainResult? jit = FindResult<JitDomainResult>(runs);
+        BoxingDomainResult? boxing = FindResult<BoxingDomainResult>(runs);
 
         // Existing detection rules
         DetectLohPressure(findings, memory, gcGen, segments);
@@ -507,8 +507,8 @@ internal sealed class InsightEngine
             if (r.EstimatedRetainedBytes > maxRetained)
             {
                 maxRetained = r.EstimatedRetainedBytes;
-                rootKind    = r.RootKind;
-                targetType  = r.TargetTypeName;
+                rootKind = r.RootKind;
+                targetType = r.TargetTypeName;
             }
         }
 

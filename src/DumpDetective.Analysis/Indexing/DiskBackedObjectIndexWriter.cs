@@ -14,8 +14,8 @@ namespace DumpDetective.Analysis.Indexing;
 internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 {
     // ObjectIndex.bin header constants (separate from IndexHeader to preserve existing format)
-    internal const int ObjIndexMagic      = 0x58494444; // DDIX
-    private  const int ObjIndexVersion    = 1;
+    internal const int ObjIndexMagic = 0x58494444; // DDIX
+    private const int ObjIndexVersion = 1;
     internal const int ObjIndexHeaderSize = 24;
     private const int RecordSize = sizeof(ulong) * 3;
     private const int ProgressReportEveryObjects = 100_000;
@@ -32,8 +32,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         // Use canonical per-dump .dumpindex/ directory for all index files.
         DumpIndexPaths.EnsureDirectory(dumpPath);
-        string indexPath    = DumpIndexPaths.ObjectIndex(dumpPath);
-        string typeAggPath  = DumpIndexPaths.TypeAggregateIndex(dumpPath);
+        string indexPath = DumpIndexPaths.ObjectIndex(dumpPath);
+        string typeAggPath = DumpIndexPaths.TypeAggregateIndex(dumpPath);
 
         // ── Fast-path: skip full heap scan if a valid TypeAggregateIndex.bin exists ──
         // TypeAggregateIndex.bin is written LAST, after all satellite files, so its
@@ -62,21 +62,21 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // give additional throughput; smaller tiers use fewer to bound page-cache pressure.
         int maxSegmentParallelism = sizeTier switch
         {
-            DumpDetective.Core.Models.DumpSizeTier.Large  => Math.Min(Environment.ProcessorCount, 8),
+            DumpDetective.Core.Models.DumpSizeTier.Large => Math.Min(Environment.ProcessorCount, 8),
             DumpDetective.Core.Models.DumpSizeTier.Medium => Math.Min(Environment.ProcessorCount, 4),
-            _                                              => 2,
+            _ => 2,
         };
 
-        var masterBuilder  = new TypeIndexBuilder();
+        var masterBuilder = new TypeIndexBuilder();
         var moduleRegistry = new ModuleRegistry();
         // Satellite data collected during parallel scan, written serially afterwards.
-        var shapeCache      = new ConcurrentDictionary<ulong, TypeShapeEntry>();
+        var shapeCache = new ConcurrentDictionary<ulong, TypeShapeEntry>();
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
-        var taskCandidates         = new ConcurrentBag<(ulong Addr, ulong Mt)>();
-        var eventCandidates        = new ConcurrentBag<(ulong Addr, ulong Mt)>();
-        var largeCandidates        = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
+        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
         // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
         var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
         // String dedup index built while dump pages are hot — zero extra I/O cost.
@@ -84,14 +84,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
         // Global distribution collectors (merged from per-thread state)
         var globalLengthSamples = new List<int>();
-        var globalLengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal);
+        var globalLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal);
 
         // OPT: open the index file before the parallel scan so each segment writes directly to
         // disk as it completes — eliminating the post-scan bag + flat-array accumulation
         // (~1.2 GB of pool buffers + flat array that were previously simultaneously live).
         // Serialization (CPU) runs outside the lock; only stream.Write is serialized.
         int serialChunkEntries = Math.Max(writeBuffer / RecordSize, 1);
-        int serialChunkBytes   = serialChunkEntries * RecordSize;
+        int serialChunkBytes = serialChunkEntries * RecordSize;
         object streamWriteLock = new();
         using FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read,
             bufferSize: writeBuffer, FileOptions.SequentialScan);
@@ -106,14 +106,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         Parallel.ForEach(
             heap.Segments,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string,int>(StringComparer.Ordinal)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
             (segment, _, state) =>
             {
                 // Determine generation from segment kind — avoids per-object GetGeneration call
                 // for server GC where each segment is dedicated to a single generation.
                 // For Ephemeral segments (workstation GC) segGen = -1; generation is resolved
                 // per-object below via segment.GetGeneration(address).
-                int segGen    = SegmentKindToGeneration(segment.Kind);
+                int segGen = SegmentKindToGeneration(segment.Kind);
                 bool isEphemeral = segGen < 0;
                 // LOH/POH: collect "Free" blob candidates to avoid a second segment walk.
                 bool isLohOrPoh = segment.Kind == GCSegmentKind.Large
@@ -161,9 +161,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         state.FlagsCache[mt] = flags;
                     }
 
-                    var entry    = new HeapEntry(obj.Address, mt, obj.Size);
+                    var entry = new HeapEntry(obj.Address, mt, obj.Size);
                     int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
-                    int objGen   = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
+                    int objGen = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
                     segBuf[segCount++] = entry;
                     state.Builder.Add(entry, moduleId, flags, objGen);
 
@@ -176,7 +176,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         largeCandidates.Add((obj.Address, mt, entry.Size));
                     // Collect LOH/POH free blocks during the scan — avoids a second segment walk
                     // that LohFreeBlockWriter.Write(heap,...) would otherwise require.
-        if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
+                    if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
                         lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
 
                     // Build string dedup index while dump pages are hot from type resolution.
@@ -235,8 +235,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                             {
                                 int off = ci * RecordSize;
                                 ref HeapEntry e = ref segBuf[srcIdx + ci];
-                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off),      e.Address);
-                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 8),  e.MethodTable);
+                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off), e.Address);
+                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 8), e.MethodTable);
                                 BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 16), e.Size);
                             }
                             lock (streamWriteLock)
@@ -350,9 +350,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     int sampleCount = e.SampleAddresses?.Length ?? 0;
                     rec[28] = (byte)Math.Min(sampleCount, 2);
                     ushort previewLen = 0;
-                    if (e.Preview is not null)
+                    string preview = e.Preview ?? string.Empty;
+                    if (!string.IsNullOrEmpty(preview))
                     {
-                        previewLen = (ushort)Math.Min(ushort.MaxValue, System.Text.Encoding.UTF8.GetByteCount(e.Preview));
+                        previewLen = (ushort)Math.Min(ushort.MaxValue, System.Text.Encoding.UTF8.GetByteCount(preview));
                     }
                     BinaryPrimitives.WriteUInt16LittleEndian(rec[29..], previewLen);
                     ds.Write(rec.Slice(0, 31));
@@ -369,7 +370,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         byte[] tmp = ArrayPool<byte>.Shared.Rent(previewLen);
                         try
                         {
-                            int written = System.Text.Encoding.UTF8.GetBytes(e.Preview, 0, e.Preview.Length, tmp, 0);
+                            int written = System.Text.Encoding.UTF8.GetBytes(preview, 0, preview.Length, tmp, 0);
                             ds.Write(tmp, 0, written);
                         }
                         finally { ArrayPool<byte>.Shared.Return(tmp); }
@@ -394,7 +395,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             if (globalLengthSamples.Count > 0 || masterStringDedup.Count > 0)
             {
                 // compute percentiles
-                IReadOnlyDictionary<string,double> percentiles = new Dictionary<string,double>(StringComparer.Ordinal);
+                IReadOnlyDictionary<string, double> percentiles = new Dictionary<string, double>(StringComparer.Ordinal);
                 int sampleCount = globalLengthSamples.Count;
                 if (sampleCount > 0)
                 {
@@ -403,11 +404,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     double p75 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.75)];
                     double p90 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.90)];
                     double p95 = globalLengthSamples[(int)Math.Floor((sampleCount - 1) * 0.95)];
-                    percentiles = new Dictionary<string,double> { ["p50"] = p50, ["p75"] = p75, ["p90"] = p90, ["p95"] = p95 };
+                    percentiles = new Dictionary<string, double> { ["p50"] = p50, ["p75"] = p75, ["p90"] = p90, ["p95"] = p95 };
                 }
 
                 // frequency buckets from masterStringDedup counts
-                var freqBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+                var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
                 {
                     ["1"] = 0,
                     ["2"] = 0,
@@ -427,7 +428,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     else freqBuckets["1001+"]++;
                 }
 
-                var distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string,int>(), freqBuckets, sampleCount);
+                var distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string, int>(), freqBuckets, sampleCount);
 
                 string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
                 var jsOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
@@ -441,7 +442,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
         // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
-        var typeAggregates    = masterBuilder.Build();
+        var typeAggregates = masterBuilder.Build();
         var globalSizeBuckets = masterBuilder.BuildSizeBuckets();
 
         // Write TypeAggregateIndex.bin LAST so its presence confirms a complete build.
@@ -685,7 +686,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // Used when segGen < 0 (Ephemeral segment): asks ClrMD which generation the object belongs to.
     private static int ResolveObjectGeneration(ClrSegment segment, ulong address)
     {
-        try   { return (int)segment.GetGeneration(address); }
+        try { return (int)segment.GetGeneration(address); }
         catch { return -1; }
     }
 
@@ -696,9 +697,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private static void WriteObjIndexHeader(Stream stream, long recordCount)
     {
         Span<byte> buf = stackalloc byte[ObjIndexHeaderSize];
-        BinaryPrimitives.WriteInt32LittleEndian(buf,       ObjIndexMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(buf[4..],  ObjIndexVersion);
-        BinaryPrimitives.WriteInt64LittleEndian(buf[8..],  DateTime.UtcNow.Ticks);
+        BinaryPrimitives.WriteInt32LittleEndian(buf, ObjIndexMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(buf[4..], ObjIndexVersion);
+        BinaryPrimitives.WriteInt64LittleEndian(buf[8..], DateTime.UtcNow.Ticks);
         BinaryPrimitives.WriteInt64LittleEndian(buf[16..], recordCount);
         stream.Write(buf);
     }

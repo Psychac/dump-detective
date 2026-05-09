@@ -19,10 +19,10 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         blocks.Add(H("LOCK CONTENTION SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Held Locks",                $"{d.TotalHeldLocks:N0}",          d.TotalHeldLocks));
-        blocks.Add(M("Contested Locks",           $"{d.ContestedLockCount:N0}",       d.ContestedLockCount));
-        blocks.Add(M("Max Waiters on Single Lock", $"{d.MaxWaitersOnSingleLock:N0}",  d.MaxWaitersOnSingleLock));
-        blocks.Add(M("Deadlock Candidates",        $"{d.DeadlockCandidateCount:N0}",  d.DeadlockCandidateCount));
+        blocks.Add(M("Held Locks", $"{d.TotalHeldLocks:N0}", d.TotalHeldLocks));
+        blocks.Add(M("Contested Locks", $"{d.ContestedLockCount:N0}", d.ContestedLockCount));
+        blocks.Add(M("Max Waiters on Single Lock", $"{d.MaxWaitersOnSingleLock:N0}", d.MaxWaitersOnSingleLock));
+        blocks.Add(M("Deadlock Candidates", $"{d.DeadlockCandidateCount:N0}", d.DeadlockCandidateCount));
 
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)

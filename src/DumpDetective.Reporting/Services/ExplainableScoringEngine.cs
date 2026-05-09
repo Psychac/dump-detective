@@ -14,18 +14,18 @@ internal static class ExplainableScoringEngine
     // ── Points per severity tier ──────────────────────────────────────────────
 
     private const int CriticalBasePoints = 40;
-    private const int WarningBasePoints  = 20;
-    private const int InfoBasePoints     = 5;
-    private const int ScoreCap           = 100;
+    private const int WarningBasePoints = 20;
+    private const int InfoBasePoints = 5;
+    private const int ScoreCap = 100;
 
     // Heuristic confidence used when a finding carries no explicit ConfidenceScore.
     private const double HeuristicConfidence = 0.70;
 
     // ── Dimension category specs ──────────────────────────────────────────────
 
-    private static readonly string[] LeakCategories       = ["Leak", "Memory"];
+    private static readonly string[] LeakCategories = ["Leak", "Memory"];
     private static readonly string[] GcPressureCategories = ["Fragmentation", "GC", "LOH"];
-    private static readonly string[] ThreadCategories     = ["Hang", "Threading", "Deadlock", "Retention"];
+    private static readonly string[] ThreadCategories = ["Hang", "Threading", "Deadlock", "Retention"];
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -37,9 +37,9 @@ internal static class ExplainableScoringEngine
         ComputeScores(IReadOnlyList<FindingRecord> findings)
     {
         return (
-            ComputeBreakdown("Leak",             LeakCategories,       findings),
-            ComputeBreakdown("GcPressure",       GcPressureCategories, findings),
-            ComputeBreakdown("ThreadContention", ThreadCategories,     findings)
+            ComputeBreakdown("Leak", LeakCategories, findings),
+            ComputeBreakdown("GcPressure", GcPressureCategories, findings),
+            ComputeBreakdown("ThreadContention", ThreadCategories, findings)
         );
     }
 
@@ -50,10 +50,10 @@ internal static class ExplainableScoringEngine
         string[] categories,
         IReadOnlyList<FindingRecord> findings)
     {
-        var contributors    = new List<ScoreContributor>();
-        int rawScore        = 0;
-        double confidenceSum  = 0.0;
-        int confidenceCount   = 0;
+        var contributors = new List<ScoreContributor>();
+        int rawScore = 0;
+        double confidenceSum = 0.0;
+        int confidenceCount = 0;
 
         for (int i = 0; i < findings.Count; i++)
         {
@@ -70,14 +70,14 @@ internal static class ExplainableScoringEngine
 
             // Confidence-weight the raw points.
             double weight = f.ConfidenceScore ?? 1.0;
-            int points    = (int)Math.Round(basePoints * weight);
+            int points = (int)Math.Round(basePoints * weight);
 
             string? detail = f.ConfidenceScore.HasValue
                 ? $"Confidence: {f.ConfidenceScore.Value:P0}"
                 : null;
 
             contributors.Add(new ScoreContributor(
-                Label:  $"{f.Severity}: {f.Title}",
+                Label: $"{f.Severity}: {f.Title}",
                 Source: f.Analyzer,
                 Points: points,
                 Detail: detail));
@@ -86,12 +86,12 @@ internal static class ExplainableScoringEngine
 
             if (f.ConfidenceScore.HasValue)
             {
-                confidenceSum  += f.ConfidenceScore.Value;
+                confidenceSum += f.ConfidenceScore.Value;
                 confidenceCount++;
             }
         }
 
-        int    score      = Math.Min(rawScore, ScoreCap);
+        int score = Math.Min(rawScore, ScoreCap);
         double confidence = contributors.Count == 0
             ? 0.0
             : confidenceCount > 0
@@ -116,7 +116,7 @@ internal static class ExplainableScoringEngine
     private static int SeverityOrdinal(string severity) => severity switch
     {
         nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning)  => 1,
-        _                                => 0,
+        nameof(FindingSeverity.Warning) => 1,
+        _ => 0,
     };
 }

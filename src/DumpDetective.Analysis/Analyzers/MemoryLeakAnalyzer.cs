@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Options;
@@ -21,20 +20,21 @@ namespace DumpDetective.Analysis.Analyzers
             cancellationToken.ThrowIfCancellationRequested();
 
             RetentionOptions options = context.GetOption<RetentionOptions>();
+            ExecutionPolicy policy = context.GetOption<ExecutionPolicy>();
 
-            return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, context.Progress).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, policy, context.Progress).Stamp(this));
         }
 
-        public AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, RetentionOptions options)
+        internal AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, RetentionOptions options)
         {
-            return Analyze(heap, runtime, cache: null, options, progress: null);
+            return Analyze(heap, runtime, cache: null, options, ExecutionPolicy.Default, progress: null);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
         {
             // Finalizer queue analysis has been moved to FinalizableObjectAnalyzer.
             // Keep RetentionAnalyzer focused on incoming-reference retention signals only.
-            LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, progress);
+            LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, policy, progress);
             IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(signals.TopHighlyReferencedObjects);
             ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(signals.TopHighlyReferencedObjects);
 
@@ -51,7 +51,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         // Finalizer queue analysis removed — handled by FinalizableObjectAnalyzer.
 
-        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
         {
             // Single-pass: enumerate the index (or heap) once, counting incoming references.
             // String analysis is handled by StringAnalyzer.
@@ -66,7 +66,7 @@ namespace DumpDetective.Analysis.Analyzers
             // MaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which are
             // the primary bottleneck on multi-GB dumps (each call reads object data from the dump file).
             // 0 = unlimited. The cap applies to both disk and memory index paths.
-            int maxScan = options.MaxLeakScanObjects;
+            int maxScan = policy.MaxLeakScanObjects;
             long objectsTraced = 0;
 
             var scanCounter = new ObjectScanCounter("scanning heap objects", progress);
@@ -91,7 +91,7 @@ namespace DumpDetective.Analysis.Analyzers
                         break;
                     }
 
-                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
                     objectsTraced++;
                 }
             }
@@ -121,7 +121,7 @@ namespace DumpDetective.Analysis.Analyzers
                         break;
                     }
 
-                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, options.MaxReferenceAddresses, ref skippedReferenceAddresses);
+                    CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
                     objectsTraced++;
                 }
             }
@@ -430,7 +430,7 @@ namespace DumpDetective.Analysis.Analyzers
             public long TotalIncomingReferences;
             public int MaxIncomingReferences;
         }
-        
+
         public void Dispose() { }
     }
 }

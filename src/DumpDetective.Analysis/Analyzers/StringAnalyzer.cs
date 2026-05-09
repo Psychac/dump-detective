@@ -1,6 +1,5 @@
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
-using System.Linq;
 using System.Diagnostics;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
@@ -82,10 +81,10 @@ internal sealed class StringAnalyzer : IAnalyzer
             foreach (ulong mt in stringMts)
             {
                 if (!typeAggregates.TryGetValue(mt, out TypeAggregateIndexEntry entry)) continue;
-                totalStrings     += (int)Math.Min(entry.Count, int.MaxValue);
+                totalStrings += (int)Math.Min(entry.Count, int.MaxValue);
                 totalStringMemory += entry.TotalSize;
-                lohStringBytes   += entry.LohSize;
-                gen2StringCount  += entry.Gen2Count;
+                lohStringBytes += entry.LohSize;
+                gen2StringCount += entry.Gen2Count;
                 if (entry.Count > 0)
                     gen2StringBytes += (ulong)entry.Gen2Count * (entry.TotalSize / (ulong)entry.Count);
             }
@@ -112,7 +111,7 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         // ── Deduplication: pre-built-index or bounded content scan — only when enabled and within threshold ─
         var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
-        var methodTableDupCounts = new Dictionary<ulong,int>(capacity: 64);
+        var methodTableDupCounts = new Dictionary<ulong, int>(capacity: 64);
         bool dedupSkipped = false;
 
         bool runDedup = stringOptions.EnableDeduplication
@@ -130,7 +129,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         string? dedupSource = null;
         // length sampling structures
         var lengthSamples = new List<int>(capacity: 100_000);
-        var lengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+        var lengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["0-15"] = 0,
             ["16-31"] = 0,
@@ -155,7 +154,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             // ── PreferPrebuiltOnly: only use prebuilt index if present, otherwise skip
             // ── FallbackToHeapScan: prefer prebuilt, else index-backed scan, else full heap scan
             // ── Disabled handled above via runDedup flag
-            
+
             if (stringOptions.DeduplicationMode == DeduplicationMode.PreferPrebuiltOnly)
             {
                 if (prebuilt is not null && prebuilt.Count > 0)
@@ -174,7 +173,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                             entry.FingerprintHash = kvp.Key;
                             entry.SamplingSource = "Prebuilt";
                         }
-                        entry.Count     += kvp.Value.Count;
+                        entry.Count += kvp.Value.Count;
                         entry.TotalSize += kvp.Value.TotalSize;
                         if (entry.DominantMethodTable != 0)
                         {
@@ -220,7 +219,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                             entry.SampleAddresses = kvp.Value.SampleAddresses;
                             entry.DominantMethodTable = kvp.Value.DominantMethodTable;
                         }
-                        entry.Count     += kvp.Value.Count;
+                        entry.Count += kvp.Value.Count;
                         entry.TotalSize += kvp.Value.TotalSize;
                         if (entry.DominantMethodTable != 0)
                         {
@@ -344,7 +343,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         IReadOnlyList<DuplicateStringSnapshot> topByCount = DrainToDescendingCount(byCountHeap, mtToName);
 
         // Build frequency buckets from stringStats
-        var freqBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+        var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["1"] = 0,
             ["2"] = 0,
@@ -365,15 +364,15 @@ internal sealed class StringAnalyzer : IAnalyzer
         }
 
         // Compute percentiles and buckets. Prefer index-provided distribution when available.
-        IReadOnlyDictionary<string,double> percentiles = new Dictionary<string,double>(StringComparer.Ordinal);
+        IReadOnlyDictionary<string, double> percentiles = new Dictionary<string, double>(StringComparer.Ordinal);
         int sampleCount = lengthSamples.Count;
         var idxDist = heapIndex?.StringDedupDistribution;
 
         if (idxDist is not null && idxDist.SampleCount > 0)
         {
-            percentiles = idxDist.Percentiles ?? new Dictionary<string,double>(StringComparer.Ordinal);
-            lengthBuckets = new Dictionary<string,int>(idxDist.LengthBuckets ?? new Dictionary<string,int>());
-            freqBuckets = new Dictionary<string,int>(idxDist.FrequencyBuckets ?? freqBuckets);
+            percentiles = idxDist.Percentiles ?? new Dictionary<string, double>(StringComparer.Ordinal);
+            lengthBuckets = new Dictionary<string, int>(idxDist.LengthBuckets ?? new Dictionary<string, int>());
+            freqBuckets = new Dictionary<string, int>(idxDist.FrequencyBuckets ?? freqBuckets);
             sampleCount = idxDist.SampleCount;
             if (stringsSampled == 0) stringsSampled = sampleCount;
             progress?.Report(new(totalStrings, "string length distribution from index", $"{sampleCount:N0} samples from index metadata"));
@@ -382,7 +381,7 @@ internal sealed class StringAnalyzer : IAnalyzer
         {
             // Lightweight, index-only estimation: derive char-length estimates from TotalSize/Count
             var estLengths = new List<int>(capacity: 1024);
-            var estLengthBuckets = new Dictionary<string,int>(StringComparer.Ordinal)
+            var estLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["0-15"] = 0,
                 ["16-31"] = 0,
@@ -396,7 +395,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                 ["16384-65535"] = 0,
                 ["65536+"] = 0
             };
-            var estFreq = new Dictionary<string,int>(StringComparer.Ordinal)
+            var estFreq = new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["1"] = 0,
                 ["2"] = 0,
@@ -448,7 +447,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             {
                 estLengths.Sort();
                 sampleCount = estLengths.Count;
-                percentiles = new Dictionary<string,double>
+                percentiles = new Dictionary<string, double>
                 {
                     ["p50"] = estLengths[(int)Math.Floor((sampleCount - 1) * 0.50)],
                     ["p75"] = estLengths[(int)Math.Floor((sampleCount - 1) * 0.75)],
@@ -471,7 +470,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                 double p75 = lengthSamples[(int)Math.Floor((sampleCount - 1) * 0.75)];
                 double p90 = lengthSamples[(int)Math.Floor((sampleCount - 1) * 0.90)];
                 double p95 = lengthSamples[(int)Math.Floor((sampleCount - 1) * 0.95)];
-                percentiles = new Dictionary<string,double>
+                percentiles = new Dictionary<string, double>
                 {
                     ["p50"] = p50,
                     ["p75"] = p75,
@@ -676,9 +675,9 @@ internal sealed class StringAnalyzer : IAnalyzer
         StringAnalysisOptions stringOptions,
         Dictionary<StringFingerprint, StringLeakInfo> stringStats,
         int maxUniqueTracking,
-        Dictionary<ulong,int> methodTableDupCounts,
+        Dictionary<ulong, int> methodTableDupCounts,
         List<int> lengthSamples,
-        Dictionary<string,int> lengthBuckets,
+        Dictionary<string, int> lengthBuckets,
         string samplingSource = "HeapScan")
     {
         ClrObject obj = heap.GetObject(address);

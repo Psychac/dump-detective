@@ -10,17 +10,17 @@ internal sealed record AnalyzerDetailSection(
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
-[JsonDerivedType(typeof(HeadingBlock),                "heading")]
-[JsonDerivedType(typeof(MetricBlock),                 "metric")]
-[JsonDerivedType(typeof(PathBlock),                   "path")]
-[JsonDerivedType(typeof(StackFrameBlock),             "stackframe")]
-[JsonDerivedType(typeof(TextBlock),                   "text")]
-[JsonDerivedType(typeof(ListItemBlock),               "listItem")]
-[JsonDerivedType(typeof(DividerBlock),                "divider")]
-[JsonDerivedType(typeof(BlankBlock),                  "blank")]
-[JsonDerivedType(typeof(TableBlock),                  "table")]
-[JsonDerivedType(typeof(CollapsibleSectionBeginBlock),"collapsibleBegin")]
-[JsonDerivedType(typeof(CollapsibleSectionEndBlock),  "collapsibleEnd")]
+[JsonDerivedType(typeof(HeadingBlock), "heading")]
+[JsonDerivedType(typeof(MetricBlock), "metric")]
+[JsonDerivedType(typeof(PathBlock), "path")]
+[JsonDerivedType(typeof(StackFrameBlock), "stackframe")]
+[JsonDerivedType(typeof(TextBlock), "text")]
+[JsonDerivedType(typeof(ListItemBlock), "listItem")]
+[JsonDerivedType(typeof(DividerBlock), "divider")]
+[JsonDerivedType(typeof(BlankBlock), "blank")]
+[JsonDerivedType(typeof(TableBlock), "table")]
+[JsonDerivedType(typeof(CollapsibleSectionBeginBlock), "collapsibleBegin")]
+[JsonDerivedType(typeof(CollapsibleSectionEndBlock), "collapsibleEnd")]
 internal abstract record SectionBlock;
 
 internal sealed record HeadingBlock(string Text, int IndentLevel = 0) : SectionBlock;

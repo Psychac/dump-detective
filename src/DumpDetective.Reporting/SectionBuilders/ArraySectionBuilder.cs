@@ -8,8 +8,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypeRows   = 20;
-    private const int TopLargeRows  = 20;
+    private const int TopTypeRows = 20;
+    private const int TopLargeRows = 20;
     private const int TopSparseRows = 10;
 
     public string AnalyzerName => "Array Analysis";
@@ -25,11 +25,11 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         // ── Summary ──────────────────────────────────────────────────────────
         blocks.Add(H("ARRAY ANALYSIS SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Array Objects",      $"{d.TotalArrayObjects:N0}",         d.TotalArrayObjects));
-        blocks.Add(M("Total Array Memory",       FormatHelper.FormatBytes(d.TotalArrayBytes)));
-        blocks.Add(M("LOH Arrays",               $"{d.LohArrayCount:N0} ({FormatHelper.FormatBytes(d.LohArrayBytes)})",
+        blocks.Add(M("Total Array Objects", $"{d.TotalArrayObjects:N0}", d.TotalArrayObjects));
+        blocks.Add(M("Total Array Memory", FormatHelper.FormatBytes(d.TotalArrayBytes)));
+        blocks.Add(M("LOH Arrays", $"{d.LohArrayCount:N0} ({FormatHelper.FormatBytes(d.LohArrayBytes)})",
                                                  d.LohArrayCount));
-        blocks.Add(M("Multi-Dimensional Arrays", $"{d.MultiDimArrayCount:N0}",         d.MultiDimArrayCount));
+        blocks.Add(M("Multi-Dimensional Arrays", $"{d.MultiDimArrayCount:N0}", d.MultiDimArrayCount));
         if (d.ScanLimited)
             blocks.Add(M("Scan Limit Reached", "Yes — sparse sampling cap hit; results may be partial", 1.0));
 

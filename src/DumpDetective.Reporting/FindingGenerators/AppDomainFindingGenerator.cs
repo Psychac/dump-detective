@@ -6,9 +6,9 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class AppDomainFindingGenerator : IFindingGenerator
 {
-    private const int DynamicModuleWarningCount  =  20;
+    private const int DynamicModuleWarningCount = 20;
     private const int DynamicModuleCriticalCount = 100;
-    private const int AnonymousModuleWarningCount =  5;
+    private const int AnonymousModuleWarningCount = 5;
 
     public string AnalyzerName => "AppDomain Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is AppDomainDomainResult;

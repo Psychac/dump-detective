@@ -19,11 +19,11 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         blocks.Add(H("THREAD SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Threads",        $"{d.TotalThreadCount:N0}",   d.TotalThreadCount));
-        blocks.Add(M("Alive Threads",        $"{d.AliveThreadCount:N0}",   d.AliveThreadCount));
-        blocks.Add(M("Background Threads",   $"{d.BackgroundThreadCount:N0}", d.BackgroundThreadCount));
-        blocks.Add(M("Thread Pool Workers",  $"{d.ThreadPoolWorkerCount:N0}", d.ThreadPoolWorkerCount));
-        blocks.Add(M("Blocked Threads",      $"{d.BlockedThreadCount:N0}", d.BlockedThreadCount));
+        blocks.Add(M("Total Threads", $"{d.TotalThreadCount:N0}", d.TotalThreadCount));
+        blocks.Add(M("Alive Threads", $"{d.AliveThreadCount:N0}", d.AliveThreadCount));
+        blocks.Add(M("Background Threads", $"{d.BackgroundThreadCount:N0}", d.BackgroundThreadCount));
+        blocks.Add(M("Thread Pool Workers", $"{d.ThreadPoolWorkerCount:N0}", d.ThreadPoolWorkerCount));
+        blocks.Add(M("Blocked Threads", $"{d.BlockedThreadCount:N0}", d.BlockedThreadCount));
         blocks.Add(M("Lock-Holding Threads", $"{d.LockHoldingThreadCount:N0}", d.LockHoldingThreadCount));
 
         // Finalizer
@@ -32,8 +32,8 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         blocks.Add(Divider());
         if (d.FinalizerManagedThreadId.HasValue)
             blocks.Add(M("Finalizer Thread ID", $"{d.FinalizerManagedThreadId.Value:N0}", d.FinalizerManagedThreadId.Value));
-        blocks.Add(M("Finalizer Blocked",   d.FinalizerThreadBlocked ? "Yes" : "No"));
-        blocks.Add(M("Finalizer Lock Count",$"{d.FinalizerLockCount:N0}", d.FinalizerLockCount));
+        blocks.Add(M("Finalizer Blocked", d.FinalizerThreadBlocked ? "Yes" : "No"));
+        blocks.Add(M("Finalizer Lock Count", $"{d.FinalizerLockCount:N0}", d.FinalizerLockCount));
 
         var finFrames = d.FinalizerFrames ?? [];
         if (finFrames.Count > 0)

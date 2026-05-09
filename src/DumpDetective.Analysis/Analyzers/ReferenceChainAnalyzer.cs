@@ -21,19 +21,20 @@ namespace DumpDetective.Analysis.Analyzers
 
             ReferenceChainOptions options = context.GetOption<ReferenceChainOptions>();
 
-            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, context.Progress).Stamp(this));
+            ExecutionPolicy policy = context.GetOption<ExecutionPolicy>();
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress).Stamp(this));
         }
 
-        public AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
+        internal AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
-            return AnalyzeTopTypes(heap, cache, options, progress: null);
+            return AnalyzeTopTypes(heap, cache, options, ExecutionPolicy.Default, progress: null);
         }
 
-        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
         {
             int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
-            int maxPathSearchObjects = options.MaxPathSearchObjects > 0
-                ? options.MaxPathSearchObjects
+            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0
+                ? policy.ReferenceChainMaxPathSearchObjects
                 : options.FallbackMaxPathSearchObjects;
             bool skipArrays = options.SkipArrays;
             int largeFanoutThreshold = options.LargeFanoutThreshold > 0 ? options.LargeFanoutThreshold : 100;
@@ -87,7 +88,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, prioritizedRoots, sampleAddress.Value, options, telemetry, out path, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out path, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -148,7 +149,7 @@ namespace DumpDetective.Analysis.Analyzers
             List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, prioritizedRoots, objectAddress, options, telemetry, out _, out _);
+            return TryFindAnyRootPath(heap, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
@@ -156,6 +157,7 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
+            ExecutionPolicy policy,
             TelemetryCounters telemetry,
             out string? path,
             out bool searchTruncated)
@@ -167,9 +169,9 @@ namespace DumpDetective.Analysis.Analyzers
                 return false;
 
             if (options.SearchMode == ReferenceChainSearchMode.Fast)
-                return TryFindAnyRootPath_Fast(heap, roots, objectAddress, options, telemetry, out path, out searchTruncated);
+                return TryFindAnyRootPath_Fast(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
 
-            return TryFindAnyRootPath_Bidirectional(heap, roots, objectAddress, options, telemetry, out path, out searchTruncated);
+            return TryFindAnyRootPath_Bidirectional(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
         }
 
         // ── Fast mode ─────────────────────────────────────────────────────────
@@ -178,6 +180,7 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
+            ExecutionPolicy policy,
             TelemetryCounters telemetry,
             out string? path,
             out bool searchTruncated)
@@ -185,7 +188,7 @@ namespace DumpDetective.Analysis.Analyzers
             path = null;
             searchTruncated = false;
 
-            int maxPathSearchObjects = options.MaxPathSearchObjects > 0 ? options.MaxPathSearchObjects : options.FallbackMaxPathSearchObjects;
+            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0 ? policy.ReferenceChainMaxPathSearchObjects : options.FallbackMaxPathSearchObjects;
 
             // Preallocate once and reuse across all root iterations.
             var visited = new HashSet<ulong>(capacity: 1024);
@@ -197,7 +200,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 scanCounter.Tick();
                 if (TryBuildPath(heap, rootAddress, objectAddress, maxPathSearchObjects, visited, previous, queue,
-                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, options.MaxPathDepth, telemetry,
+                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, policy.ReferenceChainMaxPathDepth, telemetry,
                     out List<ulong>? addresses, out bool pathSearchLimited))
                 {
                     scanCounter.Complete();
@@ -219,6 +222,7 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
+            ExecutionPolicy policy,
             TelemetryCounters telemetry,
             out string? path,
             out bool searchTruncated)
@@ -397,9 +401,17 @@ namespace DumpDetective.Analysis.Analyzers
             return reversed;
         }
 
-        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)
+        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses)
         {
-            string chain = string.Join(" -> ", addresses.Select(address => FormatNodeByAddress(heap, address)));
+            if (addresses is null || addresses.Count == 0)
+                return $"{rootKind}: <no path>";
+
+            var parts = new List<string>(addresses.Count);
+            for (int i = 0; i < addresses.Count; i++)
+            {
+                parts.Add(FormatNodeByAddress(heap, addresses[i]));
+            }
+            string chain = string.Join(" -> ", parts);
             return $"{rootKind}: {chain}";
         }
 

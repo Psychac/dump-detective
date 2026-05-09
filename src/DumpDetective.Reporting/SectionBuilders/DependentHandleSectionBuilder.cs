@@ -19,9 +19,9 @@ internal sealed class DependentHandleSectionBuilder : SectionBuilderBase, IAnaly
 
         blocks.Add(H("DEPENDENT HANDLE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Dependent Handles",       $"{d.DependentHandleCount:N0}",   d.DependentHandleCount));
-        blocks.Add(M("Resolved Edges",          $"{d.ResolvedEdgeCount:N0}",      d.ResolvedEdgeCount));
-        blocks.Add(M("Unresolved Targets",      $"{d.UnresolvedTargetCount:N0}  ({d.UnresolvedPercent:F1}%)", d.UnresolvedTargetCount));
+        blocks.Add(M("Dependent Handles", $"{d.DependentHandleCount:N0}", d.DependentHandleCount));
+        blocks.Add(M("Resolved Edges", $"{d.ResolvedEdgeCount:N0}", d.ResolvedEdgeCount));
+        blocks.Add(M("Unresolved Targets", $"{d.UnresolvedTargetCount:N0}  ({d.UnresolvedPercent:F1}%)", d.UnresolvedTargetCount));
 
         var sourceTypes = d.TopSourceTypes ?? [];
         if (sourceTypes.Count > 0)

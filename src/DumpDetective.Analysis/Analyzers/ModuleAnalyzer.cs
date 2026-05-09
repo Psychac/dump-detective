@@ -145,7 +145,7 @@ namespace DumpDetective.Analysis.Analyzers
                 list.Add(moduleInfo);
 
                 analysis.TotalModules++;
-                
+
                 if (module.IsDynamic)
                     analysis.DynamicModules++;
             }
@@ -219,9 +219,9 @@ namespace DumpDetective.Analysis.Analyzers
             return analysis;
         }
 
-        
+
         public void Dispose() { }
-        }
+    }
 
     internal class ModuleAnalysis
     {

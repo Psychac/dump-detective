@@ -130,9 +130,9 @@ namespace DumpDetective.Analysis.Analyzers
                     ToTopByteEntries(pinnedBytesByType, options.TopTypeCount));
         }
 
-            public void Dispose() { }
+        public void Dispose() { }
 
-            private static bool IsWeakLike(string kind)
+        private static bool IsWeakLike(string kind)
         {
             return kind.Contains("Weak", StringComparison.OrdinalIgnoreCase)
                 || kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase);

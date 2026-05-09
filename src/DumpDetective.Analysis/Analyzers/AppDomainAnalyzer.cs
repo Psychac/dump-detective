@@ -20,7 +20,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AppDomainAnalyzer : IAnalyzer
     {
-        public string Name     => "AppDomain Analysis";
+        public string Name => "AppDomain Analysis";
         public string Category => "Modules";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -45,8 +45,8 @@ namespace DumpDetective.Analysis.Analyzers
                 typeAggregates = heapIndex.TypeAggregates;
 
             IReadOnlyList<ClrAppDomain> appDomains = runtime.AppDomains;
-            int totalDynamicModules   = 0;
-            int anonymousModuleCount  = 0;
+            int totalDynamicModules = 0;
+            int anonymousModuleCount = 0;
 
             var domainSnapshots = new List<AppDomainSnapshot>(appDomains.Count);
             var warnings = new List<string>();
@@ -68,7 +68,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 IReadOnlyList<ClrModule> modules = domain.Modules;
 
-                int moduleCount        = modules.Count;
+                int moduleCount = modules.Count;
                 ulong domainManagedBytes = 0;
 
                 // Select modules according to selection mode. Default: TopBySize (existing behavior).
@@ -100,7 +100,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                     if (!moduleTypeData.TryGetValue(module.Address, out ModuleTypeAccumulator? acc))
                     {
-                        string moduleName   = Path.GetFileName(module.Name ?? string.Empty) ?? string.Empty;
+                        string moduleName = Path.GetFileName(module.Name ?? string.Empty) ?? string.Empty;
                         string assemblyName = module.AssemblyName ?? "Unknown";
                         acc = new ModuleTypeAccumulator(moduleName, assemblyName);
                         moduleTypeData[module.Address] = acc;
@@ -125,8 +125,8 @@ namespace DumpDetective.Analysis.Analyzers
                         if (hasIndex && typeAggregates!.TryGetValue(mt, out TypeAggregateIndexEntry entry) && entry.Count > 0)
                         {
                             acc.LiveTypeCount++;
-                            acc.ObjectCount   += entry.Count;
-                            acc.TotalBytes    += entry.TotalSize;
+                            acc.ObjectCount += entry.Count;
+                            acc.TotalBytes += entry.TotalSize;
                             domainManagedBytes += entry.TotalSize;
                         }
 
@@ -137,10 +137,10 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 domainSnapshots.Add(new AppDomainSnapshot(
-                    Name:                  domain.Name ?? "<unnamed>",
-                    Address:               domain.Address,
-                    DomainId:              domain.Id,
-                    ModuleCount:           moduleCount,
+                    Name: domain.Name ?? "<unnamed>",
+                    Address: domain.Address,
+                    DomainId: domain.Id,
+                    ModuleCount: moduleCount,
                     EstimatedManagedBytes: domainManagedBytes));
             }
 
@@ -149,12 +149,12 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (ModuleTypeAccumulator acc in moduleTypeData.Values)
             {
                 moduleEntries.Add(new ModuleTypeCountEntry(
-                    ModuleName:    acc.ModuleName,
-                    AssemblyName:  acc.AssemblyName,
-                    TypeCount:     acc.TypeCount,
+                    ModuleName: acc.ModuleName,
+                    AssemblyName: acc.AssemblyName,
+                    TypeCount: acc.TypeCount,
                     LiveTypeCount: acc.LiveTypeCount,
-                    ObjectCount:   acc.ObjectCount,
-                    TotalBytes:    acc.TotalBytes));
+                    ObjectCount: acc.ObjectCount,
+                    TotalBytes: acc.TotalBytes));
             }
             moduleEntries.Sort(static (a, b) => b.TypeCount.CompareTo(a.TypeCount));
 
@@ -163,12 +163,13 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topLimit; i++) topModules.Add(moduleEntries[i]);
 
             var result = new AppDomainDomainResult(
-                TotalDomains:         appDomains.Count,
-                Domains:              domainSnapshots,
-                TotalDynamicModules:  totalDynamicModules,
+                TotalDomains: appDomains.Count,
+                Domains: domainSnapshots,
+                TotalDynamicModules: totalDynamicModules,
                 AnonymousModuleCount: anonymousModuleCount,
                 TopModulesByTypeCount: topModules)
-                with { Warnings = warnings, Metrics = new Dictionary<string, object?> { ["ExcludedModuleCount"] = totalExcludedModules } };
+                with
+            { Warnings = warnings, Metrics = new Dictionary<string, object?> { ["ExcludedModuleCount"] = totalExcludedModules } };
 
             return result;
         }
@@ -178,18 +179,18 @@ namespace DumpDetective.Analysis.Analyzers
         {
             public readonly string ModuleName;
             public readonly string AssemblyName;
-            public int   TypeCount;
-            public int   LiveTypeCount;
-            public long  ObjectCount;
+            public int TypeCount;
+            public int LiveTypeCount;
+            public long ObjectCount;
             public ulong TotalBytes;
 
             public ModuleTypeAccumulator(string moduleName, string assemblyName)
             {
-                ModuleName   = moduleName;
+                ModuleName = moduleName;
                 AssemblyName = assemblyName;
             }
         }
-        
+
         public void Dispose() { }
     }
 }

@@ -19,12 +19,12 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
 
         blocks.Add(H("LOH FRAGMENTATION SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total LOH Bytes",         FormatHelper.FormatBytes(d.TotalBytes),     (double)d.TotalBytes));
-        blocks.Add(M("Segment Count",           $"{d.SegmentCount:N0}",                     d.SegmentCount));
-        blocks.Add(M("Overall Fragmentation",   $"{d.FragmentationPercent:F1}%",            d.FragmentationPercent));
-        blocks.Add(M("Free Bytes",              FormatHelper.FormatBytes(d.FreeBytes),       (double)d.FreeBytes));
-        blocks.Add(M("Free Blocks",             $"{d.FreeBlockCount:N0}",                   d.FreeBlockCount));
-        blocks.Add(M("Largest Free Block",      FormatHelper.FormatBytes(d.LargestFreeBlock),(double)d.LargestFreeBlock));
+        blocks.Add(M("Total LOH Bytes", FormatHelper.FormatBytes(d.TotalBytes), (double)d.TotalBytes));
+        blocks.Add(M("Segment Count", $"{d.SegmentCount:N0}", d.SegmentCount));
+        blocks.Add(M("Overall Fragmentation", $"{d.FragmentationPercent:F1}%", d.FragmentationPercent));
+        blocks.Add(M("Free Bytes", FormatHelper.FormatBytes(d.FreeBytes), (double)d.FreeBytes));
+        blocks.Add(M("Free Blocks", $"{d.FreeBlockCount:N0}", d.FreeBlockCount));
+        blocks.Add(M("Largest Free Block", FormatHelper.FormatBytes(d.LargestFreeBlock), (double)d.LargestFreeBlock));
 
         var segments = d.TopFragmentedSegments ?? [];
         if (segments.Count > 0)

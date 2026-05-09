@@ -8,7 +8,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypeRows  = 20;
+    private const int TopTypeRows = 20;
     private const int TopQueueRows = 10;
 
     public string AnalyzerName => "Finalizable Object Analysis";
@@ -24,10 +24,10 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         // ── Summary ──────────────────────────────────────────────────────────
         blocks.Add(H("FINALIZABLE OBJECT SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Finalizable Objects",       $"{d.TotalFinalizableObjects:N0}",             d.TotalFinalizableObjects));
-        blocks.Add(M("Total Finalizable Memory",        FormatHelper.FormatBytes(d.TotalFinalizableBytes)));
-        blocks.Add(M("Gen 0 / Gen 1 / Gen 2",          $"{d.Gen0Count:N0} / {d.Gen1Count:N0} / {d.Gen2Count:N0}"));
-        blocks.Add(M("Finalizer Queue Objects",         $"{d.FinalizerQueueCount:N0}",                 d.FinalizerQueueCount));
+        blocks.Add(M("Total Finalizable Objects", $"{d.TotalFinalizableObjects:N0}", d.TotalFinalizableObjects));
+        blocks.Add(M("Total Finalizable Memory", FormatHelper.FormatBytes(d.TotalFinalizableBytes)));
+        blocks.Add(M("Gen 0 / Gen 1 / Gen 2", $"{d.Gen0Count:N0} / {d.Gen1Count:N0} / {d.Gen2Count:N0}"));
+        blocks.Add(M("Finalizer Queue Objects", $"{d.FinalizerQueueCount:N0}", d.FinalizerQueueCount));
         blocks.Add(M("Finalizer Queue Retained Memory", FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)));
         if (d.PotentialResurrectionDetected)
             blocks.Add(M("Potential Object Resurrection", "Yes — undisposed IDisposable types in queue", 1.0));

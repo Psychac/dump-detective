@@ -19,7 +19,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// </summary>
 public sealed class JitAnalyzer : IAnalyzer
 {
-    public string Name     => "JIT Analysis";
+    public string Name => "JIT Analysis";
     public string Category => "Performance";
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -45,7 +45,7 @@ public sealed class JitAnalyzer : IAnalyzer
         }
 
         // ── §19.2 + §19.3  Stack Walk — Active Methods, Frame Distribution ──
-        int managedFrameCount   = 0;
+        int managedFrameCount = 0;
         int unmanagedFrameCount = 0;
         int activeMethodsOnStacks = 0;
 
@@ -89,7 +89,7 @@ public sealed class JitAnalyzer : IAnalyzer
                         frameTypeCounts[typeName] = 1;
 
                     // Tiered compilation detection
-                    int token       = method.MetadataToken;
+                    int token = method.MetadataToken;
                     ulong nativeCode = method.NativeCode;
 
                     if (token != 0 && nativeCode != 0)
@@ -108,8 +108,8 @@ public sealed class JitAnalyzer : IAnalyzer
                     // Large method tracking (deduplicated by NativeCode address)
                     if (nativeCode != 0 && !methodCandidates.ContainsKey(nativeCode))
                     {
-                        HotColdRegions hcr  = method.HotColdInfo;
-                        uint hotSize  = hcr.HotSize;
+                        HotColdRegions hcr = method.HotColdInfo;
+                        uint hotSize = hcr.HotSize;
                         uint coldSize = hcr.ColdSize;
 
                         if (hotSize + coldSize >= options.LargeMethodThresholdBytes)
@@ -135,15 +135,15 @@ public sealed class JitAnalyzer : IAnalyzer
         var topFrameTypes = BuildTopFrameTypes(frameTypeCounts, options.TopFrameTypesLimit);
 
         return new JitDomainResult(
-            TotalJitHeapBytes:        totalJitHeapBytes,
-            JitManagerCount:          jitManagerCount,
+            TotalJitHeapBytes: totalJitHeapBytes,
+            JitManagerCount: jitManagerCount,
             JitHeapPctOfTotalProcess: 0.0,               // not computable from dump alone
-            ActiveMethodsOnStacks:    activeMethodsOnStacks,
-            TopLargestMethods:        topMethods,
-            TopActiveFrameTypes:      topFrameTypes,
-            UnmanagedFrameCount:      unmanagedFrameCount,
-            ManagedFrameCount:        managedFrameCount,
-            TieredMethodCount:        tieredMethodCount);
+            ActiveMethodsOnStacks: activeMethodsOnStacks,
+            TopLargestMethods: topMethods,
+            TopActiveFrameTypes: topFrameTypes,
+            UnmanagedFrameCount: unmanagedFrameCount,
+            ManagedFrameCount: managedFrameCount,
+            TieredMethodCount: tieredMethodCount);
     }
 
     private static IReadOnlyList<JitMethodSnapshot> BuildTopMethods(
@@ -198,12 +198,12 @@ public sealed class JitAnalyzer : IAnalyzer
         uint hotSize,
         uint coldSize)
     {
-        public readonly string Signature       = signature;
-        public readonly string DeclaringType   = declaringType;
-        public readonly ulong  NativeCodeAddress = nativeCodeAddress;
-        public readonly uint   HotSize         = hotSize;
-        public readonly uint   ColdSize        = coldSize;
+        public readonly string Signature = signature;
+        public readonly string DeclaringType = declaringType;
+        public readonly ulong NativeCodeAddress = nativeCodeAddress;
+        public readonly uint HotSize = hotSize;
+        public readonly uint ColdSize = coldSize;
     }
-    
+
     public void Dispose() { }
 }

@@ -165,15 +165,15 @@ internal sealed class ReportSerializer
 
         return new AnalysisReportDocument
         {
-            DumpPath         = dumpPath,
-            GeneratedAtUtc   = DateTime.UtcNow,
-            ElapsedSeconds   = elapsed.TotalSeconds,
-            IncidentContext  = incidentContext,
-            Findings         = outputFindings,
+            DumpPath = dumpPath,
+            GeneratedAtUtc = DateTime.UtcNow,
+            ElapsedSeconds = elapsed.TotalSeconds,
+            IncidentContext = incidentContext,
+            Findings = outputFindings,
             AnalyzerSections = analyzerSections,
             ExecutiveSummary = executiveSummary,
             DeveloperActionPlan = developerActionPlan,
-            Confidence       = confidence,
+            Confidence = confidence,
             DedupDiagnostics = dedupRecord
         ,
             Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList()
@@ -221,14 +221,14 @@ internal sealed class ReportSerializer
 
     private static FindingRecord MapFinding(InsightFinding f) =>
         new(
-            Analyzer:       f.Analyzer,
-            Category:       f.Category,
-            Severity:       f.Severity.ToString(),
-            Title:          f.Title,
-            Evidence:       f.Evidence,
+            Analyzer: f.Analyzer,
+            Category: f.Category,
+            Severity: f.Severity.ToString(),
+            Title: f.Title,
+            Evidence: f.Evidence,
             Recommendation: f.Recommendation,
-            Tags:           f.Tags,
-            Fingerprint:    f.EffectiveFingerprint)
+            Tags: f.Tags,
+            Fingerprint: f.EffectiveFingerprint)
         {
             ConfidenceScore = null,
             EvidenceRefs = null,
@@ -271,7 +271,7 @@ internal sealed class ReportSerializer
             var newRec = f.RecommendationItems ?? new[] { f.Recommendation };
             var mergedRecList = existingRec.Concat(newRec).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
             string mergedRec = string.Join(Environment.NewLine, mergedRecList);
-            int    mergedSeverity = Math.Max(SeverityOrdinal(existing.Severity), SeverityOrdinal(f.Severity));
+            int mergedSeverity = Math.Max(SeverityOrdinal(existing.Severity), SeverityOrdinal(f.Severity));
             string mergedSeverityStr = SeverityFromOrdinal(mergedSeverity);
 
             var mergedTags = new List<string>(existing.Tags.Count + f.Tags.Count);
@@ -279,14 +279,14 @@ internal sealed class ReportSerializer
             foreach (string t in f.Tags) { if (!mergedTags.Contains(t)) mergedTags.Add(t); }
 
             dedupMap[f.Fingerprint] = new FindingRecord(
-                Analyzer:       existing.Analyzer,
-                Category:       existing.Category,
-                Severity:       mergedSeverityStr,
-                Title:          existing.Title,
-                Evidence:       mergedEvidence,
+                Analyzer: existing.Analyzer,
+                Category: existing.Category,
+                Severity: mergedSeverityStr,
+                Title: existing.Title,
+                Evidence: mergedEvidence,
                 Recommendation: mergedRec,
-                Tags:           mergedTags,
-                Fingerprint:    existing.Fingerprint)
+                Tags: mergedTags,
+                Fingerprint: existing.Fingerprint)
             {
                 EvidenceItems = mergedEvidenceList,
                 RecommendationItems = mergedRecList,
@@ -300,7 +300,7 @@ internal sealed class ReportSerializer
         }
 
         duplicateCandidates = mergedKeys.Count;
-        mergedSections      = mergedKeys.Count;
+        mergedSections = mergedKeys.Count;
         return new List<FindingRecord>(dedupMap.Values);
     }
 
@@ -393,11 +393,11 @@ internal sealed class ReportSerializer
         }
 
         return new ExecutiveSummaryRecord(
-            TotalManagedBytes:      totalManagedBytes,
-            LeakLikelihoodScore:    leak.Score,
-            GcPressureScore:        gcPressure.Score,
-            ThreadContentionScore:  thread.Score,
-            TopRecommendations:     top3)
+            TotalManagedBytes: totalManagedBytes,
+            LeakLikelihoodScore: leak.Score,
+            GcPressureScore: gcPressure.Score,
+            ThreadContentionScore: thread.Score,
+            TopRecommendations: top3)
         {
             ScoreBreakdowns = [leak, gcPressure, thread],
         };
@@ -410,8 +410,8 @@ internal sealed class ReportSerializer
         const int ActionPlanCap = 10;
 
         // Collect all Critical first, then fill remaining slots with Warning/Info
-        var criticals  = new List<FindingRecord>();
-        var remainder  = new List<FindingRecord>();
+        var criticals = new List<FindingRecord>();
+        var remainder = new List<FindingRecord>();
 
         for (int i = 0; i < findings.Count; i++)
         {
@@ -437,29 +437,29 @@ internal sealed class ReportSerializer
             string priority = ord == 2 ? "P0" : ord == 1 ? "P1" : "P2";
             string impact = f.Category switch
             {
-                var c when c.Contains("Leak",          StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Memory",         StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Leak", StringComparison.OrdinalIgnoreCase) ||
+                           c.Contains("Memory", StringComparison.OrdinalIgnoreCase)
                     => "Unchecked growth will increase GC pressure, slow the application, and risk process recycling under load.",
-                var c when c.Contains("Fragmentation",  StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Fragmentation", StringComparison.OrdinalIgnoreCase)
                     => "Heap fragmentation reduces allocation efficiency and can trigger premature LOH collections.",
-                var c when c.Contains("Crash",          StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Stability",       StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Crash", StringComparison.OrdinalIgnoreCase) ||
+                           c.Contains("Stability", StringComparison.OrdinalIgnoreCase)
                     => "Active exceptions can cause request failures and unhandled crashes visible to end-users.",
-                var c when c.Contains("Hang",           StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Threading",       StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Hang", StringComparison.OrdinalIgnoreCase) ||
+                           c.Contains("Threading", StringComparison.OrdinalIgnoreCase)
                     => "Thread contention will increase response latency and can lead to request timeouts.",
-                var c when c.Contains("Retention",       StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Retention", StringComparison.OrdinalIgnoreCase)
                     => "Unnecessary object retention increases memory footprint and delays garbage collection.",
-                var c when c.Contains("Pipeline",        StringComparison.OrdinalIgnoreCase)
+                var c when c.Contains("Pipeline", StringComparison.OrdinalIgnoreCase)
                     => "Analyzer failures may have left diagnostic gaps; re-running after the fix ensures complete coverage.",
-                _   => "Leaving this unaddressed risks degraded reliability or performance over time."
+                _ => "Leaving this unaddressed risks degraded reliability or performance over time."
             };
 
             actions.Add(new DeveloperActionRecord(
-                Priority:   priority,
-                Title:      f.Title,
-                Action:     f.Recommendation,
-                Impact:     impact));
+                Priority: priority,
+                Title: f.Title,
+                Action: f.Recommendation,
+                Impact: impact));
         }
 
         return actions;
@@ -470,8 +470,8 @@ internal sealed class ReportSerializer
     private static int SeverityOrdinal(string severity) => severity switch
     {
         nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning)  => 1,
-        _                                => 0
+        nameof(FindingSeverity.Warning) => 1,
+        _ => 0
     };
 
     private static string SeverityFromOrdinal(int ordinal) => ordinal switch

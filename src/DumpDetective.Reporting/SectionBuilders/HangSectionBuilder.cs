@@ -19,13 +19,13 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
 
         blocks.Add(H("HANG INDICATORS"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Alive Threads",        $"{d.TotalAliveThreads:N0}",   d.TotalAliveThreads));
-        blocks.Add(M("Waiting/Blocked Threads",    $"{d.WaitingThreadCount:N0}",   d.WaitingThreadCount));
-        blocks.Add(M("Threads Holding Locks",      $"{d.ThreadsHoldingLocks:N0}",  d.ThreadsHoldingLocks));
-        blocks.Add(M("Waiting Thread Percentage",  $"{d.WaitingPercent:F1}%",      d.WaitingPercent));
-        blocks.Add(M("Pending Tasks",              $"{d.PendingTasks:N0}",         d.PendingTasks));
-        blocks.Add(M("Faulted Tasks",              $"{d.FaultedTasks:N0}",         d.FaultedTasks));
-        blocks.Add(M("Canceled Tasks",             $"{d.CanceledTasks:N0}",        d.CanceledTasks));
+        blocks.Add(M("Total Alive Threads", $"{d.TotalAliveThreads:N0}", d.TotalAliveThreads));
+        blocks.Add(M("Waiting/Blocked Threads", $"{d.WaitingThreadCount:N0}", d.WaitingThreadCount));
+        blocks.Add(M("Threads Holding Locks", $"{d.ThreadsHoldingLocks:N0}", d.ThreadsHoldingLocks));
+        blocks.Add(M("Waiting Thread Percentage", $"{d.WaitingPercent:F1}%", d.WaitingPercent));
+        blocks.Add(M("Pending Tasks", $"{d.PendingTasks:N0}", d.PendingTasks));
+        blocks.Add(M("Faulted Tasks", $"{d.FaultedTasks:N0}", d.FaultedTasks));
+        blocks.Add(M("Canceled Tasks", $"{d.CanceledTasks:N0}", d.CanceledTasks));
         if (d.TaskScanLimited)
             blocks.Add(T("Task scan limited due to heap size; totals may be partial."));
 

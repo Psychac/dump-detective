@@ -16,8 +16,8 @@ internal sealed class StringDedupEntry
 
     public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0)
     {
-        Preview   = preview;
-        Count     = 1;
+        Preview = preview;
+        Count = 1;
         TotalSize = size;
         DominantMethodTable = dominantMt;
         SampleAddresses = sampleAddress != 0 ? new ulong[] { sampleAddress } : null;

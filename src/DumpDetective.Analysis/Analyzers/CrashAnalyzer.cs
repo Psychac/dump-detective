@@ -9,7 +9,7 @@ using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-public class CrashAnalyzer : IAnalyzer
+    public class CrashAnalyzer : IAnalyzer
     {
         private CrashAnalysisOptions _options = CrashAnalysisOptions.Default;
 
@@ -444,8 +444,9 @@ public class CrashAnalyzer : IAnalyzer
                 if (!isException)
                     return;
 
+                string key = typeName ?? StringConstants.UnknownType;
                 Interlocked.Increment(ref totalExceptions);
-                exceptionTypeCounts.AddOrUpdate(typeName, 1, (_, c) => c + 1);
+                exceptionTypeCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
 
                 bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
 
@@ -486,7 +487,7 @@ public class CrashAnalyzer : IAnalyzer
                     }
                 }
 
-                exceptionInstances.Add((typeName, exceptionInstance, isActive));
+                exceptionInstances.Add((key, exceptionInstance, isActive));
             }
 
             if (inMemoryEntries != null)
@@ -575,19 +576,20 @@ public class CrashAnalyzer : IAnalyzer
                     continue;
 
                 ulong mt = entry.MethodTable;
-                var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, null);
+                    var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, null);
                 if (isException)
                 {
+                    string key = typeName ?? StringConstants.UnknownType;
                     analysis.TotalExceptions++;
-                    exceptionTypeCounts.TryGetValue(typeName, out int typeCount);
-                    exceptionTypeCounts[typeName] = typeCount + 1;
+                    exceptionTypeCounts.TryGetValue(key, out int typeCount);
+                    exceptionTypeCounts[key] = typeCount + 1;
 
                     bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeExceptionContext);
                     if (isActive)
                     {
                         analysis.ActiveExceptions++;
-                        activeExceptionTypeCounts.TryGetValue(typeName, out int activeTypeCount);
-                        activeExceptionTypeCounts[typeName] = activeTypeCount + 1;
+                        activeExceptionTypeCounts.TryGetValue(key, out int activeTypeCount);
+                        activeExceptionTypeCounts[key] = activeTypeCount + 1;
 
                         if (!crashThreadCandidates.TryGetValue(activeExceptionContext.ThreadId, out var candidate))
                         {
@@ -603,10 +605,10 @@ public class CrashAnalyzer : IAnalyzer
                         candidate.ActiveExceptionCount++;
                     }
 
-                    if (!exceptionsByType.TryGetValue(typeName, out var list))
+                    if (!exceptionsByType.TryGetValue(key, out var list))
                     {
                         list = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
-                        exceptionsByType[typeName] = list;
+                        exceptionsByType[key] = list;
                     }
                     if (list.Count < _options.MaxExceptionsPerType || isActive)
                     {
@@ -853,9 +855,9 @@ public class CrashAnalyzer : IAnalyzer
             return stackFrames;
         }
 
-            public void Dispose() { }
+        public void Dispose() { }
 
-        }
+    }
 
 }
 

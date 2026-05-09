@@ -22,8 +22,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         // ── Summary ───────────────────────────────────────────────────────────
         blocks.Add(H("ALLOCATION PATTERN SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Allocation Profile",       d.Profile.ToString(),            (double)d.Profile));
-        blocks.Add(M("GC Pressure Level",        d.GCPressure.ToString(),         (double)d.GCPressure));
+        blocks.Add(M("Allocation Profile", d.Profile.ToString(), (double)d.Profile));
+        blocks.Add(M("GC Pressure Level", d.GCPressure.ToString(), (double)d.GCPressure));
         blocks.Add(M("Promotion Pressure Score", $"{d.PromotionPressureScore:F1}", d.PromotionPressureScore));
 
         // ── Generation distribution table ─────────────────────────────────────

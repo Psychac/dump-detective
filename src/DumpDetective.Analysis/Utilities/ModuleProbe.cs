@@ -45,7 +45,7 @@ namespace DumpDetective.Analysis.Utilities
                     var t = module.GetType();
                     // Common method name candidates
                     var m = t.GetMethod("GetMetadata", BindingFlags.Public | BindingFlags.Instance)
-                           ?? t.GetMethod("GetMetaData",  BindingFlags.Public | BindingFlags.Instance);
+                           ?? t.GetMethod("GetMetaData", BindingFlags.Public | BindingFlags.Instance);
                     if (m != null)
                     {
                         var res = m.Invoke(module, null);
@@ -61,8 +61,8 @@ namespace DumpDetective.Analysis.Utilities
                     else
                     {
                         // Try property candidates
-                        var p = t.GetProperty("Metadata",      BindingFlags.Public | BindingFlags.Instance)
-                               ?? t.GetProperty("MetadataBytes",  BindingFlags.Public | BindingFlags.Instance)
+                        var p = t.GetProperty("Metadata", BindingFlags.Public | BindingFlags.Instance)
+                               ?? t.GetProperty("MetadataBytes", BindingFlags.Public | BindingFlags.Instance)
                                ?? t.GetProperty("ModuleMetadata", BindingFlags.Public | BindingFlags.Instance);
                         if (p != null)
                         {

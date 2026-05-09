@@ -41,7 +41,7 @@ namespace DumpDetective.Analysis.Analyzers
                     AvgRefFieldsPerType: 0);
             }
 
-            IReadOnlyDictionary<ulong, TypeShapeEntry>          shapes     = idx.TypeShapeCache;
+            IReadOnlyDictionary<ulong, TypeShapeEntry> shapes = idx.TypeShapeCache;
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
             // Collect MTs present in both shape cache and aggregates, sorted by descending
@@ -60,8 +60,8 @@ namespace DumpDetective.Analysis.Analyzers
             var refHeavy = new List<TypeShapeProfile>(options.TopListLimit);
             var valHeavy = new List<TypeShapeProfile>(options.TopListLimit);
 
-            long totalRefFields  = 0;
-            int  typesAnalyzed   = 0;
+            long totalRefFields = 0;
+            int typesAnalyzed = 0;
 
             for (int i = 0; i < cap; i++)
             {
@@ -92,17 +92,17 @@ namespace DumpDetective.Analysis.Analyzers
                 catch { ifaceCount = 0; }
 
                 var profile = new TypeShapeProfile(
-                    TypeName:            type.Name ?? $"MT:0x{mt:x}",
-                    TotalFields:         shape.TotalFields,
-                    ReferenceFields:     shape.RefFields,
-                    ValueFields:         shape.ValFields,
+                    TypeName: type.Name ?? $"MT:0x{mt:x}",
+                    TotalFields: shape.TotalFields,
+                    ReferenceFields: shape.RefFields,
+                    ValueFields: shape.ValFields,
                     ReferenceFieldRatio: refRatio,
-                    InstanceCount:       (ulong)Math.Max(0, count),
-                    IsFinalizable:       type.IsFinalizable,
-                    IsValueType:         type.IsValueType,
-                    BaseTypeChainDepth:  baseDepth,
-                    InterfaceCount:      ifaceCount,
-                    Category:            category);
+                    InstanceCount: (ulong)Math.Max(0, count),
+                    IsFinalizable: type.IsFinalizable,
+                    IsValueType: type.IsValueType,
+                    BaseTypeChainDepth: baseDepth,
+                    InterfaceCount: ifaceCount,
+                    Category: category);
 
                 // Rank by (refRatio × instanceCount) — types with many instances and
                 // many ref fields impose the highest GC scan cost.
@@ -116,9 +116,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             return new ObjectShapeAnalyzerDomainResult(
                 TopReferenceHeavyTypes: refHeavy,
-                TopValueHeavyTypes:     valHeavy,
-                TotalTypesAnalyzed:     typesAnalyzed,
-                AvgRefFieldsPerType:    avgRefFields);
+                TopValueHeavyTypes: valHeavy,
+                TotalTypesAnalyzed: typesAnalyzed,
+                AvgRefFieldsPerType: avgRefFields);
         }
 
         private static int ComputeBaseTypeDepth(ClrType type)
@@ -132,7 +132,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             return depth;
         }
-        
+
         public void Dispose() { }
     }
 }

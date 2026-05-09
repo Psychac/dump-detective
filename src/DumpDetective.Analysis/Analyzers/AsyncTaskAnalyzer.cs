@@ -15,20 +15,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
 {
     // Task index record layout (20 bytes, little-endian):
     //   Address (8) | MT (8) | StateFlags (4)
-    private const int TaskIndexMagic   = 0x58494B54; // "TKIX"
+    private const int TaskIndexMagic = 0x58494B54; // "TKIX"
     private const int TaskIndexVersion = 1;
-    private const int RecordSize       = 20;
+    private const int RecordSize = 20;
 
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
-    private const int MaskFaulted   = 0x200000;
-    private const int MaskCanceled  = 0x400000;
-    private const int MaskRunning   = 0x10000; // TASK_STATE_DELEGATE_INVOKED
+    private const int MaskFaulted = 0x200000;
+    private const int MaskCanceled = 0x400000;
+    private const int MaskRunning = 0x10000; // TASK_STATE_DELEGATE_INVOKED
 
     // Sentinel continuation type — no-op callback; indicates orphan
     private const string NoOpContinuationType = "System.Threading.Tasks.Task+<>c";
 
-    public string Name     => "Async Task Analysis";
+    public string Name => "Async Task Analysis";
     public string Category => "Async";
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -55,20 +55,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         if (total == 0)
         {
             return new AsyncTaskDomainResult(
-                TotalTasks:            0,
-                PendingTasks:          0,
-                RunningTasks:          0,
-                FaultedTasks:          0,
-                CanceledTasks:         0,
-                CompletedTasks:        0,
-                OrphanedTasks:         0,
-                MaxContinuationDepth:  0,
-                AvgContinuationDepth:  0.0,
-                TaskScanLimited:       false,
-                TopPendingTaskTypes:   [],
-                TopFaultedTaskTypes:   [],
-                TopContinuationTypes:  [],
-                TopOrphanedTasks:      []);
+                TotalTasks: 0,
+                PendingTasks: 0,
+                RunningTasks: 0,
+                FaultedTasks: 0,
+                CanceledTasks: 0,
+                CompletedTasks: 0,
+                OrphanedTasks: 0,
+                MaxContinuationDepth: 0,
+                AvgContinuationDepth: 0.0,
+                TaskScanLimited: false,
+                TopPendingTaskTypes: [],
+                TopFaultedTaskTypes: [],
+                TopContinuationTypes: [],
+                TopOrphanedTasks: []);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -76,20 +76,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         // ── Step 2: Classify task states ─────────────────────────────────────────────────
         progress?.Report(new(0, "classifying task states", $"0 / {total:N0} tasks"));
 
-        int pending   = 0;
-        int running   = 0;
-        int faulted   = 0;
-        int canceled  = 0;
+        int pending = 0;
+        int running = 0;
+        int faulted = 0;
+        int canceled = 0;
         int completed = 0;
-        int orphaned  = 0;
+        int orphaned = 0;
 
-        var pendingTypeCount     = new Dictionary<string, int>(StringComparer.Ordinal);
-        var faultedTypeCount     = new Dictionary<string, int>(StringComparer.Ordinal);
-        var continuationCount    = new Dictionary<string, int>(StringComparer.Ordinal);
-        var orphanedSnapshots    = new List<OrphanedTaskSnapshot>(capacity: 32);
+        var pendingTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var faultedTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var continuationCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var orphanedSnapshots = new List<OrphanedTaskSnapshot>(capacity: 32);
 
-        int totalDepthSum    = 0;
-        int maxDepth         = 0;
+        int totalDepthSum = 0;
+        int maxDepth = 0;
         int depthSampleCount = 0;
 
         // MT → type-name cache to avoid repeated ClrMD lookups
@@ -119,15 +119,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             }
 
             bool isCompleted = (stateFlags & MaskCompleted) != 0;
-            bool isFaulted   = (stateFlags & MaskFaulted)   != 0;
-            bool isCanceled  = (stateFlags & MaskCanceled)  != 0;
-            bool isRunning   = (stateFlags & MaskRunning)   != 0 && !isCompleted && !isFaulted && !isCanceled;
+            bool isFaulted = (stateFlags & MaskFaulted) != 0;
+            bool isCanceled = (stateFlags & MaskCanceled) != 0;
+            bool isRunning = (stateFlags & MaskRunning) != 0 && !isCompleted && !isFaulted && !isCanceled;
 
-            if (isFaulted)       faulted++;
+            if (isFaulted) faulted++;
             else if (isCanceled) canceled++;
             else if (isCompleted) completed++;
-            else if (isRunning)  running++;
-            else                 pending++;
+            else if (isRunning) running++;
+            else pending++;
 
             // Resolve type name
             string typeName = ResolveTypeName(heap, address, mt, typeNameByMt);
@@ -174,8 +174,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         var visited = new HashSet<ulong>(capacity: 8) { address };
                         ClrObject current = continuationObj;
 
-                                     while (depth < options.MaxContinuationDepth && current.IsValid && current.Address != 0
-                                              && visited.Add(current.Address))
+                        while (depth < options.MaxContinuationDepth && current.IsValid && current.Address != 0
+                                 && visited.Add(current.Address))
                         {
                             // Track continuation type for top-N
                             if (current.Type != null)
@@ -205,20 +205,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         double avgDepth = depthSampleCount > 0 ? (double)totalDepthSum / depthSampleCount : 0.0;
 
         return new AsyncTaskDomainResult(
-            TotalTasks:            total,
-            PendingTasks:          pending,
-            RunningTasks:          running,
-            FaultedTasks:          faulted,
-            CanceledTasks:         canceled,
-            CompletedTasks:        completed,
-            OrphanedTasks:         orphaned,
-            MaxContinuationDepth:  maxDepth,
-            AvgContinuationDepth:  avgDepth,
-            TaskScanLimited:       taskScanLimited,
-            TopPendingTaskTypes:   BuildTopN(pendingTypeCount, options.TopTypesToShow),
-            TopFaultedTaskTypes:   BuildTopN(faultedTypeCount, options.TopTypesToShow),
-            TopContinuationTypes:  BuildTopN(continuationCount, options.TopTypesToShow),
-            TopOrphanedTasks:      orphanedSnapshots);
+            TotalTasks: total,
+            PendingTasks: pending,
+            RunningTasks: running,
+            FaultedTasks: faulted,
+            CanceledTasks: canceled,
+            CompletedTasks: completed,
+            OrphanedTasks: orphaned,
+            MaxContinuationDepth: maxDepth,
+            AvgContinuationDepth: avgDepth,
+            TaskScanLimited: taskScanLimited,
+            TopPendingTaskTypes: BuildTopN(pendingTypeCount, options.TopTypesToShow),
+            TopFaultedTaskTypes: BuildTopN(faultedTypeCount, options.TopTypesToShow),
+            TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
+            TopOrphanedTasks: orphanedSnapshots);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -303,9 +303,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                     int offset = 0;
                     while (offset + RecordSize <= read)
                     {
-                        ulong address    = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset));
-                        ulong mt         = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset + 8));
-                        int   stateFlags = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset + 16));
+                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset));
+                        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset + 8));
+                        int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset + 16));
 
                         result.Add((address, mt, stateFlags));
                         offset += RecordSize;
@@ -315,7 +315,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                             goto done;
                     }
                 }
-                done:;
+            done:;
             }
             finally
             {

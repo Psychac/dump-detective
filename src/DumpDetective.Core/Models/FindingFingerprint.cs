@@ -1,6 +1,7 @@
 ﻿using System.Text;
 
 namespace DumpDetective.Core.Models;
+
 internal static class FindingFingerprint
 {
     public static string Build(InsightFinding finding)

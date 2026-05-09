@@ -21,9 +21,9 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         blocks.Add(H("MODULE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Modules Loaded", $"{d.TotalModules:N0}",       d.TotalModules));
-        blocks.Add(M("Unique Module Names",  $"{d.UniqueModuleNames:N0}",   d.UniqueModuleNames));
-        blocks.Add(M("Dynamic Modules",      $"{d.DynamicModules:N0}",      d.DynamicModules));
+        blocks.Add(M("Total Modules Loaded", $"{d.TotalModules:N0}", d.TotalModules));
+        blocks.Add(M("Unique Module Names", $"{d.UniqueModuleNames:N0}", d.UniqueModuleNames));
+        blocks.Add(M("Dynamic Modules", $"{d.DynamicModules:N0}", d.DynamicModules));
 
         if (d.VersionConflictGroups > 0)
         {

@@ -37,9 +37,9 @@ internal sealed class DiskHandleSnapshotReader : IHandleSnapshotReader
             }
             if (read < RecordSize) yield break;
 
-            ulong addr = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(0,8));
-            ulong mt   = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(8,8));
-            byte kind  = buf[16];
+            ulong addr = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(0, 8));
+            ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(8, 8));
+            byte kind = buf[16];
             yield return new HandleRecord(addr, mt, kind);
         }
     }

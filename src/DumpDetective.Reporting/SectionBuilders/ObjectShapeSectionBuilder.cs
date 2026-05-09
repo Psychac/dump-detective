@@ -23,10 +23,10 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         // ── Summary ───────────────────────────────────────────────────────────
         blocks.Add(H("OBJECT SHAPE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Types Analyzed",        $"{d.TotalTypesAnalyzed:N0}",     d.TotalTypesAnalyzed));
-        blocks.Add(M("Avg Ref Fields / Type",  $"{d.AvgRefFieldsPerType:F2}",   d.AvgRefFieldsPerType));
-        blocks.Add(M("Reference-Heavy Types",  $"{d.TopReferenceHeavyTypes.Count:N0}", d.TopReferenceHeavyTypes.Count));
-        blocks.Add(M("Value-Heavy Types",      $"{d.TopValueHeavyTypes.Count:N0}",     d.TopValueHeavyTypes.Count));
+        blocks.Add(M("Types Analyzed", $"{d.TotalTypesAnalyzed:N0}", d.TotalTypesAnalyzed));
+        blocks.Add(M("Avg Ref Fields / Type", $"{d.AvgRefFieldsPerType:F2}", d.AvgRefFieldsPerType));
+        blocks.Add(M("Reference-Heavy Types", $"{d.TopReferenceHeavyTypes.Count:N0}", d.TopReferenceHeavyTypes.Count));
+        blocks.Add(M("Value-Heavy Types", $"{d.TopValueHeavyTypes.Count:N0}", d.TopValueHeavyTypes.Count));
 
         // ── Reference-heavy types ─────────────────────────────────────────────
         if (d.TopReferenceHeavyTypes.Count > 0)

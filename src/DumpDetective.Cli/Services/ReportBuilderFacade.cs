@@ -13,10 +13,10 @@ internal sealed class ReportBuilderFacade(
     ReportSerializer serializer,
     TrendReportComposer trendReportComposer)
 {
-    private readonly IReadOnlyList<IReportFormatter>        _formatters    = formatters.ToList();
-    private readonly IReadOnlyList<IAnalyzerSectionBuilder> _builders      = builderFactory.CreateBuilders();
-    private readonly ReportSerializer                       _serializer    = serializer;
-    private readonly TrendReportComposer                    _trendComposer = trendReportComposer;
+    private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToList();
+    private readonly IReadOnlyList<IAnalyzerSectionBuilder> _builders = builderFactory.CreateBuilders();
+    private readonly ReportSerializer _serializer = serializer;
+    private readonly TrendReportComposer _trendComposer = trendReportComposer;
 
     public string BuildRenderedReport(
         string dumpPath,

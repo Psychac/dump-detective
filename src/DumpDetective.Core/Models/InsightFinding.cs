@@ -1,4 +1,5 @@
 ﻿namespace DumpDetective.Core.Models;
+
 public sealed record InsightFinding(
 string Analyzer,
 string Category,
@@ -11,8 +12,8 @@ string? Fingerprint = null,
 double? MetricValue = null,
 string? MetricUnit = null)
 {
-public string EffectiveFingerprint =>
-    !string.IsNullOrWhiteSpace(Fingerprint)
-        ? Fingerprint
-        : FindingFingerprint.Build(Analyzer, Category, Title, Tags);
+    public string EffectiveFingerprint =>
+        !string.IsNullOrWhiteSpace(Fingerprint)
+            ? Fingerprint
+            : FindingFingerprint.Build(Analyzer, Category, Title, Tags);
 }

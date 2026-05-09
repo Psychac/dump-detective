@@ -30,13 +30,13 @@ namespace DumpDetective.Analysis.Indexing;
 internal static class TypeAggregateIndexWriter
 {
     // File magic: "TYAG" = Type Aggregate Index
-    internal const int Magic   = 0x47415954;
+    internal const int Magic = 0x47415954;
     internal const int Version = 2;
 
     // TypeAggregateIndexEntry binary record — must match the layout in the doc comment of
     // TypeAggregateIndexEntry.cs: MT(8)+ModuleId(4)+Count(8)+TotalSize(8)+LohCount(8)+
     // LohSize(8)+SampleAddress(8)+Gen0Count(4)+Gen1Count(4)+Gen2Count(4)+Flags(1)+Pad(3)
-    internal const int TypeEntrySize  = 68;
+    internal const int TypeEntrySize = 68;
 
     // TypeShapeEntry binary record: MT(8)+RefFields(2)+ValFields(2)+Pad(4)
     internal const int ShapeEntrySize = 16;
@@ -47,15 +47,15 @@ internal static class TypeAggregateIndexWriter
         string filePath,
         string dumpPath,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
-        IReadOnlyList<ModuleInfo>?                           modules,
-        long[]?                                              sizeBuckets,
-        IReadOnlyDictionary<ulong, TypeShapeEntry>?          shapeCache,
-        long                                                 objectCount)
+        IReadOnlyList<ModuleInfo>? modules,
+        long[]? sizeBuckets,
+        IReadOnlyDictionary<ulong, TypeShapeEntry>? shapeCache,
+        long objectCount)
     {
-        int typeCount   = typeAggregates.Count;
+        int typeCount = typeAggregates.Count;
         int bucketCount = sizeBuckets?.Length ?? 0;
-        int moduleCount = modules?.Count      ?? 0;
-        int shapeCount  = shapeCache?.Count   ?? 0;
+        int moduleCount = modules?.Count ?? 0;
+        int shapeCount = shapeCache?.Count ?? 0;
 
         using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write,
             FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
@@ -69,20 +69,20 @@ internal static class TypeAggregateIndexWriter
         stream.Write(buf8);
 
         // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+DumpLength(8)+DumpTimeTicks(8) ─
-        long dumpFileLength      = 0;
-        long dumpLastWriteTicks  = 0;
+        long dumpFileLength = 0;
+        long dumpLastWriteTicks = 0;
         try
         {
             var fi = new FileInfo(dumpPath);
-            dumpFileLength     = fi.Length;
+            dumpFileLength = fi.Length;
             dumpLastWriteTicks = fi.LastWriteTimeUtc.Ticks;
         }
         catch { /* stamp stays 0,0 — reader accepts 0,0 as "unknown" */ }
 
         Span<byte> extra = stackalloc byte[32];
-        BinaryPrimitives.WriteInt32LittleEndian(extra,       bucketCount);
-        BinaryPrimitives.WriteInt32LittleEndian(extra[4..],  moduleCount);
-        BinaryPrimitives.WriteInt32LittleEndian(extra[8..],  shapeCount);
+        BinaryPrimitives.WriteInt32LittleEndian(extra, bucketCount);
+        BinaryPrimitives.WriteInt32LittleEndian(extra[4..], moduleCount);
+        BinaryPrimitives.WriteInt32LittleEndian(extra[8..], shapeCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[12..], 0); // pad
         BinaryPrimitives.WriteInt64LittleEndian(extra[16..], dumpFileLength);
         BinaryPrimitives.WriteInt64LittleEndian(extra[24..], dumpLastWriteTicks);
@@ -160,11 +160,11 @@ internal static class TypeAggregateIndexWriter
                 int off = 0;
                 foreach (ModuleInfo m in modules)
                 {
-                    string name    = m.Name         ?? string.Empty;
+                    string name = m.Name ?? string.Empty;
                     string asmName = m.AssemblyName ?? string.Empty;
 
                     int nameLen = Encoding.UTF8.GetByteCount(name);
-                    int asmLen  = Encoding.UTF8.GetByteCount(asmName);
+                    int asmLen = Encoding.UTF8.GetByteCount(asmName);
                     int recSize = 4 + 2 + 2 + nameLen + asmLen; // Id + 2×len fields + strings
 
                     // Flush current buffer contents if this record would overflow.
@@ -201,24 +201,24 @@ internal static class TypeAggregateIndexWriter
 
     private static void WriteTypeEntry(Span<byte> span, ulong mt, TypeAggregateIndexEntry e)
     {
-        BinaryPrimitives.WriteUInt64LittleEndian(span,       mt);              //  8 → total  8
-        BinaryPrimitives.WriteInt32LittleEndian(span[8..],   e.ModuleId);     //  4 → total 12
-        BinaryPrimitives.WriteInt64LittleEndian(span[12..],  e.Count);        //  8 → total 20
+        BinaryPrimitives.WriteUInt64LittleEndian(span, mt);              //  8 → total  8
+        BinaryPrimitives.WriteInt32LittleEndian(span[8..], e.ModuleId);     //  4 → total 12
+        BinaryPrimitives.WriteInt64LittleEndian(span[12..], e.Count);        //  8 → total 20
         BinaryPrimitives.WriteUInt64LittleEndian(span[20..], e.TotalSize);    //  8 → total 28
-        BinaryPrimitives.WriteInt64LittleEndian(span[28..],  e.LohCount);     //  8 → total 36
+        BinaryPrimitives.WriteInt64LittleEndian(span[28..], e.LohCount);     //  8 → total 36
         BinaryPrimitives.WriteUInt64LittleEndian(span[36..], e.LohSize);      //  8 → total 44
         BinaryPrimitives.WriteUInt64LittleEndian(span[44..], e.SampleAddress);//  8 → total 52
-        BinaryPrimitives.WriteInt32LittleEndian(span[52..],  e.Gen0Count);    //  4 → total 56
-        BinaryPrimitives.WriteInt32LittleEndian(span[56..],  e.Gen1Count);    //  4 → total 60
-        BinaryPrimitives.WriteInt32LittleEndian(span[60..],  e.Gen2Count);    //  4 → total 64
+        BinaryPrimitives.WriteInt32LittleEndian(span[52..], e.Gen0Count);    //  4 → total 56
+        BinaryPrimitives.WriteInt32LittleEndian(span[56..], e.Gen1Count);    //  4 → total 60
+        BinaryPrimitives.WriteInt32LittleEndian(span[60..], e.Gen2Count);    //  4 → total 64
         span[64] = (byte)e.Flags;                                              //  1 → total 65
         span[65] = span[66] = span[67] = 0;                                    //  3 → total 68
     }
 
     private static void WriteShapeEntry(Span<byte> span, ulong mt, TypeShapeEntry s)
     {
-        BinaryPrimitives.WriteUInt64LittleEndian(span,      mt);            // 8
-        BinaryPrimitives.WriteInt16LittleEndian(span[8..],  s.RefFields);  // 2
+        BinaryPrimitives.WriteUInt64LittleEndian(span, mt);            // 8
+        BinaryPrimitives.WriteInt16LittleEndian(span[8..], s.RefFields);  // 2
         BinaryPrimitives.WriteInt16LittleEndian(span[10..], s.ValFields);  // 2
         span[12] = span[13] = span[14] = span[15] = 0;                     // 4 pad
     }
@@ -227,10 +227,10 @@ internal static class TypeAggregateIndexWriter
         byte[] buf, int off,
         int id, string name, string asmName, int nameLen, int asmLen)
     {
-        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(off),      id);
+        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(off), id);
         BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(off + 4), (ushort)nameLen);
         BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(off + 6), (ushort)asmLen);
-        Encoding.UTF8.GetBytes(name,    buf.AsSpan(off + 8));
+        Encoding.UTF8.GetBytes(name, buf.AsSpan(off + 8));
         Encoding.UTF8.GetBytes(asmName, buf.AsSpan(off + 8 + nameLen));
     }
 }

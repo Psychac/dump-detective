@@ -16,9 +16,9 @@ internal static class ConsoleUx
     //   Level 2 – Analyzer group  full-width Rule, no constant needed
     //   Level 3 – Analyzer        (IndentAnalyzer = 4 spaces)
     //   Level 4 – Phase/progress  (IndentSub      = 6 spaces)
-    private const string IndentStage    = "  ";
+    private const string IndentStage = "  ";
     private const string IndentAnalyzer = "    ";
-    private const string IndentSub      = "      ";
+    private const string IndentSub = "      ";
 
     // ── Level 0: global headers ─────────────────────────────────────────────
 
@@ -148,12 +148,12 @@ internal static class ConsoleUx
     /// </summary>
     public static void ObjectScanProgress(string operation, long scannedCount, TimeSpan elapsed, string? details = null, double? perSecondOverride = null)
     {
-        double perSecond  = perSecondOverride ?? (elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0);
-        string spinner    = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
-        string scanPart   = scannedCount > 0 ? $"  {scannedCount:N0} obj  ·  " : "  ";
-        string ratePart   = perSecond > 0 ? $"  ·  {perSecond:N0}/s" : string.Empty;
+        double perSecond = perSecondOverride ?? (elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0);
+        string spinner = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
+        string scanPart = scannedCount > 0 ? $"  {scannedCount:N0} obj  ·  " : "  ";
+        string ratePart = perSecond > 0 ? $"  ·  {perSecond:N0}/s" : string.Empty;
         string detailPart = string.IsNullOrWhiteSpace(details) ? string.Empty : $"  ·  {details}";
-        string text       = $"{IndentSub}{spinner}{scanPart}{FormatElapsed(elapsed)}{ratePart}{detailPart}";
+        string text = $"{IndentSub}{spinner}{scanPart}{FormatElapsed(elapsed)}{ratePart}{detailPart}";
 
         lock (_consoleGate)
         {
@@ -169,8 +169,8 @@ internal static class ConsoleUx
     /// </summary>
     public static void ObjectScanComplete(string operation, long scannedCount, TimeSpan elapsed, string? details = null)
     {
-        double perSecond   = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
-        string scanPart    = scannedCount > 0 ? $"  [grey]·[/]  [silver]{scannedCount:N0} obj  ·  {perSecond:N0}/s[/]" : string.Empty;
+        double perSecond = elapsed.TotalSeconds > 0 ? scannedCount / elapsed.TotalSeconds : 0;
+        string scanPart = scannedCount > 0 ? $"  [grey]·[/]  [silver]{scannedCount:N0} obj  ·  {perSecond:N0}/s[/]" : string.Empty;
         string detailsPart = string.IsNullOrWhiteSpace(details) ? string.Empty : $"  [grey]·[/]  [grey]{Escape(details)}[/]";
 
         lock (_consoleGate)
@@ -206,8 +206,8 @@ internal static class ConsoleUx
             (string icon, string color) = severity switch
             {
                 FindingSeverity.Critical => ("✖", "bold red"),
-                FindingSeverity.Warning  => ("▲", "yellow"),
-                _                        => ("ℹ", "silver"),
+                FindingSeverity.Warning => ("▲", "yellow"),
+                _ => ("ℹ", "silver"),
             };
             AnsiConsole.MarkupLine($"  [{color}]{icon}  {Escape(title)}[/]");
             if (showEvidence && !string.IsNullOrWhiteSpace(evidence))
@@ -222,8 +222,8 @@ internal static class ConsoleUx
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
-            string s = success > 0 ? $"[green]{success} ok[/]"      : $"[grey]{success} ok[/]";
-            string f = failed  > 0 ? $"[red]{failed} failed[/]"      : $"[grey]{failed} failed[/]";
+            string s = success > 0 ? $"[green]{success} ok[/]" : $"[grey]{success} ok[/]";
+            string f = failed > 0 ? $"[red]{failed} failed[/]" : $"[grey]{failed} failed[/]";
             string k = skipped > 0 ? $"[yellow]{skipped} skipped[/]" : $"[grey]{skipped} skipped[/]";
             AnsiConsole.MarkupLine(
                 $"  {s}  [grey]·[/]  {f}  [grey]·[/]  {k}  [grey]·[/]  [silver]{findings} finding{(findings == 1 ? "" : "s")}[/]");
@@ -241,7 +241,7 @@ internal static class ConsoleUx
             foreach (AnalyzerRunResult r in items)
             {
                 string scans = r.ObjectScanCount > 0 ? $"  ·  {r.ObjectScanCount:N0} obj" : string.Empty;
-                string name  = Escape(r.AnalyzerName).PadRight(40);
+                string name = Escape(r.AnalyzerName).PadRight(40);
                 AnsiConsole.MarkupLine(
                     $"    [silver]{name}[/]  [grey]{r.Duration.TotalSeconds:F1}s{Escape(scans)}  ·  {r.FindingCount} finding{(r.FindingCount == 1 ? "" : "s")}[/]");
             }
@@ -275,7 +275,7 @@ internal static class ConsoleUx
 
     public static void AnalyzerRunSummary(long scans, long cacheHits, long cacheMisses)
     {
-        long total     = cacheHits + cacheMisses;
+        long total = cacheHits + cacheMisses;
         double hitRate = total > 0 ? cacheHits * 100.0 / total : 0;
         lock (_consoleGate)
         {
@@ -382,10 +382,10 @@ internal static class ConsoleUx
     /// </summary>
     public static void MemoryTableRow(string analyzerName, long wsDelta, long wsAfter, long managedDelta)
     {
-        string wsDeltaStr    = FormatSignedBytes(wsDelta);
-        string wsAfterStr    = FormatBytes((ulong)Math.Max(0, wsAfter));
-        string managedStr    = FormatSignedBytes(managedDelta);
-        string deltaColor    = wsDelta > 50 * 1024 * 1024 ? "yellow" : wsDelta > 200 * 1024 * 1024 ? "red" : "grey";
+        string wsDeltaStr = FormatSignedBytes(wsDelta);
+        string wsAfterStr = FormatBytes((ulong)Math.Max(0, wsAfter));
+        string managedStr = FormatSignedBytes(managedDelta);
+        string deltaColor = wsDelta > 50 * 1024 * 1024 ? "yellow" : wsDelta > 200 * 1024 * 1024 ? "red" : "grey";
 
         lock (_consoleGate)
         {
@@ -404,7 +404,7 @@ internal static class ConsoleUx
     public static void MemoryTableFooter(long peakWorkingSet, long baselineWorkingSet)
     {
         long totalDelta = peakWorkingSet - baselineWorkingSet;
-        string peakStr  = FormatBytes((ulong)Math.Max(0, peakWorkingSet));
+        string peakStr = FormatBytes((ulong)Math.Max(0, peakWorkingSet));
         string deltaStr = FormatSignedBytes(totalDelta);
 
         lock (_consoleGate)
@@ -448,8 +448,8 @@ internal static class ConsoleUx
     private static string FormatBytes(ulong bytes)
     {
         if (bytes >= 1024UL * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
-        if (bytes >= 1024UL * 1024)        return $"{bytes / (1024.0 * 1024):F1} MB";
-        if (bytes >= 1024UL)               return $"{bytes / 1024.0:F1} KB";
+        if (bytes >= 1024UL * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        if (bytes >= 1024UL) return $"{bytes / 1024.0:F1} KB";
         return $"{bytes} B";
     }
 

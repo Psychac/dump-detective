@@ -45,4 +45,7 @@ internal sealed record ResolvedExecutionOptions(
     IReadOnlyCollection<string> IncludeAnalyzers,
     IReadOnlyCollection<string> ExcludeAnalyzers,
     bool DiagnosticMode,
-    HeapIndexPrebuildMode IndexPrebuildMode);
+    HeapIndexPrebuildMode IndexPrebuildMode)
+{
+    public ExecutionPolicy ExecutionPolicy { get; init; } = DumpDetective.Core.Options.ExecutionPolicy.Default;
+}

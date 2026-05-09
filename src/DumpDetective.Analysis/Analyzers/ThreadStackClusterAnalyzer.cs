@@ -197,7 +197,7 @@ namespace DumpDetective.Analysis.Analyzers
                 Signature = signature;
             }
         }
-        
+
         public void Dispose() { }
     }
 }

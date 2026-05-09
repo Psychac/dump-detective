@@ -99,10 +99,10 @@ namespace BenchmarkSuite1
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
                 Options = new Dictionary<Type, object?>
                 {
-                    [typeof(RetentionOptions)]    = memoryLeakOptions,
+                    [typeof(RetentionOptions)] = memoryLeakOptions,
                     [typeof(ReferenceChainOptions)] = referenceChainOptions,
-                    [typeof(EventLeakOptions)]      = eventLeakOptions,
-                    [typeof(DiagnosticsOptions)]    = diagnosticsOptions,
+                    [typeof(EventLeakOptions)] = eventLeakOptions,
+                    [typeof(DiagnosticsOptions)] = diagnosticsOptions,
                 }
             };
 

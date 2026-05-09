@@ -25,7 +25,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class ArrayAnalyzer : IAnalyzer
     {
-        public string Name     => "Array Analysis";
+        public string Name => "Array Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -63,10 +63,10 @@ namespace DumpDetective.Analysis.Analyzers
             var typeMap = new Dictionary<string, (int Count, ulong Bytes, bool IsMultiDim, int Rank)>(256);
 
             long totalObjects = 0;
-            ulong totalBytes  = 0;
+            ulong totalBytes = 0;
             int multiDimCount = 0;
-            int lohCount      = 0;
-            ulong lohBytes    = 0;
+            int lohCount = 0;
+            ulong lohBytes = 0;
 
             // Sparse candidates collected in a single pass to avoid a second typeAggregates scan.
             // Only 1-D reference-type arrays with a valid SampleAddress are eligible.
@@ -106,7 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 totalObjects += e.Count;
-                totalBytes   += e.TotalSize;
+                totalBytes += e.TotalSize;
                 if (isMultiDim) multiDimCount += (int)Math.Min(e.Count, int.MaxValue);
                 if (e.LohCount > 0)
                 {
@@ -181,11 +181,11 @@ namespace DumpDetective.Analysis.Analyzers
                     string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
                     ClrArray arr = obj.AsArray();
                     topLargeArrays.Add(new LargeArrayEntry(
-                        Address:         kv.Value.SampleAddress,
+                        Address: kv.Value.SampleAddress,
                         ElementTypeName: elemName,
-                        Length:          arr.Length,
-                        Rank:            arr.Rank,
-                        Size:            obj.Size));
+                        Length: arr.Length,
+                        Rank: arr.Rank,
+                        Size: obj.Size));
 
                     if (topLargeArrays.Count >= options.TopLargeLimit) break;
                 }
@@ -236,26 +236,26 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong wastedBytes = (ulong)(arr.Length * sparseRatio * (double)elemSize);
 
                 topSparseArrays.Add(new SparseArrayEntry(
-                    Address:         sampleAddr,
+                    Address: sampleAddr,
                     ElementTypeName: elemName,
-                    Length:          arr.Length,
+                    Length: arr.Length,
                     NullOrZeroCount: (int)Math.Min((long)(nullCount * ((double)arr.Length / sampleLen)), int.MaxValue),
-                    SparseRatio:     sparseRatio,
-                    WastedBytes:     wastedBytes));
+                    SparseRatio: sparseRatio,
+                    WastedBytes: wastedBytes));
             }
 
             topSparseArrays.Sort(static (a, b) => b.WastedBytes.CompareTo(a.WastedBytes));
 
             return new ArrayDomainResult(
-                TotalArrayObjects:    (int)Math.Min(totalObjects, int.MaxValue),
-                TotalArrayBytes:      totalBytes,
-                MultiDimArrayCount:   multiDimCount,
-                LohArrayCount:        lohCount,
-                LohArrayBytes:        lohBytes,
-                TopArrayTypesBySize:  topArrayTypes,
-                TopLargeArrays:       topLargeArrays,
-                TopSparseArrays:      topSparseArrays,
-                ScanLimited:          scanLimited);
+                TotalArrayObjects: (int)Math.Min(totalObjects, int.MaxValue),
+                TotalArrayBytes: totalBytes,
+                MultiDimArrayCount: multiDimCount,
+                LohArrayCount: lohCount,
+                LohArrayBytes: lohBytes,
+                TopArrayTypesBySize: topArrayTypes,
+                TopLargeArrays: topLargeArrays,
+                TopSparseArrays: topSparseArrays,
+                ScanLimited: scanLimited);
         }
 
         // ── Large array index reader ──────────────────────────────────────────────
@@ -283,8 +283,8 @@ namespace DumpDetective.Analysis.Analyzers
                 if (read < RecordSize) break;
 
                 ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                ulong mt      = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
-                ulong size    = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
 
                 if (!arrayMtSet.Contains(mt)) continue;
 
@@ -296,11 +296,11 @@ namespace DumpDetective.Analysis.Analyzers
 
                 ClrArray arr = obj.AsArray();
                 result.Add(new LargeArrayEntry(
-                    Address:         address,
+                    Address: address,
                     ElementTypeName: elemName,
-                    Length:          arr.Length,
-                    Rank:            arr.Rank,
-                    Size:            size));
+                    Length: arr.Length,
+                    Rank: arr.Rank,
+                    Size: size));
             }
         }
 

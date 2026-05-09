@@ -23,9 +23,9 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
 
         blocks.Add(H("EXCEPTION SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Exception Objects",      $"{d.TotalExceptions:N0}",             d.TotalExceptions));
-        blocks.Add(M("Active Exceptions (on threads)", $"{d.ActiveExceptions:N0}",          d.ActiveExceptions));
-        blocks.Add(M("Unique Exception Types",       $"{d.ExceptionTypeCounts.Count:N0}",   d.ExceptionTypeCounts.Count));
+        blocks.Add(M("Total Exception Objects", $"{d.TotalExceptions:N0}", d.TotalExceptions));
+        blocks.Add(M("Active Exceptions (on threads)", $"{d.ActiveExceptions:N0}", d.ActiveExceptions));
+        blocks.Add(M("Unique Exception Types", $"{d.ExceptionTypeCounts.Count:N0}", d.ExceptionTypeCounts.Count));
         if (d.InferredTraceCount > 0)
             blocks.Add(M("Inferred Original Traces", $"{d.InferredTraceCount:N0} (from heuristic inference)"));
 
@@ -81,11 +81,11 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                 {
                     string confidenceLabel = c.OriginalStackTraceConfidence switch
                     {
-                        InferenceConfidence.Exact        => "",
-                        InferenceConfidence.ThreadId     => " [confidence: ThreadId]",
+                        InferenceConfidence.Exact => "",
+                        InferenceConfidence.ThreadId => " [confidence: ThreadId]",
                         InferenceConfidence.MessageHResult => " [confidence: Message+HResult]",
-                        InferenceConfidence.TypeInnerType  => " [confidence: Type+InnerType — low]",
-                        _                                => "",
+                        InferenceConfidence.TypeInnerType => " [confidence: Type+InnerType — low]",
+                        _ => "",
                     };
                     if (c.OriginalStackTraceInferred)
                     {
@@ -179,10 +179,10 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             {
                 string confLabel = ic.OriginalStackTraceConfidence switch
                 {
-                    InferenceConfidence.ThreadId       => "ThreadId match",
+                    InferenceConfidence.ThreadId => "ThreadId match",
                     InferenceConfidence.MessageHResult => "Message+HResult match",
-                    InferenceConfidence.TypeInnerType  => "Type+InnerType match (low confidence)",
-                    _                                  => "unknown",
+                    InferenceConfidence.TypeInnerType => "Type+InnerType match (low confidence)",
+                    _ => "unknown",
                 };
                 blocks.Add(new ListItemBlock($"Thread {ic.ThreadId} → {ic.OriginalStackTraceInferredFrom} [{confLabel}]", 1));
             }

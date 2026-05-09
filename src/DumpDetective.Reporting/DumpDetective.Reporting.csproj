@@ -11,6 +11,10 @@
     <EmbeddedResource Include="Templates\report.html" />
     <EmbeddedResource Include="Templates\report.css" />
     <EmbeddedResource Include="Templates\report.js" />
+    <EmbeddedResource Include="Templates\report.dom.js" />
+    <EmbeddedResource Include="Templates\report.renderers.js" />
+    <EmbeddedResource Include="Templates\report.ui.js" />
+    <EmbeddedResource Include="Templates\report.main.js" />
   </ItemGroup>
 
   <ItemGroup>

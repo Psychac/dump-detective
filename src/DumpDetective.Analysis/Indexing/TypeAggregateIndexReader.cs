@@ -21,7 +21,7 @@ internal static class TypeAggregateIndexReader
         string typeAggPath,
         string objectIndexPath,
         string dumpPath,
-        long   objectCount,
+        long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
@@ -42,7 +42,7 @@ internal static class TypeAggregateIndexReader
         string typeAggPath,
         string objectIndexPath,
         string dumpPath,
-        long   objectCount,
+        long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
@@ -51,7 +51,7 @@ internal static class TypeAggregateIndexReader
 
         // ── IndexHeader ──────────────────────────────────────────────────────
         if (!IndexHeader.TryRead(stream, out var header)) return false;
-        if (header.Magic   != TypeAggregateIndexWriter.Magic)   return false;
+        if (header.Magic != TypeAggregateIndexWriter.Magic) return false;
         if (header.Version != TypeAggregateIndexWriter.Version) return false;
 
         int typeCount = (int)Math.Min(header.RecordCount, int.MaxValue);
@@ -66,13 +66,13 @@ internal static class TypeAggregateIndexReader
         if (stream.ReadAtLeast(extra, 32, throwOnEndOfStream: false) < 32) return false;
         int bucketCount = BinaryPrimitives.ReadInt32LittleEndian(extra);
         int moduleCount = BinaryPrimitives.ReadInt32LittleEndian(extra[4..]);
-        int shapeCount  = BinaryPrimitives.ReadInt32LittleEndian(extra[8..]);
-        long storedLength    = BinaryPrimitives.ReadInt64LittleEndian(extra[16..]);
+        int shapeCount = BinaryPrimitives.ReadInt32LittleEndian(extra[8..]);
+        long storedLength = BinaryPrimitives.ReadInt64LittleEndian(extra[16..]);
         long storedTimeTicks = BinaryPrimitives.ReadInt64LittleEndian(extra[24..]);
 
-        if (bucketCount is < 0 or > 64)   return false;
+        if (bucketCount is < 0 or > 64) return false;
         if (moduleCount is < 0 or > 65536) return false;
-        if (shapeCount  < 0)               return false;
+        if (shapeCount < 0) return false;
 
         // Validate dump identity stamp. If both stored values are 0 the stamp was not
         // available when the index was written (e.g. a permission error) — accept it.
@@ -116,7 +116,7 @@ internal static class TypeAggregateIndexReader
                 int remaining = typeCount;
                 while (remaining > 0)
                 {
-                    int batch      = Math.Min(remaining, Chunk);
+                    int batch = Math.Min(remaining, Chunk);
                     int bytesNeeded = batch * TypeAggregateIndexWriter.TypeEntrySize;
                     int read = stream.ReadAtLeast(buf.AsSpan(0, bytesNeeded), bytesNeeded, throwOnEndOfStream: false);
                     if (read < bytesNeeded) return false;
@@ -148,17 +148,17 @@ internal static class TypeAggregateIndexReader
                 int remaining = shapeCount;
                 while (remaining > 0)
                 {
-                    int batch      = Math.Min(remaining, Chunk);
+                    int batch = Math.Min(remaining, Chunk);
                     int bytesNeeded = batch * TypeAggregateIndexWriter.ShapeEntrySize;
                     int read = stream.ReadAtLeast(buf.AsSpan(0, bytesNeeded), bytesNeeded, throwOnEndOfStream: false);
                     if (read < bytesNeeded) return false;
 
                     for (int i = 0; i < batch; i++)
                     {
-                        int    off = i * TypeAggregateIndexWriter.ShapeEntrySize;
-                        ulong  mt  = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                        short  rf  = BinaryPrimitives.ReadInt16LittleEndian(buf.AsSpan(off + 8));
-                        short  vf  = BinaryPrimitives.ReadInt16LittleEndian(buf.AsSpan(off + 10));
+                        int off = i * TypeAggregateIndexWriter.ShapeEntrySize;
+                        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
+                        short rf = BinaryPrimitives.ReadInt16LittleEndian(buf.AsSpan(off + 8));
+                        short vf = BinaryPrimitives.ReadInt16LittleEndian(buf.AsSpan(off + 10));
                         shapes[mt] = new TypeShapeEntry(rf, vf);
                     }
                     remaining -= batch;
@@ -184,9 +184,9 @@ internal static class TypeAggregateIndexReader
                 for (int i = 0; i < moduleCount; i++)
                 {
                     if (stream.ReadAtLeast(hdr8, 8, throwOnEndOfStream: false) < 8) return false;
-                    int id      = BinaryPrimitives.ReadInt32LittleEndian(hdr8);
+                    int id = BinaryPrimitives.ReadInt32LittleEndian(hdr8);
                     int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(hdr8[4..]);
-                    int asmLen  = BinaryPrimitives.ReadUInt16LittleEndian(hdr8[6..]);
+                    int asmLen = BinaryPrimitives.ReadUInt16LittleEndian(hdr8[6..]);
 
                     int total = nameLen + asmLen;
                     // Use pooled buffer if it fits; otherwise allocate a one-off.
@@ -196,8 +196,8 @@ internal static class TypeAggregateIndexReader
 
                     modules.Add(new ModuleInfo
                     {
-                        Id          = id,
-                        Name        = Encoding.UTF8.GetString(strBuf, 0, nameLen),
+                        Id = id,
+                        Name = Encoding.UTF8.GetString(strBuf, 0, nameLen),
                         AssemblyName = Encoding.UTF8.GetString(strBuf, nameLen, asmLen),
                     });
                 }
@@ -225,7 +225,7 @@ internal static class TypeAggregateIndexReader
                 if (magic == 0x50554453 && version == 1 && entries > 0)
                 {
                     var map = new Dictionary<ulong, StringDedupEntry>(entries);
-                    Span<byte> rec     = stackalloc byte[31];
+                    Span<byte> rec = stackalloc byte[31];
                     Span<byte> addrBuf = stackalloc byte[8];
                     for (int i = 0; i < entries; i++)
                     {
@@ -284,12 +284,12 @@ internal static class TypeAggregateIndexReader
             HeapIndexStorageKind.Disk,
             objectIndexPath,
             objectCount,
-            Elapsed:          TimeSpan.Zero,   // elapsed not meaningful for a cache hit
-            TypeAggregates:   typeAggregates,
-            InMemoryEntries:  null,
-            Modules:          modules,
+            Elapsed: TimeSpan.Zero,   // elapsed not meaningful for a cache hit
+            TypeAggregates: typeAggregates,
+            InMemoryEntries: null,
+            Modules: modules,
             GlobalSizeBuckets: sizeBuckets,
-            TypeShapeCache:   shapeCache,
+            TypeShapeCache: shapeCache,
             SatelliteWarnings: null,
             StringDedupIndex: stringDedup,
             StringDedupDistribution: stringDedupDistribution);
@@ -301,17 +301,17 @@ internal static class TypeAggregateIndexReader
 
     private static TypeAggregateIndexEntry ReadTypeEntry(ReadOnlySpan<byte> span)
     {
-        ulong mt    = BinaryPrimitives.ReadUInt64LittleEndian(span);
-        int   modId = BinaryPrimitives.ReadInt32LittleEndian(span[8..]);
-        long  count = BinaryPrimitives.ReadInt64LittleEndian(span[12..]);
+        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(span);
+        int modId = BinaryPrimitives.ReadInt32LittleEndian(span[8..]);
+        long count = BinaryPrimitives.ReadInt64LittleEndian(span[12..]);
         ulong tSize = BinaryPrimitives.ReadUInt64LittleEndian(span[20..]);
-        long  lohCnt = BinaryPrimitives.ReadInt64LittleEndian(span[28..]);
-        ulong lohSz  = BinaryPrimitives.ReadUInt64LittleEndian(span[36..]);
-        ulong sAddr  = BinaryPrimitives.ReadUInt64LittleEndian(span[44..]);
-        int   g0     = BinaryPrimitives.ReadInt32LittleEndian(span[52..]);
-        int   g1     = BinaryPrimitives.ReadInt32LittleEndian(span[56..]);
-        int   g2     = BinaryPrimitives.ReadInt32LittleEndian(span[60..]);
-        var   flags  = (TypeAggregateFlags)span[64];
+        long lohCnt = BinaryPrimitives.ReadInt64LittleEndian(span[28..]);
+        ulong lohSz = BinaryPrimitives.ReadUInt64LittleEndian(span[36..]);
+        ulong sAddr = BinaryPrimitives.ReadUInt64LittleEndian(span[44..]);
+        int g0 = BinaryPrimitives.ReadInt32LittleEndian(span[52..]);
+        int g1 = BinaryPrimitives.ReadInt32LittleEndian(span[56..]);
+        int g2 = BinaryPrimitives.ReadInt32LittleEndian(span[60..]);
+        var flags = (TypeAggregateFlags)span[64];
 
         return new TypeAggregateIndexEntry(mt, modId, count, tSize, lohCnt, lohSz, sAddr, g0, g1, g2, flags);
     }

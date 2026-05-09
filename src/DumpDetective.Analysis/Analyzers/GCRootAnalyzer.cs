@@ -24,10 +24,10 @@ namespace DumpDetective.Analysis.Analyzers
     public sealed class GCRootAnalyzer : IAnalyzer
     {
         // RootIndex.bin binary layout constants
-        private const int  RootRecordSize   = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
-        private const int  RootHeaderMagic  = 0x58495452; // "RTIX"
-        private const int  RootHeaderVersion = 1;
-        private const long RootHeaderSize    = 24; // see IndexHeader
+        private const int RootRecordSize = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
+        private const int RootHeaderMagic = 0x58495452; // "RTIX"
+        private const int RootHeaderVersion = 1;
+        private const long RootHeaderSize = 24; // see IndexHeader
 
         public string Name => "GC Root Analysis";
         public string Category => "Memory";
@@ -64,8 +64,8 @@ namespace DumpDetective.Analysis.Analyzers
                 totalHeapBytes += agg.TotalSize;
 
             // ── Step 3: Group roots by kind, compute per-kind retained estimate ─
-            var kindCounts   = new Dictionary<string, int>(8);
-            var kindBytes    = new Dictionary<string, ulong>(8);
+            var kindCounts = new Dictionary<string, int>(8);
+            var kindBytes = new Dictionary<string, ulong>(8);
 
             foreach (var root in roots)
             {
@@ -81,7 +81,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (var kv in kindCounts)
             {
                 string kind = kv.Key;
-                ulong  estBytes = kindBytes.TryGetValue(kind, out ulong kb) ? kb : 0UL;
+                ulong estBytes = kindBytes.TryGetValue(kind, out ulong kb) ? kb : 0UL;
                 double pct = totalHeapBytes > 0 ? (double)estBytes / totalHeapBytes * 100.0 : 0.0;
                 byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct));
             }
@@ -119,8 +119,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 5: BFS path tracing for top-N roots ──────────────────────
             int pathCappedCount = 0;
-            var pathFindings    = new List<RootPathFinding>(Math.Min(findings.Count, options.PathSearchTopN));
-            int pathN           = Math.Min(findings.Count, options.PathSearchTopN);
+            var pathFindings = new List<RootPathFinding>(Math.Min(findings.Count, options.PathSearchTopN));
+            int pathN = Math.Min(findings.Count, options.PathSearchTopN);
 
             for (int i = 0; i < pathN; i++)
             {
@@ -134,20 +134,20 @@ namespace DumpDetective.Analysis.Analyzers
                     pathCappedCount++;
 
                 pathFindings.Add(new RootPathFinding(
-                    TargetAddress:  f.TargetAddress,
+                    TargetAddress: f.TargetAddress,
                     TargetTypeName: f.TargetTypeName,
-                    RootKind:       f.RootKind,
-                    PathTypeNames:  pathTypes,
-                    PathLength:     pathTypes.Count,
-                    WasCapped:      wasCapped));
+                    RootKind: f.RootKind,
+                    PathTypeNames: pathTypes,
+                    PathLength: pathTypes.Count,
+                    WasCapped: wasCapped));
             }
 
             return new GCRootDomainResult(
-                TotalRoots:          roots.Count,
-                ByKind:              byKind,
-                TopRootsBySeverity:  topFindings,
-                RootPaths:           pathFindings,
-                PathSearchCapped:    pathCappedCount > 0,
+                TotalRoots: roots.Count,
+                ByKind: byKind,
+                TopRootsBySeverity: topFindings,
+                RootPaths: pathFindings,
+                PathSearchCapped: pathCappedCount > 0,
                 PathSearchCappedCount: pathCappedCount);
         }
 
@@ -188,7 +188,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (fs.Read(headerBuf) < 24)
                 return roots;
 
-            int magic   = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
+            int magic = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
             int version = BinaryPrimitives.ReadInt32LittleEndian(headerBuf[4..]);
             if (magic != RootHeaderMagic || version != RootHeaderVersion)
                 return roots;
@@ -209,8 +209,8 @@ namespace DumpDetective.Analysis.Analyzers
                     {
                         int off = i * RootRecordSize;
                         ulong target = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                        ulong rootA  = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 8));
-                        byte  kind   = buf[off + 16];
+                        ulong rootA = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 8));
+                        byte kind = buf[off + 16];
                         roots.Add((target, rootA, kind));
                     }
                 }
@@ -241,8 +241,8 @@ namespace DumpDetective.Analysis.Analyzers
             if (startAddr == 0)
                 return [];
 
-            var visited   = new HashSet<ulong>(capacity: 64) { startAddr };
-            var queue     = new Queue<(ulong Addr, int Depth)>(capacity: 64);
+            var visited = new HashSet<ulong>(capacity: 64) { startAddr };
+            var queue = new Queue<(ulong Addr, int Depth)>(capacity: 64);
             var typeNames = new List<string>(capacity: 16);
 
             queue.Enqueue((startAddr, 0));
@@ -331,11 +331,11 @@ namespace DumpDetective.Analysis.Analyzers
             int baseScore = retainedBytes switch
             {
                 >= 100_000_000 => 100,
-                >= 10_000_000  => 80,
-                >= 1_000_000   => 60,
-                >= 100_000     => 40,
-                >= 10_000      => 20,
-                _              => 5
+                >= 10_000_000 => 80,
+                >= 1_000_000 => 60,
+                >= 100_000 => 40,
+                >= 10_000 => 20,
+                _ => 5
             };
 
             // Kind multiplier: static roots are hardest to release
@@ -343,9 +343,9 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 "StrongHandle" => 3,  // static / global
                 "FinalizerQueue" => 2,
-                "PinnedHandle"   => 2,
-                "Stack"          => 1,
-                _                => 1
+                "PinnedHandle" => 2,
+                "Stack" => 1,
+                _ => 1
             };
 
             return Math.Min(baseScore * multiplier, 300);
@@ -375,7 +375,7 @@ namespace DumpDetective.Analysis.Analyzers
                 RootPaths: [],
                 PathSearchCapped: false,
                 PathSearchCappedCount: 0);
-    
+
         public void Dispose() { }
-        }
     }
+}

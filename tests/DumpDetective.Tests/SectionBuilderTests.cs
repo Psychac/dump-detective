@@ -28,15 +28,15 @@ public sealed class SectionBuilderTests
     public void MemorySectionBuilder_Build_EmitsHeadingMetricsAndTables()
     {
         var domain = Stamped(new MemoryDomainResult(
-            TotalBytes:       1_073_741_824,
-            LohBytes:         268_435_456,
-            LohPercent:       25.0,
-            TotalObjects:     1_500_000,
-            LohObjects:       8_000,
+            TotalBytes: 1_073_741_824,
+            LohBytes: 268_435_456,
+            LohPercent: 25.0,
+            TotalObjects: 1_500_000,
+            LohObjects: 8_000,
             LohThresholdBytes: 85_000,
-            UniqueTypes:      3_200,
-            TopTypesBySize:   [new TypeSnapshot("System.String",    500_000, 400_000_000, 0)],
-            TopTypesByCount:  [new TypeSnapshot("System.Object[]",  200_000, 160_000_000, 0)]),
+            UniqueTypes: 3_200,
+            TopTypesBySize: [new TypeSnapshot("System.String", 500_000, 400_000_000, 0)],
+            TopTypesByCount: [new TypeSnapshot("System.Object[]", 200_000, 160_000_000, 0)]),
             "Memory Analysis", "Memory");
 
         var builder = new MemorySectionBuilder();
@@ -77,15 +77,15 @@ public sealed class SectionBuilderTests
         };
 
         var domain = Stamped(new MemoryDomainResult(
-            TotalBytes:        2_482_000_000,
-            LohBytes:           300_000_000,
-            LohPercent:         12.1,
-            TotalObjects:       8_611_050,
-            LohObjects:          11_050,
-            LohThresholdBytes:    85_000,
-            UniqueTypes:           4_500,
-            TopTypesBySize:   [new TypeSnapshot("System.Byte[]", 11_050, 300_000_000, 300_000_000, AverageSize: 27_149)],
-            TopTypesByCount:  [new TypeSnapshot("System.String", 5_000_000, 200_000_000, 0, AverageSize: 40)],
+            TotalBytes: 2_482_000_000,
+            LohBytes: 300_000_000,
+            LohPercent: 12.1,
+            TotalObjects: 8_611_050,
+            LohObjects: 11_050,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 4_500,
+            TopTypesBySize: [new TypeSnapshot("System.Byte[]", 11_050, 300_000_000, 300_000_000, AverageSize: 27_149)],
+            TopTypesByCount: [new TypeSnapshot("System.String", 5_000_000, 200_000_000, 0, AverageSize: 40)],
             SizeBucketHistogram: histogram),
             "Memory Analysis", "Memory");
 
@@ -109,7 +109,7 @@ public sealed class SectionBuilderTests
     [Fact]
     public void MemorySectionBuilder_CanHandle_ReturnsFalseForUnrelatedResult()
     {
-        var builder  = new MemorySectionBuilder();
+        var builder = new MemorySectionBuilder();
         var unrelated = Stamped(new CrashDomainResult(0, 0,
             new Dictionary<string, int>(), new Dictionary<string, int>()),
             "Crash Analysis", "Crash");
@@ -124,15 +124,15 @@ public sealed class SectionBuilderTests
     {
         var exCounts = new Dictionary<string, int>
         {
-            ["System.NullReferenceException"]      = 3,
-            ["System.InvalidOperationException"]   = 1
+            ["System.NullReferenceException"] = 3,
+            ["System.InvalidOperationException"] = 1
         };
         var domain = Stamped(new CrashDomainResult(
-            TotalExceptions:          4,
-            ActiveExceptions:         2,
-            ExceptionTypeCounts:      exCounts,
+            TotalExceptions: 4,
+            ActiveExceptions: 2,
+            ExceptionTypeCounts: exCounts,
             ActiveExceptionTypeCounts: new Dictionary<string, int>
-                { ["System.NullReferenceException"] = 2 }),
+            { ["System.NullReferenceException"] = 2 }),
             "Crash Analysis", "Crash");
 
         var builder = new CrashSectionBuilder();
@@ -162,12 +162,12 @@ public sealed class SectionBuilderTests
             new("WeakShort", 45)
         };
         var domain = Stamped(new GCHandleDomainResult(
-            TotalHandles:         173,
-            StrongLikeHandles:    120,
-            WeakLikeHandles:      45,
-            PinnedHandleTargets:  8,
-            HandlesByKind:        handlesByKind,
-            TopTargetTypes:       [new NameCountEntry("byte[]", 8)]),
+            TotalHandles: 173,
+            StrongLikeHandles: 120,
+            WeakLikeHandles: 45,
+            PinnedHandleTargets: 8,
+            HandlesByKind: handlesByKind,
+            TopTargetTypes: [new NameCountEntry("byte[]", 8)]),
             "GC Handle Analysis", "GCHandle");
 
         var builder = new GCHandleSectionBuilder();
@@ -194,18 +194,18 @@ public sealed class SectionBuilderTests
                 FillRate: 0.10, WastedMemory: 16_000, Address: 0x1000)
         };
         var domain = Stamped(new CollectionDomainResult(
-            TotalCollections:        500,
-            Dictionaries:            10,
-            Lists:                   200,
-            ArrayLists:              0,
-            Stacks:                  0,
-            SortedLists:             0,
-            SortedSets:              0,
-            HashSets:                5,
-            Queues:                  3,
-            TotalWastedMemory:       16_000,
+            TotalCollections: 500,
+            Dictionaries: 10,
+            Lists: 200,
+            ArrayLists: 0,
+            Stacks: 0,
+            SortedLists: 0,
+            SortedSets: 0,
+            HashSets: 5,
+            Queues: 3,
+            TotalWastedMemory: 16_000,
             WastefulCollectionCount: 1,
-            TopWastefulCollections:  wasteful),
+            TopWastefulCollections: wasteful),
             "Collection Analysis", "Collection");
 
         var builder = new CollectionSectionBuilder();
@@ -234,13 +234,13 @@ public sealed class SectionBuilderTests
                 FreeBytes: 24_000_000, LargestFreeBlock: 5_000_000)
         };
         var domain = Stamped(new LohFragmentationDomainResult(
-            SegmentCount:         1,
-            TotalBytes:           134_217_728,
-            FreeBytes:            24_000_000,
-            UsedBytes:            110_217_728,
-            FreeBlockCount:       42,
+            SegmentCount: 1,
+            TotalBytes: 134_217_728,
+            FreeBytes: 24_000_000,
+            UsedBytes: 110_217_728,
+            FreeBlockCount: 42,
             FragmentationPercent: 18.5,
-            LargestFreeBlock:     5_000_000,
+            LargestFreeBlock: 5_000_000,
             TopFragmentedSegments: segments),
             "LOH Fragmentation Analysis", "LOH");
 
@@ -295,20 +295,20 @@ public sealed class SectionBuilderTests
         };
 
         var domain = Stamped(new AsyncTaskDomainResult(
-            TotalTasks:           1_200,
-            PendingTasks:         450,
-            RunningTasks:         12,
-            FaultedTasks:         33,
-            CanceledTasks:        5,
-            CompletedTasks:       700,
-            OrphanedTasks:        orphaned.Count,
+            TotalTasks: 1_200,
+            PendingTasks: 450,
+            RunningTasks: 12,
+            FaultedTasks: 33,
+            CanceledTasks: 5,
+            CompletedTasks: 700,
+            OrphanedTasks: orphaned.Count,
             MaxContinuationDepth: 8,
             AvgContinuationDepth: 3.4,
-            TaskScanLimited:      false,
-            TopPendingTaskTypes:  [new NameCountEntry("System.Threading.Tasks.Task`1[[Foo]]", 400)],
-            TopFaultedTaskTypes:  [new NameCountEntry("System.Threading.Tasks.Task",           33)],
+            TaskScanLimited: false,
+            TopPendingTaskTypes: [new NameCountEntry("System.Threading.Tasks.Task`1[[Foo]]", 400)],
+            TopFaultedTaskTypes: [new NameCountEntry("System.Threading.Tasks.Task", 33)],
             TopContinuationTypes: [new NameCountEntry("System.Runtime.CompilerServices.AsyncTaskMethodBuilder", 120)],
-            TopOrphanedTasks:     orphaned),
+            TopOrphanedTasks: orphaned),
             "Async Task Analysis", "Async");
 
         var builder = new AsyncTaskSectionBuilder();
@@ -440,7 +440,7 @@ public sealed class SectionBuilderTests
     {
         var domain = Stamped(new AllocationPatternDomainResult(
             Gen0CountPct: 0, Gen1CountPct: 0, Gen2CountPct: 0, LohCountPct: 0,
-            Gen0SizePct: 0,  Gen1SizePct: 0,  Gen2SizePct: 0,  LohSizePct: 0,
+            Gen0SizePct: 0, Gen1SizePct: 0, Gen2SizePct: 0, LohSizePct: 0,
             Profile: AllocationProfile.Mixed,
             GCPressure: GCPressureLevel.Low,
             PromotionPressureScore: 0,
@@ -465,7 +465,7 @@ public sealed class SectionBuilderTests
     {
         var domain = Stamped(new AllocationPatternDomainResult(
             Gen0CountPct: 75.0, Gen1CountPct: 12.0, Gen2CountPct: 10.0, LohCountPct: 0.1,
-            Gen0SizePct: 45.0,  Gen1SizePct: 18.0,  Gen2SizePct: 25.0,  LohSizePct: 2.0,
+            Gen0SizePct: 45.0, Gen1SizePct: 18.0, Gen2SizePct: 25.0, LohSizePct: 2.0,
             Profile: AllocationProfile.Transient,
             GCPressure: GCPressureLevel.Low,
             PromotionPressureScore: 8.4,
@@ -515,7 +515,7 @@ public sealed class SectionBuilderTests
 
         var domain = Stamped(new AllocationPatternDomainResult(
             Gen0CountPct: 30.0, Gen1CountPct: 8.0, Gen2CountPct: 55.0, LohCountPct: 0.1,
-            Gen0SizePct: 25.0,  Gen1SizePct: 7.0,  Gen2SizePct: 50.0,  LohSizePct: 5.0,
+            Gen0SizePct: 25.0, Gen1SizePct: 7.0, Gen2SizePct: 50.0, LohSizePct: 5.0,
             Profile: AllocationProfile.Retained,
             GCPressure: GCPressureLevel.High,
             PromotionPressureScore: 42.0,
@@ -554,9 +554,9 @@ public sealed class SectionBuilderTests
     {
         var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
             TopReferenceHeavyTypes: [],
-            TopValueHeavyTypes:     [],
-            TotalTypesAnalyzed:     0,
-            AvgRefFieldsPerType:    0),
+            TopValueHeavyTypes: [],
+            TotalTypesAnalyzed: 0,
+            AvgRefFieldsPerType: 0),
             "Object Shape Analysis", "Memory");
         new ObjectShapeSectionBuilder().CanHandle(domain).Should().BeTrue();
     }
@@ -575,9 +575,9 @@ public sealed class SectionBuilderTests
     {
         var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
             TopReferenceHeavyTypes: [],
-            TopValueHeavyTypes:     [],
-            TotalTypesAnalyzed:     42,
-            AvgRefFieldsPerType:    3.7),
+            TopValueHeavyTypes: [],
+            TotalTypesAnalyzed: 42,
+            AvgRefFieldsPerType: 3.7),
             "Object Shape Analysis", "Memory");
 
         var builder = new ObjectShapeSectionBuilder();
@@ -620,9 +620,9 @@ public sealed class SectionBuilderTests
 
         var domain = Stamped(new ObjectShapeAnalyzerDomainResult(
             TopReferenceHeavyTypes: refHeavy,
-            TopValueHeavyTypes:     valHeavy,
-            TotalTypesAnalyzed:     150,
-            AvgRefFieldsPerType:    2.4),
+            TopValueHeavyTypes: valHeavy,
+            TotalTypesAnalyzed: 150,
+            AvgRefFieldsPerType: 2.4),
             "Object Shape Analysis", "Memory");
 
         var builder = new ObjectShapeSectionBuilder();
@@ -1107,19 +1107,19 @@ public sealed class SectionBuilderTests
             EstimatedManagedBytes: 104_857_600);
 
         var moduleEntry = new ModuleTypeCountEntry(
-            ModuleName:   "MyApp.Core.dll",
+            ModuleName: "MyApp.Core.dll",
             AssemblyName: "MyApp.Core, Version=1.0.0.0",
-            TypeCount:    850,
+            TypeCount: 850,
             LiveTypeCount: 120,
-            ObjectCount:  50_000,
-            TotalBytes:   40_000_000);
+            ObjectCount: 50_000,
+            TotalBytes: 40_000_000);
 
         var domain = Stamped(
             new AppDomainDomainResult(
-                TotalDomains:          1,
-                Domains:               [domainSnapshot],
-                TotalDynamicModules:   3,
-                AnonymousModuleCount:  1,
+                TotalDomains: 1,
+                Domains: [domainSnapshot],
+                TotalDynamicModules: 3,
+                AnonymousModuleCount: 1,
                 TopModulesByTypeCount: [moduleEntry]),
             "AppDomain Analysis", "Modules");
 
@@ -1176,17 +1176,17 @@ public sealed class SectionBuilderTests
         var byHeap = new Dictionary<int, ulong> { [0] = 12 * 1024 * 1024UL };
         var result = Stamped(
             new SegmentReservationDomainResult(
-                TotalCommittedBytes:        3 * 1024 * 1024,
-                TotalReservedBytes:         12 * 1024 * 1024,
-                ReservationGapBytes:        9 * 1024 * 1024,
-                ReservedToCommittedRatio:   4.0,
-                EphemeralSegmentCount:      1,
-                AvgEphemeralFillPct:        25.0,
+                TotalCommittedBytes: 3 * 1024 * 1024,
+                TotalReservedBytes: 12 * 1024 * 1024,
+                ReservationGapBytes: 9 * 1024 * 1024,
+                ReservedToCommittedRatio: 4.0,
+                EphemeralSegmentCount: 1,
+                AvgEphemeralFillPct: 25.0,
                 NonEphemeralSohSegmentCount: 0,
-                SegmentTable:               entries,
-                ReservedByLogicalHeap:      byHeap,
-                AddressSpacePressureRisk:   false,
-                PressureRiskReason:         string.Empty),
+                SegmentTable: entries,
+                ReservedByLogicalHeap: byHeap,
+                AddressSpacePressureRisk: false,
+                PressureRiskReason: string.Empty),
             "Segment Reservation Analysis", "Memory");
 
         AnalyzerDetailSection section = new SegmentReservationSectionBuilder().Build(result);
@@ -1237,17 +1237,17 @@ public sealed class SectionBuilderTests
         };
         var result = Stamped(
             new WeakReferenceDomainResult(
-                TotalWeakHandles:            200,
-                AliveWeakTargets:            80,
-                DeadWeakTargets:             120,
-                DeadTargetRatio:             0.6,
-                WeakReferenceObjectCount:    50,
-                WeakReferenceObjectBytes:    1024 * 1024,
-                StaleWrapperCount:           10,
-                TopWeakTargetTypes:          topTargetTypes,
-                TopStaleWrapperHolderTypes:  [],
+                TotalWeakHandles: 200,
+                AliveWeakTargets: 80,
+                DeadWeakTargets: 120,
+                DeadTargetRatio: 0.6,
+                WeakReferenceObjectCount: 50,
+                WeakReferenceObjectBytes: 1024 * 1024,
+                StaleWrapperCount: 10,
+                TopWeakTargetTypes: topTargetTypes,
+                TopStaleWrapperHolderTypes: [],
                 DependentHandleDeadKeyCount: 5,
-                ScanCapped:                  false),
+                ScanCapped: false),
             "Weak Reference Analysis", "Memory");
 
         AnalyzerDetailSection section = new WeakReferenceSectionBuilder().Build(result);
@@ -1304,14 +1304,14 @@ public sealed class SectionBuilderTests
         };
         var result = Stamped(
             new BoxingDomainResult(
-                TotalBoxedObjects:       7000,
-                TotalBoxedBytes:         96000,
-                TopBoxedTypes:           boxedTypes,
-                BoxedEnumCount:          2000,
-                BoxedEnumBytes:          16000,
+                TotalBoxedObjects: 7000,
+                TotalBoxedBytes: 96000,
+                TopBoxedTypes: boxedTypes,
+                BoxedEnumCount: 2000,
+                BoxedEnumBytes: 16000,
                 OversizedValueTypeCount: 50,
-                TopPaddingWasteTypes:    paddingTypes,
-                TypeScanCapped:          false),
+                TopPaddingWasteTypes: paddingTypes,
+                TypeScanCapped: false),
             "Boxing Analysis", "Memory");
 
         AnalyzerDetailSection section = new BoxingSectionBuilder().Build(result);
@@ -1371,15 +1371,15 @@ public sealed class SectionBuilderTests
         };
         var result = Stamped(
             new JitDomainResult(
-                TotalJitHeapBytes:        200 * 1024 * 1024,
-                JitManagerCount:          2,
+                TotalJitHeapBytes: 200 * 1024 * 1024,
+                JitManagerCount: 2,
                 JitHeapPctOfTotalProcess: 0.0,
-                ActiveMethodsOnStacks:    100,
-                TopLargestMethods:        methods,
-                TopActiveFrameTypes:      frameTypes,
-                UnmanagedFrameCount:      15,
-                ManagedFrameCount:        85,
-                TieredMethodCount:        3),
+                ActiveMethodsOnStacks: 100,
+                TopLargestMethods: methods,
+                TopActiveFrameTypes: frameTypes,
+                UnmanagedFrameCount: 15,
+                ManagedFrameCount: 85,
+                TieredMethodCount: 3),
             "JIT Analysis", "Performance");
 
         AnalyzerDetailSection section = new JitSectionBuilder().Build(result);

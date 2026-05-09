@@ -140,7 +140,7 @@ public sealed class ReportingCompositionTests
     {
         AnalysisReportDocument doc = new()
         {
-            DumpPath       = "C:/dumps/detailed.dmp",
+            DumpPath = "C:/dumps/detailed.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
             ElapsedSeconds = 1,
             AnalyzerSections =

@@ -314,11 +314,11 @@ namespace DumpDetective.Analysis.Analyzers
                 target[key] = dest;
             }
 
-            dest.InstanceCount    += source.InstanceCount;
+            dest.InstanceCount += source.InstanceCount;
             dest.TotalSubscribers += source.TotalSubscribers;
             if (source.MinSubscribers < dest.MinSubscribers) dest.MinSubscribers = source.MinSubscribers;
             if (source.MaxSubscribers > dest.MaxSubscribers) dest.MaxSubscribers = source.MaxSubscribers;
-            if (source.MaxSeverity   > dest.MaxSeverity)    dest.MaxSeverity    = source.MaxSeverity;
+            if (source.MaxSeverity > dest.MaxSeverity) dest.MaxSeverity = source.MaxSeverity;
 
             foreach (var kvp in source.AllSubscriberTypeCounts)
             {
@@ -399,16 +399,16 @@ namespace DumpDetective.Analysis.Analyzers
             var groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
 
             var processedStaticMethodTables = new HashSet<ulong>(capacity: 64);
-            var processedStaticDelegates    = new HashSet<ulong>(capacity: 64);
-            var appDomains  = heap.Runtime.AppDomains;
-            var rootHints   = BuildRootHintMap(heap, cache);
+            var processedStaticDelegates = new HashSet<ulong>(capacity: 64);
+            var appDomains = heap.Runtime.AppDomains;
+            var rootHints = BuildRootHintMap(heap, cache);
             var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
 
             // ── Fast scanner: direct IMemoryReader.ReadPointer — no heap.GetObject ────
             var fastScanner = new EventLeakFastScanner(heap, GetEventNames, progress);
 
-            HeapEntry[]? inMemoryArray  = null;
-            int objectCount             = 0;
+            HeapEntry[]? inMemoryArray = null;
+            int objectCount = 0;
             IEnumerable<HeapEntry>? streamingEntries = null;
 
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
@@ -416,7 +416,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (heapIdx.InMemoryEntries is { } arr)
                 {
                     inMemoryArray = arr;
-                    objectCount   = (int)Math.Min(heapIdx.ObjectCount, (long)arr.Length);
+                    objectCount = (int)Math.Min(heapIdx.ObjectCount, (long)arr.Length);
                 }
                 else
                 {

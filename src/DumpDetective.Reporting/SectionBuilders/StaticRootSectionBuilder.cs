@@ -21,8 +21,8 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
 
         blocks.Add(H("STATIC FIELD REFERENCES"));
         blocks.Add(Divider());
-        blocks.Add(M("Concerning Static Roots", $"{d.RootCount:N0}",                            d.RootCount));
-        blocks.Add(M("Total Retained Bytes",    FormatHelper.FormatBytes(d.TotalRetainedBytes),  (double)d.TotalRetainedBytes));
+        blocks.Add(M("Concerning Static Roots", $"{d.RootCount:N0}", d.RootCount));
+        blocks.Add(M("Total Retained Bytes", FormatHelper.FormatBytes(d.TotalRetainedBytes), (double)d.TotalRetainedBytes));
 
         var roots = d.TopRootsByRetainedBytes ?? [];
         if (roots.Count > 0)

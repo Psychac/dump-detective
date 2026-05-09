@@ -16,8 +16,8 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
         FindingSeverity severity = r.GCPressure switch
         {
             GCPressureLevel.Critical => FindingSeverity.Critical,
-            GCPressureLevel.High     => FindingSeverity.Warning,
-            _                        => FindingSeverity.Info
+            GCPressureLevel.High => FindingSeverity.Warning,
+            _ => FindingSeverity.Info
         };
 
         string evidence = $"Allocation profile: {r.Profile}. " +

@@ -22,12 +22,12 @@ public sealed class ReportDocumentSchemaTests
     {
         AnalysisReportDocument original = new()
         {
-            DumpPath         = "C:/dumps/test.dmp",
-            GeneratedAtUtc   = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
-            ElapsedSeconds   = 42.5,
-            IsTrendReport    = false,
+            DumpPath = "C:/dumps/test.dmp",
+            GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
+            ElapsedSeconds = 42.5,
+            IsTrendReport = false,
             DedupDiagnostics = new DedupRecord(MergedSections: 2, DuplicateCandidates: 3, EvidenceBeforeMerge: 5),
-            Findings         =
+            Findings =
             [
                 new FindingRecord(
                     Analyzer:       "RetentionAnalyzer",
@@ -82,7 +82,7 @@ public sealed class ReportDocumentSchemaTests
     {
         AnalysisReportDocument original = new()
         {
-            DumpPath       = "C:/test.dmp",
+            DumpPath = "C:/test.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
             AnalyzerSections =
             [
@@ -130,9 +130,9 @@ public sealed class ReportDocumentSchemaTests
     {
         AnalysisReportDocument original = new()
         {
-            DumpPath       = "C:/trend.dmp",
+            DumpPath = "C:/trend.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
-            IsTrendReport  = true,
+            IsTrendReport = true,
             TrendDumpCount = 3,
             TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"]
         };
@@ -162,10 +162,10 @@ public sealed class ReportDocumentSchemaTests
     {
         AnalysisReportDocument original = new()
         {
-            DumpPath       = "C:/t.dmp",
+            DumpPath = "C:/t.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
             ElapsedSeconds = 1.0,
-            Findings       = [new FindingRecord("A","B","Info","T","E","R",[],"fp")]
+            Findings = [new FindingRecord("A", "B", "Info", "T", "E", "R", [], "fp")]
         };
 
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);

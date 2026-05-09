@@ -8,9 +8,9 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypeRows         = 20;
-    private const int TopCaptureRows      = 10;
-    private const int TopSuspendedRows    = 20;
+    private const int TopTypeRows = 20;
+    private const int TopCaptureRows = 10;
+    private const int TopSuspendedRows = 20;
 
     public string AnalyzerName => "Async State Machine Analysis";
     public int SortOrder => 48; // §23 async state machines
@@ -25,10 +25,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         // ── Summary ──────────────────────────────────────────────────────────
         blocks.Add(H("ASYNC STATE MACHINE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total State Machines",  $"{d.TotalStateMachines:N0}",          d.TotalStateMachines));
-        blocks.Add(M("Total Memory",          FormatHelper.FormatBytes(d.TotalStateMachineBytes)));
-        blocks.Add(M("Distinct Types",        $"{d.TopStateMachineTypes.Count:N0}"));
-        blocks.Add(M("Suspended Methods",     $"{d.SuspendedMethodMap.Count:N0}"));
+        blocks.Add(M("Total State Machines", $"{d.TotalStateMachines:N0}", d.TotalStateMachines));
+        blocks.Add(M("Total Memory", FormatHelper.FormatBytes(d.TotalStateMachineBytes)));
+        blocks.Add(M("Distinct Types", $"{d.TopStateMachineTypes.Count:N0}"));
+        blocks.Add(M("Suspended Methods", $"{d.SuspendedMethodMap.Count:N0}"));
         if (d.ScanLimited)
             blocks.Add(M("Scan Limit Reached", "Yes — type candidate cap hit; results may be partial", 1.0));
 

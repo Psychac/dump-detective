@@ -22,7 +22,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     // Address space pressure thresholds (§25.3).
 
     public void Dispose() { }
-    public string Name     => "Segment Reservation Analysis";
+    public string Name => "Segment Reservation Analysis";
     public string Category => "Memory";
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -37,11 +37,11 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     private static AnalyzerDomainResult Analyze(ClrHeap heap, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
     {
         ulong totalCommitted = 0;
-        ulong totalReserved  = 0;
+        ulong totalReserved = 0;
 
-        int ephemeralCount         = 0;
-        double ephemeralFillSum    = 0.0;
-        int nonEphemeralSohCount   = 0;
+        int ephemeralCount = 0;
+        double ephemeralFillSum = 0.0;
+        int nonEphemeralSohCount = 0;
 
         var segmentTable = new List<SegmentReservationEntry>(64);
         var reservedByHeap = new Dictionary<int, ulong>(16);
@@ -51,13 +51,13 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             cancellationToken.ThrowIfCancellationRequested();
 
             ulong committed = GetLength(segment.CommittedMemory);
-            ulong reserved  = GetLength(segment.ReservedMemory);
+            ulong reserved = GetLength(segment.ReservedMemory);
             bool isEphemeral = SegmentKindMapper.IsEphemeral(segment);
-            int logicalHeap  = segment.SubHeap?.Index ?? 0;
+            int logicalHeap = segment.SubHeap?.Index ?? 0;
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
 
             totalCommitted += committed;
-            totalReserved  += reserved;
+            totalReserved += reserved;
 
             // Per-logical-heap reserved bytes (Server GC per-CPU breakdown).
             if (reservedByHeap.TryGetValue(logicalHeap, out ulong existing))
@@ -80,13 +80,13 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             }
 
             segmentTable.Add(new SegmentReservationEntry(
-                Address:       segment.Address,
-                Kind:          kind,
+                Address: segment.Address,
+                Kind: kind,
                 CommittedBytes: committed,
-                ReservedBytes:  reserved,
-                IsEphemeral:    isEphemeral,
-                LogicalHeap:    logicalHeap,
-                FillPct:        fillPct));
+                ReservedBytes: reserved,
+                IsEphemeral: isEphemeral,
+                LogicalHeap: logicalHeap,
+                FillPct: fillPct));
         }
 
         ulong gapBytes = totalReserved > totalCommitted ? totalReserved - totalCommitted : 0;
@@ -98,27 +98,27 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         string pressureReason = string.Empty;
         if (IntPtr.Size == 4 && totalReserved > options.ThirtyTwoBitPressureThresholdBytes)
         {
-            pressureRisk   = true;
+            pressureRisk = true;
             pressureReason = $"32-bit process has {totalReserved / (1024 * 1024):N0} MB reserved (>{options.ThirtyTwoBitPressureThresholdBytes / (1024 * 1024):N0} MB threshold).";
         }
         else if (ratio > options.RatioHighPressureThreshold)
         {
-            pressureRisk   = true;
+            pressureRisk = true;
             pressureReason = $"Reserved-to-committed ratio is {ratio:F1}x (>{options.RatioHighPressureThreshold:F0}x threshold). GC is holding large uncommitted reservations.";
         }
 
         return new SegmentReservationDomainResult(
-            TotalCommittedBytes:       totalCommitted,
-            TotalReservedBytes:        totalReserved,
-            ReservationGapBytes:       gapBytes,
-            ReservedToCommittedRatio:  ratio,
-            EphemeralSegmentCount:     ephemeralCount,
-            AvgEphemeralFillPct:       avgFill,
+            TotalCommittedBytes: totalCommitted,
+            TotalReservedBytes: totalReserved,
+            ReservationGapBytes: gapBytes,
+            ReservedToCommittedRatio: ratio,
+            EphemeralSegmentCount: ephemeralCount,
+            AvgEphemeralFillPct: avgFill,
             NonEphemeralSohSegmentCount: nonEphemeralSohCount,
-            SegmentTable:              segmentTable,
-            ReservedByLogicalHeap:     reservedByHeap,
-            AddressSpacePressureRisk:  pressureRisk,
-            PressureRiskReason:        pressureReason);
+            SegmentTable: segmentTable,
+            ReservedByLogicalHeap: reservedByHeap,
+            AddressSpacePressureRisk: pressureRisk,
+            PressureRiskReason: pressureReason);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

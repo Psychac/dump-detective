@@ -222,7 +222,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             return false;
         }
-        
+
         public void Dispose() { }
     }
 

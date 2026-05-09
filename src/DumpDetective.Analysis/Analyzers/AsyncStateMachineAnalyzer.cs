@@ -27,7 +27,7 @@ namespace DumpDetective.Analysis.Analyzers
         private static readonly Regex StateMachinePattern =
             new(@"<(.+?)>d__\d+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
-        public string Name     => "Async State Machine Analysis";
+        public string Name => "Async State Machine Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -77,7 +77,7 @@ namespace DumpDetective.Analysis.Analyzers
                 // Confirm it implements IAsyncStateMachine
                 if (!ImplementsIAsyncStateMachine(clrType)) continue;
 
-                string methodName    = m.Groups[1].Value;
+                string methodName = m.Groups[1].Value;
                 string declaringType = angleOpen > 0 ? fullName[..(angleOpen - 1)] : string.Empty;
 
                 candidates.Add((kv.Key, kv.Value, methodName, declaringType));
@@ -100,14 +100,14 @@ namespace DumpDetective.Analysis.Analyzers
             ulong totalBytes = 0;
             for (int i = 0; i < candidates.Count; i++)
             {
-                totalCount  += candidates[i].Entry.Count;
-                totalBytes  += candidates[i].Entry.TotalSize;
+                totalCount += candidates[i].Entry.Count;
+                totalBytes += candidates[i].Entry.TotalSize;
             }
 
             // ── Step 3: Field metadata + sample-based analysis ───────────────────
             // Read ClrType.Fields and the SampleAddress for each candidate type.
             int typeLimit = Math.Min(candidates.Count, options.TopTypeLimit);
-            var topTypes  = new List<StateMachineTypeProfile>(typeLimit);
+            var topTypes = new List<StateMachineTypeProfile>(typeLimit);
             var highCaptures = new List<(ulong Address, string TypeName, ulong CapturedBytes, List<string> LargeCaptures)>(16);
 
             for (int i = 0; i < candidates.Count; i++)
@@ -130,9 +130,9 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 // Read state value and captured ref bytes from the sample instance
-                int  avgStateValue  = 0;
+                int avgStateValue = 0;
                 ulong capturedBytes = 0;
-                var largeCaptures   = new List<string>(4);
+                var largeCaptures = new List<string>(4);
 
                 if (entry.SampleAddress != 0)
                 {
@@ -170,12 +170,12 @@ namespace DumpDetective.Analysis.Analyzers
                 if (i < typeLimit)
                 {
                     topTypes.Add(new StateMachineTypeProfile(
-                        TypeName:           clrType.Name ?? $"MT:0x{mt:X}",
-                        OriginatingMethod:  methodName,
-                        DeclaringType:      declaringType,
-                        Count:              (int)Math.Min(entry.Count, int.MaxValue),
-                        TotalBytes:         entry.TotalSize,
-                        AvgStateValue:      avgStateValue,
+                        TypeName: clrType.Name ?? $"MT:0x{mt:X}",
+                        OriginatingMethod: methodName,
+                        DeclaringType: declaringType,
+                        Count: (int)Math.Min(entry.Count, int.MaxValue),
+                        TotalBytes: entry.TotalSize,
+                        AvgStateValue: avgStateValue,
                         ReferenceFieldCount: refFieldCount));
                 }
             }
@@ -188,10 +188,10 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 (ulong addr, string typeName, ulong captured, List<string> captures) = highCaptures[i];
                 topByCapturedSize.Add(new HighCaptureStateMachine(
-                    Address:               addr,
-                    TypeName:              typeName,
+                    Address: addr,
+                    TypeName: typeName,
                     TotalCapturedRefBytes: captured,
-                    LargeCaptures:         captures));
+                    LargeCaptures: captures));
             }
 
             // ── Step 5: SuspendedMethodMap ────────────────────────────────────────
@@ -217,12 +217,12 @@ namespace DumpDetective.Analysis.Analyzers
                 suspendedMap.RemoveRange(options.SuspendedMethodMapLimit, suspendedMap.Count - options.SuspendedMethodMapLimit);
 
             return new AsyncStateMachineDomainResult(
-                TotalStateMachines:     (int)Math.Min(totalCount, int.MaxValue),
+                TotalStateMachines: (int)Math.Min(totalCount, int.MaxValue),
                 TotalStateMachineBytes: totalBytes,
-                TopStateMachineTypes:   topTypes,
-                TopByCapturedSize:      topByCapturedSize,
-                SuspendedMethodMap:     suspendedMap,
-                ScanLimited:            scanLimited);
+                TopStateMachineTypes: topTypes,
+                TopByCapturedSize: topByCapturedSize,
+                SuspendedMethodMap: suspendedMap,
+                ScanLimited: scanLimited);
         }
 
         public void Dispose() { }
@@ -242,9 +242,9 @@ namespace DumpDetective.Analysis.Analyzers
         private static string FormatBytes(ulong bytes) => bytes switch
         {
             >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-            >= 1_048_576     => $"{bytes / 1_048_576.0:F1} MB",
-            >= 1_024         => $"{bytes / 1_024.0:F1} KB",
-            _                => $"{bytes} B"
+            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+            >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+            _ => $"{bytes} B"
         };
     }
 }

@@ -1,4 +1,5 @@
 ﻿namespace DumpDetective.Core.Models;
+
 internal sealed record AnalysisSnapshot(
 int Index,
 string DumpPath,

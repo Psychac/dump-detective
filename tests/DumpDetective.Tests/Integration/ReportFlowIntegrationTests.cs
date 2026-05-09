@@ -182,7 +182,7 @@ public sealed class ReportFlowIntegrationTests
         output.Should().Contain("TREND COMPARISON");
 
         int trendComparisonIndex = output.IndexOf("[Trend Comparison]", StringComparison.Ordinal);
-        int dumpOneIndex         = output.IndexOf("[Dump 1 of 2: base.dmp]", StringComparison.Ordinal);
+        int dumpOneIndex = output.IndexOf("[Dump 1 of 2: base.dmp]", StringComparison.Ordinal);
         trendComparisonIndex.Should().BeGreaterThan(-1);
         dumpOneIndex.Should().BeGreaterThan(-1);
         trendComparisonIndex.Should().BeLessThan(dumpOneIndex);

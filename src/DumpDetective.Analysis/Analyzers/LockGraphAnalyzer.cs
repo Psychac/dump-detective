@@ -130,12 +130,12 @@ namespace DumpDetective.Analysis.Analyzers
 
                 var entry = new LockContention
                 {
-                    ObjectAddress        = sb.Object,
-                    ObjectTypeName       = typeName,
-                    OwnerThread          = ownerThread,
+                    ObjectAddress = sb.Object,
+                    ObjectTypeName = typeName,
+                    OwnerThread = ownerThread,
                     HoldingThreadAddress = sb.HoldingThreadAddress,
-                    RecursionCount       = sb.RecursionCount,
-                    WaitingThreadCount   = sb.WaitingThreadCount
+                    RecursionCount = sb.RecursionCount,
+                    WaitingThreadCount = sb.WaitingThreadCount
                 };
 
                 result.AllHeldLocks.Add(entry);
@@ -173,8 +173,8 @@ namespace DumpDetective.Analysis.Analyzers
 
                 result.DeadlockCandidates.Add(new DeadlockCandidate
                 {
-                    Thread    = thread,
-                    TopFrame  = topFrame.Method.Signature,
+                    Thread = thread,
+                    TopFrame = topFrame.Method.Signature,
                     LocksHeld = result.AllHeldLocks
                         .Where(l => l.OwnerThread?.ManagedThreadId == thread.ManagedThreadId)
                         .ToList()
@@ -195,7 +195,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             return obj.Type.Name ?? StringConstants.UnknownType;
         }
-        
+
         public void Dispose() { }
     }
 

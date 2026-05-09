@@ -17,8 +17,8 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal static class LohFreeBlockWriter
 {
     // File magic: "LFBX" = Loh Free Block indeX
-    private const int Magic      = 0x5842464C;
-    private const int Version    = 1;
+    private const int Magic = 0x5842464C;
+    private const int Version = 1;
     private const int RecordSize = 24; // 8 + 8 + 8
 
     // "Free" objects in CLR are represented as instances of the internal Free type.
@@ -58,11 +58,11 @@ internal static class LohFreeBlockWriter
                         continue;
 
                     ulong freeOffset = obj.Address - segAddr;
-                    ulong freeSize   = obj.Size;
+                    ulong freeSize = obj.Size;
 
                     var span = buf.AsSpan(offset, RecordSize);
-                    BinaryPrimitives.WriteUInt64LittleEndian(span,       segAddr);
-                    BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  freeOffset);
+                    BinaryPrimitives.WriteUInt64LittleEndian(span, segAddr);
+                    BinaryPrimitives.WriteUInt64LittleEndian(span[8..], freeOffset);
                     BinaryPrimitives.WriteUInt64LittleEndian(span[16..], freeSize);
 
                     offset += RecordSize;
@@ -115,8 +115,8 @@ internal static class LohFreeBlockWriter
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var span = buf.AsSpan(offset, RecordSize);
-                BinaryPrimitives.WriteUInt64LittleEndian(span,       segAddr);
-                BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  freeOffset);
+                BinaryPrimitives.WriteUInt64LittleEndian(span, segAddr);
+                BinaryPrimitives.WriteUInt64LittleEndian(span[8..], freeOffset);
                 BinaryPrimitives.WriteUInt64LittleEndian(span[16..], freeSize);
 
                 offset += RecordSize;

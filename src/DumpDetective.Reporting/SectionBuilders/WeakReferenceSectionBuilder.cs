@@ -24,10 +24,10 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         // ── §24.1 Weak GC Handle Population ──────────────────────────────────
         blocks.Add(H("WEAK GC HANDLE POPULATION"));
         blocks.Add(Divider());
-        blocks.Add(M("Total weak handles",   $"{d.TotalWeakHandles:N0}",    d.TotalWeakHandles));
-        blocks.Add(M("Alive targets",        $"{d.AliveWeakTargets:N0}",    d.AliveWeakTargets));
-        blocks.Add(M("Dead targets",         $"{d.DeadWeakTargets:N0}",     d.DeadWeakTargets));
-        blocks.Add(M("Dead target ratio",    $"{d.DeadTargetRatio:P1}",     d.DeadTargetRatio));
+        blocks.Add(M("Total weak handles", $"{d.TotalWeakHandles:N0}", d.TotalWeakHandles));
+        blocks.Add(M("Alive targets", $"{d.AliveWeakTargets:N0}", d.AliveWeakTargets));
+        blocks.Add(M("Dead targets", $"{d.DeadWeakTargets:N0}", d.DeadWeakTargets));
+        blocks.Add(M("Dead target ratio", $"{d.DeadTargetRatio:P1}", d.DeadTargetRatio));
 
         if (d.ScanCapped)
             blocks.Add(T("⚠ Handle scan was capped at 50 000 entries — totals may be underestimated."));
@@ -50,9 +50,9 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         blocks.Add(Blank());
         blocks.Add(H("WEAKREFERENCE<T> OBJECT ANALYSIS"));
         blocks.Add(Divider());
-        blocks.Add(M("WeakReference objects",       $"{d.WeakReferenceObjectCount:N0}",                       d.WeakReferenceObjectCount));
-        blocks.Add(M("WeakReference object bytes",  FormatHelper.FormatBytes(d.WeakReferenceObjectBytes),     (double)d.WeakReferenceObjectBytes));
-        blocks.Add(M("Stale wrappers (m_handle=0)", $"{d.StaleWrapperCount:N0}",                              d.StaleWrapperCount));
+        blocks.Add(M("WeakReference objects", $"{d.WeakReferenceObjectCount:N0}", d.WeakReferenceObjectCount));
+        blocks.Add(M("WeakReference object bytes", FormatHelper.FormatBytes(d.WeakReferenceObjectBytes), (double)d.WeakReferenceObjectBytes));
+        blocks.Add(M("Stale wrappers (m_handle=0)", $"{d.StaleWrapperCount:N0}", d.StaleWrapperCount));
 
         if (d.TopStaleWrapperHolderTypes.Count > 0)
         {

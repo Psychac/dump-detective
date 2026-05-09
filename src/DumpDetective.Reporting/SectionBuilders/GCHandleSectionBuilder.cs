@@ -17,18 +17,18 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
         var d = (GCHandleDomainResult)result;
         var blocks = new List<SectionBlock>();
 
-        double strongPct  = d.TotalHandles == 0 ? 0 : d.StrongLikeHandles   * 100.0 / d.TotalHandles;
-        double weakPct    = d.TotalHandles == 0 ? 0 : d.WeakLikeHandles     * 100.0 / d.TotalHandles;
-        double pinnedPct  = d.TotalHandles == 0 ? 0 : d.PinnedHandleTargets * 100.0 / d.TotalHandles;
+        double strongPct = d.TotalHandles == 0 ? 0 : d.StrongLikeHandles * 100.0 / d.TotalHandles;
+        double weakPct = d.TotalHandles == 0 ? 0 : d.WeakLikeHandles * 100.0 / d.TotalHandles;
+        double pinnedPct = d.TotalHandles == 0 ? 0 : d.PinnedHandleTargets * 100.0 / d.TotalHandles;
 
         blocks.Add(H("HANDLE SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Handles",           $"{d.TotalHandles:N0}",                              d.TotalHandles));
-        blocks.Add(M("Strong-like Handles",     $"{d.StrongLikeHandles:N0}  ({strongPct:F1}%)",      d.StrongLikeHandles));
-        blocks.Add(M("Weak-like Handles",       $"{d.WeakLikeHandles:N0}  ({weakPct:F1}%)",          d.WeakLikeHandles));
-        blocks.Add(M("Pinned Handle Targets",   $"{d.PinnedHandleTargets:N0}  ({pinnedPct:F1}%)",    d.PinnedHandleTargets));
+        blocks.Add(M("Total Handles", $"{d.TotalHandles:N0}", d.TotalHandles));
+        blocks.Add(M("Strong-like Handles", $"{d.StrongLikeHandles:N0}  ({strongPct:F1}%)", d.StrongLikeHandles));
+        blocks.Add(M("Weak-like Handles", $"{d.WeakLikeHandles:N0}  ({weakPct:F1}%)", d.WeakLikeHandles));
+        blocks.Add(M("Pinned Handle Targets", $"{d.PinnedHandleTargets:N0}  ({pinnedPct:F1}%)", d.PinnedHandleTargets));
         if (d.PinnedRetainedBytes > 0)
-            blocks.Add(M("Pinned Retained Bytes", FormatHelper.FormatBytes(d.PinnedRetainedBytes),   (long)d.PinnedRetainedBytes));
+            blocks.Add(M("Pinned Retained Bytes", FormatHelper.FormatBytes(d.PinnedRetainedBytes), (long)d.PinnedRetainedBytes));
 
         var byKind = d.HandlesByKind ?? [];
         if (byKind.Count > 0)

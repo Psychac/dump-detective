@@ -20,26 +20,26 @@ internal readonly struct IndexHeader
 {
     public const int Size = 24;
 
-    public readonly int    Magic;
-    public readonly int    Version;
-    public readonly long   RecordCount;
-    public readonly long   Reserved;
+    public readonly int Magic;
+    public readonly int Version;
+    public readonly long RecordCount;
+    public readonly long Reserved;
 
     public IndexHeader(int magic, int version, long recordCount)
     {
-        Magic       = magic;
-        Version     = version;
+        Magic = magic;
+        Version = version;
         RecordCount = recordCount;
-        Reserved    = 0;
+        Reserved = 0;
     }
 
     /// <summary>Writes this header into the first <see cref="Size"/> bytes of <paramref name="stream"/>.</summary>
     public void WriteTo(Stream stream)
     {
         Span<byte> buf = stackalloc byte[Size];
-        BinaryPrimitives.WriteInt32LittleEndian(buf,       Magic);
-        BinaryPrimitives.WriteInt32LittleEndian(buf[4..],  Version);
-        BinaryPrimitives.WriteInt64LittleEndian(buf[8..],  RecordCount);
+        BinaryPrimitives.WriteInt32LittleEndian(buf, Magic);
+        BinaryPrimitives.WriteInt32LittleEndian(buf[4..], Version);
+        BinaryPrimitives.WriteInt64LittleEndian(buf[8..], RecordCount);
         BinaryPrimitives.WriteInt64LittleEndian(buf[16..], Reserved);
         stream.Write(buf);
     }

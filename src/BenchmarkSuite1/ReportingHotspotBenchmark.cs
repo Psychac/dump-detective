@@ -13,20 +13,20 @@ namespace BenchmarkSuite1;
 [ShortRunJob]
 public class ReportingHotspotBenchmark
 {
-    private IReadOnlyList<AnalyzerRunResult>    _runs      = null!;
+    private IReadOnlyList<AnalyzerRunResult> _runs = null!;
     private IReadOnlyList<IAnalyzerSectionBuilder> _builders = null!;
-    private ReportSerializer                    _serializer = null!;
-    private MarkdownCanonicalReportFormatter    _markdown  = null!;
-    private HtmlCanonicalReportFormatter        _html      = null!;
+    private ReportSerializer _serializer = null!;
+    private MarkdownCanonicalReportFormatter _markdown = null!;
+    private HtmlCanonicalReportFormatter _html = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        _runs      = BuildRuns(250);
-        _builders  = [];
+        _runs = BuildRuns(250);
+        _builders = [];
         _serializer = new ReportSerializer();
-        _markdown  = new MarkdownCanonicalReportFormatter();
-        _html      = new HtmlCanonicalReportFormatter();
+        _markdown = new MarkdownCanonicalReportFormatter();
+        _html = new HtmlCanonicalReportFormatter();
     }
 
     [Benchmark(Description = "ReportSerializer - serialize (duplicate heavy)")]

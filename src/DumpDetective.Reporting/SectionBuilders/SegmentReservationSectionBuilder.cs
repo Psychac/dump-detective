@@ -24,19 +24,19 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         // ── §25.1 Committed vs Reserved ──────────────────────────────────────
         blocks.Add(H("COMMITTED VS RESERVED MEMORY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total committed",           FormatHelper.FormatBytes(d.TotalCommittedBytes),  (double)d.TotalCommittedBytes));
-        blocks.Add(M("Total reserved",            FormatHelper.FormatBytes(d.TotalReservedBytes),   (double)d.TotalReservedBytes));
-        blocks.Add(M("Reservation gap",           FormatHelper.FormatBytes(d.ReservationGapBytes),  (double)d.ReservationGapBytes));
-        blocks.Add(M("Reserved-to-committed ratio", $"{d.ReservedToCommittedRatio:F2}x",            d.ReservedToCommittedRatio));
+        blocks.Add(M("Total committed", FormatHelper.FormatBytes(d.TotalCommittedBytes), (double)d.TotalCommittedBytes));
+        blocks.Add(M("Total reserved", FormatHelper.FormatBytes(d.TotalReservedBytes), (double)d.TotalReservedBytes));
+        blocks.Add(M("Reservation gap", FormatHelper.FormatBytes(d.ReservationGapBytes), (double)d.ReservationGapBytes));
+        blocks.Add(M("Reserved-to-committed ratio", $"{d.ReservedToCommittedRatio:F2}x", d.ReservedToCommittedRatio));
 
         // ── §25.2 Segment Lifecycle ───────────────────────────────────────────
         blocks.Add(Blank());
         blocks.Add(H("SEGMENT LIFECYCLE"));
         blocks.Add(Divider());
-        blocks.Add(M("Ephemeral segments",          $"{d.EphemeralSegmentCount:N0}",              d.EphemeralSegmentCount));
-        blocks.Add(M("Avg ephemeral fill",          $"{d.AvgEphemeralFillPct:F1} %",              d.AvgEphemeralFillPct));
-        blocks.Add(M("Non-ephemeral SOH segments",  $"{d.NonEphemeralSohSegmentCount:N0}",        d.NonEphemeralSohSegmentCount));
-        blocks.Add(M("Logical heap count",          $"{d.ReservedByLogicalHeap.Count:N0}",        d.ReservedByLogicalHeap.Count));
+        blocks.Add(M("Ephemeral segments", $"{d.EphemeralSegmentCount:N0}", d.EphemeralSegmentCount));
+        blocks.Add(M("Avg ephemeral fill", $"{d.AvgEphemeralFillPct:F1} %", d.AvgEphemeralFillPct));
+        blocks.Add(M("Non-ephemeral SOH segments", $"{d.NonEphemeralSohSegmentCount:N0}", d.NonEphemeralSohSegmentCount));
+        blocks.Add(M("Logical heap count", $"{d.ReservedByLogicalHeap.Count:N0}", d.ReservedByLogicalHeap.Count));
 
         // Per-logical-heap reserved breakdown (server GC).
         if (d.ReservedByLogicalHeap.Count > 1)

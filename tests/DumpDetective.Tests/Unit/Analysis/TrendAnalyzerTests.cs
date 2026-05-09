@@ -100,7 +100,7 @@ public sealed class TrendAnalyzerTests
             ]);
 
         var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
-        var currentSnap  = MakeSnapshot(1, "Retention Analysis", currentResult);
+        var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
 
         TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
         var results = analyzer.CompareAll(baselineSnap, currentSnap);
@@ -126,7 +126,7 @@ public sealed class TrendAnalyzerTests
             ]);
 
         var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
-        var currentSnap  = MakeSnapshot(1, "Retention Analysis", currentResult);
+        var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
 
         TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
         var results = analyzer.CompareAll(baselineSnap, currentSnap);
@@ -189,7 +189,7 @@ public sealed class TrendAnalyzerTests
             if (baseline is not RetentionDomainResult b || current is not RetentionDomainResult c)
                 return [];
             double delta = c.HighlyReferencedObjectCount - b.HighlyReferencedObjectCount;
-            double? pct  = Math.Abs(b.HighlyReferencedObjectCount) > double.Epsilon
+            double? pct = Math.Abs(b.HighlyReferencedObjectCount) > double.Epsilon
                 ? delta * 100.0 / b.HighlyReferencedObjectCount : null;
             return [new MetricDelta("leak.highly.referenced", null,
                 b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount,

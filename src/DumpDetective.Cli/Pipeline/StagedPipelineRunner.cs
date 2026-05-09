@@ -30,7 +30,7 @@ internal sealed class StagedPipelineRunner
             if (trackMemory)
             {
                 _currentProcess.Refresh();
-                wsBefore      = _currentProcess.WorkingSet64;
+                wsBefore = _currentProcess.WorkingSet64;
                 managedBefore = GC.GetTotalMemory(false);
             }
 
@@ -41,10 +41,10 @@ internal sealed class StagedPipelineRunner
             {
                 _currentProcess.Refresh();
                 state.StageMemoryStats.Add((stage.Name, new AnalyzerMemoryStats(
-                    WorkingSetBefore:  wsBefore,
-                    WorkingSetAfter:   _currentProcess.WorkingSet64,
+                    WorkingSetBefore: wsBefore,
+                    WorkingSetAfter: _currentProcess.WorkingSet64,
                     ManagedHeapBefore: managedBefore,
-                    ManagedHeapAfter:  GC.GetTotalMemory(false))));
+                    ManagedHeapAfter: GC.GetTotalMemory(false))));
             }
 
             ConsoleUx.StageComplete(i + 1, total, stage.Name, sw.Elapsed);

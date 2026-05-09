@@ -15,8 +15,8 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal sealed class LargeObjectTracker
 {
     // File magic: "LOIX" = Large Object Index
-    private const int Magic      = 0x58494F4C;
-    private const int Version    = 1;
+    private const int Magic = 0x58494F4C;
+    private const int Version = 1;
     private const int RecordSize = 24; // 8 + 8 + 8
     private const int MaxEntries = 100;
     private const ulong LohThreshold = 85_000;
@@ -58,8 +58,8 @@ internal sealed class LargeObjectTracker
         Span<byte> rec = stackalloc byte[RecordSize];
         foreach ((ulong size, ulong address, ulong mt) in _top)
         {
-            BinaryPrimitives.WriteUInt64LittleEndian(rec,       address);
-            BinaryPrimitives.WriteUInt64LittleEndian(rec[8..],  mt);
+            BinaryPrimitives.WriteUInt64LittleEndian(rec, address);
+            BinaryPrimitives.WriteUInt64LittleEndian(rec[8..], mt);
             BinaryPrimitives.WriteUInt64LittleEndian(rec[16..], size);
             stream.Write(rec);
         }

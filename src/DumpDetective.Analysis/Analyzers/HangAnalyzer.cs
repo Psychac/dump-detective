@@ -9,7 +9,7 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-public class HangAnalyzer : IAnalyzer
+    public class HangAnalyzer : IAnalyzer
     {
         public string Name => "Hang Analysis";
         public string Category => "Hang";
@@ -182,7 +182,7 @@ public class HangAnalyzer : IAnalyzer
             double waitingPct = analysis.TotalAliveThreads == 0 ? 0
                 : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
 
-            if (waitingPct >= 80)      score -= 40;
+            if (waitingPct >= 80) score -= 40;
             else if (waitingPct >= 50) score -= 25;
             else if (waitingPct >= 30) score -= 10;
 
@@ -197,9 +197,9 @@ public class HangAnalyzer : IAnalyzer
 
             // â”€â”€ Thread pool health (up to -15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             var tp = analysis.ThreadPoolInfo;
-            bool saturated  = tp.RuntimeMaxThreads > 0 && tp.RuntimeActiveWorkerThreads >= tp.RuntimeMaxThreads;
+            bool saturated = tp.RuntimeMaxThreads > 0 && tp.RuntimeActiveWorkerThreads >= tp.RuntimeMaxThreads;
             bool starvation = saturated && tp.RuntimeCpuUtilization < 20;
-            if (starvation)     score -= 15;
+            if (starvation) score -= 15;
             else if (saturated) score -= 10;
 
             // â”€â”€ Task backpressure (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -221,7 +221,7 @@ public class HangAnalyzer : IAnalyzer
                 return null;
 
             string topMethod = topFrame.Method.Signature?.ToLowerInvariant() ?? "";
-            
+
             WaitType? waitType = null;
             string? waitReason = null;
 
@@ -345,11 +345,11 @@ public class HangAnalyzer : IAnalyzer
                         {
                             int stateFlags = stateField.Read<int>(obj, interior: false);
                             bool isCompleted = (stateFlags & 0x1000000) != 0;
-                            bool isFaulted   = (stateFlags & 0x200000) != 0;
-                            bool isCanceled  = (stateFlags & 0x400000) != 0;
+                            bool isFaulted = (stateFlags & 0x200000) != 0;
+                            bool isCanceled = (stateFlags & 0x400000) != 0;
 
-                            if (isFaulted)        Interlocked.Increment(ref faultedTasks);
-                            else if (isCanceled)  Interlocked.Increment(ref canceledTasks);
+                            if (isFaulted) Interlocked.Increment(ref faultedTasks);
+                            else if (isCanceled) Interlocked.Increment(ref canceledTasks);
                             else if (!isCompleted) Interlocked.Increment(ref pendingTasks);
                         }
                     }
@@ -393,12 +393,12 @@ public class HangAnalyzer : IAnalyzer
 
             analysis.ThreadPoolInfo = new ThreadPoolAnalysis
             {
-                QueuedWorkItems  = queuedWorkItems,
-                TotalTasks       = totalTasks,
-                PendingTasks     = pendingTasks,
-                FaultedTasks     = faultedTasks,
-                CanceledTasks    = canceledTasks,
-                TaskScanLimited  = taskScanLimited
+                QueuedWorkItems = queuedWorkItems,
+                TotalTasks = totalTasks,
+                PendingTasks = pendingTasks,
+                FaultedTasks = faultedTasks,
+                CanceledTasks = canceledTasks,
+                TaskScanLimited = taskScanLimited
             };
             analysis.TaskContinuations = new Dictionary<string, int>(taskContinuations, StringComparer.Ordinal);
             analysis.TotalContinuations = totalContinuations;
@@ -540,11 +540,11 @@ public class HangAnalyzer : IAnalyzer
                 return new AsyncTypeProfile(typeName, isTask, isQueuedWorkItem, isContinuation);
             }
         }
-    
-            public void Dispose() { }
-        }
 
-        internal class HangAnalysis
+        public void Dispose() { }
+    }
+
+    internal class HangAnalysis
     {
         public int TotalAliveThreads { get; set; }
         public int ThreadsHoldingLocks { get; set; }

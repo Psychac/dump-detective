@@ -20,7 +20,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class FinalizableObjectAnalyzer : IAnalyzer
     {
-        public string Name     => "Finalizable Object Analysis";
+        public string Name => "Finalizable Object Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -44,7 +44,7 @@ namespace DumpDetective.Analysis.Analyzers
                 typeAggregates = idx.TypeAggregates;
 
             long totalObjects = 0;
-            ulong totalBytes  = 0;
+            ulong totalBytes = 0;
             int gen0 = 0, gen1 = 0, gen2 = 0;
 
             var finalizableTypes = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
@@ -59,10 +59,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                     finalizableTypes.Add((kv.Key, e));
                     totalObjects += e.Count;
-                    totalBytes   += e.TotalSize;
-                    gen0         += e.Gen0Count;
-                    gen1         += e.Gen1Count;
-                    gen2         += e.Gen2Count;
+                    totalBytes += e.TotalSize;
+                    gen0 += e.Gen0Count;
+                    gen1 += e.Gen1Count;
+                    gen2 += e.Gen2Count;
                 }
             }
             else
@@ -76,7 +76,7 @@ namespace DumpDetective.Analysis.Analyzers
                     totalObjects++;
                     totalBytes += obj.Size;
                     int g = ResolveGeneration(heap, obj.Address);
-                    if      (g == 0) gen0++;
+                    if (g == 0) gen0++;
                     else if (g == 1) gen1++;
                     else if (g == 2) gen2++;
                 }
@@ -92,11 +92,11 @@ namespace DumpDetective.Analysis.Analyzers
                 (ulong mt, TypeAggregateIndexEntry e) = finalizableTypes[i];
                 string typeName = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:X}";
                 topTypesByGen2.Add(new TypeGenerationProfile(
-                    TypeName:  typeName,
+                    TypeName: typeName,
                     Gen0Count: e.Gen0Count,
                     Gen1Count: e.Gen1Count,
                     Gen2Count: e.Gen2Count,
-                    LohCount:  (int)Math.Min(e.LohCount, int.MaxValue)));
+                    LohCount: (int)Math.Min(e.LohCount, int.MaxValue)));
             }
 
             // ── Step 3: Finalizer queue analysis ─────────────────────────────
@@ -114,8 +114,8 @@ namespace DumpDetective.Analysis.Analyzers
             // Sort by shallow size descending, analyse top N
             queueSamples.Sort(static (a, b) => b.ShallowSize.CompareTo(a.ShallowSize));
 
-            int entryLimit  = Math.Min(queueSamples.Count, options.TopQueueEntries);
-            var topEntries  = new List<FinalizerQueueEntry>(entryLimit);
+            int entryLimit = Math.Min(queueSamples.Count, options.TopQueueEntries);
+            var topEntries = new List<FinalizerQueueEntry>(entryLimit);
             ulong totalQueueRetained = 0;
             bool potentialResurrection = false;
 
@@ -128,9 +128,9 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!obj.IsValid || obj.Type is null)
                     continue;
 
-                bool isDisposable   = IsDisposableType(obj.Type);
-                bool disposedFound  = false;
-                bool disposedValue  = false;
+                bool isDisposable = IsDisposableType(obj.Type);
+                bool disposedFound = false;
+                bool disposedValue = false;
 
                 ClrInstanceField? disposedField = FindDisposedField(obj.Type);
                 if (disposedField is not null)
@@ -148,29 +148,29 @@ namespace DumpDetective.Analysis.Analyzers
                 totalQueueRetained += retained;
 
                 topEntries.Add(new FinalizerQueueEntry(
-                    Address:              addr,
-                    TypeName:             typeName,
-                    ShallowSize:          shallowSize,
+                    Address: addr,
+                    TypeName: typeName,
+                    ShallowSize: shallowSize,
                     EstimatedRetainedBytes: retained,
-                    IsDisposableType:     isDisposable,
-                    DisposedFieldFound:   disposedFound,
-                    DisposedFieldValue:   disposedValue));
+                    IsDisposableType: isDisposable,
+                    DisposedFieldFound: disposedFound,
+                    DisposedFieldValue: disposedValue));
             }
 
             // Sort by estimated retained size descending
             topEntries.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
             return new FinalizableObjectDomainResult(
-                TotalFinalizableObjects:       (int)Math.Min(totalObjects, int.MaxValue),
-                TotalFinalizableBytes:         totalBytes,
-                Gen0Count:                     gen0,
-                Gen1Count:                     gen1,
-                Gen2Count:                     gen2,
-                FinalizerQueueCount:           queueCount,
-                FinalizerQueueRetainedBytes:   totalQueueRetained,
+                TotalFinalizableObjects: (int)Math.Min(totalObjects, int.MaxValue),
+                TotalFinalizableBytes: totalBytes,
+                Gen0Count: gen0,
+                Gen1Count: gen1,
+                Gen2Count: gen2,
+                FinalizerQueueCount: queueCount,
+                FinalizerQueueRetainedBytes: totalQueueRetained,
                 PotentialResurrectionDetected: potentialResurrection,
                 TopFinalizableTypesByGen2Count: topTypesByGen2,
-                TopQueueEntriesByRetainedSize:  topEntries);
+                TopQueueEntriesByRetainedSize: topEntries);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             ClrSegment? seg = heap.GetSegmentByAddress(address);
             if (seg is null) return 2;
-            try   { return (int)seg.GetGeneration(address); }
+            try { return (int)seg.GetGeneration(address); }
             catch { return 2; }
         }
 
@@ -216,11 +216,11 @@ namespace DumpDetective.Analysis.Analyzers
             if (startAddr == 0)
                 return 0;
 
-            var visited   = new HashSet<ulong>(capacity: 32) { startAddr };
-            var queue     = new Queue<(ulong Addr, int Depth)>(capacity: 32);
+            var visited = new HashSet<ulong>(capacity: 32) { startAddr };
+            var queue = new Queue<(ulong Addr, int Depth)>(capacity: 32);
             queue.Enqueue((startAddr, 0));
-            ulong totalSize  = 0;
-            int   nodesSeen  = 0;
+            ulong totalSize = 0;
+            int nodesSeen = 0;
 
             while (queue.Count > 0)
             {

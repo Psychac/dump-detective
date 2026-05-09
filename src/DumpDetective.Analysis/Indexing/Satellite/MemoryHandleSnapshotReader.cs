@@ -22,7 +22,7 @@ internal sealed class MemoryHandleSnapshotReader : IHandleSnapshotReader
     public IEnumerable<HandleRecord> EnumerateRecords(System.Threading.CancellationToken token)
     {
         _count = 0;
-            foreach (var h in _runtime.EnumerateHandles())
+        foreach (var h in _runtime.EnumerateHandles())
         {
             token.ThrowIfCancellationRequested();
             var kind = (byte)h.HandleKind;

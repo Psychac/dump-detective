@@ -27,7 +27,7 @@ internal static class ServiceRegistration
         // CollectionAnalyzer diagnostics (field detection, waste scan summary) log at Debug.
         builder.Logging
             .SetMinimumLevel(LogLevel.Warning);
-            //.AddFilter("DumpDetective", LogLevel.Debug);
+        //.AddFilter("DumpDetective", LogLevel.Debug);
 
         services.AddSingleton<RootCommandBuilder>();
 

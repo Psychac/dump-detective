@@ -8,8 +8,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopDomainRows  = 10;
-    private const int TopModuleRows  = 20;
+    private const int TopDomainRows = 10;
+    private const int TopModuleRows = 20;
 
     public string AnalyzerName => "AppDomain Analysis";
     public int SortOrder => 41; // §18.1/18.3 — right after Module Analysis (§18, SortOrder 40)
@@ -24,9 +24,9 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
         // ── Summary ──────────────────────────────────────────────────────────
         blocks.Add(H("APPDOMAIN SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total AppDomains",     $"{d.TotalDomains:N0}",         d.TotalDomains));
-        blocks.Add(M("Dynamic Modules",      $"{d.TotalDynamicModules:N0}",  d.TotalDynamicModules));
-        blocks.Add(M("Anonymous Modules",    $"{d.AnonymousModuleCount:N0}", d.AnonymousModuleCount));
+        blocks.Add(M("Total AppDomains", $"{d.TotalDomains:N0}", d.TotalDomains));
+        blocks.Add(M("Dynamic Modules", $"{d.TotalDynamicModules:N0}", d.TotalDynamicModules));
+        blocks.Add(M("Anonymous Modules", $"{d.AnonymousModuleCount:N0}", d.AnonymousModuleCount));
 
         // Optional: render warnings and excluded-module summary when present in the domain result
         if (d.Warnings is not null && d.Warnings.Count > 0)

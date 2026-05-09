@@ -24,7 +24,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
         blocks.Add(M("Gen0 objects", $"{d.Gen0Objects:N0},  {FormatHelper.FormatBytes(d.Gen0Bytes)}", d.Gen0Objects));
         blocks.Add(M("Gen1 objects", $"{d.Gen1Objects:N0},  {FormatHelper.FormatBytes(d.Gen1Bytes)}", d.Gen1Objects));
         blocks.Add(M("Gen2 objects", $"{d.Gen2Objects:N0},  {FormatHelper.FormatBytes(d.Gen2Bytes)}", d.Gen2Objects));
-        blocks.Add(M("LOH objects",  $"{d.LohObjects:N0},  {FormatHelper.FormatBytes(d.LohBytes)}",   d.LohObjects));
+        blocks.Add(M("LOH objects", $"{d.LohObjects:N0},  {FormatHelper.FormatBytes(d.LohBytes)}", d.LohObjects));
         blocks.Add(M("Total objects", $"{d.TotalObjects:N0}", d.TotalObjects));
         blocks.Add(M("LOH percentage", $"{d.LohPercent:F1}%", d.LohPercent));
 
@@ -34,7 +34,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
         blocks.Add(M("Gen0 bytes", FormatHelper.FormatBytes(d.Gen0Bytes), (double)d.Gen0Bytes));
         blocks.Add(M("Gen1 bytes", FormatHelper.FormatBytes(d.Gen1Bytes), (double)d.Gen1Bytes));
         blocks.Add(M("Gen2 bytes", FormatHelper.FormatBytes(d.Gen2Bytes), (double)d.Gen2Bytes));
-        blocks.Add(M("LOH bytes",  FormatHelper.FormatBytes(d.LohBytes),  (double)d.LohBytes));
+        blocks.Add(M("LOH bytes", FormatHelper.FormatBytes(d.LohBytes), (double)d.LohBytes));
 
         var lohTypes = d.TopLohTypes;
         if (lohTypes.Count > 0)

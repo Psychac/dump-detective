@@ -25,17 +25,17 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
                 : "none";
 
             findings.Add(new InsightFinding(
-                Analyzer:       AnalyzerName,
-                Category:       "Memory",
-                Severity:       r.AvgRefFieldsPerType >= 8.0 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title:          $"High reference-field density: avg {r.AvgRefFieldsPerType:F1} ref fields/type",
-                Evidence:       $"{r.TopReferenceHeavyTypes.Count} reference-heavy types found. " +
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: r.AvgRefFieldsPerType >= 8.0 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: $"High reference-field density: avg {r.AvgRefFieldsPerType:F1} ref fields/type",
+                Evidence: $"{r.TopReferenceHeavyTypes.Count} reference-heavy types found. " +
                                 $"Top: {top}. Average ref fields per analyzed type: {r.AvgRefFieldsPerType:F1}.",
                 Recommendation: "Review types with many reference fields. Consider splitting large aggregate types, " +
                                 "using value types for hot-path data, or caching field offsets to reduce GC scan cost.",
-                Tags:           ["gc-scan", "reference-fields", "object-shape"],
-                MetricValue:    r.AvgRefFieldsPerType,
-                MetricUnit:     "ref-fields/type"));
+                Tags: ["gc-scan", "reference-fields", "object-shape"],
+                MetricValue: r.AvgRefFieldsPerType,
+                MetricUnit: "ref-fields/type"));
         }
 
         // Flag value-heavy types with large instance counts (padding waste candidates).
@@ -45,18 +45,18 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
             if (topValCount >= 10_000)
             {
                 findings.Add(new InsightFinding(
-                    Analyzer:       AnalyzerName,
-                    Category:       "Memory",
-                    Severity:       FindingSeverity.Info,
-                    Title:          $"Value-heavy types with high instance count ({topValCount:N0} instances)",
-                    Evidence:       $"Top value-heavy type: {FormatTypeName(r.TopValueHeavyTypes[0].TypeName)} " +
+                    Analyzer: AnalyzerName,
+                    Category: "Memory",
+                    Severity: FindingSeverity.Info,
+                    Title: $"Value-heavy types with high instance count ({topValCount:N0} instances)",
+                    Evidence: $"Top value-heavy type: {FormatTypeName(r.TopValueHeavyTypes[0].TypeName)} " +
                                     $"({r.TopValueHeavyTypes[0].TotalFields} fields, {topValCount:N0} instances). " +
                                     $"{r.TopValueHeavyTypes.Count} value-heavy types analyzed.",
                     Recommendation: "Check struct field ordering for padding waste. " +
                                     "Consider using BoxingAnalyzer for struct-layout optimization.",
-                    Tags:           ["value-type", "struct", "object-shape"],
-                    MetricValue:    topValCount,
-                    MetricUnit:     "instances"));
+                    Tags: ["value-type", "struct", "object-shape"],
+                    MetricValue: topValCount,
+                    MetricUnit: "instances"));
             }
         }
 

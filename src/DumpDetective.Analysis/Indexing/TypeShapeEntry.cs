@@ -21,8 +21,8 @@ internal readonly struct TypeShapeEntry
 
     public TypeShapeEntry(short refFields, short valFields)
     {
-        RefFields  = refFields;
-        ValFields  = valFields;
+        RefFields = refFields;
+        ValFields = valFields;
         TotalFields = (short)(refFields + valFields);
     }
 }

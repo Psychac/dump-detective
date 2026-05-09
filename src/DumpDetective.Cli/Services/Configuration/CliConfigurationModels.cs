@@ -14,6 +14,7 @@ internal sealed class CliConfigurationFileModel
     public List<string>? TrendDumpPaths { get; init; }
     public string? Profile { get; init; }
     public AnalyzerOptionsModel? Analyzers { get; init; }
+    public ExecutionPolicyModel? ExecutionPolicy { get; init; }
 
     public RetentionOptions? MemoryLeak { get; init; }
     public ReferenceChainOptions? ReferenceChain { get; init; }
@@ -77,12 +78,23 @@ internal sealed class IndexingOptionsModel
     public string? Mode { get; init; }
 }
 
+internal sealed class ExecutionPolicyModel
+{
+    public int? MaxLeakScanObjects { get; init; }
+    public int? MaxReferenceAddresses { get; init; }
+    public int? ReferenceChainMaxPathDepth { get; init; }
+    public int? ReferenceChainFastModeMaxDepth { get; init; }
+    public int? ReferenceChainMaxPathSearchObjects { get; init; }
+    public HeapIndexPrebuildMode? IndexPrebuildMode { get; init; }
+}
+
 [JsonSourceGenerationOptions(
     PropertyNameCaseInsensitive = true,
     ReadCommentHandling = JsonCommentHandling.Skip,
     AllowTrailingCommas = true)]
 [JsonSerializable(typeof(CliConfigurationFileModel))]
 [JsonSerializable(typeof(AnalyzerOptionsModel))]
+[JsonSerializable(typeof(ExecutionPolicyModel))]
 [JsonSerializable(typeof(CrashAnalysisOptionsModel))]
 [JsonSerializable(typeof(AsyncTaskAnalysisOptions))]
 [JsonSerializable(typeof(AsyncStateMachineAnalysisOptions))]

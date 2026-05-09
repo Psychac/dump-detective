@@ -6,11 +6,11 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
 {
-    private const int FireAndForgetThreshold  =  100;
-    private const int HighCountWarning        = 1_000;
-    private const int HighCountCritical       = 10_000;
-    private const ulong LargeCaptureWarning   =  50_000_000UL;  // 50 MB
-    private const ulong LargeCaptureCritical  = 200_000_000UL;  // 200 MB
+    private const int FireAndForgetThreshold = 100;
+    private const int HighCountWarning = 1_000;
+    private const int HighCountCritical = 10_000;
+    private const ulong LargeCaptureWarning = 50_000_000UL;  // 50 MB
+    private const ulong LargeCaptureCritical = 200_000_000UL;  // 200 MB
 
     public string AnalyzerName => "Async State Machine Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is AsyncStateMachineDomainResult;
@@ -109,8 +109,8 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
     private static string FormatBytes(ulong bytes) => bytes switch
     {
         >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576     => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1_024         => $"{bytes / 1_024.0:F1} KB",
-        _                => $"{bytes} B"
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
     };
 }

@@ -21,10 +21,10 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
 
         blocks.Add(H("CLUSTER SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Alive Threads",        $"{d.AliveThreadCount:N0}",  d.AliveThreadCount));
-        blocks.Add(M("Unique Signatures",    $"{d.UniqueClusters:N0}",    d.UniqueClusters));
+        blocks.Add(M("Alive Threads", $"{d.AliveThreadCount:N0}", d.AliveThreadCount));
+        blocks.Add(M("Unique Signatures", $"{d.UniqueClusters:N0}", d.UniqueClusters));
         blocks.Add(M("Singleton Signatures", $"{d.SingletonSignatures:N0}", d.SingletonSignatures));
-        blocks.Add(M("Signature Diversity",  $"{d.DiversityPercent:F1}%", d.DiversityPercent));
+        blocks.Add(M("Signature Diversity", $"{d.DiversityPercent:F1}%", d.DiversityPercent));
 
         if (d.TopClusterSignatures.Count > 0)
         {

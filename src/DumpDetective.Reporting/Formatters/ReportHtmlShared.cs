@@ -6,7 +6,7 @@ namespace DumpDetective.Reporting.Formatters;
 
 internal static class ReportHtmlShared
 {
-    public static string Enc(string v) => System.Net.WebUtility.HtmlEncode(v);
+    public static string Enc(string? v) => System.Net.WebUtility.HtmlEncode(v ?? string.Empty);
 
     public static string WrapAddr(string html) =>
         Regex.Replace(html, @"0x[0-9A-Fa-f]{4,}",
@@ -93,16 +93,19 @@ internal static class ReportHtmlShared
                     continue;
                 }
 
-                sb.Append($"<td{da}>{Enc(cell.Display)}</td>");
+                sb.Append($"<td{da}>{Enc(display)}</td>");
             }
             sb.AppendLine("</tr>");
         }
         sb.AppendLine("</tbody></table>");
     }
 
-    public static string RenderFindings(IReadOnlyList<FindingRecord> findings)
+    public static string RenderFindings(IReadOnlyList<FindingRecord>? findings)
     {
         var sb = new StringBuilder();
+        if (findings is null || findings.Count == 0)
+            return string.Empty;
+
         for (int i = 0; i < findings.Count; i++)
         {
             FindingRecord f = findings[i];
@@ -119,7 +122,7 @@ internal static class ReportHtmlShared
 
             if (f.EvidenceItems is { Count: > 1 })
             {
-                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.EvidenceItems.Select(Enc)) + "</div>");
+                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.EvidenceItems.Select(e => Enc(e))) + "</div>");
                 sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
                 sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.EvidenceItems.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
             }
@@ -143,9 +146,12 @@ internal static class ReportHtmlShared
         return sb.ToString();
     }
 
-    public static string RenderAnalyzerSections(IReadOnlyList<AnalyzerDetailSection> sections)
+    public static string RenderAnalyzerSections(IReadOnlyList<AnalyzerDetailSection>? sections)
     {
         var sb = new StringBuilder();
+        if (sections is null || sections.Count == 0)
+            return string.Empty;
+
         for (int i = 0; i < sections.Count; i++)
         {
             AnalyzerDetailSection section = sections[i];

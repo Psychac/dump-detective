@@ -33,7 +33,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 return new AllocationPatternDomainResult(
                     Gen0CountPct: 0, Gen1CountPct: 0, Gen2CountPct: 0, LohCountPct: 0,
-                    Gen0SizePct: 0,  Gen1SizePct: 0,  Gen2SizePct: 0,  LohSizePct: 0,
+                    Gen0SizePct: 0, Gen1SizePct: 0, Gen2SizePct: 0, LohSizePct: 0,
                     Profile: AllocationProfile.Mixed,
                     GCPressure: GCPressureLevel.Low,
                     PromotionPressureScore: 0,
@@ -52,16 +52,16 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 TypeAggregateIndexEntry e = kv.Value;
                 totalObjects += e.Count;
-                gen0Objects  += e.Gen0Count;
-                gen1Objects  += e.Gen1Count;
-                gen2Objects  += e.Gen2Count;
-                lohObjects   += e.LohCount;
-                totalSize    += e.TotalSize;
-                lohBytes     += e.LohSize;
+                gen0Objects += e.Gen0Count;
+                gen1Objects += e.Gen1Count;
+                gen2Objects += e.Gen2Count;
+                lohObjects += e.LohCount;
+                totalSize += e.TotalSize;
+                lohBytes += e.LohSize;
             }
 
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
-            long nonLohTotal  = totalObjects - lohObjects;
+            long nonLohTotal = totalObjects - lohObjects;
 
             // Approximate gen bytes using average non-LOH size × per-MT gen count.
             AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
@@ -70,19 +70,19 @@ namespace DumpDetective.Analysis.Analyzers
             double gen0CountPct = totalObjects > 0 ? Math.Round(gen0Objects * 100.0 / totalObjects, 2) : 0.0;
             double gen1CountPct = totalObjects > 0 ? Math.Round(gen1Objects * 100.0 / totalObjects, 2) : 0.0;
             double gen2CountPct = totalObjects > 0 ? Math.Round(gen2Objects * 100.0 / totalObjects, 2) : 0.0;
-            double lohCountPct  = totalObjects > 0 ? Math.Round(lohObjects  * 100.0 / totalObjects, 2) : 0.0;
+            double lohCountPct = totalObjects > 0 ? Math.Round(lohObjects * 100.0 / totalObjects, 2) : 0.0;
             // Size percentages (relative to total managed bytes) — round to two decimals for clarity
-            double gen0SizePct  = totalSize > 0 ? Math.Round(gen0Bytes * 100.0 / (double)totalSize, 2) : 0.0;
-            double gen1SizePct  = totalSize > 0 ? Math.Round(gen1Bytes * 100.0 / (double)totalSize, 2) : 0.0;
-            double gen2SizePct  = totalSize > 0 ? Math.Round(gen2Bytes * 100.0 / (double)totalSize, 2) : 0.0;
-            double lohSizePct   = totalSize > 0 ? Math.Round(lohBytes  * 100.0 / (double)totalSize, 2) : 0.0;
+            double gen0SizePct = totalSize > 0 ? Math.Round(gen0Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double gen1SizePct = totalSize > 0 ? Math.Round(gen1Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double gen2SizePct = totalSize > 0 ? Math.Round(gen2Bytes * 100.0 / (double)totalSize, 2) : 0.0;
+            double lohSizePct = totalSize > 0 ? Math.Round(lohBytes * 100.0 / (double)totalSize, 2) : 0.0;
 
-            AllocationProfile profile  = ClassifyProfile(gen0CountPct, gen2CountPct);
+            AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct);
             // Pressure uses count% for gen0/2 (reflects GC collection frequency) and
             // size% for LOH (LOH count% is near-zero on typical heaps, size% is meaningful).
-            double pressureScore       = (gen0CountPct * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
-            GCPressureLevel pressure   = ClassifyPressure(pressureScore);
-            double promotionScore      = gen2CountPct + (lohSizePct * 2.0);
+            double pressureScore = (gen0CountPct * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
+            GCPressureLevel pressure = ClassifyPressure(pressureScore);
+            double promotionScore = gen2CountPct + (lohSizePct * 2.0);
 
             // Build a metric list and sort according to SelectionMode from options
             var metrics = new List<(ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore)>(aggregates.Count);
@@ -123,7 +123,7 @@ namespace DumpDetective.Analysis.Analyzers
             metrics.Sort(comparator);
 
             var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var shortish  = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var shortish = new List<TypeAllocationProfile>(options.TopTypeLimit);
             var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
 
             int scanLimit;
@@ -150,7 +150,7 @@ namespace DumpDetective.Analysis.Analyzers
                     long mtGen2 = e.Gen2Count;
 
                     double longLivedRatio = item.Gen2Ratio;
-                    double typeGen0Pct    = item.Gen0Pct;
+                    double typeGen0Pct = item.Gen0Pct;
                     AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
                         ? AllocationProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
@@ -247,7 +247,7 @@ namespace DumpDetective.Analysis.Analyzers
                     long mtGen2 = e.Gen2Count;
 
                     double longLivedRatio = item.Gen2Ratio;
-                    double typeGen0Pct    = item.Gen0Pct;
+                    double typeGen0Pct = item.Gen0Pct;
                     AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
                         ? AllocationProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
@@ -289,7 +289,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             return new AllocationPatternDomainResult(
                 gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,
-                gen0SizePct,  gen1SizePct,  gen2SizePct,  lohSizePct,
+                gen0SizePct, gen1SizePct, gen2SizePct, lohSizePct,
                 profile, pressure, promotionScore,
                 transient, shortish, longLived);
         }
@@ -309,7 +309,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (score > 20.0) return GCPressureLevel.Moderate;
             return GCPressureLevel.Low;
         }
-        
+
         public void Dispose() { }
     }
 }

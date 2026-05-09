@@ -212,7 +212,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     {
         var opts = DefaultOptions;
         int instanceScore = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
-        int staticScore   = EventLeakAnalyzer.CalculateSeverity(isStatic: true,  subscriberCount: 3, rootHint: string.Empty, opts);
+        int staticScore = EventLeakAnalyzer.CalculateSeverity(isStatic: true, subscriberCount: 3, rootHint: string.Empty, opts);
         (staticScore - instanceScore).Should().Be(opts.SeverityStaticPublisherBonus);
     }
 
@@ -220,7 +220,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_RootHintPresentAppliesBonus()
     {
         var opts = DefaultOptions;
-        int noHint   = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
+        int noHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
         int withHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: "static root", opts);
         (withHint - noHint).Should().Be(opts.SeverityRootHintBonus);
     }
@@ -287,7 +287,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void BuildEventNameSet_PairedAddRemove_ReturnsEventName()
     {
         var result = EventLeakAnalyzer.BuildEventNameSet(
-            addNames:    ["Changed", "Opened"],
+            addNames: ["Changed", "Opened"],
             removeNames: ["Changed", "Opened"]);
 
         result.Should().BeEquivalentTo(["Changed", "Opened"]);
@@ -298,7 +298,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     {
         // "Orphan" has add_ but no remove_ → not a real event
         var result = EventLeakAnalyzer.BuildEventNameSet(
-            addNames:    ["Changed", "Orphan"],
+            addNames: ["Changed", "Orphan"],
             removeNames: ["Changed"]);
 
         result.Should().BeEquivalentTo(["Changed"]);
@@ -327,19 +327,19 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void BuildEventNameSet_OwnPlusInheritedNames_ContainsBoth()
     {
         // Own events
-        var ownAdd    = new[] { "OwnEvent" };
+        var ownAdd = new[] { "OwnEvent" };
         var ownRemove = new[] { "OwnEvent" };
 
         // Base-class events discovered by walking BaseType
-        var baseAdd    = new[] { "InheritedEvent" };
+        var baseAdd = new[] { "InheritedEvent" };
         var baseRemove = new[] { "InheritedEvent" };
 
-        var allAdd    = ownAdd.Concat(baseAdd).ToArray();
+        var allAdd = ownAdd.Concat(baseAdd).ToArray();
         var allRemove = ownRemove.Concat(baseRemove).ToArray();
 
         var names = EventLeakAnalyzer.BuildEventNameSet(allAdd, allRemove);
 
-        names.Should().Contain("OwnEvent",       "own event must be accepted");
+        names.Should().Contain("OwnEvent", "own event must be accepted");
         names.Should().Contain("InheritedEvent", "inherited event must also be accepted (Bug A fix)");
     }
 
@@ -360,11 +360,11 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         var leak = new EventLeakInfo
         {
-            PublisherType  = "App.Publisher",
+            PublisherType = "App.Publisher",
             EventFieldName = "DataReady",
-            IsStatic       = false,
+            IsStatic = false,
             SubscriberCount = subscribers.Count,
-            Subscribers    = subscribers,
+            Subscribers = subscribers,
         };
 
         leak.SubscriberCount.Should().Be(2,
@@ -386,11 +386,11 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         var leak = new EventLeakInfo
         {
-            PublisherType   = "App.Publisher",
-            EventFieldName  = "E",
-            IsStatic        = false,
+            PublisherType = "App.Publisher",
+            EventFieldName = "E",
+            IsStatic = false,
             SubscriberCount = subscribers.Count,
-            Subscribers     = subscribers,
+            Subscribers = subscribers,
         };
 
         var groups = NewAnalyzer().GroupEventLeaks([leak]);
@@ -424,11 +424,11 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         var leak = new EventLeakInfo
         {
-            PublisherType   = "App.Publisher",
-            EventFieldName  = "ManagerChanged",
-            IsStatic        = true,
+            PublisherType = "App.Publisher",
+            EventFieldName = "ManagerChanged",
+            IsStatic = true,
             SubscriberCount = subscribers.Count,
-            Subscribers     = subscribers,
+            Subscribers = subscribers,
         };
 
         var groups = NewAnalyzer().GroupEventLeaks([leak]);
@@ -451,11 +451,11 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         var leak = new EventLeakInfo
         {
-            PublisherType   = "App.Publisher",
-            EventFieldName  = "ManagerChanged",
-            IsStatic        = true,
+            PublisherType = "App.Publisher",
+            EventFieldName = "ManagerChanged",
+            IsStatic = true,
             SubscriberCount = subscribers.Count,
-            Subscribers     = subscribers,
+            Subscribers = subscribers,
         };
 
         var groups = NewAnalyzer().GroupEventLeaks([leak]);

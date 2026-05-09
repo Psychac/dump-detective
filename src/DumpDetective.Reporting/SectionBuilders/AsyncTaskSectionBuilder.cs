@@ -10,7 +10,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
 {
     public string AnalyzerName => "Async Task Analysis";
     public string DisplayTitle => "Async & Task Analysis";
-    public int    SortOrder    => 28;
+    public int SortOrder => 28;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AsyncTaskDomainResult;
 
@@ -22,22 +22,22 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
         // ── §8.1 Task Summary ─────────────────────────────────────────────────
         blocks.Add(H("TASK SUMMARY"));
         blocks.Add(Divider());
-        blocks.Add(M("Total Tasks",           $"{d.TotalTasks:N0}",                                      d.TotalTasks));
-        blocks.Add(M("Pending",               $"{d.PendingTasks:N0}",                                    d.PendingTasks));
-        blocks.Add(M("Running",               $"{d.RunningTasks:N0}",                                    d.RunningTasks));
-        blocks.Add(M("Faulted",               $"{d.FaultedTasks:N0}",                                    d.FaultedTasks));
-        blocks.Add(M("Canceled",              $"{d.CanceledTasks:N0}",                                   d.CanceledTasks));
-        blocks.Add(M("Completed",             $"{d.CompletedTasks:N0}",                                  d.CompletedTasks));
-        blocks.Add(M("Orphaned",              $"{d.OrphanedTasks:N0}",                                   d.OrphanedTasks));
+        blocks.Add(M("Total Tasks", $"{d.TotalTasks:N0}", d.TotalTasks));
+        blocks.Add(M("Pending", $"{d.PendingTasks:N0}", d.PendingTasks));
+        blocks.Add(M("Running", $"{d.RunningTasks:N0}", d.RunningTasks));
+        blocks.Add(M("Faulted", $"{d.FaultedTasks:N0}", d.FaultedTasks));
+        blocks.Add(M("Canceled", $"{d.CanceledTasks:N0}", d.CanceledTasks));
+        blocks.Add(M("Completed", $"{d.CompletedTasks:N0}", d.CompletedTasks));
+        blocks.Add(M("Orphaned", $"{d.OrphanedTasks:N0}", d.OrphanedTasks));
         if (d.TaskScanLimited)
-            blocks.Add(M("Scan Limited",      "Yes — results may be incomplete",                         0));
+            blocks.Add(M("Scan Limited", "Yes — results may be incomplete", 0));
 
         // ── §8.3 Continuation Chains ─────────────────────────────────────────
         blocks.Add(Blank());
         blocks.Add(H("CONTINUATION CHAINS"));
         blocks.Add(Divider());
-        blocks.Add(M("Max Chain Depth",       $"{d.MaxContinuationDepth}",                               d.MaxContinuationDepth));
-        blocks.Add(M("Avg Chain Depth",       $"{d.AvgContinuationDepth:F1}",                            d.AvgContinuationDepth));
+        blocks.Add(M("Max Chain Depth", $"{d.MaxContinuationDepth}", d.MaxContinuationDepth));
+        blocks.Add(M("Avg Chain Depth", $"{d.AvgContinuationDepth:F1}", d.AvgContinuationDepth));
 
         if (d.TopContinuationTypes.Count > 0)
         {

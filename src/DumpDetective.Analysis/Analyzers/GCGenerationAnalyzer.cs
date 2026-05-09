@@ -62,8 +62,8 @@ namespace DumpDetective.Analysis.Analyzers
                 gen0Objects += e.Gen0Count;
                 gen1Objects += e.Gen1Count;
                 gen2Objects += e.Gen2Count;
-                lohBytes    += e.LohSize;
-                lohObjects  += e.LohCount;
+                lohBytes += e.LohSize;
+                lohObjects += e.LohCount;
                 totalObjects += e.Count;
 
                 if (e.LohCount > 0)
@@ -79,8 +79,8 @@ namespace DumpDetective.Analysis.Analyzers
             AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
-            double lohPct  = totalManagedBytes == 0 ? 0.0 : lohBytes   * 100.0 / totalManagedBytes;
-            double gen2Pct = totalObjects      == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
+            double lohPct = totalManagedBytes == 0 ? 0.0 : lohBytes * 100.0 / totalManagedBytes;
+            double gen2Pct = totalObjects == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
 
             // Top LOH types — resolve names only for top N.
             lohCandidates.Sort(static (a, b) => b.Entry.LohSize.CompareTo(a.Entry.LohSize));
@@ -139,18 +139,18 @@ namespace DumpDetective.Analysis.Analyzers
 
             foreach (CachedTypeStatistics stat in typeStats.Values)
             {
-                lohBytes     += stat.LohSize;
+                lohBytes += stat.LohSize;
                 totalObjects += stat.Count;
-                lohObjects   += stat.LohCount;
-                int nonLoh    = Math.Max(0, stat.Count - stat.LohCount);
+                lohObjects += stat.LohCount;
+                int nonLoh = Math.Max(0, stat.Count - stat.LohCount);
                 ulong nonLohBytes = stat.TotalSize >= stat.LohSize ? stat.TotalSize - stat.LohSize : 0;
-                gen2Objects  += nonLoh;
-                gen2Bytes    += nonLohBytes;
+                gen2Objects += nonLoh;
+                gen2Bytes += nonLohBytes;
             }
 
             ulong totalManagedBytes = gen2Bytes + lohBytes;
-            double lohPct  = totalManagedBytes == 0 ? 0.0 : lohBytes    * 100.0 / totalManagedBytes;
-            double gen2Pct = totalObjects      == 0 ? 0.0 : gen2Objects  * 100.0 / totalObjects;
+            double lohPct = totalManagedBytes == 0 ? 0.0 : lohBytes * 100.0 / totalManagedBytes;
+            double gen2Pct = totalObjects == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
 
             // No LINQ in hot paths — explicit sort + loop.
             var lohList = new List<CachedTypeStatistics>(capacity: 32);

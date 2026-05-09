@@ -16,8 +16,8 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal sealed class EventCandidateIndexWriter : IDisposable
 {
     // File magic: "EVIX" = Event Index
-    private const int Magic      = 0x58495645;
-    private const int Version    = 1;
+    private const int Magic = 0x58495645;
+    private const int Version = 1;
     private const int RecordSize = 16; // 8 + 8
 
     private readonly FileStream _stream;
@@ -38,7 +38,7 @@ internal sealed class EventCandidateIndexWriter : IDisposable
     public void Add(ulong address, ulong methodTable)
     {
         var span = _buf.AsSpan(_offset, RecordSize);
-        BinaryPrimitives.WriteUInt64LittleEndian(span,      address);
+        BinaryPrimitives.WriteUInt64LittleEndian(span, address);
         BinaryPrimitives.WriteUInt64LittleEndian(span[8..], methodTable);
 
         _offset += RecordSize;

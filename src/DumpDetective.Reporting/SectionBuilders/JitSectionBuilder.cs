@@ -9,7 +9,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopMethodsToShow    = 15;
+    private const int TopMethodsToShow = 15;
     private const int TopFrameTypesToShow = 15;
 
     public string AnalyzerName => "JIT Analysis";
@@ -25,8 +25,8 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
         // ── §19.1  JIT Heap Usage ─────────────────────────────────────────────
         blocks.Add(H("JIT CODE HEAP USAGE"));
         blocks.Add(Divider());
-        blocks.Add(M("Total JIT code heap",    FormatHelper.FormatBytes(d.TotalJitHeapBytes), (double)d.TotalJitHeapBytes));
-        blocks.Add(M("JIT manager count",      $"{d.JitManagerCount:N0}",   d.JitManagerCount));
+        blocks.Add(M("Total JIT code heap", FormatHelper.FormatBytes(d.TotalJitHeapBytes), (double)d.TotalJitHeapBytes));
+        blocks.Add(M("JIT manager count", $"{d.JitManagerCount:N0}", d.JitManagerCount));
 
         if (d.JitHeapPctOfTotalProcess > 0.0)
             blocks.Add(M("JIT heap % of process", $"{d.JitHeapPctOfTotalProcess:P1}", d.JitHeapPctOfTotalProcess));
@@ -35,8 +35,8 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
         blocks.Add(Blank());
         blocks.Add(H("COMPILED METHOD ANALYSIS"));
         blocks.Add(Divider());
-        blocks.Add(M("Active managed frames",   $"{d.ManagedFrameCount:N0}",    d.ManagedFrameCount));
-        blocks.Add(M("Runtime/internal frames", $"{d.UnmanagedFrameCount:N0}",  d.UnmanagedFrameCount));
+        blocks.Add(M("Active managed frames", $"{d.ManagedFrameCount:N0}", d.ManagedFrameCount));
+        blocks.Add(M("Runtime/internal frames", $"{d.UnmanagedFrameCount:N0}", d.UnmanagedFrameCount));
 
         int totalFrames = d.ManagedFrameCount + d.UnmanagedFrameCount;
         if (totalFrames > 0)

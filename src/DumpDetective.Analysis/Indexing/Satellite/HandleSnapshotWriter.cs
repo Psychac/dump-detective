@@ -18,7 +18,7 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 internal static class HandleSnapshotWriter
 {
     // File magic: "HDSS" = Handle Snapshot
-    private const int Magic   = 0x53534448;
+    private const int Magic = 0x53534448;
     private const int Version = 1;
     private const int RecordSize = 20; // 8 + 8 + 1 + 3 pad
     private const int ProgressEveryHandles = 25_000;
@@ -48,12 +48,12 @@ internal static class HandleSnapshotWriter
 
                 ClrObject target = handle.Object;
                 ulong objAddr = target.Address;
-                ulong mt      = target.Type?.MethodTable ?? 0;
-                byte  kind    = (byte)handle.HandleKind;
+                ulong mt = target.Type?.MethodTable ?? 0;
+                byte kind = (byte)handle.HandleKind;
 
                 var span = buf.AsSpan(offset, RecordSize);
-                BinaryPrimitives.WriteUInt64LittleEndian(span,       objAddr);
-                BinaryPrimitives.WriteUInt64LittleEndian(span[8..],  mt);
+                BinaryPrimitives.WriteUInt64LittleEndian(span, objAddr);
+                BinaryPrimitives.WriteUInt64LittleEndian(span[8..], mt);
                 span[16] = kind;
                 // bytes 17–19 left as 0 (padding — already zeroed by Rent or previous flush)
                 span[17] = 0; span[18] = 0; span[19] = 0;

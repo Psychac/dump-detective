@@ -23,7 +23,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class BoxingAnalyzer : IAnalyzer
     {
-        public string Name     => "Boxing Analysis";
+        public string Name => "Boxing Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
@@ -59,12 +59,12 @@ namespace DumpDetective.Analysis.Analyzers
             var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum)>(
                 StringComparer.Ordinal);
 
-            int  totalBoxedObjects = 0;
-            ulong totalBoxedBytes  = 0;
-            int  boxedEnumCount    = 0;
-            ulong boxedEnumBytes   = 0;
-            int  oversizedCount    = 0;
-            bool scanCapped        = false;
+            int totalBoxedObjects = 0;
+            ulong totalBoxedBytes = 0;
+            int boxedEnumCount = 0;
+            ulong boxedEnumBytes = 0;
+            int oversizedCount = 0;
+            bool scanCapped = false;
 
             // Struct padding candidates: collect during the same pass
             var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes)>(64);
@@ -87,17 +87,17 @@ namespace DumpDetective.Analysis.Analyzers
                 // also catches the same set reliably.
                 bool isBoxed = clrType.IsValueType
                     || string.Equals(clrType.BaseType?.Name, "System.ValueType", StringComparison.Ordinal)
-                    || string.Equals(clrType.BaseType?.Name, "System.Enum",      StringComparison.Ordinal);
+                    || string.Equals(clrType.BaseType?.Name, "System.Enum", StringComparison.Ordinal);
 
                 if (!isBoxed) continue;
 
                 string typeName = clrType.Name ?? $"MT:0x{kv.Key:x}";
-                int    count    = (int)Math.Min(entry.Count, int.MaxValue);
-                ulong  bytes    = entry.TotalSize;
-                bool   isEnum   = clrType.IsEnum;
+                int count = (int)Math.Min(entry.Count, int.MaxValue);
+                ulong bytes = entry.TotalSize;
+                bool isEnum = clrType.IsEnum;
 
                 totalBoxedObjects += count;
-                totalBoxedBytes   += bytes;
+                totalBoxedBytes += bytes;
 
                 if (isEnum)
                 {
@@ -156,22 +156,22 @@ namespace DumpDetective.Analysis.Analyzers
                 int wasted = c.StructSize - c.FieldBytes;
                 double ratio = c.StructSize > 0 ? (double)wasted / c.StructSize : 0.0;
                 topPaddingWaste.Add(new StructPaddingEntry(
-                    TypeName:            c.TypeName,
-                    TotalFieldBytes:     c.FieldBytes,
-                    StructSize:          c.StructSize,
-                    WastedPaddingBytes:  wasted,
-                    WasteRatio:          ratio));
+                    TypeName: c.TypeName,
+                    TotalFieldBytes: c.FieldBytes,
+                    StructSize: c.StructSize,
+                    WastedPaddingBytes: wasted,
+                    WasteRatio: ratio));
             }
 
             return new BoxingDomainResult(
-                TotalBoxedObjects:      totalBoxedObjects,
-                TotalBoxedBytes:        totalBoxedBytes,
-                TopBoxedTypes:          topBoxedTypes,
-                BoxedEnumCount:         boxedEnumCount,
-                BoxedEnumBytes:         boxedEnumBytes,
+                TotalBoxedObjects: totalBoxedObjects,
+                TotalBoxedBytes: totalBoxedBytes,
+                TopBoxedTypes: topBoxedTypes,
+                BoxedEnumCount: boxedEnumCount,
+                BoxedEnumBytes: boxedEnumBytes,
                 OversizedValueTypeCount: oversizedCount,
-                TopPaddingWasteTypes:   topPaddingWaste,
-                TypeScanCapped:         scanCapped);
+                TopPaddingWasteTypes: topPaddingWaste,
+                TypeScanCapped: scanCapped);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

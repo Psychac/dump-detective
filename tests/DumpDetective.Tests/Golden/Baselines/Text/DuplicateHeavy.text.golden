@@ -3,7 +3,7 @@
 Dump: C:/fixtures/DuplicateHeavy.dmp
 Generated (UTC): 2026-01-01 12:00:00
 Elapsed: 8.1s
-Schema: 2.0
+Schema: 2.1
 
 Dedup: merged 3/3 candidate duplicates
 

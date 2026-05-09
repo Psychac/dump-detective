@@ -82,7 +82,7 @@ internal sealed class TrendOrchestrationService(
         ConsoleUx.StageStart(2, totalStages, $"Build {resolved.Report.Format} trend report");
 
         IReadOnlyList<AnalysisSnapshot> snapshots = trendExecutions
-            .Select((execution, index) => BuildSnapshot(index, execution.DumpPath, execution.Runs))
+            .Select((execution, index) => BuildSnapshot(index, execution))
             .ToList();
 
         AnalysisSnapshot baseline = snapshots[0];
@@ -108,6 +108,7 @@ internal sealed class TrendOrchestrationService(
             resolved.Report.Audience,
             currentRuns,
             totalStopwatch.Elapsed,
+            trendExecutions[^1].IncidentContext,
             trendData,
             cancellationToken);
 
@@ -242,15 +243,22 @@ internal sealed class TrendOrchestrationService(
         }
 
         stopwatch.Stop();
-        return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed);
+        AnalysisIncidentContext incidentContext = IncidentContextFactory.Create(
+            mode: "Trend",
+            loadContext: loadContext,
+            resolved: resolved,
+            activeAnalyzers: activeAnalyzers,
+            elapsed: stopwatch.Elapsed);
+
+        return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed, incidentContext, DateTime.UtcNow);
     }
 
-    private static AnalysisSnapshot BuildSnapshot(int index, string dumpPath, IReadOnlyList<AnalyzerRunResult> runs)
+    private static AnalysisSnapshot BuildSnapshot(int index, TrendDumpExecution execution)
     {
         Dictionary<string, AnalyzerDomainResult> domains = new(StringComparer.Ordinal);
         List<InsightFinding> findings = [];
 
-        foreach (AnalyzerRunResult run in runs)
+        foreach (AnalyzerRunResult run in execution.Runs)
         {
             if (run.Status != AnalyzerExecutionStatus.Success || run.Result is null)
                 continue;
@@ -261,13 +269,19 @@ internal sealed class TrendOrchestrationService(
 
         return new AnalysisSnapshot(
             Index: index,
-            DumpPath: dumpPath,
+            DumpPath: execution.DumpPath,
             Findings: findings,
             DomainResults: domains,
-            GeneratedAtUtc: DateTime.UtcNow);
+            GeneratedAtUtc: execution.GeneratedAtUtc,
+            IncidentContext: execution.IncidentContext);
     }
 
-    private sealed record TrendDumpExecution(string DumpPath, IReadOnlyList<AnalyzerRunResult> Runs, TimeSpan Elapsed);
+    private sealed record TrendDumpExecution(
+        string DumpPath,
+        IReadOnlyList<AnalyzerRunResult> Runs,
+        TimeSpan Elapsed,
+        AnalysisIncidentContext IncidentContext,
+        DateTime GeneratedAtUtc);
 
     private static void PrintTrendDumpSummary(int dumpIndex, int totalDumps, TrendDumpExecution execution, TimeSpan cumulativeDumpElapsed, bool diagnosticMode)
     {

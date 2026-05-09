@@ -1,5 +1,5 @@
 ﻿{
-  "schemaVersion": "2.0",
+  "schemaVersion": "2.1",
   "dumpPath": "C:/fixtures/MixedSeverity.dmp",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
   "elapsedSeconds": 6.6,
@@ -51,5 +51,6 @@
     "evidenceBeforeMerge": 3
   },
   "analyzerSections": [],
+  "analyzerRunStatuses": [],
   "artifacts": []
 }

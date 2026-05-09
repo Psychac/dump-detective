@@ -17,7 +17,8 @@ internal sealed class ReportSerializer
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
-        ReportAudience audience = ReportAudience.All)
+        ReportAudience audience = ReportAudience.All,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
         List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, builders);
@@ -167,6 +168,7 @@ internal sealed class ReportSerializer
             DumpPath         = dumpPath,
             GeneratedAtUtc   = DateTime.UtcNow,
             ElapsedSeconds   = elapsed.TotalSeconds,
+            IncidentContext  = incidentContext,
             Findings         = outputFindings,
             AnalyzerSections = analyzerSections,
             ExecutiveSummary = executiveSummary,
@@ -175,6 +177,15 @@ internal sealed class ReportSerializer
             DedupDiagnostics = dedupRecord
         ,
             Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList()
+        ,
+            AnalyzerRunStatuses = runs.Select(r => new AnalyzerRunStatusRecord(
+                AnalyzerName: r.AnalyzerName,
+                Status: r.Status.ToString(),
+                DurationMs: r.Duration.TotalMilliseconds,
+                FindingCount: r.FindingCount,
+                WarningCount: r.WarningCount,
+                ObjectScanCount: r.ObjectScanCount,
+                ErrorMessage: r.ErrorMessage)).ToList()
         };
     }
 
@@ -217,7 +228,15 @@ internal sealed class ReportSerializer
             Evidence:       f.Evidence,
             Recommendation: f.Recommendation,
             Tags:           f.Tags,
-            Fingerprint:    f.EffectiveFingerprint);
+            Fingerprint:    f.EffectiveFingerprint)
+        {
+            ConfidenceScore = null,
+            EvidenceRefs = null,
+            SuggestedOwner = null,
+            Effort = null,
+            ValidationStep = null,
+            TrackingStatus = null
+        };
 
     // ── Deduplication (preserves ReportBuilder.DeduplicateSections logic) ────
 
@@ -270,7 +289,13 @@ internal sealed class ReportSerializer
                 Fingerprint:    existing.Fingerprint)
             {
                 EvidenceItems = mergedEvidenceList,
-                RecommendationItems = mergedRecList
+                RecommendationItems = mergedRecList,
+                ConfidenceScore = existing.ConfidenceScore ?? f.ConfidenceScore,
+                EvidenceRefs = (existing.EvidenceRefs ?? Array.Empty<EvidenceRef>()).Concat(f.EvidenceRefs ?? Array.Empty<EvidenceRef>()).ToList(),
+                SuggestedOwner = existing.SuggestedOwner ?? f.SuggestedOwner,
+                Effort = existing.Effort ?? f.Effort,
+                ValidationStep = existing.ValidationStep ?? f.ValidationStep,
+                TrackingStatus = existing.TrackingStatus ?? f.TrackingStatus
             };
         }
 
@@ -355,19 +380,8 @@ internal sealed class ReportSerializer
 
     private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings, long totalManagedBytes)
     {
-        // totalManagedBytes provided by caller when available
-
-        int criticalCount = 0, warningCount = 0;
-        for (int i = 0; i < findings.Count; i++)
-        {
-            int ord = SeverityOrdinal(findings[i].Severity);
-            if (ord == 2) criticalCount++;
-            else if (ord == 1) warningCount++;
-        }
-
-        int leakScore     = ComputeCategoryScore(findings, "Leak", "Memory");
-        int gcScore       = ComputeCategoryScore(findings, "Fragmentation", "GC");
-        int threadScore   = ComputeCategoryScore(findings, "Hang", "Threading", "Retention");
+        // P1.2: Use ExplainableScoringEngine for reproducible, contributor-backed scores.
+        var (leak, gcPressure, thread) = ExplainableScoringEngine.ComputeScores(findings);
 
         // Top 3 Critical or Warning findings
         var top3 = new List<FindingRecord>(3);
@@ -380,33 +394,13 @@ internal sealed class ReportSerializer
 
         return new ExecutiveSummaryRecord(
             TotalManagedBytes:      totalManagedBytes,
-            LeakLikelihoodScore:    leakScore,
-            GcPressureScore:        gcScore,
-            ThreadContentionScore:  threadScore,
-            TopRecommendations:     top3);
-    }
-
-    private static int ComputeCategoryScore(IReadOnlyList<FindingRecord> findings, params string[] categories)
-    {
-        int score = 0;
-        for (int i = 0; i < findings.Count; i++)
+            LeakLikelihoodScore:    leak.Score,
+            GcPressureScore:        gcPressure.Score,
+            ThreadContentionScore:  thread.Score,
+            TopRecommendations:     top3)
         {
-            FindingRecord f = findings[i];
-            bool matches = false;
-            for (int c = 0; c < categories.Length; c++)
-            {
-                if (f.Category.Contains(categories[c], StringComparison.OrdinalIgnoreCase))
-                {
-                    matches = true;
-                    break;
-                }
-            }
-
-            if (!matches) continue;
-            score += SeverityOrdinal(f.Severity) == 2 ? 40 : 20;
-        }
-
-        return Math.Min(score, 100);
+            ScoreBreakdowns = [leak, gcPressure, thread],
+        };
     }
 
     // ── Developer action plan ─────────────────────────────────────────────────

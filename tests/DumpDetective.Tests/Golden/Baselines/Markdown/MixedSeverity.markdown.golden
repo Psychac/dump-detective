@@ -3,12 +3,21 @@
 > Dump: `C:/fixtures/MixedSeverity.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
 > Elapsed: `6.6s`
-> Schema: `2.0`
+> Schema: `2.1`
 
 > Dedup merged **0** section(s) from **0** candidate duplicate(s).
 
+## Table of Contents
+
+### Findings
+
+- [Critical leak](#finding-0)
+- [Warning leak](#finding-1)
+- [Info signal](#finding-2)
+
 ## Findings
 
+<a id="finding-0"></a>
 ## [Critical] Critical leak
 
 Critical item
@@ -17,6 +26,7 @@ Critical item
 
 - Handle now
 
+<a id="finding-1"></a>
 ## [Warning] Warning leak
 
 Warning item
@@ -25,6 +35,7 @@ Warning item
 
 - Plan remediation
 
+<a id="finding-2"></a>
 ## [Info] Info signal
 
 Informational item

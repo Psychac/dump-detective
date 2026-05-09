@@ -3,12 +3,19 @@
 > Dump: `C:/fixtures/LongNames.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
 > Elapsed: `4.2s`
-> Schema: `2.0`
+> Schema: `2.1`
 
 > Dedup merged **0** section(s) from **0** candidate duplicate(s).
 
+## Table of Contents
+
+### Findings
+
+- [Long member/type names](#finding-0)
+
 ## Findings
 
+<a id="finding-0"></a>
 ## [Warning] Long member/type names
 
 Long identifiers are preserved end-to-end.

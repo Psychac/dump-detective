@@ -1,5 +1,5 @@
 ﻿{
-  "schemaVersion": "2.0",
+  "schemaVersion": "2.1",
   "dumpPath": "C:/fixtures/LongNames.dmp",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
   "elapsedSeconds": 4.2,
@@ -27,5 +27,6 @@
     "evidenceBeforeMerge": 2
   },
   "analyzerSections": [],
+  "analyzerRunStatuses": [],
   "artifacts": []
 }

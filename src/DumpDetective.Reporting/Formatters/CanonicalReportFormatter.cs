@@ -48,14 +48,46 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
 
+        if (doc.IncidentContext is { } ctx)
+        {
+            sb.AppendLine("INCIDENT CONTEXT");
+            sb.AppendLine(StringConstants.Equals80);
+            sb.AppendLine($"- Mode: {ctx.Mode}");
+            sb.AppendLine($"- Dump Path: {ctx.DumpPath}");
+            if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"- Baseline Dump: {ctx.BaselineDumpPath}");
+            sb.AppendLine($"- Report: {ctx.ReportFormat} / {ctx.ReportAudience}");
+            sb.AppendLine($"- Config: {(ctx.UsedConfigFile ? "config file" : "command line")}" + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})"));
+            sb.AppendLine($"- Diagnostic Mode: {(ctx.DiagnosticMode ? "on" : "off")}");
+            sb.AppendLine($"- Index Prebuild: {ctx.IndexPrebuildMode}");
+            sb.AppendLine($"- Runtime: {ctx.RuntimeFlavor ?? "n/a"}" + (string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : $" {ctx.RuntimeVersion}"));
+            sb.AppendLine($"- GC Mode: {ctx.GcMode ?? "n/a"}");
+            sb.AppendLine($"- Heap Count: {(ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a")}");
+            sb.AppendLine($"- Heap Walkable: {(ctx.HeapCanWalk ? "yes" : "no")}");
+            sb.AppendLine($"- Active Analyzers: {ctx.ActiveAnalyzerCount}");
+            sb.AppendLine($"- Analysis Elapsed: {ctx.AnalysisElapsedSeconds:F1}s");
+            if (ctx.TrendSnapshots is { Count: > 0 })
+            {
+                sb.AppendLine("- Snapshot Contexts:");
+                foreach (var snap in ctx.TrendSnapshots)
+                {
+                    string role = snap.IsBaseline ? "baseline" : snap.IsCurrent ? "current" : $"snapshot {snap.Index + 1}";
+                    sb.AppendLine($"  - {role}: {snap.DumpPath} | {snap.ElapsedSeconds:F1}s | analyzers {snap.AnalyzerCount} | findings {snap.FindingCount}");
+                }
+            }
+            sb.AppendLine();
+        }
+
         if (doc.ExecutiveSummary is { } ex)
         {
             sb.AppendLine("EXECUTIVE SUMMARY");
             sb.AppendLine(StringConstants.Equals80);
             sb.AppendLine($"- Total Managed Bytes: {FormatHelper.FormatBytes((ulong)ex.TotalManagedBytes)}");
-            sb.AppendLine($"- Leak Likelihood Score: {ex.LeakLikelihoodScore}/100");
-            sb.AppendLine($"- GC Pressure Score: {ex.GcPressureScore}/100");
-            sb.AppendLine($"- Thread Contention Score: {ex.ThreadContentionScore}/100");
+            AppendScore(sb, "Leak Likelihood Score",   ex.LeakLikelihoodScore,   ex.LeakScoreDelta,
+                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "Leak"));
+            AppendScore(sb, "GC Pressure Score",       ex.GcPressureScore,       ex.GcPressureScoreDelta,
+                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "GcPressure"));
+            AppendScore(sb, "Thread Contention Score", ex.ThreadContentionScore, ex.ThreadContentionScoreDelta,
+                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "ThreadContention"));
             foreach (FindingRecord rec in ex.TopRecommendations)
                 sb.AppendLine($"  [{rec.Severity}] {rec.Title}");
             sb.AppendLine();
@@ -134,6 +166,30 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         }
 
         return sb.ToString();
+    }
+
+    // ── P1.2: Explainable score rendering ─────────────────────────────────────
+
+    private static void AppendScore(StringBuilder sb, string label, int score, int? delta, ScoreBreakdown? breakdown)
+    {
+        string deltaStr = delta.HasValue
+            ? $" ({(delta.Value >= 0 ? "+" : string.Empty)}{delta.Value} vs baseline)"
+            : string.Empty;
+        string confidenceStr = breakdown is not null
+            ? $" [confidence: {breakdown.Confidence:P0}]"
+            : string.Empty;
+
+        sb.AppendLine($"- {label}: {score}/100{deltaStr}{confidenceStr}");
+
+        if (breakdown?.Contributors is { Count: > 0 } contributors)
+        {
+            for (int i = 0; i < contributors.Count; i++)
+            {
+                ScoreContributor c = contributors[i];
+                string detail = string.IsNullOrEmpty(c.Detail) ? string.Empty : $" ({c.Detail})";
+                sb.AppendLine($"    +{c.Points,2} pts  [{c.Source}] {c.Label}{detail}");
+            }
+        }
     }
 
     private static void RenderBlocksText(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)
@@ -279,6 +335,42 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine("> Analyzed dumps:");
                 foreach (string path in doc.TrendDumpPaths)
                     sb.AppendLine($"> - `{path}`");
+            }
+            sb.AppendLine();
+        }
+
+        if (doc.IncidentContext is { } ctx)
+        {
+            sb.AppendLine("## Incident Context");
+            sb.AppendLine();
+            sb.AppendLine("| Field | Value |");
+            sb.AppendLine("|---|---|");
+            sb.AppendLine($"| **Mode** | {Esc(ctx.Mode)} |");
+            sb.AppendLine($"| **Dump Path** | `{ctx.DumpPath}` |");
+            if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"| **Baseline Dump** | `{ctx.BaselineDumpPath}` |");
+            sb.AppendLine($"| **Report** | {Esc(ctx.ReportFormat)} / {ctx.ReportAudience} |");
+            sb.AppendLine($"| **Config** | {(ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({Esc(ctx.ConfigPath)})")} |");
+            sb.AppendLine($"| **Diagnostic Mode** | {(ctx.DiagnosticMode ? "on" : "off")} |");
+            sb.AppendLine($"| **Index Prebuild** | {Esc(ctx.IndexPrebuildMode)} |");
+            sb.AppendLine($"| **Runtime** | {Esc(ctx.RuntimeFlavor ?? "n/a")}{(string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : " " + Esc(ctx.RuntimeVersion))} |");
+            sb.AppendLine($"| **GC Mode** | {Esc(ctx.GcMode ?? "n/a")} |");
+            sb.AppendLine($"| **Heap Count** | {(ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a")} |");
+            sb.AppendLine($"| **Heap Walkable** | {(ctx.HeapCanWalk ? "yes" : "no")} |");
+            sb.AppendLine($"| **Active Analyzers** | {ctx.ActiveAnalyzerCount} |");
+            sb.AppendLine($"| **Analysis Elapsed** | {ctx.AnalysisElapsedSeconds:F1}s |");
+            if (ctx.TrendSnapshots is { Count: > 0 })
+            {
+                sb.AppendLine();
+                sb.AppendLine("### Snapshot Contexts");
+                sb.AppendLine();
+                sb.AppendLine("| Snapshot | Dump | Elapsed | Analyzers | Findings |");
+                sb.AppendLine("|---|---|---|---|---|");
+                foreach (var snap in ctx.TrendSnapshots)
+                {
+                    string role = snap.IsBaseline ? "Baseline" : snap.IsCurrent ? "Current" : $"Snapshot {snap.Index + 1}";
+                    sb.AppendLine($"| {role} | `{snap.DumpPath}` | {snap.ElapsedSeconds:F1}s | {snap.AnalyzerCount} | {snap.FindingCount} |");
+                }
+                sb.AppendLine();
             }
             sb.AppendLine();
         }
@@ -508,6 +600,46 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             }
         }
 
+        if (doc.IncidentContext is { } ctx)
+        {
+            string configText = (ctx.UsedConfigFile ? "config file" : "command line")
+                + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})");
+            string runtimeText = ctx.RuntimeFlavor ?? "n/a";
+            if (!string.IsNullOrWhiteSpace(ctx.RuntimeVersion))
+                runtimeText += $" {ctx.RuntimeVersion}";
+
+            string heapCountText = ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a";
+
+            sb.AppendLine("<section class=\"section-card\"><h2>Incident Context</h2>");
+            sb.AppendLine("<table><thead><tr><th scope=\"col\">Field</th><th scope=\"col\">Value</th></tr></thead><tbody>");
+            sb.AppendLine($"<tr><td>Mode</td><td>{Enc(ctx.Mode)}</td></tr>");
+            sb.AppendLine($"<tr><td>Dump Path</td><td class=\"wrap\">{Enc(ctx.DumpPath)}</td></tr>");
+            if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"<tr><td>Baseline Dump</td><td class=\"wrap\">{Enc(ctx.BaselineDumpPath)}</td></tr>");
+            sb.AppendLine($"<tr><td>Report</td><td>{Enc(ctx.ReportFormat)} / {ctx.ReportAudience}</td></tr>");
+            sb.AppendLine($"<tr><td>Config</td><td>{Enc(configText)}</td></tr>");
+            sb.AppendLine($"<tr><td>Diagnostic Mode</td><td>{(ctx.DiagnosticMode ? "on" : "off")}</td></tr>");
+            sb.AppendLine($"<tr><td>Index Prebuild</td><td>{Enc(ctx.IndexPrebuildMode)}</td></tr>");
+            sb.AppendLine($"<tr><td>Runtime</td><td>{Enc(runtimeText)}</td></tr>");
+            sb.AppendLine($"<tr><td>GC Mode</td><td>{Enc(ctx.GcMode ?? "n/a")}</td></tr>");
+            sb.AppendLine($"<tr><td>Heap Count</td><td>{heapCountText}</td></tr>");
+            sb.AppendLine($"<tr><td>Heap Walkable</td><td>{(ctx.HeapCanWalk ? "yes" : "no")}</td></tr>");
+            sb.AppendLine($"<tr><td>Active Analyzers</td><td>{ctx.ActiveAnalyzerCount}</td></tr>");
+            sb.AppendLine($"<tr><td>Analysis Elapsed</td><td>{ctx.AnalysisElapsedSeconds:F1}s</td></tr>");
+            sb.AppendLine("</tbody></table>");
+            if (ctx.TrendSnapshots is { Count: > 0 })
+            {
+                sb.AppendLine("<h3>Snapshot Contexts</h3>");
+                sb.AppendLine("<table><thead><tr><th scope=\"col\">Snapshot</th><th scope=\"col\">Dump</th><th scope=\"col\">Elapsed</th><th scope=\"col\">Analyzers</th><th scope=\"col\">Findings</th></tr></thead><tbody>");
+                foreach (var snap in ctx.TrendSnapshots)
+                {
+                    string role = snap.IsBaseline ? "Baseline" : snap.IsCurrent ? "Current" : $"Snapshot {snap.Index + 1}";
+                    sb.AppendLine($"<tr><td>{Enc(role)}</td><td class=\"wrap\">{Enc(snap.DumpPath)}</td><td>{snap.ElapsedSeconds:F1}s</td><td>{snap.AnalyzerCount}</td><td>{snap.FindingCount}</td></tr>");
+                }
+                sb.AppendLine("</tbody></table>");
+            }
+            sb.AppendLine("</section>");
+        }
+
         // ── Table Of Contents (HTML) ───────────────────────────────────────
         if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
         {
@@ -683,6 +815,12 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine("thead th{background:#f9fafb;font-weight:600;border:1px solid #e5e7eb;padding:8px;text-align:left;}");
         sb.AppendLine("tbody td{border:1px solid #e5e7eb;padding:8px;vertical-align:top;}");
         sb.AppendLine("tbody tr:nth-child(even){background:#fcfcfd;}.wrap{overflow-wrap:anywhere;word-break:break-word;}");
+        // P1.2: Score contributor styles
+        sb.AppendLine(".score-delta{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;}");
+        sb.AppendLine(".score-delta-up{background:#fee2e2;color:#b91c1c;}.score-delta-down{background:#dcfce7;color:#166534;}.score-delta-flat{background:#f3f4f6;color:#6b7280;}");
+        sb.AppendLine(".score-contributors-row td{background:#f9fafb!important;border-top:none!important;padding:4px 8px 4px 16px;}");
+        sb.AppendLine(".score-contrib-toggle{background:none;border:none;cursor:pointer;color:#6b7280;font-size:12px;padding:2px 0;text-align:left;}");
+        sb.AppendLine(".score-contrib-list{margin:4px 0 0 4px;padding-left:16px;font-size:12px;color:#374151;list-style:disc;}");
         sb.AppendLine(".remediation-title{margin:12px 0 6px 0;font-size:15px;}.remediation-list{margin:0;padding-left:20px;}");
         sb.AppendLine(".analyzer-section{background:#fff;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;border-radius:10px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}");
         sb.AppendLine(".detail-color-0{border-left-color:#3b82f6;}.detail-color-1{border-left-color:#7c3aed;}.detail-color-2{border-left-color:#0891b2;}");

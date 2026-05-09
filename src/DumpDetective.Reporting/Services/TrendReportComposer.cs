@@ -19,6 +19,7 @@ internal sealed class TrendReportComposer(
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
+        DumpDetective.Core.Models.AnalysisIncidentContext? currentIncidentContext,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
         TrendReportData trendData,
         ReportAudience audience = ReportAudience.All)
@@ -45,7 +46,7 @@ internal sealed class TrendReportComposer(
             Findings: trendFindings,
             FindingCount: trendFindings.Count);
 
-        AnalysisReportDocument baseDoc = _serializer.Serialize(dumpPath, [trendRun], elapsed, [], audience);
+        AnalysisReportDocument baseDoc = _serializer.Serialize(dumpPath, [trendRun], elapsed, [], audience, currentIncidentContext);
 
         // Build trend-specific analyzer sections
         var analyzerSections = new List<AnalyzerDetailSection>();
@@ -66,8 +67,22 @@ internal sealed class TrendReportComposer(
             IsTrendReport       = true,
             TrendDumpCount      = trendData.Snapshots.Count,
             TrendDumpPaths      = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
+            IncidentContext     = currentIncidentContext is null
+                ? baseDoc.IncidentContext
+                : currentIncidentContext with
+                {
+                    TrendSnapshots = trendData.Snapshots.Select(s => new TrendSnapshotContext(
+                        s.Index,
+                        s.DumpPath,
+                        s.GeneratedAtUtc,
+                        0,
+                        s.DomainResults.Count,
+                        s.Findings.Count,
+                        s.Index == 0,
+                        s.Index == trendData.Snapshots.Count - 1)).ToList()
+                },
             Findings            = baseDoc.Findings,
-            ExecutiveSummary    = baseDoc.ExecutiveSummary,
+            ExecutiveSummary    = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
             Confidence          = baseDoc.Confidence,
             DedupDiagnostics    = baseDoc.DedupDiagnostics,
@@ -149,6 +164,36 @@ internal sealed class TrendReportComposer(
         ];
     }
 
+    // ── P1.2: Trend executive summary with score deltas ───────────────────────
+
+    private ExecutiveSummaryRecord? ComputeTrendExecutiveSummary(
+        AnalysisReportDocument baseDoc,
+        IReadOnlyList<AnalysisSnapshot> snapshots,
+        ReportAudience audience)
+    {
+        if (baseDoc.ExecutiveSummary is not { } summary)
+            return null;
+
+        // Need at least 2 snapshots to compute a meaningful delta.
+        if (snapshots.Count < 2)
+            return summary;
+
+        AnalysisReportDocument firstDoc = _serializer.Serialize(
+            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), TimeSpan.Zero, [], audience);
+        AnalysisReportDocument lastDoc  = _serializer.Serialize(
+            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), TimeSpan.Zero, [], audience);
+
+        if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
+            return summary;
+
+        return summary with
+        {
+            LeakScoreDelta             = last.LeakLikelihoodScore   - first.LeakLikelihoodScore,
+            GcPressureScoreDelta       = last.GcPressureScore       - first.GcPressureScore,
+            ThreadContentionScoreDelta = last.ThreadContentionScore - first.ThreadContentionScore,
+        };
+    }
+
     // ── Per-dump sections ─────────────────────────────────────────────────────
 
     private IReadOnlyList<AnalyzerDetailSection> BuildPerDumpSections(
@@ -162,7 +207,7 @@ internal sealed class TrendReportComposer(
         {
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerRunResult> runs = BuildSnapshotRuns(snapshot);
-            AnalysisReportDocument snapshotDoc = _serializer.Serialize(snapshot.DumpPath, runs, TimeSpan.Zero, builders, audience);
+            AnalysisReportDocument snapshotDoc = _serializer.Serialize(snapshot.DumpPath, runs, TimeSpan.Zero, builders, audience, snapshot.IncidentContext);
             sections.Add(BuildStructuredDumpSection(snapshotDoc, i, snapshots.Count));
         }
 
@@ -202,6 +247,23 @@ internal sealed class TrendReportComposer(
         blocks.Add(new PathBlock("Path", snapshotDoc.DumpPath));
         blocks.Add(new MetricBlock("Generated (UTC)", snapshotDoc.GeneratedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")));
         blocks.Add(new MetricBlock("Findings", snapshotDoc.Findings.Count.ToString()));
+
+        if (snapshotDoc.IncidentContext is { } ctx)
+        {
+            blocks.Add(new BlankBlock());
+            blocks.Add(new HeadingBlock("INCIDENT CONTEXT"));
+            blocks.Add(new DividerBlock());
+            blocks.Add(new MetricBlock("Mode", ctx.Mode));
+            blocks.Add(new MetricBlock("Report", $"{ctx.ReportFormat} / {ctx.ReportAudience}"));
+            blocks.Add(new MetricBlock("Runtime", $"{ctx.RuntimeFlavor ?? "n/a"}{(string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : " " + ctx.RuntimeVersion)}"));
+            blocks.Add(new MetricBlock("GC Mode", ctx.GcMode ?? "n/a"));
+            blocks.Add(new MetricBlock("Heap Count", ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a"));
+            blocks.Add(new MetricBlock("Heap Walkable", ctx.HeapCanWalk ? "yes" : "no"));
+            blocks.Add(new MetricBlock("Config", (ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})")));
+            blocks.Add(new MetricBlock("Index Prebuild", ctx.IndexPrebuildMode));
+            blocks.Add(new MetricBlock("Active Analyzers", ctx.ActiveAnalyzerCount.ToString()));
+            blocks.Add(new MetricBlock("Elapsed", $"{ctx.AnalysisElapsedSeconds:F1}s"));
+        }
 
         if (snapshotDoc.Findings.Count > 0)
         {

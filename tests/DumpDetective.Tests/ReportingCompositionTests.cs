@@ -132,7 +132,7 @@ public sealed class ReportingCompositionTests
             elapsed: TimeSpan.FromSeconds(1),
             builders: []);
 
-        doc.SchemaVersion.Should().Be("2.0");
+        doc.SchemaVersion.Should().Be("2.1");
     }
 
     [Fact]

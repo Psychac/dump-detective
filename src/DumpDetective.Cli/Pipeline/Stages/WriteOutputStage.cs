@@ -22,8 +22,11 @@ internal sealed class WriteOutputStage : IAnalysisStage
                 {
                     string html = state.RenderedReport ?? string.Empty;
                     // Extract the JSON inside <script id="report-json" type="application/json">...</script>
-                    var m = System.Text.RegularExpressions.Regex.Match(html, "<script[^>]*id=\\\"report-json\\\"[^>]*>([\\s\\S]*?)</script>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    string json = m.Success ? m.Groups[1].Value : string.Empty;
+                    // Match the <script id="report-json" ...>...</script> element robustly.
+                    // Accept single or double quotes and arbitrary attribute ordering/whitespace.
+                    var pattern = "<script[^>]*\\bid\\s*=\\s*(['\"])(report-json)\\1[^>]*>([\\s\\S]*?)</script>";
+                    var m = System.Text.RegularExpressions.Regex.Match(html, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    string json = m.Success ? m.Groups[3].Value : string.Empty;
                     string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
                     string jsonPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(outPath) + ".json");
                     if (!string.IsNullOrWhiteSpace(json))

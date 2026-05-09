@@ -4,4 +4,5 @@ int Index,
 string DumpPath,
 IReadOnlyList<InsightFinding> Findings,
 IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults,
-DateTime GeneratedAtUtc);
+DateTime GeneratedAtUtc,
+AnalysisIncidentContext? IncidentContext = null);

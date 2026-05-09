@@ -25,9 +25,19 @@ internal sealed class ReportBuilderFacade(
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         CancellationToken cancellationToken)
+        => BuildRenderedReport(dumpPath, format, audience, runs, elapsed, null, cancellationToken);
+
+    public string BuildRenderedReport(
+        string dumpPath,
+        ReportFormat format,
+        ReportAudience audience,
+        IReadOnlyList<AnalyzerRunResult> runs,
+        TimeSpan elapsed,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AnalysisReportDocument doc = BuildReportDocument(dumpPath, audience, runs, elapsed);
+        AnalysisReportDocument doc = BuildReportDocument(dumpPath, audience, runs, elapsed, incidentContext);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
@@ -42,11 +52,22 @@ internal sealed class ReportBuilderFacade(
         TimeSpan elapsed,
         TrendReportData trendData,
         CancellationToken cancellationToken)
+        => BuildRenderedTrendReport(dumpPath, format, audience, currentRuns, elapsed, null, trendData, cancellationToken);
+
+    public string BuildRenderedTrendReport(
+        string dumpPath,
+        ReportFormat format,
+        ReportAudience audience,
+        IReadOnlyList<AnalyzerRunResult> currentRuns,
+        TimeSpan elapsed,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        TrendReportData trendData,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         AnalysisReportDocument doc = _trendComposer.ComposeCanonicalTrendReport(
-            dumpPath, currentRuns, elapsed, _builders, trendData, audience);
+            dumpPath, currentRuns, elapsed, incidentContext, _builders, trendData, audience);
 
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
@@ -58,9 +79,10 @@ internal sealed class ReportBuilderFacade(
         string dumpPath,
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
-        TimeSpan elapsed)
+        TimeSpan elapsed,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
     {
-        return _serializer.Serialize(dumpPath, runs, elapsed, _builders, audience);
+        return _serializer.Serialize(dumpPath, runs, elapsed, _builders, audience, incidentContext);
     }
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format)

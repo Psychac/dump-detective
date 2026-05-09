@@ -3,7 +3,7 @@
 Dump: C:/fixtures/MixedSeverity.dmp
 Generated (UTC): 2026-01-01 12:00:00
 Elapsed: 6.6s
-Schema: 2.0
+Schema: 2.1
 
 Dedup: merged 0/0 candidate duplicates
 

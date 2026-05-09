@@ -1,17 +1,3 @@
-using System.Text.Json;
-using System.Text.RegularExpressions;
-
-using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Formatters;
-using DumpDetective.Reporting.Services;
-using DumpDetective.Reporting.Serialization;
-using DumpDetective.Reporting.Models;
-
-using FluentAssertions;
-using Xunit;
-
-namespace DumpDetective.Tests.Integration;
-
 public sealed class HtmlRendererCssTests
 {
     [Fact]
@@ -26,7 +12,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: new[] { });
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -41,6 +27,6 @@ public sealed class HtmlRendererCssTests
         // Assert
         html.Should().Contain("<style>");
         html.Should().Contain("--bg");
-        html.Should().MatchRegex("<script type=\\\"importmap\\\">|<script type=\\\"module\\\">import 'report\\.main\\.js'");
+        html.Should().Contain("<script type=\"importmap\">").OrContain("<script type=\"module\">import 'report.main.js'", "import map or module bootstrap must be present");
     }
 }

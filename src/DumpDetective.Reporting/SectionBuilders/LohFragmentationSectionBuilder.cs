@@ -49,6 +49,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         blocks.Add(Blank());
         blocks.Add(H("FRAGMENTATION SIGNAL"));
         blocks.Add(Divider());
+        blocks.Add(M("Severity Band", GetSeverityBand(d.FragmentationPercent)));
         if (d.FragmentationPercent >= 40)
             blocks.Add(T("LOH fragmentation is critically high — compaction or large-object pooling recommended."));
         else if (d.FragmentationPercent >= 20)
@@ -96,5 +97,16 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+    }
+
+    private static string GetSeverityBand(double fragmentationPercent)
+    {
+        if (fragmentationPercent >= 40)
+            return "Critical (>= 40%)";
+
+        if (fragmentationPercent >= 20)
+            return "Warning (20% to 39.9%)";
+
+        return "OK (< 20%)";
     }
 }

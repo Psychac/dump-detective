@@ -72,18 +72,21 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             blocks.Add(Blank());
             blocks.Add(H("LARGE JIT-COMPILED METHODS ON STACKS (≥ 64 KB)", indent: 1));
             blocks.Add(Divider());
+            blocks.Add(T("ReadyToRun/native image detection is not available through ClrMD here; treat R2R status as N/A."));
             var methodRows = new List<TableRow>(Math.Min(d.TopLargestMethods.Count, TopMethodsToShow));
             foreach (JitMethodSnapshot m in d.TopLargestMethods.Take(TopMethodsToShow))
             {
                 ulong total = (ulong)m.HotSize + m.ColdSize;
+                string largeFlag = total > 64_000 ? ">64 KB" : string.Empty;
                 methodRows.Add(new TableRow([
                     Cell(m.Signature),
                     Cell(FormatHelper.FormatBytes(m.HotSize),  m.HotSize),
                     Cell(FormatHelper.FormatBytes(m.ColdSize), m.ColdSize),
-                    Cell(FormatHelper.FormatBytes(total),      (long)total)]));
+                    Cell(FormatHelper.FormatBytes(total),      (long)total),
+                    Cell(largeFlag)]));
             }
             blocks.Add(new TableBlock("Large JIT-compiled methods (native code size)",
-                ["Signature", "Hot", "Cold", "Total"], methodRows));
+                ["Signature", "Hot", "Cold", "Total", "Flag"], methodRows));
             if (d.TopLargestMethods.Count > TopMethodsToShow)
                 blocks.Add(T($"Showing top {TopMethodsToShow} JIT methods. {d.TopLargestMethods.Count - TopMethodsToShow} additional method(s) omitted."));
         }

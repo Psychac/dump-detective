@@ -41,6 +41,11 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         if (!string.IsNullOrEmpty(d.DedupSkipReason)) blocks.Add(M("Dedup Skip Reason", d.DedupSkipReason, null));
         blocks.Add(M("Duplication Ratio", $"{d.DuplicationRatio:P1}", d.DuplicationRatio));
         blocks.Add(M("Duplicate Waste", FormatHelper.FormatBytes(d.DuplicateWastedBytes), (double)d.DuplicateWastedBytes));
+        ulong estimatedInterningSaving = 0;
+        int interningLimit = Math.Min(d.TopDuplicatesByWaste.Count, 20);
+        for (int i = 0; i < interningLimit; i++)
+            estimatedInterningSaving += d.TopDuplicatesByWaste[i].WastedBytes;
+        blocks.Add(M("Estimated Interning Saving", FormatHelper.FormatBytes(estimatedInterningSaving), (double)estimatedInterningSaving));
         blocks.Add(M("LOH String Bytes", FormatHelper.FormatBytes(d.LohStringBytes), (double)d.LohStringBytes));
         blocks.Add(M("Gen2 String Count", $"{d.Gen2StringCount:N0}", d.Gen2StringCount));
         blocks.Add(M("Interned Strings (FOH)", $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount));

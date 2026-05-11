@@ -29,6 +29,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         blocks.Add(M("Gen 0 / Gen 1 / Gen 2", $"{d.Gen0Count:N0} / {d.Gen1Count:N0} / {d.Gen2Count:N0}"));
         blocks.Add(M("Finalizer Queue Objects", $"{d.FinalizerQueueCount:N0}", d.FinalizerQueueCount));
         blocks.Add(M("Finalizer Queue Retained Memory", FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)));
+        blocks.Add(M("Finalizer queue severity", GetSeverityBand(d.FinalizerQueueCount)));
         if (d.PotentialResurrectionDetected)
             blocks.Add(M("Potential Object Resurrection", "Yes — undisposed IDisposable types in queue", 1.0));
 
@@ -100,5 +101,16 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             ]));
         }
         return rows;
+    }
+
+    private static string GetSeverityBand(int queueCount)
+    {
+        if (queueCount > 10_000)
+            return "Critical (> 10,000)";
+
+        if (queueCount >= 1_000)
+            return "Warning (1,000–10,000)";
+
+        return "OK (< 1,000)";
     }
 }

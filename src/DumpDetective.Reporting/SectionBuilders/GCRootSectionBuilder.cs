@@ -62,11 +62,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             blocks.Add(Blank());
             blocks.Add(H("ROOT RETENTION PATHS (FORWARD BFS)"));
             blocks.Add(T("Each path shows the type chain reachable from the root's direct target object (forward traversal, depth ≤ 20, nodes ≤ 500)."));
-            int pathLimit = Math.Min(d.RootPaths.Count, TopPathRows);
-            blocks.Add(new TableBlock(
-                Caption: "Root retention paths",
-                Headers: ["Root Kind", "Target Type", "Path Length", "Capped", "First Types Seen"],
-                Rows: BuildPathRows(d.RootPaths, pathLimit)));
+            blocks.AddRange(BuildGroupedPathBlocks(d.RootPaths));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "GC Root Intelligence", SortOrder, blocks);
@@ -105,10 +101,52 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         return rows;
     }
 
+    private static IReadOnlyList<SectionBlock> BuildGroupedPathBlocks(IReadOnlyList<RootPathFinding> paths)
+    {
+        var grouped = new Dictionary<string, List<RootPathFinding>>(StringComparer.Ordinal);
+        var order = new List<string>();
+
+        for (int i = 0; i < paths.Count; i++)
+        {
+            RootPathFinding p = paths[i];
+            if (!grouped.TryGetValue(p.TargetTypeName, out var group))
+            {
+                group = [];
+                grouped[p.TargetTypeName] = group;
+                order.Add(p.TargetTypeName);
+            }
+
+            group.Add(p);
+        }
+
+        order.Sort((a, b) => grouped[b].Count.CompareTo(grouped[a].Count));
+
+        var blocks = new List<SectionBlock>();
+        int groupLimit = Math.Min(order.Count, TopPathRows);
+        for (int i = 0; i < groupLimit; i++)
+        {
+            string targetType = order[i];
+            List<RootPathFinding> group = grouped[targetType];
+            group.Sort((a, b) => a.PathLength.CompareTo(b.PathLength));
+
+            blocks.Add(CollapseBegin($"{targetType} ({group.Count:N0} path(s))"));
+            blocks.Add(new TableBlock(
+                Caption: $"Paths for {targetType}",
+                Headers: ["Root Kind", "Path Length", "Capped", "First Types Seen"],
+                Rows: BuildPathRows(group, 3)));
+            blocks.Add(CollapseEnd());
+        }
+
+        if (order.Count > TopPathRows)
+            blocks.Add(T($"Showing top {TopPathRows} target type group(s). {order.Count - TopPathRows} additional target type(s) omitted."));
+
+        return blocks;
+    }
+
     private static List<TableRow> BuildPathRows(IReadOnlyList<RootPathFinding> paths, int limit)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(Math.Min(paths.Count, limit));
+        for (int i = 0; i < paths.Count && i < limit; i++)
         {
             RootPathFinding p = paths[i];
 
@@ -124,10 +162,11 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             }
             if (p.PathTypeNames.Count > PathTypesCap)
                 typeList.Append(" …");
+            if (p.WasCapped)
+                typeList.Append(" [TRUNCATED]");
 
             rows.Add(new TableRow([
                 Cell(p.RootKind),
-                Cell(FormatHelper.TruncateString(p.TargetTypeName, 55)),
                 Cell($"{p.PathLength}", p.PathLength),
                 Cell(p.WasCapped ? "yes" : "no"),
                 Cell(typeList.ToString()),

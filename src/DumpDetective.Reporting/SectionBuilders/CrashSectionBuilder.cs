@@ -78,7 +78,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                 blocks.Add(CollapseBegin($"[{rank + 1}] Thread {c.ThreadId} (OS: {c.OSThreadId}) — {c.ActiveExceptionCount} active exception(s)"));
                 blocks.Add(M("Primary exception type", c.PrimaryExceptionType, indent: 1));
                 for (int f = 0; f < c.TopFrames.Count; f++)
-                    blocks.Add(new StackFrameBlock(c.TopFrames[f], 2, CrashAnalyzer.IsFrameworkFrame(c.TopFrames[f])));
+                    blocks.Add(new StackFrameBlock(FormatFrameWithOrigin(c.TopFrames[f]), 2, CrashAnalyzer.IsFrameworkFrame(c.TopFrames[f])));
                 if (c.OriginalStackTrace is { Count: > 0 })
                 {
                     string confidenceLabel = c.OriginalStackTraceConfidence switch
@@ -124,7 +124,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     }
 
                     for (int f = 0; f < c.OriginalStackTrace.Count; f++)
-                        blocks.Add(new StackFrameBlock(c.OriginalStackTrace[f], 2, CrashAnalyzer.IsFrameworkFrame(c.OriginalStackTrace[f])));
+                        blocks.Add(new StackFrameBlock(FormatFrameWithOrigin(c.OriginalStackTrace[f]), 2, CrashAnalyzer.IsFrameworkFrame(c.OriginalStackTrace[f])));
                 }
                 blocks.Add(CollapseEnd());
             }
@@ -152,14 +152,14 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                 {
                     blocks.Add(H("Current Thread Frames:", 1));
                     for (int f = 0; f < ex.CurrentThreadFrames.Count; f++)
-                        blocks.Add(new StackFrameBlock(ex.CurrentThreadFrames[f], 2, CrashAnalyzer.IsFrameworkFrame(ex.CurrentThreadFrames[f])));
+                        blocks.Add(new StackFrameBlock(FormatFrameWithOrigin(ex.CurrentThreadFrames[f]), 2, CrashAnalyzer.IsFrameworkFrame(ex.CurrentThreadFrames[f])));
                 }
 
                 if (ex.OriginalStackTrace is { Count: > 0 })
                 {
                     blocks.Add(H("Original Stack Trace (where thrown):", 1));
                     for (int f = 0; f < ex.OriginalStackTrace.Count; f++)
-                        blocks.Add(new StackFrameBlock(ex.OriginalStackTrace[f], 2, CrashAnalyzer.IsFrameworkFrame(ex.OriginalStackTrace[f])));
+                        blocks.Add(new StackFrameBlock(FormatFrameWithOrigin(ex.OriginalStackTrace[f]), 2, CrashAnalyzer.IsFrameworkFrame(ex.OriginalStackTrace[f])));
                 }
 
                 blocks.Add(CollapseEnd());
@@ -191,5 +191,21 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+    }
+
+    private static string FormatFrameWithOrigin(string frame)
+    {
+        return $"{frame} [{GetFrameOriginLabel(frame)}]";
+    }
+
+    private static string GetFrameOriginLabel(string frame)
+    {
+        if (CrashAnalyzer.IsFrameworkFrame(frame))
+            return "FrameworkCode";
+
+        if (frame.Contains('!') || frame.Contains("::"))
+            return "ThirdParty";
+
+        return "UserCode";
     }
 }

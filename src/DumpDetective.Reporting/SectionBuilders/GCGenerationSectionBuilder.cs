@@ -1,3 +1,4 @@
+using System.Linq;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -63,6 +64,20 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                 Caption: "Per-type generation distribution",
                 Headers: ["Type", "Gen0", "Gen1", "Gen2", "LOH"],
                 Rows: BuildGenProfileRows(profiles)));
+
+            blocks.Add(Blank());
+            blocks.Add(H("TOP GEN0 TYPES"));
+            blocks.Add(new TableBlock(
+                Caption: "Top types by Gen0 count",
+                Headers: ["Type", "Gen0", "Gen1", "Gen2", "LOH"],
+                Rows: BuildFilteredRows(profiles, p => p.Gen0Count)));
+
+            blocks.Add(Blank());
+            blocks.Add(H("TOP GEN1 TYPES"));
+            blocks.Add(new TableBlock(
+                Caption: "Top types by Gen1 count",
+                Headers: ["Type", "Gen0", "Gen1", "Gen2", "LOH"],
+                Rows: BuildFilteredRows(profiles, p => p.Gen1Count)));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
@@ -95,6 +110,23 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                 new TableCell($"{p.Gen2Count:N0}", p.Gen2Count),
                 new TableCell($"{p.LohCount:N0}", p.LohCount)]));
         }
+        return rows;
+    }
+
+    private static List<TableRow> BuildFilteredRows(IReadOnlyList<TypeGenerationProfile> profiles, Func<TypeGenerationProfile, int> selector)
+    {
+        const int topCount = 15;
+        var rows = new List<TableRow>(Math.Min(profiles.Count, topCount));
+        foreach (TypeGenerationProfile p in profiles.OrderByDescending(selector).Take(topCount))
+        {
+            rows.Add(new TableRow([
+                new TableCell(p.TypeName),
+                new TableCell($"{p.Gen0Count:N0}", p.Gen0Count),
+                new TableCell($"{p.Gen1Count:N0}", p.Gen1Count),
+                new TableCell($"{p.Gen2Count:N0}", p.Gen2Count),
+                new TableCell($"{p.LohCount:N0}", p.LohCount)]));
+        }
+
         return rows;
     }
 }

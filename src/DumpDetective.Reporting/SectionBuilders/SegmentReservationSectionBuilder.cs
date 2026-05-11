@@ -55,6 +55,38 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             blocks.Add(new TableBlock("Reserved bytes per logical heap", ["Heap", "Reserved"], heapRows));
         }
 
+        // ── VA gap analysis ────────────────────────────────────────────────
+        var orderedSegments = d.SegmentTable
+            .OrderBy(s => s.Address)
+            .ToList();
+        if (orderedSegments.Count > 1)
+        {
+            var gapRows = new List<TableRow>();
+            for (int i = 0; i < orderedSegments.Count - 1; i++)
+            {
+                SegmentReservationEntry current = orderedSegments[i];
+                SegmentReservationEntry next = orderedSegments[i + 1];
+                ulong currentEnd = current.Address + current.ReservedBytes;
+                if (next.Address <= currentEnd)
+                    continue;
+
+                ulong gapBytes = next.Address - currentEnd;
+                gapRows.Add(new TableRow([
+                    Cell($"0x{currentEnd:x16}"),
+                    Cell($"0x{next.Address:x16}"),
+                    Cell(FormatHelper.FormatBytes(gapBytes), (long)gapBytes),
+                ]));
+            }
+
+            if (gapRows.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("VA GAP ANALYSIS"));
+                blocks.Add(Divider());
+                blocks.Add(new TableBlock("Virtual address gaps between segments", ["Gap Start", "Gap End", "Gap Size"], gapRows));
+            }
+        }
+
         // ── Top segments by reserved size ────────────────────────────────────
         var top = d.SegmentTable
             .OrderByDescending(s => s.ReservedBytes)

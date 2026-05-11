@@ -29,6 +29,20 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
         if (d.TaskScanLimited)
             blocks.Add(T("Task scan limited due to heap size; totals may be partial."));
 
+        if (d.RuntimeThreadPoolDataAvailable)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("THREAD POOL DETAILS"));
+            blocks.Add(Divider());
+            blocks.Add(M("Min Threads", $"{d.RuntimeMinThreads:N0}", d.RuntimeMinThreads));
+            blocks.Add(M("Max Threads", $"{d.RuntimeMaxThreads:N0}", d.RuntimeMaxThreads));
+            blocks.Add(M("Active Worker Threads", $"{d.RuntimeActiveWorkerThreads:N0}", d.RuntimeActiveWorkerThreads));
+            blocks.Add(M("Idle Worker Threads", $"{d.RuntimeIdleWorkerThreads:N0}", d.RuntimeIdleWorkerThreads));
+            blocks.Add(M("Retired Worker Threads", $"{d.RuntimeRetiredWorkerThreads:N0}", d.RuntimeRetiredWorkerThreads));
+            blocks.Add(M("CPU Utilization", $"{d.RuntimeCpuUtilization:N0}%", d.RuntimeCpuUtilization));
+            blocks.Add(M("Starved", d.IsStarved ? "Yes" : "No", d.IsStarved ? 1.0 : 0.0));
+        }
+
         if (d.WaitingPercent >= 80)
         {
             blocks.Add(Blank());

@@ -54,6 +54,16 @@ namespace DumpDetective.Analysis.Analyzers
                     hangInfo.ThreadPoolInfo.FaultedTasks,
                     hangInfo.ThreadPoolInfo.CanceledTasks,
                     hangInfo.ThreadPoolInfo.RuntimeInitialized,
+                    hangInfo.ThreadPoolInfo.RuntimeMinThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeMaxThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeIdleWorkerThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeRetiredWorkerThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeCpuUtilization,
+                    hangInfo.ThreadPoolInfo.RuntimeInitialized &&
+                        hangInfo.ThreadPoolInfo.RuntimeMaxThreads > 0 &&
+                        hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads >= hangInfo.ThreadPoolInfo.RuntimeMaxThreads &&
+                        hangInfo.ThreadPoolInfo.RuntimeCpuUtilization < 20,
                     hangInfo.ThreadPoolInfo.TaskScanLimited,
                     hangInfo.HealthScore,
                     hangInfo.WaitingThreads

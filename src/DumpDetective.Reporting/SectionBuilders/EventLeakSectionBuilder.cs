@@ -32,6 +32,34 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (d.TotalPublisherInstances > 0)
             blocks.Add(M("Publisher Instances", $"{d.TotalPublisherInstances:N0}", d.TotalPublisherInstances));
 
+        var instancesWithGeneration = d.TopLeakInstances ?? [];
+        if (instancesWithGeneration.Count > 0)
+        {
+            int gen0 = 0;
+            int gen1 = 0;
+            int gen2 = 0;
+            int unknown = 0;
+            for (int i = 0; i < instancesWithGeneration.Count; i++)
+            {
+                int generation = instancesWithGeneration[i].PublisherGeneration;
+                if (generation == 0) gen0++;
+                else if (generation == 1) gen1++;
+                else if (generation >= 2) gen2++;
+                else unknown++;
+            }
+
+            blocks.Add(Blank());
+            blocks.Add(H("PUBLISHER GENERATION DISTRIBUTION"));
+            var genRows = new List<TableRow>(4)
+            {
+                new([Cell("Gen0"), Cell($"{gen0:N0}", gen0)]),
+                new([Cell("Gen1"), Cell($"{gen1:N0}", gen1)]),
+                new([Cell("Gen2"), Cell($"{gen2:N0}", gen2)]),
+                new([Cell("Unknown"), Cell($"{unknown:N0}", unknown)]),
+            };
+            blocks.Add(new TableBlock("Publisher generation distribution", ["Generation", "Count"], genRows));
+        }
+
         var topPublishers = d.TopPublisherEvents ?? [];
         if (topPublishers.Count > 0)
         {

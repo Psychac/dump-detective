@@ -27,6 +27,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         blocks.Add(M("Avg Ref Fields / Type", $"{d.AvgRefFieldsPerType:F2}", d.AvgRefFieldsPerType));
         blocks.Add(M("Reference-Heavy Types", $"{d.TopReferenceHeavyTypes.Count:N0}", d.TopReferenceHeavyTypes.Count));
         blocks.Add(M("Value-Heavy Types", $"{d.TopValueHeavyTypes.Count:N0}", d.TopValueHeavyTypes.Count));
+        blocks.Add(T("Report labels normalize Balanced as Mixed; the reference-heavy cutoff remains a heuristic view, not a hard spec threshold."));
 
         // ── Reference-heavy types ─────────────────────────────────────────────
         if (d.TopReferenceHeavyTypes.Count > 0)
@@ -35,7 +36,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
             blocks.Add(H("TOP REFERENCE-HEAVY TYPES (HIGH GC SCAN COST)"));
             blocks.Add(new TableBlock(
                 Caption: "Top reference-heavy types",
-                Headers: ["Type", "Instances", "Ref Fields", "Val Fields", "Ref Ratio", "Finalizable", "Base Depth"],
+                Headers: ["Type", "Instances", "Ref Fields", "Val Fields", "Ref Ratio", "Category", "Finalizable", "Base Depth"],
                 Rows: BuildShapeRows(d.TopReferenceHeavyTypes)));
         }
 
@@ -46,7 +47,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
             blocks.Add(H("TOP VALUE-HEAVY TYPES (LOW GC SCAN COST)"));
             blocks.Add(new TableBlock(
                 Caption: "Top value-heavy types",
-                Headers: ["Type", "Instances", "Ref Fields", "Val Fields", "Ref Ratio", "IsValueType", "Interfaces"],
+                Headers: ["Type", "Instances", "Ref Fields", "Val Fields", "Ref Ratio", "Category", "IsValueType", "Interfaces"],
                 Rows: BuildShapeRows(d.TopValueHeavyTypes, valueMode: true)));
         }
 
@@ -66,6 +67,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
                 Cell($"{t.ReferenceFields:N0}", t.ReferenceFields),
                 Cell($"{t.ValueFields:N0}",     t.ValueFields),
                 Cell($"{t.ReferenceFieldRatio:P0}"),
+                Cell(GetCategoryLabel(t.Category)),
                 valueMode
                     ? Cell(t.IsValueType    ? "yes" : "no")
                     : Cell(t.IsFinalizable  ? "yes" : "no"),
@@ -75,5 +77,17 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
             ]));
         }
         return rows;
+    }
+
+    private static string GetCategoryLabel(ObjectShapeCategory category)
+    {
+        return category switch
+        {
+            ObjectShapeCategory.ReferenceHeavy => "Reference-heavy",
+            ObjectShapeCategory.ValueHeavy => "Value-heavy",
+            ObjectShapeCategory.Balanced => "Mixed",
+            ObjectShapeCategory.Scalar => "Scalar",
+            _ => category.ToString(),
+        };
     }
 }

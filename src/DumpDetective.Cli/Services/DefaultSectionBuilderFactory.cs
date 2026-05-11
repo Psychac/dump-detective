@@ -41,8 +41,19 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
     [
+        new ExecutiveSummarySectionBuilder(),
+        new MemoryTopologySectionBuilder(),
+        new TypeSystemSectionBuilder(),
+        new GCRootIntelligenceSectionBuilder(),
         new RetentionDominatorSectionBuilder(),
+        new ThreadConcurrencySectionBuilder(),
+        new AsyncAnalysisSectionBuilder(),
+        new ExceptionAnalysisSectionBuilder(),
+        new AppDomainAssemblySectionBuilder(),
         new FindingNarrativeSectionBuilder(),
+        new InsightsSectionBuilder(),
+        new GCPressureSectionBuilder(),
+        new HeapSegmentDiagnosticsSectionBuilder(),
         new LeakAnalysisSectionBuilder(),
         new ConfidenceSectionBuilder()
     ];

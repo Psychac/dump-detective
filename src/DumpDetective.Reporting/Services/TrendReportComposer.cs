@@ -46,7 +46,7 @@ internal sealed class TrendReportComposer(
             Findings: trendFindings,
             FindingCount: trendFindings.Count);
 
-        AnalysisReportDocument baseDoc = _serializer.Serialize(dumpPath, [trendRun], elapsed, [], audience, currentIncidentContext);
+        AnalysisReportDocument baseDoc = _serializer.Serialize(dumpPath, [trendRun], elapsed, [], [], audience, currentIncidentContext);
 
         // Build trend-specific analyzer sections
         var analyzerSections = new List<AnalyzerDetailSection>();
@@ -178,9 +178,9 @@ internal sealed class TrendReportComposer(
             return summary;
 
         AnalysisReportDocument firstDoc = _serializer.Serialize(
-            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), TimeSpan.Zero, [], audience);
+            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), TimeSpan.Zero, [], [], audience);
         AnalysisReportDocument lastDoc = _serializer.Serialize(
-            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), TimeSpan.Zero, [], audience);
+            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), TimeSpan.Zero, [], [], audience);
 
         if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
             return summary;
@@ -206,7 +206,7 @@ internal sealed class TrendReportComposer(
         {
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerRunResult> runs = BuildSnapshotRuns(snapshot);
-            AnalysisReportDocument snapshotDoc = _serializer.Serialize(snapshot.DumpPath, runs, TimeSpan.Zero, builders, audience, snapshot.IncidentContext);
+            AnalysisReportDocument snapshotDoc = _serializer.Serialize(snapshot.DumpPath, runs, TimeSpan.Zero, builders, [], audience, snapshot.IncidentContext);
             sections.Add(BuildStructuredDumpSection(snapshotDoc, i, snapshots.Count));
         }
 

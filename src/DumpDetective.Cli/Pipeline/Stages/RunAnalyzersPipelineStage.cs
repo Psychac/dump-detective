@@ -32,12 +32,14 @@ internal sealed class RunAnalyzersPipelineStage : IAnalysisStage
             throw new AnalysisPipelineException("Analysis pipeline failed unexpectedly.", ex);
         }
 
-        if (runs.Any(r => r.Status == AnalyzerExecutionStatus.Canceled))
+        if (runs.Any(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation))
         {
             throw new OperationCanceledException("Analysis canceled.");
         }
 
-        state.Runs = runs;
+        state.Runs = AnalyzerFilterService.BuildSkippedByFilterResults(state.AllAnalyzers, state.ActiveAnalyzers)
+            .Concat(runs)
+            .ToList();
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
     }
 

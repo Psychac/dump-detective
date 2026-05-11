@@ -63,6 +63,39 @@ internal static class AnalyzerFilterService
             .ThenBy(a => a.Name, StringComparer.Ordinal)
             .ToList();
 
+    public static IReadOnlyList<AnalyzerRunResult> BuildSkippedByFilterResults(
+        IReadOnlyList<IAnalyzer> allAnalyzers,
+        IReadOnlyList<IAnalyzer> activeAnalyzers)
+    {
+        HashSet<string> activeNames = activeAnalyzers.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<AnalyzerRunResult> skipped = [];
+
+        foreach (IAnalyzer analyzer in allAnalyzers)
+        {
+            if (activeNames.Contains(analyzer.Name))
+                continue;
+
+            skipped.Add(new AnalyzerRunResult(
+                analyzer.Name,
+                AnalyzerExecutionStatus.SkippedByFilter,
+                TimeSpan.Zero,
+                null,
+                "Excluded by --include-analyzers / --exclude-analyzers filter.",
+                null,
+                Findings: [],
+                FindingCount: 0,
+                WarningCount: 0,
+                ObjectScanCount: 0,
+                CacheHits: 0,
+                CacheMisses: 0,
+                Artifacts: [],
+                FindingGeneratorError: null,
+                MemoryStats: null));
+        }
+
+        return skipped;
+    }
+
     private static int GetStageRank(IAnalyzer analyzer)
     {
         string typeName = analyzer.GetType().Name;

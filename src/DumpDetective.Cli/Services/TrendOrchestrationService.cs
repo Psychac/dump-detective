@@ -32,6 +32,7 @@ internal sealed class TrendOrchestrationService(
 
     public async Task<int> ExecuteAsync(
         ResolvedExecutionOptions resolved,
+        IReadOnlyList<IAnalyzer> allAnalyzers,
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         IReadOnlyList<string> trendDumpPaths,
         CancellationToken cancellationToken)
@@ -63,13 +64,13 @@ internal sealed class TrendOrchestrationService(
             string dumpName = Path.GetFileName(dumpPath);
             ConsoleUx.DumpStart(i + 1, trendDumpPaths.Count, dumpName);
 
-            TrendDumpExecution execution = await ExecutePipelineForDumpAsync(dumpPath, resolved, activeAnalyzers, cancellationToken);
+            TrendDumpExecution execution = await ExecutePipelineForDumpAsync(dumpPath, resolved, allAnalyzers, activeAnalyzers, cancellationToken);
             trendExecutions.Add(execution);
             cumulativeDumpElapsed += execution.Elapsed;
             ConsoleUx.DumpComplete(i + 1, trendDumpPaths.Count, dumpName, execution.Elapsed);
             PrintTrendDumpSummary(i + 1, trendDumpPaths.Count, execution, cumulativeDumpElapsed, resolved.DiagnosticMode);
 
-            if (execution.Runs.Any(r => r.Status == AnalyzerExecutionStatus.Canceled))
+            if (execution.Runs.Any(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation))
                 throw new OperationCanceledException("Analysis canceled.");
         }
 
@@ -133,7 +134,7 @@ internal sealed class TrendOrchestrationService(
             {
                 IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
                 ConsoleUx.Info($"Trend pipeline completed in {totalStopwatch.Elapsed.TotalSeconds:F1}s");
-                ConsoleUx.Info($"Run summary: {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)} skipped.");
+                ConsoleUx.Info($"Run summary: {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter) + allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)} skipped.");
                 PrintDiagnosticsSummary(allRuns);
             }
 
@@ -167,6 +168,7 @@ internal sealed class TrendOrchestrationService(
     private async Task<TrendDumpExecution> ExecutePipelineForDumpAsync(
         string dumpPath,
         ResolvedExecutionOptions resolved,
+        IReadOnlyList<IAnalyzer> allAnalyzers,
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         CancellationToken cancellationToken)
     {
@@ -244,6 +246,10 @@ internal sealed class TrendOrchestrationService(
             // Swallow to avoid failing trend execution; diagnostics will surface elsewhere
         }
 
+        runs = AnalyzerFilterService.BuildSkippedByFilterResults(allAnalyzers, activeAnalyzers)
+            .Concat(runs)
+            .ToList();
+
         stopwatch.Stop();
         AnalysisIncidentContext incidentContext = IncidentContextFactory.Create(
             mode: "Trend",
@@ -289,10 +295,11 @@ internal sealed class TrendOrchestrationService(
     {
         int success = execution.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success);
         int failed = execution.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
-        int skipped = execution.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped);
+        int skippedByFilter = execution.Runs.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter);
+        int skippedByCancellation = execution.Runs.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation);
         long findings = execution.Runs.Sum(r => r.FindingCount);
 
-        ConsoleUx.Success($"[{dumpIndex}/{totalDumps}] Completed {Path.GetFileName(execution.DumpPath)} in {execution.Elapsed.TotalSeconds:F1}s (cumulative dumps: {cumulativeDumpElapsed.TotalSeconds:F1}s) · success={success}, failed={failed}, skipped={skipped}, findings={findings}");
+        ConsoleUx.Success($"[{dumpIndex}/{totalDumps}] Completed {Path.GetFileName(execution.DumpPath)} in {execution.Elapsed.TotalSeconds:F1}s (cumulative dumps: {cumulativeDumpElapsed.TotalSeconds:F1}s) · success={success}, failed={failed}, skipped_filter={skippedByFilter}, skipped_cancelled={skippedByCancellation}, findings={findings}");
 
         IReadOnlyList<AnalyzerRunResult> failedRuns = execution.Runs
             .Where(r => r.Status == AnalyzerExecutionStatus.Failed)

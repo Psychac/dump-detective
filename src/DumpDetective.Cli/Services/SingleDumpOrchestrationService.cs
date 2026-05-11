@@ -29,6 +29,7 @@ internal sealed class SingleDumpOrchestrationService(
 
     public async Task<int> ExecuteAsync(
         ResolvedExecutionOptions resolved,
+        IReadOnlyList<IAnalyzer> allAnalyzers,
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         CancellationToken cancellationToken)
     {
@@ -46,6 +47,7 @@ internal sealed class SingleDumpOrchestrationService(
         using SingleDumpPipelineState state = new()
         {
             Resolved = resolved,
+            AllAnalyzers = allAnalyzers,
             ActiveAnalyzers = activeAnalyzers
         };
 
@@ -60,9 +62,10 @@ internal sealed class SingleDumpOrchestrationService(
         {
             int success = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Success);
             int failed = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
-            int skipped = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.Skipped);
+            int skippedByFilter = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter);
+            int skippedByCancellation = state.Runs.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation);
             int findings = state.Runs.Sum(r => r.FindingCount);
-            ConsoleUx.RunStatusSummary(success, failed, skipped, findings);
+            ConsoleUx.RunStatusSummary(success, failed, skippedByFilter, skippedByCancellation, findings);
             PrintDiagnosticsSummary(state.Runs);
         }
 

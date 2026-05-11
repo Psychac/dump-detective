@@ -39,7 +39,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             {
                 AnalyzerRunResult skipped = new(
                     analyzer.Name,
-                    AnalyzerExecutionStatus.Skipped,
+                    AnalyzerExecutionStatus.SkippedByCancellation,
                     TimeSpan.Zero,
                     null,
                     "Skipped because cancellation was requested before analyzer start.",
@@ -171,7 +171,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 
                 AnalyzerRunResult canceled = new(
                     analyzer.Name,
-                    AnalyzerExecutionStatus.Canceled,
+                    AnalyzerExecutionStatus.SkippedByCancellation,
                     stopwatch.Elapsed,
                     null,
                     "Analyzer execution canceled.",
@@ -282,7 +282,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             ObjectScanCount: runResults.Sum(r => r.ObjectScanCount),
             CacheHits: runResults.Sum(r => r.CacheHits),
             CacheMisses: runResults.Sum(r => r.CacheMisses),
-            Message: $"Run completed. Success={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, Skipped={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Skipped)}, Canceled={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Canceled)}",
+            Message: $"Run completed. Success={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={runResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={runResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
             ExceptionType: null,
             ExceptionMessage: null));
 

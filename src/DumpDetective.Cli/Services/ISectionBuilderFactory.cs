@@ -4,5 +4,6 @@ namespace DumpDetective.Cli.Services;
 
 internal interface ISectionBuilderFactory
 {
-    IReadOnlyList<IAnalyzerSectionBuilder> CreateBuilders();
+    IReadOnlyList<IAnalyzerSectionBuilder> CreateAnalyzerBuilders();
+    IReadOnlyList<IReportSectionBuilder> CreateReportBuilders();
 }

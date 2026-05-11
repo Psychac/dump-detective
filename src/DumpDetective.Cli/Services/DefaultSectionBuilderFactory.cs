@@ -5,7 +5,7 @@ namespace DumpDetective.Cli.Services;
 
 internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 {
-    public IReadOnlyList<IAnalyzerSectionBuilder> CreateBuilders() =>
+    public IReadOnlyList<IAnalyzerSectionBuilder> CreateAnalyzerBuilders() =>
     [
         new MemorySectionBuilder(),
         new GCGenerationSectionBuilder(),
@@ -38,4 +38,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new BoxingSectionBuilder(),
         new JitSectionBuilder()
     ];
+
+    public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() => [];
 }

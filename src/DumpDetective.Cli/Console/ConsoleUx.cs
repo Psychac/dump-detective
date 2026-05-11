@@ -217,16 +217,17 @@ internal static class ConsoleUx
 
     // ── Post-analysis summary ────────────────────────────────────────────
 
-    public static void RunStatusSummary(int success, int failed, int skipped, int findings)
+    public static void RunStatusSummary(int success, int failed, int skippedByFilter, int skippedByCancellation, int findings)
     {
         lock (_consoleGate)
         {
             FlushScanLineIfNeeded_NoLock();
             string s = success > 0 ? $"[green]{success} ok[/]" : $"[grey]{success} ok[/]";
             string f = failed > 0 ? $"[red]{failed} failed[/]" : $"[grey]{failed} failed[/]";
-            string k = skipped > 0 ? $"[yellow]{skipped} skipped[/]" : $"[grey]{skipped} skipped[/]";
+            string k1 = skippedByFilter > 0 ? $"[yellow]{skippedByFilter} skipped filter[/]" : $"[grey]{skippedByFilter} skipped filter[/]";
+            string k2 = skippedByCancellation > 0 ? $"[yellow]{skippedByCancellation} skipped cancelled[/]" : $"[grey]{skippedByCancellation} skipped cancelled[/]";
             AnsiConsole.MarkupLine(
-                $"  {s}  [grey]·[/]  {f}  [grey]·[/]  {k}  [grey]·[/]  [silver]{findings} finding{(findings == 1 ? "" : "s")}[/]");
+                $"  {s}  [grey]·[/]  {f}  [grey]·[/]  {k1}  [grey]·[/]  {k2}  [grey]·[/]  [silver]{findings} finding{(findings == 1 ? "" : "s")}[/]");
         }
     }
 

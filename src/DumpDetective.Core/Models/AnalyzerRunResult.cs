@@ -18,8 +18,8 @@ internal enum AnalyzerExecutionStatus
 {
     Success,
     Failed,
-    Skipped,
-    Canceled
+    SkippedByFilter,
+    SkippedByCancellation
 }
 
 internal sealed record AnalyzerRunResult(

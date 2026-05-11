@@ -16,12 +16,16 @@ internal sealed class ReportSerializer
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
-        IReadOnlyList<IAnalyzerSectionBuilder> builders,
+        IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
+        IReadOnlyList<IReportSectionBuilder> reportBuilders,
         ReportAudience audience = ReportAudience.All,
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
-        List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, builders);
+        List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, analyzerBuilders);
+        AnalyzerResultSet resultSet = new(runs);
+        List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
+        List<AnalyzerDetailSection> mergedSections = MergeSections(analyzerSections, specSections);
 
         // If analyzers produced exported artifact files (NDJSON/CSV etc.), append
         // a short informational note to the corresponding analyzer section so
@@ -41,17 +45,17 @@ internal sealed class ReportSerializer
             if (dupArtifacts.Count == 0)
                 continue;
 
-            int idx = analyzerSections.FindIndex(s => string.Equals(s.AnalyzerName, run.AnalyzerName, StringComparison.OrdinalIgnoreCase));
+            int idx = mergedSections.FindIndex(s => string.Equals(s.AnalyzerName, run.AnalyzerName, StringComparison.OrdinalIgnoreCase));
             if (idx < 0)
                 continue;
 
-            AnalyzerDetailSection section = analyzerSections[idx];
+            AnalyzerDetailSection section = mergedSections[idx];
             var blocks = section.Blocks.ToList();
             blocks.Add(new DividerBlock());
             blocks.Add(new TextBlock($"Note: This analyzer produced {dupArtifacts.Count} artifact file(s) (e.g. NDJSON/CSV) containing exported snapshots or duplicate records. These artifacts are written to the report's artifacts folder and can be downloaded for deeper analysis."));
-            analyzerSections[idx] = section with { Blocks = blocks };
+            mergedSections[idx] = section with { Blocks = blocks };
         }
-        analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
+        mergedSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
 
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
         List<FindingRecord> allFindings = [];
@@ -167,7 +171,7 @@ internal sealed class ReportSerializer
             ElapsedSeconds = elapsed.TotalSeconds,
             IncidentContext = incidentContext,
             Findings = outputFindings,
-            AnalyzerSections = analyzerSections,
+            AnalyzerSections = mergedSections,
             ExecutiveSummary = executiveSummary,
             DeveloperActionPlan = developerActionPlan,
             Confidence = confidence,
@@ -209,6 +213,34 @@ internal sealed class ReportSerializer
         }
 
         return sections;
+    }
+
+    private static List<AnalyzerDetailSection> BuildSpecSections(
+        AnalyzerResultSet results,
+        IReadOnlyList<IReportSectionBuilder> builders)
+    {
+        List<AnalyzerDetailSection> sections = [];
+
+        for (int i = 0; i < builders.Count; i++)
+        {
+            IReportSectionBuilder builder = builders[i];
+            if (!builder.CanBuild(results))
+                continue;
+
+            sections.Add(builder.Build(results));
+        }
+
+        return sections;
+    }
+
+    private static List<AnalyzerDetailSection> MergeSections(
+        IReadOnlyList<AnalyzerDetailSection> analyzerSections,
+        IReadOnlyList<AnalyzerDetailSection> specSections)
+    {
+        List<AnalyzerDetailSection> merged = new(analyzerSections.Count + specSections.Count);
+        merged.AddRange(analyzerSections);
+        merged.AddRange(specSections);
+        return merged;
     }
 
     // ── Finding mapping ───────────────────────────────────────────────────────

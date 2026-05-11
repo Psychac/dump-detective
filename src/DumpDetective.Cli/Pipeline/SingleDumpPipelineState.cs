@@ -17,6 +17,7 @@ internal sealed class SingleDumpPipelineState : IDisposable
 {
     // ── Inputs (set before pipeline starts) ─────────────────────────────────
     public required ResolvedExecutionOptions Resolved { get; init; }
+    public required IReadOnlyList<IAnalyzer> AllAnalyzers { get; init; }
     public required IReadOnlyList<IAnalyzer> ActiveAnalyzers { get; init; }
 
     // ── Stage 1: LoadDumpStage ───────────────────────────────────────────────

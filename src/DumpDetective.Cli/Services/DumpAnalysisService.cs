@@ -26,8 +26,8 @@ internal sealed class DumpAnalysisService(
         AnalyzerFilterService.Validate(resolved, analyzers);
         IReadOnlyList<IAnalyzer> activeAnalyzers = AnalyzerFilterService.Order(AnalyzerFilterService.Apply(resolved, analyzers));
         if (TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths))
-            return await _trendOrchestration.ExecuteAsync(resolved, activeAnalyzers, trendDumpPaths!, cancellationToken);
-        return await _singleDumpOrchestration.ExecuteAsync(resolved, activeAnalyzers, cancellationToken);
+            return await _trendOrchestration.ExecuteAsync(resolved, analyzers, activeAnalyzers, trendDumpPaths!, cancellationToken);
+        return await _singleDumpOrchestration.ExecuteAsync(resolved, analyzers, activeAnalyzers, cancellationToken);
     }
     private static bool TryResolveTrendSequence(ResolvedExecutionOptions resolved, out IReadOnlyList<string>? trendDumpPaths)
     {

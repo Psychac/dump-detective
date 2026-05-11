@@ -29,6 +29,7 @@ internal sealed record AnalyzerRunResult(
     AnalyzerDomainResult? Result,
     string? ErrorMessage,
     string? ErrorType,
+    string? SkipReason = null,
     IReadOnlyList<InsightFinding>? Findings = null,
     int FindingCount = 0,
     int WarningCount = 0,

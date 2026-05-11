@@ -19,7 +19,9 @@ public sealed record TypeSnapshot(
     ulong TotalBytes,
     ulong LohBytes,
     ulong AverageSize = 0,
-    ulong EstimatedRetainedBytes = 0);
+    ulong EstimatedRetainedBytes = 0,
+    ulong SampleAddress = 0,
+    string? ModuleName = null);
 
 /// <summary>Shared primitive: a name paired with an object count. Used across multiple domain results.</summary>
 public sealed record NameCountEntry(string Name, int Count);

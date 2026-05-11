@@ -51,7 +51,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(status),
                 Cell(run.Duration.TotalMilliseconds.ToString("N0"), (long)Math.Round(run.Duration.TotalMilliseconds)),
                 Cell(run.ObjectScanCount.ToString("N0"), run.ObjectScanCount),
-                Cell(string.IsNullOrWhiteSpace(run.ErrorMessage) ? "-" : run.ErrorMessage)));
+                Cell(string.IsNullOrWhiteSpace(run.SkipReason) ? (string.IsNullOrWhiteSpace(run.ErrorMessage) ? "-" : run.ErrorMessage) : run.SkipReason)));
         }
 
         blocks.Add(new TableBlock(

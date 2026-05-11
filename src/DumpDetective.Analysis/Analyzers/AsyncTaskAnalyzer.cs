@@ -62,6 +62,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 CanceledTasks: 0,
                 CompletedTasks: 0,
                 OrphanedTasks: 0,
+                TotalTaskContinuations: 0,
                 MaxContinuationDepth: 0,
                 AvgContinuationDepth: 0.0,
                 TaskScanLimited: false,
@@ -93,6 +94,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         int totalDepthSum = 0;
         int maxDepth = 0;
         int depthSampleCount = 0;
+        int totalContinuations = 0;
 
         // MT → type-name cache to avoid repeated ClrMD lookups
         var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
@@ -168,7 +170,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         {
                             string? resultType = ExtractResultType(typeName);
                             ulong size = taskObj.Size;
-                            orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size));
+                            (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(taskObj);
+                            orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size, exceptionType, exceptionMessage));
                         }
                     }
 
@@ -186,7 +189,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         {
                             // Track continuation type for top-N
                             if (current.Type != null)
+                            {
+                                totalContinuations++;
                                 IncrementCount(continuationCount, current.Type.Name ?? string.Empty);
+                            }
 
                             var nextField = current.Type?.GetFieldByName("m_continuationObject");
                             if (nextField == null) break;
@@ -238,6 +244,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             CanceledTasks: canceled,
             CompletedTasks: completed,
             OrphanedTasks: orphaned,
+            TotalTaskContinuations: totalContinuations,
             MaxContinuationDepth: maxDepth,
             AvgContinuationDepth: avgDepth,
             TaskScanLimited: taskScanLimited,
@@ -451,6 +458,113 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         if (end < 0) end = typeName.IndexOf("]]", start, StringComparison.Ordinal);
         if (end <= start) return null;
         return typeName[start..end];
+    }
+
+    private static (string? ExceptionType, string? ExceptionMessage) ExtractFaultedTaskException(ClrObject taskObj)
+    {
+        if (!taskObj.IsValid || taskObj.Type is null)
+            return (null, null);
+
+        var visited = new HashSet<ulong>(capacity: 16);
+
+        foreach (string fieldName in new[] { "m_contingentProperties", "_contingentProperties" })
+        {
+            ClrObject contingent = ReadObjectField(taskObj, fieldName);
+            if (!contingent.IsValid)
+                continue;
+
+            if (TryFindExceptionLikeObject(contingent, visited, 0, out ClrObject exceptionObj) && TryReadExceptionSummary(exceptionObj, out string? exceptionType, out string? message))
+                return (exceptionType, message);
+        }
+
+        if (TryFindExceptionLikeObject(taskObj, visited, 0, out ClrObject fallbackExceptionObj) && TryReadExceptionSummary(fallbackExceptionObj, out string? fallbackType, out string? fallbackMessage))
+            return (fallbackType, fallbackMessage);
+
+        return (null, null);
+    }
+
+    private static ClrObject ReadObjectField(ClrObject source, string fieldName)
+    {
+        if (source.Type is null)
+            return default;
+
+        var field = source.Type.GetFieldByName(fieldName);
+        return field is null ? default : field.ReadObject(source, interior: false);
+    }
+
+    private static bool TryFindExceptionLikeObject(ClrObject source, HashSet<ulong> visited, int depth, out ClrObject exceptionObj)
+    {
+        exceptionObj = default;
+        if (!source.IsValid || source.Address == 0 || depth > 4 || !visited.Add(source.Address))
+            return false;
+
+        string? typeName = source.Type?.Name;
+        if (!string.IsNullOrWhiteSpace(typeName)
+            && typeName.Contains("Exception", StringComparison.Ordinal)
+            && !typeName.Contains("ExceptionDispatchInfo", StringComparison.Ordinal)
+            && TryReadExceptionSummary(source, out _, out _))
+        {
+            exceptionObj = source;
+            return true;
+        }
+
+        if (source.Type is null)
+            return false;
+
+        foreach (string fieldName in new[] { "m_exceptionsHolder", "_exceptionsHolder", "m_contingentProperties", "_contingentProperties", "m_faultExceptions", "_faultExceptions", "_exception", "m_exception" })
+        {
+            ClrObject child = ReadObjectField(source, fieldName);
+            if (!child.IsValid)
+                continue;
+
+            if (TryFindExceptionLikeObject(child, visited, depth + 1, out exceptionObj))
+                return true;
+        }
+
+        foreach (ClrObject child in source.EnumerateReferences(carefully: true))
+        {
+            if (!child.IsValid || child.Address == 0)
+                continue;
+
+            if (TryFindExceptionLikeObject(child, visited, depth + 1, out exceptionObj))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadExceptionSummary(ClrObject exceptionObj, out string? exceptionType, out string? message)
+    {
+        exceptionType = exceptionObj.Type?.Name;
+        message = null;
+
+        if (!exceptionObj.IsValid || exceptionObj.Type is null)
+            return false;
+
+        if (exceptionType is not null && exceptionType.Contains("ExceptionDispatchInfo", StringComparison.Ordinal))
+        {
+            foreach (string fieldName in new[] { "_exception", "m_exception" })
+            {
+                ClrObject inner = ReadObjectField(exceptionObj, fieldName);
+                if (TryReadExceptionSummary(inner, out exceptionType, out message))
+                    return true;
+            }
+
+            return false;
+        }
+
+        var messageField = exceptionObj.Type.GetFieldByName("_message");
+        if (messageField != null)
+        {
+            ClrObject messageObj = messageField.ReadObject(exceptionObj, interior: false);
+            if (messageObj.IsValid)
+                message = messageObj.AsString();
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+            message = null;
+
+        return !string.IsNullOrWhiteSpace(exceptionType);
     }
 
     private static void IncrementCount(Dictionary<string, int> dict, string key)

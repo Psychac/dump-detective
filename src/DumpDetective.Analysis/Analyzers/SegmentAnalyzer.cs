@@ -43,6 +43,9 @@ public sealed class SegmentAnalyzer : IAnalyzer
         int segmentsProcessed = 0;
 
         var snapshots = new List<HeapSegmentSnapshot>(totalSegments);
+        var bytesByLogicalHeap = new Dictionary<int, ulong>();
+        var objectsByLogicalHeap = new Dictionary<int, int>();
+        var segmentCountByLogicalHeap = new Dictionary<int, int>();
 
         foreach (ClrSegment segment in heap.Segments)
         {
@@ -55,6 +58,31 @@ public sealed class SegmentAnalyzer : IAnalyzer
             int generation = segment.SubHeap?.Index ?? -1;
 
             int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, progress);
+            if (generation >= 0)
+            {
+                if (bytesByLogicalHeap.TryGetValue(generation, out ulong existingBytes))
+                    bytesByLogicalHeap[generation] = existingBytes + committed;
+                else
+                    bytesByLogicalHeap[generation] = committed;
+
+                if (segmentCountByLogicalHeap.TryGetValue(generation, out int existingSegments))
+                    segmentCountByLogicalHeap[generation] = existingSegments + 1;
+                else
+                    segmentCountByLogicalHeap[generation] = 1;
+
+                if (objCount < 0)
+                {
+                    objectsByLogicalHeap[generation] = -1;
+                }
+                else if (objectsByLogicalHeap.TryGetValue(generation, out int existingObjects) && existingObjects >= 0)
+                {
+                    objectsByLogicalHeap[generation] = existingObjects + objCount;
+                }
+                else if (!objectsByLogicalHeap.ContainsKey(generation))
+                {
+                    objectsByLogicalHeap[generation] = objCount;
+                }
+            }
 
             segmentsProcessed++;
             progress?.Report(new(
@@ -113,6 +141,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes;
         ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved;
         ulong reservationGap = totalReserved > totalCommitted ? totalReserved - totalCommitted : 0;
+        double frozenPercent = totalCommitted == 0 ? 0.0 : frozenBytes * 100.0 / totalCommitted;
         double lohPercent = totalCommitted == 0 ? 0.0 : lohBytes * 100.0 / totalCommitted;
         double pohPercent = totalCommitted == 0 ? 0.0 : pohBytes * 100.0 / totalCommitted;
 
@@ -123,6 +152,15 @@ public sealed class SegmentAnalyzer : IAnalyzer
                 new(HeapSegmentKind.PinnedObjectHeap, pohCount, pohObjects, pohBytes, pohReserved),
                 new(HeapSegmentKind.Frozen, frozenCount, frozenObjects, frozenBytes, frozenReserved),
         };
+
+        var logicalHeapSummaries = new List<PerLogicalHeapSummary>(bytesByLogicalHeap.Count);
+        foreach (int heapIndex in bytesByLogicalHeap.Keys.OrderBy(index => index))
+        {
+            bytesByLogicalHeap.TryGetValue(heapIndex, out ulong heapBytes);
+            segmentCountByLogicalHeap.TryGetValue(heapIndex, out int heapSegments);
+            objectsByLogicalHeap.TryGetValue(heapIndex, out int heapObjects);
+            logicalHeapSummaries.Add(new PerLogicalHeapSummary(heapIndex, heapBytes, heapObjects, heapSegments));
+        }
 
         var topBySize = snapshots
             .OrderByDescending(s => s.CommittedBytes)
@@ -147,9 +185,11 @@ public sealed class SegmentAnalyzer : IAnalyzer
             PohBytes: pohBytes,
             FrozenSegmentCount: frozenCount,
             FrozenBytes: frozenBytes,
+            FrozenPercent: frozenPercent,
             LohPercent: lohPercent,
             PohPercent: pohPercent,
             KindSummaries: kindSummaries,
+            PerLogicalHeapSummaries: logicalHeapSummaries,
             TopSegmentsBySize: topBySize);
     }
 

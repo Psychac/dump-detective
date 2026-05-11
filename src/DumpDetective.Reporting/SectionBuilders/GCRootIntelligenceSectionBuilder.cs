@@ -39,6 +39,22 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
             Headers: ["Root Kind", "Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
             Rows: BuildSeverityRows(roots.TopRootsBySeverity)));
 
+        var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToList();
+        if (finalizerRoots.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("FINALIZER ROOTS"));
+            blocks.Add(new TableBlock(
+                Caption: "Finalizer roots",
+                Headers: ["Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
+                Rows: finalizerRoots.Take(10).Select(root => Row(
+                    Cell(root.TargetTypeName),
+                    Cell(root.FieldDescription ?? "—"),
+                    Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
+                    Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
+                    Cell($"0x{root.RootAddress:X}"))).ToList()));
+        }
+
         blocks.Add(Blank());
         blocks.Add(H("ROOT PATHS BY TARGET TYPE"));
         blocks.Add(T("Root paths are grouped by target type and shown shortest-first within each group."));
@@ -109,6 +125,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
     private static string FormatPath(RootPathFinding path)
     {
         var builder = new System.Text.StringBuilder();
+        bool isIndirect = false;
         builder.Append('[').Append(path.RootKind).Append("] ");
 
         for (int i = 0; i < path.PathTypeNames.Count; i++)
@@ -116,11 +133,21 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
             if (i > 0)
                 builder.Append(" → ");
 
-            builder.Append(TrimTypeName(path.PathTypeNames[i]));
+            string typeName = path.PathTypeNames[i];
+            if (typeName.Contains("object[]", StringComparison.OrdinalIgnoreCase)
+                || typeName.Contains("List`1", StringComparison.OrdinalIgnoreCase))
+            {
+                isIndirect = true;
+            }
+
+            builder.Append(TrimTypeName(typeName));
         }
 
         if (path.WasCapped)
             builder.Append(" [TRUNCATED]");
+
+        if (isIndirect)
+            builder.Append(" (indirect)");
 
         return builder.ToString();
     }

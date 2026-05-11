@@ -15,13 +15,15 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
     public bool CanBuild(AnalyzerResultSet results)
         => results.Get<SegmentAnalysisDomainResult>() is not null
         || results.Get<LohFragmentationDomainResult>() is not null
-        || results.Get<ArrayDomainResult>() is not null;
+        || results.Get<ArrayDomainResult>() is not null
+        || results.Get<MemoryDomainResult>() is not null;
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
         SegmentAnalysisDomainResult? segments = results.Get<SegmentAnalysisDomainResult>();
         LohFragmentationDomainResult? loh = results.Get<LohFragmentationDomainResult>();
         ArrayDomainResult? arrays = results.Get<ArrayDomainResult>();
+        MemoryDomainResult? memory = results.Get<MemoryDomainResult>();
 
         var blocks = new List<SectionBlock>
         {
@@ -40,6 +42,32 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
         if (loh is not null)
         {
             blocks.Add(Blank());
+            if (memory?.TopTypesBySize is { Count: > 0 })
+            {
+                var nearLohRows = new List<TableRow>();
+                for (int i = 0; i < memory.TopTypesBySize.Count; i++)
+                {
+                    TypeSnapshot type = memory.TopTypesBySize[i];
+                    if (type.AverageSize <= 85_000 || type.AverageSize >= 200_000)
+                        continue;
+
+                    nearLohRows.Add(Row(
+                        Cell(type.TypeName),
+                        Cell(type.Count.ToString("N0"), type.Count),
+                        Cell(FormatBytes(type.AverageSize), (long)Math.Min(type.AverageSize, long.MaxValue)),
+                        Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue))));
+
+                    if (nearLohRows.Count >= 10)
+                        break;
+                }
+
+                if (nearLohRows.Count > 0)
+                {
+                    blocks.Add(Blank());
+                    blocks.Add(H("TYPES JUST OVER THE LOH THRESHOLD"));
+                    blocks.Add(new TableBlock("Approximate near-LOH types", ["Type", "Count", "Avg Size", "Total Size"], nearLohRows));
+                }
+            }
             blocks.Add(H("FRAGMENTATION METRICS"));
             blocks.Add(M("Fragmentation percent", $"{loh.FragmentationPercent:F1}%", loh.FragmentationPercent));
             blocks.Add(M("Free blocks", loh.FreeBlockCount.ToString("N0"), loh.FreeBlockCount));

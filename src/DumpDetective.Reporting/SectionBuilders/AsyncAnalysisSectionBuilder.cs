@@ -50,10 +50,11 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
             blocks.Add(Blank());
             blocks.Add(H("THREAD POOL CONTEXT"));
             blocks.Add(M("Queued work items", hang.QueuedWorkItems.ToString("N0"), hang.QueuedWorkItems));
-            blocks.Add(M("Total task continuations", hang.TotalTaskContinuations.ToString("N0"), hang.TotalTaskContinuations));
             blocks.Add(M("Runtime TP data", hang.RuntimeThreadPoolDataAvailable ? "Available" : "Unavailable", hang.RuntimeThreadPoolDataAvailable ? 1.0 : 0.0));
             blocks.Add(M("Task scan limited", hang.TaskScanLimited ? "Yes" : "No", hang.TaskScanLimited ? 1.0 : 0.0));
         }
+
+        blocks.Add(M("Total task continuations", asyncTasks.TotalTaskContinuations.ToString("N0"), asyncTasks.TotalTaskContinuations));
 
         blocks.Add(Blank());
         blocks.Add(H("CONTINUATION CHAINS"));
@@ -124,10 +125,12 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
                     Cell($"0x{snapshot.Address:X}"),
                     Cell(snapshot.TaskType),
                     Cell(snapshot.ResultType ?? "—"),
-                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue))));
+                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
+                    Cell(snapshot.ExceptionType ?? "—"),
+                    Cell(snapshot.ExceptionMessage is null ? "—" : FormatHelper.TruncateString(snapshot.ExceptionMessage, 80))));
             }
 
-            blocks.Add(new TableBlock("Orphaned tasks", ["Address", "Task Type", "Result Type", "Size"], rows));
+            blocks.Add(new TableBlock("Orphaned tasks", ["Address", "Task Type", "Result Type", "Size", "Exception Type", "Exception Message"], rows));
         }
 
         if (asyncTasks.TaskScanLimited)

@@ -132,9 +132,30 @@ internal sealed class ThreadConcurrencySectionBuilder : SectionBuilderBase, IRep
             blocks.Add(M("Canceled tasks", hang.CanceledTasks.ToString("N0"), hang.CanceledTasks));
             blocks.Add(M("Runtime TP data", hang.RuntimeThreadPoolDataAvailable ? "Available" : "Unavailable", hang.RuntimeThreadPoolDataAvailable ? 1.0 : 0.0));
             blocks.Add(M("Health score", hang.HealthScore.ToString("N0"), hang.HealthScore));
-            blocks.Add(T(hang.RuntimeThreadPoolDataAvailable
-                ? "Thread-pool metadata is available, but full min/max worker metrics are not modeled here yet."
-                : "Runtime thread-pool metadata was unavailable; this summary is approximate."));
+
+            if (hang.RuntimeThreadPoolDataAvailable)
+            {
+                var tpRows = new List<TableRow>
+                {
+                    Row(Cell("Min worker threads"), Cell(hang.RuntimeMinThreads.ToString("N0"), hang.RuntimeMinThreads)),
+                    Row(Cell("Max worker threads"), Cell(hang.RuntimeMaxThreads.ToString("N0"), hang.RuntimeMaxThreads)),
+                    Row(Cell("Active worker threads"), Cell(hang.RuntimeActiveWorkerThreads.ToString("N0"), hang.RuntimeActiveWorkerThreads)),
+                    Row(Cell("Idle worker threads"), Cell(hang.RuntimeIdleWorkerThreads.ToString("N0"), hang.RuntimeIdleWorkerThreads)),
+                    Row(Cell("Retired worker threads"), Cell(hang.RuntimeRetiredWorkerThreads.ToString("N0"), hang.RuntimeRetiredWorkerThreads)),
+                    Row(Cell("CPU utilization"), Cell($"{hang.RuntimeCpuUtilization:N0}%", hang.RuntimeCpuUtilization)),
+                    Row(Cell("Starvation flag"), Cell(hang.IsStarved ? "Yes" : "No", hang.IsStarved ? 1L : 0L)),
+                    Row(Cell("Queue length proxy"), Cell($"{hang.QueuedWorkItems:N0} queued work items", hang.QueuedWorkItems)),
+                };
+
+                blocks.Add(Blank());
+                blocks.Add(H("RUNTIME THREAD-POOL METRICS"));
+                blocks.Add(new TableBlock("Runtime thread-pool metrics", ["Signal", "Value"], tpRows));
+                blocks.Add(T("Queue length is represented here by queued work items scanned from the dump; ClrMD runtime queue length is not directly exposed in this build."));
+            }
+            else
+            {
+                blocks.Add(T("Runtime thread-pool metadata was unavailable; this summary is approximate."));
+            }
 
             if (hang.TopContinuationTypes is { Count: > 0 })
             {

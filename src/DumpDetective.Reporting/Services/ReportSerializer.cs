@@ -23,7 +23,7 @@ internal sealed class ReportSerializer
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
         List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, analyzerBuilders);
-        AnalyzerResultSet resultSet = new(runs);
+        AnalyzerResultSet resultSet = new(runs, incidentContext);
         List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
         List<AnalyzerDetailSection> mergedSections = MergeSections(analyzerSections, specSections);
 

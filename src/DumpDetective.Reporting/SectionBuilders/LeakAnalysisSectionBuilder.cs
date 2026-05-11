@@ -54,6 +54,8 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
                     Cell(candidate.Classification.ToString()),
                     Cell(candidate.RootKind ?? "—")
                 )).ToList()));
+
+                    blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
         }
 
         return new AnalyzerDetailSection(

@@ -82,6 +82,7 @@ internal static class AnalyzerFilterService
                 null,
                 "Excluded by --include-analyzers / --exclude-analyzers filter.",
                 null,
+                SkipReason: "Excluded by analyzer filter.",
                 Findings: [],
                 FindingCount: 0,
                 WarningCount: 0,

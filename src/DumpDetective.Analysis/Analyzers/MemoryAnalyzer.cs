@@ -65,12 +65,14 @@ namespace DumpDetective.Analysis.Analyzers
             var byCount = new List<CachedTypeStatistics>(typeStats.Values);
             byCount.Sort((a, b) => b.Count.CompareTo(a.Count));
 
-            static TypeSnapshot ToSnapshot(CachedTypeStatistics s, ulong retainedBytes)
+                static TypeSnapshot ToSnapshot(CachedTypeStatistics s, ulong retainedBytes, ulong sampleAddress)
             {
                 ulong avgSize = s.Count > 0 ? s.TotalSize / (ulong)s.Count : 0;
                 return new TypeSnapshot(s.TypeName, s.Count, s.TotalSize, s.LohSize,
                     AverageSize: avgSize,
-                    EstimatedRetainedBytes: retainedBytes);
+                    EstimatedRetainedBytes: retainedBytes,
+                    SampleAddress: sampleAddress,
+                    ModuleName: string.IsNullOrWhiteSpace(s.ModuleName) ? null : s.ModuleName);
             }
 
             static ulong EstimateRetained(ClrHeap heap, IHeapAnalysisCache cache, string typeName, HashSet<ulong> claimedAddresses)
@@ -122,7 +124,7 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topN; i++)
             {
                 CachedTypeStatistics stat = bySize[i];
-                topBySize.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims)));
+                topBySize.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
             }
 
             int topM = Math.Min(options.TopByCountCount, byCount.Count);
@@ -131,7 +133,7 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topM; i++)
             {
                 CachedTypeStatistics stat = byCount[i];
-                topByCount.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedCountClaims)));
+                topByCount.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedCountClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
             }
 
             return new MemoryDomainResult(

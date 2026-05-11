@@ -21,6 +21,7 @@ public sealed record TypeShapeProfile(
     ulong InstanceCount,
     bool IsFinalizable,
     bool IsValueType,
+    bool IsArray,
     int BaseTypeChainDepth,
     int InterfaceCount,
     ObjectShapeCategory Category);

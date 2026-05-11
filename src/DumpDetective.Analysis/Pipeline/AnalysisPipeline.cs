@@ -43,7 +43,8 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     TimeSpan.Zero,
                     null,
                     "Skipped because cancellation was requested before analyzer start.",
-                    nameof(OperationCanceledException));
+                    nameof(OperationCanceledException),
+                    SkipReason: "Skipped by cancellation before analyzer start.");
 
                 runResults.Add(skipped);
 
@@ -176,6 +177,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     null,
                     "Analyzer execution canceled.",
                     nameof(OperationCanceledException),
+                    SkipReason: "Skipped by cancellation during analyzer execution.",
                     ObjectScanCount: context.Cache.ObjectScanCount,
                     CacheHits: context.Cache.CacheHits,
                     CacheMisses: context.Cache.CacheMisses);
@@ -208,6 +210,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     null,
                     ex.Message,
                     ex.GetType().Name,
+                    SkipReason: null,
                     ObjectScanCount: context.Cache.ObjectScanCount,
                     CacheHits: context.Cache.CacheHits,
                     CacheMisses: context.Cache.CacheMisses);

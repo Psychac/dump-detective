@@ -18,14 +18,14 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         => results.Get<MemoryDomainResult>() is not null
         || results.Get<GCGenerationDomainResult>() is not null
         || results.Get<ObjectShapeAnalyzerDomainResult>() is not null
-        || results.Get<ModuleDomainResult>() is not null;
+        || results.Get<GCRootDomainResult>() is not null;
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
         MemoryDomainResult? memory = results.Get<MemoryDomainResult>();
         GCGenerationDomainResult? gcGen = results.Get<GCGenerationDomainResult>();
         ObjectShapeAnalyzerDomainResult? shape = results.Get<ObjectShapeAnalyzerDomainResult>();
-        ModuleDomainResult? modules = results.Get<ModuleDomainResult>();
+        GCRootDomainResult? roots = results.Get<GCRootDomainResult>();
 
         var blocks = new List<SectionBlock>
         {
@@ -46,7 +46,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             TypeSnapshot type = memory.TopTypesBySize[i];
             TypeShapeProfile? profile = FindShape(shape, type.TypeName);
             TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
-            string moduleName = modules is null ? "N/A" : "N/A (module join not resolved yet)";
+            string moduleName = string.IsNullOrWhiteSpace(type.ModuleName) ? "N/A" : type.ModuleName;
 
             rows.Add(Row(
                 Cell(FormatHelper.TruncateString(type.TypeName, 70)),
@@ -57,7 +57,8 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(gen is null ? "—" : GenRatio(gen)),
                 Cell(profile is null ? "—" : profile.IsFinalizable ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.IsValueType ? "Yes" : "No"),
-                Cell(profile is null ? "—" : profile.ReferenceFields == 0 ? "No" : ">60% ref fields"),
+                Cell(profile is null ? "—" : profile.ReferenceFields.ToString("N0"), profile is null ? null : profile.ReferenceFields),
+                Cell(profile is null ? "—" : profile.IsArray ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.BaseTypeChainDepth.ToString("N0"), profile is null ? null : profile.BaseTypeChainDepth),
                 Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
                 Cell(moduleName),
@@ -66,7 +67,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         blocks.Add(new TableBlock(
             Caption: "Type table",
-            Headers: ["Type", "Count", "Shallow Size", "Avg Size", "Estimated Retained", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Base Depth", "Interfaces", "Module", "Method Table"],
+            Headers: ["Type", "Count", "Shallow Size", "Avg Size", "Estimated Retained", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
             Rows: rows));
 
         if (memory.TopTypesBySize.Count > TopRows)
@@ -74,9 +75,9 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         blocks.Add(Blank());
         blocks.Add(H("DOMINATOR CANDIDATES"));
-        blocks.Add(T("Candidates are nominated from available type, generation, and shape signals. Module join is approximate until the module map is fully surfaced."));
+        blocks.Add(T("Candidates are nominated from available type, generation, and shape signals."));
 
-        var candidates = BuildCandidates(memory, gcGen, shape);
+        var candidates = BuildCandidates(memory, gcGen, shape, roots);
         if (candidates.Count == 0)
         {
             blocks.Add(T("No dominator candidates met the heuristic thresholds."));
@@ -94,18 +95,19 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(FormatBytes(candidate.ShallowBytes), (long)Math.Min(candidate.ShallowBytes, long.MaxValue)),
                     Cell(candidate.Gen2Pct.ToString("F1") + "%"),
                     Cell(candidate.RetainedBytes > 0 ? FormatBytes(candidate.RetainedBytes) : "—"),
+                    Cell(candidate.SampleAddress == 0 ? "—" : $"0x{candidate.SampleAddress:X}"),
                     Cell(candidate.Rooted ? "Rooted" : "Unknown")));
             }
 
             blocks.Add(new TableBlock(
                 Caption: "Dominator candidates",
-                Headers: ["Type", "Reason", "Instances", "Shallow Size", "Gen2%", "Estimated Retained", "GC Root Reachability"],
+                Headers: ["Type", "Reason", "Instances", "Shallow Size", "Gen2%", "Estimated Retained", "Sample Address", "GC Root Reachability"],
                 Rows: candidateRows));
         }
 
         blocks.Add(Blank());
         blocks.Add(H("TYPE SHAPE NOTES"));
-        blocks.Add(T("Balanced shapes are surfaced as Mixed; reference-heavy types are highlighted as scan-cost hotspots."));
+        blocks.Add(T("Balanced shapes are surfaced as Mixed; arrays are flagged explicitly in the type table."));
 
         return new AnalyzerDetailSection("Type System", DisplayTitle, SortOrder, blocks);
     }
@@ -154,12 +156,22 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         ulong ShallowBytes,
         double Gen2Pct,
         ulong RetainedBytes,
+        ulong SampleAddress,
         bool Rooted);
 
-    private static List<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape)
+    private static List<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape, GCRootDomainResult? roots)
     {
         var candidates = new List<DominatorCandidate>();
         ulong heapTotal = memory.TotalBytes == 0 ? 1 : memory.TotalBytes;
+        var rootedTypes = new HashSet<string>(StringComparer.Ordinal);
+        if (roots is not null)
+        {
+            for (int i = 0; i < roots.TopRootsBySeverity.Count; i++)
+                rootedTypes.Add(roots.TopRootsBySeverity[i].TargetTypeName);
+
+            for (int i = 0; i < roots.RootPaths.Count; i++)
+                rootedTypes.Add(roots.RootPaths[i].TargetTypeName);
+        }
 
         int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
         for (int i = 0; i < limit; i++)
@@ -170,7 +182,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
             double gen2Pct = gen is null ? 0.0 : GenRatioValue(gen);
             bool finalizable = profile?.IsFinalizable ?? false;
-            bool rooted = type.EstimatedRetainedBytes > 0;
+            bool rooted = rootedTypes.Contains(type.TypeName) || type.EstimatedRetainedBytes > 0;
             var reasons = new List<string>();
 
             if ((double)type.TotalBytes / heapTotal > 0.01)
@@ -192,6 +204,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 type.TotalBytes,
                 gen2Pct,
                 type.EstimatedRetainedBytes,
+                type.SampleAddress,
                 rooted));
         }
 

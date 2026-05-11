@@ -24,6 +24,12 @@ internal sealed record SegmentKindSummary(
     ulong TotalBytes,
     ulong ReservedBytes);
 
+internal sealed record PerLogicalHeapSummary(
+    int LogicalHeapIndex,
+    ulong Bytes,
+    int ObjectCount,
+    int SegmentCount);
+
 internal sealed record SegmentAnalysisDomainResult(
     int TotalSegments,
     ulong TotalCommittedBytes,
@@ -37,7 +43,9 @@ internal sealed record SegmentAnalysisDomainResult(
     ulong PohBytes,
     int FrozenSegmentCount,
     ulong FrozenBytes,
+    double FrozenPercent,
     double LohPercent,
     double PohPercent,
     IReadOnlyList<SegmentKindSummary> KindSummaries,
+    IReadOnlyList<PerLogicalHeapSummary> PerLogicalHeapSummaries,
     IReadOnlyList<HeapSegmentSnapshot>? TopSegmentsBySize = null) : AnalyzerDomainResult;

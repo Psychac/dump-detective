@@ -50,10 +50,26 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
             if (retention.TopRetentionTypes is { Count: > 0 })
             {
+                var proxyRows = new List<RetentionTypeSnapshot>(retention.TopRetentionTypes);
+                proxyRows.Sort((a, b) => b.TotalIncomingReferences.CompareTo(a.TotalIncomingReferences));
+
                 blocks.Add(new TableBlock(
                     Caption: "Top retention types",
                     Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Max Refs"],
                     Rows: retention.TopRetentionTypes.Take(10).Select(type => Row(
+                        Cell(type.TypeName),
+                        Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
+                        Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                        Cell(type.TotalIncomingReferences.ToString("N0"), type.TotalIncomingReferences),
+                        Cell(type.MaxIncomingReferences.ToString("N0"), type.MaxIncomingReferences))).ToList()));
+
+                blocks.Add(Blank());
+                blocks.Add(H("TOP 20 BY INCOMING REFS (PROXY FOR RETENTION RATIO)"));
+                blocks.Add(T("Retention ratio remains blocked until bounded BFS retained-size computation lands; incoming references are used as a proxy here."));
+                blocks.Add(new TableBlock(
+                    Caption: "Top retention proxies by incoming references",
+                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Max Refs"],
+                    Rows: proxyRows.Take(20).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
                         Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),

@@ -292,6 +292,9 @@ namespace DumpDetective.Analysis.Cache
                             localState.Samples[typeName] = obj.Address;
                         }
 
+                        if (string.IsNullOrEmpty(stats.ModuleName) && obj.Type.Module?.Name is string moduleName)
+                            stats.ModuleName = System.IO.Path.GetFileName(moduleName);
+
                         stats.Count++;
                         stats.TotalSize += size;
                         if (isLoh)
@@ -363,6 +366,9 @@ namespace DumpDetective.Analysis.Cache
                     }
                 }
 
+                if (string.IsNullOrEmpty(stats.ModuleName))
+                    stats.ModuleName = ResolveModuleNameFromSample(heap, aggregate.SampleAddress, methodTable);
+
                 stats.Count = AddClamped(stats.Count, aggregate.Count);
                 stats.TotalSize += aggregate.TotalSize;
                 stats.LohCount = AddClamped(stats.LohCount, aggregate.LohCount);
@@ -389,6 +395,22 @@ namespace DumpDetective.Analysis.Cache
             }
 
             return $"MethodTable@0x{methodTable:X}";
+        }
+
+        private static string ResolveModuleNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
+        {
+            ClrType? type = heap.GetTypeByMethodTable(methodTable);
+            if (type?.Module?.Name is string moduleName && !string.IsNullOrWhiteSpace(moduleName))
+                return System.IO.Path.GetFileName(moduleName);
+
+            if (sampleAddress != 0)
+            {
+                ClrObject sample = heap.GetObject(sampleAddress);
+                if (sample.IsValid && sample.Type?.Module?.Name is string sampleModuleName && !string.IsNullOrWhiteSpace(sampleModuleName))
+                    return System.IO.Path.GetFileName(sampleModuleName);
+            }
+
+            return "N/A";
         }
 
         private static int AddClamped(int existing, long delta)

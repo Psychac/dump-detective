@@ -7,10 +7,13 @@ internal sealed class AnalyzerResultSet
     private readonly IReadOnlyList<AnalyzerRunResult> _runs;
     private readonly Dictionary<Type, AnalyzerDomainResult?> _cache = new();
 
-    public AnalyzerResultSet(IReadOnlyList<AnalyzerRunResult> runs)
+    public AnalyzerResultSet(IReadOnlyList<AnalyzerRunResult> runs, AnalysisIncidentContext? incidentContext = null)
     {
         _runs = runs;
+        IncidentContext = incidentContext;
     }
+
+    public AnalysisIncidentContext? IncidentContext { get; }
 
     public T? Get<T>() where T : AnalyzerDomainResult
     {

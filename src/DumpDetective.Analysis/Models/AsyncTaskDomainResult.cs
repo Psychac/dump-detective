@@ -4,7 +4,13 @@ namespace DumpDetective.Analysis.Models;
 
 // Async Task
 
-internal sealed record OrphanedTaskSnapshot(ulong Address, string TaskType, string? ResultType, ulong Size);
+internal sealed record OrphanedTaskSnapshot(
+    ulong Address,
+    string TaskType,
+    string? ResultType,
+    ulong Size,
+    string? ExceptionType = null,
+    string? ExceptionMessage = null);
 
 internal sealed record ContinuationChainSnapshot(
     ulong RootAddress,
@@ -20,6 +26,7 @@ internal sealed record AsyncTaskDomainResult(
     int CanceledTasks,
     int CompletedTasks,
     int OrphanedTasks,
+    int TotalTaskContinuations,
     int MaxContinuationDepth,
     double AvgContinuationDepth,
     bool TaskScanLimited,

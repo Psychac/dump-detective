@@ -63,6 +63,18 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             blocks.Add(H("ROOT RETENTION PATHS (FORWARD BFS)"));
             blocks.Add(T("Each path shows the type chain reachable from the root's direct target object (forward traversal, depth ≤ 20, nodes ≤ 500)."));
             blocks.AddRange(BuildGroupedPathBlocks(d.RootPaths));
+
+            var threadLocalRows = BuildThreadLocalRows(d.RootPaths);
+            if (threadLocalRows.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("THREAD-LOCAL ROOT CHAINS"));
+                blocks.Add(T("Heuristic: paths containing ThreadLocal/AsyncLocal-style types are flagged as thread-local retention chains."));
+                blocks.Add(new TableBlock(
+                    Caption: "Thread-local root paths",
+                    Headers: ["Target Type", "Root Kind", "Path Length", "First Types Seen"],
+                    Rows: threadLocalRows));
+            }
         }
 
         return new AnalyzerDetailSection(AnalyzerName, "GC Root Intelligence", SortOrder, blocks);
@@ -173,5 +185,59 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ]));
         }
         return rows;
+    }
+
+    private static List<TableRow> BuildThreadLocalRows(IReadOnlyList<RootPathFinding> paths)
+    {
+        var rows = new List<TableRow>();
+        for (int i = 0; i < paths.Count; i++)
+        {
+            RootPathFinding path = paths[i];
+            if (!LooksLikeThreadLocalChain(path))
+                continue;
+
+            int showCount = Math.Min(path.PathTypeNames.Count, PathTypesCap);
+            var typeList = new System.Text.StringBuilder();
+            for (int j = 0; j < showCount; j++)
+            {
+                if (j > 0) typeList.Append(" → ");
+                string typeName = path.PathTypeNames[j];
+                int dot = typeName.LastIndexOf('.');
+                typeList.Append(dot >= 0 ? typeName.AsSpan(dot + 1).ToString() : typeName);
+            }
+            if (path.PathTypeNames.Count > PathTypesCap)
+                typeList.Append(" …");
+            if (path.WasCapped)
+                typeList.Append(" [TRUNCATED]");
+
+            rows.Add(new TableRow([
+                Cell(path.TargetTypeName),
+                Cell(path.RootKind),
+                Cell($"{path.PathLength}", path.PathLength),
+                Cell(typeList.ToString()),
+            ]));
+
+            if (rows.Count >= TopPathRows)
+                break;
+        }
+
+        return rows;
+    }
+
+    private static bool LooksLikeThreadLocalChain(RootPathFinding path)
+    {
+        if (path.TargetTypeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase)
+            || path.RootKind.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        for (int i = 0; i < path.PathTypeNames.Count; i++)
+        {
+            string typeName = path.PathTypeNames[i];
+            if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase)
+                || typeName.Contains("AsyncLocal", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 }

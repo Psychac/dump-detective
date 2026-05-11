@@ -27,6 +27,7 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
         GCGenerationDomainResult? gcGen = results.Get<GCGenerationDomainResult>();
         SegmentAnalysisDomainResult? segments = results.Get<SegmentAnalysisDomainResult>();
         SegmentReservationDomainResult? reservation = results.Get<SegmentReservationDomainResult>();
+        AnalysisIncidentContext? incident = results.IncidentContext;
 
         var blocks = new List<SectionBlock>
         {
@@ -48,8 +49,11 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
                 Row(Cell("Total committed"), Cell(segments is null ? "N/A" : FormatBytes(segments.TotalCommittedBytes)), Cell(segments is null ? "No segment analysis result." : "Committed heap bytes across all segment kinds.")),
                 Row(Cell("Total reserved"), Cell(segments is null ? "N/A" : FormatBytes(segments.TotalReservedBytes)), Cell(segments is null ? "No segment analysis result." : "Reserved address space for heap segments.")),
                 Row(Cell("Reservation gap"), Cell(segments is null ? "N/A" : FormatBytes(segments.ReservationGapBytes)), Cell(segments is null ? "No segment analysis result." : (segments.ReservationGapBytes > 0 ? "Reserved space exceeds committed space." : "Reserved space matches committed space closely."))),
+                Row(Cell("Frozen share"), Cell(segments is null ? "N/A" : $"{segments.FrozenPercent:F1}%"), Cell(segments is null ? "No segment analysis result." : "Frozen heap share of total committed memory.")),
                 Row(Cell("LOH bytes"), Cell(memory is null ? (gcGen is null ? "N/A" : FormatBytes(gcGen.LohBytes)) : FormatBytes(memory.LohBytes)), Cell(memory is null ? "Derived from GC generation data when memory result is absent." : "Large object heap footprint.")),
                 Row(Cell("LOH share"), Cell(memory is null ? (gcGen is null ? "N/A" : $"{gcGen.LohPercent:F1}%") : $"{memory.LohPercent:F1}%"), Cell("LOH fraction of the managed heap.")),
+                Row(Cell("GC mode"), Cell(incident?.GcMode ?? "N/A"), Cell(incident is null ? "No incident context available." : "Workstation vs Server GC reported by the runtime context.")),
+                Row(Cell("Server GC heaps"), Cell(incident?.HeapCount is null ? "N/A" : incident.HeapCount.Value.ToString("N0"), incident?.HeapCount), Cell(incident is null ? "No incident context available." : "Logical heap count from the runtime context.")),
                 Row(Cell("GC pressure"), Cell(gcGen is null ? "N/A" : gcGen.Gen2Pct > 0 ? $"{gcGen.Gen2Pct:F1}% Gen2" : "Available"), Cell(gcGen is null ? "No GC generation result." : DescribeGcPressure(gcGen.Gen2Pct, gcGen.LohPercent))),
                 Row(Cell("Allocation profile"), Cell(segments is null ? (reservation is null ? "N/A" : reservation.AddressSpacePressureRisk ? "Pressure" : "Balanced") : (reservation is null ? "Available" : reservation.AddressSpacePressureRisk ? "Pressure" : "Balanced")), Cell("Higher reserved-to-committed ratios and ephemeral fill point toward pressure.")),
             ]));
@@ -78,6 +82,36 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
                 Caption: "Segment breakdown by kind",
                 Headers: ["Kind", "Segments", "Objects", "Committed", "Reserved"],
                 Rows: rows));
+
+            if (segments.PerLogicalHeapSummaries.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("LOGICAL HEAP BREAKDOWN"));
+                var heapRows = new List<TableRow>(segments.PerLogicalHeapSummaries.Count);
+                ulong maxBytes = 0;
+                ulong minBytes = ulong.MaxValue;
+
+                for (int i = 0; i < segments.PerLogicalHeapSummaries.Count; i++)
+                {
+                    PerLogicalHeapSummary summary = segments.PerLogicalHeapSummaries[i];
+                    if (summary.Bytes > maxBytes) maxBytes = summary.Bytes;
+                    if (summary.Bytes < minBytes) minBytes = summary.Bytes;
+
+                    heapRows.Add(Row(
+                        Cell($"Heap {summary.LogicalHeapIndex}"),
+                        Cell(summary.SegmentCount.ToString("N0"), summary.SegmentCount),
+                        Cell(summary.ObjectCount < 0 ? "N/A" : summary.ObjectCount.ToString("N0"), summary.ObjectCount < 0 ? null : summary.ObjectCount),
+                        Cell(FormatBytes(summary.Bytes), (long)Math.Min(summary.Bytes, long.MaxValue))));
+                }
+
+                blocks.Add(new TableBlock(
+                    Caption: "Per-logical-heap breakdown",
+                    Headers: ["Logical Heap", "Segments", "Objects", "Bytes"],
+                    Rows: heapRows));
+
+                if (segments.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
+                    blocks.Add(T("⚠ Logical heaps are skewed: the largest heap has more than 2x the bytes of the smallest heap."));
+            }
         }
 
         if (reservation is not null)
@@ -107,6 +141,27 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
 
         if (memory is not null)
         {
+            if (memory.SizeBucketHistogram is { Count: > 0 })
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("OBJECT SIZE DISTRIBUTION"));
+
+                var histogramRows = new List<TableRow>(memory.SizeBucketHistogram.Count);
+                for (int i = 0; i < memory.SizeBucketHistogram.Count; i++)
+                {
+                    SizeBucketEntry bucket = memory.SizeBucketHistogram[i];
+                    histogramRows.Add(Row(
+                        Cell(bucket.RangeLabel),
+                        Cell(bucket.ObjectCount.ToString("N0"), bucket.ObjectCount),
+                        Cell(FormatBytes(bucket.TotalBytes), (long)Math.Min(bucket.TotalBytes, long.MaxValue))));
+                }
+
+                blocks.Add(new TableBlock(
+                    Caption: "Object size histogram",
+                    Headers: ["Bucket", "Objects", "Bytes"],
+                    Rows: histogramRows));
+            }
+
             blocks.Add(Blank());
             blocks.Add(H("TOP MEMORY CONSUMERS"));
 

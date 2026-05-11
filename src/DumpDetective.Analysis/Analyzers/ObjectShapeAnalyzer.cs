@@ -100,6 +100,7 @@ namespace DumpDetective.Analysis.Analyzers
                     InstanceCount: (ulong)Math.Max(0, count),
                     IsFinalizable: type.IsFinalizable,
                     IsValueType: type.IsValueType,
+                    IsArray: type.IsArray,
                     BaseTypeChainDepth: baseDepth,
                     InterfaceCount: ifaceCount,
                     Category: category);

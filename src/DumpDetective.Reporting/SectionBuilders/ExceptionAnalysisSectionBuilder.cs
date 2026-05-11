@@ -76,6 +76,44 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IRep
 
             blocks.Add(new TableBlock("Crash thread candidates", ["Managed Thread", "OS Thread", "Active Exceptions", "Primary Exception", "Trace Confidence"], hotspotRows));
 
+            var originRows = new List<TableRow>(crash.TopCrashThreadCandidates.Count);
+            for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
+            {
+                CrashThreadCandidateSnapshot candidate = crash.TopCrashThreadCandidates[i];
+                int frameworkFrames = 0;
+                int thirdPartyFrames = 0;
+                int userCodeFrames = 0;
+
+                for (int j = 0; j < candidate.TopFrames.Count; j++)
+                {
+                    string frame = candidate.TopFrames[j];
+                    switch (ClassifyFrameOrigin(frame, modules))
+                    {
+                        case "FrameworkCode":
+                            frameworkFrames++;
+                            break;
+                        case "ThirdParty":
+                            thirdPartyFrames++;
+                            break;
+                        default:
+                            userCodeFrames++;
+                            break;
+                    }
+                }
+
+                int totalFrames = candidate.TopFrames.Count;
+                originRows.Add(Row(
+                    Cell(candidate.ThreadId.ToString("N0"), candidate.ThreadId),
+                    Cell(frameworkFrames.ToString("N0"), frameworkFrames),
+                    Cell(thirdPartyFrames.ToString("N0"), thirdPartyFrames),
+                    Cell(userCodeFrames.ToString("N0"), userCodeFrames),
+                    Cell(totalFrames.ToString("N0"), totalFrames)));
+            }
+
+            blocks.Add(Blank());
+            blocks.Add(H("FRAME ORIGIN BREAKDOWN"));
+            blocks.Add(new TableBlock("Frame origin classification", ["Managed Thread", "Framework", "ThirdParty", "UserCode", "Total Frames"], originRows));
+
             if (threads is not null && threads.TopBlockedThreads is { Count: > 0 })
                 blocks.Add(T("Thread hotspots can be cross-checked against the blocked-thread tables in the thread/concurrency section."));
         }
@@ -107,5 +145,23 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IRep
             : "Frames can be classified as FrameworkCode, ThirdParty, or UserCode by module prefix and module inventory."));
 
         return new AnalyzerDetailSection("Exception Analysis", DisplayTitle, SortOrder, blocks);
+    }
+
+    private static string ClassifyFrameOrigin(string frame, ModuleDomainResult? modules)
+    {
+        if (frame.StartsWith("System.", StringComparison.Ordinal) || frame.StartsWith("Microsoft.", StringComparison.Ordinal))
+            return "FrameworkCode";
+
+        if (modules?.TopModulesBySize is { Count: > 0 })
+        {
+            for (int i = 0; i < modules.TopModulesBySize.Count; i++)
+            {
+                string moduleName = modules.TopModulesBySize[i].Name;
+                if (!string.IsNullOrWhiteSpace(moduleName) && frame.IndexOf(moduleName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return "ThirdParty";
+            }
+        }
+
+        return "UserCode";
     }
 }

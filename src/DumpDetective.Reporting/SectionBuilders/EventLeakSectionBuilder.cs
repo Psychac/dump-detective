@@ -86,6 +86,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var leakGroups = d.TopLeakGroups ?? [];
         if (leakGroups.Count > 0)
         {
+            var allInstances = d.TopLeakInstances ?? [];
             blocks.Add(Blank());
             blocks.Add(H("LEAK GROUP DETAILS"));
             blocks.Add(Divider());
@@ -100,6 +101,26 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 blocks.Add(M("Total Subscribers", $"{group.TotalSubscribers:N0}", group.TotalSubscribers, indent: 1));
                 blocks.Add(M("Avg Subscribers", $"{group.AverageSubscribers:F2}", indent: 1));
                 blocks.Add(M("Min/Max Subscribers", $"{group.MinSubscribers}/{group.MaxSubscribers}", indent: 1));
+
+                int matchingInstances = 0;
+                int gen2Instances = 0;
+                for (int j = 0; j < allInstances.Count; j++)
+                {
+                    EventLeakInstanceSnapshot inst = allInstances[j];
+                    if (inst.PublisherType != group.PublisherType || inst.EventFieldName != group.EventFieldName || inst.IsStatic != group.IsStatic)
+                        continue;
+
+                    matchingInstances++;
+                    if (inst.PublisherGeneration >= 2)
+                        gen2Instances++;
+                }
+
+                if (matchingInstances > 0)
+                {
+                    double gen2Percent = gen2Instances * 100.0 / matchingInstances;
+                    blocks.Add(M("Gen2 Publisher Share", $"{gen2Percent:F1}% ({gen2Instances:N0}/{matchingInstances:N0})", gen2Percent, indent: 1));
+                }
+
                 if (group.EstimatedSubscriberRetainedBytes > 0)
                     blocks.Add(M("Est. Retained Bytes", FormatHelper.FormatBytes(group.EstimatedSubscriberRetainedBytes), (double)group.EstimatedSubscriberRetainedBytes, indent: 1));
                 if (group.HasDuplicateSubscriptions)

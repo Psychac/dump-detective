@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
@@ -58,6 +59,8 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
         blocks.Add(H("CONTINUATION CHAINS"));
         blocks.Add(M("Max continuation depth", asyncTasks.MaxContinuationDepth.ToString("N0"), asyncTasks.MaxContinuationDepth));
         blocks.Add(M("Average continuation depth", asyncTasks.AvgContinuationDepth.ToString("F1"), asyncTasks.AvgContinuationDepth));
+        if (asyncTasks.MaxContinuationDepth > 50)
+            blocks.Add(T("Deep continuation chains exceed 50 hops."));
 
         if (asyncTasks.TopContinuationTypes.Count > 0)
         {
@@ -66,6 +69,25 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
                 rows.Add(Row(Cell(asyncTasks.TopContinuationTypes[i].Name), Cell(asyncTasks.TopContinuationTypes[i].Count.ToString("N0"), asyncTasks.TopContinuationTypes[i].Count)));
 
             blocks.Add(new TableBlock("Continuation types", ["Type", "Count"], rows));
+        }
+
+        if (asyncTasks.TopDeepestChains.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("DEEPEST CONTINUATION CHAINS"));
+            var rows = new List<TableRow>(asyncTasks.TopDeepestChains.Count);
+            for (int i = 0; i < asyncTasks.TopDeepestChains.Count; i++)
+            {
+                ContinuationChainSnapshot chain = asyncTasks.TopDeepestChains[i];
+                string chainText = chain.ChainTypes.Count > 0 ? string.Join(" -> ", chain.ChainTypes) : chain.RootType;
+                rows.Add(Row(
+                    Cell($"0x{chain.RootAddress:X}"),
+                    Cell(chain.RootType),
+                    Cell(chain.Depth.ToString("N0"), chain.Depth),
+                    Cell(FormatHelper.TruncateString(chainText, 80))));
+            }
+
+            blocks.Add(new TableBlock("Deepest continuation chains", ["Root Address", "Root Type", "Depth", "Chain"], rows));
         }
 
         if (asyncTasks.TopPendingTaskTypes.Count > 0)

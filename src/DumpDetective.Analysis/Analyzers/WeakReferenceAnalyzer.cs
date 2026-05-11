@@ -73,6 +73,7 @@ namespace DumpDetective.Analysis.Analyzers
             bool scanCapped = false;
 
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
+            var weakHandleKinds = new Dictionary<string, int>(StringComparer.Ordinal);
 
             // Optional exports
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
@@ -116,6 +117,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
 
                     totalWeakHandles++;
+                    IncrementDict(weakHandleKinds, KindToName(rec.Kind));
                     if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
                     ulong addr = rec.Addr;
@@ -165,6 +167,7 @@ namespace DumpDetective.Analysis.Analyzers
                             if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
 
                             totalWeakHandles++;
+                            IncrementDict(weakHandleKinds, KindToName(rec.Kind));
                             if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
                             ulong addr = rec.Address;
@@ -352,6 +355,7 @@ namespace DumpDetective.Analysis.Analyzers
                 AliveWeakTargets: aliveWeakTargets,
                 DeadWeakTargets: deadWeakTargets,
                 DeadTargetRatio: deadRatio,
+                WeakHandleKinds: BuildTopEntries(weakHandleKinds, options.TopTypeLimit),
                 WeakReferenceObjectCount: weakRefObjCount,
                 WeakReferenceObjectBytes: weakRefObjBytes,
                 StaleWrapperCount: staleWrapperCount,
@@ -454,6 +458,18 @@ namespace DumpDetective.Analysis.Analyzers
                 dict[key] = v + 1;
             else
                 dict[key] = 1;
+        }
+
+        private static string KindToName(byte kind)
+        {
+            return kind switch
+            {
+                KindWeakShort => "WeakShort",
+                KindWeakLong => "WeakLong",
+                KindDependent => "Dependent",
+                KindWeakWinRT => "WeakWinRT",
+                _ => $"Kind{kind}"
+            };
         }
 
         private static List<NameCountEntry> BuildTopEntries(Dictionary<string, int> source, int take)

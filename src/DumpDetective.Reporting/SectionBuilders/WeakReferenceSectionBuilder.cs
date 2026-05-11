@@ -32,6 +32,19 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         if (d.ScanCapped)
             blocks.Add(T("⚠ Handle scan was capped at 50 000 entries — totals may be underestimated."));
 
+        if (d.WeakHandleKinds.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("WEAK HANDLE KIND BREAKDOWN"));
+            blocks.Add(Divider());
+
+            var rows = new List<TableRow>(d.WeakHandleKinds.Count);
+            foreach (NameCountEntry e in d.WeakHandleKinds.Take(TopTypesToShow))
+                rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
+
+            blocks.Add(new TableBlock("Weak handle kinds", ["Kind", "Count"], rows));
+        }
+
         // Top alive-target type breakdown
         if (d.TopWeakTargetTypes.Count > 0)
         {

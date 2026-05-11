@@ -76,6 +76,10 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             blocks.Add(T("No lock contention/deadlock candidates detected."));
 
         var deadlockDetails = d.DeadlockCandidateDetails ?? [];
+        var deadlockOwnerIds = new HashSet<uint>();
+        for (int i = 0; i < deadlockDetails.Count; i++)
+            deadlockOwnerIds.Add(deadlockDetails[i].ManagedThreadId);
+
         if (deadlockDetails.Count > 0)
         {
             blocks.Add(Blank());
@@ -88,15 +92,46 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 string lockTypes = dc.LockObjectTypes.Count > 0
                     ? string.Join(", ", dc.LockObjectTypes)
                     : "(none)";
+                string lockAddresses = dc.LockObjectAddresses.Count > 0
+                    ? string.Join(", ", dc.LockObjectAddresses.Select(address => $"0x{address:x}"))
+                    : "(none)";
                 dcRows.Add(new TableRow([
                     Cell($"{dc.ManagedThreadId}"),
                     Cell($"{dc.OsThreadId}"),
                     Cell(FormatHelper.TruncateString(lockTypes, 60)),
+                    Cell(FormatHelper.TruncateString(lockAddresses, 70)),
                     Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
             }
             blocks.Add(new TableBlock("Deadlock candidate threads",
-                ["Managed ID", "OS Thread ID", "Held Lock Types", "Summary"],
+                ["Managed ID", "OS Thread ID", "Held Lock Types", "Held Lock Addresses", "Summary"],
                 dcRows));
+        }
+
+        if (deadlockOwnerIds.Count > 0 && contestedDetails.Count > 0)
+        {
+            var suspectedRows = new List<TableRow>();
+            for (int i = 0; i < contestedDetails.Count; i++)
+            {
+                ContestedLockSnapshot cl = contestedDetails[i];
+                if (!cl.OwnerManagedThreadId.HasValue || !deadlockOwnerIds.Contains(cl.OwnerManagedThreadId.Value))
+                    continue;
+
+                suspectedRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(cl.ObjectTypeName, 60)),
+                    Cell($"0x{cl.ObjectAddress:x}"),
+                    Cell(cl.OwnerManagedThreadId.Value.ToString(), cl.OwnerManagedThreadId.Value),
+                    Cell($"{cl.WaitingThreadCount:N0}", cl.WaitingThreadCount),
+                    Cell($"{cl.RecursionCount:N0}", cl.RecursionCount)]));
+            }
+
+            if (suspectedRows.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("SUSPECTED DEADLOCK LOCKS"));
+                blocks.Add(Divider());
+                blocks.Add(T("Contested locks owned by threads that already participate in a deadlock candidate."));
+                blocks.Add(new TableBlock("Suspected deadlock locks", ["Type", "Address", "Owner Thread", "Waiters", "Recursion"], suspectedRows));
+            }
         }
 
         return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);

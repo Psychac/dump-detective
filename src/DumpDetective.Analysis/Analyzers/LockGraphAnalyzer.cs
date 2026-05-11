@@ -56,8 +56,12 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (var dc in graph.DeadlockCandidates)
             {
                 var lockTypes = new List<string>(dc.LocksHeld.Count);
+                var lockAddresses = new List<ulong>(dc.LocksHeld.Count);
                 foreach (var lh in dc.LocksHeld)
+                {
                     lockTypes.Add(lh.ObjectTypeName);
+                    lockAddresses.Add(lh.ObjectAddress);
+                }
 
                 string summary = $"Thread {dc.Thread.ManagedThreadId} (OS: {dc.Thread.OSThreadId}) holds {dc.LocksHeld.Count} lock(s), blocked at: {dc.TopFrame}";
 
@@ -65,6 +69,7 @@ namespace DumpDetective.Analysis.Analyzers
                     (uint)dc.Thread.ManagedThreadId,
                     (uint)dc.Thread.OSThreadId,
                     lockTypes,
+                    lockAddresses,
                     summary));
             }
 

@@ -46,7 +46,8 @@ internal sealed record ThreadStateSnapshot(
     string? WaitCategory,
     string? WaitReason,
     IReadOnlyList<string> TopFrames,
-    int StackRootCount);
+    int StackRootCount,
+    ulong StackSizeBytes);
 
 internal sealed record ThreadExceptionSnapshot(
     uint ThreadId,

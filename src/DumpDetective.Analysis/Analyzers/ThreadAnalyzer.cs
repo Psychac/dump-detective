@@ -194,6 +194,10 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)
         {
+            ulong stackSizeBytes = source.Thread.StackBase > source.Thread.StackLimit
+                ? source.Thread.StackBase - source.Thread.StackLimit
+                : 0;
+
             return new ThreadStateSnapshot(
                 (uint)source.Thread.ManagedThreadId,
                 source.Thread.OSThreadId,
@@ -206,7 +210,8 @@ namespace DumpDetective.Analysis.Analyzers
                     .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
                     .Take(maxFramesForThreadScan)
                     .ToList(),
-                source.StackRootCount);
+                source.StackRootCount,
+                stackSizeBytes);
         }
 
         private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)

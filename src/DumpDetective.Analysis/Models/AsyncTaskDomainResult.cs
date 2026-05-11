@@ -6,6 +6,12 @@ namespace DumpDetective.Analysis.Models;
 
 internal sealed record OrphanedTaskSnapshot(ulong Address, string TaskType, string? ResultType, ulong Size);
 
+internal sealed record ContinuationChainSnapshot(
+    ulong RootAddress,
+    string RootType,
+    int Depth,
+    IReadOnlyList<string> ChainTypes);
+
 internal sealed record AsyncTaskDomainResult(
     int TotalTasks,
     int PendingTasks,
@@ -20,4 +26,5 @@ internal sealed record AsyncTaskDomainResult(
     IReadOnlyList<NameCountEntry> TopPendingTaskTypes,
     IReadOnlyList<NameCountEntry> TopFaultedTaskTypes,
     IReadOnlyList<NameCountEntry> TopContinuationTypes,
-    IReadOnlyList<OrphanedTaskSnapshot> TopOrphanedTasks) : AnalyzerDomainResult;
+    IReadOnlyList<OrphanedTaskSnapshot> TopOrphanedTasks,
+    IReadOnlyList<ContinuationChainSnapshot> TopDeepestChains) : AnalyzerDomainResult;

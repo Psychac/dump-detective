@@ -9,6 +9,7 @@ internal sealed record WeakReferenceDomainResult(
     int AliveWeakTargets,
     int DeadWeakTargets,
     double DeadTargetRatio,
+    IReadOnlyList<NameCountEntry> WeakHandleKinds,
     int WeakReferenceObjectCount,
     ulong WeakReferenceObjectBytes,
     int StaleWrapperCount,

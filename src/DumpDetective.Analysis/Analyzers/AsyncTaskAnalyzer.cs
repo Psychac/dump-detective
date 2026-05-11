@@ -68,7 +68,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                 TopPendingTaskTypes: [],
                 TopFaultedTaskTypes: [],
                 TopContinuationTypes: [],
-                TopOrphanedTasks: []);
+                TopOrphanedTasks: [],
+                TopDeepestChains: []);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -87,6 +88,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         var faultedTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var continuationCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var orphanedSnapshots = new List<OrphanedTaskSnapshot>(capacity: 32);
+        var deepestChains = new List<ContinuationChainSnapshot>(capacity: 5);
 
         int totalDepthSum = 0;
         int maxDepth = 0;
@@ -156,6 +158,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         || continuationObj.Address == 0
                         || string.Equals(continuationObj.Type?.Name, NoOpContinuationType, StringComparison.Ordinal);
 
+                        var chainTypes = new List<string>(capacity: 8);
+                        chainTypes.Add(typeName);
+
                     if (isOrphan && !isCompleted && !isCanceled)
                     {
                         orphaned++;
@@ -173,6 +178,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
                         int depth = 1;
                         var visited = new HashSet<ulong>(capacity: 8) { address };
                         ClrObject current = continuationObj;
+                            if (current.Type != null)
+                                chainTypes.Add(current.Type.Name ?? string.Empty);
 
                         while (depth < options.MaxContinuationDepth && current.IsValid && current.Address != 0
                                  && visited.Add(current.Address))
@@ -189,11 +196,30 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
 
                             current = next;
                             depth++;
+                                if (current.Type != null)
+                                    chainTypes.Add(current.Type.Name ?? string.Empty);
                         }
 
                         totalDepthSum += depth;
                         if (depth > maxDepth) maxDepth = depth;
                         depthSampleCount++;
+
+                            if (deepestChains.Count < 5)
+                            {
+                                deepestChains.Add(new ContinuationChainSnapshot(address, typeName, depth, chainTypes));
+                            }
+                            else
+                            {
+                                int shallowestIndex = 0;
+                                for (int chainIndex = 1; chainIndex < deepestChains.Count; chainIndex++)
+                                {
+                                    if (deepestChains[chainIndex].Depth < deepestChains[shallowestIndex].Depth)
+                                        shallowestIndex = chainIndex;
+                                }
+
+                                if (depth > deepestChains[shallowestIndex].Depth)
+                                    deepestChains[shallowestIndex] = new ContinuationChainSnapshot(address, typeName, depth, chainTypes);
+                            }
                     }
                 }
             }
@@ -218,7 +244,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             TopPendingTaskTypes: BuildTopN(pendingTypeCount, options.TopTypesToShow),
             TopFaultedTaskTypes: BuildTopN(faultedTypeCount, options.TopTypesToShow),
             TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
-            TopOrphanedTasks: orphanedSnapshots);
+            TopOrphanedTasks: orphanedSnapshots,
+            TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToList());
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────

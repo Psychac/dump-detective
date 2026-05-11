@@ -59,7 +59,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             int limit = Math.Min(d.TopLargeArrays.Count, TopLargeRows);
             blocks.Add(new TableBlock(
                 Caption: "Largest individual array instances",
-                Headers: ["Address", "Element Type", "Length", "Rank", "Size"],
+                Headers: ["Address", "Element Type", "Length", "Rank", "Size", "Label"],
                 Rows: BuildLargeRows(d.TopLargeArrays, limit)));
             if (d.TopLargeArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} large arrays. {d.TopLargeArrays.Count - limit} additional array(s) omitted."));
@@ -113,9 +113,22 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Cell($"{e.Length:N0}",                      e.Length),
                 Cell($"{e.Rank:N0}",                        e.Rank),
                 Cell(FormatHelper.FormatBytes(e.Size)),
+                Cell(GetAntiPatternLabel(e.ElementTypeName, e.Length, e.Size)),
             ]));
         }
         return rows;
+    }
+
+    private static string GetAntiPatternLabel(string elementTypeName, int length, ulong size)
+    {
+        if (elementTypeName.Contains("Byte", StringComparison.OrdinalIgnoreCase) && size > 1_000_000)
+            return "byte[] > 1 MB";
+
+        if ((elementTypeName.Contains("String", StringComparison.OrdinalIgnoreCase) || elementTypeName.Contains("Object", StringComparison.OrdinalIgnoreCase))
+            && length > 10_000)
+            return $"{elementTypeName}[] > 10k";
+
+        return "—";
     }
 
     private static List<TableRow> BuildSparseRows(IReadOnlyList<SparseArrayEntry> entries, int limit)

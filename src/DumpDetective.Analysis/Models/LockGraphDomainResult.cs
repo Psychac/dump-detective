@@ -8,6 +8,7 @@ internal sealed record DeadlockCandidateSnapshot(
     uint ManagedThreadId,
     uint OsThreadId,
     IReadOnlyList<string> LockObjectTypes,
+    IReadOnlyList<ulong> LockObjectAddresses,
     string CycleSummary);
 
 internal sealed record ContestedLockSnapshot(

@@ -65,15 +65,17 @@ internal sealed class ThreadConcurrencySectionBuilder : SectionBuilderBase, IRep
                 for (int i = 0; i < threads.TopBlockedThreads.Count; i++)
                 {
                     ThreadStateSnapshot snapshot = threads.TopBlockedThreads[i];
+                    long stackSize = snapshot.StackSizeBytes > (ulong)long.MaxValue ? long.MaxValue : (long)snapshot.StackSizeBytes;
                     blockedRows.Add(Row(
                         Cell(snapshot.OSThreadId.ToString("N0"), snapshot.OSThreadId),
                         Cell(snapshot.WaitCategory ?? "—"),
                         Cell(snapshot.WaitReason ?? "—"),
                         Cell(snapshot.LockCount.ToString("N0"), snapshot.LockCount),
+                        Cell(stackSize > 0 ? stackSize.ToString("N0") : "—", stackSize),
                         Cell(snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0] : "—")));
                 }
 
-                blocks.Add(new TableBlock("Blocked threads", ["OS Thread", "Wait Category", "Wait Reason", "Locks", "Top Frame"], blockedRows));
+                blocks.Add(new TableBlock("Blocked threads", ["OS Thread", "Wait Category", "Wait Reason", "Locks", "Stack Size", "Top Frame"], blockedRows));
             }
 
             if (threads.TopLockedThreads is { Count: > 0 })
@@ -84,14 +86,16 @@ internal sealed class ThreadConcurrencySectionBuilder : SectionBuilderBase, IRep
                 for (int i = 0; i < threads.TopLockedThreads.Count; i++)
                 {
                     ThreadStateSnapshot snapshot = threads.TopLockedThreads[i];
+                    long stackSize = snapshot.StackSizeBytes > (ulong)long.MaxValue ? long.MaxValue : (long)snapshot.StackSizeBytes;
                     lockedRows.Add(Row(
                         Cell(snapshot.OSThreadId.ToString("N0"), snapshot.OSThreadId),
                         Cell(snapshot.LockCount.ToString("N0"), snapshot.LockCount),
                         Cell(snapshot.GcMode),
+                        Cell(stackSize > 0 ? stackSize.ToString("N0") : "—", stackSize),
                         Cell(snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0] : "—")));
                 }
 
-                blocks.Add(new TableBlock("Lock-holding threads", ["OS Thread", "Lock Count", "GC Mode", "Top Frame"], lockedRows));
+                blocks.Add(new TableBlock("Lock-holding threads", ["OS Thread", "Lock Count", "GC Mode", "Stack Size", "Top Frame"], lockedRows));
             }
 
             if (threads.TopStackHotspots is { Count: > 0 })

@@ -112,6 +112,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 if (!string.IsNullOrEmpty(s.WaitReason))
                     blocks.Add(M("Wait Reason", s.WaitReason ?? ""));
                 blocks.Add(M("Stack Root Count", $"{s.StackRootCount:N0}", s.StackRootCount));
+                blocks.Add(M("Stack Size", s.StackSizeBytes > 0 ? $"{s.StackSizeBytes:N0}" : "—", s.StackSizeBytes));
 
                 for (int f = 0; f < s.TopFrames.Count; f++)
                     blocks.Add(T(s.TopFrames[f], 2));

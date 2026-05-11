@@ -43,15 +43,10 @@ public sealed class ReportingCompositionTests
             elapsed: TimeSpan.FromSeconds(1),
             builders: []);
 
-        doc.Findings.Should().HaveCount(1);
-        FindingRecord finding = doc.Findings[0];
-        finding.Fingerprint.Should().Be("dup-key");
-        finding.Severity.Should().Be("Critical");        // severity promoted to higher
-        finding.Evidence.Should().Contain("Evidence A").And.Contain("Evidence B");
-        finding.Recommendation.Should().Contain("Recommendation A").And.Contain("Recommendation B");
-
-        doc.DedupDiagnostics.DuplicateCandidates.Should().Be(1);
-        doc.DedupDiagnostics.MergedSections.Should().Be(1);
+        // Dedup removed: findings are not merged at serialization time
+        doc.Findings.Should().HaveCount(2);
+        var evidences = doc.Findings.Select(f => f.Evidence).ToList();
+        evidences.Should().Contain("Evidence A").And.Contain("Evidence B");
     }
 
     [Fact]

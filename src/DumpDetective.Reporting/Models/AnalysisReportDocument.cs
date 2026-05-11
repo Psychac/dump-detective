@@ -18,7 +18,6 @@ internal sealed record AnalysisReportDocument
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
     public IReadOnlyList<DeveloperActionRecord> DeveloperActionPlan { get; init; } = [];
     public IReadOnlyList<ConfidenceNote> Confidence { get; init; } = [];
-    public DedupRecord DedupDiagnostics { get; init; } = new(0, 0, 0);
 
     // Per-analyzer structured sections — ordered by SortOrder
     public IReadOnlyList<AnalyzerDetailSection> AnalyzerSections { get; init; } = [];
@@ -110,7 +109,4 @@ internal sealed record ConfidenceNote(
     bool Capped,
     string Reason);
 
-internal sealed record DedupRecord(
-    int MergedSections,
-    int DuplicateCandidates,
-    int EvidenceBeforeMerge);
+// DedupRecord removed — dedup diagnostics are no longer produced

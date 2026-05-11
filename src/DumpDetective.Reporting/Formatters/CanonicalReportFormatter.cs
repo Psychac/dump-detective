@@ -33,8 +33,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"Elapsed: {doc.ElapsedSeconds:F1}s");
         sb.AppendLine($"Schema: {doc.SchemaVersion}");
         sb.AppendLine();
-        sb.AppendLine($"Dedup: merged {doc.DedupDiagnostics.MergedSections}/{doc.DedupDiagnostics.DuplicateCandidates} candidate duplicates");
-        sb.AppendLine();
+        // dedup diagnostics removed from report document
 
         if (doc.IsTrendReport)
         {
@@ -294,8 +293,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"> Elapsed: `{doc.ElapsedSeconds:F1}s`");
         sb.AppendLine($"> Schema: `{doc.SchemaVersion}`");
         sb.AppendLine();
-        sb.AppendLine($"> Dedup merged **{doc.DedupDiagnostics.MergedSections}** section(s) from **{doc.DedupDiagnostics.DuplicateCandidates}** candidate duplicate(s).");
-        sb.AppendLine();
+        // Dedup merged summary removed — no longer useful
 
         // Table Of Contents (Markdown)
         if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
@@ -586,7 +584,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> <time datetime=\"{doc.GeneratedAtUtc:yyyy-MM-ddTHH:mm:ssZ}\">{doc.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</time></div>");
         sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> {doc.ElapsedSeconds:F1}s</div>");
         sb.AppendLine("</div>");
-        sb.AppendLine($"<div class=\"dedup-note\"><strong>Dedup:</strong> merged {doc.DedupDiagnostics.MergedSections}/{doc.DedupDiagnostics.DuplicateCandidates}</div>");
+        // dedup diagnostics removed from report document
         sb.AppendLine($"<div class=\"action-bar\" role=\"toolbar\"><button type=\"button\" class=\"action-btn\" id=\"btn-download-json\" data-filename=\"{exportFn}\">\u2B07 JSON</button><button type=\"button\" class=\"action-btn\" id=\"btn-export-csv\" data-filename=\"{exportFn}\">\u2B07 CSV</button><button type=\"button\" class=\"action-btn\" id=\"btn-print\">\u2399 Print</button></div>");
         sb.AppendLine("</section>");
 

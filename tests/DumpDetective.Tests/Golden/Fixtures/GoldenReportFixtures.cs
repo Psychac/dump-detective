@@ -35,7 +35,7 @@ internal static class GoldenReportFixtures
                 Tags:           ["baseline-small"],
                 Fingerprint:    "baseline-small")
         ],
-        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 2)
+        
     };
 
     private static AnalysisReportDocument DuplicateHeavy() => new()
@@ -55,7 +55,7 @@ internal static class GoldenReportFixtures
                 Tags:           ["dup-heavy"],
                 Fingerprint:    "dup-heavy")
         ],
-        DedupDiagnostics = new DedupRecord(MergedSections: 3, DuplicateCandidates: 3, EvidenceBeforeMerge: 8)
+        
     };
 
     private static AnalysisReportDocument LongNames() => new()
@@ -75,7 +75,7 @@ internal static class GoldenReportFixtures
                 Tags:           ["long-names"],
                 Fingerprint:    "long-names")
         ],
-        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 2)
+        
     };
 
     private static AnalysisReportDocument RichEvidence() => new()
@@ -95,7 +95,7 @@ internal static class GoldenReportFixtures
                 Tags:           ["rich-evidence"],
                 Fingerprint:    "rich-evidence")
         ],
-        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 3)
+        
     };
 
     private static AnalysisReportDocument MixedSeverity() => new()
@@ -109,7 +109,7 @@ internal static class GoldenReportFixtures
             new FindingRecord("LeakAnalyzer", "Leak", "Warning",  "Warning leak",   "Warning item",      "Plan remediation",  ["sev-warning"],  "sev-warning"),
             new FindingRecord("LeakAnalyzer", "Info", "Info",     "Info signal",    "Informational item","Observe",           ["sev-info"],     "sev-info")
         ],
-        DedupDiagnostics = new DedupRecord(MergedSections: 0, DuplicateCandidates: 0, EvidenceBeforeMerge: 3)
+        
     };
 }
 

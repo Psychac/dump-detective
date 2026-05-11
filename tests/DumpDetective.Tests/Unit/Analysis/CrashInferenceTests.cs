@@ -312,7 +312,6 @@ public sealed class CrashInferenceTests
             Findings = [],
             AnalyzerSections = [section],
             Confidence = [],
-            DedupDiagnostics = new DedupRecord(0, 0, 0),
             ExecutiveSummary = null,
             DeveloperActionPlan = [],
         };

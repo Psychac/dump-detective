@@ -26,7 +26,6 @@ public sealed class ReportDocumentSchemaTests
             GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
             ElapsedSeconds = 42.5,
             IsTrendReport = false,
-            DedupDiagnostics = new DedupRecord(MergedSections: 2, DuplicateCandidates: 3, EvidenceBeforeMerge: 5),
             Findings =
             [
                 new FindingRecord(
@@ -65,8 +64,7 @@ public sealed class ReportDocumentSchemaTests
         restored.DumpPath.Should().Be("C:/dumps/test.dmp");
         restored.ElapsedSeconds.Should().BeApproximately(42.5, 0.001);
         restored.IsTrendReport.Should().BeFalse();
-        restored.DedupDiagnostics.MergedSections.Should().Be(2);
-        restored.DedupDiagnostics.DuplicateCandidates.Should().Be(3);
+        // dedup diagnostics removed
 
         restored.Findings.Should().HaveCount(1);
         FindingRecord f = restored.Findings[0];

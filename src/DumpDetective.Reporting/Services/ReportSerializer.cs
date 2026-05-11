@@ -55,7 +55,7 @@ internal sealed class ReportSerializer
 
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
         List<FindingRecord> allFindings = [];
-        int evidenceBeforeMerge = 0;
+        
 
         foreach (AnalyzerRunResult run in runs)
         {
@@ -63,14 +63,14 @@ internal sealed class ReportSerializer
             {
                 foreach (InsightFinding finding in run.Findings)
                 {
-                    evidenceBeforeMerge += 2;
+                    
                     allFindings.Add(MapFinding(finding));
                 }
             }
 
             if (run.Status == AnalyzerExecutionStatus.Failed)
             {
-                evidenceBeforeMerge += 2;
+                
                 allFindings.Add(new FindingRecord(
                     Analyzer: run.AnalyzerName,
                     Category: "Pipeline",
@@ -84,7 +84,7 @@ internal sealed class ReportSerializer
 
             if (!string.IsNullOrWhiteSpace(run.FindingGeneratorError))
             {
-                evidenceBeforeMerge += 1;
+                
                 allFindings.Add(new FindingRecord(
                     Analyzer: run.AnalyzerName,
                     Category: "Pipeline",
@@ -97,8 +97,8 @@ internal sealed class ReportSerializer
             }
         }
 
-        // ── 3. Deduplicate findings ───────────────────────────────────────────
-        List<FindingRecord> deduped = DeduplicateFindings(allFindings, out int duplicateCandidates, out int mergedSections);
+        // ── 3. (no dedup) Use collected findings as-is
+        List<FindingRecord> deduped = allFindings;
 
         // Sort: Critical → Warning → Info, then by Category, then by Title
         deduped.Sort(static (a, b) =>
@@ -110,10 +110,7 @@ internal sealed class ReportSerializer
             return StringComparer.Ordinal.Compare(a.Title, b.Title);
         });
 
-        DedupRecord dedupRecord = new(
-            MergedSections: mergedSections,
-            DuplicateCandidates: duplicateCandidates,
-            EvidenceBeforeMerge: evidenceBeforeMerge);
+        // dedup diagnostics removed
 
         // ── 4. Confidence notes ───────────────────────────────────────────────
         List<ConfidenceNote> confidence = BuildConfidenceNotes(runs);
@@ -174,10 +171,7 @@ internal sealed class ReportSerializer
             ExecutiveSummary = executiveSummary,
             DeveloperActionPlan = developerActionPlan,
             Confidence = confidence,
-            DedupDiagnostics = dedupRecord
-        ,
-            Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList()
-        ,
+            Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList(),
             AnalyzerRunStatuses = runs.Select(r => new AnalyzerRunStatusRecord(
                 AnalyzerName: r.AnalyzerName,
                 Status: r.Status.ToString(),
@@ -238,71 +232,7 @@ internal sealed class ReportSerializer
             TrackingStatus = null
         };
 
-    // ── Deduplication (preserves ReportBuilder.DeduplicateSections logic) ────
-
-    private static List<FindingRecord> DeduplicateFindings(
-        List<FindingRecord> findings,
-        out int duplicateCandidates,
-        out int mergedSections)
-    {
-        var dedupMap = new Dictionary<string, FindingRecord>(StringComparer.Ordinal);
-        var mergedKeys = new HashSet<string>(StringComparer.Ordinal);
-
-        for (int i = 0; i < findings.Count; i++)
-        {
-            FindingRecord f = findings[i];
-
-            if (!dedupMap.TryGetValue(f.Fingerprint, out FindingRecord? existing))
-            {
-                dedupMap[f.Fingerprint] = f;
-                continue;
-            }
-
-            mergedKeys.Add(f.Fingerprint);
-
-            // Merge: take higher severity, combine evidence + recommendation (distinct)
-            // Merge evidence/recommendation as lists (preserve order, dedupe exact entries)
-            var existingEvidence = existing.EvidenceItems ?? new[] { existing.Evidence };
-            var newEvidence = f.EvidenceItems ?? new[] { f.Evidence };
-            var mergedEvidenceList = existingEvidence.Concat(newEvidence).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
-            string mergedEvidence = string.Join(Environment.NewLine, mergedEvidenceList);
-
-            var existingRec = existing.RecommendationItems ?? new[] { existing.Recommendation };
-            var newRec = f.RecommendationItems ?? new[] { f.Recommendation };
-            var mergedRecList = existingRec.Concat(newRec).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
-            string mergedRec = string.Join(Environment.NewLine, mergedRecList);
-            int mergedSeverity = Math.Max(SeverityOrdinal(existing.Severity), SeverityOrdinal(f.Severity));
-            string mergedSeverityStr = SeverityFromOrdinal(mergedSeverity);
-
-            var mergedTags = new List<string>(existing.Tags.Count + f.Tags.Count);
-            foreach (string t in existing.Tags) mergedTags.Add(t);
-            foreach (string t in f.Tags) { if (!mergedTags.Contains(t)) mergedTags.Add(t); }
-
-            dedupMap[f.Fingerprint] = new FindingRecord(
-                Analyzer: existing.Analyzer,
-                Category: existing.Category,
-                Severity: mergedSeverityStr,
-                Title: existing.Title,
-                Evidence: mergedEvidence,
-                Recommendation: mergedRec,
-                Tags: mergedTags,
-                Fingerprint: existing.Fingerprint)
-            {
-                EvidenceItems = mergedEvidenceList,
-                RecommendationItems = mergedRecList,
-                ConfidenceScore = existing.ConfidenceScore ?? f.ConfidenceScore,
-                EvidenceRefs = (existing.EvidenceRefs ?? Array.Empty<EvidenceRef>()).Concat(f.EvidenceRefs ?? Array.Empty<EvidenceRef>()).ToList(),
-                SuggestedOwner = existing.SuggestedOwner ?? f.SuggestedOwner,
-                Effort = existing.Effort ?? f.Effort,
-                ValidationStep = existing.ValidationStep ?? f.ValidationStep,
-                TrackingStatus = existing.TrackingStatus ?? f.TrackingStatus
-            };
-        }
-
-        duplicateCandidates = mergedKeys.Count;
-        mergedSections = mergedKeys.Count;
-        return new List<FindingRecord>(dedupMap.Values);
-    }
+    // Deduplication removed: findings are not merged at serialization time
 
     private static string MergeText(string a, string b)
     {

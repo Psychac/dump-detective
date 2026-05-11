@@ -45,11 +45,6 @@
   ],
   "developerActionPlan": [],
   "confidence": [],
-  "dedupDiagnostics": {
-    "mergedSections": 0,
-    "duplicateCandidates": 0,
-    "evidenceBeforeMerge": 3
-  },
   "analyzerSections": [],
   "analyzerRunStatuses": [],
   "artifacts": []

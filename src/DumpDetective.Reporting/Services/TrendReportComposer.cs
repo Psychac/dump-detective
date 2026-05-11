@@ -85,7 +85,6 @@ internal sealed class TrendReportComposer(
             ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
             Confidence = baseDoc.Confidence,
-            DedupDiagnostics = baseDoc.DedupDiagnostics,
             AnalyzerSections = analyzerSections
         };
     }

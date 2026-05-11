@@ -227,7 +227,7 @@ export function buildHeader(doc) {
   const genRaw = doc.generatedAtUtc; const genStr = genRaw ? (new Date(genRaw)).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
   grid.appendChild(metaItem('Generated (UTC)', genStr)); grid.appendChild(metaItem('Elapsed', ((doc.elapsedSeconds) || 0).toFixed(1) + 's')); grid.appendChild(metaItem('Schema', doc.schemaVersion || ''));
   sec.appendChild(grid);
-  const dedup = doc.dedupDiagnostics; if (dedup) { const d = el('div', 'dedup-note'); d.textContent = 'Dedup: merged ' + dedup.mergedSections + '/' + dedup.duplicateCandidates + ' candidate duplicates'; sec.appendChild(d); }
+  // dedup diagnostics removed
   if (isTrend) { const td = el('div', 'dedup-note'); td.textContent = 'Dumps analyzed: ' + (doc.trendDumpCount || 0); sec.appendChild(td); if (doc.trendDumpPaths && doc.trendDumpPaths.length) { const dp = el('div', 'dedup-note'); const strong = document.createElement('strong'); strong.textContent = 'Analyzed dumps:'; dp.appendChild(strong); for (const p of doc.trendDumpPaths) { dp.appendChild(document.createElement('br')); dp.appendChild(t('\u2022 ' + p)); } sec.appendChild(dp); } }
   const bar = el('div', 'action-bar'); bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Report actions');
   function actionBtn(id, ariaLabel, txt) { const btn = el('button', 'action-btn'); btn.type = 'button'; btn.id = id; btn.dataset.filename = exportName; btn.setAttribute('aria-label', ariaLabel); btn.textContent = txt; return btn; }

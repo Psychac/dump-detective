@@ -21,11 +21,6 @@
   ],
   "developerActionPlan": [],
   "confidence": [],
-  "dedupDiagnostics": {
-    "mergedSections": 3,
-    "duplicateCandidates": 3,
-    "evidenceBeforeMerge": 8
-  },
   "analyzerSections": [],
   "analyzerRunStatuses": [],
   "artifacts": []

@@ -10,9 +10,8 @@ internal static class Program
         Assembly repAsm = Assembly.Load("DumpDetective.Reporting");
         Type docType = repAsm.GetType("DumpDetective.Reporting.Models.AnalysisReportDocument", true);
         Type findingType = repAsm.GetType("DumpDetective.Reporting.Models.FindingRecord", true);
-        Type dedupType = repAsm.GetType("DumpDetective.Reporting.Models.DedupRecord", true);
 
-        var fixtures = BuildFixtures(findingType, dedupType);
+        var fixtures = BuildFixtures(findingType);
 
         var outBase = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "tests", "DumpDetective.Tests", "Golden", "Baselines");
         Directory.CreateDirectory(outBase);
@@ -53,7 +52,7 @@ internal static class Program
         return 0;
     }
 
-    private static Dictionary<string, object> BuildFixtures(Type findingType, Type dedupType)
+    private static Dictionary<string, object> BuildFixtures(Type findingType)
     {
         var fixtures = new Dictionary<string, object>(StringComparer.Ordinal);
 
@@ -62,8 +61,7 @@ internal static class Program
             elapsed: 12.3,
             findings: new[] {
                 MakeFinding(findingType, "MemoryLeakAnalyzer", "Leak", "Warning", "Leak pressure", "Detected duplicate strings.\n- Analyzer: MemoryLeakAnalyzer\n- Value: System.String duplicated", "Pool repeated string payloads.", new[] { "baseline-small" }, "baseline-small")
-            },
-            dedup: MakeDedup(dedupType, 0,0,2)
+            }
         );
 
         fixtures["DuplicateHeavy"] = MakeDoc(
@@ -71,8 +69,7 @@ internal static class Program
             elapsed: 8.1,
             findings: new[] {
                 MakeFinding(findingType, "MemoryLeakAnalyzer", "Leak", "Critical", "Duplicate-heavy merged section", "Merged duplicate leak evidence from multiple analyzers.\n- EvidenceA: A repeated payload instance\n- EvidenceB: Another repeated payload instance", "Deduplicate payload cache keys. Review object retention roots.", new[] { "dup-heavy" }, "dup-heavy")
-            },
-            dedup: MakeDedup(dedupType, 3,3,8)
+            }
         );
 
         fixtures["LongNames"] = MakeDoc(
@@ -80,8 +77,7 @@ internal static class Program
             elapsed: 4.2,
             findings: new[] {
                 MakeFinding(findingType, "MemoryAnalyzer", "Memory", "Warning", "Long member/type names", "Long identifiers are preserved end-to-end.\n- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP\n- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN", "Keep full value visibility; do not truncate.", new[] { "long-names" }, "long-names")
-            },
-            dedup: MakeDedup(dedupType,0,0,2)
+            }
         );
 
         fixtures["RichEvidence"] = MakeDoc(
@@ -89,8 +85,7 @@ internal static class Program
             elapsed: 9.8,
             findings: new[] {
                 MakeFinding(findingType, "CrashAnalyzer", "Crash", "Warning", "Rich evidence sample", "Includes multiple evidence and remediation records.\n- Thread: 42\n- Exception: System.NullReferenceException\n- StackTop: Service.ProcessRequest", "Guard null dereferences. Add targeted telemetry around request processing.", new[] { "rich-evidence" }, "rich-evidence")
-            },
-            dedup: MakeDedup(dedupType,0,0,3)
+            }
         );
 
         fixtures["MixedSeverity"] = MakeDoc(
@@ -100,14 +95,13 @@ internal static class Program
                 MakeFinding(findingType, "LeakAnalyzer", "Leak", "Critical", "Critical leak", "Critical item", "Handle now", new[] { "sev-critical" }, "sev-critical"),
                 MakeFinding(findingType, "LeakAnalyzer", "Leak", "Warning", "Warning leak", "Warning item", "Plan remediation", new[] { "sev-warning" }, "sev-warning"),
                 MakeFinding(findingType, "LeakAnalyzer", "Info", "Info", "Info signal", "Informational item", "Observe", new[] { "sev-info" }, "sev-info")
-            },
-            dedup: MakeDedup(dedupType,0,0,3)
+            }
         );
 
         return fixtures;
     }
 
-    private static object MakeDoc(string dumpPath, double elapsed, object[] findings, object dedup)
+    private static object MakeDoc(string dumpPath, double elapsed, object[] findings)
     {
         Assembly repAsm = Assembly.Load("DumpDetective.Reporting");
         Type docType = repAsm.GetType("DumpDetective.Reporting.Models.AnalysisReportDocument", true);
@@ -125,7 +119,6 @@ internal static class Program
         foreach (var f in findings) add.Invoke(list, new[] { f });
 
         docType.GetProperty("Findings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(doc, list);
-        docType.GetProperty("DedupDiagnostics", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(doc, dedup);
 
         return doc;
     }
@@ -156,9 +149,5 @@ internal static class Program
         return inst;
     }
 
-    private static object MakeDedup(Type dedupType, int mergedSections, int duplicateCandidates, int evidenceBefore)
-    {
-        var ctor = dedupType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).First();
-        return ctor.Invoke(new object[] { mergedSections, duplicateCandidates, evidenceBefore });
-    }
+    
 }

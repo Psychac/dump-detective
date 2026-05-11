@@ -480,7 +480,9 @@ internal sealed class InsightEngine
                       "Cross-cutting correlations that depend on their results will be absent.",
             Recommendation: "Check the diagnostic output for per-analyzer error messages. " +
                             "Re-run with --diagnostic flag for detailed error information.",
-            Tags: ["analysis-quality", "failed-analyzer"]));
+            Tags: ["analysis-quality", "failed-analyzer"],
+            ConfidenceScore: 0.55,
+            Caveats: "Derived from a partially complete analyzer set."));
     }
 
     // ── Part 4: New cross-cutting detection methods ───────────────────────────

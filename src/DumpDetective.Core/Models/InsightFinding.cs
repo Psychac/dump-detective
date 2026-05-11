@@ -10,8 +10,24 @@ string Recommendation,
 IReadOnlyList<string> Tags,
 string? Fingerprint = null,
 double? MetricValue = null,
-string? MetricUnit = null)
+string? MetricUnit = null,
+double? ConfidenceScore = null,
+string? Caveats = null)
 {
+    public double? ConfidenceScore { get; init; } = ConfidenceScore ?? Severity switch
+    {
+        FindingSeverity.Critical => 0.9,
+        FindingSeverity.Warning => 0.7,
+        _ => 0.5
+    };
+
+    public double EffectiveConfidenceScore => ConfidenceScore ?? Severity switch
+    {
+        FindingSeverity.Critical => 0.9,
+        FindingSeverity.Warning => 0.7,
+        _ => 0.5
+    };
+
     public string EffectiveFingerprint =>
         !string.IsNullOrWhiteSpace(Fingerprint)
             ? Fingerprint

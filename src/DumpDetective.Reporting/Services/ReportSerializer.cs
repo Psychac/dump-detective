@@ -494,12 +494,7 @@ internal sealed class ReportSerializer
         };
     }
 
-    private static double BuildConfidenceScore(InsightFinding finding) => finding.Severity switch
-    {
-        FindingSeverity.Critical => 0.9,
-        FindingSeverity.Warning => 0.7,
-        _ => 0.5
-    };
+    private static double BuildConfidenceScore(InsightFinding finding) => finding.EffectiveConfidenceScore;
 
     private static string BuildSuggestedOwner(InsightFinding finding) => finding.Category switch
     {

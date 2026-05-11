@@ -93,7 +93,7 @@ body {
   background: #fafafa;
   border-color: var(--border-strong);
 }
-.report-navbar__title { font-size: .92rem; font-weight: 600; letter-spacing: -0.01em; }
+.report-navbar__title { font-size: .92rem; font-weight: 500; letter-spacing: -0.01em; }
 .report-navbar__meta { font-size: .78rem; color: var(--muted); }
 .report-navbar__palette { position: sticky; top: 0; z-index: 1; padding-bottom: 0; margin-bottom: 0; background: transparent; }
 .report-navbar__search {
@@ -134,7 +134,7 @@ body {
   white-space: normal;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
-.report-navbar__toc summary { background: var(--surface); border-color: transparent; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .88rem; font-weight: 600; color: #111827; }
+.report-navbar__toc summary { background: var(--surface); border-color: transparent; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .88rem; font-weight: 500; color: #111827; }
 .report-navbar__toc a { background: var(--surface); text-decoration: none; color: #1f2937; font-size: .86rem; font-weight: 500; line-height: 1.35; }
 .report-navbar__toc summary:hover,
 .report-navbar__toc a:hover { background: #f8fafc; border-color: var(--border); }
@@ -175,7 +175,7 @@ main#main > .analyzer-section {
 
 /* Collapsible subsections inside TOC */
 .toc details { margin-bottom: 6px; }
-.toc details summary { cursor: pointer; list-style: none; padding: 6px 8px; border-radius: 6px; font-weight: 700; }
+.toc details summary { cursor: pointer; list-style: none; padding: 6px 8px; border-radius: 6px; font-weight: 500; }
 .toc details[open] > summary { background: rgba(59,130,246,0.04); }
 .toc details ol { margin: 6px 0 0 8px; padding-left: 6px; }
 .toc details ol li a { padding-left: 4px; font-weight: 500; }

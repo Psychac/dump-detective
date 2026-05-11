@@ -370,12 +370,12 @@ internal sealed class TrendReportComposer(
                         ? "no change"
                         : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}{pctStr}";
 
-                    string status = (point.Direction, delta > 0, delta < 0) switch
+                    TrendClassification classification = ClassifyTrend(point.Direction, delta, severity);
+                    string status = classification switch
                     {
-                        (MetricTrendDirection.HigherIsWorse, true, _) => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
-                        (MetricTrendDirection.HigherIsWorse, _, true) => "\u2705 Improvement",
-                        (MetricTrendDirection.LowerIsWorse, _, true) => severity == RegressionSeverity.Severe ? "\u26a0\u26a0 Severe" : "\u26a0 Regression",
-                        (MetricTrendDirection.LowerIsWorse, true, _) => "\u2705 Improvement",
+                        TrendClassification.SevereRegression => "\u26a0\u26a0 Severe",
+                        TrendClassification.Regression => "\u26a0 Regression",
+                        TrendClassification.Improvement => "\u2705 Improvement",
                         _ => "\u2014 Stable"
                     };
 
@@ -436,6 +436,30 @@ internal sealed class TrendReportComposer(
                 blocks.Add(new ListItemBlock($"[{f.Severity}] {f.Analyzer}: {f.Title}"));
         }
 
+        var newTypes = BuildNewTypes(snapshots);
+        if (newTypes.Count > 0)
+        {
+            blocks.Add(new BlankBlock());
+            blocks.Add(new HeadingBlock("NEW TYPES (BASELINE → CURRENT):"));
+            blocks.Add(new DividerBlock());
+            foreach (var entry in newTypes)
+            {
+                blocks.Add(new ListItemBlock($"{entry.TypeName}: {FormatHelper.FormatBytes(entry.CurrentBytes)} in latest dump"));
+            }
+        }
+
+        var escalations = BuildSeverityEscalations(snapshots);
+        if (escalations.Count > 0)
+        {
+            blocks.Add(new BlankBlock());
+            blocks.Add(new HeadingBlock("SEVERITY ESCALATIONS:"));
+            blocks.Add(new DividerBlock());
+            foreach (var escalation in escalations)
+            {
+                blocks.Add(new ListItemBlock($"{escalation.Analyzer}: {escalation.Title} ({escalation.BaselineSeverity} -> {escalation.CurrentSeverity})"));
+            }
+        }
+
         if (lifecycle.ResolvedFindings.Count > 0)
         {
             blocks.Add(new BlankBlock());
@@ -469,6 +493,89 @@ internal sealed class TrendReportComposer(
 
         blocks.Add(new DividerBlock());
         return new AnalyzerDetailSection("Trend Comparison", "Trend Comparison", 0, blocks);
+    }
+
+    private static TrendClassification ClassifyTrend(MetricTrendDirection direction, double delta, RegressionSeverity severity)
+    {
+        bool isRegression = (direction == MetricTrendDirection.HigherIsWorse && delta > 0)
+                         || (direction == MetricTrendDirection.LowerIsWorse && delta < 0);
+        bool isImprovement = (direction == MetricTrendDirection.HigherIsWorse && delta < 0)
+                          || (direction == MetricTrendDirection.LowerIsWorse && delta > 0);
+
+        if (isImprovement)
+            return TrendClassification.Improvement;
+
+        if (isRegression)
+            return severity == RegressionSeverity.Severe ? TrendClassification.SevereRegression : TrendClassification.Regression;
+
+        return TrendClassification.Stable;
+    }
+
+    private sealed record NewTypeEntry(string TypeName, ulong CurrentBytes);
+
+    private sealed record SeverityEscalationEntry(string Analyzer, string Title, FindingSeverity BaselineSeverity, FindingSeverity CurrentSeverity);
+
+    private static IReadOnlyList<NewTypeEntry> BuildNewTypes(IReadOnlyList<AnalysisSnapshot> snapshots)
+    {
+        if (snapshots.Count < 2)
+            return [];
+
+        if (!TryGetMemorySnapshot(snapshots[0], out MemoryDomainResult baseline) ||
+            !TryGetMemorySnapshot(snapshots[^1], out MemoryDomainResult current))
+            return [];
+
+        var baselineTypes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (TypeSnapshot type in baseline.TopTypesBySize)
+            baselineTypes.Add(type.TypeName);
+
+        var results = new List<NewTypeEntry>();
+        foreach (TypeSnapshot type in current.TopTypesBySize.OrderByDescending(t => t.TotalBytes))
+        {
+            if (baselineTypes.Contains(type.TypeName))
+                continue;
+
+            results.Add(new NewTypeEntry(type.TypeName, type.TotalBytes));
+            if (results.Count >= 10)
+                break;
+        }
+
+        return results;
+    }
+
+    private static IReadOnlyList<SeverityEscalationEntry> BuildSeverityEscalations(IReadOnlyList<AnalysisSnapshot> snapshots)
+    {
+        if (snapshots.Count < 2)
+            return [];
+
+        var baselineByFingerprint = snapshots[0].Findings
+            .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var escalations = new List<SeverityEscalationEntry>();
+        foreach (InsightFinding current in snapshots[^1].Findings)
+        {
+            if (!baselineByFingerprint.TryGetValue(current.EffectiveFingerprint, out InsightFinding? baseline))
+                continue;
+
+            if (baseline.Severity == FindingSeverity.Warning && current.Severity == FindingSeverity.Critical)
+            {
+                escalations.Add(new SeverityEscalationEntry(current.Analyzer, current.Title, baseline.Severity, current.Severity));
+            }
+        }
+
+        return escalations;
+    }
+
+    private static bool TryGetMemorySnapshot(AnalysisSnapshot snapshot, out MemoryDomainResult result)
+    {
+        if (snapshot.DomainResults.TryGetValue("Memory Analysis", out AnalyzerDomainResult? raw) && raw is MemoryDomainResult memory)
+        {
+            result = memory;
+            return true;
+        }
+
+        result = null!;
+        return false;
     }
 
     private sealed record FindingLifecycleResult(

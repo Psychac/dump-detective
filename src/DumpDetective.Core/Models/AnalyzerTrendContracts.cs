@@ -15,6 +15,14 @@ internal enum RegressionSeverity
     Severe
 }
 
+internal enum TrendClassification
+{
+    Stable,
+    Improvement,
+    Regression,
+    SevereRegression
+}
+
 internal sealed record AnalyzerMetric(
 string Key,
 string? Scope,
@@ -48,6 +56,11 @@ MetricTrendDirection Direction)
 
     /// <summary>Growth rate as a percentage: (current − baseline) / baseline × 100. Zero when baseline is zero.</summary>
     public double GrowthRatePercent => DeltaPercent ?? 0.0;
+
+    public TrendClassification Classification =>
+        IsImprovement ? TrendClassification.Improvement :
+        IsRegression ? (Severity == RegressionSeverity.Severe ? TrendClassification.SevereRegression : TrendClassification.Regression) :
+        TrendClassification.Stable;
 
     /// <summary>Severity of this delta if it represents a regression.</summary>
     public RegressionSeverity Severity

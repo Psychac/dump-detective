@@ -256,12 +256,17 @@ internal sealed class ReportSerializer
             Tags: f.Tags,
             Fingerprint: f.EffectiveFingerprint)
         {
-            ConfidenceScore = null,
+            EvidenceItems = SplitLines(f.Evidence),
+            RecommendationItems = SplitLines(f.Recommendation),
+            Cause = BuildCause(f),
+            Effect = BuildEffect(f),
+            Fix = BuildFix(f),
+            ConfidenceScore = BuildConfidenceScore(f),
             EvidenceRefs = null,
-            SuggestedOwner = null,
-            Effort = null,
-            ValidationStep = null,
-            TrackingStatus = null
+            SuggestedOwner = BuildSuggestedOwner(f),
+            Effort = BuildEffort(f),
+            ValidationStep = BuildValidationStep(f),
+            TrackingStatus = BuildTrackingStatus(f)
         };
 
     // Deduplication removed: findings are not merged at serialization time
@@ -441,5 +446,92 @@ internal sealed class ReportSerializer
         2 => nameof(FindingSeverity.Critical),
         1 => nameof(FindingSeverity.Warning),
         _ => nameof(FindingSeverity.Info)
+    };
+
+    private static IReadOnlyList<string>? SplitLines(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        string[] parts = text
+            .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
+    }
+
+    private static string BuildCause(InsightFinding finding)
+    {
+        string analyzer = string.IsNullOrWhiteSpace(finding.Analyzer) ? "Analyzer" : finding.Analyzer;
+        string category = string.IsNullOrWhiteSpace(finding.Category) ? "the signal" : finding.Category;
+
+        return finding.Severity switch
+        {
+            FindingSeverity.Critical => $"{analyzer} produced a Critical signal in {category}; the underlying pattern is large enough to affect runtime behavior.",
+            FindingSeverity.Warning => $"{analyzer} produced a Warning in {category}; the pattern is present and trending toward a production issue.",
+            _ => $"{analyzer} produced a lower-severity signal in {category}."
+        };
+    }
+
+    private static string BuildEffect(InsightFinding finding)
+    {
+        return finding.Severity switch
+        {
+            FindingSeverity.Critical => $"Expected effect: {finding.Title} can increase memory, latency, or failure risk immediately if the path continues.",
+            FindingSeverity.Warning => $"Expected effect: {finding.Title} can become user-visible if the same pattern grows or repeats.",
+            _ => $"Expected effect: {finding.Title} is informational but still worth reviewing."
+        };
+    }
+
+    private static string BuildFix(InsightFinding finding)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.Recommendation))
+            return finding.Recommendation;
+
+        return finding.Severity switch
+        {
+            FindingSeverity.Critical => "Remove the retention source, re-run the analyzer, and confirm the signal drops.",
+            FindingSeverity.Warning => "Add a guardrail or bounded cap, then verify the trend no longer worsens.",
+            _ => "Review the analyzer output and decide whether follow-up is needed."
+        };
+    }
+
+    private static double BuildConfidenceScore(InsightFinding finding) => finding.Severity switch
+    {
+        FindingSeverity.Critical => 0.9,
+        FindingSeverity.Warning => 0.7,
+        _ => 0.5
+    };
+
+    private static string BuildSuggestedOwner(InsightFinding finding) => finding.Category switch
+    {
+        var c when c.Contains("Memory", StringComparison.OrdinalIgnoreCase) ||
+                   c.Contains("Leak", StringComparison.OrdinalIgnoreCase) ||
+                   c.Contains("Retention", StringComparison.OrdinalIgnoreCase) => "Platform / Service Owner",
+        var c when c.Contains("Thread", StringComparison.OrdinalIgnoreCase) ||
+                   c.Contains("Hang", StringComparison.OrdinalIgnoreCase) ||
+                   c.Contains("Concurrency", StringComparison.OrdinalIgnoreCase) => "Runtime / Service Owner",
+        var c when c.Contains("Crash", StringComparison.OrdinalIgnoreCase) ||
+                   c.Contains("Exception", StringComparison.OrdinalIgnoreCase) => "Application Owner",
+        _ => "Investigation Owner"
+    };
+
+    private static string BuildEffort(InsightFinding finding) => finding.Severity switch
+    {
+        FindingSeverity.Critical => "High",
+        FindingSeverity.Warning => "Medium",
+        _ => "Low"
+    };
+
+    private static string BuildValidationStep(InsightFinding finding) => finding.Severity switch
+    {
+        FindingSeverity.Critical => "Re-run the dump after the fix and confirm the finding disappears or drops sharply.",
+        FindingSeverity.Warning => "Verify the trend or cap value after the change and confirm the signal stops growing.",
+        _ => "Confirm whether the signal is expected for this workload."
+    };
+
+    private static string BuildTrackingStatus(InsightFinding finding) => finding.Severity switch
+    {
+        FindingSeverity.Critical => "Untracked",
+        FindingSeverity.Warning => "InProgress",
+        _ => "Review"
     };
 }

@@ -727,6 +727,30 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\">{WrapAddr(Enc(f.Evidence))}</td></tr>");
             }
 
+            if (!string.IsNullOrWhiteSpace(f.Cause))
+                sb.AppendLine($"<tr><td>Cause</td><td class=\"wrap\">{WrapAddr(Enc(f.Cause))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.Effect))
+                sb.AppendLine($"<tr><td>Effect</td><td class=\"wrap\">{WrapAddr(Enc(f.Effect))}</td></tr>");
+
+            if (f.ConfidenceScore is not null)
+                sb.AppendLine($"<tr><td>Confidence</td><td class=\"wrap\">{Enc(f.ConfidenceScore.Value.ToString("F2"))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.SuggestedOwner))
+                sb.AppendLine($"<tr><td>Owner</td><td class=\"wrap\">{WrapAddr(Enc(f.SuggestedOwner))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.Effort))
+                sb.AppendLine($"<tr><td>Effort</td><td class=\"wrap\">{WrapAddr(Enc(f.Effort))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.ValidationStep))
+                sb.AppendLine($"<tr><td>Validation</td><td class=\"wrap\">{WrapAddr(Enc(f.ValidationStep))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.TrackingStatus))
+                sb.AppendLine($"<tr><td>Status</td><td class=\"wrap\">{WrapAddr(Enc(f.TrackingStatus))}</td></tr>");
+
+            if (!string.IsNullOrWhiteSpace(f.Fix))
+                sb.AppendLine($"<tr><td>Fix</td><td class=\"wrap\">{WrapAddr(Enc(f.Fix))}</td></tr>");
+
             if (f.RecommendationItems is { Count: > 0 })
             {
                 sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.RecommendationItems)))}</td></tr>");

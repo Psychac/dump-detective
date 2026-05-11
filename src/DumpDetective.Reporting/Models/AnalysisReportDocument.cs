@@ -52,6 +52,9 @@ internal partial record FindingRecord
 {
     public IReadOnlyList<string>? EvidenceItems { get; init; } = null;
     public IReadOnlyList<string>? RecommendationItems { get; init; } = null;
+    public string? Cause { get; init; } = null;
+    public string? Effect { get; init; } = null;
+    public string? Fix { get; init; } = null;
 
     // P1.1: Traceability & actionability extensions
     public double? ConfidenceScore { get; init; } = null;                // 0.0–1.0

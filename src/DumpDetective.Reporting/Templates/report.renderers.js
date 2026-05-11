@@ -358,7 +358,15 @@ export function buildFindingCard(f, i) {
     const fieldValue = el('div', 'finding-card__field-value'); fieldValue.textContent = value || '—'; wrapAddresses(fieldValue); linkifyAnchors(fieldValue);
     field.appendChild(fieldLabel); field.appendChild(fieldValue); details.appendChild(field);
   }
+  if (f.cause) detailField('Cause', f.cause);
+  if (f.effect) detailField('Effect', f.effect);
+  if (f.confidenceScore != null) detailField('Confidence', Number(f.confidenceScore).toFixed(2));
+  if (f.suggestedOwner) detailField('Owner', f.suggestedOwner);
+  if (f.effort) detailField('Effort', f.effort);
+  if (f.validationStep) detailField('Validation', f.validationStep);
+  if (f.trackingStatus) detailField('Status', f.trackingStatus);
   detailField('Evidence', f.evidence || '');
+  if (f.fix) detailField('Fix', f.fix);
   if (f.recommendation) detailField('Recommendation', f.recommendation);
   sec.appendChild(details);
   return sec;

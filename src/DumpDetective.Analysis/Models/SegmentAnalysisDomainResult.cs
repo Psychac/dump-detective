@@ -12,6 +12,7 @@ internal sealed record HeapSegmentSnapshot(
     ulong End,
     ulong Length,
     ulong CommittedBytes,
+    ulong ReservedBytes,
     HeapSegmentKind Kind,
     int Generation,
     int ObjectCount);
@@ -20,11 +21,14 @@ internal sealed record SegmentKindSummary(
     HeapSegmentKind Kind,
     int SegmentCount,
     int ObjectCount,
-    ulong TotalBytes);
+    ulong TotalBytes,
+    ulong ReservedBytes);
 
 internal sealed record SegmentAnalysisDomainResult(
     int TotalSegments,
     ulong TotalCommittedBytes,
+    ulong TotalReservedBytes,
+    ulong ReservationGapBytes,
     int SohSegmentCount,
     ulong SohBytes,
     int LohSegmentCount,

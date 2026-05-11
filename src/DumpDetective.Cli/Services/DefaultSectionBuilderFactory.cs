@@ -39,5 +39,8 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new JitSectionBuilder()
     ];
 
-    public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() => [];
+    public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
+    [
+        new LeakAnalysisSectionBuilder()
+    ];
 }

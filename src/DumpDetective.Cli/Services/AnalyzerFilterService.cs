@@ -119,6 +119,7 @@ internal static class AnalyzerFilterService
 
             // Stage 2+3 — Detecting memory leaks (both map to the same console stage name so they stay consecutive)
             nameof(Analysis.Analyzers.RetentionAnalyzer)
+            or nameof(Analysis.Analyzers.LeakCandidateAnalyzer)
             or nameof(Analysis.Analyzers.CollectionAnalyzer)
             or nameof(Analysis.Analyzers.StringAnalyzer)
                 => 2,

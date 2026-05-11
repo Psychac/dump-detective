@@ -36,6 +36,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         progress?.Report(new(0, "classifying heap segments", $"0 / {totalSegments} segments"));
 
         ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0;
+        ulong sohReserved = 0, lohReserved = 0, pohReserved = 0, frozenReserved = 0;
         int sohCount = 0, lohCount = 0, pohCount = 0, frozenCount = 0;
         int sohObjects = 0, lohObjects = 0, pohObjects = 0, frozenObjects = 0;
         long totalObjectsScanned = 0;
@@ -47,6 +48,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         {
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
             ulong committed = GetCommittedBytes(segment);
+            ulong reserved = GetReservedBytes(segment);
             ulong start = segment.Start;
             ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
@@ -66,6 +68,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
                 End: end,
                 Length: length,
                 CommittedBytes: committed,
+                ReservedBytes: reserved,
                 Kind: kind,
                 Generation: generation,
                 ObjectCount: objCount));
@@ -77,41 +80,48 @@ public sealed class SegmentAnalyzer : IAnalyzer
                 case HeapSegmentKind.SmallObjectHeap:
                     sohCount++;
                     sohBytes += committed;
+                    sohReserved += reserved;
                     if (objCount >= 0) sohObjects += countedObj; else sohObjects = -1;
                     break;
                 case HeapSegmentKind.LargeObjectHeap:
                     lohCount++;
                     lohBytes += committed;
+                    lohReserved += reserved;
                     lohObjects += countedObj;
                     break;
                 case HeapSegmentKind.PinnedObjectHeap:
                     pohCount++;
                     pohBytes += committed;
+                    pohReserved += reserved;
                     pohObjects += countedObj;
                     break;
                 case HeapSegmentKind.Frozen:
                     frozenCount++;
                     frozenBytes += committed;
+                    frozenReserved += reserved;
                     frozenObjects += countedObj;
                     break;
                 default:
                     sohCount++;
                     sohBytes += committed;
+                    sohReserved += reserved;
                     if (objCount >= 0) sohObjects += countedObj; else sohObjects = -1;
                     break;
             }
         }
 
         ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes;
+        ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved;
+        ulong reservationGap = totalReserved > totalCommitted ? totalReserved - totalCommitted : 0;
         double lohPercent = totalCommitted == 0 ? 0.0 : lohBytes * 100.0 / totalCommitted;
         double pohPercent = totalCommitted == 0 ? 0.0 : pohBytes * 100.0 / totalCommitted;
 
         var kindSummaries = new List<SegmentKindSummary>
         {
-            new(HeapSegmentKind.SmallObjectHeap, sohCount, sohObjects, sohBytes),
-            new(HeapSegmentKind.LargeObjectHeap, lohCount, lohObjects, lohBytes),
-            new(HeapSegmentKind.PinnedObjectHeap, pohCount, pohObjects, pohBytes),
-            new(HeapSegmentKind.Frozen, frozenCount, frozenObjects, frozenBytes),
+                new(HeapSegmentKind.SmallObjectHeap, sohCount, sohObjects, sohBytes, sohReserved),
+                new(HeapSegmentKind.LargeObjectHeap, lohCount, lohObjects, lohBytes, lohReserved),
+                new(HeapSegmentKind.PinnedObjectHeap, pohCount, pohObjects, pohBytes, pohReserved),
+                new(HeapSegmentKind.Frozen, frozenCount, frozenObjects, frozenBytes, frozenReserved),
         };
 
         var topBySize = snapshots
@@ -127,6 +137,8 @@ public sealed class SegmentAnalyzer : IAnalyzer
         return new SegmentAnalysisDomainResult(
             TotalSegments: snapshots.Count,
             TotalCommittedBytes: totalCommitted,
+            TotalReservedBytes: totalReserved,
+            ReservationGapBytes: reservationGap,
             SohSegmentCount: sohCount,
             SohBytes: sohBytes,
             LohSegmentCount: lohCount,
@@ -149,6 +161,11 @@ public sealed class SegmentAnalyzer : IAnalyzer
         return mem.End >= mem.Start ? mem.End - mem.Start : 0;
     }
 
+    private static ulong GetReservedBytes(ClrSegment segment)
+    {
+        MemoryRange mem = segment.ReservedMemory;
+        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
+    }
     private static int CountObjects(
         ClrSegment segment,
         HeapSegmentKind kind,

@@ -5,6 +5,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -35,10 +36,12 @@ namespace DumpDetective.Analysis.Analyzers
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
                 globalBuckets = heapIndex.GlobalSizeBuckets;
 
-            return BuildDomainResult(typeStats, globalBuckets, options);
+            return BuildDomainResult(heap, cache, typeStats, globalBuckets, options);
         }
 
         private static MemoryDomainResult BuildDomainResult(
+            ClrHeap heap,
+            IHeapAnalysisCache cache,
             Dictionary<string, CachedTypeStatistics> typeStats,
             long[]? globalSizeBuckets,
             MemoryAnalysisOptions options)
@@ -62,14 +65,30 @@ namespace DumpDetective.Analysis.Analyzers
             var byCount = new List<CachedTypeStatistics>(typeStats.Values);
             byCount.Sort((a, b) => b.Count.CompareTo(a.Count));
 
-            static TypeSnapshot ToSnapshot(CachedTypeStatistics s)
+            static TypeSnapshot ToSnapshot(CachedTypeStatistics s, ulong retainedBytes)
             {
                 ulong avgSize = s.Count > 0 ? s.TotalSize / (ulong)s.Count : 0;
                 return new TypeSnapshot(s.TypeName, s.Count, s.TotalSize, s.LohSize,
                     AverageSize: avgSize,
-                    EstimatedRetainedBytes: 0);
+                    EstimatedRetainedBytes: retainedBytes);
             }
 
+            static ulong EstimateRetained(ClrHeap heap, IHeapAnalysisCache cache, string typeName, HashSet<ulong> claimedAddresses)
+            {
+                ulong sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
+                if (sampleAddress == 0)
+                    return 0;
+
+                try
+                {
+                    ClrObject root = heap.GetObject(sampleAddress);
+                    return BoundedRetainedSizeBfs.ComputeExclusiveRetained(root, heap, claimedAddresses);
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
             // Build size-bucket histogram from Phase 1 counters (zero heap scan)
             IReadOnlyList<SizeBucketEntry>? histogram = null;
             if (globalSizeBuckets is { Length: >= SizeBucketHelper.BucketCount })
@@ -99,13 +118,21 @@ namespace DumpDetective.Analysis.Analyzers
 
             int topN = Math.Min(options.TopBySizeCount, bySize.Count);
             var topBySize = new List<TypeSnapshot>(topN);
+            HashSet<ulong> retainedClaims = new();
             for (int i = 0; i < topN; i++)
-                topBySize.Add(ToSnapshot(bySize[i]));
+            {
+                CachedTypeStatistics stat = bySize[i];
+                topBySize.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims)));
+            }
 
             int topM = Math.Min(options.TopByCountCount, byCount.Count);
             var topByCount = new List<TypeSnapshot>(topM);
+            HashSet<ulong> retainedCountClaims = new();
             for (int i = 0; i < topM; i++)
-                topByCount.Add(ToSnapshot(byCount[i]));
+            {
+                CachedTypeStatistics stat = byCount[i];
+                topByCount.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedCountClaims)));
+            }
 
             return new MemoryDomainResult(
                 totalMemory,

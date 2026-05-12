@@ -26,6 +26,7 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
         EventLeakDomainResult? eventLeaks = results.Get<EventLeakDomainResult>();
         FinalizableObjectDomainResult? finalizers = results.Get<FinalizableObjectDomainResult>();
         LeakCandidateDomainResult? leakCandidates = results.Get<LeakCandidateDomainResult>();
+        DominatorDomainResult? dominators = results.Get<DominatorDomainResult>();
 
         var blocks = new List<SectionBlock>
         {
@@ -36,6 +37,7 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
             M("Static roots", staticRoots?.RootCount.ToString("N0") ?? "N/A", staticRoots?.RootCount),
             M("Event leak groups", eventLeaks?.TopLeakGroups?.Count.ToString("N0") ?? "N/A", eventLeaks?.TopLeakGroups?.Count),
             M("Leak candidates", leakCandidates?.TopCandidates.Count.ToString("N0") ?? "N/A", leakCandidates?.TopCandidates.Count),
+            M("Dominator suspects", dominators?.TopDominatorTypes.Count.ToString("N0") ?? "N/A", dominators?.TopDominatorTypes.Count),
         };
 
         if (retention is not null)
@@ -173,6 +175,24 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
                 blocks.Add(T($"Top suspect {top.TypeName} scores {top.SuspicionScore:N0} because it is {top.Classification} with {FormatBytes(top.TotalSize)} shallow size and {top.Gen2Pct:F1}% Gen2 occupancy."));
                 blocks.Add(T($"Root hint: {(string.IsNullOrWhiteSpace(top.RootKind) ? "unknown" : top.RootKind)}. Review GC root paths, static ownership, and queue retention for this type."));
             }
+        }
+
+        if (dominators is not null && dominators.TopDominatorTypes.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("DOMINATOR SUSPECTS"));
+            blocks.Add(T(dominators.HeuristicOnly
+                ? $"Retained bytes are estimated with a bounded BFS over {dominators.AnalyzedCount:N0} suspects (breadth cap {dominators.MaxBreadth:N0}, depth cap {dominators.MaxDepth:N0})."
+                : "Retained bytes are available for the listed suspects."));
+            blocks.Add(new TableBlock(
+                Caption: "Top dominator suspects",
+                Headers: ["Type", "Objects", "Shallow", "Retained", "Ratio"],
+                Rows: dominators.TopDominatorTypes.Take(10).Select(type => Row(
+                    Cell(type.TypeName),
+                    Cell(type.Count.ToString("N0"), type.Count),
+                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                    Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
+                    Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)))).ToList()));
         }
 
         return new AnalyzerDetailSection(

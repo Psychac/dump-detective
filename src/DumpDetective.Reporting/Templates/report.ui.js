@@ -29,11 +29,16 @@ export function buildSidebar(tocNode, doc) {
     search.setAttribute('spellcheck', 'false');
     search.addEventListener('input', function () {
       const query = search.value.trim().toLowerCase();
-      const items = aside.querySelectorAll('.toc a');
-      items.forEach(function (item) {
-        const text = item.textContent ? item.textContent.toLowerCase() : '';
-        const match = !query || text.includes(query);
-        item.closest('li')?.toggleAttribute('hidden', !match);
+      const sections = aside.querySelectorAll('.toc-section > details');
+      sections.forEach(function (section) {
+        const summaryLink = section.querySelector(':scope > summary');
+        const rootList = section.querySelector(':scope > ol');
+        const selfMatch = !query || (summaryLink && summaryLink.textContent && summaryLink.textContent.toLowerCase().includes(query));
+        const childMatch = rootList ? filterTocList(rootList, query) : false;
+        const visible = selfMatch || childMatch;
+        section.hidden = !visible;
+        if (query && visible)
+          section.open = true;
       });
     });
     search.addEventListener('keydown', function (ev) {
@@ -46,6 +51,24 @@ export function buildSidebar(tocNode, doc) {
   }
 
   return aside;
+}
+
+function filterTocList(list, query) {
+  let anyVisible = false;
+  const items = Array.from(list.children).filter(function (child) { return child.tagName === 'LI'; });
+
+  for (const item of items) {
+    const link = item.firstElementChild;
+    const nestedList = Array.from(item.children).find(function (child) { return child.tagName === 'OL'; }) || null;
+    const selfText = link && link.textContent ? link.textContent.toLowerCase() : '';
+    const selfMatch = !query || selfText.includes(query);
+    const childMatch = nestedList ? filterTocList(nestedList, query) : false;
+    const visible = selfMatch || childMatch;
+    item.hidden = !visible;
+    anyVisible = anyVisible || visible;
+  }
+
+  return anyVisible;
 }
 
 export function setupInteractivity(doc, announce) {
@@ -68,6 +91,11 @@ export function setupInteractivity(doc, announce) {
       const m = id.match(/^detail-(\d+)-heading-(\d+)$/);
       if (m) {
         const sec = document.getElementById('detail-' + m[1]); if (sec) { const det = sec.querySelector('details'); if (det) det.open = true; }
+      }
+      const c = id.match(/^detail-(\d+)-collapse-(\d+)$/);
+      if (c) {
+        const sec = document.getElementById('detail-' + c[1]); if (sec) { const det = sec.querySelector('details'); if (det) det.open = true; }
+        const collapse = document.getElementById(id); if (collapse && collapse.tagName === 'DETAILS') collapse.open = true;
       }
     } catch (ex) { }
     const target = document.getElementById(id);

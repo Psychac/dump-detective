@@ -237,15 +237,24 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // Post-scan: enumerate GC roots — mirrors WriteSatelliteFiles/RootIndexWriter in disk mode.
         // Stored in HeapIndexBuildResult so GCRootAnalyzer and FinalizableObjectAnalyzer can
         // consume pre-enumerated root data without re-walking the heap.
-        progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
+        var rootProgressStopwatch = Stopwatch.StartNew();
+        long lastRootReportElapsedMs = 0;
+
+        progress?.Report(new(0, "enumerating GC roots", Detail: "0 roots", Elapsed: stopwatch.Elapsed));
         var rootList = new List<(ulong TargetAddr, ulong RootAddr, byte Kind)>(capacity: 4096);
         long rootCount = 0;
         foreach (ClrRoot root in heap.EnumerateRoots())
         {
             if (cancellationToken.IsCancellationRequested) break;
             rootList.Add((root.Object, root.Address, (byte)root.RootKind));
-            if (++rootCount % 10_000 == 0)
-            progress?.Report(new(rootCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));
+
+            rootCount++;
+            long currentElapsedMs = rootProgressStopwatch.ElapsedMilliseconds;
+            if (rootCount % 10_000 == 0 || currentElapsedMs - lastRootReportElapsedMs >= 1000)
+            {
+                progress?.Report(new(rootCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));
+                lastRootReportElapsedMs = currentElapsedMs;
+            }
         }
 
         progress?.Report(new(rootCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));

@@ -4,6 +4,7 @@ export function renderBlocks(blocks, container, announce) {
   if (!blocks || !blocks.length) return;
   const stack = [container];
   if (container && !container._headingCounter) container._headingCounter = 0;
+  if (container && !container._collapseCounter) container._collapseCounter = 0;
   for (const block of blocks) {
     const top = stack[stack.length - 1];
     switch (block.type) {
@@ -75,6 +76,14 @@ export function renderBlocks(blocks, container, announce) {
       }
       case 'collapsibleBegin': {
         const details = el('details', 'detail-nested');
+        try {
+          const sidx = container && container.dataset && container.dataset.sectionIndex;
+          if (sidx != null) {
+            const idx = Number(sidx);
+            const counter = (container._collapseCounter = (container._collapseCounter || 0) + 1) - 1;
+            details.id = `detail-${idx}-collapse-${counter}`;
+          }
+        } catch (e) { }
         const summary = el('summary'); summary.textContent = block.title || '';
         details.appendChild(summary);
         const content = el('div', 'detail-nested-content');
@@ -306,9 +315,117 @@ export function buildFilterBar(doc) {
 }
 
 export function buildTOC(doc) {
-  const sections = doc.analyzerSections || []; if (!sections || !sections.length) return null; const nav = document.getElementById('toc') || el('nav', 'toc'); nav.className = 'toc report-navbar__toc'; nav.setAttribute('aria-label', 'Report sections'); const existingTitle = nav.querySelector('.toc-title'); if (existingTitle) existingTitle.remove();
-  if (sections && sections.length) { const container = el('div', 'toc-section'); for (let i = 0; i < sections.length; i++) { const sec = sections[i]; const det = document.createElement('details'); det.open = false; const summ = document.createElement('summary'); const sa = document.createElement('a'); sa.href = '#detail-' + i; sa.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i); summ.appendChild(sa); det.appendChild(summ); const headings = []; if (sec.blocks && sec.blocks.length) { for (let b = 0; b < sec.blocks.length; b++) { const blk = sec.blocks[b]; if (blk && blk.type === 'heading') headings.push({ text: blk.text, index: b }); } } if (headings.length) { const ol = document.createElement('ol'); for (let h = 0; h < headings.length; h++) { const ha = document.createElement('a'); ha.href = `#detail-${i}-heading-${h}`; ha.textContent = headings[h].text || `Heading ${h+1}`; const li = document.createElement('li'); li.appendChild(ha); ol.appendChild(li); } det.appendChild(ol); } container.appendChild(det); } nav.appendChild(container); }
+  const sections = doc.analyzerSections || [];
+  if (!sections || !sections.length) return null;
+
+  const nav = document.getElementById('toc') || el('nav', 'toc');
+  nav.className = 'toc report-navbar__toc';
+  nav.setAttribute('aria-label', 'Report sections');
+  const existingTitle = nav.querySelector('.toc-title');
+  if (existingTitle) existingTitle.remove();
+
+  const container = el('div', 'toc-section');
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i];
+    const det = document.createElement('details');
+    det.open = false;
+    det.dataset.target = '#detail-' + i;
+
+    const summ = document.createElement('summary');
+    summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
+    det.appendChild(summ);
+
+    det.addEventListener('toggle', function () {
+      if (!det.open)
+        return;
+
+      const target = document.getElementById(det.dataset.target ? det.dataset.target.substring(1) : '');
+      if (!target)
+        return;
+
+      try {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', det.dataset.target || '#');
+      } catch (e) { }
+    });
+
+    const tocNodes = buildTocNodes(sec.blocks || [], i);
+    if (tocNodes.length)
+      det.appendChild(renderTocNodes(tocNodes));
+
+    container.appendChild(det);
+  }
+
+  nav.replaceChildren(container);
   return nav;
+}
+
+function buildTocNodes(blocks, sectionIndex) {
+  const root = [];
+  const contextStack = [{ nodes: root, headingStack: [] }];
+  let headingIndex = 0;
+  let collapseIndex = 0;
+
+  for (const block of blocks) {
+    if (!block)
+      continue;
+
+    if (block.type === 'collapsibleBegin') {
+      const current = contextStack[contextStack.length - 1];
+      const node = createTocNode(block.title || 'Narrative', `#detail-${sectionIndex}-collapse-${collapseIndex++}`);
+      current.nodes.push(node);
+      contextStack.push({ nodes: node.children, headingStack: [] });
+      continue;
+    }
+
+    if (block.type === 'collapsibleEnd') {
+      if (contextStack.length > 1)
+        contextStack.pop();
+      continue;
+    }
+
+    if (block.type !== 'heading')
+      continue;
+
+    const current = contextStack[contextStack.length - 1];
+    const level = Math.max(0, block.indentLevel || 0);
+    while (current.headingStack.length > level)
+      current.headingStack.pop();
+
+    let parentNode = null;
+    if (level > 0)
+      parentNode = current.headingStack[level - 1] || current.headingStack[current.headingStack.length - 1] || null;
+
+    const node = createTocNode(block.text || (`Heading ${headingIndex + 1}`), `#detail-${sectionIndex}-heading-${headingIndex++}`);
+    if (parentNode)
+      parentNode.children.push(node);
+    else
+      current.nodes.push(node);
+
+    current.headingStack[level] = node;
+    current.headingStack.length = level + 1;
+  }
+
+  return root;
+}
+
+function createTocNode(text, href) {
+  return { text, href, children: [] };
+}
+
+function renderTocNodes(nodes) {
+  const list = document.createElement('ol');
+  for (const node of nodes) {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = node.href;
+    a.textContent = node.text || '';
+    li.appendChild(a);
+    if (node.children.length)
+      li.appendChild(renderTocNodes(node.children));
+    list.appendChild(li);
+  }
+  return list;
 }
 
 export function buildFindingCard(f, i) {

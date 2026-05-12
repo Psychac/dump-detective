@@ -20,12 +20,14 @@ internal sealed class TrendOrchestrationService(
     IDumpLoader dumpLoader,
     FindingGenerationPipeline findingGenerationPipeline,
     ReportBuilderFacade reportBuilderFacade,
-    TrendAnalyzer trendAnalyzer)
+    TrendAnalyzer trendAnalyzer,
+    AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly IDumpLoader _dumpLoader = dumpLoader;
     private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly TrendAnalyzer _trendAnalyzer = trendAnalyzer;
+    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -211,53 +213,8 @@ internal sealed class TrendOrchestrationService(
             : Path.GetFileName(heapIndex.IndexPath);
         ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, $"{heapIndex.StorageKind} • {indexTarget}");
 
-        RuntimeAnalysisContext context = new()
-        {
-            Runtime = loadContext.Runtime,
-            Heap = loadContext.Heap,
-            Cache = heapCache,
-            Diagnostics = resolved.Diagnostics,
-            ExecutionPolicy = resolved.ExecutionPolicy,
-            Options = new Dictionary<Type, object?>
-            {
-                [typeof(Core.Options.RetentionOptions)] = resolved.MemoryLeak,
-                [typeof(Core.Options.ReferenceChainOptions)] = resolved.ReferenceChain,
-                [typeof(Core.Options.EventLeakOptions)] = resolved.EventLeak,
-                [typeof(Core.Options.DiagnosticsOptions)] = resolved.Diagnostics,
-                [typeof(Core.Options.ExecutionPolicy)] = resolved.ExecutionPolicy,
-                [typeof(Core.Options.CrashAnalysisOptions)] = resolved.Crash,
-                [typeof(Core.Options.AsyncTaskAnalysisOptions)] = resolved.AsyncTaskAnalysis,
-                [typeof(Core.Options.AsyncStateMachineAnalysisOptions)] = resolved.AsyncStateMachineAnalysis,
-                [typeof(Core.Options.ArrayAnalysisOptions)] = resolved.ArrayAnalysis,
-                [typeof(Core.Options.BoxingAnalysisOptions)] = resolved.BoxingAnalysis,
-                [typeof(Core.Options.CollectionAnalysisOptions)] = resolved.Collection,
-                [typeof(Core.Options.StringAnalysisOptions)] = resolved.StringAnalysis,
-                [typeof(Core.Options.SegmentAnalysisOptions)] = resolved.SegmentAnalysis,
-                [typeof(Core.Options.AppDomainAnalysisOptions)] = resolved.AppDomainAnalysis,
-                [typeof(Core.Options.AllocationPatternAnalysisOptions)] = resolved.AllocationPatternAnalysis,
-                [typeof(Core.Options.ThreadStackClusterAnalysisOptions)] = resolved.ThreadStackClusterAnalysis,
-                [typeof(Core.Options.LockGraphAnalysisOptions)] = resolved.LockGraphAnalysis,
-                [typeof(Core.Options.FinalizableObjectAnalysisOptions)] = resolved.FinalizableObjectAnalysis,
-                [typeof(Core.Options.GCGenerationAnalysisOptions)] = resolved.GCGenerationAnalysis,
-                [typeof(Core.Options.GCRootAnalysisOptions)] = resolved.GCRootAnalysis,
-                [typeof(Core.Options.LohFragmentationAnalysisOptions)] = resolved.LohFragmentationAnalysis,
-                [typeof(Core.Options.SegmentReservationAnalysisOptions)] = resolved.SegmentReservationAnalysis,
-                [typeof(Core.Options.ThreadAnalysisOptions)] = resolved.ThreadAnalysis,
-                [typeof(Core.Options.HangAnalysisOptions)] = resolved.HangAnalysis,
-                [typeof(Core.Options.JitAnalysisOptions)] = resolved.JitAnalysis,
-                [typeof(Core.Options.WeakReferenceAnalysisOptions)] = resolved.WeakReferenceAnalysis,
-                [typeof(Core.Options.ObjectShapeAnalysisOptions)] = resolved.ObjectShapeAnalysis,
-                [typeof(Core.Options.ModuleAnalysisOptions)] = resolved.ModuleAnalysis,
-                [typeof(Core.Options.DependentHandleAnalysisOptions)] = resolved.DependentHandleAnalysis,
-                [typeof(Core.Options.GCHandleAnalysisOptions)] = resolved.GCHandleAnalysis,
-                [typeof(Core.Options.StaticRootLeakAnalysisOptions)] = resolved.StaticRootLeakAnalysis,
-                [typeof(Core.Options.MemoryAnalysisOptions)] = resolved.MemoryAnalysis,
-            },
-            DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
-        };
-
-        AnalysisPipeline pipeline = new(activeAnalyzers);
-        IReadOnlyList<AnalyzerRunResult> runs = await pipeline.ExecuteAsync(context, cancellationToken);
+        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(resolved, loadContext, heapCache, activeAnalyzers);
+        IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(context, activeAnalyzers, cancellationToken);
 
         // Generate findings for trend dumps so snapshots include interpreted findings
         try

@@ -18,11 +18,13 @@ namespace DumpDetective.Cli.Services;
 internal sealed class SingleDumpOrchestrationService(
     IDumpLoader dumpLoader,
     FindingGenerationPipeline findingGenerationPipeline,
-    ReportBuilderFacade reportBuilderFacade)
+    ReportBuilderFacade reportBuilderFacade,
+    AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly IDumpLoader _dumpLoader = dumpLoader;
     private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
+    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -84,7 +86,7 @@ internal sealed class SingleDumpOrchestrationService(
     [
         new LoadDumpStage(_dumpLoader),
         new BuildHeapIndexStage(),
-        new RunAnalyzersPipelineStage(),
+        new RunAnalyzersPipelineStage(_analyzerExecutionService),
         new GenerateFindingsStage(_findingGenerationPipeline),
         new BuildReportStage(_reportBuilderFacade),
         new WriteOutputStage()

@@ -1,6 +1,6 @@
 import { renderSparklines } from './report.renderers.js';
 
-export function buildSidebar(tocNode) {
+export function buildSidebar(tocNode, doc) {
   if (!tocNode) return null;
 
   const aside = document.getElementById('report-navbar') || document.querySelector('.report-navbar') || document.createElement('header');
@@ -18,37 +18,23 @@ export function buildSidebar(tocNode) {
     content.replaceChildren(...Array.from(tocNode.childNodes));
   }
 
-  let quickLinks = aside.querySelector('.report-navbar__links');
-  if (!quickLinks) {
-    quickLinks = document.createElement('nav');
-    quickLinks.className = 'report-navbar__links';
-    quickLinks.setAttribute('aria-label', 'Quick links');
-    quickLinks.innerHTML = '<div class="report-navbar__links-title">Quick links</div>';
-    const actionLink = document.createElement('a');
-    actionLink.href = '#developer-action-plan';
-    actionLink.textContent = 'Developer Action Plan';
-    quickLinks.appendChild(actionLink);
-    aside.insertBefore(quickLinks, aside.querySelector('.report-navbar__palette') || tocNode);
-  }
-
   aside.classList.add('expanded');
   aside.classList.remove('collapsed', 'is-open');
 
   const search = document.getElementById('toc-search');
   if (search && !search.dataset.bound) {
     search.dataset.bound = '1';
+    search.setAttribute('aria-label', 'Search sections');
+    if (!search.getAttribute('placeholder')) search.setAttribute('placeholder', 'Search sections');
+    search.setAttribute('spellcheck', 'false');
     search.addEventListener('input', function () {
       const query = search.value.trim().toLowerCase();
       const items = aside.querySelectorAll('.toc a');
-      let visibleCount = 0;
       items.forEach(function (item) {
         const text = item.textContent ? item.textContent.toLowerCase() : '';
         const match = !query || text.includes(query);
         item.closest('li')?.toggleAttribute('hidden', !match);
-        if (match) visibleCount++;
       });
-      const title = aside.querySelector('.toc-title');
-      if (title) title.textContent = query ? ('Sections ' + '(' + visibleCount + ')') : 'Sections';
     });
     search.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') {
@@ -68,9 +54,6 @@ export function setupInteractivity(doc, announce) {
     const active = document.activeElement;
     if (!active) return;
     try {
-      if (active.closest && active.closest('.findings-paged')) {
-        const container = active.closest('.findings-paged'); if (!container) return; const prev = container.querySelector('.findings-prev'); const next = container.querySelector('.findings-next'); if (ev.key === 'ArrowLeft' && prev && !prev.disabled) { prev.click(); ev.preventDefault(); } if (ev.key === 'ArrowRight' && next && !next.disabled) { next.click(); ev.preventDefault(); }
-      }
       if (active.closest && active.closest('.table-with-pagination')) {
         const container = active.closest('.table-with-pagination'); if (!container) return; const prev = container.querySelector('.table-prev'); const next = container.querySelector('.table-next'); if (ev.key === 'ArrowLeft' && prev && !prev.disabled) { prev.click(); ev.preventDefault(); } if (ev.key === 'ArrowRight' && next && !next.disabled) { next.click(); ev.preventDefault(); }
       }
@@ -99,7 +82,7 @@ export function setupInteractivity(doc, announce) {
   (function () {
     const links = document.querySelectorAll('.toc a'); if (!links || !links.length) return; const idToLink = {}; links.forEach(function (l) { if (l.hash) idToLink[l.hash.substring(1)] = l; });
     const obs = new IntersectionObserver(function (entries) { entries.forEach(function (ent) { if (!ent.target || !ent.target.id) return; if (ent.isIntersecting) { document.querySelectorAll('.toc a.active').forEach(function (x) { x.classList.remove('active'); }); const link = idToLink[ent.target.id]; if (link) link.classList.add('active'); } }); }, { root: null, rootMargin: '-40% 0px -40% 0px', threshold: 0 });
-    const targets = document.querySelectorAll('#main [id^="finding-"], #main [id^="detail-"]'); targets.forEach(function (t) { obs.observe(t); });
+    const targets = document.querySelectorAll('#main [id^="detail-"]'); targets.forEach(function (t) { obs.observe(t); });
   })();
 
   // Copy to clipboard (delegated)
@@ -111,9 +94,6 @@ export function setupInteractivity(doc, announce) {
 
   // Download JSON
   const btnJson = document.getElementById('btn-download-json'); if (btnJson) btnJson.addEventListener('click', function () { try { const jsonEl = document.getElementById('report-json'); let payload = null; if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) { try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; } } else payload = window.__REPORT__ || null; const json = JSON.stringify(payload, null, 2); const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnJson.dataset.filename || 'report') + '.json'; a.click(); URL.revokeObjectURL(a.href); } catch (e) { console.error(e); } });
-
-  // Export CSV
-  const btnCsv = document.getElementById('btn-export-csv'); if (btnCsv) btnCsv.addEventListener('click', function () { try { const rows = [['ID', 'Severity', 'Category', 'Title', 'Evidence', 'Recommendation']]; (doc.findings || []).forEach(function (f, i) { rows.push(['finding-' + i, f.severity || '', f.category || '', f.title || '', f.evidence || '', f.recommendation || '']); }); const csv = rows.map(function (r) { return r.map(function (c) { return '"' + (c || '').replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n'); const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnCsv.dataset.filename || 'findings') + '-findings.csv'; a.click(); URL.revokeObjectURL(a.href); } catch (e) { console.error(e); } });
 
   // Print
   const btnPrint = document.getElementById('btn-print'); if (btnPrint) btnPrint.addEventListener('click', function () { window.print(); });

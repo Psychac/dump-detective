@@ -89,43 +89,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             }
         }
 
-        if (doc.Findings.Count > 0)
-        {
-            sb.AppendLine("FINDINGS");
-            sb.AppendLine(StringConstants.Equals80);
-            foreach (FindingRecord f in doc.Findings)
-            {
-                sb.AppendLine($"[{f.Severity}] {f.Title} ({f.Category})");
-                sb.AppendLine(StringConstants.Separator80);
-                // Evidence: prefer structured list when available
-                if (f.EvidenceItems is { Count: > 1 })
-                {
-                    foreach (string ev in f.EvidenceItems)
-                        sb.AppendLine($"- {ev}");
-                }
-                else
-                {
-                    sb.AppendLine(f.Evidence);
-                }
-
-                // Recommendation: render each recommendation item (fallback to scalar)
-                if (f.RecommendationItems is { Count: > 0 } && !string.IsNullOrWhiteSpace(string.Join("", f.RecommendationItems)))
-                {
-                    sb.AppendLine("Remediation:");
-                    foreach (var rec in f.RecommendationItems)
-                        foreach (string line in TableWrapHelper.Wrap(rec, 96))
-                            sb.AppendLine($"  - {line}");
-                }
-                else if (!string.IsNullOrWhiteSpace(f.Recommendation))
-                {
-                    sb.AppendLine("Remediation:");
-                    foreach (string line in TableWrapHelper.Wrap(f.Recommendation, 96))
-                        sb.AppendLine($"  - {line}");
-                }
-                sb.AppendLine();
-            }
-        }
-
         if (doc.Confidence.Count > 0)
         {
             sb.AppendLine("CONFIDENCE NOTES");
@@ -280,22 +243,10 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         // Dedup merged summary removed — no longer useful
 
         // Table Of Contents (Markdown)
-        if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
+        if (doc.AnalyzerSections.Count > 0)
         {
             sb.AppendLine("## Table of Contents");
             sb.AppendLine();
-            if (doc.Findings.Count > 0)
-            {
-                sb.AppendLine("### Findings");
-                sb.AppendLine();
-                for (int ti = 0; ti < doc.Findings.Count; ti++)
-                {
-                    var tf = doc.Findings[ti];
-                    sb.AppendLine($"- [{Esc(tf.Title)}](#finding-{ti})");
-                }
-                sb.AppendLine();
-            }
-
             if (doc.AnalyzerSections.Count > 0)
             {
                 sb.AppendLine("### Analyzer Sections");
@@ -366,38 +317,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             foreach (DeveloperActionRecord action in doc.DeveloperActionPlan)
                 sb.AppendLine($"| {action.Priority} | {Esc(action.Title)} | {Esc(action.Action)} | {Esc(action.Impact)} |");
             sb.AppendLine();
-        }
-
-        if (doc.Findings.Count > 0)
-        {
-            sb.AppendLine("## Findings");
-            sb.AppendLine();
-            for (int i = 0; i < doc.Findings.Count; i++)
-            {
-                FindingRecord f = doc.Findings[i];
-                sb.AppendLine($"<a id=\"finding-{i}\"></a>");
-                sb.AppendLine($"## [{f.Severity}] {Esc(f.Title)}");
-                sb.AppendLine();
-                sb.AppendLine(f.Evidence);
-                sb.AppendLine();
-                if (f.RecommendationItems is { Count: > 0 } && !string.IsNullOrWhiteSpace(string.Join("", f.RecommendationItems)))
-                {
-                    sb.AppendLine("**Remediation**");
-                    sb.AppendLine();
-                    foreach (var rec in f.RecommendationItems)
-                    {
-                        sb.AppendLine($"- {rec}");
-                        sb.AppendLine();
-                    }
-                }
-                else if (!string.IsNullOrWhiteSpace(f.Recommendation))
-                {
-                    sb.AppendLine("**Remediation**");
-                    sb.AppendLine();
-                    sb.AppendLine($"- {f.Recommendation}");
-                    sb.AppendLine();
-                }
-            }
         }
 
         if (doc.Confidence.Count > 0)

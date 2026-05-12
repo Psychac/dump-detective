@@ -30,17 +30,11 @@ async function bootstrap() {
   main.appendChild(R.buildHeader(doc));
 
   const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
-
-  const filterBar = R.buildFilterBar(doc);
   const toc = R.buildTOC(doc);
 
-  UI.buildSidebar(toc);
+  UI.buildSidebar(toc, doc);
 
   const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
-
-  if (filterBar) main.appendChild(filterBar);
-
-  const findingsPaged = R.renderFindingsPaged(doc, announce); if (findingsPaged) main.appendChild(findingsPaged);
 
   const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
 

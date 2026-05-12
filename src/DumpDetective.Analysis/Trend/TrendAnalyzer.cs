@@ -13,9 +13,6 @@ namespace DumpDetective.Analysis.Trend
 
         public IReadOnlyList<AnalyzerTrendResult> CompareAll(AnalysisSnapshot baseline, AnalysisSnapshot current)
         {
-            Dictionary<string, IReadOnlyList<NewLeakSignal>> leakSignalsByAnalyzer =
-                ComputeNewLeakSignals(baseline, current);
-
             var results = new List<AnalyzerTrendResult>();
             foreach (var (analyzerName, baselineDomain) in baseline.DomainResults)
             {
@@ -40,17 +37,18 @@ namespace DumpDetective.Analysis.Trend
                 if (deltas.Count == 0)
                     continue;
 
-                leakSignalsByAnalyzer.TryGetValue(outputAnalyzerName, out var signals);
-                results.Add(new AnalyzerTrendResult(outputAnalyzerName, deltas)
-                {
-                    NewLeakSignals = signals ?? []
-                });
+                results.Add(new AnalyzerTrendResult(outputAnalyzerName, deltas));
             }
 
             return results;
         }
 
-        private static Dictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignals(
+        public IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignals(AnalysisSnapshot baseline, AnalysisSnapshot current)
+        {
+            return ComputeNewLeakSignalsCore(baseline, current);
+        }
+
+        private static Dictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignalsCore(
             AnalysisSnapshot baseline,
             AnalysisSnapshot current)
         {

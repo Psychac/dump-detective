@@ -4,6 +4,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
@@ -43,6 +44,7 @@ internal sealed class TrendReportComposer(
         analyzerSections.Add(BuildTrendComparisonSection(
             trendData.Steps,
             trendData.Overall,
+            trendData.NewLeakSignalsByAnalyzer,
             lifecycle,
             trendData.Timeline,
             trendData.Snapshots));
@@ -242,6 +244,7 @@ internal sealed class TrendReportComposer(
     private static AnalyzerDetailSection BuildTrendComparisonSection(
         IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> steps,
         IReadOnlyList<AnalyzerTrendResult> overall,
+        IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> leakSignalsByAnalyzer,
         FindingLifecycleResult lifecycle,
         IReadOnlyList<AnalyzerMetricTimeline> timeline,
         IReadOnlyList<AnalysisSnapshot> snapshots)
@@ -419,9 +422,8 @@ internal sealed class TrendReportComposer(
         }
 
         // New leak signals from cross-snapshot type comparison
-        var allLeakSignals = overall
-            .Where(r => r.NewLeakSignals.Count > 0)
-            .SelectMany(r => r.NewLeakSignals.Select(s => (r.AnalyzerName, Signal: s)))
+        var allLeakSignals = leakSignalsByAnalyzer
+            .SelectMany(kvp => kvp.Value.Select(s => (AnalyzerName: kvp.Key, Signal: s)))
             .OrderByDescending(x => x.Signal.CurrentBytes)
             .Take(10)
             .ToList();
@@ -564,6 +566,7 @@ internal sealed class TrendReportComposer(
 internal sealed record TrendReportData(
     IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> Steps,
     IReadOnlyList<AnalyzerTrendResult> Overall,
+    IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> NewLeakSignalsByAnalyzer,
     IReadOnlyList<AnalyzerMetricTimeline> Timeline,
     IReadOnlyList<AnalysisSnapshot> Snapshots,
     IReadOnlyList<InsightFinding> NewFindings,

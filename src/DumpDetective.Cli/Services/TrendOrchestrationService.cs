@@ -94,6 +94,7 @@ internal sealed class TrendOrchestrationService(
         TrendReportData trendData = new(
             Steps: _trendAnalyzer.CompareSeries(snapshots),
             Overall: _trendAnalyzer.CompareAll(baseline, current),
+            NewLeakSignalsByAnalyzer: _trendAnalyzer.ComputeNewLeakSignals(baseline, current),
             Timeline: _trendAnalyzer.ExtractTimeline(snapshots),
             Snapshots: snapshots,
             NewFindings: lifecycle.NewFindings,

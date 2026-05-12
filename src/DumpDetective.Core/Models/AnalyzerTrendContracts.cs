@@ -87,18 +87,10 @@ internal interface IAnalyzerTrendComparer
     IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current);
 }
 
-/// <summary>A type that appeared in or significantly grew within current leak results relative to baseline.</summary>
-internal sealed record NewLeakSignal(
-    string TypeName,
-    double BaselineBytes,
-    double CurrentBytes,
-    string Source);
-
 internal sealed record AnalyzerTrendResult(
 string AnalyzerName,
 IReadOnlyList<MetricDelta> Deltas)
 {
-    public IReadOnlyList<NewLeakSignal> NewLeakSignals { get; init; } = [];
     public IReadOnlyList<MetricDelta> Regressions =>
         Deltas.Where(d => d.IsRegression).OrderByDescending(d => Math.Abs(d.Delta)).ToList();
 

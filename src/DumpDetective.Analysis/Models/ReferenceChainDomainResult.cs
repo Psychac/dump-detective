@@ -10,7 +10,8 @@ internal sealed record ReferenceChainDomainResult(
     double RetainedPercent,
     IReadOnlyList<NameCountEntry>? TopRetainedTypes = null,
     IReadOnlyList<string>? SampleReferenceChains = null,
-    IReadOnlyList<ReferenceTypeSampleSnapshot>? TopTypeSampleTraces = null) : AnalyzerDomainResult;
+    IReadOnlyList<ReferenceTypeSampleSnapshot>? TopTypeSampleTraces = null,
+    int TraversalLimitedSamples = 0) : AnalyzerDomainResult;
 
 internal sealed record ReferenceTypeSampleSnapshot(
     string TypeName,

@@ -16,7 +16,8 @@ internal sealed record CollectionDomainResult(
     int Queues,
     ulong TotalWastedMemory,
     int WastefulCollectionCount,
-    IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null) : AnalyzerDomainResult;
+    IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null,
+    IReadOnlyDictionary<CollectionKind, int>? WasteCountsByKind = null) : AnalyzerDomainResult;
 internal sealed record WastefulCollectionSnapshot(
     string Type,
     CollectionKind Kind,

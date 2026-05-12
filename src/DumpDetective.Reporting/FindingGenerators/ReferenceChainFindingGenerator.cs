@@ -41,10 +41,10 @@ internal sealed class ReferenceChainFindingGenerator : IFindingGenerator
             MetricValue: r.RetainedPercent,
             MetricUnit: "% retained-samples"));
 
-        // Traversal-limit finding derived from metrics stored on the result
-        if (r.Metrics.TryGetValue("traversalLimitedSamples", out object? limitedObj)
-            && limitedObj is long limitedSamples and > 0)
+        // Traversal-limit finding derived from the typed result property.
+        if (r.TraversalLimitedSamples > 0)
         {
+            long limitedSamples = r.TraversalLimitedSamples;
             double limitedPct = r.AnalyzedSamples == 0 ? 0 : limitedSamples * 100.0 / r.AnalyzedSamples;
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,

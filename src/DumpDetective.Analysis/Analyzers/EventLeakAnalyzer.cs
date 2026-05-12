@@ -22,7 +22,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            EventLeakOptions options = context.GetOption<EventLeakOptions>();
+            EventLeakOptions options = context.AnalysisOptions.EventLeak;
 
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }

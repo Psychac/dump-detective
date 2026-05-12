@@ -22,7 +22,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AllocationPatternAnalysisOptions options = context.GetOption<AllocationPatternAnalysisOptions>();
+            AllocationPatternAnalysisOptions options = context.AnalysisOptions.AllocationPatternAnalysis;
             return ValueTask.FromResult(Analyze(context, options).Stamp(this));
         }
 

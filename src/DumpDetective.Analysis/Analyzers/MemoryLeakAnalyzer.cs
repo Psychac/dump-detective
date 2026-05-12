@@ -20,8 +20,8 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            RetentionOptions options = context.GetOption<RetentionOptions>();
-            ExecutionPolicy policy = context.GetOption<ExecutionPolicy>();
+                    RetentionOptions options = context.AnalysisOptions.MemoryLeak;
+                    ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
             return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, options, policy, context.Progress).Stamp(this));
         }
@@ -394,7 +394,6 @@ namespace DumpDetective.Analysis.Analyzers
                     };
                 }
             }
-
             return byType
                 .Select(static kvp => new RetentionTypeSnapshot(
                     TypeName: kvp.Key,

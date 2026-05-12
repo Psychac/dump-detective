@@ -28,7 +28,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AppDomainAnalysisOptions options = context.GetOption<AppDomainAnalysisOptions>();
+            AppDomainAnalysisOptions options = context.AnalysisOptions.AppDomainAnalysis;
             return ValueTask.FromResult(
                 Analyze(context.Runtime, context.Cache, options, cancellationToken).Stamp(this));
         }
@@ -183,9 +183,10 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalDynamicModules: totalDynamicModules,
                 DynamicModuleBytes: dynamicModuleBytes,
                 AnonymousModuleCount: anonymousModuleCount,
-                TopModulesByTypeCount: topModules)
+                TopModulesByTypeCount: topModules,
+                ExcludedModuleCount: totalExcludedModules)
                 with
-            { Warnings = warnings, Metrics = new Dictionary<string, object?> { ["ExcludedModuleCount"] = totalExcludedModules } };
+            { Warnings = warnings };
 
             return result;
         }

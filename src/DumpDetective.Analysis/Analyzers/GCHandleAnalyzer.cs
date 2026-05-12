@@ -15,7 +15,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            GCHandleAnalysisOptions options = context.GetOption<GCHandleAnalysisOptions>();
+            GCHandleAnalysisOptions options = context.AnalysisOptions.GCHandleAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 

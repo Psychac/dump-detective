@@ -22,7 +22,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var opts = context.GetOption<SegmentAnalysisOptions>();
+        var opts = context.AnalysisOptions.SegmentAnalysis;
         return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects).Stamp(this));
     }
 

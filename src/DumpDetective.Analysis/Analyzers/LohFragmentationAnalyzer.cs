@@ -30,7 +30,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            LohFragmentationAnalysisOptions options = context.GetOption<LohFragmentationAnalysisOptions>();
+            LohFragmentationAnalysisOptions options = context.AnalysisOptions.LohFragmentationAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
         }
 

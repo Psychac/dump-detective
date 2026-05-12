@@ -31,7 +31,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            BoxingAnalysisOptions options = context.GetOption<BoxingAnalysisOptions>();
+            BoxingAnalysisOptions options = context.AnalysisOptions.BoxingAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 

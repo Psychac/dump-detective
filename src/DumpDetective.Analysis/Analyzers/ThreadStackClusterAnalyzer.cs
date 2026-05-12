@@ -18,7 +18,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ThreadStackClusterAnalysisOptions options = context.GetOption<ThreadStackClusterAnalysisOptions>();
+            ThreadStackClusterAnalysisOptions options = context.AnalysisOptions.ThreadStackClusterAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Progress, options).Stamp(this));
         }
 

@@ -15,7 +15,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            LockGraphAnalysisOptions options = context.GetOption<LockGraphAnalysisOptions>();
+            LockGraphAnalysisOptions options = context.AnalysisOptions.LockGraphAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress, options).Stamp(this));
         }
 

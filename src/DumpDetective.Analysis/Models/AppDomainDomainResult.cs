@@ -26,4 +26,5 @@ internal sealed record AppDomainDomainResult(
     int TotalDynamicModules,
     ulong DynamicModuleBytes,
     int AnonymousModuleCount,
-    IReadOnlyList<ModuleTypeCountEntry> TopModulesByTypeCount) : AnalyzerDomainResult;
+    IReadOnlyList<ModuleTypeCountEntry> TopModulesByTypeCount,
+    int ExcludedModuleCount = 0) : AnalyzerDomainResult;

@@ -17,13 +17,11 @@ namespace DumpDetective.Cli.Services;
 /// </summary>
 internal sealed class TrendOrchestrationService(
     IDumpLoader dumpLoader,
-    FindingGenerationPipeline findingGenerationPipeline,
     ReportBuilderFacade reportBuilderFacade,
     TrendAnalyzer trendAnalyzer,
     AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly IDumpLoader _dumpLoader = dumpLoader;
-    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly TrendAnalyzer _trendAnalyzer = trendAnalyzer;
     private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
@@ -214,16 +212,6 @@ internal sealed class TrendOrchestrationService(
 
         RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(resolved, loadContext, heapCache, activeAnalyzers);
         IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(context, activeAnalyzers, cancellationToken);
-
-        // Generate findings for trend dumps so snapshots include interpreted findings
-        try
-        {
-            runs = _findingGenerationPipeline.Generate(runs, cancellationToken);
-        }
-        catch
-        {
-            // Swallow to avoid failing trend execution; diagnostics will surface elsewhere
-        }
 
         runs = AnalyzerFilterService.BuildSkippedByFilterResults(allAnalyzers, activeAnalyzers)
             .Concat(runs)

@@ -28,7 +28,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            FinalizableObjectAnalysisOptions options = context.GetOption<FinalizableObjectAnalysisOptions>();
+            FinalizableObjectAnalysisOptions options = context.AnalysisOptions.FinalizableObjectAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 

@@ -35,7 +35,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AsyncTaskAnalysisOptions options = context.GetOption<AsyncTaskAnalysisOptions>();
+        AsyncTaskAnalysisOptions options = context.AnalysisOptions.AsyncTaskAnalysis;
         return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
     }
 

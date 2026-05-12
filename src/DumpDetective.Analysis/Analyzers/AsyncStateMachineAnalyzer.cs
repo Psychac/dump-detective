@@ -35,7 +35,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AsyncStateMachineAnalysisOptions options = context.GetOption<AsyncStateMachineAnalysisOptions>();
+            AsyncStateMachineAnalysisOptions options = context.AnalysisOptions.AsyncStateMachineAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
         }
 

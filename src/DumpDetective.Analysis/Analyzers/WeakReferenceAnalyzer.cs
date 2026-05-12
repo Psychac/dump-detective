@@ -45,7 +45,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            WeakReferenceAnalysisOptions options = context.GetOption<WeakReferenceAnalysisOptions>();
+            WeakReferenceAnalysisOptions options = context.AnalysisOptions.WeakReferenceAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 

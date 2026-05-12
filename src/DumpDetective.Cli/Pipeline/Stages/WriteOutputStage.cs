@@ -61,7 +61,7 @@ internal sealed class WriteOutputStage : IAnalysisStage
                     string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
                     // Make artifacts folder specific to the dump being analyzed to avoid collisions
                     // Prefer the resolved dump path for naming; fall back to the report document DumpPath
-                    string resolvedDump = state.Resolved?.DumpPath ?? doc?.DumpPath ?? string.Empty;
+                    string resolvedDump = state.Resolved?.DumpPath ?? string.Empty;
                     string dumpBaseName = !string.IsNullOrWhiteSpace(resolvedDump)
                         ? Path.GetFileNameWithoutExtension(resolvedDump)
                         : "default";

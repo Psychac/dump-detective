@@ -302,8 +302,8 @@ public sealed class CrashInferenceTests
             Category = "Crash",
         };
 
-    private static AnalysisReportDocument BuildMinimalDoc(AnalyzerDetailSection section)
-        => new AnalysisReportDocument
+    private static SingleDumpReportDocument BuildMinimalDoc(AnalyzerDetailSection section)
+        => new SingleDumpReportDocument
         {
             DumpPath = "test.dmp",
             GeneratedAtUtc = DateTime.UtcNow,

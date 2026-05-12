@@ -73,7 +73,6 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, BoxingFindingGenerator>();
         services.AddSingleton<IFindingGenerator, JitFindingGenerator>();
 
-        // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
         services.AddSingleton<CanonicalReportDocumentFactory>();
 

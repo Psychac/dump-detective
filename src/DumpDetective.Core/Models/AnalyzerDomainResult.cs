@@ -4,7 +4,6 @@ public abstract record AnalyzerDomainResult
 {
     public string AnalyzerName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
-    public IReadOnlyDictionary<string, object?> Metrics { get; init; } = new Dictionary<string, object?>();
     public IReadOnlyCollection<string> Warnings { get; init; } = Array.Empty<string>();
 }
 

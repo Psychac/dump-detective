@@ -78,7 +78,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _options = context.GetOption<CollectionAnalysisOptions>();
+            _options = context.AnalysisOptions.Collection;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 
@@ -126,13 +126,8 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.Queues,
                 collectionStats.TotalWastedMemory,
                 collectionStats.WastefulCollectionCount,
-                topSnapshots);
-
-            // Copy metrics into domain result
-            if (collectionStats.Metrics != null && collectionStats.Metrics.Count > 0)
-            {
-                domainResult = domainResult with { Metrics = collectionStats.Metrics };
-            }
+                topSnapshots,
+                collectionStats.WasteCountsByKind);
 
             if (collectionStats.TotalCollections == 0)
             {
@@ -477,84 +472,24 @@ namespace DumpDetective.Analysis.Analyzers
                 skippedDictionaries, skippedLists, skippedHashSets, skippedQueues,
                 stats.WastefulCollectionCount);
 
-            // Aggregate metrics and simple percentiles for distributions
+            // Aggregate a typed per-kind breakdown for reporting.
             try
             {
                 int wasteCount = stats.WastefulCollectionCount;
                 if (wasteCount > 0)
                 {
-                    double avg = stats.TotalWastedMemory / (double)wasteCount;
-
-                    var metrics = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
                     {
-                        ["Waste.AvgBytes"] = avg,
-                        ["Waste.TotalBytes"] = stats.TotalWastedMemory,
-                        ["Waste.Count"] = wasteCount
+                        [CollectionKind.Dictionary] = dictionaries,
+                        [CollectionKind.List] = lists,
+                        [CollectionKind.ArrayList] = arrayLists,
+                        [CollectionKind.Stack] = stacks,
+                        [CollectionKind.SortedList] = sortedLists,
+                        [CollectionKind.SortedSet] = sortedSets,
+                        [CollectionKind.HashSet] = hashSets,
+                        [CollectionKind.Queue] = queues,
                     };
-
-                    // Per-kind counts for reporting
-                    var perKindCounts = new Dictionary<string, int>(StringComparer.Ordinal)
-                    {
-                        [DumpDetective.Core.Models.CollectionKind.Dictionary.ToString()] = dictionaries,
-                        [DumpDetective.Core.Models.CollectionKind.List.ToString()] = lists,
-                        [DumpDetective.Core.Models.CollectionKind.ArrayList.ToString()] = arrayLists,
-                        [DumpDetective.Core.Models.CollectionKind.Stack.ToString()] = stacks,
-                        [DumpDetective.Core.Models.CollectionKind.SortedList.ToString()] = sortedLists,
-                        [DumpDetective.Core.Models.CollectionKind.SortedSet.ToString()] = sortedSets,
-                        [DumpDetective.Core.Models.CollectionKind.HashSet.ToString()] = hashSets,
-                        [DumpDetective.Core.Models.CollectionKind.Queue.ToString()] = queues,
-                    };
-
-                    metrics["Waste.Counts.ByKind"] = perKindCounts;
-
-                    // Histogram buckets (overall)
-                    var buckets = new Dictionary<string, int>(StringComparer.Ordinal)
-                    {
-                        ["<1KB"] = wasteUnder1Kb,
-                        ["1KB-10KB"] = waste1To10Kb,
-                        ["10KB-100KB"] = waste10To100Kb,
-                        ["100KB-1MB"] = waste100KbTo1Mb,
-                        [">=1MB"] = wasteAtLeast1Mb
-                    };
-
-                    // Per-kind running stats (count + average) to avoid retaining duplicate value arrays.
-                    var perKindRunning = new Dictionary<CollectionKind, (int Count, ulong Sum)>
-                    {
-                        [CollectionKind.Dictionary] = (wasteCountByKind[(int)CollectionKind.Dictionary], wasteBytesByKind[(int)CollectionKind.Dictionary]),
-                        [CollectionKind.List] = (wasteCountByKind[(int)CollectionKind.List], wasteBytesByKind[(int)CollectionKind.List]),
-                        [CollectionKind.ArrayList] = (wasteCountByKind[(int)CollectionKind.ArrayList], wasteBytesByKind[(int)CollectionKind.ArrayList]),
-                        [CollectionKind.Stack] = (wasteCountByKind[(int)CollectionKind.Stack], wasteBytesByKind[(int)CollectionKind.Stack]),
-                        [CollectionKind.SortedList] = (wasteCountByKind[(int)CollectionKind.SortedList], wasteBytesByKind[(int)CollectionKind.SortedList]),
-                        [CollectionKind.SortedSet] = (wasteCountByKind[(int)CollectionKind.SortedSet], wasteBytesByKind[(int)CollectionKind.SortedSet]),
-                        [CollectionKind.HashSet] = (wasteCountByKind[(int)CollectionKind.HashSet], wasteBytesByKind[(int)CollectionKind.HashSet]),
-                        [CollectionKind.Queue] = (wasteCountByKind[(int)CollectionKind.Queue], wasteBytesByKind[(int)CollectionKind.Queue]),
-                    };
-
-                    metrics["Waste.Histogram"] = buckets;
-                    // Add per-kind summary metrics without duplicating all waste values in memory.
-                    var perKindMetrics = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    foreach (var kv in perKindRunning)
-                    {
-                        if (kv.Value.Count == 0)
-                        {
-                            perKindMetrics[kv.Key.ToString()] = new Dictionary<string, object?>
-                            {
-                                ["Count"] = 0
-                            };
-                            continue;
-                        }
-
-                        double kAvg = kv.Value.Sum / (double)kv.Value.Count;
-
-                        perKindMetrics[kv.Key.ToString()] = new Dictionary<string, object?>
-                        {
-                            ["Count"] = kv.Value.Count,
-                            ["AvgBytes"] = kAvg
-                        };
-                    }
-
-                    metrics["Waste.Histogram.ByKind"] = perKindMetrics;
-                    stats.Metrics = metrics;
+                    stats.WasteCountsByKind = wasteCountsByKind;
                 }
             }
             catch (Exception ex)
@@ -1533,7 +1468,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ulong TotalWastedMemory { get; set; }
         public int WastefulCollectionCount { get; set; }
         public List<WastefulCollection> WastefulCollections { get; set; } = new();
-        public IReadOnlyDictionary<string, object?> Metrics { get; set; } = new Dictionary<string, object?>();
+        public IReadOnlyDictionary<CollectionKind, int> WasteCountsByKind { get; set; } = new Dictionary<CollectionKind, int>();
     }
 
     internal class WastefulCollection

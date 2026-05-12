@@ -27,7 +27,7 @@ public sealed class JitAnalyzer : IAnalyzer
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        JitAnalysisOptions options = context.GetOption<JitAnalysisOptions>();
+        JitAnalysisOptions options = context.AnalysisOptions.JitAnalysis;
         return ValueTask.FromResult(Analyze(context.Runtime, options, cancellationToken).Stamp(this));
     }
 

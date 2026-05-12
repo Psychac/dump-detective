@@ -1,3 +1,4 @@
+using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using DumpDetective.Analysis.Cache;
@@ -28,7 +29,7 @@ public class PipelineHotspotBenchmark
             .Select(i => (IAnalyzer)new SyntheticAnalyzer($"Analyzer-{i:00}", i))
             .ToArray();
 
-        _pipeline = new AnalysisPipeline(analyzers);
+        _pipeline = new AnalysisPipeline(analyzers, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
         _context = new RuntimeAnalysisContext
         {
             Runtime = null!,

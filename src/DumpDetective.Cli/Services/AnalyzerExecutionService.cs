@@ -11,8 +11,10 @@ using System.Text;
 
 namespace DumpDetective.Cli.Services;
 
-internal sealed class AnalyzerExecutionService
+internal sealed class AnalyzerExecutionService(FindingGenerationPipeline findingGenerationPipeline)
 {
+    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
+
     public RuntimeAnalysisContext BuildContext(
         ResolvedExecutionOptions resolved,
         DumpLoadContext loadContext,
@@ -47,43 +49,43 @@ internal sealed class AnalyzerExecutionService
             Runtime = loadContext.Runtime,
             Cache = heapCache,
             RuntimeFacade = new RuntimeFacade(loadContext.Runtime, loadContext.Heap),
+            AnalysisOptions = new AnalysisOptions
+            {
+                MemoryLeak = resolved.MemoryLeak,
+                ReferenceChain = resolved.ReferenceChain,
+                EventLeak = resolved.EventLeak,
+                Diagnostics = resolved.Diagnostics,
+                ExecutionPolicy = resolved.ExecutionPolicy,
+                Crash = resolved.Crash,
+                AsyncTaskAnalysis = resolved.AsyncTaskAnalysis,
+                AsyncStateMachineAnalysis = resolved.AsyncStateMachineAnalysis,
+                ArrayAnalysis = resolved.ArrayAnalysis,
+                BoxingAnalysis = resolved.BoxingAnalysis,
+                Collection = resolved.Collection,
+                StringAnalysis = resolved.StringAnalysis,
+                SegmentAnalysis = resolved.SegmentAnalysis,
+                AppDomainAnalysis = resolved.AppDomainAnalysis,
+                AllocationPatternAnalysis = resolved.AllocationPatternAnalysis,
+                ThreadStackClusterAnalysis = resolved.ThreadStackClusterAnalysis,
+                LockGraphAnalysis = resolved.LockGraphAnalysis,
+                FinalizableObjectAnalysis = resolved.FinalizableObjectAnalysis,
+                GCGenerationAnalysis = resolved.GCGenerationAnalysis,
+                GCRootAnalysis = resolved.GCRootAnalysis,
+                LohFragmentationAnalysis = resolved.LohFragmentationAnalysis,
+                SegmentReservationAnalysis = resolved.SegmentReservationAnalysis,
+                ThreadAnalysis = threadOptions ?? resolved.ThreadAnalysis,
+                HangAnalysis = resolved.HangAnalysis,
+                JitAnalysis = resolved.JitAnalysis,
+                WeakReferenceAnalysis = resolved.WeakReferenceAnalysis,
+                ObjectShapeAnalysis = resolved.ObjectShapeAnalysis,
+                ModuleAnalysis = resolved.ModuleAnalysis,
+                DependentHandleAnalysis = resolved.DependentHandleAnalysis,
+                GCHandleAnalysis = resolved.GCHandleAnalysis,
+                StaticRootLeakAnalysis = resolved.StaticRootLeakAnalysis,
+                MemoryAnalysis = resolved.MemoryAnalysis,
+            },
             Diagnostics = resolved.Diagnostics,
             ExecutionPolicy = resolved.ExecutionPolicy,
-            Options = new Dictionary<Type, object?>
-            {
-                [typeof(RetentionOptions)] = resolved.MemoryLeak,
-                [typeof(ReferenceChainOptions)] = resolved.ReferenceChain,
-                [typeof(EventLeakOptions)] = resolved.EventLeak,
-                [typeof(DiagnosticsOptions)] = resolved.Diagnostics,
-                [typeof(ExecutionPolicy)] = resolved.ExecutionPolicy,
-                [typeof(CrashAnalysisOptions)] = resolved.Crash,
-                [typeof(AsyncTaskAnalysisOptions)] = resolved.AsyncTaskAnalysis,
-                [typeof(AsyncStateMachineAnalysisOptions)] = resolved.AsyncStateMachineAnalysis,
-                [typeof(ArrayAnalysisOptions)] = resolved.ArrayAnalysis,
-                [typeof(BoxingAnalysisOptions)] = resolved.BoxingAnalysis,
-                [typeof(CollectionAnalysisOptions)] = resolved.Collection,
-                [typeof(StringAnalysisOptions)] = resolved.StringAnalysis,
-                [typeof(SegmentAnalysisOptions)] = resolved.SegmentAnalysis,
-                [typeof(AppDomainAnalysisOptions)] = resolved.AppDomainAnalysis,
-                [typeof(AllocationPatternAnalysisOptions)] = resolved.AllocationPatternAnalysis,
-                [typeof(ThreadStackClusterAnalysisOptions)] = resolved.ThreadStackClusterAnalysis,
-                [typeof(LockGraphAnalysisOptions)] = resolved.LockGraphAnalysis,
-                [typeof(FinalizableObjectAnalysisOptions)] = resolved.FinalizableObjectAnalysis,
-                [typeof(GCGenerationAnalysisOptions)] = resolved.GCGenerationAnalysis,
-                [typeof(GCRootAnalysisOptions)] = resolved.GCRootAnalysis,
-                [typeof(LohFragmentationAnalysisOptions)] = resolved.LohFragmentationAnalysis,
-                [typeof(SegmentReservationAnalysisOptions)] = resolved.SegmentReservationAnalysis,
-                [typeof(ThreadAnalysisOptions)] = threadOptions,
-                [typeof(HangAnalysisOptions)] = resolved.HangAnalysis,
-                [typeof(JitAnalysisOptions)] = resolved.JitAnalysis,
-                [typeof(WeakReferenceAnalysisOptions)] = resolved.WeakReferenceAnalysis,
-                [typeof(ObjectShapeAnalysisOptions)] = resolved.ObjectShapeAnalysis,
-                [typeof(ModuleAnalysisOptions)] = resolved.ModuleAnalysis,
-                [typeof(DependentHandleAnalysisOptions)] = resolved.DependentHandleAnalysis,
-                [typeof(GCHandleAnalysisOptions)] = resolved.GCHandleAnalysis,
-                [typeof(StaticRootLeakAnalysisOptions)] = resolved.StaticRootLeakAnalysis,
-                [typeof(MemoryAnalysisOptions)] = resolved.MemoryAnalysis,
-            },
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };
     }
@@ -93,7 +95,7 @@ internal sealed class AnalyzerExecutionService
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         CancellationToken cancellationToken)
     {
-        AnalysisPipeline pipeline = new(activeAnalyzers);
+        AnalysisPipeline pipeline = new(activeAnalyzers, _findingGenerationPipeline);
         return await pipeline.ExecuteAsync(context, cancellationToken);
     }
 }

@@ -20,7 +20,6 @@ namespace DumpDetective.Analysis.Analyzers;
 public sealed class SegmentReservationAnalyzer : IAnalyzer
 {
     // Address space pressure thresholds (§25.3).
-
     public void Dispose() { }
     public string Name => "Segment Reservation Analysis";
     public string Category => "Memory";
@@ -30,7 +29,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        SegmentReservationAnalysisOptions options = context.GetOption<SegmentReservationAnalysisOptions>();
+        SegmentReservationAnalysisOptions options = context.AnalysisOptions.SegmentReservationAnalysis;
         return ValueTask.FromResult(Analyze(context.Heap, options, cancellationToken).Stamp(this));
     }
 

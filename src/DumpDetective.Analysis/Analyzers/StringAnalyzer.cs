@@ -19,7 +19,6 @@ namespace DumpDetective.Analysis.Analyzers;
 internal sealed class StringAnalyzer : IAnalyzer
 {
     // File-level constants removed. Use StringAnalysisOptions for configurable thresholds.
-
     /// <inheritdoc/>
     public string Name => "String Analysis";
 
@@ -34,7 +33,7 @@ internal sealed class StringAnalyzer : IAnalyzer
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        StringAnalysisOptions stringOptions = context.GetOption<StringAnalysisOptions>();
+        StringAnalysisOptions stringOptions = context.AnalysisOptions.StringAnalysis;
         ulong totalManagedBytes = GetTotalManagedBytes(context);
         List<(ulong Start, ulong End)> fohSegments = BuildFohSegments(context.Heap);
 

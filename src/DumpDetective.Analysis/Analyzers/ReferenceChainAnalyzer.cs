@@ -19,9 +19,9 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ReferenceChainOptions options = context.GetOption<ReferenceChainOptions>();
+            ReferenceChainOptions options = context.AnalysisOptions.ReferenceChain;
+            ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-            ExecutionPolicy policy = context.GetOption<ExecutionPolicy>();
             return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress).Stamp(this));
         }
 
@@ -127,23 +127,17 @@ namespace DumpDetective.Analysis.Analyzers
                 .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
                 .ToList();
 
-            var metrics = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["SearchMode"] = options.SearchMode.ToString(),
-                ["PrunedNodes"] = telemetry.PrunedNodes,
-                ["LargeFanoutNodesSkipped"] = telemetry.LargeFanoutNodesSkipped,
-                ["CandidateSetSize"] = telemetry.TotalCandidateSetSize,
-                ["ReverseIndexEntries"] = telemetry.ReverseIndexEntries,
-                ["traversalLimitedSamples"] = (long)traversalLimitedSamples,
-            };
-
-            return new ReferenceChainDomainResult(analyzedSamples, retainedSamples, retainedPct, topRetainedTypes, sampleReferenceChains, topTypeSampleTraces)
-            {
-                Metrics = metrics
-            };
+            return new ReferenceChainDomainResult(
+                analyzedSamples,
+                retainedSamples,
+                retainedPct,
+                topRetainedTypes,
+                sampleReferenceChains,
+                topTypeSampleTraces,
+                traversalLimitedSamples);
         }
 
-        public bool AnalyzeObject(ClrHeap heap, IHeapAnalysisCache cache, ulong objectAddress)
+        internal bool AnalyzeObject(ClrHeap heap, IHeapAnalysisCache cache, ulong objectAddress)
         {
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
             List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);

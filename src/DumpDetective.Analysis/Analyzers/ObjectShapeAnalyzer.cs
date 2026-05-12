@@ -24,7 +24,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ObjectShapeAnalysisOptions options = context.GetOption<ObjectShapeAnalysisOptions>();
+            ObjectShapeAnalysisOptions options = context.AnalysisOptions.ObjectShapeAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
         }
 

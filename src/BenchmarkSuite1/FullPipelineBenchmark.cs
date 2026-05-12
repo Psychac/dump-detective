@@ -102,7 +102,7 @@ public class FullPipelineBenchmark
             new ThreadAnalyzer(),
             new LockGraphAnalyzer(),
             new EventLeakAnalyzer(),
-        });
+        }, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
     }
 
     [GlobalCleanup]

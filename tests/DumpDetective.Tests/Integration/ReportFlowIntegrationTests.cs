@@ -56,8 +56,8 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultSectionBuilderFactory(),
-        new ReportSerializer(),
-        new TrendReportComposer([], new ReportSerializer()));
+        new CanonicalReportDocumentFactory(new ReportSerializer()),
+        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
@@ -95,8 +95,8 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultSectionBuilderFactory(),
-        new ReportSerializer(),
-        new TrendReportComposer([], new ReportSerializer()));
+        new CanonicalReportDocumentFactory(new ReportSerializer()),
+        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         using CancellationTokenSource cts = new();
         cts.Cancel();

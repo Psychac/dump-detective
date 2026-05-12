@@ -10,6 +10,10 @@ public class AnalysisContext
     public required ClrRuntime Runtime { get; init; }
     public ClrHeap Heap => Runtime.Heap;
     public required IHeapAnalysisCache Cache { get; init; }
+    /// <summary>
+    /// Typed per-run analysis options. Prefer this over the legacy type-keyed <see cref="Options"/> map.
+    /// </summary>
+    public AnalysisOptions AnalysisOptions { get; init; } = new();
     public DiagnosticsOptions Diagnostics { get; init; } = new();
     /// <summary>
     /// Per-analyzer options, keyed by the option type itself.

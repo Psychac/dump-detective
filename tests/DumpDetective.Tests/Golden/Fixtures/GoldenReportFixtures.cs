@@ -5,7 +5,7 @@ namespace DumpDetective.Tests.Golden.Fixtures;
 
 internal static class GoldenReportFixtures
 {
-    public static AnalysisReportDocument Build(string fixtureName)
+    public static SingleDumpReportDocument Build(string fixtureName)
     {
         return fixtureName switch
         {
@@ -18,7 +18,7 @@ internal static class GoldenReportFixtures
         };
     }
 
-    private static AnalysisReportDocument BaselineSmall() => new()
+    private static SingleDumpReportDocument BaselineSmall() => new()
     {
         DumpPath = "C:/fixtures/BaselineSmall.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
@@ -38,7 +38,7 @@ internal static class GoldenReportFixtures
         
     };
 
-    private static AnalysisReportDocument DuplicateHeavy() => new()
+    private static SingleDumpReportDocument DuplicateHeavy() => new()
     {
         DumpPath = "C:/fixtures/DuplicateHeavy.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
@@ -58,7 +58,7 @@ internal static class GoldenReportFixtures
         
     };
 
-    private static AnalysisReportDocument LongNames() => new()
+    private static SingleDumpReportDocument LongNames() => new()
     {
         DumpPath = "C:/fixtures/LongNames.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
@@ -78,7 +78,7 @@ internal static class GoldenReportFixtures
         
     };
 
-    private static AnalysisReportDocument RichEvidence() => new()
+    private static SingleDumpReportDocument RichEvidence() => new()
     {
         DumpPath = "C:/fixtures/RichEvidence.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),
@@ -98,7 +98,7 @@ internal static class GoldenReportFixtures
         
     };
 
-    private static AnalysisReportDocument MixedSeverity() => new()
+    private static SingleDumpReportDocument MixedSeverity() => new()
     {
         DumpPath = "C:/fixtures/MixedSeverity.dmp",
         GeneratedAtUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc),

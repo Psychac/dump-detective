@@ -5,7 +5,6 @@ using DumpDetective.Cli.Pipeline;
 using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Reporting.Services;
 
 using System.Diagnostics;
@@ -17,12 +16,10 @@ namespace DumpDetective.Cli.Services;
 /// </summary>
 internal sealed class SingleDumpOrchestrationService(
     IDumpLoader dumpLoader,
-    FindingGenerationPipeline findingGenerationPipeline,
     ReportBuilderFacade reportBuilderFacade,
     AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly IDumpLoader _dumpLoader = dumpLoader;
-    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
@@ -87,7 +84,6 @@ internal sealed class SingleDumpOrchestrationService(
         new LoadDumpStage(_dumpLoader),
         new BuildHeapIndexStage(),
         new RunAnalyzersPipelineStage(_analyzerExecutionService),
-        new GenerateFindingsStage(_findingGenerationPipeline),
         new BuildReportStage(_reportBuilderFacade),
         new WriteOutputStage()
     ];

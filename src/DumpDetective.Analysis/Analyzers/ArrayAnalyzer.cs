@@ -33,7 +33,7 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ArrayAnalysisOptions options = context.GetOption<ArrayAnalysisOptions>();
+            ArrayAnalysisOptions options = context.AnalysisOptions.ArrayAnalysis;
             return ValueTask.FromResult(
                 Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
         }

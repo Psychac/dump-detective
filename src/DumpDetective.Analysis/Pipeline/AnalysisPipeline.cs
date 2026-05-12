@@ -7,9 +7,12 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace DumpDetective.Analysis.Pipeline;
 
-internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
+internal sealed class AnalysisPipeline(
+    IEnumerable<IAnalyzer> analyzers,
+    FindingGenerationPipeline findingGenerationPipeline)
 {
     private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
+    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
     // Cached once per pipeline instance to avoid repeated OS round-trips per analyzer.
     private static readonly Process _currentProcess = Process.GetCurrentProcess();
 
@@ -100,9 +103,9 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     stopwatch,
                     cancellationToken);
 
-                long objectScans = ExtractLongMetric(analyzerResult.Metrics, "objectScans") ?? context.Cache.ObjectScanCount;
-                long cacheHits = ExtractLongMetric(analyzerResult.Metrics, "cacheHits") ?? context.Cache.CacheHits;
-                long cacheMisses = ExtractLongMetric(analyzerResult.Metrics, "cacheMisses") ?? context.Cache.CacheMisses;
+                long objectScans = context.Cache.ObjectScanCount;
+                long cacheHits = context.Cache.CacheHits;
+                long cacheMisses = context.Cache.CacheMisses;
                 int warningCount = analyzerResult.Warnings.Count;
 
                 stopwatch.Stop();
@@ -281,6 +284,15 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
 
         runStopwatch.Stop();
 
+        try
+        {
+            runResults = _findingGenerationPipeline.Generate(runResults, cancellationToken).ToList();
+        }
+        catch
+        {
+            // Best effort only. Analyzer findings are additive and report generation still proceeds.
+        }
+
         PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
             EventType: AnalysisDiagnosticsEventType.RunCompleted,
@@ -384,23 +396,6 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
         }
     }
 
-    private static long? ExtractLongMetric(IReadOnlyDictionary<string, object?> metrics, string key)
-    {
-        if (!metrics.TryGetValue(key, out object? value) || value is null)
-        {
-            return null;
-        }
-
-        return value switch
-        {
-            long l => l,
-            int i => i,
-            double d => (long)d,
-            float f => (long)f,
-            _ when long.TryParse(value.ToString(), out long parsed) => parsed,
-            _ => null
-        };
-    }
 }
 
 

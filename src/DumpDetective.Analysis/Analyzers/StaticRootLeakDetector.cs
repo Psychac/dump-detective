@@ -17,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            StaticRootLeakAnalysisOptions options = context.GetOption<StaticRootLeakAnalysisOptions>();
+            StaticRootLeakAnalysisOptions options = context.AnalysisOptions.StaticRootLeakAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
         }
 

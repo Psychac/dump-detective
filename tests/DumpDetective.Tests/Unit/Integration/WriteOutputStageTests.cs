@@ -40,7 +40,7 @@ public sealed class WriteOutputStageTests
                 ContentType: "application/gzip",
                 FilePath: tmpGz);
 
-            var doc = new AnalysisReportDocument { Artifacts = new[] { artifact } };
+            var doc = new SingleDumpReportDocument { Artifacts = new[] { artifact } };
 
             var state = new SingleDumpPipelineState
             {

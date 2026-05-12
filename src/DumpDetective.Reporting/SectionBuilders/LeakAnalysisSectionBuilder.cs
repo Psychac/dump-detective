@@ -35,6 +35,13 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
             M("Heuristic only", leak.HeuristicOnly ? "Yes" : "No"),
         };
 
+        if (leak.TopCandidates.Count > 0)
+        {
+            LeakCandidateRecord top = leak.TopCandidates[0];
+            blocks.Add(M("Top suspect", $"{top.TypeName} ({top.Severity})", top.SuspicionScore));
+            blocks.Add(M("Top suspicion score", top.SuspicionScore.ToString("N0"), top.SuspicionScore));
+        }
+
         if (leak.CandidatesByClass.Count > 0)
         {
             blocks.Add(H("CLASS BREAKDOWN"));

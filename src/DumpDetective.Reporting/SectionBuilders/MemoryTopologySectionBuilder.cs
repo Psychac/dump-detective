@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Text.Json;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -59,7 +60,27 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
                 Row(Cell("Server GC heaps"), Cell(incident?.HeapCount is null ? "N/A" : incident.HeapCount.Value.ToString("N0"), incident?.HeapCount), Cell(incident is null ? "No incident context available." : "Logical heap count from the runtime context.")),
                 Row(Cell("GC pressure"), Cell(gcGen is null ? "N/A" : gcGen.Gen2Pct > 0 ? $"{gcGen.Gen2Pct:F1}% Gen2" : "Available"), Cell(gcGen is null ? "No GC generation result." : DescribeGcPressure(gcGen.Gen2Pct, gcGen.LohPercent))),
                 Row(Cell("Allocation profile"), Cell(segments is null ? (reservation is null ? "N/A" : reservation.AddressSpacePressureRisk ? "Pressure" : "Balanced") : (reservation is null ? "Available" : reservation.AddressSpacePressureRisk ? "Pressure" : "Balanced")), Cell("Higher reserved-to-committed ratios and ephemeral fill point toward pressure.")),
+                Row(Cell("Fragmentation signal"), Cell(DescribeFragmentationSignal(segments, reservation, gcGen)), Cell("How much the current topology suggests fragmentation or address-space pressure.")),
             ]));
+
+        if (segments is not null)
+        {
+            blocks.Add(Chart(
+                "Heap composition",
+                "pie",
+                JsonSerializer.Serialize(new
+                {
+                    title = "Heap composition",
+                    subtitle = "Committed bytes by segment family",
+                    items = new object[]
+                    {
+                        new { label = "SOH", value = segments.SohBytes },
+                        new { label = "LOH", value = segments.LohBytes },
+                        new { label = "POH", value = segments.PohBytes },
+                        new { label = "FOH", value = segments.FrozenBytes }
+                    }
+                })));
+        }
 
         if (segments is not null)
         {
@@ -244,6 +265,23 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IReport
             return "Moderate GC pressure.";
 
         return "GC pressure appears within the low-risk band.";
+    }
+
+    private static string DescribeFragmentationSignal(SegmentAnalysisDomainResult? segments, SegmentReservationDomainResult? reservation, GCGenerationDomainResult? gcGen)
+    {
+        if (reservation?.AddressSpacePressureRisk == true)
+            return "Pressure";
+
+        if (segments is not null && segments.FrozenPercent >= 20.0)
+            return "Frozen-heavy";
+
+        if (gcGen is not null && gcGen.LohPercent >= 35.0)
+            return "LOH-fragmented";
+
+        if (reservation is not null && reservation.AvgEphemeralFillPct >= 80.0)
+            return "Ephemeral pressure";
+
+        return "Low";
     }
 
     private static string FormatBytes(ulong value)

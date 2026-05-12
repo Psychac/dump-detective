@@ -172,6 +172,10 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                 case TableBlock tbl:
                     RenderTableText(tbl, sb);
                     break;
+                case ChartBlock chart:
+                    sb.AppendLine($"{Indent(0)}[Chart] {chart.Title} ({chart.Kind})");
+                    sb.AppendLine();
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"[{cs.Title}]");
                     break;
@@ -382,6 +386,10 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     break;
                 case TableBlock tbl:
                     RenderTableMd(tbl, sb);
+                    break;
+                case ChartBlock chart:
+                    sb.AppendLine($"**{chart.Title}** ({chart.Kind})");
+                    sb.AppendLine();
                     break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details><summary>{cs.Title}</summary>");

@@ -548,6 +548,18 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 .detail-block tbody td { border: 1px solid var(--border); padding: 10px 12px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; background: #fff; }
 .detail-block tbody tr:nth-child(even) td { background: #fcfcfc; }
 .detail-block caption { color: #4b5563; font-size: 13px; font-weight: 600; text-align: left; padding: 2px 0 4px 0; caption-side: top; }
+.detail-chart { margin: 8px 0 12px 0; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff; overflow: hidden; width: 100%; max-width: 460px; }
+.detail-chart__title { font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px; }
+.detail-chart__frame { display: flex; flex-direction: column; gap: 3px; }
+.detail-chart__svg { width: 100%; height: auto; display: block; max-width: 100%; max-height: 210px; }
+.detail-chart__caption { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 1px; }
+.detail-chart text { font-family: inherit; }
+.detail-chart__center-label { font-size: 11px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+.detail-chart__center-subtitle { font-size: 10px; fill: #64748b; text-anchor: middle; }
+.detail-chart__legend-label, .detail-chart__legend-value { font-size: 10px; fill: #0f172a; }
+.detail-chart__tile-label, .detail-chart__tile-value { font-size: 10px; fill: #fff; }
+.detail-chart__axis-label, .detail-chart__axis-value { font-size: 10px; fill: #475569; text-anchor: end; }
+.detail-chart__tile-label--light, .detail-chart__tile-value--light { fill: #fff; }
 
 /* ── Nested collapsibles ─────────────────────────────────────────────────── */
 .detail-nested { margin: 6px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }

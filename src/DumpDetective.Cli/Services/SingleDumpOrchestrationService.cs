@@ -40,7 +40,7 @@ internal sealed class SingleDumpOrchestrationService(
         //ConsoleUx.Note(TemporaryAdaptiveIndexingNotice);
 
         if (resolved.DiagnosticMode)
-            ConsoleUx.Info($"Config: {(resolved.UsedConfigFile ? $"file ({resolved.ConfigPath})" : "CLI fallback")}  ·  {activeAnalyzers.Count} analyzers: {string.Join(", ", activeAnalyzers.Select(a => a.Name))}");
+            ConsoleUx.Info(AnalysisSummaryFormatter.FormatConfigSummary(resolved, activeAnalyzers));
 
         IReadOnlyList<IAnalysisStage> stages = BuildStages();
 

@@ -327,6 +327,10 @@ public sealed class SectionBuilderTests
         section.Blocks.OfType<MetricBlock>()
             .Should().Contain(m => m.Label == "Total Tasks" && m.RawValue == 1_200);
 
+        section.Blocks.OfType<TableBlock>()
+            .SelectMany(t => t.Rows)
+            .Should().Contain(row => row.Cells[0].Display == "RanToCompletion");
+
         // Max chain depth metric
         section.Blocks.OfType<MetricBlock>()
             .Should().Contain(m => m.Label == "Max Chain Depth" && m.RawValue == 8);
@@ -337,6 +341,80 @@ public sealed class SectionBuilderTests
         orphanTable.Should().NotBeNull("orphaned tasks table must be emitted when orphans exist");
         orphanTable!.Rows.Should().HaveCount(2);
         orphanTable.Rows[0].Cells[1].Display.Should().Contain("Task`1");
+    }
+
+    [Fact]
+    public void AsyncAnalysisSectionBuilder_Build_EmitsTaskSummaryAndThreadPoolContext()
+    {
+        var asyncDomain = Stamped(new AsyncTaskDomainResult(
+            TotalTasks: 1_200,
+            PendingTasks: 450,
+            RunningTasks: 12,
+            FaultedTasks: 33,
+            CanceledTasks: 5,
+            CompletedTasks: 700,
+            OrphanedTasks: 2,
+            TotalTaskContinuations: 1_500,
+            MaxContinuationDepth: 8,
+            AvgContinuationDepth: 3.4,
+            TaskScanLimited: false,
+            TopPendingTaskTypes: [new NameCountEntry("System.Threading.Tasks.Task`1[[Foo]]", 400)],
+            TopFaultedTaskTypes: [new NameCountEntry("System.Threading.Tasks.Task", 33)],
+            TopContinuationTypes: [new NameCountEntry("System.Runtime.CompilerServices.AsyncTaskMethodBuilder", 120)],
+            TopOrphanedTasks: [new OrphanedTaskSnapshot(0xDEAD_BEEF_0001UL, "System.Threading.Tasks.Task`1[[System.String]]", "System.String", 120)],
+            TopDeepestChains: [new ContinuationChainSnapshot(0xDEAD_BEEF_0001UL, "System.Threading.Tasks.Task`1[[System.String]]", 8, ["System.Threading.Tasks.Task", "System.Runtime.CompilerServices.AsyncTaskMethodBuilder"]) ]),
+            "Async Task Analysis", "Async");
+
+        var hangDomain = Stamped(new HangDomainResult(
+            TotalAliveThreads: 24,
+            WaitingThreadCount: 4,
+            ThreadsHoldingLocks: 2,
+            WaitingPercent: 16.7,
+            WaitCategoryBreakdown: new Dictionary<string, int> { ["Task"] = 4 },
+            TotalTaskContinuations: 1_500,
+            QueuedWorkItems: 42,
+            TotalTasks: 1_200,
+            PendingTasks: 450,
+            FaultedTasks: 33,
+            CanceledTasks: 5,
+            RuntimeThreadPoolDataAvailable: true,
+            RuntimeMinThreads: 8,
+            RuntimeMaxThreads: 32,
+            RuntimeActiveWorkerThreads: 8,
+            RuntimeIdleWorkerThreads: 24,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeCpuUtilization: 15,
+            IsStarved: false,
+            TaskScanLimited: false,
+            HealthScore: 92),
+            "Hang Analysis", "Hang");
+
+        var runs = new[]
+        {
+            new AnalyzerRunResult("Async Task Analysis", AnalyzerExecutionStatus.Success, TimeSpan.FromMilliseconds(5), asyncDomain, null, null),
+            new AnalyzerRunResult("Hang Analysis", AnalyzerExecutionStatus.Success, TimeSpan.FromMilliseconds(5), hangDomain, null, null),
+        };
+
+        var resultSet = new AnalyzerResultSet(runs);
+        var builder = new AsyncAnalysisSectionBuilder();
+
+        builder.CanBuild(resultSet).Should().BeTrue();
+
+        AnalyzerDetailSection section = builder.Build(resultSet);
+
+        section.SortOrder.Should().Be(1350);
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Total tasks" && m.RawValue == 1_200);
+
+        section.Blocks.OfType<TableBlock>()
+            .SelectMany(t => t.Rows)
+            .Should().Contain(row => row.Cells[0].Display == "RanToCompletion");
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Queued work items" && m.RawValue == 42);
+
+        section.Blocks.OfType<MetricBlock>()
+            .Should().Contain(m => m.Label == "Runtime TP data" && m.Value == "Available");
     }
 
     // ── Lock Graph ────────────────────────────────────────────────────────────

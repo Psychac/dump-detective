@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Text.Json;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -44,6 +45,23 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock)]));
             }
             blocks.Add(new TableBlock("Top fragmented segments", ["Address", "Size", "Frag %", "Largest Free Block"], segRows));
+
+            var heatmapItems = new List<object>(segments.Count);
+            for (int i = 0; i < segments.Count; i++)
+            {
+                var s = segments[i];
+                heatmapItems.Add(new { label = $"0x{s.Address:x16}", value = s.FragmentationPercent });
+            }
+
+            blocks.Add(Chart(
+                "LOH fragmentation heatmap",
+                "heatmap",
+                JsonSerializer.Serialize(new
+                {
+                    title = "Top fragmented segments",
+                    subtitle = "Higher values indicate more free-space fragmentation",
+                    items = heatmapItems
+                })));
         }
 
         blocks.Add(Blank());

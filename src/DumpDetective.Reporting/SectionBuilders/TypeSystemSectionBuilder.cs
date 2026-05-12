@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Text.Json;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -89,6 +90,27 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             Caption: "Type table",
             Headers: ["Type", "Count", "Shallow Size", "Avg Size", "Estimated Retained", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
             Rows: rows));
+
+        var treemapItems = new List<object>();
+        int treemapLimit = Math.Min(memory.TopTypesBySize.Count, 8);
+        for (int i = 0; i < treemapLimit; i++)
+        {
+            TypeSnapshot type = memory.TopTypesBySize[i];
+            treemapItems.Add(new { label = type.TypeName, value = type.TotalBytes });
+        }
+
+        if (treemapItems.Count > 0)
+        {
+            blocks.Add(Chart(
+                "Type treemap",
+                "treemap",
+                JsonSerializer.Serialize(new
+                {
+                    title = "Top types by shallow size",
+                    subtitle = "Largest object types in the current snapshot",
+                    items = treemapItems
+                })));
+        }
 
         if (memory.TopTypesBySize.Count > TopRows)
             blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypesBySize.Count - TopRows} additional type(s) omitted."));

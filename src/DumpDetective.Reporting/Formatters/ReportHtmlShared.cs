@@ -51,6 +51,9 @@ internal static class ReportHtmlShared
                 case TableBlock tbl:
                     RenderTableHtml(tbl, sb);
                     break;
+                case ChartBlock chart:
+                    sb.AppendLine($"<div class=\"detail-chart detail-indent-{Math.Min(chart.IndentLevel, 3)}\" data-chart-kind=\"{Enc(chart.Kind)}\" data-chart-payload=\"{Enc(chart.PayloadJson)}\" data-chart-title=\"{Enc(chart.Title)}\"></div>");
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details class=\"detail-nested\"><summary>{Enc(cs.Title)}</summary><div class=\"detail-nested-content\">");
                     break;

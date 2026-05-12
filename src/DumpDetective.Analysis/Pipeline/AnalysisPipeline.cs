@@ -203,12 +203,15 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
             {
                 stopwatch.Stop();
 
+                // Capture full exception details (includes stack trace) to aid diagnostics
+                string fullEx = ex.ToString();
+
                 AnalyzerRunResult failed = new(
                     analyzer.Name,
                     AnalyzerExecutionStatus.Failed,
                     stopwatch.Elapsed,
                     null,
-                    ex.Message,
+                    fullEx,
                     ex.GetType().Name,
                     SkipReason: null,
                     ObjectScanCount: context.Cache.ObjectScanCount,
@@ -229,7 +232,7 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     CacheMisses: failed.CacheMisses,
                     Message: $"Analyzer '{analyzer.Name}' failed.",
                     ExceptionType: ex.GetType().Name,
-                    ExceptionMessage: ex.Message));
+                    ExceptionMessage: fullEx));
 
                 if (!context.Diagnostics.ContinueOnAnalyzerFailure)
                 {

@@ -32,6 +32,8 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
             return new AnalyzerDetailSection("Async & Task", DisplayTitle, SortOrder, blocks);
         }
 
+        blocks.Add(M("Total tasks", asyncTasks.TotalTasks.ToString("N0"), asyncTasks.TotalTasks));
+
         blocks.Add(new TableBlock(
             Caption: "Task status summary",
             Headers: ["Status", "Count"],
@@ -41,7 +43,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IReportS
                 Row(Cell("Running"), Cell(asyncTasks.RunningTasks.ToString("N0"), asyncTasks.RunningTasks)),
                 Row(Cell("Faulted"), Cell(asyncTasks.FaultedTasks.ToString("N0"), asyncTasks.FaultedTasks)),
                 Row(Cell("Canceled"), Cell(asyncTasks.CanceledTasks.ToString("N0"), asyncTasks.CanceledTasks)),
-                Row(Cell("Completed"), Cell(asyncTasks.CompletedTasks.ToString("N0"), asyncTasks.CompletedTasks)),
+                Row(Cell("RanToCompletion"), Cell(asyncTasks.CompletedTasks.ToString("N0"), asyncTasks.CompletedTasks)),
                 Row(Cell("Orphaned"), Cell(asyncTasks.OrphanedTasks.ToString("N0"), asyncTasks.OrphanedTasks)),
             ]));
 

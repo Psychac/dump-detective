@@ -10,6 +10,7 @@ internal abstract class SectionBuilderBase
     protected static ListItemBlock Li(string text, int indent = 0) => new(text, indent);
     protected static DividerBlock Divider() => new();
     protected static BlankBlock Blank() => new();
+    protected static ChartBlock Chart(string title, string kind, string payloadJson, int indent = 0) => new(title, kind, payloadJson, indent);
     protected static CollapsibleSectionBeginBlock CollapseBegin(string title) => new(title);
     protected static CollapsibleSectionEndBlock CollapseEnd() => new();
     protected static TableRow Row(params TableCell[] cells) => new(cells);

@@ -1,4 +1,4 @@
-import { renderSparklines } from './report.renderers.js';
+import { renderSparklines, renderCharts } from './report.renderers.js';
 
 export function buildSidebar(tocNode, doc) {
   if (!tocNode) return null;
@@ -145,4 +145,5 @@ export function setupInteractivity(doc, announce) {
 
   // Initial sparkline rendering
   renderSparklines();
+  renderCharts();
 }

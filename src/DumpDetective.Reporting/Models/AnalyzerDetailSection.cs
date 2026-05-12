@@ -19,6 +19,7 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(DividerBlock), "divider")]
 [JsonDerivedType(typeof(BlankBlock), "blank")]
 [JsonDerivedType(typeof(TableBlock), "table")]
+[JsonDerivedType(typeof(ChartBlock), "chart")]
 [JsonDerivedType(typeof(CollapsibleSectionBeginBlock), "collapsibleBegin")]
 [JsonDerivedType(typeof(CollapsibleSectionEndBlock), "collapsibleEnd")]
 internal abstract record SectionBlock;
@@ -36,6 +37,12 @@ internal sealed record TableBlock(
     string? Caption,
     IReadOnlyList<string> Headers,
     IReadOnlyList<TableRow> Rows) : SectionBlock;
+
+internal sealed record ChartBlock(
+    string Title,
+    string Kind,
+    string PayloadJson,
+    int IndentLevel = 0) : SectionBlock;
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
 internal sealed record TableCell(string Display, long? RawValue = null);   // RawValue for client-side sort

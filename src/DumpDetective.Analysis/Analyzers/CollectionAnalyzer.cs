@@ -177,7 +177,9 @@ namespace DumpDetective.Analysis.Analyzers
             long scanned = 0;
             const long progressInterval = 50_000;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
-            var heapLock = _options.SerializeHeapAccess ? new object() : null;
+            // ClrMD heap/field reads are not reliably thread-safe under this analyzer's
+            // parallel per-entry execution, so we always serialize the critical heap reads.
+            var heapLock = new object();
 
             void TrackWasteful(WastefulCollection waste)
             {
@@ -233,7 +235,15 @@ namespace DumpDetective.Analysis.Analyzers
                 if (kind == CollectionKind.Dictionary)
                 {
                     Interlocked.Increment(ref dictionaries);
-                    var waste = AnalyzeDictionary(heap, address);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeDictionary(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeDictionary(heap, address);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.Dictionary;
@@ -244,7 +254,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.List)
                 {
                     Interlocked.Increment(ref lists);
-                    var waste = AnalyzeList(heap, address);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeList(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeList(heap, address);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.List;
@@ -255,7 +273,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.HashSet)
                 {
                     Interlocked.Increment(ref hashSets);
-                    var waste = AnalyzeHashSet(heap, address);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeHashSet(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeHashSet(heap, address);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = CollectionKind.HashSet;
@@ -266,7 +292,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.ArrayList)
                 {
                     Interlocked.Increment(ref arrayLists);
-                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
@@ -277,7 +311,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.Stack)
                 {
                     Interlocked.Increment(ref stacks);
-                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
@@ -288,7 +330,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.SortedList)
                 {
                     Interlocked.Increment(ref sortedLists);
-                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
@@ -299,7 +349,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.SortedSet)
                 {
                     Interlocked.Increment(ref sortedSets);
-                    var waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    WastefulCollection? waste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         waste.Kind = kind;
@@ -310,7 +368,15 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == CollectionKind.Queue)
                 {
                     Interlocked.Increment(ref queues);
-                    var qWaste = AnalyzeQueue(heap, address);
+                    WastefulCollection? qWaste;
+                    if (heapLock is object)
+                    {
+                        lock (heapLock) { qWaste = AnalyzeQueue(heap, address); }
+                    }
+                    else
+                    {
+                        qWaste = AnalyzeQueue(heap, address);
+                    }
                     if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
                     {
                         qWaste.Kind = CollectionKind.Queue;
@@ -340,6 +406,7 @@ namespace DumpDetective.Analysis.Analyzers
                         parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                         foreach (ClrObject obj in segment.EnumerateObjects())
                         {
+                            parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                             if (!obj.IsValid || obj.Type is null)
                                 continue;
                             ulong mt = obj.Type.MethodTable;
@@ -1056,9 +1123,6 @@ namespace DumpDetective.Analysis.Analyzers
                     _logger?.LogError(ex, "Error analyzing collection at {Address}", address);
                 else
                     _logger?.LogDebug(ex, "Ignored error analyzing collection at {Address}", address);
-#if DEBUG
-                throw;
-#endif
             }
 
             return null;
@@ -1150,9 +1214,6 @@ namespace DumpDetective.Analysis.Analyzers
                     _logger?.LogError(ex, "Error analyzing Dictionary at {Address}", dictionaryAddress);
                 else
                     _logger?.LogDebug(ex, "Ignored error analyzing Dictionary at {Address}", dictionaryAddress);
-#if DEBUG
-                throw;
-#endif
             }
 
             return null;
@@ -1266,9 +1327,6 @@ namespace DumpDetective.Analysis.Analyzers
                     _logger?.LogError(ex, "Error analyzing Queue at {Address}", queueAddress);
                 else
                     _logger?.LogDebug(ex, "Ignored error analyzing Queue at {Address}", queueAddress);
-#if DEBUG
-                throw;
-#endif
             }
 
             return null;
@@ -1343,9 +1401,6 @@ namespace DumpDetective.Analysis.Analyzers
                     _logger?.LogError(ex, "Error analyzing List at {Address}", listAddress);
                 else
                     _logger?.LogDebug(ex, "Ignored error analyzing List at {Address}", listAddress);
-#if DEBUG
-                throw;
-#endif
             }
 
             return null;
@@ -1436,9 +1491,6 @@ namespace DumpDetective.Analysis.Analyzers
                     _logger?.LogError(ex, "Error analyzing HashSet at {Address}", hashSetAddress);
                 else
                     _logger?.LogDebug(ex, "Ignored error analyzing HashSet at {Address}", hashSetAddress);
-#if DEBUG
-                throw;
-#endif
             }
 
             return null;

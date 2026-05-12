@@ -50,6 +50,8 @@ internal sealed class TrendOrchestrationService(
         //ConsoleUx.Warning(TemporaryAdaptiveIndexingNotice);
         ConsoleUx.Info($"Trend dumps ({trendDumpPaths.Count}): {string.Join(" -> ", trendDumpPaths.Select(Path.GetFileName))}");
         ConsoleUx.Info($"Running {activeAnalyzers.Count} analyzers per dump...");
+        if (resolved.DiagnosticMode)
+            ConsoleUx.Info(AnalysisSummaryFormatter.FormatConfigSummary(resolved, activeAnalyzers));
 
         // ── Stage 1: Analyze each trend dump ─────────────────────────────────
         stageStopwatch.Restart();
@@ -130,13 +132,22 @@ internal sealed class TrendOrchestrationService(
                 ConsoleUx.Success($"Report written to: {resolved.OutputPath}");
             }
 
+            IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
+
             if (resolved.DiagnosticMode)
             {
-                IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
                 ConsoleUx.Info($"Trend pipeline completed in {totalStopwatch.Elapsed.TotalSeconds:F1}s");
-                ConsoleUx.Info($"Run summary: {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Success)} success, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Failed)} failed, {allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter) + allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)} skipped.");
+                ConsoleUx.RunStatusSummary(
+                    allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Success),
+                    allRuns.Count(r => r.Status == AnalyzerExecutionStatus.Failed),
+                    allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter),
+                    allRuns.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation),
+                    allRuns.Sum(r => r.FindingCount));
                 PrintDiagnosticsSummary(allRuns);
             }
+
+            if (resolved.Diagnostics.EnableMemoryDiagnostics)
+                PrintMemorySummary(trendExecutions);
 
             stageStopwatch.Stop();
             writeOutputElapsed = stageStopwatch.Elapsed;
@@ -173,6 +184,18 @@ internal sealed class TrendOrchestrationService(
         CancellationToken cancellationToken)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
+        AnalyzerMemoryStats? memoryStats = null;
+        if (resolved.Diagnostics.EnableMemoryDiagnostics)
+        {
+            using Process currentProcess = Process.GetCurrentProcess();
+            currentProcess.Refresh();
+            memoryStats = new AnalyzerMemoryStats(
+                WorkingSetBefore: currentProcess.WorkingSet64,
+                WorkingSetAfter: currentProcess.WorkingSet64,
+                ManagedHeapBefore: GC.GetTotalMemory(false),
+                ManagedHeapAfter: GC.GetTotalMemory(false));
+        }
+
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
         HeapAnalysisCache heapCache = new();
         IHeapIndexBuilder heapBuilder = heapCache;
@@ -251,6 +274,17 @@ internal sealed class TrendOrchestrationService(
             .ToList();
 
         stopwatch.Stop();
+        if (resolved.Diagnostics.EnableMemoryDiagnostics)
+        {
+            using Process currentProcess = Process.GetCurrentProcess();
+            currentProcess.Refresh();
+            memoryStats = new AnalyzerMemoryStats(
+                WorkingSetBefore: memoryStats?.WorkingSetBefore ?? currentProcess.WorkingSet64,
+                WorkingSetAfter: currentProcess.WorkingSet64,
+                ManagedHeapBefore: memoryStats?.ManagedHeapBefore ?? GC.GetTotalMemory(false),
+                ManagedHeapAfter: GC.GetTotalMemory(false));
+        }
+
         AnalysisIncidentContext incidentContext = IncidentContextFactory.Create(
             mode: "Trend",
             loadContext: loadContext,
@@ -258,7 +292,7 @@ internal sealed class TrendOrchestrationService(
             activeAnalyzers: activeAnalyzers,
             elapsed: stopwatch.Elapsed);
 
-        return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed, incidentContext, DateTime.UtcNow);
+        return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed, incidentContext, DateTime.UtcNow, memoryStats);
     }
 
     private static AnalysisSnapshot BuildSnapshot(int index, TrendDumpExecution execution)
@@ -289,7 +323,8 @@ internal sealed class TrendOrchestrationService(
         IReadOnlyList<AnalyzerRunResult> Runs,
         TimeSpan Elapsed,
         AnalysisIncidentContext IncidentContext,
-        DateTime GeneratedAtUtc);
+        DateTime GeneratedAtUtc,
+        AnalyzerMemoryStats? MemoryStats);
 
     private static void PrintTrendDumpSummary(int dumpIndex, int totalDumps, TrendDumpExecution execution, TimeSpan cumulativeDumpElapsed, bool diagnosticMode)
     {
@@ -387,5 +422,56 @@ internal sealed class TrendOrchestrationService(
         ConsoleUx.Info("Top slow analyzers:");
         foreach (AnalyzerRunResult run in topSlow)
             ConsoleUx.Info($"  - {run.AnalyzerName}: {run.Duration.TotalMilliseconds:F0} ms, findings={run.FindingCount}, warnings={run.WarningCount}, scans={run.ObjectScanCount:N0}");
+    }
+
+    private static void PrintMemorySummary(IReadOnlyList<TrendDumpExecution> executions)
+    {
+        List<TrendDumpExecution> withStageStats = executions
+            .Where(e => e.MemoryStats is not null)
+            .ToList();
+
+        if (withStageStats.Count > 0)
+        {
+            ConsoleUx.MemoryStageTableHeader();
+            foreach (TrendDumpExecution execution in withStageStats)
+            {
+                AnalyzerMemoryStats s = execution.MemoryStats!;
+                ConsoleUx.MemoryTableRow(Path.GetFileName(execution.DumpPath), s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+            }
+        }
+
+        foreach (TrendDumpExecution execution in executions)
+        {
+            List<AnalyzerRunResult> dumpRuns = execution.Runs
+                .Where(r => r.MemoryStats is not null)
+                .ToList();
+
+            if (dumpRuns.Count == 0)
+                continue;
+
+            ConsoleUx.Info($"Memory diagnostics for dump: {Path.GetFileName(execution.DumpPath)}");
+            ConsoleUx.MemoryTableHeader();
+            foreach (AnalyzerRunResult run in dumpRuns)
+            {
+                AnalyzerMemoryStats s = run.MemoryStats!;
+                ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+            }
+        }
+
+        long baseline = withStageStats.Count > 0
+            ? withStageStats[0].MemoryStats!.WorkingSetBefore
+            : executions.SelectMany(e => e.Runs).FirstOrDefault(r => r.MemoryStats is not null)?.MemoryStats?.WorkingSetBefore ?? 0;
+        long peakFromStages = withStageStats.Count > 0 ? withStageStats.Max(e => e.MemoryStats!.WorkingSetAfter) : 0;
+        IReadOnlyList<AnalyzerRunResult> analyzerRunsWithStats = executions
+            .SelectMany(e => e.Runs)
+            .Where(r => r.MemoryStats is not null)
+            .ToList();
+        long peakFromAnalyzers = analyzerRunsWithStats.Count > 0
+            ? analyzerRunsWithStats.Max(r => r.MemoryStats!.WorkingSetAfter)
+            : 0;
+        long peak = Math.Max(peakFromStages, peakFromAnalyzers);
+
+        if (peak > 0)
+            ConsoleUx.MemoryTableFooter(peak, baseline);
     }
 }

@@ -4,6 +4,8 @@ using DumpDetective.Reporting.Models;
 namespace DumpDetective.Reporting.Serialization;
 
 [JsonSerializable(typeof(AnalysisReportDocument))]
+[JsonSerializable(typeof(SingleDumpReportDocument))]
+[JsonSerializable(typeof(TrendReportDocument))]
 [JsonSerializable(typeof(DumpDetective.Core.Models.AnalysisIncidentContext))]
 [JsonSerializable(typeof(DumpDetective.Core.Models.TrendSnapshotContext))]
 [JsonSerializable(typeof(List<DumpDetective.Core.Models.TrendSnapshotContext>))]

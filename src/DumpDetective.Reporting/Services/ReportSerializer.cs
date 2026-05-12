@@ -164,7 +164,7 @@ internal sealed class ReportSerializer
         // Executive audience strips raw findings (summary replaces them)
         IReadOnlyList<FindingRecord> outputFindings = audience == ReportAudience.Executive ? [] : deduped;
 
-        return new AnalysisReportDocument
+        return new SingleDumpReportDocument
         {
             DumpPath = dumpPath,
             GeneratedAtUtc = DateTime.UtcNow,

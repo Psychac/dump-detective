@@ -48,13 +48,12 @@ internal sealed class TrendReportComposer(
             trendData.Snapshots));
         analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, audience));
 
-        return new AnalysisReportDocument
+        return new TrendReportDocument
         {
             SchemaVersion = baseDoc.SchemaVersion,
-            DumpPath = baseDoc.DumpPath,
+            DumpPath = dumpPath,
             GeneratedAtUtc = baseDoc.GeneratedAtUtc,
             ElapsedSeconds = baseDoc.ElapsedSeconds,
-            IsTrendReport = true,
             TrendDumpCount = trendData.Snapshots.Count,
             TrendDumpPaths = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
             IncidentContext = currentIncidentContext is null

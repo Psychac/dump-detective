@@ -1,17 +1,16 @@
-using DumpDetective.Reporting.Models;
+using System.Text.Json.Serialization;
 
 namespace DumpDetective.Reporting.Models;
 
-internal sealed record AnalysisReportDocument
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
+[JsonDerivedType(typeof(SingleDumpReportDocument), typeDiscriminator: "single")]
+[JsonDerivedType(typeof(TrendReportDocument), typeDiscriminator: "trend")]
+internal abstract record AnalysisReportDocument
 {
     public string SchemaVersion { get; init; } = "2.1";
-    public string DumpPath { get; init; } = "";
     public DateTime GeneratedAtUtc { get; init; }
     public double ElapsedSeconds { get; init; }
     public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; init; }
-    public bool IsTrendReport { get; init; }
-    public int TrendDumpCount { get; init; }
-    public IReadOnlyList<string>? TrendDumpPaths { get; init; }
 
     // Cross-cutting outputs
     public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
@@ -25,6 +24,18 @@ internal sealed record AnalysisReportDocument
     public IReadOnlyList<AnalyzerRunStatusRecord> AnalyzerRunStatuses { get; init; } = [];
     // Serialized raw artifacts produced by analyzers (CSV/JSON) when requested.
     public IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts { get; init; } = [];
+}
+
+internal sealed record SingleDumpReportDocument : AnalysisReportDocument
+{
+    public string DumpPath { get; init; } = "";
+}
+
+internal sealed record TrendReportDocument : AnalysisReportDocument
+{
+    public string DumpPath { get; init; } = "";
+    public int TrendDumpCount { get; init; }
+    public IReadOnlyList<string> TrendDumpPaths { get; init; } = [];
 }
 
 internal sealed record AnalyzerRunStatusRecord(

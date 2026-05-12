@@ -22,26 +22,33 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
 
     public string Render(AnalysisReportDocument doc)
     {
-        string title = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
-        string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
+        bool isTrend = doc is TrendReportDocument;
+        string title = isTrend ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string dumpLabel = isTrend ? "Latest dump" : "Dump";
+        string dumpPath = doc switch
+        {
+            TrendReportDocument trend => trend.DumpPath,
+            SingleDumpReportDocument single => single.DumpPath,
+            _ => string.Empty
+        };
 
         var sb = new StringBuilder();
         sb.AppendLine(title);
         sb.AppendLine(StringConstants.Equals80);
-        sb.AppendLine($"{dumpLabel}: {doc.DumpPath}");
+        sb.AppendLine($"{dumpLabel}: {dumpPath}");
         sb.AppendLine($"Generated (UTC): {doc.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine($"Elapsed: {doc.ElapsedSeconds:F1}s");
         sb.AppendLine($"Schema: {doc.SchemaVersion}");
         sb.AppendLine();
         // dedup diagnostics removed from report document
 
-        if (doc.IsTrendReport)
+        if (doc is TrendReportDocument trendDoc)
         {
-            sb.AppendLine($"Dumps analyzed: {doc.TrendDumpCount}");
-            if (doc.TrendDumpPaths is { Count: > 0 })
+            sb.AppendLine($"Dumps analyzed: {trendDoc.TrendDumpCount}");
+            if (trendDoc.TrendDumpPaths is { Count: > 0 })
             {
                 sb.AppendLine("Analyzed dumps:");
-                foreach (string path in doc.TrendDumpPaths)
+                foreach (string path in trendDoc.TrendDumpPaths)
                     sb.AppendLine($"  - {path}");
             }
             sb.AppendLine();
@@ -233,13 +240,20 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
 
     public string Render(AnalysisReportDocument doc)
     {
-        string title = doc.IsTrendReport ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
-        string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
+        bool isTrend = doc is TrendReportDocument;
+        string title = isTrend ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
+        string dumpLabel = isTrend ? "Latest dump" : "Dump";
+        string dumpPath = doc switch
+        {
+            TrendReportDocument trend => trend.DumpPath,
+            SingleDumpReportDocument single => single.DumpPath,
+            _ => string.Empty
+        };
 
         var sb = new StringBuilder();
         sb.AppendLine(title);
         sb.AppendLine();
-        sb.AppendLine($"> {dumpLabel}: `{doc.DumpPath}`  ");
+        sb.AppendLine($"> {dumpLabel}: `{dumpPath}`  ");
         sb.AppendLine($"> Generated (UTC): `{doc.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}`  ");
         sb.AppendLine($"> Elapsed: `{doc.ElapsedSeconds:F1}s`");
         sb.AppendLine($"> Schema: `{doc.SchemaVersion}`");
@@ -264,13 +278,13 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             }
         }
 
-        if (doc.IsTrendReport)
+        if (doc is TrendReportDocument trendDoc)
         {
-            sb.AppendLine($"> Dumps analyzed: **{doc.TrendDumpCount}**");
-            if (doc.TrendDumpPaths is { Count: > 0 })
+            sb.AppendLine($"> Dumps analyzed: **{trendDoc.TrendDumpCount}**");
+            if (trendDoc.TrendDumpPaths is { Count: > 0 })
             {
                 sb.AppendLine("> Analyzed dumps:");
-                foreach (string path in doc.TrendDumpPaths)
+                foreach (string path in trendDoc.TrendDumpPaths)
                     sb.AppendLine($"> - `{path}`");
             }
             sb.AppendLine();
@@ -449,9 +463,16 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 m => $"<span class=\"addr\">{m.Value}<button class=\"copy-btn\" type=\"button\" aria-label=\"Copy {m.Value}\" data-copy=\"{m.Value}\" title=\"Copy to clipboard\">&#x2398;</button></span>",
                 RegexOptions.CultureInvariant);
 
-        string title = doc.IsTrendReport ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
-        string dumpLabel = doc.IsTrendReport ? "Latest dump" : "Dump";
-        string exportFn = Enc(System.IO.Path.GetFileNameWithoutExtension(doc.DumpPath));
+        bool isTrend = doc is TrendReportDocument;
+        string title = isTrend ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
+        string dumpLabel = isTrend ? "Latest dump" : "Dump";
+        string dumpPath = doc switch
+        {
+            TrendReportDocument trend => trend.DumpPath,
+            SingleDumpReportDocument single => single.DumpPath,
+            _ => string.Empty
+        };
+        string exportFn = Enc(System.IO.Path.GetFileNameWithoutExtension(dumpPath));
 
         var sb = new StringBuilder();
 
@@ -470,7 +491,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine("<section class=\"header-card\">");
         sb.AppendLine($"<h1>{Enc(title)}</h1>");
         sb.AppendLine("<div class=\"meta-grid\">");
-        sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">{Enc(dumpLabel)}:</span> <span class=\"wrap\">{Enc(doc.DumpPath)}</span></div>");
+        sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">{Enc(dumpLabel)}:</span> <span class=\"wrap\">{Enc(dumpPath)}</span></div>");
         sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">Generated (UTC):</span> <time datetime=\"{doc.GeneratedAtUtc:yyyy-MM-ddTHH:mm:ssZ}\">{doc.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss}</time></div>");
         sb.AppendLine($"<div class=\"meta-item\"><span class=\"meta-label\">Elapsed:</span> {doc.ElapsedSeconds:F1}s</div>");
         sb.AppendLine("</div>");
@@ -478,12 +499,12 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"<div class=\"action-bar\" role=\"toolbar\"><button type=\"button\" class=\"action-btn\" id=\"btn-download-json\" data-filename=\"{exportFn}\">\u2B07 JSON</button><button type=\"button\" class=\"action-btn\" id=\"btn-export-csv\" data-filename=\"{exportFn}\">\u2B07 CSV</button><button type=\"button\" class=\"action-btn\" id=\"btn-print\">\u2399 Print</button></div>");
         sb.AppendLine("</section>");
 
-        if (doc.IsTrendReport)
+        if (doc is TrendReportDocument trendDoc)
         {
-            sb.AppendLine($"<div class=\"dedup-note\"><strong>Dumps analyzed:</strong> {doc.TrendDumpCount}</div>");
-            if (doc.TrendDumpPaths is { Count: > 0 })
+            sb.AppendLine($"<div class=\"dedup-note\"><strong>Dumps analyzed:</strong> {trendDoc.TrendDumpCount}</div>");
+            if (trendDoc.TrendDumpPaths is { Count: > 0 })
             {
-                string dumpList = string.Join("<br/>", doc.TrendDumpPaths.Select(p => $"&bull; {Enc(p)}"));
+                string dumpList = string.Join("<br/>", trendDoc.TrendDumpPaths.Select(p => $"&bull; {Enc(p)}"));
                 sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
             }
         }

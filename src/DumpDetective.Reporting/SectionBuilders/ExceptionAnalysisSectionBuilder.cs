@@ -136,6 +136,27 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IRep
             }
 
             blocks.Add(new TableBlock("Exception instances", ["Type", "Address", "Message", "HRESULT", "Inner Type", "Status"], rows));
+
+            var depthBuckets = new Dictionary<int, int>();
+            for (int i = 0; i < crash.TopExceptionInstances.Count; i++)
+            {
+                ExceptionInstanceSnapshot ex = crash.TopExceptionInstances[i];
+                if (depthBuckets.TryGetValue(ex.ChainDepth, out int count))
+                    depthBuckets[ex.ChainDepth] = count + 1;
+                else
+                    depthBuckets[ex.ChainDepth] = 1;
+            }
+
+            if (depthBuckets.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("INNER EXCEPTION CHAIN DEPTH"));
+                var depthRows = new List<TableRow>(depthBuckets.Count);
+                foreach (KeyValuePair<int, int> kvp in depthBuckets.OrderBy(kvp => kvp.Key))
+                    depthRows.Add(Row(Cell(kvp.Key.ToString("N0"), kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
+
+                blocks.Add(new TableBlock("Exception chain depth histogram", ["Depth", "Count"], depthRows));
+            }
         }
 
         blocks.Add(Blank());

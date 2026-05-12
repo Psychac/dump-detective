@@ -35,11 +35,12 @@ internal sealed record RetentionDomainResult(
     ulong TopHighlyReferencedTotalBytes = 0) : AnalyzerDomainResult;
 
 // DuplicateStringSnapshot moved to DumpDetective.Core.Models.DuplicateStringSnapshot
-internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences);
+internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0);
 
 internal sealed record RetentionTypeSnapshot(
     string TypeName,
     int ObjectCount,
     ulong TotalBytes,
     long TotalIncomingReferences,
-    int MaxIncomingReferences);
+    int MaxIncomingReferences,
+    ulong EstimatedRetainedBytes = 0);

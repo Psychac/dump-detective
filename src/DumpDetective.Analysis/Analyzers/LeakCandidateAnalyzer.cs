@@ -127,6 +127,7 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
                 dependentTargetCounts.ContainsKey(typeName),
                 isContainer,
                 referenceFieldRatio);
+            FindingSeverity severity = GetSeverity(score);
 
             string? rootKind = classification switch
             {
@@ -146,6 +147,7 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
                 InstanceCount: aggregate.Count,
                 Gen2Pct: gen2Pct,
                 SuspicionScore: score,
+                Severity: severity,
                 Classification: classification,
                 RootKind: rootKind,
                 IsFinalizable: isFinalizable,
@@ -244,6 +246,13 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
 
         return score;
     }
+
+    private static FindingSeverity GetSeverity(int score)
+        => score >= 90
+            ? FindingSeverity.Critical
+            : score >= 70
+                ? FindingSeverity.Warning
+                : FindingSeverity.Info;
 
     private static void Increment(Dictionary<LeakClass, int> counts, LeakClass classification)
     {

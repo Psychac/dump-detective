@@ -96,7 +96,9 @@ namespace DumpDetective.Analysis.Analyzers
                     Gen0Count: e.Gen0Count,
                     Gen1Count: e.Gen1Count,
                     Gen2Count: e.Gen2Count,
-                    LohCount: (int)Math.Min(e.LohCount, int.MaxValue)));
+                    LohCount: (int)Math.Min(e.LohCount, int.MaxValue),
+                    TotalBytes: e.TotalSize,
+                    IsFinalizable: true));
             }
 
             // ── Step 3: Finalizer queue analysis ─────────────────────────────

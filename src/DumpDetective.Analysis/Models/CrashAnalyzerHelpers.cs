@@ -44,6 +44,7 @@ namespace DumpDetective.Analysis.Analyzers
         public string Message { get; set; } = string.Empty;
         public int HResult { get; set; }
         public string? InnerExceptionType { get; set; }
+        public int ChainDepth { get; set; } = 1;
         public uint? ThreadId { get; set; }
         public uint? OSThreadId { get; set; }
         public List<string> OriginalStackTrace { get; set; } = new();

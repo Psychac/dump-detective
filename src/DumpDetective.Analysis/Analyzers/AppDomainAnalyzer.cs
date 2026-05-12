@@ -46,6 +46,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             IReadOnlyList<ClrAppDomain> appDomains = runtime.AppDomains;
             int totalDynamicModules = 0;
+            ulong dynamicModuleBytes = 0;
             int anonymousModuleCount = 0;
 
             var domainSnapshots = new List<AppDomainSnapshot>(appDomains.Count);
@@ -70,6 +71,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 int moduleCount = modules.Count;
                 ulong domainManagedBytes = 0;
+                var domainTopModules = new List<string>(capacity: Math.Min(options.ModuleEnumerationLimit, 8));
 
                 // Select modules according to selection mode. Default: TopBySize (existing behavior).
                 ClrModule[]? sortedModules = null;
@@ -94,7 +96,19 @@ namespace DumpDetective.Analysis.Analyzers
                     ClrModule module = sortedModules is not null ? sortedModules[mi] : modules[mi];
 
                     if (module.IsDynamic) totalDynamicModules++;
+                    if (module.IsDynamic) dynamicModuleBytes += module.Size;
                     if (string.IsNullOrEmpty(module.Name)) anonymousModuleCount++;
+
+                    if (domainTopModules.Count < 8)
+                    {
+                        string moduleDisplay = Path.GetFileName(module.Name ?? string.Empty) ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(moduleDisplay))
+                            moduleDisplay = "<anonymous>";
+                        if (module.IsDynamic)
+                            moduleDisplay += " [dynamic]";
+
+                        domainTopModules.Add(moduleDisplay);
+                    }
 
                     if (module.Address == 0) continue;
 
@@ -141,7 +155,8 @@ namespace DumpDetective.Analysis.Analyzers
                     Address: domain.Address,
                     DomainId: domain.Id,
                     ModuleCount: moduleCount,
-                    EstimatedManagedBytes: domainManagedBytes));
+                    EstimatedManagedBytes: domainManagedBytes,
+                    TopModules: domainTopModules));
             }
 
             // Build TopModulesByTypeCount — sort by TypeCount descending, cap at limit
@@ -166,6 +181,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalDomains: appDomains.Count,
                 Domains: domainSnapshots,
                 TotalDynamicModules: totalDynamicModules,
+                DynamicModuleBytes: dynamicModuleBytes,
                 AnonymousModuleCount: anonymousModuleCount,
                 TopModulesByTypeCount: topModules)
                 with

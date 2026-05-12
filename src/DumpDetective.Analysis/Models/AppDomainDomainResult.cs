@@ -9,7 +9,8 @@ internal sealed record AppDomainSnapshot(
     ulong Address,
     int DomainId,
     int ModuleCount,
-    ulong EstimatedManagedBytes);
+    ulong EstimatedManagedBytes,
+    IReadOnlyList<string>? TopModules = null);
 
 internal sealed record ModuleTypeCountEntry(
     string ModuleName,
@@ -23,5 +24,6 @@ internal sealed record AppDomainDomainResult(
     int TotalDomains,
     IReadOnlyList<AppDomainSnapshot> Domains,
     int TotalDynamicModules,
+    ulong DynamicModuleBytes,
     int AnonymousModuleCount,
     IReadOnlyList<ModuleTypeCountEntry> TopModulesByTypeCount) : AnalyzerDomainResult;

@@ -20,6 +20,7 @@ internal sealed record LeakCandidateRecord(
     long InstanceCount,
     double Gen2Pct,
     int SuspicionScore,
+    FindingSeverity Severity,
     LeakClass Classification,
     string? RootKind,
     bool IsFinalizable,

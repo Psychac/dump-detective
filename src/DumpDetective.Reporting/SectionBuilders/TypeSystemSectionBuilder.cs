@@ -40,6 +40,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         var rows = new List<TableRow>(Math.Min(memory.TopTypesBySize.Count, TopRows));
+        var finalizableOverheadRows = new List<FinalizableOverheadCandidate>();
         int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
         for (int i = 0; i < limit; i++)
         {
@@ -63,6 +64,25 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
                 Cell(moduleName),
                 Cell("N/A")));
+
+            if (gen is not null && gen.IsFinalizable)
+            {
+                int totalCount = gen.Gen0Count + gen.Gen1Count + gen.Gen2Count + gen.LohCount;
+                if (totalCount > 0 && gen.TotalBytes > 0)
+                {
+                    ulong avgSize = gen.TotalBytes / (ulong)totalCount;
+                    ulong estimatedGen2Bytes = (ulong)gen.Gen2Count * avgSize;
+                    if (estimatedGen2Bytes > 0)
+                    {
+                        finalizableOverheadRows.Add(new FinalizableOverheadCandidate(
+                            type.TypeName,
+                            gen.Gen2Count,
+                            avgSize,
+                            estimatedGen2Bytes,
+                            moduleName));
+                    }
+                }
+            }
         }
 
         blocks.Add(new TableBlock(
@@ -72,6 +92,38 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         if (memory.TopTypesBySize.Count > TopRows)
             blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypesBySize.Count - TopRows} additional type(s) omitted."));
+
+        if (finalizableOverheadRows.Count > 0)
+        {
+            blocks.Add(Blank());
+            blocks.Add(H("FINALIZABLE GEN2 OVERHEAD"));
+            blocks.Add(T("Estimated as Gen2 count multiplied by average shallow size for the finalizable types present in the current type table."));
+
+            finalizableOverheadRows.Sort(static (a, b) => b.EstimatedGen2Bytes.CompareTo(a.EstimatedGen2Bytes));
+            int finalizableLimit = Math.Min(finalizableOverheadRows.Count, 10);
+            var overheadRows = new List<TableRow>(finalizableLimit);
+            ulong totalEstimatedBytes = 0;
+            for (int i = 0; i < finalizableLimit; i++)
+            {
+                FinalizableOverheadCandidate candidate = finalizableOverheadRows[i];
+                totalEstimatedBytes += candidate.EstimatedGen2Bytes;
+                overheadRows.Add(Row(
+                    Cell(candidate.TypeName),
+                    Cell(candidate.Gen2Count.ToString("N0"), candidate.Gen2Count),
+                    Cell(FormatBytes(candidate.AverageSize), (long)Math.Min(candidate.AverageSize, long.MaxValue)),
+                    Cell(FormatBytes(candidate.EstimatedGen2Bytes), (long)Math.Min(candidate.EstimatedGen2Bytes, long.MaxValue)),
+                    Cell(candidate.ModuleName)));
+            }
+
+            blocks.Add(M("Estimated finalizable Gen2 bytes", FormatBytes(totalEstimatedBytes), (double)Math.Min(totalEstimatedBytes, long.MaxValue)));
+            blocks.Add(new TableBlock(
+                Caption: "Finalizable types by estimated Gen2 overhead",
+                Headers: ["Type", "Gen2 Count", "Avg Size", "Est. Gen2 Bytes", "Module"],
+                Rows: overheadRows));
+
+            if (finalizableOverheadRows.Count > finalizableLimit)
+                blocks.Add(T($"Showing top {finalizableLimit} finalizable type(s). {finalizableOverheadRows.Count - finalizableLimit} additional type(s) omitted."));
+        }
 
         blocks.Add(Blank());
         blocks.Add(H("DOMINATOR CANDIDATES"));
@@ -158,6 +210,13 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         ulong RetainedBytes,
         ulong SampleAddress,
         bool Rooted);
+
+    private sealed record FinalizableOverheadCandidate(
+        string TypeName,
+        int Gen2Count,
+        ulong AverageSize,
+        ulong EstimatedGen2Bytes,
+        string ModuleName);
 
     private static List<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape, GCRootDomainResult? roots)
     {

@@ -55,6 +55,9 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IReportSect
         else
         {
             blocks.Add(M("Committed bytes", FormatBytes(segments.TotalCommittedBytes), (double)segments.TotalCommittedBytes));
+            blocks.Add(M("Used bytes", FormatBytes(segments.TotalUsedBytes), (double)segments.TotalUsedBytes));
+            double utilization = segments.TotalCommittedBytes == 0 ? 0.0 : segments.TotalUsedBytes * 100.0 / segments.TotalCommittedBytes;
+            blocks.Add(M("Utilization", $"{utilization:F1}%", utilization));
             blocks.Add(M("Reserved bytes", FormatBytes(segments.TotalReservedBytes), (double)segments.TotalReservedBytes));
             blocks.Add(M("Reservation gap", FormatBytes(segments.ReservationGapBytes), (double)segments.ReservationGapBytes));
             blocks.Add(M("LOH bytes", FormatBytes(segments.LohBytes), (double)segments.LohBytes));

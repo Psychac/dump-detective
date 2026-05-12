@@ -37,6 +37,34 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
             blocks.Add(M("LOH segments", segments.LohSegmentCount.ToString("N0"), segments.LohSegmentCount));
             blocks.Add(M("POH bytes", FormatBytes(segments.PohBytes), (double)segments.PohBytes));
             blocks.Add(M("FOH bytes", FormatBytes(segments.FrozenBytes), (double)segments.FrozenBytes));
+
+            if (segments.FrozenBytes > 100UL * 1024 * 1024)
+            {
+                blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
+            }
+
+            if (segments.PerLogicalHeapSummaries.Count > 0)
+            {
+                blocks.Add(Blank());
+                blocks.Add(H("CROSS-HEAP DISTRIBUTION"));
+                blocks.Add(T("Per-logical-heap committed bytes, object counts, and segment counts. This is a direct view of heap balance across subheaps."));
+
+                var heapRows = new List<TableRow>(segments.PerLogicalHeapSummaries.Count);
+                for (int i = 0; i < segments.PerLogicalHeapSummaries.Count; i++)
+                {
+                    PerLogicalHeapSummary heap = segments.PerLogicalHeapSummaries[i];
+                    double share = segments.TotalCommittedBytes == 0 ? 0.0 : heap.Bytes * 100.0 / segments.TotalCommittedBytes;
+
+                    heapRows.Add(Row(
+                        Cell(heap.LogicalHeapIndex.ToString("N0"), heap.LogicalHeapIndex),
+                        Cell(FormatBytes(heap.Bytes), (long)Math.Min(heap.Bytes, long.MaxValue)),
+                        Cell(share.ToString("F1") + "%"),
+                        Cell(heap.ObjectCount >= 0 ? heap.ObjectCount.ToString("N0") : "N/A", heap.ObjectCount),
+                        Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
+                }
+
+                blocks.Add(new TableBlock("Per logical heap distribution", ["Heap", "Committed Bytes", "% of Total", "Objects", "Segments"], heapRows));
+            }
         }
 
         if (loh is not null)
@@ -166,7 +194,48 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
 
         blocks.Add(Blank());
         blocks.Add(H("POH / FOH NOTES"));
-        blocks.Add(T("POH and FOH top-type enumeration is not currently modelled; use the segment summaries above for pressure analysis."));
+        if (segments?.TopPohTypes is { Count: > 0 })
+        {
+            var pohRows = new List<TableRow>(segments.TopPohTypes.Count);
+            for (int i = 0; i < segments.TopPohTypes.Count; i++)
+            {
+                TypeSnapshot type = segments.TopPohTypes[i];
+                pohRows.Add(Row(
+                    Cell(type.TypeName),
+                    Cell(type.Count.ToString("N0"), type.Count),
+                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                    Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—")));
+            }
+
+            blocks.Add(H("TOP POH TYPES"));
+            blocks.Add(new TableBlock("Pinned object heap types", ["Type", "Count", "Size", "Avg Size"], pohRows));
+        }
+        else
+        {
+            blocks.Add(T("POH type distribution is not currently available for this dump; use the segment summaries above for pressure analysis."));
+        }
+
+        if (segments?.TopFrozenTypes is { Count: > 0 })
+        {
+            var frozenRows = new List<TableRow>(segments.TopFrozenTypes.Count);
+            for (int i = 0; i < segments.TopFrozenTypes.Count; i++)
+            {
+                TypeSnapshot type = segments.TopFrozenTypes[i];
+                frozenRows.Add(Row(
+                    Cell(type.TypeName),
+                    Cell(type.Count.ToString("N0"), type.Count),
+                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                    Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—")));
+            }
+
+            blocks.Add(Blank());
+            blocks.Add(H("TOP FOH TYPES"));
+            blocks.Add(new TableBlock("Frozen object heap types", ["Type", "Count", "Size", "Avg Size"], frozenRows));
+        }
+        else
+        {
+            blocks.Add(T("FOH type distribution is not currently available for this dump; use the segment summaries above for pressure analysis."));
+        }
 
         return new AnalyzerDetailSection("Heap Segment Diagnostics", DisplayTitle, SortOrder, blocks);
     }

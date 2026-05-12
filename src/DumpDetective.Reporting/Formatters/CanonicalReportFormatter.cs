@@ -76,22 +76,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
 
-        if (doc.ExecutiveSummary is { } ex)
-        {
-            sb.AppendLine("EXECUTIVE SUMMARY");
-            sb.AppendLine(StringConstants.Equals80);
-            sb.AppendLine($"- Total Managed Bytes: {FormatHelper.FormatBytes((ulong)ex.TotalManagedBytes)}");
-            AppendScore(sb, "Leak Likelihood Score", ex.LeakLikelihoodScore, ex.LeakScoreDelta,
-                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "Leak"));
-            AppendScore(sb, "GC Pressure Score", ex.GcPressureScore, ex.GcPressureScoreDelta,
-                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "GcPressure"));
-            AppendScore(sb, "Thread Contention Score", ex.ThreadContentionScore, ex.ThreadContentionScoreDelta,
-                ex.ScoreBreakdowns?.FirstOrDefault(b => b.Dimension == "ThreadContention"));
-            foreach (FindingRecord rec in ex.TopRecommendations)
-                sb.AppendLine($"  [{rec.Severity}] {rec.Title}");
-            sb.AppendLine();
-        }
-
         if (doc.DeveloperActionPlan.Count > 0)
         {
             sb.AppendLine("DEVELOPER ACTION PLAN");
@@ -373,27 +357,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
 
-        if (doc.ExecutiveSummary is { } ex)
-        {
-            sb.AppendLine("## Executive Summary");
-            sb.AppendLine();
-            sb.AppendLine("| Signal | Value |");
-            sb.AppendLine("|---|---|");
-            sb.AppendLine($"| **Total Managed Bytes** | {FormatHelper.FormatBytes((ulong)ex.TotalManagedBytes)} |");
-            sb.AppendLine($"| **Leak Likelihood** | {ex.LeakLikelihoodScore}/100 |");
-            sb.AppendLine($"| **GC Pressure** | {ex.GcPressureScore}/100 |");
-            sb.AppendLine($"| **Thread Contention** | {ex.ThreadContentionScore}/100 |");
-            sb.AppendLine();
-            if (ex.TopRecommendations.Count > 0)
-            {
-                sb.AppendLine("**Top Recommendations**");
-                sb.AppendLine();
-                foreach (FindingRecord rec in ex.TopRecommendations)
-                    sb.AppendLine($"- [{rec.Severity}] {rec.Title}");
-                sb.AppendLine();
-            }
-        }
-
         if (doc.DeveloperActionPlan.Count > 0)
         {
             sb.AppendLine("## Developer Action Plan");
@@ -657,26 +620,6 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine("</ol></div>");
             }
             sb.AppendLine("</nav>");
-        }
-
-        // ── Executive summary ───────────────────────────────────────────────
-        if (doc.ExecutiveSummary is { } ex)
-        {
-            sb.AppendLine("<section class=\"section-card\"><h2>Executive Summary</h2>");
-            sb.AppendLine("<table><thead><tr><th scope=\"col\">Signal</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-            sb.AppendLine($"<tr><td>Total Managed Bytes</td><td>{FormatHelper.FormatBytes((ulong)ex.TotalManagedBytes)}</td></tr>");
-            sb.AppendLine($"<tr><td>Leak Likelihood Score</td><td>{ex.LeakLikelihoodScore}/100</td></tr>");
-            sb.AppendLine($"<tr><td>GC Pressure Score</td><td>{ex.GcPressureScore}/100</td></tr>");
-            sb.AppendLine($"<tr><td>Thread Contention Score</td><td>{ex.ThreadContentionScore}/100</td></tr>");
-            sb.AppendLine("</tbody></table>");
-            if (ex.TopRecommendations.Count > 0)
-            {
-                sb.AppendLine("<h3>Top Recommendations</h3><ul>");
-                foreach (FindingRecord rec in ex.TopRecommendations)
-                    sb.AppendLine($"<li><span class=\"severity-badge {SevCss(rec.Severity)}\">{Enc(rec.Severity)}</span> {Enc(rec.Title)}</li>");
-                sb.AppendLine("</ul>");
-            }
-            sb.AppendLine("</section>");
         }
 
         // ── Developer action plan ───────────────────────────────────────────

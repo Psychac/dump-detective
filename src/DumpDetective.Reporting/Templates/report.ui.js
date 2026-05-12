@@ -24,10 +24,6 @@ export function buildSidebar(tocNode) {
     quickLinks.className = 'report-navbar__links';
     quickLinks.setAttribute('aria-label', 'Quick links');
     quickLinks.innerHTML = '<div class="report-navbar__links-title">Quick links</div>';
-    const summaryLink = document.createElement('a');
-    summaryLink.href = '#executive-summary';
-    summaryLink.textContent = 'Executive Summary';
-    quickLinks.appendChild(summaryLink);
     const actionLink = document.createElement('a');
     actionLink.href = '#developer-action-plan';
     actionLink.textContent = 'Developer Action Plan';

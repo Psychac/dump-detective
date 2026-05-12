@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -35,15 +36,18 @@ namespace DumpDetective.Analysis.Analyzers
             // Finalizer queue analysis has been moved to FinalizableObjectAnalyzer.
             // Keep RetentionAnalyzer focused on incoming-reference retention signals only.
             LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, policy, progress);
-            IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(signals.TopHighlyReferencedObjects);
-            ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(signals.TopHighlyReferencedObjects);
+            List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
+                ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
+            PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
+            IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
+            ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
 
             return new RetentionDomainResult(
                     FinalizerQueueCount: 0,
                     HighlyReferencedObjectCount: signals.HighlyReferencedObjectCount,
                     SkippedReferenceAddresses: signals.SkippedReferenceAddresses,
                     TopFinalizerTypes: null,
-                    TopHighlyReferencedObjects: signals.TopHighlyReferencedObjects,
+                    TopHighlyReferencedObjects: topHighlyReferencedObjects,
                 ObjectScanCapped: signals.ObjectScanCapped,
                 TopRetentionTypes: topRetentionTypes,
                 TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes);
@@ -332,6 +336,24 @@ namespace DumpDetective.Analysis.Analyzers
                 incomingReferences);
         }
 
+        private static void PopulateRetainedBytes(ClrHeap heap, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
+        {
+            if (objects.Count == 0)
+                return;
+
+            var visited = new HashSet<ulong>(capacity: Math.Min(objects.Count * 4, 256));
+            for (int i = 0; i < objects.Count; i++)
+            {
+                HighlyReferencedObjectSnapshot snapshot = objects[i];
+                ClrObject root = heap.GetObject(snapshot.Address);
+                if (!root.IsValid)
+                    continue;
+
+                ulong retained = BoundedRetainedSizeBfs.ComputeExclusiveRetained(root, heap, visited, maxBreadth: options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000, maxDepth: 20);
+                objects[i] = snapshot with { EstimatedRetainedBytes = retained };
+            }
+        }
+
         private static ulong SumTopHighlyReferencedBytes(IReadOnlyList<HighlyReferencedObjectSnapshot> objects)
         {
             ulong total = 0;
@@ -355,6 +377,7 @@ namespace DumpDetective.Analysis.Analyzers
                     acc.ObjectCount++;
                     acc.TotalBytes += obj.Size;
                     acc.TotalIncomingReferences += obj.IncomingReferences;
+                    acc.EstimatedRetainedBytes += obj.EstimatedRetainedBytes;
                     if (obj.IncomingReferences > acc.MaxIncomingReferences)
                         acc.MaxIncomingReferences = obj.IncomingReferences;
                     byType[obj.TypeName] = acc;
@@ -366,7 +389,8 @@ namespace DumpDetective.Analysis.Analyzers
                         ObjectCount = 1,
                         TotalBytes = obj.Size,
                         TotalIncomingReferences = obj.IncomingReferences,
-                        MaxIncomingReferences = obj.IncomingReferences
+                        MaxIncomingReferences = obj.IncomingReferences,
+                        EstimatedRetainedBytes = obj.EstimatedRetainedBytes
                     };
                 }
             }
@@ -377,8 +401,9 @@ namespace DumpDetective.Analysis.Analyzers
                     ObjectCount: kvp.Value.ObjectCount,
                     TotalBytes: kvp.Value.TotalBytes,
                     TotalIncomingReferences: kvp.Value.TotalIncomingReferences,
-                    MaxIncomingReferences: kvp.Value.MaxIncomingReferences))
-                .OrderByDescending(static t => t.TotalIncomingReferences)
+                    MaxIncomingReferences: kvp.Value.MaxIncomingReferences,
+                    EstimatedRetainedBytes: kvp.Value.EstimatedRetainedBytes))
+                .OrderByDescending(static t => t.EstimatedRetainedBytes > 0 ? (double)t.EstimatedRetainedBytes / Math.Max(1.0, t.TotalBytes) : (double)t.TotalIncomingReferences)
                 .ThenByDescending(static t => t.TotalBytes)
                 .ToList();
         }
@@ -429,6 +454,7 @@ namespace DumpDetective.Analysis.Analyzers
             public ulong TotalBytes;
             public long TotalIncomingReferences;
             public int MaxIncomingReferences;
+            public ulong EstimatedRetainedBytes;
         }
 
         public void Dispose() { }

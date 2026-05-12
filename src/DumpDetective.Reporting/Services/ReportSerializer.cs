@@ -25,6 +25,8 @@ internal sealed class ReportSerializer
         List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, analyzerBuilders);
         AnalyzerResultSet resultSet = new(runs, incidentContext);
         List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
+        analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
+        specSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
         List<AnalyzerDetailSection> mergedSections = MergeSections(analyzerSections, specSections);
 
         // If analyzers produced exported artifact files (NDJSON/CSV etc.), append
@@ -55,8 +57,6 @@ internal sealed class ReportSerializer
             blocks.Add(new TextBlock($"Note: This analyzer produced {dupArtifacts.Count} artifact file(s) (e.g. NDJSON/CSV) containing exported snapshots or duplicate records. These artifacts are written to the report's artifacts folder and can be downloaded for deeper analysis."));
             mergedSections[idx] = section with { Blocks = blocks };
         }
-        mergedSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
-
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
         List<FindingRecord> allFindings = [];
         
@@ -238,8 +238,8 @@ internal sealed class ReportSerializer
         IReadOnlyList<AnalyzerDetailSection> specSections)
     {
         List<AnalyzerDetailSection> merged = new(analyzerSections.Count + specSections.Count);
-        merged.AddRange(analyzerSections);
         merged.AddRange(specSections);
+        merged.AddRange(analyzerSections);
         return merged;
     }
 

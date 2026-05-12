@@ -29,8 +29,6 @@ async function bootstrap() {
 
   main.appendChild(R.buildHeader(doc));
 
-  const execBanner = R.buildExecutiveBanner(doc); if (execBanner) main.appendChild(execBanner);
-  const exSec = R.buildExecutiveSummary(doc); if (exSec) main.appendChild(exSec);
   const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
 
   const filterBar = R.buildFilterBar(doc);

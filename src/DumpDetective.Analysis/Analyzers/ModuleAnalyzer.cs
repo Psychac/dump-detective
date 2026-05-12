@@ -58,7 +58,7 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < candidates.Count && i < options.TopLoadedAssembliesCount; i++)
             {
                 var m = candidates[i];
-                topModules.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic));
+                topModules.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic, m.IsPEFile));
             }
 
             // Conflict groups — preserve full per-instance detail for the printer.
@@ -67,7 +67,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 var instances = new List<LoadedModuleSnapshot>(kvp.Value.Count);
                 foreach (var m in kvp.Value)
-                    instances.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic));
+                    instances.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic, m.IsPEFile));
                 conflictDetails.Add(new ModuleConflictGroup(kvp.Key, instances));
             }
 
@@ -134,7 +134,8 @@ namespace DumpDetective.Analysis.Analyzers
                     AssemblyName = assemblyName,
                     Address = module.Address,
                     Size = module.Size,
-                    IsDynamic = module.IsDynamic
+                    IsDynamic = module.IsDynamic,
+                    IsPEFile = module.IsPEFile
                 };
 
                 if (!modulesByName.TryGetValue(moduleName, out var list))
@@ -239,6 +240,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ulong Address { get; set; }
         public ulong Size { get; set; }
         public bool IsDynamic { get; set; }
+        public bool IsPEFile { get; set; }
     }
 }
 

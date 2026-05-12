@@ -45,6 +45,7 @@ internal sealed record ExceptionInstanceSnapshot(
     string? Message,
     int? HResult,
     string? InnerExceptionType,
+    int ChainDepth,
     bool IsActive,
     uint? ThreadId,
     uint? OSThreadId,

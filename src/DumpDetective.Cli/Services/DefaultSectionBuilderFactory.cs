@@ -7,19 +7,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 {
     public IReadOnlyList<IAnalyzerSectionBuilder> CreateAnalyzerBuilders() =>
     [
-        new MemorySectionBuilder(),
-        new GCGenerationSectionBuilder(),
-        new AllocationPatternSectionBuilder(),
-        new ObjectShapeSectionBuilder(),
-        new GCRootSectionBuilder(),
-        new SegmentSectionBuilder(),
-        new SegmentReservationSectionBuilder(),
-        new ModuleSectionBuilder(),
-        new AppDomainSectionBuilder(),
-        new CrashSectionBuilder(),
-        new HangSectionBuilder(),
-        new AsyncTaskSectionBuilder(),
-        new RetentionSectionBuilder(),
         new StringSectionBuilder(),
         new CollectionSectionBuilder(),
         new StaticRootSectionBuilder(),

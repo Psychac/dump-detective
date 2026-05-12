@@ -36,6 +36,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         progress?.Report(new(0, "classifying heap segments", $"0 / {totalSegments} segments"));
 
         ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0;
+        ulong sohUsedBytes = 0, lohUsedBytes = 0, pohUsedBytes = 0, frozenUsedBytes = 0;
         ulong sohReserved = 0, lohReserved = 0, pohReserved = 0, frozenReserved = 0;
         int sohCount = 0, lohCount = 0, pohCount = 0, frozenCount = 0;
         int sohObjects = 0, lohObjects = 0, pohObjects = 0, frozenObjects = 0;
@@ -46,18 +47,28 @@ public sealed class SegmentAnalyzer : IAnalyzer
         var bytesByLogicalHeap = new Dictionary<int, ulong>();
         var objectsByLogicalHeap = new Dictionary<int, int>();
         var segmentCountByLogicalHeap = new Dictionary<int, int>();
+        var pohTypes = new Dictionary<string, SegmentTypeAccumulator>(StringComparer.Ordinal);
+        var frozenTypes = new Dictionary<string, SegmentTypeAccumulator>(StringComparer.Ordinal);
 
         foreach (ClrSegment segment in heap.Segments)
         {
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
             ulong committed = GetCommittedBytes(segment);
             ulong reserved = GetReservedBytes(segment);
+            ulong used = 0;
             ulong start = segment.Start;
             ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
             int generation = segment.SubHeap?.Index ?? -1;
 
-            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, progress);
+            Dictionary<string, SegmentTypeAccumulator>? typeStats = kind switch
+            {
+                HeapSegmentKind.PinnedObjectHeap => pohTypes,
+                HeapSegmentKind.Frozen => frozenTypes,
+                _ => null
+            };
+
+            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, ref used, progress, typeStats);
             if (generation >= 0)
             {
                 if (bytesByLogicalHeap.TryGetValue(generation, out ulong existingBytes))
@@ -96,10 +107,27 @@ public sealed class SegmentAnalyzer : IAnalyzer
                 End: end,
                 Length: length,
                 CommittedBytes: committed,
+                UsedBytes: used,
                 ReservedBytes: reserved,
                 Kind: kind,
                 Generation: generation,
                 ObjectCount: objCount));
+
+            switch (kind)
+            {
+                case HeapSegmentKind.SmallObjectHeap:
+                    sohUsedBytes += used;
+                    break;
+                case HeapSegmentKind.LargeObjectHeap:
+                    lohUsedBytes += used;
+                    break;
+                case HeapSegmentKind.PinnedObjectHeap:
+                    pohUsedBytes += used;
+                    break;
+                case HeapSegmentKind.Frozen:
+                    frozenUsedBytes += used;
+                    break;
+            }
 
             // objCount == -1 is the sentinel for "SOH not counted" — do not add to totals.
             int countedObj = objCount >= 0 ? objCount : 0;
@@ -139,6 +167,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         }
 
         ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes;
+        ulong totalUsed = sohUsedBytes + lohUsedBytes + pohUsedBytes + frozenUsedBytes;
         ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved;
         ulong reservationGap = totalReserved > totalCommitted ? totalReserved - totalCommitted : 0;
         double frozenPercent = totalCommitted == 0 ? 0.0 : frozenBytes * 100.0 / totalCommitted;
@@ -167,6 +196,9 @@ public sealed class SegmentAnalyzer : IAnalyzer
             .Take(SegmentAnalyzerOptions.TopSegmentsCount)
             .ToList();
 
+        var topPohTypes = BuildTopTypeSnapshots(pohTypes, SegmentAnalyzerOptions.TopSegmentsCount);
+        var topFrozenTypes = BuildTopTypeSnapshots(frozenTypes, SegmentAnalyzerOptions.TopSegmentsCount);
+
         progress?.Report(new(
             ScannedCount: totalObjectsScanned,
             Phase: "aggregating results",
@@ -175,6 +207,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
         return new SegmentAnalysisDomainResult(
             TotalSegments: snapshots.Count,
             TotalCommittedBytes: totalCommitted,
+            TotalUsedBytes: totalUsed,
             TotalReservedBytes: totalReserved,
             ReservationGapBytes: reservationGap,
             SohSegmentCount: sohCount,
@@ -190,6 +223,8 @@ public sealed class SegmentAnalyzer : IAnalyzer
             PohPercent: pohPercent,
             KindSummaries: kindSummaries,
             PerLogicalHeapSummaries: logicalHeapSummaries,
+                TopPohTypes: topPohTypes,
+                TopFrozenTypes: topFrozenTypes,
             TopSegmentsBySize: topBySize);
     }
 
@@ -211,7 +246,9 @@ public sealed class SegmentAnalyzer : IAnalyzer
         HeapSegmentKind kind,
         bool countSoh,
         ref long totalObjectsScanned,
-        IProgress<AnalyzerProgressReport>? progress)
+        ref ulong usedBytes,
+        IProgress<AnalyzerProgressReport>? progress,
+        Dictionary<string, SegmentTypeAccumulator>? typeStats = null)
     {
         // SOH holds the vast majority of objects on large dumps.
         // Skip enumeration unless explicitly requested to avoid O(87M) scans.
@@ -227,7 +264,24 @@ public sealed class SegmentAnalyzer : IAnalyzer
         foreach (ClrObject obj in segment.EnumerateObjects())
         {
             if (obj.IsValid && !obj.IsFree)
+            {
                 count++;
+                usedBytes += obj.Size;
+
+                if (typeStats is not null && obj.Type is not null)
+                {
+                    string typeName = obj.Type.Name ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(typeName))
+                    {
+                        if (!typeStats.TryGetValue(typeName, out SegmentTypeAccumulator acc))
+                            acc = new SegmentTypeAccumulator();
+
+                        acc.Count++;
+                        acc.TotalBytes += obj.Size;
+                        typeStats[typeName] = acc;
+                    }
+                }
+            }
 
             localScanned++;
 
@@ -244,5 +298,32 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
         totalObjectsScanned += localScanned;
         return count;
+    }
+
+    private static IReadOnlyList<TypeSnapshot> BuildTopTypeSnapshots(Dictionary<string, SegmentTypeAccumulator> typeStats, int limit)
+    {
+        if (typeStats.Count == 0)
+            return [];
+
+        var snapshots = new List<TypeSnapshot>(typeStats.Count);
+        foreach (KeyValuePair<string, SegmentTypeAccumulator> kvp in typeStats)
+        {
+            int count = kvp.Value.Count;
+            ulong totalBytes = kvp.Value.TotalBytes;
+            ulong averageSize = count > 0 ? totalBytes / (ulong)count : 0;
+            snapshots.Add(new TypeSnapshot(kvp.Key, count, totalBytes, 0, averageSize));
+        }
+
+        snapshots.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
+        if (snapshots.Count > limit)
+            snapshots.RemoveRange(limit, snapshots.Count - limit);
+
+        return snapshots;
+    }
+
+    private struct SegmentTypeAccumulator
+    {
+        public int Count { get; set; }
+        public ulong TotalBytes { get; set; }
     }
 }

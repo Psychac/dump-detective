@@ -362,6 +362,7 @@ namespace DumpDetective.Analysis.Analyzers
                     string.IsNullOrWhiteSpace(inst.Message) ? null : inst.Message,
                     inst.HResult == 0 ? null : inst.HResult,
                     inst.InnerExceptionType,
+                    inst.ChainDepth,
                     inst.ThreadId.HasValue,
                     inst.ThreadId,
                     inst.OSThreadId,
@@ -735,6 +736,8 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
 
+                instance.ChainDepth = ComputeExceptionChainDepth(heap, exceptionAddress);
+
                 // Get the ORIGINAL stack trace from exception object (not thread stack)
                 instance.OriginalStackTrace = ExtractExceptionStackTrace(heap, exceptionAddress);
 
@@ -751,6 +754,34 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return instance;
+        }
+
+        private static int ComputeExceptionChainDepth(ClrHeap heap, ulong exceptionAddress)
+        {
+            const int MaxDepth = 16;
+            int depth = 1;
+            var seen = new HashSet<ulong>();
+            ulong currentAddress = exceptionAddress;
+
+            while (currentAddress != 0 && depth < MaxDepth && seen.Add(currentAddress))
+            {
+                ClrObject current = heap.GetObject(currentAddress);
+                if (!current.IsValid || current.Type is null)
+                    break;
+
+                var innerField = current.Type.GetFieldByName("_innerException");
+                if (innerField is null)
+                    break;
+
+                ClrObject inner = innerField.ReadObject(current, interior: false);
+                if (!inner.IsValid || inner.Type is null)
+                    break;
+
+                depth++;
+                currentAddress = inner.Address;
+            }
+
+            return depth;
         }
 
         private List<string> ExtractExceptionStackTrace(ClrHeap heap, ulong exceptionAddress)

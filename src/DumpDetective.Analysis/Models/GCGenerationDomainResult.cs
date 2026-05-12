@@ -10,7 +10,9 @@ public sealed record TypeGenerationProfile(
     int Gen0Count,
     int Gen1Count,
     int Gen2Count,
-    int LohCount);
+    int LohCount,
+    ulong TotalBytes = 0,
+    bool IsFinalizable = false);
 
 public sealed record GCGenerationDomainResult(
     ulong Gen0Bytes,

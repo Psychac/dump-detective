@@ -106,7 +106,9 @@ namespace DumpDetective.Analysis.Analyzers
                     string name = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
                     profiles.Add(new TypeGenerationProfile(
                         name, e.Gen0Count, e.Gen1Count, e.Gen2Count,
-                        (int)Math.Min(int.MaxValue, e.LohCount)));
+                        (int)Math.Min(int.MaxValue, e.LohCount),
+                        e.TotalSize,
+                        (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0));
                 }
             }
 

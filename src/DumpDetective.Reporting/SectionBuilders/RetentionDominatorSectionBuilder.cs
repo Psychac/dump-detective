@@ -51,30 +51,32 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
             if (retention.TopRetentionTypes is { Count: > 0 })
             {
                 var proxyRows = new List<RetentionTypeSnapshot>(retention.TopRetentionTypes);
-                proxyRows.Sort((a, b) => b.TotalIncomingReferences.CompareTo(a.TotalIncomingReferences));
+                proxyRows.Sort((a, b) => CompareRetentionRatio(b, a));
 
                 blocks.Add(new TableBlock(
                     Caption: "Top retention types",
-                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Max Refs"],
+                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
                     Rows: retention.TopRetentionTypes.Take(10).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
                         Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
                         Cell(type.TotalIncomingReferences.ToString("N0"), type.TotalIncomingReferences),
-                        Cell(type.MaxIncomingReferences.ToString("N0"), type.MaxIncomingReferences))).ToList()));
+                        Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
+                        Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)))).ToList()));
 
                 blocks.Add(Blank());
-                blocks.Add(H("TOP 20 BY INCOMING REFS (PROXY FOR RETENTION RATIO)"));
-                blocks.Add(T("Retention ratio remains blocked until bounded BFS retained-size computation lands; incoming references are used as a proxy here."));
+                blocks.Add(H("TOP 20 BY RETENTION RATIO"));
+                blocks.Add(T("Retention ratio is estimated from bounded BFS retained bytes on the top highly referenced objects. Results remain capped by breadth and depth."));
                 blocks.Add(new TableBlock(
-                    Caption: "Top retention proxies by incoming references",
-                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Max Refs"],
+                    Caption: "Top retention types by ratio",
+                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
                     Rows: proxyRows.Take(20).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
                         Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
                         Cell(type.TotalIncomingReferences.ToString("N0"), type.TotalIncomingReferences),
-                        Cell(type.MaxIncomingReferences.ToString("N0"), type.MaxIncomingReferences))).ToList()));
+                        Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
+                        Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)))).ToList()));
             }
         }
 
@@ -198,5 +200,25 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
         }
 
         return unitIndex == 0 ? $"{value:N0} B" : $"{bytes:F1} {units[unitIndex]}";
+    }
+
+    private static string FormatRatio(ulong retainedBytes, ulong shallowBytes)
+    {
+        if (shallowBytes == 0)
+            return "—";
+
+        return $"{(double)retainedBytes / shallowBytes:F2}x";
+    }
+
+    private static double RatioValue(ulong retainedBytes, ulong shallowBytes)
+        => shallowBytes == 0 ? 0.0 : (double)retainedBytes / shallowBytes;
+
+    private static int CompareRetentionRatio(RetentionTypeSnapshot left, RetentionTypeSnapshot right)
+    {
+        double leftRatio = RatioValue(left.EstimatedRetainedBytes, left.TotalBytes);
+        double rightRatio = RatioValue(right.EstimatedRetainedBytes, right.TotalBytes);
+
+        int cmp = rightRatio.CompareTo(leftRatio);
+        return cmp != 0 ? cmp : right.TotalBytes.CompareTo(left.TotalBytes);
     }
 }

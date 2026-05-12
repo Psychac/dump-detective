@@ -10,7 +10,8 @@ public sealed record LoadedModuleSnapshot(
     string FullPath,
     ulong Address,
     ulong Size,
-    bool IsDynamic);
+    bool IsDynamic,
+    bool IsPEFile);
 
 public sealed record ModuleConflictGroup(
     string ModuleName,

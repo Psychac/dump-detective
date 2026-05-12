@@ -3,7 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Reporting.FindingGenerators;
+namespace DumpDetective.Analysis.FindingGenerators;
 
 internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
 {

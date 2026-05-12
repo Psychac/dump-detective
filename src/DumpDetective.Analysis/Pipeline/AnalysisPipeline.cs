@@ -144,11 +144,12 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     Findings: null,
                     FindingCount: 0,
                     WarningCount: warningCount,
-                    ObjectScanCount: objectScans,
-                    CacheHits: cacheHits,
-                    CacheMisses: cacheMisses,
                     Artifacts: propagatedArtifacts,
-                    MemoryStats: memoryStats);
+                    Diagnostics: new AnalyzerExecutionDiagnostics(
+                        ObjectScanCount: objectScans,
+                        CacheHits: cacheHits,
+                        CacheMisses: cacheMisses,
+                        MemoryStats: memoryStats));
 
                 runResults.Add(success);
 
@@ -178,9 +179,10 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     "Analyzer execution canceled.",
                     nameof(OperationCanceledException),
                     SkipReason: "Skipped by cancellation during analyzer execution.",
-                    ObjectScanCount: context.Cache.ObjectScanCount,
-                    CacheHits: context.Cache.CacheHits,
-                    CacheMisses: context.Cache.CacheMisses);
+                    Diagnostics: new AnalyzerExecutionDiagnostics(
+                        ObjectScanCount: context.Cache.ObjectScanCount,
+                        CacheHits: context.Cache.CacheHits,
+                        CacheMisses: context.Cache.CacheMisses));
 
                 runResults.Add(canceled);
 
@@ -214,9 +216,10 @@ internal sealed class AnalysisPipeline(IEnumerable<IAnalyzer> analyzers)
                     fullEx,
                     ex.GetType().Name,
                     SkipReason: null,
-                    ObjectScanCount: context.Cache.ObjectScanCount,
-                    CacheHits: context.Cache.CacheHits,
-                    CacheMisses: context.Cache.CacheMisses);
+                    Diagnostics: new AnalyzerExecutionDiagnostics(
+                        ObjectScanCount: context.Cache.ObjectScanCount,
+                        CacheHits: context.Cache.CacheHits,
+                        CacheMisses: context.Cache.CacheMisses));
 
                 runResults.Add(failed);
 

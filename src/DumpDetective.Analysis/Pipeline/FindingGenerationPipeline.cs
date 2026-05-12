@@ -1,7 +1,7 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Reporting.Pipeline;
+namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class FindingGenerationPipeline(IEnumerable<IFindingGenerator> generators)
 {
@@ -38,7 +38,11 @@ internal sealed class FindingGenerationPipeline(IEnumerable<IFindingGenerator> g
                 {
                     // Do not abort the pipeline — record the error on the run result so it is
                     // visible in both the report (Warning section) and the console summary.
-                    updated.Add(run with { FindingGeneratorError = $"{ex.GetType().Name}: {ex.Message}" });
+                    AnalyzerExecutionDiagnostics diagnostics = run.Diagnostics is null
+                        ? new AnalyzerExecutionDiagnostics(run.ObjectScanCount, run.CacheHits, run.CacheMisses, run.MemoryStats, $"{ex.GetType().Name}: {ex.Message}")
+                        : run.Diagnostics with { FindingGeneratorError = $"{ex.GetType().Name}: {ex.Message}" };
+
+                    updated.Add(run with { Diagnostics = diagnostics });
                 }
             }
             else

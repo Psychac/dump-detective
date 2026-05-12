@@ -32,7 +32,6 @@ public class PipelineHotspotBenchmark
         _context = new RuntimeAnalysisContext
         {
             Runtime = null!,
-            Heap = null!,
             Cache = new HeapAnalysisCache(),
             Diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true },
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance

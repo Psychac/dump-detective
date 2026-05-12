@@ -8,7 +8,7 @@ namespace DumpDetective.Core.Abstractions;
 public class AnalysisContext
 {
     public required ClrRuntime Runtime { get; init; }
-    public required ClrHeap Heap { get; init; }
+    public ClrHeap Heap => Runtime.Heap;
     public required IHeapAnalysisCache Cache { get; init; }
     public DiagnosticsOptions Diagnostics { get; init; } = new();
     /// <summary>

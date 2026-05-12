@@ -1,6 +1,6 @@
 using DumpDetective.Cli.Console;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Pipeline;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 

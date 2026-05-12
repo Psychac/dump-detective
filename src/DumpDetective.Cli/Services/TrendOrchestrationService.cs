@@ -5,7 +5,6 @@ using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Pipeline;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Trend;
 

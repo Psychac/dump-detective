@@ -10,14 +10,6 @@ public interface IAnalyzer : IDisposable
     string Category => AnalyzerCategory.Infer(Name);
     IReadOnlyCollection<string> Tags => [];
     int Order => 0;
-    /// <summary>
-    /// Declares whether this analyzer is safe to execute concurrently with other thread-safe analyzers.
-    /// <c>false</c> by default — the pipeline runs the analyzer sequentially.
-    /// Set to <c>true</c> only when the analyzer holds no shared mutable state and all <c>ClrMD</c>
-    /// accesses are read-only and do not mutate heap/runtime state.
-    /// Required by <c>AnalysisPipeline</c> before Phase 2 parallelization (PERF-MED-07).
-    /// </summary>
-    bool IsThreadSafe => false;
     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
 
     /// <summary>

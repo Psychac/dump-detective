@@ -9,11 +9,11 @@ using DumpDetective.Reporting.Models;
 
 internal sealed class TrendReportComposer(
     IEnumerable<IFindingGenerator> generators,
-    ReportSerializer serializer)
+    CanonicalReportDocumentFactory documentFactory)
 {
     private readonly IReadOnlyDictionary<string, IFindingGenerator> _generators =
         generators.ToDictionary(g => g.AnalyzerName, StringComparer.Ordinal);
-    private readonly ReportSerializer _serializer = serializer;
+    private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;
 
     public AnalysisReportDocument ComposeCanonicalTrendReport(
         string dumpPath,
@@ -21,6 +21,7 @@ internal sealed class TrendReportComposer(
         TimeSpan elapsed,
         DumpDetective.Core.Models.AnalysisIncidentContext? currentIncidentContext,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
+        IReadOnlyList<IReportSectionBuilder> reportBuilders,
         TrendReportData trendData,
         ReportAudience audience = ReportAudience.All)
     {
@@ -35,18 +36,7 @@ internal sealed class TrendReportComposer(
             .. BuildTopRegressionFindings(trendData.Overall)
         ];
 
-        // Wrap trend findings in a synthetic run so ReportSerializer can serialize them
-        AnalyzerRunResult trendRun = new(
-            AnalyzerName: "TrendAnalyzer",
-            Status: AnalyzerExecutionStatus.Success,
-            Duration: TimeSpan.Zero,
-            Result: null,
-            ErrorMessage: null,
-            ErrorType: null,
-            Findings: trendFindings,
-            FindingCount: trendFindings.Count);
-
-        AnalysisReportDocument baseDoc = _serializer.Serialize(dumpPath, [trendRun], elapsed, [], [], audience, currentIncidentContext);
+        AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, [], reportBuilders, audience, currentIncidentContext);
 
         // Build trend-specific analyzer sections
         var analyzerSections = new List<AnalyzerDetailSection>();
@@ -81,7 +71,7 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1)).ToList()
                 },
-            Findings = baseDoc.Findings,
+            Findings = trendFindings.Select(MapFinding).ToList(),
             ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
             Confidence = baseDoc.Confidence,
@@ -177,10 +167,10 @@ internal sealed class TrendReportComposer(
         if (snapshots.Count < 2)
             return summary;
 
-        AnalysisReportDocument firstDoc = _serializer.Serialize(
-            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), TimeSpan.Zero, [], [], audience);
-        AnalysisReportDocument lastDoc = _serializer.Serialize(
-            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), TimeSpan.Zero, [], [], audience);
+        AnalysisReportDocument firstDoc = _documentFactory.BuildSnapshotDocument(
+            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), [], audience);
+        AnalysisReportDocument lastDoc = _documentFactory.BuildSnapshotDocument(
+            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), [], audience);
 
         if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
             return summary;
@@ -206,8 +196,17 @@ internal sealed class TrendReportComposer(
         {
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerRunResult> runs = BuildSnapshotRuns(snapshot);
-            AnalysisReportDocument snapshotDoc = _serializer.Serialize(snapshot.DumpPath, runs, TimeSpan.Zero, builders, [], audience, snapshot.IncidentContext);
-            sections.Add(BuildStructuredDumpSection(snapshotDoc, i, snapshots.Count));
+            IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
+                .BuildSnapshotSections(snapshot.DumpPath, runs, builders, audience, snapshot.IncidentContext);
+            IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(MapFinding).ToList();
+            sections.Add(TrendSnapshotSectionComposer.Build(
+                snapshot.DumpPath,
+                snapshot.GeneratedAtUtc,
+                findings,
+                snapshot.IncidentContext,
+                snapshotSections,
+                i,
+                snapshots.Count));
         }
 
         return sections;
@@ -230,62 +229,13 @@ internal sealed class TrendReportComposer(
                     ErrorType: null,
                     Findings: domainFindings,
                     FindingCount: domainFindings.Count,
-                    WarningCount: kvp.Value.Warnings.Count);
+                    WarningCount: kvp.Value.Warnings.Count,
+                    Diagnostics: new AnalyzerExecutionDiagnostics(
+                        ObjectScanCount: 0,
+                        CacheHits: 0,
+                        CacheMisses: 0));
             })
             .ToList();
-    }
-
-    private static AnalyzerDetailSection BuildStructuredDumpSection(
-        AnalysisReportDocument snapshotDoc, int dumpIndex, int totalDumps)
-    {
-        string title = $"Dump {dumpIndex + 1} of {totalDumps}: {Path.GetFileName(snapshotDoc.DumpPath)}";
-        var blocks = new List<SectionBlock>();
-
-        blocks.Add(new HeadingBlock("DUMP SUMMARY"));
-        blocks.Add(new DividerBlock());
-        blocks.Add(new PathBlock("Path", snapshotDoc.DumpPath));
-        blocks.Add(new MetricBlock("Generated (UTC)", snapshotDoc.GeneratedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")));
-        blocks.Add(new MetricBlock("Findings", snapshotDoc.Findings.Count.ToString()));
-
-        if (snapshotDoc.IncidentContext is { } ctx)
-        {
-            blocks.Add(new BlankBlock());
-            blocks.Add(new HeadingBlock("INCIDENT CONTEXT"));
-            blocks.Add(new DividerBlock());
-            blocks.Add(new MetricBlock("Mode", ctx.Mode));
-            blocks.Add(new MetricBlock("Report", $"{ctx.ReportFormat} / {ctx.ReportAudience}"));
-            blocks.Add(new MetricBlock("Runtime", $"{ctx.RuntimeFlavor ?? "n/a"}{(string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : " " + ctx.RuntimeVersion)}"));
-            blocks.Add(new MetricBlock("GC Mode", ctx.GcMode ?? "n/a"));
-            blocks.Add(new MetricBlock("Heap Count", ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a"));
-            blocks.Add(new MetricBlock("Heap Walkable", ctx.HeapCanWalk ? "yes" : "no"));
-            blocks.Add(new MetricBlock("Config", (ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})")));
-            blocks.Add(new MetricBlock("Index Prebuild", ctx.IndexPrebuildMode));
-            blocks.Add(new MetricBlock("Active Analyzers", ctx.ActiveAnalyzerCount.ToString()));
-            blocks.Add(new MetricBlock("Elapsed", $"{ctx.AnalysisElapsedSeconds:F1}s"));
-        }
-
-        if (snapshotDoc.Findings.Count > 0)
-        {
-            blocks.Add(new BlankBlock());
-            blocks.Add(new HeadingBlock("FINDINGS"));
-            blocks.Add(new DividerBlock());
-            foreach (FindingRecord finding in snapshotDoc.Findings)
-            {
-                blocks.Add(new HeadingBlock($"[{finding.Severity}] {finding.Title}", 1));
-                blocks.Add(new TextBlock(finding.Evidence, 2));
-            }
-        }
-
-        foreach (AnalyzerDetailSection section in snapshotDoc.AnalyzerSections)
-        {
-            blocks.Add(new BlankBlock());
-            blocks.Add(new CollapsibleSectionBeginBlock(section.DisplayTitle));
-            foreach (SectionBlock block in section.Blocks)
-                blocks.Add(block);
-            blocks.Add(new CollapsibleSectionEndBlock());
-        }
-
-        return new AnalyzerDetailSection(title, title, dumpIndex * 10 + 200, blocks);
     }
 
     // ── Trend comparison section ──────────────────────────────────────────────
@@ -493,6 +443,34 @@ internal sealed class TrendReportComposer(
 
         blocks.Add(new DividerBlock());
         return new AnalyzerDetailSection("Trend Comparison", "Trend Comparison", 0, blocks);
+    }
+
+    private static FindingRecord MapFinding(InsightFinding finding)
+    {
+        return new FindingRecord(
+            Analyzer: finding.Analyzer,
+            Category: finding.Category,
+            Severity: finding.Severity.ToString(),
+            Title: finding.Title,
+            Evidence: finding.Evidence,
+            Recommendation: finding.Recommendation,
+            Tags: finding.Tags,
+            Fingerprint: finding.EffectiveFingerprint)
+        {
+            EvidenceItems = SplitLines(finding.Evidence),
+            RecommendationItems = SplitLines(finding.Recommendation),
+            ConfidenceScore = finding.ConfidenceScore,
+        };
+    }
+
+    private static IReadOnlyList<string>? SplitLines(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
     }
 
     private static TrendClassification ClassifyTrend(MetricTrendDirection direction, double delta, RegressionSeverity severity)

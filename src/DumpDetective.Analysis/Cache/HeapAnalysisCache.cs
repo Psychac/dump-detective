@@ -25,7 +25,6 @@ namespace DumpDetective.Analysis.Cache
         private long _cacheMisses;
         private IProgress<AnalyzerProgressReport>? _progress;
         private DumpDetective.Core.Models.DumpSizeTier _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
-        private Dictionary<ulong, HashSet<ulong>>? _retainedObjectsCache;
         private Dictionary<ulong, bool>? _methodTableHasRefs;
         private Dictionary<(ulong ThreadAddress, int MaxStackRootsToCount), int>? _threadStackRootCountCache;
 
@@ -436,14 +435,9 @@ namespace DumpDetective.Analysis.Cache
 
         public HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
         {
-            // Check cache first
-            if (_retainedObjectsCache != null && _retainedObjectsCache.TryGetValue(rootAddress, out var cached))
-            {
-                Interlocked.Increment(ref _cacheHits);
-                return cached;
-            }
-
-            Interlocked.Increment(ref _cacheMisses);
+            // Not cached: each root address is visited exactly once per analyzer run (StaticRootLeakDetector),
+            // so a cache would only ever miss — storing up to maxObjects×8 bytes per root address for no benefit.
+            Interlocked.Increment(ref _objectScanCount);
 
             var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
             var queue = new Queue<ulong>(capacity: 256);
@@ -470,9 +464,6 @@ namespace DumpDetective.Analysis.Cache
                     }
                 }
             }
-
-            _retainedObjectsCache ??= new Dictionary<ulong, HashSet<ulong>>();
-            _retainedObjectsCache[rootAddress] = retained;
 
             return retained;
         }

@@ -93,7 +93,6 @@ namespace BenchmarkSuite1
             AnalysisContext = new AnalysisContext
             {
                 Runtime = Runtime,
-                Heap = Heap,
                 Cache = Cache,
                 Diagnostics = diagnosticsOptions,
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
@@ -121,7 +120,6 @@ namespace BenchmarkSuite1
             OnCleanup();
             AnalysisContext = null;
             Cache = null;
-            Heap = null;
             Runtime = null;
             _dataTarget?.Dispose();
             _dataTarget = null;

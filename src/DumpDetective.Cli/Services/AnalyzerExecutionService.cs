@@ -45,7 +45,6 @@ internal sealed class AnalyzerExecutionService
         return new RuntimeAnalysisContext
         {
             Runtime = loadContext.Runtime,
-            Heap = loadContext.Heap,
             Cache = heapCache,
             RuntimeFacade = new RuntimeFacade(loadContext.Runtime, loadContext.Heap),
             Diagnostics = resolved.Diagnostics,

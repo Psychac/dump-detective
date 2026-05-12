@@ -3,7 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
 
-namespace DumpDetective.Reporting.FindingGenerators;
+namespace DumpDetective.Analysis.FindingGenerators;
 
 internal sealed class ModuleFindingGenerator : IFindingGenerator
 {

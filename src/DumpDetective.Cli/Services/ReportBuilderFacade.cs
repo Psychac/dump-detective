@@ -10,13 +10,13 @@ namespace DumpDetective.Cli.Services;
 internal sealed class ReportBuilderFacade(
     IEnumerable<IReportFormatter> formatters,
     ISectionBuilderFactory builderFactory,
-    ReportSerializer serializer,
+    CanonicalReportDocumentFactory documentFactory,
     TrendReportComposer trendReportComposer)
 {
     private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToList();
     private readonly IReadOnlyList<IAnalyzerSectionBuilder> _analyzerBuilders = builderFactory.CreateAnalyzerBuilders();
     private readonly IReadOnlyList<IReportSectionBuilder> _reportBuilders = builderFactory.CreateReportBuilders();
-    private readonly ReportSerializer _serializer = serializer;
+    private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;
     private readonly TrendReportComposer _trendComposer = trendReportComposer;
 
     public string BuildRenderedReport(
@@ -68,7 +68,7 @@ internal sealed class ReportBuilderFacade(
         cancellationToken.ThrowIfCancellationRequested();
 
         AnalysisReportDocument doc = _trendComposer.ComposeCanonicalTrendReport(
-            dumpPath, currentRuns, elapsed, incidentContext, _analyzerBuilders, trendData, audience);
+            dumpPath, currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData, audience);
 
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
@@ -83,7 +83,7 @@ internal sealed class ReportBuilderFacade(
         TimeSpan elapsed,
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
     {
-        return _serializer.Serialize(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext);
+        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext);
     }
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format)

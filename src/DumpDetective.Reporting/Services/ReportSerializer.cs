@@ -187,6 +187,20 @@ internal sealed class ReportSerializer
         };
     }
 
+    public IReadOnlyList<AnalyzerDetailSection> SerializeSectionsOnly(
+        IReadOnlyList<AnalyzerRunResult> runs,
+        IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
+        IReadOnlyList<IReportSectionBuilder> reportBuilders,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
+    {
+        List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, analyzerBuilders);
+        AnalyzerResultSet resultSet = new(runs, incidentContext);
+        List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
+        analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
+        specSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
+        return MergeSections(analyzerSections, specSections);
+    }
+
     // ── Section routing ───────────────────────────────────────────────────────
 
     private static List<AnalyzerDetailSection> BuildAnalyzerSections(
@@ -194,6 +208,13 @@ internal sealed class ReportSerializer
         IReadOnlyList<IAnalyzerSectionBuilder> builders)
     {
         var sections = new List<AnalyzerDetailSection>(runs.Count);
+        var buildersByName = new Dictionary<string, IAnalyzerSectionBuilder>(builders.Count, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < builders.Count; i++)
+        {
+            IAnalyzerSectionBuilder builder = builders[i];
+            buildersByName[builder.AnalyzerName] = builder;
+        }
 
         for (int r = 0; r < runs.Count; r++)
         {
@@ -201,15 +222,13 @@ internal sealed class ReportSerializer
             if (run.Status != AnalyzerExecutionStatus.Success || run.Result is null)
                 continue;
 
-            for (int b = 0; b < builders.Count; b++)
-            {
-                IAnalyzerSectionBuilder builder = builders[b];
-                if (!builder.CanHandle(run.Result))
-                    continue;
+            if (!buildersByName.TryGetValue(run.AnalyzerName, out IAnalyzerSectionBuilder? builder))
+                continue;
 
-                sections.Add(builder.Build(run.Result));
-                break;  // first matching builder wins
-            }
+            if (!builder.CanHandle(run.Result))
+                continue;
+
+            sections.Add(builder.Build(run.Result));
         }
 
         return sections;

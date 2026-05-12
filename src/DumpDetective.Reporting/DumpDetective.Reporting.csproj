@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="FindingGenerators\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Cli" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="BenchmarkSuite1" />

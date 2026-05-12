@@ -32,20 +32,20 @@ public class ReportingHotspotBenchmark
     [Benchmark(Description = "ReportSerializer - serialize (duplicate heavy)")]
     public object SerializeCanonical_DuplicateHeavy()
     {
-        return _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
+        return _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
     }
 
     [Benchmark(Description = "Formatter - markdown render large sections")]
     public string RenderMarkdown_LargeSections()
     {
-        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
         return _markdown.Render(doc);
     }
 
     [Benchmark(Description = "Formatter - html render long values")]
     public string RenderHtml_LongValues()
     {
-        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
         return _html.Render(doc);
     }
 
@@ -89,9 +89,10 @@ public class ReportingHotspotBenchmark
                 Findings: [finding],
                 FindingCount: 1,
                 WarningCount: result.Warnings.Count,
-                ObjectScanCount: 1000 + i,
-                CacheHits: 700 + (i % 100),
-                CacheMisses: 300 + (i % 50)));
+                Diagnostics: new AnalyzerExecutionDiagnostics(
+                    ObjectScanCount: 1000 + i,
+                    CacheHits: 700 + (i % 100),
+                    CacheMisses: 300 + (i % 50))));
         }
 
         return runs;

@@ -5,7 +5,7 @@ using DumpDetective.Cli.Pipeline;
 using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Pipeline;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Reporting.Services;
 
 using System.Diagnostics;

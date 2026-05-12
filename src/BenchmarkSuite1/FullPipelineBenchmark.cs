@@ -68,7 +68,6 @@ public class FullPipelineBenchmark
         _context = new RuntimeAnalysisContext
         {
             Runtime = _runtime,
-            Heap = _heap,
             Cache = _cache,
             Diagnostics = diagnostics,
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,

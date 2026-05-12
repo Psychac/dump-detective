@@ -1,6 +1,6 @@
-using DumpDetective.Reporting.FindingGenerators;
-using DumpDetective.Reporting.Pipeline;
 using DumpDetective.Analysis.Dump;
+using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
@@ -75,6 +75,7 @@ internal static class ServiceRegistration
 
         // Finding generation pipeline (runs after analysis to generate insight findings)
         services.AddSingleton<FindingGenerationPipeline>();
+        services.AddSingleton<CanonicalReportDocumentFactory>();
 
         // Trend comparers — one per analyzer, registered as IAnalyzerTrendComparer.
         // TrendAnalyzer consumes IEnumerable<IAnalyzerTrendComparer> via DI.

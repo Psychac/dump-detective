@@ -86,12 +86,11 @@ internal static class AnalyzerFilterService
                 Findings: [],
                 FindingCount: 0,
                 WarningCount: 0,
-                ObjectScanCount: 0,
-                CacheHits: 0,
-                CacheMisses: 0,
                 Artifacts: [],
-                FindingGeneratorError: null,
-                MemoryStats: null));
+                Diagnostics: new AnalyzerExecutionDiagnostics(
+                    ObjectScanCount: 0,
+                    CacheHits: 0,
+                    CacheMisses: 0)));
         }
 
         return skipped;

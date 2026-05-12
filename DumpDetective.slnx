@@ -9,5 +9,4 @@
   <Folder Name="/tests/">
     <Project Path="tests/DumpDetective.Tests/DumpDetective.Tests.csproj" />
   </Folder>
-  <Project Path="DumpDetective/DumpDetective.csproj" />
 </Solution>

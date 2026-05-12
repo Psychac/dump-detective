@@ -50,7 +50,6 @@ namespace BenchmarkSuite1
                 AnalysisContext = new AnalysisContext
                 {
                     Runtime = AnalysisContext.Runtime,
-                    Heap = AnalysisContext.Heap,
                     Cache = AnalysisContext.Cache,
                     Diagnostics = AnalysisContext.Diagnostics,
                     DiagnosticsSink = AnalysisContext.DiagnosticsSink,

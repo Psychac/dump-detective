@@ -23,7 +23,7 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("AfterFailure", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers);
+        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -42,7 +42,7 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("ShouldNotRun", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers);
+        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: false);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -61,13 +61,13 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("ShouldNotRun", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers);
+        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
         result.Should().HaveCount(1);
-        result[0].Status.Should().Be(AnalyzerExecutionStatus.Canceled);
+        result[0].Status.Should().Be(AnalyzerExecutionStatus.SkippedByCancellation);
     }
 
     private static RuntimeAnalysisContext CreateContext(bool continueOnFailure)
@@ -80,7 +80,6 @@ public sealed class AnalysisPipelineTests
         return new RuntimeAnalysisContext
         {
             Runtime = null!,
-            Heap = null!,
             Cache = new HeapAnalysisCache(),
             Diagnostics = diagnostics
         };

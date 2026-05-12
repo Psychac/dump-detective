@@ -9,7 +9,7 @@ using Xunit;
 namespace DumpDetective.Tests;
 
 /// <summary>
-/// H2 — format-independent regression tests for <see cref="AnalysisReportDocument"/> JSON shape.
+/// H2 — format-independent regression tests for the polymorphic report JSON shape.
 /// Round-trips through <see cref="ReportJsonContext"/> and asserts field values hold.
 /// </summary>
 public sealed class ReportDocumentSchemaTests
@@ -20,12 +20,11 @@ public sealed class ReportDocumentSchemaTests
     [Fact]
     public void RoundTrip_PreservesAllTopLevelFields()
     {
-        AnalysisReportDocument original = new()
+        SingleDumpReportDocument original = new()
         {
             DumpPath = "C:/dumps/test.dmp",
             GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
             ElapsedSeconds = 42.5,
-            IsTrendReport = false,
             Findings =
             [
                 new FindingRecord(
@@ -61,9 +60,9 @@ public sealed class ReportDocumentSchemaTests
 
         restored.Should().NotBeNull();
         restored!.SchemaVersion.Should().Be("2.1");
-        restored.DumpPath.Should().Be("C:/dumps/test.dmp");
         restored.ElapsedSeconds.Should().BeApproximately(42.5, 0.001);
-        restored.IsTrendReport.Should().BeFalse();
+        restored.Should().BeOfType<SingleDumpReportDocument>();
+        ((SingleDumpReportDocument)restored).DumpPath.Should().Be("C:/dumps/test.dmp");
         // dedup diagnostics removed
 
         restored.Findings.Should().HaveCount(1);
@@ -78,7 +77,7 @@ public sealed class ReportDocumentSchemaTests
     [Fact]
     public void RoundTrip_PreservesSectionBlockPolymorphism()
     {
-        AnalysisReportDocument original = new()
+        SingleDumpReportDocument original = new()
         {
             DumpPath = "C:/test.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
@@ -126,11 +125,10 @@ public sealed class ReportDocumentSchemaTests
     [Fact]
     public void RoundTrip_PreservesTrendFields()
     {
-        AnalysisReportDocument original = new()
+        TrendReportDocument original = new()
         {
             DumpPath = "C:/trend.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
-            IsTrendReport = true,
             TrendDumpCount = 3,
             TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"]
         };
@@ -138,15 +136,17 @@ public sealed class ReportDocumentSchemaTests
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
 
-        restored!.IsTrendReport.Should().BeTrue();
-        restored.TrendDumpCount.Should().Be(3);
-        restored.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");
+        restored.Should().BeOfType<TrendReportDocument>();
+        TrendReportDocument trend = (TrendReportDocument)restored!;
+        trend.DumpPath.Should().Be("C:/trend.dmp");
+        trend.TrendDumpCount.Should().Be(3);
+        trend.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");
     }
 
     [Fact]
     public void RoundTrip_ExecutiveSummaryIsNullWhenAbsent()
     {
-        AnalysisReportDocument original = new() { DumpPath = "C:/t.dmp", GeneratedAtUtc = DateTime.UtcNow };
+        SingleDumpReportDocument original = new() { DumpPath = "C:/t.dmp", GeneratedAtUtc = DateTime.UtcNow };
 
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);
 
@@ -158,7 +158,7 @@ public sealed class ReportDocumentSchemaTests
     [Fact]
     public void JsonShape_UsesLowerCamelCase()
     {
-        AnalysisReportDocument original = new()
+        SingleDumpReportDocument original = new()
         {
             DumpPath = "C:/t.dmp",
             GeneratedAtUtc = DateTime.UtcNow,

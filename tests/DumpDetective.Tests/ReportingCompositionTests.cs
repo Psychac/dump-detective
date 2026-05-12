@@ -41,7 +41,8 @@ public sealed class ReportingCompositionTests
             dumpPath: "C:/dumps/test.dmp",
             runs: [runA, runB],
             elapsed: TimeSpan.FromSeconds(1),
-            builders: []);
+            analyzerBuilders: [],
+            reportBuilders: []);
 
         // Dedup removed: findings are not merged at serialization time
         doc.Findings.Should().HaveCount(2);
@@ -89,7 +90,8 @@ public sealed class ReportingCompositionTests
             dumpPath: "C:/dumps/test2.dmp",
             runs: [CreateRun("CrashAnalyzer", finding1), CreateRun("ThreadAnalyzer", finding2)],
             elapsed: TimeSpan.FromSeconds(2),
-            builders: []);
+            analyzerBuilders: [],
+            reportBuilders: []);
 
         IReportFormatter[] formatters =
         [
@@ -125,7 +127,8 @@ public sealed class ReportingCompositionTests
             dumpPath: "C:/dumps/contract.dmp",
             runs: [CreateRun("CrashAnalyzer", finding)],
             elapsed: TimeSpan.FromSeconds(1),
-            builders: []);
+            analyzerBuilders: [],
+            reportBuilders: []);
 
         doc.SchemaVersion.Should().Be("2.1");
     }
@@ -133,7 +136,7 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void HtmlFormatter_ShouldRenderDetailedAnalyzerSections_AsCollapsibleBlocks()
     {
-        AnalysisReportDocument doc = new()
+        SingleDumpReportDocument doc = new()
         {
             DumpPath = "C:/dumps/detailed.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
@@ -172,7 +175,6 @@ public sealed class ReportingCompositionTests
         {
             AnalyzerName = analyzerName,
             Category = finding.Category,
-            Metrics = new Dictionary<string, object?>(),
             Warnings = []
         };
 

@@ -33,8 +33,8 @@ public sealed class P0SmokeTests
         new HtmlReportRenderer(),
     ],
     new DefaultSectionBuilderFactory(),
-    new ReportSerializer(),
-    new TrendReportComposer([], new ReportSerializer()));
+    new CanonicalReportDocumentFactory(new ReportSerializer()),
+    new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
 
     private static AnalyzerRunResult MakeRun(string name, FindingSeverity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
     {
@@ -52,7 +52,6 @@ public sealed class P0SmokeTests
         {
             AnalyzerName = name,
             Category = "Leak",
-            Metrics = new Dictionary<string, object?>(),
             Warnings = []
         };
 
@@ -80,7 +79,8 @@ public sealed class P0SmokeTests
             "C:/dumps/smoke.dmp",
             [run],
             TimeSpan.FromSeconds(5),
-            new DefaultSectionBuilderFactory().CreateBuilders());
+            analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         // Render HTML
         HtmlReportRenderer renderer = new();
@@ -100,7 +100,7 @@ public sealed class P0SmokeTests
             embeddedJson, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
-        restored!.DumpPath.Should().Be("C:/dumps/smoke.dmp");
+        ((SingleDumpReportDocument)restored!).DumpPath.Should().Be("C:/dumps/smoke.dmp");
         restored.Findings.Should().HaveCount(doc.Findings.Count);
         restored.Findings[0].Title.Should().Be("BigLeak");
     }
@@ -149,7 +149,8 @@ public sealed class P0SmokeTests
             "C:/dumps/smoke.dmp",
             [run1, run2, run3],
             TimeSpan.FromSeconds(1),
-            new DefaultSectionBuilderFactory().CreateBuilders());
+            analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         doc.AnalyzerRunStatuses.Should().HaveCount(3);
 
@@ -171,7 +172,8 @@ public sealed class P0SmokeTests
             "C:/dumps/smoke.dmp",
             [run],
             TimeSpan.FromSeconds(2),
-            new DefaultSectionBuilderFactory().CreateBuilders());
+            analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         // Round-trip via source-gen serializer
         string json = JsonSerializer.Serialize(doc, ReportJsonContext.Default.AnalysisReportDocument);
@@ -194,7 +196,8 @@ public sealed class P0SmokeTests
             "C:/dumps/smoke.dmp",
             [run1, run2],
             TimeSpan.FromSeconds(1),
-            new DefaultSectionBuilderFactory().CreateBuilders());
+            analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         HtmlReportRenderer renderer = new();
         string html = renderer.Render(doc);

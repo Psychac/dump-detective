@@ -1,0 +1,2484 @@
+{
+  "$schema": "http://json.schemastore.org/sarif-1.0.0",
+  "version": "1.0.0",
+  "runs": [
+    {
+      "tool": {
+        "name": "Microsoft (R) Visual C# Compiler",
+        "version": "5.3.0.0",
+        "fileVersion": "5.3.0-2.26119.122 (40cd698e5cfb2d90f436889726ee01f48d99f3ab)",
+        "semanticVersion": "5.3.0",
+        "language": "en-US"
+      },
+      "results": [
+        {
+          "ruleId": "CS1739",
+          "level": "error",
+          "message": "The best overload for 'Serialize' does not have a parameter named 'builders'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 44,
+                  "startColumn": 13,
+                  "endLine": 44,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'DefaultSectionBuilderFactory' does not contain a definition for 'CreateBuilders' and no accessible extension method 'CreateBuilders' accepting a first argument of type 'DefaultSectionBuilderFactory' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/HtmlRendererCssTests.cs",
+                "region": {
+                  "startLine": 35,
+                  "startColumn": 75,
+                  "endLine": 35,
+                  "endColumn": 89
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1503",
+          "level": "error",
+          "message": "Argument 2: cannot convert from 'DumpDetective.Reporting.Services.ReportSerializer' to 'DumpDetective.Reporting.Services.CanonicalReportDocumentFactory'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 37,
+                  "startColumn": 33,
+                  "endLine": 37,
+                  "endColumn": 55
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1503",
+          "level": "error",
+          "message": "Argument 3: cannot convert from 'DumpDetective.Reporting.Services.ReportSerializer' to 'DumpDetective.Reporting.Services.CanonicalReportDocumentFactory'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 36,
+                  "startColumn": 5,
+                  "endLine": 36,
+                  "endColumn": 27
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'GenericAnalyzerDomainResult' does not contain a definition for 'Metrics'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 55,
+                  "startColumn": 13,
+                  "endLine": 55,
+                  "endColumn": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'DynamicModuleBytes' of 'AppDomainDomainResult.AppDomainDomainResult(int, IReadOnlyList<AppDomainSnapshot>, int, ulong, int, IReadOnlyList<ModuleTypeCountEntry>, int)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Reporting/AppDomainSectionBuilderTests.cs",
+                "region": {
+                  "startLine": 28,
+                  "startColumn": 26,
+                  "endLine": 28,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AppDomainDomainResult' does not contain a definition for 'Metrics'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Reporting/AppDomainSectionBuilderTests.cs",
+                "region": {
+                  "startLine": 37,
+                  "startColumn": 13,
+                  "endLine": 37,
+                  "endColumn": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AppDomainSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Reporting/AppDomainSectionBuilderTests.cs",
+                "region": {
+                  "startLine": 42,
+                  "startColumn": 45,
+                  "endLine": 42,
+                  "endColumn": 68
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS8629",
+          "level": "warning",
+          "message": "Nullable value type may be null.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Reporting/AppDomainSectionBuilderTests.cs",
+                "region": {
+                  "startLine": 50,
+                  "startColumn": 88,
+                  "endLine": 50,
+                  "endColumn": 103
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 23,
+                  "startColumn": 43,
+                  "endLine": 57,
+                  "endColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 25,
+                  "startColumn": 13,
+                  "endLine": 25,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'IsTrendReport'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 28,
+                  "startColumn": 13,
+                  "endLine": 28,
+                  "endColumn": 26
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath' and no accessible extension method 'DumpPath' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 64,
+                  "startColumn": 18,
+                  "endLine": 64,
+                  "endColumn": 26
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'IsTrendReport' and no accessible extension method 'IsTrendReport' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 66,
+                  "startColumn": 18,
+                  "endLine": 66,
+                  "endColumn": 31
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS9035",
+          "level": "error",
+          "message": "Required member 'SingleDumpPipelineState.AllAnalyzers' must be set in the object initializer or attribute constructor.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Integration/WriteOutputStageTests.cs",
+                "region": {
+                  "startLine": 45,
+                  "startColumn": 29,
+                  "endLine": 45,
+                  "endColumn": 52
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'MemorySectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 42,
+                  "startColumn": 27,
+                  "endLine": 42,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 81,
+                  "startColumn": 43,
+                  "endLine": 101,
+                  "endColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 83,
+                  "startColumn": 13,
+                  "endLine": 83,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1739",
+          "level": "error",
+          "message": "The best overload for 'Serialize' does not have a parameter named 'builders'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 92,
+                  "startColumn": 13,
+                  "endLine": 92,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1739",
+          "level": "error",
+          "message": "The best overload for 'Serialize' does not have a parameter named 'builders'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 128,
+                  "startColumn": 13,
+                  "endLine": 128,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 129,
+                  "startColumn": 43,
+                  "endLine": 136,
+                  "endColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 131,
+                  "startColumn": 13,
+                  "endLine": 131,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'IsTrendReport'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 133,
+                  "startColumn": 13,
+                  "endLine": 133,
+                  "endColumn": 26
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'TrendDumpCount'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 134,
+                  "startColumn": 13,
+                  "endLine": 134,
+                  "endColumn": 27
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'TrendDumpPaths'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 135,
+                  "startColumn": 13,
+                  "endLine": 135,
+                  "endColumn": 27
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'IsTrendReport' and no accessible extension method 'IsTrendReport' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 141,
+                  "startColumn": 19,
+                  "endLine": 141,
+                  "endColumn": 32
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'TrendDumpCount' and no accessible extension method 'TrendDumpCount' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 142,
+                  "startColumn": 18,
+                  "endLine": 142,
+                  "endColumn": 32
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'TrendDumpPaths' and no accessible extension method 'TrendDumpPaths' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 143,
+                  "startColumn": 18,
+                  "endLine": 143,
+                  "endColumn": 32
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 149,
+                  "startColumn": 43,
+                  "endLine": 149,
+                  "endColumn": 108
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 149,
+                  "startColumn": 51,
+                  "endLine": 149,
+                  "endColumn": 59
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'NewLeakSignalsByAnalyzer' of 'TrendReportData.TrendReportData(IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>>, IReadOnlyList<AnalyzerTrendResult>, IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>>, IReadOnlyList<AnalyzerMetricTimeline>, IReadOnlyList<AnalysisSnapshot>, IReadOnlyList<InsightFinding>, IReadOnlyList<InsightFinding>, IReadOnlyList<InsightFinding>)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/ReportFlowIntegrationTests.cs",
+                "region": {
+                  "startLine": 144,
+                  "startColumn": 37,
+                  "endLine": 151,
+                  "endColumn": 34
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1503",
+          "level": "error",
+          "message": "Argument 2: cannot convert from 'DumpDetective.Reporting.Services.ReportSerializer' to 'DumpDetective.Reporting.Services.CanonicalReportDocumentFactory'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/ReportFlowIntegrationTests.cs",
+                "region": {
+                  "startLine": 161,
+                  "startColumn": 37,
+                  "endLine": 161,
+                  "endColumn": 59
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 136,
+                  "startColumn": 38,
+                  "endLine": 154,
+                  "endColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 138,
+                  "startColumn": 13,
+                  "endLine": 138,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'GenericAnalyzerDomainResult' does not contain a definition for 'Metrics'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/ReportFlowIntegrationTests.cs",
+                "region": {
+                  "startLine": 197,
+                  "startColumn": 13,
+                  "endLine": 197,
+                  "endColumn": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'GenericAnalyzerDomainResult' does not contain a definition for 'Metrics'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 175,
+                  "startColumn": 13,
+                  "endLine": 175,
+                  "endColumn": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'DefaultSectionBuilderFactory' does not contain a definition for 'CreateBuilders' and no accessible extension method 'CreateBuilders' accepting a first argument of type 'DefaultSectionBuilderFactory' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 83,
+                  "startColumn": 48,
+                  "endLine": 83,
+                  "endColumn": 62
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath' and no accessible extension method 'DumpPath' accepting a first argument of type 'AnalysisReportDocument' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 103,
+                  "startColumn": 19,
+                  "endLine": 103,
+                  "endColumn": 27
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0144",
+          "level": "error",
+          "message": "Cannot create an instance of the abstract type or interface 'AnalysisReportDocument'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 161,
+                  "startColumn": 43,
+                  "endLine": 167,
+                  "endColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalysisReportDocument' does not contain a definition for 'DumpPath'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportDocumentSchemaTests.cs",
+                "region": {
+                  "startLine": 163,
+                  "startColumn": 13,
+                  "endLine": 163,
+                  "endColumn": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'MemorySectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 92,
+                  "startColumn": 27,
+                  "endLine": 92,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'DefaultSectionBuilderFactory' does not contain a definition for 'CreateBuilders' and no accessible extension method 'CreateBuilders' accepting a first argument of type 'DefaultSectionBuilderFactory' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 152,
+                  "startColumn": 48,
+                  "endLine": 152,
+                  "endColumn": 62
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'MemorySectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 112,
+                  "startColumn": 27,
+                  "endLine": 112,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS9035",
+          "level": "error",
+          "message": "Required member 'SingleDumpPipelineState.AllAnalyzers' must be set in the object initializer or attribute constructor.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 24,
+                  "startColumn": 25,
+                  "endLine": 24,
+                  "endColumn": 48
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS9035",
+          "level": "error",
+          "message": "Required member 'SingleDumpPipelineState.AllAnalyzers' must be set in the object initializer or attribute constructor.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 40,
+                  "startColumn": 26,
+                  "endLine": 40,
+                  "endColumn": 49
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS8600",
+          "level": "warning",
+          "message": "Converting null literal or possible null value to non-nullable type.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 34,
+                  "startColumn": 19,
+                  "endLine": 34,
+                  "endColumn": 84
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8602",
+          "level": "warning",
+          "message": "Dereference of a possibly null reference.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 37,
+                  "startColumn": 9,
+                  "endLine": 37,
+                  "endColumn": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8600",
+          "level": "warning",
+          "message": "Converting null literal or possible null value to non-nullable type.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 49,
+                  "startColumn": 20,
+                  "endLine": 49,
+                  "endColumn": 86
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8602",
+          "level": "warning",
+          "message": "Dereference of a possibly null reference.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 51,
+                  "startColumn": 9,
+                  "endLine": 51,
+                  "endColumn": 13
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS9035",
+          "level": "error",
+          "message": "Required member 'SingleDumpPipelineState.AllAnalyzers' must be set in the object initializer or attribute constructor.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 61,
+                  "startColumn": 22,
+                  "endLine": 61,
+                  "endColumn": 45
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS9035",
+          "level": "error",
+          "message": "Required member 'SingleDumpPipelineState.AllAnalyzers' must be set in the object initializer or attribute constructor.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 69,
+                  "startColumn": 22,
+                  "endLine": 69,
+                  "endColumn": 45
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS8600",
+          "level": "warning",
+          "message": "Converting null literal or possible null value to non-nullable type.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 80,
+                  "startColumn": 18,
+                  "endLine": 80,
+                  "endColumn": 82
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8600",
+          "level": "warning",
+          "message": "Converting null literal or possible null value to non-nullable type.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 81,
+                  "startColumn": 18,
+                  "endLine": 81,
+                  "endColumn": 82
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8602",
+          "level": "warning",
+          "message": "Dereference of a possibly null reference.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 83,
+                  "startColumn": 9,
+                  "endLine": 83,
+                  "endColumn": 11
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS8602",
+          "level": "warning",
+          "message": "Dereference of a possibly null reference.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/RunAnalyzersPipelineStageTests.cs",
+                "region": {
+                  "startLine": 83,
+                  "startColumn": 40,
+                  "endLine": 83,
+                  "endColumn": 42
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'findingGenerationPipeline' of 'AnalysisPipeline.AnalysisPipeline(IEnumerable<IAnalyzer>, FindingGenerationPipeline)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisPipelineTests.cs",
+                "region": {
+                  "startLine": 26,
+                  "startColumn": 37,
+                  "endLine": 26,
+                  "endColumn": 51
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AllocationPatternAnalyzerTests.cs",
+                "region": {
+                  "startLine": 53,
+                  "startColumn": 13,
+                  "endLine": 53,
+                  "endColumn": 17
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'findingGenerationPipeline' of 'AnalysisPipeline.AnalysisPipeline(IEnumerable<IAnalyzer>, FindingGenerationPipeline)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisPipelineTests.cs",
+                "region": {
+                  "startLine": 45,
+                  "startColumn": 37,
+                  "endLine": 45,
+                  "endColumn": 51
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'findingGenerationPipeline' of 'AnalysisPipeline.AnalysisPipeline(IEnumerable<IAnalyzer>, FindingGenerationPipeline)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisPipelineTests.cs",
+                "region": {
+                  "startLine": 64,
+                  "startColumn": 37,
+                  "endLine": 64,
+                  "endColumn": 51
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'AnalyzerExecutionStatus' does not contain a definition for 'Canceled'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisPipelineTests.cs",
+                "region": {
+                  "startLine": 70,
+                  "startColumn": 62,
+                  "endLine": 70,
+                  "endColumn": 70
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisPipelineTests.cs",
+                "region": {
+                  "startLine": 83,
+                  "startColumn": 13,
+                  "endLine": 83,
+                  "endColumn": 17
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'CrashSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 138,
+                  "startColumn": 27,
+                  "endLine": 138,
+                  "endColumn": 46
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalyzerTrendResult' does not contain a definition for 'NewLeakSignals' and no accessible extension method 'NewLeakSignals' accepting a first argument of type 'AnalyzerTrendResult' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/TrendAnalyzerTests.cs",
+                "region": {
+                  "startLine": 110,
+                  "startColumn": 21,
+                  "endLine": 110,
+                  "endColumn": 35
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalyzerTrendResult' does not contain a definition for 'NewLeakSignals' and no accessible extension method 'NewLeakSignals' accepting a first argument of type 'AnalyzerTrendResult' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/TrendAnalyzerTests.cs",
+                "region": {
+                  "startLine": 135,
+                  "startColumn": 20,
+                  "endLine": 135,
+                  "endColumn": 35
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'AnalyzerTrendResult' does not contain a definition for 'NewLeakSignals' and no accessible extension method 'NewLeakSignals' accepting a first argument of type 'AnalyzerTrendResult' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/TrendAnalyzerTests.cs",
+                "region": {
+                  "startLine": 145,
+                  "startColumn": 16,
+                  "endLine": 145,
+                  "endColumn": 30
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'findingGenerationPipeline' of 'AnalysisPipeline.AnalysisPipeline(IEnumerable<IAnalyzer>, FindingGenerationPipeline)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisDiagnosticsTests.cs",
+                "region": {
+                  "startLine": 22,
+                  "startColumn": 37,
+                  "endLine": 22,
+                  "endColumn": 65
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'findingGenerationPipeline' of 'AnalysisPipeline.AnalysisPipeline(IEnumerable<IAnalyzer>, FindingGenerationPipeline)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisDiagnosticsTests.cs",
+                "region": {
+                  "startLine": 52,
+                  "startColumn": 37,
+                  "endLine": 52,
+                  "endColumn": 65
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'DefaultSectionBuilderFactory' does not contain a definition for 'CreateBuilders' and no accessible extension method 'CreateBuilders' accepting a first argument of type 'DefaultSectionBuilderFactory' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 174,
+                  "startColumn": 48,
+                  "endLine": 174,
+                  "endColumn": 62
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisDiagnosticsTests.cs",
+                "region": {
+                  "startLine": 67,
+                  "startColumn": 13,
+                  "endLine": 67,
+                  "endColumn": 17
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS1061",
+          "level": "error",
+          "message": "'DefaultSectionBuilderFactory' does not contain a definition for 'CreateBuilders' and no accessible extension method 'CreateBuilders' accepting a first argument of type 'DefaultSectionBuilderFactory' could be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 197,
+                  "startColumn": 48,
+                  "endLine": 197,
+                  "endColumn": 62
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AllocationPatternAnalyzerTests.cs",
+                "region": {
+                  "startLine": 134,
+                  "startColumn": 13,
+                  "endLine": 134,
+                  "endColumn": 17
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0117",
+          "level": "error",
+          "message": "'GenericAnalyzerDomainResult' does not contain a definition for 'Metrics'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AnalysisDiagnosticsTests.cs",
+                "region": {
+                  "startLine": 86,
+                  "startColumn": 17,
+                  "endLine": 86,
+                  "endColumn": 24
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'TotalTaskContinuations' of 'AsyncTaskDomainResult.AsyncTaskDomainResult(int, int, int, int, int, int, int, int, int, double, bool, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, IReadOnlyList<OrphanedTaskSnapshot>, IReadOnlyList<ContinuationChainSnapshot>)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 266,
+                  "startColumn": 34,
+                  "endLine": 266,
+                  "endColumn": 55
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AsyncTaskSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 274,
+                  "startColumn": 13,
+                  "endLine": 274,
+                  "endColumn": 36
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AllocationPatternAnalyzerTests.cs",
+                "region": {
+                  "startLine": 185,
+                  "startColumn": 13,
+                  "endLine": 185,
+                  "endColumn": 17
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AllocationPatternAnalyzerTests.cs",
+                "region": {
+                  "startLine": 220,
+                  "startColumn": 62,
+                  "endLine": 220,
+                  "endColumn": 66
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'reportBuilders' of 'ReportSerializer.Serialize(string, IReadOnlyList<AnalyzerRunResult>, TimeSpan, IReadOnlyList<IAnalyzerSectionBuilder>, IReadOnlyList<IReportSectionBuilder>, ReportAudience, AnalysisIncidentContext?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ExplainableScoringEngineTests.cs",
+                "region": {
+                  "startLine": 223,
+                  "startColumn": 42,
+                  "endLine": 223,
+                  "endColumn": 51
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AsyncTaskSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 285,
+                  "startColumn": 13,
+                  "endLine": 285,
+                  "endColumn": 36
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'CrashSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/CrashInferenceTests.cs",
+                "region": {
+                  "startLine": 224,
+                  "startColumn": 27,
+                  "endLine": 224,
+                  "endColumn": 46
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0200",
+          "level": "error",
+          "message": "Property or indexer 'AnalysisContext.Heap' cannot be assigned to -- it is read only",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/AllocationPatternAnalyzerTests.cs",
+                "region": {
+                  "startLine": 254,
+                  "startColumn": 62,
+                  "endLine": 254,
+                  "endColumn": 66
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'CrashSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/CrashInferenceTests.cs",
+                "region": {
+                  "startLine": 251,
+                  "startColumn": 27,
+                  "endLine": 251,
+                  "endColumn": 46
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'TotalTaskContinuations' of 'AsyncTaskDomainResult.AsyncTaskDomainResult(int, int, int, int, int, int, int, int, int, double, bool, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, IReadOnlyList<OrphanedTaskSnapshot>, IReadOnlyList<ContinuationChainSnapshot>)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 297,
+                  "startColumn": 34,
+                  "endLine": 297,
+                  "endColumn": 55
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AsyncTaskSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 314,
+                  "startColumn": 27,
+                  "endLine": 314,
+                  "endColumn": 50
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'CrashSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analysis/CrashInferenceTests.cs",
+                "region": {
+                  "startLine": 280,
+                  "startColumn": 27,
+                  "endLine": 280,
+                  "endColumn": 46
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'CycleSummary' of 'DeadlockCandidateSnapshot.DeadlockCandidateSnapshot(uint, uint, IReadOnlyList<string>, IReadOnlyList<ulong>, string)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 471,
+                  "startColumn": 13,
+                  "endLine": 471,
+                  "endColumn": 114
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'CycleSummary' of 'DeadlockCandidateSnapshot.DeadlockCandidateSnapshot(uint, uint, IReadOnlyList<string>, IReadOnlyList<ulong>, string)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 472,
+                  "startColumn": 13,
+                  "endLine": 472,
+                  "endColumn": 140
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AllocationPatternSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 529,
+                  "startColumn": 13,
+                  "endLine": 529,
+                  "endColumn": 44
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AllocationPatternSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 538,
+                  "startColumn": 13,
+                  "endLine": 538,
+                  "endColumn": 44
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AllocationPatternSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 555,
+                  "startColumn": 27,
+                  "endLine": 555,
+                  "endColumn": 58
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AllocationPatternSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 605,
+                  "startColumn": 27,
+                  "endLine": 605,
+                  "endColumn": 58
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'ObjectShapeSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 639,
+                  "startColumn": 13,
+                  "endLine": 639,
+                  "endColumn": 38
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'ObjectShapeSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 648,
+                  "startColumn": 13,
+                  "endLine": 648,
+                  "endColumn": 38
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'ObjectShapeSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 661,
+                  "startColumn": 27,
+                  "endLine": 661,
+                  "endColumn": 52
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'IsArray' of 'TypeShapeProfile.TypeShapeProfile(string, int, int, int, double, ulong, bool, bool, bool, int, int, ObjectShapeCategory)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 682,
+                  "startColumn": 13,
+                  "endLine": 687,
+                  "endColumn": 62
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'IsArray' of 'TypeShapeProfile.TypeShapeProfile(string, int, int, int, double, ulong, bool, bool, bool, int, int, ObjectShapeCategory)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 691,
+                  "startColumn": 13,
+                  "endLine": 696,
+                  "endColumn": 58
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'ObjectShapeSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 706,
+                  "startColumn": 27,
+                  "endLine": 706,
+                  "endColumn": 52
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'GCRootSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 734,
+                  "startColumn": 13,
+                  "endLine": 734,
+                  "endColumn": 33
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'GCRootSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 745,
+                  "startColumn": 13,
+                  "endLine": 745,
+                  "endColumn": 33
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'GCRootSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 758,
+                  "startColumn": 27,
+                  "endLine": 758,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'GCRootSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 799,
+                  "startColumn": 27,
+                  "endLine": 799,
+                  "endColumn": 47
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'TopModulesByTypeCount' of 'AppDomainDomainResult.AppDomainDomainResult(int, IReadOnlyList<AppDomainSnapshot>, int, ulong, int, IReadOnlyList<ModuleTypeCountEntry>, int)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1163,
+                  "startColumn": 17,
+                  "endLine": 1163,
+                  "endColumn": 38
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AppDomainSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1165,
+                  "startColumn": 13,
+                  "endLine": 1165,
+                  "endColumn": 36
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AppDomainSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1174,
+                  "startColumn": 13,
+                  "endLine": 1174,
+                  "endColumn": 36
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'DynamicModuleBytes' of 'AppDomainDomainResult.AppDomainDomainResult(int, IReadOnlyList<AppDomainSnapshot>, int, ulong, int, IReadOnlyList<ModuleTypeCountEntry>, int)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1196,
+                  "startColumn": 17,
+                  "endLine": 1196,
+                  "endColumn": 38
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'AppDomainSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1204,
+                  "startColumn": 45,
+                  "endLine": 1204,
+                  "endColumn": 68
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'SegmentReservationSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1234,
+                  "startColumn": 13,
+                  "endLine": 1234,
+                  "endColumn": 45
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'FrozenPercent' of 'SegmentAnalysisDomainResult.SegmentAnalysisDomainResult(int, ulong, ulong, ulong, ulong, int, ulong, int, ulong, int, ulong, int, ulong, double, double, double, IReadOnlyList<SegmentKindSummary>, IReadOnlyList<PerLogicalHeapSummary>, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<HeapSegmentSnapshot>?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1241,
+                  "startColumn": 17,
+                  "endLine": 1241,
+                  "endColumn": 44
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'SegmentReservationSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1243,
+                  "startColumn": 13,
+                  "endLine": 1243,
+                  "endColumn": 45
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS0246",
+          "level": "error",
+          "message": "The type or namespace name 'SegmentReservationSectionBuilder' could not be found (are you missing a using directive or an assembly reference?)",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1270,
+                  "startColumn": 45,
+                  "endLine": 1270,
+                  "endColumn": 77
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'ScanCapped' of 'WeakReferenceDomainResult.WeakReferenceDomainResult(int, int, int, double, IReadOnlyList<NameCountEntry>, int, ulong, int, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, int, bool, IReadOnlyList<ReportArtifact>?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1294,
+                  "startColumn": 17,
+                  "endLine": 1294,
+                  "endColumn": 42
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'FrozenPercent' of 'SegmentAnalysisDomainResult.SegmentAnalysisDomainResult(int, ulong, ulong, ulong, ulong, int, ulong, int, ulong, int, ulong, int, ulong, double, double, double, IReadOnlyList<SegmentKindSummary>, IReadOnlyList<PerLogicalHeapSummary>, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<HeapSegmentSnapshot>?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1303,
+                  "startColumn": 17,
+                  "endLine": 1303,
+                  "endColumn": 44
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'WeakHandleKinds' of 'WeakReferenceDomainResult.WeakReferenceDomainResult(int, int, int, double, IReadOnlyList<NameCountEntry>, int, ulong, int, IReadOnlyList<NameCountEntry>, IReadOnlyList<NameCountEntry>, int, bool, IReadOnlyList<ReportArtifact>?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1317,
+                  "startColumn": 17,
+                  "endLine": 1317,
+                  "endColumn": 42
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CS7036",
+          "level": "error",
+          "message": "There is no argument given that corresponds to the required parameter 'FrozenPercent' of 'SegmentAnalysisDomainResult.SegmentAnalysisDomainResult(int, ulong, ulong, ulong, ulong, int, ulong, int, ulong, int, ulong, int, ulong, double, double, double, IReadOnlyList<SegmentKindSummary>, IReadOnlyList<PerLogicalHeapSummary>, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<TypeSnapshot>?, IReadOnlyList<HeapSegmentSnapshot>?)'",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 1366,
+                  "startColumn": 17,
+                  "endLine": 1366,
+                  "endColumn": 44
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "xUnit1042",
+          "level": "note",
+          "message": "The member referenced by the MemberData attribute returns untyped data rows, such as object[]. Consider using TheoryData<> as the return type to provide better type safety.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Golden/GoldenFileTests.cs",
+                "region": {
+                  "startLine": 24,
+                  "startColumn": 6,
+                  "endLine": 24,
+                  "endColumn": 37
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CA1861",
+          "level": "note",
+          "message": "Prefer 'static readonly' fields over constant array arguments if the called method is called repeatedly and is not mutating the passed array",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Analyzers/ThreadStackClusterAnalyzerOptionsTests.cs",
+                "region": {
+                  "startLine": 29,
+                  "startColumn": 73,
+                  "endLine": 29,
+                  "endColumn": 88
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1,
+            "customProperties": {
+              "paramName": "TopClusterSignatures"
+            }
+          }
+        },
+        {
+          "ruleId": "CA1859",
+          "level": "note",
+          "message": "Change return type of method 'ReadProjectReferenceNames' from 'System.Collections.Generic.IReadOnlyCollection<string>' to 'string[]' for improved performance",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs",
+                "region": {
+                  "startLine": 27,
+                  "startColumn": 48,
+                  "endLine": 27,
+                  "endColumn": 73
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CA1859",
+          "level": "note",
+          "message": "Change type of variable 'formatter' from 'DumpDetective.Reporting.Formatters.IReportFormatter' to 'DumpDetective.Reporting.Formatters.HtmlCanonicalReportFormatter' for improved performance",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/ReportingCompositionTests.cs",
+                "region": {
+                  "startLine": 156,
+                  "startColumn": 26,
+                  "endLine": 156,
+                  "endColumn": 35
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "SYSLIB1045",
+          "level": "note",
+          "message": "Use 'GeneratedRegexAttribute' to generate the regular expression implementation at compile-time.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 90,
+                  "startColumn": 19,
+                  "endLine": 92,
+                  "endColumn": 37
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CA1847",
+          "level": "note",
+          "message": "Use 'string.Contains(char)' instead of 'string.Contains(string)' when searching for a single character",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 145,
+                  "startColumn": 53,
+                  "endLine": 145,
+                  "endColumn": 56
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "CA1847",
+          "level": "note",
+          "message": "Use 'string.Contains(char)' instead of 'string.Contains(string)' when searching for a single character",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/SectionBuilderTests.cs",
+                "region": {
+                  "startLine": 145,
+                  "startColumn": 78,
+                  "endLine": 145,
+                  "endColumn": 81
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        },
+        {
+          "ruleId": "SYSLIB1045",
+          "level": "note",
+          "message": "Use 'GeneratedRegexAttribute' to generate the regular expression implementation at compile-time.",
+          "locations": [
+            {
+              "resultFile": {
+                "uri": "file:///D:/POC/DumpAnalyzer/DumpDetective/tests/DumpDetective.Tests/Integration/P0SmokeTests.cs",
+                "region": {
+                  "startLine": 203,
+                  "startColumn": 19,
+                  "endLine": 205,
+                  "endColumn": 37
+                }
+              }
+            }
+          ],
+          "properties": {
+            "warningLevel": 1
+          }
+        }
+      ],
+      "rules": {
+        "CA1847": {
+          "id": "CA1847",
+          "shortDescription": "Use char literal for a single character lookup",
+          "fullDescription": "'string.Contains(char)' is available as a better performing overload for single char lookup.",
+          "defaultLevel": "note",
+          "helpUri": "https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca1847",
+          "properties": {
+            "category": "Performance",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Telemetry",
+              "EnabledRuleInAggressiveMode"
+            ]
+          }
+        },
+        "CA1859": {
+          "id": "CA1859",
+          "shortDescription": "Use concrete types when possible for improved performance",
+          "fullDescription": "Using concrete types avoids virtual or interface call overhead and enables inlining.",
+          "defaultLevel": "note",
+          "helpUri": "https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca1859",
+          "properties": {
+            "category": "Performance",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Telemetry",
+              "EnabledRuleInAggressiveMode"
+            ]
+          }
+        },
+        "CA1861": {
+          "id": "CA1861",
+          "shortDescription": "Avoid constant arrays as arguments",
+          "fullDescription": "Constant arrays passed as arguments are not reused when called repeatedly, which implies a new array is created each time. Consider extracting them to 'static readonly' fields to improve performance if the passed array is not mutated within the called method.",
+          "defaultLevel": "note",
+          "helpUri": "https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca1861",
+          "properties": {
+            "category": "Performance",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Telemetry",
+              "EnabledRuleInAggressiveMode"
+            ]
+          }
+        },
+        "CS0117": {
+          "id": "CS0117",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS0117)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS0144": {
+          "id": "CS0144",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS0144)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS0200": {
+          "id": "CS0200",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS0200)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS0246": {
+          "id": "CS0246",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS0246)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS1061": {
+          "id": "CS1061",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS1061)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS1503": {
+          "id": "CS1503",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS1503)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS1739": {
+          "id": "CS1739",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS1739)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS7036": {
+          "id": "CS7036",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS7036)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "CS8600": {
+          "id": "CS8600",
+          "shortDescription": "Converting null literal or possible null value to non-nullable type.",
+          "defaultLevel": "warning",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS8600)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry"
+            ]
+          }
+        },
+        "CS8602": {
+          "id": "CS8602",
+          "shortDescription": "Dereference of a possibly null reference.",
+          "defaultLevel": "warning",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS8602)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry"
+            ]
+          }
+        },
+        "CS8629": {
+          "id": "CS8629",
+          "shortDescription": "Nullable value type may be null.",
+          "defaultLevel": "warning",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS8629)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry"
+            ]
+          }
+        },
+        "CS9035": {
+          "id": "CS9035",
+          "defaultLevel": "error",
+          "helpUri": "https://msdn.microsoft.com/query/roslyn.query?appId=roslyn&k=k(CS9035)",
+          "properties": {
+            "category": "Compiler",
+            "isEnabledByDefault": true,
+            "tags": [
+              "Compiler",
+              "Telemetry",
+              "NotConfigurable"
+            ]
+          }
+        },
+        "SYSLIB1045": {
+          "id": "SYSLIB1045",
+          "shortDescription": "Convert to 'GeneratedRegexAttribute'.",
+          "defaultLevel": "note",
+          "helpUri": "https://learn.microsoft.com/dotnet/fundamentals/syslib-diagnostics/syslib1045",
+          "properties": {
+            "category": "Performance",
+            "isEnabledByDefault": true
+          }
+        },
+        "xUnit1042": {
+          "id": "xUnit1042",
+          "shortDescription": "The member referenced by the MemberData attribute returns untyped data rows",
+          "defaultLevel": "note",
+          "helpUri": "https://xunit.net/xunit.analyzers/rules/xUnit1042",
+          "properties": {
+            "category": "Usage",
+            "isEnabledByDefault": true
+          }
+        }
+      }
+    }
+  ]
+}

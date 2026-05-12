@@ -25,6 +25,7 @@ public class RunAnalyzersPipelineStageTests
         {
             Resolved = resolved,
             ActiveAnalyzers = System.Array.Empty<IAnalyzer>(),
+            AllAnalyzers = System.Array.Empty<IAnalyzer>(),
             HeapCache = new FakeHeapCache(),
             LoadContext = CreateDumpLoadContext("C:\\dumps\\sample1.dmp")
         };
@@ -41,6 +42,7 @@ public class RunAnalyzersPipelineStageTests
         {
             Resolved = resolved,
             ActiveAnalyzers = System.Array.Empty<IAnalyzer>(),
+            AllAnalyzers = System.Array.Empty<IAnalyzer>(),
             HeapCache = new FakeHeapCache(),
             LoadContext = CreateDumpLoadContext("C:\\dumps\\sample1.dmp")
         };
@@ -62,6 +64,7 @@ public class RunAnalyzersPipelineStageTests
         {
             Resolved = resolved,
             ActiveAnalyzers = System.Array.Empty<IAnalyzer>(),
+            AllAnalyzers = System.Array.Empty<IAnalyzer>(),
             HeapCache = new FakeHeapCache(),
             LoadContext = CreateDumpLoadContext("C:\\dumps\\a.dmp")
         };
@@ -70,6 +73,7 @@ public class RunAnalyzersPipelineStageTests
         {
             Resolved = resolved,
             ActiveAnalyzers = System.Array.Empty<IAnalyzer>(),
+            AllAnalyzers = System.Array.Empty<IAnalyzer>(),
             HeapCache = new FakeHeapCache(),
             LoadContext = CreateDumpLoadContext("C:\\dumps\\b.dmp")
         };

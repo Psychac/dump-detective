@@ -220,7 +220,7 @@ public sealed class ExplainableScoringEngineTests
             ErrorType: null,
             Findings: [finding]);
 
-        var doc = new ReportSerializer().Serialize("dump.dmp", [run], TimeSpan.FromSeconds(1), []);
+        var doc = new ReportSerializer().Serialize("dump.dmp", [run], TimeSpan.FromSeconds(1), [], []);
 
         doc.ExecutiveSummary.Should().NotBeNull();
         doc.ExecutiveSummary!.LeakLikelihoodScore.Should().Be(40);

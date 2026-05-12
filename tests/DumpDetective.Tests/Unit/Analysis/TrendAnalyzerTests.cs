@@ -79,7 +79,7 @@ public sealed class TrendAnalyzerTests
         delta.Severity.Should().Be(RegressionSeverity.Moderate);
     }
 
-    // ── TrendAnalyzer.CompareAll — NewLeakSignals ────────────────────────────
+    // ── TrendAnalyzer.ComputeNewLeakSignals ──────────────────────────────────
 
     [Fact]
     public void CompareAll_PopulatesNewLeakSignals_WhenTypeAppearsInCurrent()
@@ -103,11 +103,10 @@ public sealed class TrendAnalyzerTests
         var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
 
         TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
-        var results = analyzer.CompareAll(baselineSnap, currentSnap);
+        var signals = analyzer.ComputeNewLeakSignals(baselineSnap, currentSnap);
 
-        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Retention Analysis");
-        leakResult.Should().NotBeNull();
-        leakResult!.NewLeakSignals.Should().ContainSingle(s => s.TypeName == "MyApp.CachedService");
+        signals.Should().ContainKey("Retention Analysis");
+        signals["Retention Analysis"].Should().ContainSingle(s => s.TypeName == "MyApp.CachedService");
     }
 
     [Fact]
@@ -129,20 +128,9 @@ public sealed class TrendAnalyzerTests
         var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
 
         TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
-        var results = analyzer.CompareAll(baselineSnap, currentSnap);
+        var signals = analyzer.ComputeNewLeakSignals(baselineSnap, currentSnap);
 
-        var leakResult = results.FirstOrDefault(r => r.AnalyzerName == "Retention Analysis");
-        leakResult?.NewLeakSignals.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void AnalyzerTrendResult_NewLeakSignals_DefaultsToEmpty()
-    {
-        var result = new AnalyzerTrendResult("SomeAnalyzer",
-        [
-            MetricDeltaHelper_Compute("m", null, 1.0, 2.0, "bytes", MetricTrendDirection.HigherIsWorse)
-        ]);
-        result.NewLeakSignals.Should().BeEmpty();
+        signals.Should().NotContainKey("Retention Analysis");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

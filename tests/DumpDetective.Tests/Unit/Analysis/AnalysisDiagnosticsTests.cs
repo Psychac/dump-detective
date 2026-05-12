@@ -19,7 +19,7 @@ public sealed class AnalysisDiagnosticsTests
     {
         InMemoryAnalysisDiagnosticsSink sink = new();
         TestFindingGenerator generator = new();
-        AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
+        AnalysisPipeline pipeline = new([new MetricsAnalyzer()], new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = CreateContext(sink, continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -49,7 +49,7 @@ public sealed class AnalysisDiagnosticsTests
     [Fact]
     public async Task ExecuteAsync_ShouldNotFail_WhenSinkThrows()
     {
-        AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
+        AnalysisPipeline pipeline = new([new MetricsAnalyzer()], new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = CreateContext(new ThrowingSink(), continueOnFailure: true);
 
         Func<Task> act = async () => await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -64,7 +64,6 @@ public sealed class AnalysisDiagnosticsTests
         return new RuntimeAnalysisContext
         {
             Runtime = null!,
-            Heap = null!,
             Cache = new HeapAnalysisCache(),
             Diagnostics = diagnostics,
             DiagnosticsSink = sink
@@ -83,12 +82,6 @@ public sealed class AnalysisDiagnosticsTests
                 AnalyzerName = Name,
                 Category = Category,
                 Warnings = ["Synthetic warning"],
-                Metrics = new Dictionary<string, object?>
-                {
-                    ["objectScans"] = 42,
-                    ["cacheHits"] = 12,
-                    ["cacheMisses"] = 3
-                }
             };
 
             return ValueTask.FromResult<AnalyzerDomainResult>(result);

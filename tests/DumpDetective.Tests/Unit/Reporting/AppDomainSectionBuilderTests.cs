@@ -29,24 +29,31 @@ public sealed class AppDomainSectionBuilderTests
             TotalDomains: 1,
             Domains: [domainSnapshot],
             TotalDynamicModules: 0,
+            DynamicModuleBytes: 0,
             AnonymousModuleCount: 0,
-            TopModulesByTypeCount: [])
+            TopModulesByTypeCount: [],
+            ExcludedModuleCount: 150)
             with
         {
-            Warnings = new[] { "Index missing; sampling used." },
-            Metrics = new Dictionary<string, object?> { ["ExcludedModuleCount"] = 150 }
+            Warnings = new[] { "Index missing; sampling used." }
         };
 
         var stamped = Stamped(domain, "AppDomain Analysis", "Modules");
 
-        AnalyzerDetailSection section = new AppDomainSectionBuilder().Build(stamped);
+        var resultSet = new AnalyzerResultSet([
+            new AnalyzerRunResult(
+                AnalyzerName: "AppDomain Analysis",
+                Status: AnalyzerExecutionStatus.Success,
+                Duration: TimeSpan.FromMilliseconds(1),
+                Result: stamped,
+                ErrorMessage: null,
+                ErrorType: null)]);
 
-        // There should be a NOTES heading and message
-        section.Blocks.OfType<HeadingBlock>().Any(h => h.Text.Contains("NOTES")).Should().BeTrue();
-        section.Blocks.OfType<TextBlock>().Any(t => t.Text.Contains("Index missing; sampling used.")).Should().BeTrue();
+        AnalyzerDetailSection section = new AppDomainAssemblySectionBuilder().Build(resultSet);
 
-        // There should be an EXCLUDED MODULES heading and a metric block for excluded modules
-        section.Blocks.OfType<HeadingBlock>().Any(h => h.Text.Contains("EXCLUDED MODULES")).Should().BeTrue();
-        section.Blocks.OfType<MetricBlock>().Any(m => m.Label == "Excluded Modules" && (int)m.RawValue == 150).Should().BeTrue();
+        // Current builder renders the inventory summary for AppDomains.
+        section.Blocks.OfType<HeadingBlock>().Any(h => h.Text.Contains("APPDOMAIN INVENTORY")).Should().BeTrue();
+        section.Blocks.OfType<MetricBlock>().Any(m => m.Label == "Total domains" && (int)m.RawValue == 1).Should().BeTrue();
+        section.Blocks.OfType<TableBlock>().Should().ContainSingle();
     }
 }

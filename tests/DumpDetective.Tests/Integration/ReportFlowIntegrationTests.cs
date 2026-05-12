@@ -144,6 +144,7 @@ public sealed class ReportFlowIntegrationTests
         TrendReportData trendData = new(
             Steps: [],
             Overall: [],
+            NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
             Timeline: [],
             Snapshots: [baseline, current],
             NewFindings: [finding],
@@ -157,8 +158,8 @@ public sealed class ReportFlowIntegrationTests
             new HtmlCanonicalReportFormatter()
         ],
         new DefaultSectionBuilderFactory(),
-        new ReportSerializer(),
-        new TrendReportComposer([], new ReportSerializer()));
+        new CanonicalReportDocumentFactory(new ReportSerializer()),
+        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         string output = facade.BuildRenderedTrendReport(
             dumpPath: "C:/dumps/current.dmp",
@@ -194,7 +195,6 @@ public sealed class ReportFlowIntegrationTests
         {
             AnalyzerName = analyzerName,
             Category = finding.Category,
-            Metrics = new Dictionary<string, object?>(),
             Warnings = []
         };
 

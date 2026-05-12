@@ -46,6 +46,7 @@ public sealed class WriteOutputStageTests
             {
                 Resolved = ResolvedExecutionOptionsFactory.Create(reportPath),
                 ActiveAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
+                AllAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
                 RenderedReport = "dummy",
                 ReportDocument = doc
             };

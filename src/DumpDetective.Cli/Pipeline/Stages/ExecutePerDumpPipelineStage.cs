@@ -28,6 +28,9 @@ internal sealed class ExecutePerDumpPipelineStage(PerDumpExecutionService perDum
         state.HeapCache = result.HeapCache;
         state.HeapIndexBuilder = result.HeapCache;
         state.AnalysisElapsed = result.Elapsed;
+        state.HasDetailedStageMemoryStats = true;
+        state.StageMemoryStats.Clear();
+        state.StageMemoryStats.AddRange(result.StageMemoryStats);
 
         string indexTarget = result.HeapIndex.StorageKind == DumpDetective.Analysis.Indexing.HeapIndexStorageKind.Memory
             ? "in-memory"

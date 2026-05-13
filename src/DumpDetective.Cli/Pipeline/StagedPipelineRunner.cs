@@ -37,7 +37,7 @@ internal sealed class StagedPipelineRunner
             await stage.ExecuteAsync(state, cancellationToken);
             sw.Stop();
 
-            if (trackMemory)
+            if (trackMemory && !(state.HasDetailedStageMemoryStats && i == 0))
             {
                 _currentProcess.Refresh();
                 state.StageMemoryStats.Add((stage.Name, new AnalyzerMemoryStats(

@@ -56,5 +56,11 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// </summary>
     public List<(string StageName, AnalyzerMemoryStats Stats)> StageMemoryStats { get; } = [];
 
+    /// <summary>
+    /// Set when the wrapper stage has already populated detailed load/scan/analyze memory
+    /// snapshots, so the outer pipeline runner should not add a combined wrapper row.
+    /// </summary>
+    public bool HasDetailedStageMemoryStats { get; set; }
+
     public void Dispose() => LoadContext?.Dispose();
 }

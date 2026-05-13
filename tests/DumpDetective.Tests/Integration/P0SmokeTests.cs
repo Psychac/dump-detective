@@ -34,7 +34,7 @@ public sealed class P0SmokeTests
     ],
     new DefaultSectionBuilderFactory(),
     new CanonicalReportDocumentFactory(new ReportSerializer()),
-    new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
+    new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
 
     private static AnalyzerRunResult MakeRun(string name, FindingSeverity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
     {

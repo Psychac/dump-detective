@@ -57,7 +57,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
-        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
+        new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
@@ -96,7 +96,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
-        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
+        new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         using CancellationTokenSource cts = new();
         cts.Cancel();
@@ -130,6 +130,7 @@ public sealed class ReportFlowIntegrationTests
         AnalysisSnapshot baseline = new(
             Index: 0,
             DumpPath: "C:/dumps/base.dmp",
+            Runs: [],
             Findings: [],
             DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
             GeneratedAtUtc: DateTime.UtcNow.AddMinutes(-5));
@@ -137,6 +138,7 @@ public sealed class ReportFlowIntegrationTests
         AnalysisSnapshot current = new(
             Index: 1,
             DumpPath: "C:/dumps/current.dmp",
+            Runs: [currentRun],
             Findings: [finding],
             DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
             GeneratedAtUtc: DateTime.UtcNow);
@@ -159,7 +161,7 @@ public sealed class ReportFlowIntegrationTests
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
-        new TrendReportComposer([], new CanonicalReportDocumentFactory(new ReportSerializer())));
+        new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         string output = facade.BuildRenderedTrendReport(
             dumpPath: "C:/dumps/current.dmp",
@@ -175,8 +177,9 @@ public sealed class ReportFlowIntegrationTests
         output.Should().Contain("Analyzed dumps:");
         output.Should().Contain("C:/dumps/base.dmp");
         output.Should().Contain("C:/dumps/current.dmp");
-        output.Should().Contain("Trend metric regression summary");
-        output.Should().Contain("Trend finding lifecycle summary");
+        output.Should().Contain("LIFECYCLE SUMMARY:");
+        output.Should().Contain("Metric regressions: 0");
+        output.Should().Contain("NEW FINDINGS:");
         output.Should().Contain("[Dump 1 of 2: base.dmp]");
         output.Should().Contain("[Dump 2 of 2: current.dmp]");
         output.Should().Contain("DUMP SUMMARY");

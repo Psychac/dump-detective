@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Trend;
+using DumpDetective.Analysis.Trend.Comparers;
 using DumpDetective.Core.Models;
 
 using FluentAssertions;
@@ -133,6 +134,45 @@ public sealed class TrendAnalyzerTests
         signals.Should().NotContainKey("Retention Analysis");
     }
 
+    [Fact]
+    public void ComputeNewLeakSignals_PopulatesLeakCandidateSignals_WhenCandidateAppearsInCurrent()
+    {
+        LeakCandidateDomainResult baselineResult = new(
+            TotalCandidates: 0,
+            TopCandidates: [],
+            CandidatesByClass: new Dictionary<LeakClass, int>(),
+            HeuristicOnly: true);
+
+        LeakCandidateDomainResult currentResult = new(
+            TotalCandidates: 1,
+            TopCandidates:
+            [
+                new LeakCandidateRecord(
+                    TypeName: "MyApp.CacheBucket",
+                    TotalSize: 2_000_000,
+                    InstanceCount: 100,
+                    Gen2Pct: 95.0,
+                    SuspicionScore: 85,
+                    Severity: FindingSeverity.Warning,
+                    Classification: LeakClass.CacheLeak,
+                    RootKind: "StaticRoot",
+                    IsFinalizable: false,
+                    IsContainer: true,
+                    ReferenceFieldRatio: 0.75)
+            ],
+            CandidatesByClass: new Dictionary<LeakClass, int> { [LeakClass.CacheLeak] = 1 },
+            HeuristicOnly: true);
+
+        var baselineSnap = MakeSnapshot(0, "Leak Candidate Analysis", baselineResult);
+        var currentSnap = MakeSnapshot(1, "Leak Candidate Analysis", currentResult);
+
+        TrendAnalyzer analyzer = new([new LeakCandidateTrendComparer()]);
+        var signals = analyzer.ComputeNewLeakSignals(baselineSnap, currentSnap);
+
+        signals.Should().ContainKey("Leak Candidate Analysis");
+        signals["Leak Candidate Analysis"].Should().ContainSingle(s => s.TypeName == "MyApp.CacheBucket");
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private static MetricDelta MetricDeltaHelper_Compute(
@@ -153,6 +193,7 @@ public sealed class TrendAnalyzerTests
         return new AnalysisSnapshot(
             Index: index,
             DumpPath: $"dump{index}.dmp",
+            Runs: [],
             Findings: [],
             DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal)
             {

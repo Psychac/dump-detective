@@ -59,11 +59,12 @@ namespace DumpDetective.Analysis.Analyzers
                     hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads,
                     hangInfo.ThreadPoolInfo.RuntimeIdleWorkerThreads,
                     hangInfo.ThreadPoolInfo.RuntimeRetiredWorkerThreads,
+                    hangInfo.ThreadPoolInfo.RuntimeQueueLength,
                     hangInfo.ThreadPoolInfo.RuntimeCpuUtilization,
                     hangInfo.ThreadPoolInfo.RuntimeInitialized &&
                         hangInfo.ThreadPoolInfo.RuntimeMaxThreads > 0 &&
-                        hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads >= hangInfo.ThreadPoolInfo.RuntimeMaxThreads &&
-                        hangInfo.ThreadPoolInfo.RuntimeCpuUtilization < 20,
+                        hangInfo.ThreadPoolInfo.RuntimeQueueLength.GetValueOrDefault() > 0 &&
+                        hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads >= hangInfo.ThreadPoolInfo.RuntimeMaxThreads,
                     hangInfo.ThreadPoolInfo.TaskScanLimited,
                     hangInfo.HealthScore,
                     hangInfo.WaitingThreads
@@ -175,9 +176,31 @@ namespace DumpDetective.Analysis.Analyzers
             info.RuntimeActiveWorkerThreads = tp.ActiveWorkerThreads;
             info.RuntimeIdleWorkerThreads = tp.IdleWorkerThreads;
             info.RuntimeRetiredWorkerThreads = tp.RetiredWorkerThreads;
+            info.RuntimeQueueLength = GetIntProperty(tp, "QueueLength");
             info.RuntimeCpuUtilization = tp.CpuUtilization;
             info.UsingPortableThreadPool = tp.UsingPortableThreadPool;
             info.UsingWindowsThreadPool = tp.UsingWindowsThreadPool;
+        }
+
+        private static int? GetIntProperty(object? instance, string propertyName)
+        {
+            if (instance is null)
+                return null;
+
+            try
+            {
+                object? value = instance.GetType().GetProperty(propertyName)?.GetValue(instance);
+                return value switch
+                {
+                    int intValue => intValue,
+                    long longValue when longValue is >= int.MinValue and <= int.MaxValue => (int)longValue,
+                    _ => null
+                };
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -592,6 +615,7 @@ namespace DumpDetective.Analysis.Analyzers
         public int RuntimeActiveWorkerThreads { get; set; }
         public int RuntimeIdleWorkerThreads { get; set; }
         public int RuntimeRetiredWorkerThreads { get; set; }
+        public int? RuntimeQueueLength { get; set; }
         public int RuntimeCpuUtilization { get; set; }
         public bool UsingPortableThreadPool { get; set; }
         public bool UsingWindowsThreadPool { get; set; }

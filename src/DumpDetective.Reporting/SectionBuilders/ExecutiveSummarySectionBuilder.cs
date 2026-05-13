@@ -89,8 +89,8 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
                 blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
                 blocks.Add(T($"Evidence: {finding.Evidence}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
-                if (!string.IsNullOrWhiteSpace(finding.Caveats))
-                    blocks.Add(T($"Caveats: {finding.Caveats}"));
+                if (finding.EffectiveCaveats.Count > 0)
+                    blocks.Add(T($"Caveats: {string.Join(" ", finding.EffectiveCaveats)}"));
                 blocks.Add(CollapseEnd());
 
                 if (i + 1 < topRecommendations.Count)

@@ -67,8 +67,8 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
                 blocks.Add(T(FormatText("Evidence", finding.Evidence)));
                 blocks.Add(T(FormatText("Recommendation", finding.Recommendation)));
 
-                if (!string.IsNullOrWhiteSpace(finding.Caveats))
-                    blocks.Add(T(FormatText("Caveats", finding.Caveats)));
+                if (finding.EffectiveCaveats.Count > 0)
+                    blocks.Add(T(FormatText("Caveats", string.Join(" ", finding.EffectiveCaveats))));
 
                 if (finding.Tags is { Count: > 0 })
                 {

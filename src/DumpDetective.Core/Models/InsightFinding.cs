@@ -12,7 +12,7 @@ string? Fingerprint = null,
 double? MetricValue = null,
 string? MetricUnit = null,
 double? ConfidenceScore = null,
-string? Caveats = null)
+IReadOnlyList<string>? Caveats = null)
 {
     public double? ConfidenceScore { get; init; } = ConfidenceScore ?? Severity switch
     {
@@ -20,6 +20,8 @@ string? Caveats = null)
         FindingSeverity.Warning => 0.7,
         _ => 0.5
     };
+
+    public IReadOnlyList<string> EffectiveCaveats { get; init; } = Caveats ?? [];
 
     public double EffectiveConfidenceScore => ConfidenceScore ?? Severity switch
     {

@@ -23,13 +23,13 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
     }
 
     [Fact]
-    public void DomainResult_Can_Carry_RawExports()
+    public void DomainResult_Can_Carry_Artifacts()
     {
         var artifact = new ReportArtifact("Test", "f.txt", "hello", "text/plain", null);
         var result = new ThreadStackClusterDomainResult(1, 1, 0, 100.0, new[] { "sig" }, null, new[] { artifact });
 
-        result.RawExports.Should().NotBeNull();
-        result.RawExports!.Count.Should().Be(1);
-        result.RawExports[0].Analyzer.Should().Be("Test");
+        result.Artifacts.Should().NotBeNull();
+        result.Artifacts!.Count.Should().Be(1);
+        result.Artifacts[0].Analyzer.Should().Be("Test");
     }
 }

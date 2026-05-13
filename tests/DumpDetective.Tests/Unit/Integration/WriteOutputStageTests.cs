@@ -51,7 +51,7 @@ public sealed class WriteOutputStageTests
                 ReportDocument = doc
             };
 
-            var stage = new WriteOutputStage();
+            var stage = new WriteOutputStage(new ReportOutputWriter());
             await stage.ExecuteAsync(state, CancellationToken.None);
 
             // Expected artifacts path is artifacts/<dump-base-name> where dump-base-name comes from Resolved.DumpPath

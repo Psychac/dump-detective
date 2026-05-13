@@ -142,6 +142,7 @@ internal sealed class ThreadConcurrencySectionBuilder : SectionBuilderBase, IRep
                     Row(Cell("Active worker threads"), Cell(hang.RuntimeActiveWorkerThreads.ToString("N0"), hang.RuntimeActiveWorkerThreads)),
                     Row(Cell("Idle worker threads"), Cell(hang.RuntimeIdleWorkerThreads.ToString("N0"), hang.RuntimeIdleWorkerThreads)),
                     Row(Cell("Retired worker threads"), Cell(hang.RuntimeRetiredWorkerThreads.ToString("N0"), hang.RuntimeRetiredWorkerThreads)),
+                    Row(Cell("Runtime queue length"), Cell(hang.RuntimeQueueLength.HasValue ? hang.RuntimeQueueLength.Value.ToString("N0") : "Unavailable", hang.RuntimeQueueLength)),
                     Row(Cell("CPU utilization"), Cell($"{hang.RuntimeCpuUtilization:N0}%", hang.RuntimeCpuUtilization)),
                     Row(Cell("Starvation flag"), Cell(hang.IsStarved ? "Yes" : "No", hang.IsStarved ? 1L : 0L)),
                     Row(Cell("Queue length proxy"), Cell($"{hang.QueuedWorkItems:N0} queued work items", hang.QueuedWorkItems)),
@@ -150,7 +151,9 @@ internal sealed class ThreadConcurrencySectionBuilder : SectionBuilderBase, IRep
                 blocks.Add(Blank());
                 blocks.Add(H("RUNTIME THREAD-POOL METRICS"));
                 blocks.Add(new TableBlock("Runtime thread-pool metrics", ["Signal", "Value"], tpRows));
-                blocks.Add(T("Queue length is represented here by queued work items scanned from the dump; ClrMD runtime queue length is not directly exposed in this build."));
+                blocks.Add(T(hang.RuntimeQueueLength.HasValue
+                    ? "Runtime queue length is shown directly when the ClrMD thread-pool surface exposes it; queued work items remain a dump-derived proxy."
+                    : "Queued work items remain the fallback queue-length proxy because this ClrMD thread-pool surface did not expose a runtime queue length value."));
             }
             else
             {

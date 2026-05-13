@@ -7,6 +7,7 @@ namespace DumpDetective.Analysis.Trend
     {
         private const string RetentionAnalyzerName = "Retention Analysis";
         private const string LegacyLeakAnalyzerName = "Memory Leak Analysis";
+        private const string LeakCandidateAnalyzerName = "Leak Candidate Analysis";
 
         private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers =
             comparers.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
@@ -104,6 +105,29 @@ namespace DumpDetective.Analysis.Trend
 
                 if (signals.Count > 0)
                     result["Static Root Leak Detection"] = signals;
+            }
+
+            // Leak Candidate Analysis — compare current candidate footprint by type.
+            if (baseline.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? bLeakCandidateRaw) &&
+                current.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? cLeakCandidateRaw) &&
+                bLeakCandidateRaw is LeakCandidateDomainResult bLeakCandidates &&
+                cLeakCandidateRaw is LeakCandidateDomainResult cLeakCandidates)
+            {
+                var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
+                foreach (LeakCandidateRecord candidate in bLeakCandidates.TopCandidates)
+                    baselineByType[candidate.TypeName] = candidate.TotalSize;
+
+                var signals = new List<NewLeakSignal>();
+                foreach (LeakCandidateRecord candidate in cLeakCandidates.TopCandidates)
+                {
+                    double currentBytes = candidate.TotalSize;
+                    baselineByType.TryGetValue(candidate.TypeName, out double baseBytes);
+                    if (currentBytes > baseBytes * 1.5 + 1024)
+                        signals.Add(new NewLeakSignal(candidate.TypeName, baseBytes, currentBytes, "LeakCandidateAnalyzer"));
+                }
+
+                if (signals.Count > 0)
+                    result[LeakCandidateAnalyzerName] = signals;
             }
 
             return result;

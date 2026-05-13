@@ -68,7 +68,7 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1)).ToList()
                 },
-            Findings = trendFindings.Select(MapFinding).ToList(),
+            Findings = trendFindings.Select(f => MapFinding(f, trendData.Snapshots.Count - 1)).ToList(),
             ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
             Confidence = baseDoc.Confidence,
@@ -203,7 +203,7 @@ internal sealed class TrendReportComposer(
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
                 .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, audience, snapshot.IncidentContext);
-            IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(MapFinding).ToList();
+            IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(f => MapFinding(f, snapshot.Index)).ToList();
             sections.Add(TrendSnapshotSectionComposer.Build(
                 snapshot.DumpPath,
                 snapshot.GeneratedAtUtc,
@@ -424,7 +424,7 @@ internal sealed class TrendReportComposer(
         return new AnalyzerDetailSection("Trend Comparison", "Trend Comparison", 0, blocks);
     }
 
-    private static FindingRecord MapFinding(InsightFinding finding)
+    private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)
     {
         return new FindingRecord(
             Analyzer: finding.Analyzer,
@@ -438,7 +438,17 @@ internal sealed class TrendReportComposer(
         {
             EvidenceItems = SplitLines(finding.Evidence),
             RecommendationItems = SplitLines(finding.Recommendation),
+            CaveatItems = finding.EffectiveCaveats.Count > 0 ? finding.EffectiveCaveats : null,
             ConfidenceScore = finding.ConfidenceScore,
+            EvidenceRefs =
+            [
+                new EvidenceRef(
+                    Analyzer: finding.Analyzer,
+                    MetricKey: finding.Tags.FirstOrDefault(t => t.Contains('.', StringComparison.Ordinal) || t.Contains('_', StringComparison.Ordinal)),
+                    Addresses: null,
+                    ArtifactPath: null,
+                    SnapshotIndex: snapshotIndex)
+            ],
         };
     }
 

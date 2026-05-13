@@ -67,8 +67,7 @@ internal sealed class ReportSerializer
             {
                 foreach (InsightFinding finding in run.Findings)
                 {
-                    
-                    allFindings.Add(MapFinding(finding));
+                    allFindings.Add(MapFinding(finding, run.Artifacts));
                 }
             }
 
@@ -264,7 +263,7 @@ internal sealed class ReportSerializer
 
     // ── Finding mapping ───────────────────────────────────────────────────────
 
-    private static FindingRecord MapFinding(InsightFinding f) =>
+    private static FindingRecord MapFinding(InsightFinding f, IReadOnlyList<ReportArtifact>? artifacts = null, int? snapshotIndex = null) =>
         new(
             Analyzer: f.Analyzer,
             Category: f.Category,
@@ -277,16 +276,62 @@ internal sealed class ReportSerializer
         {
             EvidenceItems = SplitLines(f.Evidence),
             RecommendationItems = SplitLines(f.Recommendation),
+            CaveatItems = f.EffectiveCaveats.Count > 0 ? f.EffectiveCaveats : null,
             Cause = BuildCause(f),
             Effect = BuildEffect(f),
             Fix = BuildFix(f),
             ConfidenceScore = BuildConfidenceScore(f),
-            EvidenceRefs = null,
+            EvidenceRefs = BuildEvidenceRefs(f, artifacts, snapshotIndex),
             SuggestedOwner = BuildSuggestedOwner(f),
             Effort = BuildEffort(f),
             ValidationStep = BuildValidationStep(f),
             TrackingStatus = BuildTrackingStatus(f)
         };
+
+    private static IReadOnlyList<EvidenceRef> BuildEvidenceRefs(
+        InsightFinding finding,
+        IReadOnlyList<ReportArtifact>? artifacts,
+        int? snapshotIndex)
+    {
+        string? metricKey = BuildMetricKey(finding);
+        List<ReportArtifact>? matchingArtifacts = artifacts?
+            .Where(a => string.Equals(a.Analyzer, finding.Analyzer, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matchingArtifacts is { Count: > 0 })
+        {
+            return matchingArtifacts
+                .Select(a => new EvidenceRef(
+                    Analyzer: finding.Analyzer,
+                    MetricKey: metricKey,
+                    Addresses: null,
+                    ArtifactPath: a.FilePath ?? a.FileName,
+                    SnapshotIndex: snapshotIndex))
+                .ToList();
+        }
+
+        return
+        [
+            new EvidenceRef(
+                Analyzer: finding.Analyzer,
+                MetricKey: metricKey,
+                Addresses: null,
+                ArtifactPath: null,
+                SnapshotIndex: snapshotIndex)
+        ];
+    }
+
+    private static string? BuildMetricKey(InsightFinding finding)
+    {
+        for (int i = 0; i < finding.Tags.Count; i++)
+        {
+            string tag = finding.Tags[i];
+            if (tag.Contains('.', StringComparison.Ordinal) || tag.Contains('_', StringComparison.Ordinal))
+                return tag;
+        }
+
+        return null;
+    }
 
     // Deduplication removed: findings are not merged at serialization time
 

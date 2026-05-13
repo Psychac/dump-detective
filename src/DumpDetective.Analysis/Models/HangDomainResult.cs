@@ -22,6 +22,7 @@ internal sealed record HangDomainResult(
     int RuntimeActiveWorkerThreads,
     int RuntimeIdleWorkerThreads,
     int RuntimeRetiredWorkerThreads,
+    int? RuntimeQueueLength,
     int RuntimeCpuUtilization,
     bool IsStarved,
     bool TaskScanLimited,

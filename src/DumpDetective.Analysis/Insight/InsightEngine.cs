@@ -482,7 +482,7 @@ internal sealed class InsightEngine
                             "Re-run with --diagnostic flag for detailed error information.",
             Tags: ["analysis-quality", "failed-analyzer"],
             ConfidenceScore: 0.55,
-            Caveats: "Derived from a partially complete analyzer set."));
+                Caveats: ["Derived from a partially complete analyzer set."]));
     }
 
     // ── Part 4: New cross-cutting detection methods ───────────────────────────

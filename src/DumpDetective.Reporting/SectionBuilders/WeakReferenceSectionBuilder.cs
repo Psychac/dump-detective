@@ -88,14 +88,14 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             $"{d.DependentHandleDeadKeyCount:N0}", d.DependentHandleDeadKeyCount));
 
         // Exported artifacts note (if any)
-        if (d.RawExports is { Count: > 0 })
+        if (d.Artifacts is { Count: > 0 })
         {
             blocks.Add(Blank());
             blocks.Add(H("EXPORTS"));
             blocks.Add(Divider());
             blocks.Add(T("This analyzer produced on-disk exports for deeper offline inspection."));
 
-            foreach (var a in d.RawExports)
+            foreach (var a in d.Artifacts)
             {
                 if (a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                     blocks.Add(Li($"{a.FileName} — Pretty JSON; open in VS Code or any JSON viewer."));

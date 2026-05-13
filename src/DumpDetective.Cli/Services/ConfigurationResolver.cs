@@ -232,13 +232,18 @@ internal sealed class ConfigurationResolver
             ?? request.EnablePerformanceDiagnostics;
 
         bool collectAfterAnalyzerRun = config.Diagnostics?.CollectAfterAnalyzerRun ?? false;
+        int collectAfterAnalyzerRunEveryKAnalyzers = config.Diagnostics?.CollectAfterAnalyzerRunEveryKAnalyzers ?? 0;
+        long collectAfterAnalyzerRunWorkingSetThresholdBytes = config.Diagnostics?.CollectAfterAnalyzerRunWorkingSetThresholdBytes ?? 0;
+        bool compactLargeObjectHeapAfterAnalyzerCollection = config.Diagnostics?.CompactLargeObjectHeapAfterAnalyzerCollection ?? true;
 
         return new DiagnosticsOptions
         {
             EnableMemoryDiagnostics = enableMemoryDiagnostics,
-            EnablePerformanceDiagnostics = enablePerformanceDiagnostics
-            ,
-            CollectAfterAnalyzerRun = collectAfterAnalyzerRun
+            EnablePerformanceDiagnostics = enablePerformanceDiagnostics,
+            CollectAfterAnalyzerRun = collectAfterAnalyzerRun,
+            CollectAfterAnalyzerRunEveryKAnalyzers = collectAfterAnalyzerRunEveryKAnalyzers,
+            CollectAfterAnalyzerRunWorkingSetThresholdBytes = collectAfterAnalyzerRunWorkingSetThresholdBytes,
+            CompactLargeObjectHeapAfterAnalyzerCollection = compactLargeObjectHeapAfterAnalyzerCollection
         };
     }
 

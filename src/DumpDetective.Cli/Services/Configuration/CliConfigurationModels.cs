@@ -123,6 +123,7 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(GCHandleAnalysisOptions))]
 [JsonSerializable(typeof(StaticRootLeakAnalysisOptions))]
 [JsonSerializable(typeof(MemoryAnalysisOptions))]
+[JsonSerializable(typeof(DiagnosticsOptions))]
 internal partial class CliConfigurationJsonSerializerContext : JsonSerializerContext
 {
 }

@@ -631,7 +631,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             TopDuplicateTypes: topDuplicateTypes,
                 Distribution: distribution,
                 PreviewMaxLength: stringOptions.PreviewMaxLength,
-                RawExports: rawExports);
+                Artifacts: rawExports);
     }
 
     // Internal helper used by the analyzer and unit tests to compute effective numeric caps

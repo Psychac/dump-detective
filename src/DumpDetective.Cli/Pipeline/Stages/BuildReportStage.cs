@@ -10,12 +10,10 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        state.IncidentContext = IncidentContextFactory.Create(
-            mode: "Single",
-            loadContext: state.LoadContext,
-            resolved: state.Resolved,
-            activeAnalyzers: state.ActiveAnalyzers,
-            elapsed: state.AnalysisElapsed);
+        if (state.IncidentContext is null)
+        {
+            throw new InvalidOperationException("Incident context was not initialized by the per-dump execution stage.");
+        }
 
         // Build the serializable report document and keep it in state for artifact persistence.
         var doc = reportBuilderFacade.BuildReportDocument(

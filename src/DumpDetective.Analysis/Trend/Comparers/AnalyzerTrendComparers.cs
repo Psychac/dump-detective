@@ -443,7 +443,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
 
     internal sealed class ThreadStackClusterTrendComparer : IAnalyzerTrendComparer
     {
-        public string AnalyzerName => "Thread Stack Cluster Analysis";
+        public string AnalyzerName => "Thread Stack Signature Clustering";
 
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
@@ -970,6 +970,65 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("jit.active.methods",   null, b.ActiveMethodsOnStacks, c.ActiveMethodsOnStacks, "methods", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("jit.tiered.count",     null, b.TieredMethodCount,     c.TieredMethodCount,     "methods", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("jit.unmanaged.frames", null, b.UnmanagedFrameCount,   c.UnmanagedFrameCount,   "frames",  MetricTrendDirection.HigherIsWorse),
+            ];
+        }
+    }
+
+    internal sealed class LeakCandidateTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Leak Candidate Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not LeakCandidateDomainResult r) return [];
+            return
+            [
+                new("leak.candidates.total", null, r.TotalCandidates, "candidates", MetricTrendDirection.HigherIsWorse),
+                new("leak.candidates.top.score", null, r.TopCandidates.Count > 0 ? r.TopCandidates[0].SuspicionScore : 0, "score", MetricTrendDirection.HigherIsWorse),
+                new("leak.candidates.top.count", null, r.TopCandidates.Count, "candidates", MetricTrendDirection.Neutral)
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not LeakCandidateDomainResult b || current is not LeakCandidateDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("leak.candidates.total", null, b.TotalCandidates, c.TotalCandidates, "candidates", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("leak.candidates.top.count", null, b.TopCandidates.Count, c.TopCandidates.Count, "candidates", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("leak.candidates.top.score", null,
+                    b.TopCandidates.Count > 0 ? b.TopCandidates[0].SuspicionScore : 0,
+                    c.TopCandidates.Count > 0 ? c.TopCandidates[0].SuspicionScore : 0,
+                    "score", MetricTrendDirection.HigherIsWorse)
+            ];
+        }
+    }
+
+    internal sealed class DominatorTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Dominator Analysis";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not DominatorDomainResult r) return [];
+            return
+            [
+                new("dominator.candidates", null, r.CandidateCount, "candidates", MetricTrendDirection.HigherIsWorse),
+                new("dominator.analyzed", null, r.AnalyzedCount, "types", MetricTrendDirection.Neutral),
+                new("dominator.retained.bytes", null, r.TotalEstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("dominator.top.count", null, r.TopDominatorTypes.Count, "types", MetricTrendDirection.Neutral)
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+        {
+            if (baseline is not DominatorDomainResult b || current is not DominatorDomainResult c) return [];
+            return
+            [
+                MetricDeltaHelper.Compute("dominator.candidates", null, b.CandidateCount, c.CandidateCount, "candidates", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("dominator.analyzed", null, b.AnalyzedCount, c.AnalyzedCount, "types", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("dominator.retained.bytes", null, b.TotalEstimatedRetainedBytes, c.TotalEstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("dominator.top.count", null, b.TopDominatorTypes.Count, c.TopDominatorTypes.Count, "types", MetricTrendDirection.Neutral)
             ];
         }
     }

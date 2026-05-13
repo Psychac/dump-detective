@@ -363,7 +363,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TopStaleWrapperHolderTypes: topStaleTypes,
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
                 ScanCapped: scanCapped,
-                RawExports: rawExports);
+                Artifacts: rawExports);
         }
 
         // ── File reader helpers ───────────────────────────────────────────────

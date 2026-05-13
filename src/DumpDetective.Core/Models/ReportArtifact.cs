@@ -1,6 +1,6 @@
 namespace DumpDetective.Core.Models;
 
-internal sealed record ReportArtifact(
+public sealed record ReportArtifact(
     string Analyzer,
     string FileName,
     string? Content,

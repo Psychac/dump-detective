@@ -6,6 +6,7 @@ using DumpDetective.Cli.Console;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Trend;
 
 using System.Diagnostics;
@@ -16,15 +17,15 @@ namespace DumpDetective.Cli.Services;
 /// Orchestrates a multi-dump trend analysis run: per-dump pipelines → trend report → output.
 /// </summary>
 internal sealed class TrendOrchestrationService(
-    IDumpLoader dumpLoader,
     ReportBuilderFacade reportBuilderFacade,
     TrendAnalyzer trendAnalyzer,
-    AnalyzerExecutionService analyzerExecutionService)
+    ReportOutputWriter outputWriter,
+        PerDumpExecutionService perDumpExecutionService)
 {
-    private readonly IDumpLoader _dumpLoader = dumpLoader;
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly TrendAnalyzer _trendAnalyzer = trendAnalyzer;
-    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
+    private readonly ReportOutputWriter _outputWriter = outputWriter;
+    private readonly PerDumpExecutionService _perDumpExecutionService = perDumpExecutionService;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -105,15 +106,14 @@ internal sealed class TrendOrchestrationService(
             PrintTrendOverallSummary(trendData, resolved.DiagnosticMode);
 
         IReadOnlyList<AnalyzerRunResult> currentRuns = trendExecutions[^1].Runs;
-        string renderedReport = _reportBuilderFacade.BuildRenderedTrendReport(
+        AnalysisReportDocument trendDoc = _reportBuilderFacade.BuildTrendReportDocument(
             trendDumpPaths[^1],
-            resolved.Report.Format,
             resolved.Report.Audience,
             currentRuns,
             totalStopwatch.Elapsed,
             trendExecutions[^1].IncidentContext,
-            trendData,
-            cancellationToken);
+            trendData);
+        string renderedReport = _reportBuilderFacade.RenderDocument(trendDoc, resolved.Report.Format);
 
         stageStopwatch.Stop();
         buildReportElapsed = stageStopwatch.Elapsed;
@@ -126,11 +126,7 @@ internal sealed class TrendOrchestrationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!string.IsNullOrWhiteSpace(resolved.OutputPath))
-            {
-                await File.WriteAllTextAsync(resolved.OutputPath, renderedReport, cancellationToken);
-                ConsoleUx.Success($"Report written to: {resolved.OutputPath}");
-            }
+            await _outputWriter.WriteAsync(resolved, trendDoc, renderedReport, cancellationToken);
 
             IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
 
@@ -183,7 +179,6 @@ internal sealed class TrendOrchestrationService(
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         CancellationToken cancellationToken)
     {
-        Stopwatch stopwatch = Stopwatch.StartNew();
         AnalyzerMemoryStats? memoryStats = null;
         if (resolved.Diagnostics.EnableMemoryDiagnostics)
         {
@@ -196,29 +191,16 @@ internal sealed class TrendOrchestrationService(
                 ManagedHeapAfter: GC.GetTotalMemory(false));
         }
 
-        using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
-        HeapAnalysisCache heapCache = new();
-        IHeapIndexBuilder heapBuilder = heapCache;
-        var heapIndex = heapBuilder.PrebuildHeapIndex(
-            loadContext.Heap,
+        PerDumpExecutionResult execution = await _perDumpExecutionService.ExecuteAsync(
+            "Trend",
+            resolved,
+            allAnalyzers,
+            activeAnalyzers,
             dumpPath,
-            cancellationToken,
-            progress: new Progress<AnalyzerProgressReport>(r =>
+            new Progress<AnalyzerProgressReport>(r =>
                 ConsoleUx.ObjectScanProgress($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
-            mode: resolved.IndexPrebuildMode);
-        string indexTarget = heapIndex.StorageKind == Analysis.Indexing.HeapIndexStorageKind.Memory
-            ? "in-memory"
-            : Path.GetFileName(heapIndex.IndexPath);
-        ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", heapIndex.ObjectCount, heapIndex.Elapsed, $"{heapIndex.StorageKind} • {indexTarget}");
+            cancellationToken);
 
-        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(resolved, loadContext, heapCache, activeAnalyzers);
-        IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(context, activeAnalyzers, cancellationToken);
-
-        runs = AnalyzerFilterService.BuildSkippedByFilterResults(allAnalyzers, activeAnalyzers)
-            .Concat(runs)
-            .ToList();
-
-        stopwatch.Stop();
         if (resolved.Diagnostics.EnableMemoryDiagnostics)
         {
             using Process currentProcess = Process.GetCurrentProcess();
@@ -230,14 +212,12 @@ internal sealed class TrendOrchestrationService(
                 ManagedHeapAfter: GC.GetTotalMemory(false));
         }
 
-        AnalysisIncidentContext incidentContext = IncidentContextFactory.Create(
-            mode: "Trend",
-            loadContext: loadContext,
-            resolved: resolved,
-            activeAnalyzers: activeAnalyzers,
-            elapsed: stopwatch.Elapsed);
+        string indexTarget = execution.HeapIndex.StorageKind == Analysis.Indexing.HeapIndexStorageKind.Memory
+            ? "in-memory"
+            : Path.GetFileName(execution.HeapIndex.IndexPath);
+        ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", execution.HeapIndex.ObjectCount, execution.HeapIndex.Elapsed, $"{execution.HeapIndex.StorageKind} • {indexTarget}");
 
-        return new TrendDumpExecution(dumpPath, runs, stopwatch.Elapsed, incidentContext, DateTime.UtcNow, memoryStats);
+        return new TrendDumpExecution(dumpPath, execution.Runs, execution.Elapsed, execution.IncidentContext, DateTime.UtcNow, memoryStats);
     }
 
     private static AnalysisSnapshot BuildSnapshot(int index, TrendDumpExecution execution)
@@ -257,6 +237,7 @@ internal sealed class TrendOrchestrationService(
         return new AnalysisSnapshot(
             Index: index,
             DumpPath: execution.DumpPath,
+            Runs: execution.Runs,
             Findings: findings,
             DomainResults: domains,
             GeneratedAtUtc: execution.GeneratedAtUtc,

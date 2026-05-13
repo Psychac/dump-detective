@@ -1,6 +1,5 @@
 namespace DumpDetective.Reporting.Services;
 
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -9,11 +8,8 @@ using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
 internal sealed class TrendReportComposer(
-    IEnumerable<IFindingGenerator> generators,
     CanonicalReportDocumentFactory documentFactory)
 {
-    private readonly IReadOnlyDictionary<string, IFindingGenerator> _generators =
-        generators.ToDictionary(g => g.AnalyzerName, StringComparer.Ordinal);
     private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;
 
     public AnalysisReportDocument ComposeCanonicalTrendReport(
@@ -76,7 +72,16 @@ internal sealed class TrendReportComposer(
             ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
             DeveloperActionPlan = baseDoc.DeveloperActionPlan,
             Confidence = baseDoc.Confidence,
-            AnalyzerSections = analyzerSections
+            AnalyzerSections = analyzerSections,
+            AnalyzerRunStatuses = currentRuns.Select(r => new AnalyzerRunStatusRecord(
+                AnalyzerName: r.AnalyzerName,
+                Status: r.Status.ToString(),
+                DurationMs: r.Duration.TotalMilliseconds,
+                FindingCount: r.FindingCount,
+                WarningCount: r.WarningCount,
+                ObjectScanCount: r.ObjectScanCount,
+                ErrorMessage: r.ErrorMessage)).ToList(),
+            Artifacts = currentRuns.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToList()
         };
     }
 
@@ -169,9 +174,9 @@ internal sealed class TrendReportComposer(
             return summary;
 
         AnalysisReportDocument firstDoc = _documentFactory.BuildSnapshotDocument(
-            snapshots[0].DumpPath, BuildSnapshotRuns(snapshots[0]), [], audience);
+            snapshots[0].DumpPath, snapshots[0].Runs, [], audience, snapshots[0].IncidentContext);
         AnalysisReportDocument lastDoc = _documentFactory.BuildSnapshotDocument(
-            snapshots[^1].DumpPath, BuildSnapshotRuns(snapshots[^1]), [], audience);
+            snapshots[^1].DumpPath, snapshots[^1].Runs, [], audience, snapshots[^1].IncidentContext);
 
         if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
             return summary;
@@ -196,9 +201,8 @@ internal sealed class TrendReportComposer(
         for (int i = 0; i < snapshots.Count; i++)
         {
             AnalysisSnapshot snapshot = snapshots[i];
-            IReadOnlyList<AnalyzerRunResult> runs = BuildSnapshotRuns(snapshot);
             IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
-                .BuildSnapshotSections(snapshot.DumpPath, runs, builders, audience, snapshot.IncidentContext);
+                .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, audience, snapshot.IncidentContext);
             IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(MapFinding).ToList();
             sections.Add(TrendSnapshotSectionComposer.Build(
                 snapshot.DumpPath,
@@ -211,32 +215,6 @@ internal sealed class TrendReportComposer(
         }
 
         return sections;
-    }
-
-    private IReadOnlyList<AnalyzerRunResult> BuildSnapshotRuns(AnalysisSnapshot snapshot)
-    {
-        return snapshot.DomainResults
-            .Select(kvp =>
-            {
-                IReadOnlyList<InsightFinding> domainFindings = _generators.TryGetValue(kvp.Key, out IFindingGenerator? gen)
-                    ? gen.Generate(kvp.Value)
-                    : [];
-                return new AnalyzerRunResult(
-                    AnalyzerName: kvp.Key,
-                    Status: AnalyzerExecutionStatus.Success,
-                    Duration: TimeSpan.Zero,
-                    Result: kvp.Value,
-                    ErrorMessage: null,
-                    ErrorType: null,
-                    Findings: domainFindings,
-                    FindingCount: domainFindings.Count,
-                    WarningCount: kvp.Value.Warnings.Count,
-                    Diagnostics: new AnalyzerExecutionDiagnostics(
-                        ObjectScanCount: 0,
-                        CacheHits: 0,
-                        CacheMisses: 0));
-            })
-            .ToList();
     }
 
     // ── Trend comparison section ──────────────────────────────────────────────

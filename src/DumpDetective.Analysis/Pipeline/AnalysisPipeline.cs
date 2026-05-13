@@ -87,11 +87,13 @@ internal sealed class AnalysisPipeline(
 
             AnalyzerMemoryStats? memoryStats = null;
             long wsBefore = 0, managedBefore = 0;
-            if (context.Diagnostics.EnableMemoryDiagnostics)
+            bool trackWorkingSet = context.Diagnostics.EnableMemoryDiagnostics || context.Diagnostics.HasAnalyzerCollectionPolicy();
+            if (trackWorkingSet)
             {
                 _currentProcess.Refresh();
                 wsBefore = _currentProcess.WorkingSet64;
-                managedBefore = GC.GetTotalMemory(false);
+                if (context.Diagnostics.EnableMemoryDiagnostics)
+                    managedBefore = GC.GetTotalMemory(false);
             }
 
             try
@@ -110,31 +112,20 @@ internal sealed class AnalysisPipeline(
 
                 stopwatch.Stop();
 
-                if (context.Diagnostics.EnableMemoryDiagnostics)
+                long wsAfter = 0;
+                if (trackWorkingSet)
                 {
                     _currentProcess.Refresh();
-                    memoryStats = new AnalyzerMemoryStats(
-                        WorkingSetBefore: wsBefore,
-                        WorkingSetAfter: _currentProcess.WorkingSet64,
-                        ManagedHeapBefore: managedBefore,
-                        ManagedHeapAfter: GC.GetTotalMemory(false));
+                    wsAfter = _currentProcess.WorkingSet64;
                 }
 
-                // If the analyzer domain result exposes a `RawExports` property (some analyzers
-                // attach on-disk artifacts there), propagate them into the AnalyzerRunResult
-                // so the reporting serializer can collect and write them out.
-                IReadOnlyList<ReportArtifact>? propagatedArtifacts = null;
-                try
+                if (context.Diagnostics.EnableMemoryDiagnostics)
                 {
-                    var prop = analyzerResult.GetType().GetProperty("RawExports");
-                    if (prop is not null)
-                    {
-                        propagatedArtifacts = prop.GetValue(analyzerResult) as IReadOnlyList<ReportArtifact>;
-                    }
-                }
-                catch
-                {
-                    propagatedArtifacts = null;
+                    memoryStats = new AnalyzerMemoryStats(
+                        WorkingSetBefore: wsBefore,
+                        WorkingSetAfter: wsAfter,
+                        ManagedHeapBefore: managedBefore,
+                        ManagedHeapAfter: GC.GetTotalMemory(false));
                 }
 
                 AnalyzerRunResult success = new(
@@ -147,7 +138,7 @@ internal sealed class AnalysisPipeline(
                     Findings: null,
                     FindingCount: 0,
                     WarningCount: warningCount,
-                    Artifacts: propagatedArtifacts,
+                    Artifacts: analyzerResult.Artifacts,
                     Diagnostics: new AnalyzerExecutionDiagnostics(
                         ObjectScanCount: objectScans,
                         CacheHits: cacheHits,
@@ -261,11 +252,16 @@ internal sealed class AnalysisPipeline(
                     try { disposable.Dispose(); } catch { }
                 }
 
-                if (context.Diagnostics is not null && context.Diagnostics.CollectAfterAnalyzerRun)
+                if (context.Diagnostics is not null
+                    && context.Diagnostics.ShouldCollectAfterAnalyzerRun(runResults.Count, wsBefore, trackWorkingSet ? _currentProcess.WorkingSet64 : 0))
                 {
                     try
                     {
-                        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                        if (context.Diagnostics.CompactLargeObjectHeapAfterAnalyzerCollection)
+                        {
+                            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                        }
+
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
                         GC.Collect();

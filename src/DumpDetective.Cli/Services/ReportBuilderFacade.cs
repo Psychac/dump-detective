@@ -66,15 +66,29 @@ internal sealed class ReportBuilderFacade(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        AnalysisReportDocument doc = _trendComposer.ComposeCanonicalTrendReport(
-            dumpPath, currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData, audience);
+        AnalysisReportDocument doc = BuildTrendReportDocument(
+            dumpPath,
+            audience,
+            currentRuns,
+            elapsed,
+            incidentContext,
+            trendData);
 
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
         return formatter.Render(doc);
     }
+
+    public AnalysisReportDocument BuildTrendReportDocument(
+        string dumpPath,
+        ReportAudience audience,
+        IReadOnlyList<AnalyzerRunResult> currentRuns,
+        TimeSpan elapsed,
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        TrendReportData trendData)
+        => _trendComposer.ComposeCanonicalTrendReport(
+            dumpPath, currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData, audience);
 
     public AnalysisReportDocument BuildReportDocument(
         string dumpPath,

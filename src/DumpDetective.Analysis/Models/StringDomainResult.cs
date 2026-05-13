@@ -54,4 +54,4 @@ internal sealed record StringDomainResult(
     IReadOnlyList<DumpDetective.Core.Models.NameCountEntry>? TopDuplicateTypes = null,
     DistributionSummary? Distribution = null,
     int PreviewMaxLength = 0,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? RawExports = null) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;

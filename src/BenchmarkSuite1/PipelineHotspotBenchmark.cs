@@ -57,13 +57,7 @@ public class PipelineHotspotBenchmark
             GenericAnalyzerDomainResult result = new()
             {
                 AnalyzerName = Name,
-                Category = Category,
-                Metrics = new Dictionary<string, object?>
-                {
-                    ["objectScans"] = 100,
-                    ["cacheHits"] = 80,
-                    ["cacheMisses"] = 20
-                }
+                Category = Category
             };
 
             return ValueTask.FromResult<AnalyzerDomainResult>(result);

@@ -35,6 +35,8 @@ internal static class ServiceRegistration
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<IDumpLoader, DumpLoader>();
         services.AddSingleton<AnalyzerExecutionService>();
+        services.AddSingleton<PerDumpExecutionService>();
+        services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();
         services.AddSingleton<SingleDumpOrchestrationService>();
         services.AddSingleton<TrendOrchestrationService>();
@@ -72,6 +74,8 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, WeakReferenceFindingGenerator>();
         services.AddSingleton<IFindingGenerator, BoxingFindingGenerator>();
         services.AddSingleton<IFindingGenerator, JitFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, LeakCandidateFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, DominatorFindingGenerator>();
 
         services.AddSingleton<FindingGenerationPipeline>();
         services.AddSingleton<CanonicalReportDocumentFactory>();
@@ -109,6 +113,8 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, WeakReferenceTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, BoxingTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, JitTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, LeakCandidateTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, DominatorTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

@@ -1,9 +1,52 @@
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Abstractions;
+
 using DumpDetective.Core.Options;
 
 namespace DumpDetective.Cli.Services;
 
 internal sealed class StartupValidator
 {
+    public void ValidateRegistrations(
+        IReadOnlyList<IAnalyzer> analyzers,
+        IEnumerable<IFindingGenerator> findingGenerators,
+        IEnumerable<IAnalyzerTrendComparer> trendComparers,
+        ISectionBuilderFactory sectionBuilderFactory)
+    {
+        List<string> errors = [];
+
+        IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders = sectionBuilderFactory.CreateAnalyzerBuilders();
+        IReadOnlyList<IReportSectionBuilder> reportSectionBuilders = sectionBuilderFactory.CreateReportBuilders();
+
+        if (reportSectionBuilders.Count == 0)
+            errors.Add("No report section builders are registered.");
+
+        ValidateNameCoverage(
+            "finding generators",
+            analyzers.Select(a => a.Name),
+            findingGenerators.Select(g => g.AnalyzerName),
+            errors,
+            requireEveryAnalyzer: true);
+
+        ValidateNameCoverage(
+            "trend comparers",
+            analyzers.Select(a => a.Name),
+            trendComparers.Select(c => c.AnalyzerName),
+            errors,
+            requireEveryAnalyzer: true);
+
+        ValidateNameCoverage(
+            "analyzer section builders",
+            analyzers.Select(a => a.Name),
+            analyzerSectionBuilders.Select(b => b.AnalyzerName),
+            errors,
+            requireEveryAnalyzer: false);
+
+        if (errors.Count > 0)
+            throw new ArgumentException(string.Join(Environment.NewLine, errors));
+    }
+
     public void Validate(ResolvedExecutionOptions options)
     {
         List<string> errors = [];
@@ -60,6 +103,26 @@ internal sealed class StartupValidator
         {
             throw new ArgumentException(string.Join(Environment.NewLine, errors));
         }
+    }
+
+    private static void ValidateNameCoverage(
+        string label,
+        IEnumerable<string> expectedNames,
+        IEnumerable<string> registeredNames,
+        List<string> errors,
+        bool requireEveryAnalyzer)
+    {
+        HashSet<string> expected = new(expectedNames, StringComparer.Ordinal);
+        HashSet<string> registered = new(registeredNames, StringComparer.Ordinal);
+
+        List<string> missing = expected.Where(name => !registered.Contains(name)).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        List<string> extra = registered.Where(name => !expected.Contains(name)).OrderBy(name => name, StringComparer.Ordinal).ToList();
+
+        if (requireEveryAnalyzer && missing.Count > 0)
+            errors.Add($"Missing {label} for analyzers: {string.Join(", ", missing)}");
+
+        if (extra.Count > 0)
+            errors.Add($"Registered {label} without matching analyzer: {string.Join(", ", extra)}");
     }
 
     private static void ValidateRetentionOptions(RetentionOptions options, List<string> errors)

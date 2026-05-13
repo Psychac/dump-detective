@@ -9,7 +9,7 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
 {
     private const int TopSignaturesToShow = 5;
 
-    public string AnalyzerName => "Thread Stack Cluster Analysis";
+    public string AnalyzerName => "Thread Stack Signature Clustering";
     public int SortOrder => 65;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ThreadStackClusterDomainResult;
@@ -66,14 +66,14 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             : T("Signature diversity suggests varied active work."));
 
         // Exported artifacts note (if any)
-        if (d.RawExports is { Count: > 0 })
+        if (d.Artifacts is { Count: > 0 })
         {
             blocks.Add(Blank());
             blocks.Add(H("EXPORTS"));
             blocks.Add(Divider());
             blocks.Add(T("This analyzer produced on-disk exports for deeper offline inspection."));
 
-            foreach (var a in d.RawExports)
+            foreach (var a in d.Artifacts)
             {
                 // Friendly guidance: JSON for quick viewing; NDJSON+gzip for tooling/streaming
                 if (a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))

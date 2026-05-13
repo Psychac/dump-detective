@@ -5,6 +5,7 @@ public abstract record AnalyzerDomainResult
     public string AnalyzerName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public IReadOnlyCollection<string> Warnings { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = [];
 }
 
 public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;

@@ -14,6 +14,10 @@
 - Keep top-N, breadth, and depth limits visible in prose so large-dump behavior is reproducible.
 - Golden report tests must validate content and status coverage for small and large dumps.
 
+## Trend Report Contract
+
+Trend mode composition, narrative order, and acceptance criteria are specified in [TrendReportBlueprint.md](TrendReportBlueprint.md). The authoritative trend document schema — section map, field-to-source mapping, rendering rules, and stable section anchors (`T0`–`T7`) — is in [TrendReportFormat.md](TrendReportFormat.md). The detailed implementation plan (steps T1–T11, dependency order, test checklist) is in [TrendReportImplementationPlan2.md](TrendReportImplementationPlan2.md). Per-section data availability for trend-specific signals (snapshot scope, deltas, lifecycle) follows the same ✅/⚠️/❌ notation used throughout this document.
+
 ---
 
 # 1. Executive Summary
@@ -40,7 +44,7 @@
 
 - SOH / LOH / POH / FOH proportions (`HeapSegmentKind.Frozen` for FOH)
   - ✅ `SegmentAnalyzer` → `SegmentAnalysisDomainResult`: `SohBytes`, `LohBytes`, `PohBytes`, `FrozenBytes`, `TotalCommittedBytes`, `LohPercent`, `PohPercent`
-  - ⚠️ `FrozenPercent` missing from model — trivially add: `FrozenBytes / TotalCommittedBytes`
+  - ✅ `FrozenPercent` now a field in `SegmentAnalysisDomainResult` (`FrozenBytes / TotalCommittedBytes`)
   - API: `ClrHeap.Segments` → `SegmentKindMapper.Map(segment)` → accumulate per kind
 - Object size distribution histogram (bucketed by size range)
   - ✅ `MemoryAnalyzer` → `MemoryDomainResult.SizeBucketHistogram` (`IReadOnlyList<SizeBucketEntry>`)
@@ -53,10 +57,8 @@
   - ✅ `IncidentContextFactory` → `AnalysisIncidentContext.HeapCount` (`int?`); rendered in all formatters
   - ⚠️ Also fetched via reflection — consider `ClrHeap.SubHeaps.Count()` as a more stable alternative
 - Per-logical-heap segment breakdown: size and object count per heap index (imbalance = thread affinity or allocation hotspot)
-  - ⚠️ Data exists but not aggregated at model level: `segment.SubHeap?.Index` is available during the `SegmentAnalyzer` loop (stored in `HeapSegmentSnapshot.Generation` — field is misnamed)
-  - `SegmentReservationAnalyzer` already builds `ReservedByLogicalHeap: IReadOnlyDictionary<int, ulong>` (reserved bytes only)
-  - ❌ `SegmentAnalysisDomainResult` lacks a committed-bytes + object-count per logical heap dict
-  - Fix: add `IReadOnlyDictionary<int, PerLogicalHeapSummary>` to `SegmentAnalysisDomainResult`; aggregate in existing segment loop (zero extra cost)
+  - ✅ `SegmentAnalysisDomainResult.PerLogicalHeapSummaries: IReadOnlyList<PerLogicalHeapSummary>` now implemented; each entry carries `LogicalHeapIndex`, `Bytes`, `ObjectCount`, `SegmentCount`; aggregated in existing segment loop at zero extra cost
+  - `SegmentReservationAnalyzer` also builds `ReservedByLogicalHeap: IReadOnlyDictionary<int, ulong>` (reserved bytes per heap)
 
 ## 2.2 Generation Pressure
 
@@ -99,11 +101,11 @@
 | Object count | ✅ | `TypeAggregateIndexEntry.Count` (Phase 1 index) | |
 | Shallow size (total) | ✅ | `TypeAggregateIndexEntry.TotalSize` (Phase 1 index) | |
 | Shallow size (avg) | ✅ | `TotalSize / Count`; exposed as `TypeSnapshot.AverageSize` in `MemoryDomainResult` | |
-| Estimated retained size | ⚠️ Partial | `TypeSnapshot.EstimatedRetainedBytes` exists but is 0 until populated; `RetentionAnalyzer` tracks highly-referenced objects, not per-type retained size | Needs explicit BFS retained size computation in section builder |
+| Estimated retained size | ✅ | `TypeSnapshot.EstimatedRetainedBytes` populated by `MemoryAnalyzer` via `BoundedRetainedSizeBfs.ComputeExclusiveRetained` for top-N types; bounded (breadth 10 000, depth 20) | Heuristic; not true dominator |
 | GC generation distribution | ✅ | `TypeAggregateIndexEntry.Gen0Count/Gen1Count/Gen2Count/LohCount` → `GCGenerationAnalyzer.PerTypeGenerationProfiles` | Per-type Gen% derivable |
 | Is finalizable | ✅ | `TypeShapeProfile.IsFinalizable` via `ClrType.IsFinalizable`; resolved by `ObjectShapeAnalyzer` for top-N types | Only for types in shape analysis cap |
 | Is value type | ✅ | `TypeShapeProfile.IsValueType` via `ClrType.IsValueType` | Same cap |
-| Is array | ❌ | Not in any current model field; would need `ClrType.IsArray` lookup per type | Add to `TypeShapeProfile` or resolve on demand |
+| Is array | ✅ | `TypeShapeProfile.IsArray` via `ClrType.IsArray`; resolved by `ObjectShapeAnalyzer`; `TypeAggregateFlags.IsArrayType` also set during Phase 1 indexing | Same shape-analysis cap |
 | Base type chain depth | ✅ | `TypeShapeProfile.BaseTypeChainDepth` (`ComputeBaseTypeDepth` via `ClrType.BaseType` traversal) | |
 | Interface count | ✅ | `TypeShapeProfile.InterfaceCount` (`ClrType.EnumerateInterfaces().Count()`) | |
 | Field count (ref / value) | ✅ | `TypeShapeProfile.ReferenceFields`, `ValueFields`, `TotalFields` from `TypeShapeEntry` (Phase 1 cache) | |
@@ -126,12 +128,12 @@ Per candidate fields:
 - Instance count, total shallow size: ✅ `TypeAggregateIndexEntry`
 - Largest instance (address + size): ✅ `TypeAggregateIndexEntry.SampleAddress` (one sample captured during Phase 1); size from `TotalSize/Count`
 - Gen2 %: ✅ `Gen2Count / Count` from index
-- Estimated retained size: ⚠️ not pre-computed per type; `RetentionDomainResult.TopRetentionTypes` gives retention by highly-referenced count, not BFS retained bytes — add bounded BFS per candidate if needed
+- Estimated retained size: ✅ `DominatorAnalyzer` (Phase 2) calls `BoundedRetainedSizeBfs.ComputeExclusiveRetained` per candidate; result stored in `TypeSnapshot.EstimatedRetainedBytes` inside `DominatorDomainResult.TopDominatorTypes`
 - GC root reachability: ⚠️ not available per type from index; requires cross-referencing `GCRootAnalyzer` output by type name
 
-Top 30: ❌ no pre-ranked dominator candidate list exists; section builder must construct from index + shape + generation data
+Top 30: ✅ `DominatorAnalyzer` → `DominatorDomainResult.TopDominatorTypes` (`IReadOnlyList<TypeSnapshot>`) sorted by `EstimatedRetainedBytes`; candidate count capped via `TopHighlyReferencedObjectsToShow` option
 
-> Suggestion: build a `DominatorCandidateBuilder` in the section builder that joins `TypeAggregateIndexEntry` + `TypeShapeProfile` + `TypeGenerationProfile` and applies the four nomination criteria.
+> `DominatorAnalyzer` replaced the suggestion — no separate `DominatorCandidateBuilder` needed; nomination criteria are applied inside the analyzer.
 
 ## 3.3 Object Shape Analysis
 
@@ -159,32 +161,29 @@ Via `ClrType.Fields` for each type in the index:
 
 Scoped to top-N types by total shallow size:
 - Per-type estimated retained size: bounded BFS via `ClrObject.EnumerateReferences()`
-  - ❌ Not implemented as a forward BFS retained-size pass. `RetentionAnalyzer` counts **incoming** references per object (how many objects point TO each address) — produces `HighlyReferencedObjectSnapshot` (incoming ref count proxy), not retained bytes
-  - `TypeSnapshot.EstimatedRetainedBytes` field exists in the model but is always 0
-  - `ReferenceChainAnalyzer` does BFS from sample instances to GC roots (path finding), not retained-size computation
-  - Fix: implement a bounded forward BFS (breadth 10 000, depth 20) per top-N candidate using `ClrObject.EnumerateReferences()` to sum exclusively-reachable shallow sizes; populate `TypeSnapshot.EstimatedRetainedBytes`
+  - ✅ `BoundedRetainedSizeBfs.ComputeExclusiveRetained` implemented in `DumpDetective.Analysis.Utilities`; called by `MemoryAnalyzer` for top-N types and by `DominatorAnalyzer` for dominator candidates
+  - ✅ `TypeSnapshot.EstimatedRetainedBytes` is now populated for top types in `MemoryDomainResult.TopTypesBySize` and `DominatorDomainResult.TopDominatorTypes`
+  - `ReferenceChainAnalyzer` still does BFS from sample instances to GC roots (path finding), not retained-size computation — not changed
 - Retention ratio: retained / shallow
-  - ❌ Cannot compute until `EstimatedRetainedBytes` is populated (see above)
+  - ⚠️ Derivable from `TypeSnapshot.EstimatedRetainedBytes / TotalSize`; not pre-computed as a named field
 - Top 20 by retention ratio
-  - ❌ Same blocker
+  - ⚠️ Data available; `DominatorDomainResult.TopDominatorTypes` is sorted by `EstimatedRetainedBytes` (not by retention ratio); section builder must re-sort by ratio if needed
 - Limits: breadth 10 000 objects/candidate, depth 20 hops
-  - `ReferenceChainAnalyzer` uses `MaxPathSearchObjects = 5000` and `DefaultMaxPathDepth = 25`; adjust to match spec limits when BFS is implemented
+  - ✅ `BoundedRetainedSizeBfs` uses configurable `maxBreadth` (default 10 000 via `RetentionOptions.MaxLeakScanObjects`) and `maxDepth = 20`; `ReferenceChainAnalyzer` uses separate path-search limits
 
 ## 4.2 Dominator Tree (Approx)
 
 Full Lengauer-Tarjan is unsafe for 25 GB+ dumps.
 - Per candidate from section 4.1: bounded BFS, exclusively-reachable objects
-  - ❌ No exclusive-reachability BFS exists anywhere in the codebase; depends on §4.1 forward BFS being implemented first
+  - ✅ `DominatorAnalyzer` implements bounded forward BFS (`BoundedRetainedSizeBfs.ComputeExclusiveRetained`) per top-N candidate; depends on Phase 1 index being present
 - Exclusive retained bytes: memory freed if this object were removed
-  - ❌ Not computed; would require a second BFS pass checking whether each reachable object has alternative incoming paths
+  - ✅ Computed per candidate; stored in `TypeSnapshot.EstimatedRetainedBytes` inside `DominatorDomainResult.TopDominatorTypes`; marked `HeuristicOnly = true`
 - Dominator impact score = exclusive retained / total heap x 1000 (per-mille)
-  - ❌ Derived from exclusive retained bytes — blocked
+  - ⚠️ Not pre-computed as a per-mille field; retained bytes are available; section builder can derive `(EstimatedRetainedBytes / TotalHeapBytes) * 1000`
 - Top 15 by exclusive retained bytes
-  - ❌ Blocked
+  - ✅ `DominatorDomainResult.TopDominatorTypes` sorted by `EstimatedRetainedBytes` descending; top-N cap via `TopHighlyReferencedObjectsToShow` (default 15-20)
 - Overlapping reachable sets flagged as shared dominators
-  - ❌ Blocked; requires comparing reachable sets across candidates
-
-> Suggestion: implement §4.1 BFS first. §4.2 can be approximated by re-using the same BFS reachable sets and marking objects whose address appears in multiple candidates' sets as shared.
+  - ❌ Not implemented; would require comparing reachable sets across candidates
 
 ## 4.3 Retention Patterns
 
@@ -272,17 +271,18 @@ Suspicion score (0-100):
 | High reference field density (section 3.3) | +5 | `ClrType.Fields` |
 
 Top 30 by score. Per entry: type name, score, total size, instance count, Gen2 %, root kind.
-- ❌ No `LeakCandidateAnalyzer` or suspicion-score model exists
-- All signal inputs exist in separate analyzers but are never assembled into a scored candidate list:
-  - Gen2 pct: `GCGenerationDomainResult.PerTypeGenerationProfiles` (`TypeGenerationProfile.Gen2Count / total`) ✅
-  - Type total size >100 MB: `TypeAggregateIndexEntry.TotalSize` from Phase 1 index ✅
+- ✅ `LeakCandidateAnalyzer` implemented; `LeakCandidateDomainResult` contains `TotalCandidates`, `TopCandidates: IReadOnlyList<LeakCandidateRecord>`, `CandidatesByClass: IReadOnlyDictionary<LeakClass, int>`
+- `LeakCandidateRecord` fields: `TypeName`, `TotalSize`, `InstanceCount`, `Gen2Pct`, `SuspicionScore`, `Severity`, `Classification` (`LeakClass`), `RootKind`, `IsFinalizable`, `IsContainer`, `ReferenceFieldRatio`
+- Signal assembly (all inputs now joined in a single type-keyed pass — no heap scan):
+  - Gen2 pct: from Phase 1 `TypeAggregateIndexEntry.Gen2Count` ✅
+  - Type total size >100 MB: `TypeAggregateIndexEntry.TotalSize` ✅
   - Trend delta: `TrendAnalyzer` delta — only in trend/compare mode ⚠️
-  - `IsFinalizable` + Gen2 count: `TypeAggregateFlags` has finalizable flag; `Gen2Count` in `TypeAggregateIndexEntry` ✅
-  - Static root reachability: `StaticRootDomainResult.TopRootsByBytes` (name match by type name) ⚠️
-  - Strong/pinned handle: `GCHandleAnalyzer` (by handle kind) ⚠️
+  - `IsFinalizable` + Gen2 count: `TypeAggregateFlags.IsFinalizableType` + `TypeAggregateIndexEntry.Gen2Count` ✅
+  - Static root reachability: `cache.GetStaticRootedAddresses(heap)` hash set ✅
+  - Strong/pinned handle: scan of `runtime.EnumerateHandles()` keyed by target type name ✅
+  - Dependent handle: same handle scan ✅
   - Container type: type-name pattern match ✅
-  - High ref density: `TypeShapeProfile.ReferenceFieldRatio` from `ObjectShapeAnalyzer` ✅
-- Suggestion: implement `LeakCandidateAnalyzer` as a Phase 2 aggregator that joins index data from the above analyzers via a single type-keyed dictionary pass (no heap scan)
+  - High ref density: `TypeShapeEntry.RefFields / TotalFields` from Phase 1 shape cache ✅
 
 ## 6.2 Leak Classification
 
@@ -298,12 +298,13 @@ Top 30 by score. Per entry: type name, score, total size, instance count, Gen2 %
 | `Unknown` | Reachable from root, pattern unrecognised | Manual investigation required |
 
 - `EventLeak`: ✅ `EventLeakAnalyzer` → `EventLeakDomainResult` (per-event group, subscriber count, estimated retained bytes, publisher type, field name)
-- `StaticRetention`: ⚠️ `StaticRootLeakDetector` → `StaticRootDomainResult` (total retained bytes + top roots list); no per-candidate cross-reference to leak type list
-- `GCHandleRetention`: ⚠️ `GCHandleAnalyzer` → by-kind counts; no per-handle target type cross-reference to candidate list
-- `DependentHandleLeak`: ⚠️ `DependentHandleAnalyzer` → source/target type pair counts; no retained-bytes computation
-- `CacheLeak`, `ThreadLocalLeak`: ❌ no dedicated detection; type-name pattern match + Gen2 count check would be sufficient approximation
-- `FinalizerRetention`: ⚠️ `FinalizableObjectAnalyzer` covers queue depth and top queued types; no retained sub-graph per queued object
-- Unified `LeakClass` enum and classified candidate list: ❌ do not exist
+- `StaticRetention`: ✅ cross-referenced in `LeakCandidateAnalyzer` via `cache.GetStaticRootedAddresses(heap)`; `LeakClass.StaticRetention` assigned when sample address is in static root set
+- `GCHandleRetention`: ✅ `LeakCandidateAnalyzer` scans `runtime.EnumerateHandles()` for Pinned targets; `LeakClass.GCHandleRetention` assigned per type
+- `DependentHandleLeak`: ✅ same handle scan; `LeakClass.DependentHandleLeak` assigned for Dependent handle targets
+- `CacheLeak`: ✅ type-name pattern match (`Cache`, `Dictionary`, `ConcurrentDictionary`, `Queue`) + Gen2 > 50 % in `LeakCandidateAnalyzer.Classify()`
+- `ThreadLocalLeak`: ✅ type-name pattern match (`ThreadLocal`) in `LeakCandidateAnalyzer.Classify()`
+- `FinalizerRetention`: ✅ `IsFinalizable` flag from `TypeAggregateFlags` in `LeakCandidateAnalyzer`
+- Unified `LeakClass` enum and classified candidate list: ✅ `LeakClass` enum in `LeakCandidateDomainResult.cs`; `CandidatesByClass` dict and per-record `Classification` field in `LeakCandidateRecord`
 
 ## 6.3 Leak Explanation
 
@@ -317,7 +318,7 @@ Per candidate, template-based explanation parameterised with `ClrType.Name`, `Cl
 ## 6.4 Leak Impact
 
 - Memory: shallow + estimated retained, % of total heap
-  - ⚠️ Shallow size available from `TypeAggregateIndexEntry.TotalSize`; estimated retained blocked by §4.1 BFS gap
+  - ✅ Shallow size from `LeakCandidateRecord.TotalSize`; `% of heap` computed in `LeakAnalysisSectionBuilder` from `memory.TotalBytes`; estimated retained derivable from `DominatorDomainResult.TopDominatorTypes.EstimatedRetainedBytes` (same type key)
 - GC: finalizable leaks force two-pass collection
   - ⚠️ `FinalizableObjectAnalyzer.FinalizerQueueDepth` available; two-pass GC impact text is section-builder prose
 - Fragmentation: Gen2 blocks compaction; LOH leaks fragment LOH
@@ -325,7 +326,7 @@ Per candidate, template-based explanation parameterised with `ClrType.Name`, `Cl
 - Thread: finalizer queue backlog starves finalizer thread
   - ⚠️ `FinalizableObjectAnalyzer.FinalizerQueueDepth` + `ThreadDomainResult.FinalizerThreadBlocked` ✅ for signal; section builder assembles text
 - Stability risk: Low (< 50 MB) / Medium (50-500 MB) / High (500 MB-2 GB) / Critical (> 2 GB)
-  - ❌ No `StabilityRisk` enum or threshold computation; must be derived in section builder from total type sizes
+  - ✅ `LeakAnalysisSectionBuilder.GetImpactBand(TotalSize)` maps shallow size to Low/Medium/High/Critical bands matching spec thresholds
 
 ---
 
@@ -340,14 +341,13 @@ Per candidate, template-based explanation parameterised with `ClrType.Name`, `Cl
 - Async chain threads (`AsyncChainThreadCount`), max async chain depth
   - ✅ `AsyncChainThreadCount`, `MaxAsyncChainDepth` in `ThreadDomainResult`
 - Thread pool via `ClrRuntime.ThreadPool`: `MinThreads`, `MaxThreads`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `RetiredWorkerThreads`, `QueueLength`, `CpuUtilization`
-  - ⚠️ `HangAnalyzer.ReadRuntimeThreadPool()` reads `MinThreads`, `MaxThreads`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `CpuUtilization` from `ClrRuntime.ThreadPool` into internal `HangAnalysis` helper object; NOT surfaced in `HangDomainResult` (only a `RuntimeThreadPoolDataAvailable` bool is stored)
-  - ❌ `RetiredWorkerThreads` and `QueueLength` are NOT read anywhere
+  - ✅ `HangAnalyzer.ReadRuntimeThreadPool()` reads all stable fields directly from `ClrRuntime.ThreadPool` into `HangDomainResult`: `RuntimeMinThreads`, `RuntimeMaxThreads`, `RuntimeActiveWorkerThreads`, `RuntimeIdleWorkerThreads`, `RuntimeRetiredWorkerThreads`, `RuntimeCpuUtilization`, `RuntimeThreadPoolDataAvailable` (= `RuntimeInitialized`)
+  - ✅ `QueueLength` is now probed via reflection (`GetIntProperty(tp, "QueueLength")`) and surfaced as nullable `HangDomainResult.RuntimeQueueLength`; when unavailable on a given ClrMD build, reporting falls back to the queued-work-items proxy
   - `ThreadDomainResult.ThreadPoolWorkerCount` is a single int (total count only)
-  - Fix: add `MinThreads`, `MaxThreads`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `RetiredWorkerThreads`, `QueueLength`, `CpuUtilization` fields to `HangDomainResult`
 - Starvation flag: `QueueLength > 0` AND `ActiveWorkerThreads == MaxThreads`
-  - ⚠️ Partial: `HangAnalyzer` computes `saturated` (Active >= Max) and `starvation` (saturated + low CPU) internally but does NOT surface them in `HangDomainResult`
+  - ✅ `HangDomainResult.IsStarved` now emitted; computed from runtime queue length when present (`RuntimeQueueLength > 0 && Active >= Max`)
 - Per-thread stack size: `ClrThread.StackBase - ClrThread.StackLimit`
-  - ❌ Not computed anywhere; `ClrThread.StackBase` and `ClrThread.StackLimit` are valid ClrMD 3.1.5 properties but not used; `ThreadStateSnapshot` does not include stack size
+  - ✅ `ThreadStateSnapshot.StackSizeBytes` (ulong) computed from `StackBase - StackLimit`; rendered in `ThreadConcurrencySectionBuilder` and `ThreadSectionBuilder`
 
 ## 7.2 Synchronization Patterns
 
@@ -370,8 +370,8 @@ Via `LockGraphAnalyzer` from `ClrThread.BlockingObjects`:
 - DFS cycle detection
   - ✅ Deadlock candidates detected; `LockGraphDomainResult.DeadlockCandidateCount`
 - Per cycle: full thread chain, lock addresses, owning type names
-  - ✅ `LockGraphDomainResult.DeadlockCandidates` (`IReadOnlyList<DeadlockCandidateSnapshot>`): `ManagedThreadId`, `OSThreadId`, `LocksHeld` (list of type names), `Summary`
-  - ⚠️ `LocksHeld` contains type names, not lock addresses; lock addresses available in `ContestedLockSnapshot` but not in `DeadlockCandidateSnapshot`
+  - ✅ `LockGraphDomainResult.DeadlockCandidates` (`IReadOnlyList<DeadlockCandidateSnapshot>`): `ManagedThreadId`, `OsThreadId`, `LockObjectTypes` (type names), `LockObjectAddresses` (ulong list), `CycleSummary`
+  - ✅ Lock addresses now included in `DeadlockCandidateSnapshot.LockObjectAddresses`
 - Suspected deadlock (no confirmed cycle): mutual lock holding flagged
   - ⚠️ `LockGraphDomainResult.ContestedLocks` (`IReadOnlyList<ContestedLockSnapshot>`) covers threads waiting on contested monitors; mutual-holding without confirmed cycle not separately flagged
 
@@ -387,11 +387,11 @@ Via `HangAnalyzer`, `Task`/`Task<T>` heap inspection:
 - Status breakdown: `Pending` / `Running` / `Faulted` / `Canceled` / `RanToCompletion`
   - ✅ `AsyncTaskDomainResult`: `PendingTasks`, `RunningTasks`, `FaultedTasks`, `CanceledTasks`, `CompletedTasks` (CompletedTasks = RanToCompletion)
 - `QueuedWorkItems` from `ClrRuntime.ThreadPool.QueueLength`
-  - ⚠️ `HangDomainResult.QueuedWorkItems` exists but sourced from task-queue scan, not `ClrRuntime.ThreadPool.QueueLength`; actual `QueueLength` not read (see §7.1 gap)
+  - ⚠️ `HangDomainResult.QueuedWorkItems` exists but sourced from heap task scan, not `ClrRuntime.ThreadPool.QueueLength`; actual `QueueLength` not read (see §7.1 gap)
 - `TotalTaskContinuations`: sum of non-null `m_continuationObject` fields
-  - ❌ Not a field in `AsyncTaskDomainResult`; `TopContinuationTypes` gives per-type counts but no total sum
+  - ✅ `AsyncTaskDomainResult.TotalTaskContinuations` now a field; computed by `AsyncTaskAnalyzer` during task scan
 - `RuntimeThreadPoolDataAvailable` flag
-  - ✅ in `HangDomainResult` only; not in `AsyncTaskDomainResult`
+  - ⚠️ In `HangDomainResult` as `RuntimeInitialized`; not in `AsyncTaskDomainResult`
 
 ## 8.2 Orphaned Tasks
 
@@ -402,7 +402,7 @@ Detection: `m_continuationObject == null`, status = `RanToCompletion` or `Faulte
 - Completed + no continuation + not in stack roots: fire-and-forget
   - ⚠️ `OrphanedTasks` count captures both faulted and completed orphans; not split by sub-category
 - Top 10 orphaned faulted tasks: address, exception type, exception message
-  - ❌ `OrphanedTaskSnapshot` has Address, TaskType, ResultType, Size — no exception type or exception message field; exception data is not retrieved for orphaned tasks
+  - ✅ `OrphanedTaskSnapshot` now includes `ExceptionType` (nullable string) and `ExceptionMessage` (nullable string); populated for faulted orphaned tasks
 
 ## 8.3 Continuation Chains
 
@@ -410,9 +410,9 @@ Via `m_continuationObject` chain traversal:
 - `MaxAsyncChainDepth`, `AsyncChainThreadCount`
   - ✅ `AsyncTaskDomainResult.MaxContinuationDepth`; `ThreadDomainResult.AsyncChainThreadCount`
 - Top 5 deepest chains: root task type -> continuation type sequence
-  - ❌ `TopContinuationTypes` (`IReadOnlyList<NameCountEntry>`) is ranked by frequency, NOT by chain depth; no ordered chain sequence (root → continuation → ...) is captured
+  - ✅ `AsyncTaskDomainResult.TopDeepestChains` (`IReadOnlyList<ContinuationChainSnapshot>`): `RootAddress`, `RootType`, `Depth`, `ChainTypes` (ordered type-name sequence); sorted by `Depth` descending
 - Depth > 50 flags state machine leak or unbounded continuations
-  - ❌ Not computed; `MaxContinuationDepth` is available but no threshold flag emitted in the domain result
+  - ✅ `AsyncAnalysisSectionBuilder` checks `MaxContinuationDepth > 50` and emits a warning block
 - `TopContinuationTypes` (from `HangDomainResult`)
   - ✅ Also present in `AsyncTaskDomainResult.TopContinuationTypes` (same data, from `AsyncTaskAnalyzer`)
 
@@ -433,7 +433,7 @@ Via `ClrSegment` generation correlation:
 - Survival ratio per type: Gen2 count / total count (near 1.0 = permanent)
   - ⚠️ Derivable from `TypeGenerationProfile` fields but not pre-computed as `SurvivalRatio`
 - Allocation pressure: ephemeral segment fill % above 80 % = imminent Gen0 GC
-  - ❌ Not computed; would need UsedBytes vs CommittedBytes per SOH segment; `HeapSegmentSnapshot` has `CommittedBytes` and `Length` but no `UsedBytes` field
+  - ⚠️ `SegmentReservationDomainResult.AvgEphemeralFillPct` available; `HeapSegmentSnapshot` now has `UsedBytes` field; `FillPct` in `SegmentReservationEntry` is computed as `CommittedMemory / Length` (proxy for fill, not `UsedBytes / CommittedBytes`)
 - Allocation density: objects per KB of total size
   - ❌ Not computed anywhere
 - Size histogram: < 64 B / 64-256 B / 256 B-1 KB / 1-85 KB / > 85 KB
@@ -449,11 +449,11 @@ Via `ClrSegment` generation correlation:
 - Finalizable Gen2 overhead: count and size of `IsFinalizable` types in Gen2
   - ⚠️ `TypeAggregateFlags.IsFinalizable` flag + `Gen2Count` in `TypeAggregateIndexEntry` exist; not pre-aggregated into a scalar; section builder must filter and sum via `GCGenerationDomainResult.PerTypeGenerationProfiles`
 - Segment utilisation: `UsedBytes / CommittedMemory` per segment
-  - ❌ `HeapSegmentSnapshot` has `CommittedBytes` (= `Length`) but no `UsedBytes`; per-segment utilization not computed
+  - ✅ `HeapSegmentSnapshot` now has `UsedBytes` and `CommittedBytes` fields; `SegmentAnalyzer` computes `UsedBytes` from `ClrSegment`; `SegmentAnalysisDomainResult.TotalUsedBytes` aggregated
 - Committed vs reserved gap (`ClrSegment.CommittedMemory` vs `ClrSegment.ReservedMemory`)
-  - ❌ `ReservedMemory` not read or stored anywhere in `SegmentAnalyzer` or `HeapSegmentSnapshot`
+  - ✅ `HeapSegmentSnapshot.ReservedBytes` now stored; `SegmentAnalysisDomainResult.TotalReservedBytes` and `ReservationGapBytes` available; per-segment in `SegmentReservationEntry.ReservedBytes`
 - Cross-heap distribution (Server GC): count and bytes per logical heap; skew > 2x = affinity problem
-  - ❌ Per-logical-heap breakdown not implemented (see §2.1 gap)
+  - ✅ `SegmentAnalysisDomainResult.PerLogicalHeapSummaries` now implemented (see §2.1); rendered in `MemoryTopologySectionBuilder` and `HeapSegmentDiagnosticsSectionBuilder`
 - Compaction blockage: pinned handle count (section 9.3) + POH object count (section 10.4)
   - ⚠️ Pinned handle count: `GCHandleDomainResult.PinnedHandleTargets` ✅; POH object count: `SegmentAnalysisDomainResult.KindSummaries` (Pinned kind) ✅; combined score/metric not computed
 
@@ -613,15 +613,29 @@ Leak condition: publisher GC-rooted AND subscriber `_target` in Gen2 with no oth
   - `CrashThreadCandidateSnapshot` is per-thread, not per-frame-frequency; no pre-aggregated frame hotspot count across all exception threads
   - `ThreadDomainResult.TopStackHotspots` gives frame frequency across ALL threads — section builder must filter to exception threads only
 - Origin: `UserCode` / `FrameworkCode` (`System.*`/`Microsoft.*`) / `ThirdParty` (via `ModuleAnalyzer`)
-  - ❌ No `Origin` classification on `CrashThreadCandidateSnapshot` frames; must be derived in section builder from frame name prefix heuristic
+  - ✅ `ExceptionAnalysisSectionBuilder.ClassifyFrameOrigin(frame, modules)` classifies each frame as `FrameworkCode`, `ThirdParty`, or `UserCode` using module inventory; per-thread origin breakdown table emitted
 - InnerException chain depth histogram (depth > 5 flagged)
-  - ⚠️ `ExceptionInstanceSnapshot.InnerExceptionType` (only one level deep — immediate inner); full chain traversal reads `_innerException` field recursively in `CrashAnalyzer`, but chain depth is not counted or stored; no depth histogram in `CrashDomainResult`
+  - ✅ `ExceptionInstanceSnapshot.ChainDepth` computed by `CrashAnalyzer.ComputeExceptionChainDepth()` (recursive `_innerException` traversal); `ExceptionAnalysisSectionBuilder` renders a per-depth-value histogram from `TopExceptionInstances`
 
 ---
 
 # 14. Temporal / Diff Analysis
 
-## 14.1 Growth Trends
+Trend mode should read as a narrative of change rather than a copy of the single-dump report with extra deltas appended.
+
+## 14.1 Trend Summary
+
+Trend mode opens with:
+- Dump count and snapshot order
+  - ✅ `TrendReportComposer` populates `TrendDumpCount`, `TrendDumpPaths`, and `IncidentContext.TrendSnapshots`
+- Finding lifecycle summary
+  - ✅ `FindingLifecycleComparer.Compare()` produces `NewFindings`, `PersistentFindings`, and `ResolvedFindings`
+- Executive summary deltas
+  - ✅ `TrendReportComposer.ComputeTrendExecutiveSummary()` adds leak, GC pressure, and thread-contention deltas to the summary model
+- Top regressions
+  - ✅ `TrendReportComposer.BuildTopRegressionFindings()` surfaces the worst metric regressions as findings
+
+## 14.2 Growth Trends
 
 Via `TrendAnalyzer` + `AnalyzerTrendComparers` + `TrendReportComposer`:
 - Per-type count delta and byte delta between snapshots
@@ -630,19 +644,21 @@ Via `TrendAnalyzer` + `AnalyzerTrendComparers` + `TrendReportComposer`:
 - Top 20 by byte delta; top 20 by count delta
   - ⚠️ `MetricDelta` records are flat; top-N sorting is done in `TrendReportComposer`; capped to top types in `TopTypesBySize`/`TopTypesByCount` (default top 10 per snapshot), not full type universe
 - New types in snapshot B absent from A
-  - ⚠️ Not explicitly tracked as a "new type" list; types missing from baseline won't appear in `MetricDelta` comparison (only compared types are emitted)
+  - ✅ `TrendReportComposer.BuildNewTypes()` compares `MemoryDomainResult.TopTypesBySize` between baseline and latest snapshots and emits a dedicated `NEW TYPES (BASELINE → CURRENT)` block in the trend section
+  - ⚠️ The comparison is capped to the top-N memory types retained in each snapshot, not the full type universe
 - Classification: Stable (< 5 % delta) / Growing (5-50 %) / Exploding (> 50 %)
   - ✅ `TrendReportComposer` emits classification labels in the trend report text ("— Stable", "Growing", "Exploding")
   - ⚠️ Classification is applied in section builder prose, not as a typed enum field in the domain model
 
-## 14.2 Regression Detection
+## 14.3 Regression Detection
 
 - Types negligible in A but leak candidates in B (cross-ref section 6.1)
-  - ❌ No `LeakCandidateAnalyzer` (see §6.1 gap); cross-referencing not possible without it
+  - ✅ `TrendAnalyzer.ComputeNewLeakSignals()` now compares `LeakCandidateDomainResult.TopCandidates` by type across snapshots and emits `NewLeakSignal` entries under `"Leak Candidate Analysis"`
 - `FindingLifecycleComparer`: new regressions (B not A) and resolved issues (A not B)
   - ✅ `FindingLifecycleComparer.Compare()` → `FindingLifecycleResult`: `NewFindings`, `PersistentFindings`, `ResolvedFindings` (`IReadOnlyList<InsightFinding>`) — based on finding fingerprint matching
 - Severity escalations: Warning -> Critical between snapshots
-  - ⚠️ `TrendComparisonResult` stores `CurrentCriticalCount` and `BaselineCriticalCount`; per-finding severity escalation (Warning→Critical) not explicitly flagged — derivable by comparing same-fingerprint findings across snapshots
+  - ✅ `TrendReportComposer.BuildSeverityEscalations()` compares finding fingerprints between baseline and latest snapshots and emits a dedicated `SEVERITY ESCALATIONS` block for Warning -> Critical transitions
+  - ⚠️ Current implementation checks baseline-vs-latest only; intermediate snapshot hops are not reported separately
 - Requires `--compare` mode; skipped in single-dump runs
   - ✅ `TrendAnalyzer.CompareAll()` is only invoked in diff/compare mode; single-dump path is separate
 
@@ -650,22 +666,22 @@ Via `TrendAnalyzer` + `AnalyzerTrendComparers` + `TrendReportComposer`:
 
 # 15. Visualization
 
-Data-export layer:
+Trend visualization layer:
 - Memory pie/bar: SOH/LOH/POH/FOH, Gen0/1/2 (sections 2.1-2.2)
   - ⚠️ Raw data available via `SegmentAnalysisDomainResult` and `GCGenerationDomainResult`; no dedicated visualization artifact produced — section builder would need to emit Chart.js data or SVG
 - Type treemap: retained bytes per type (sections 3.1, 4.1)
-  - ❌ Retained bytes not computed (§4.1 BFS gap); shallow bytes available from `TypeAggregateIndexEntry`; no treemap artifact produced
+  - ⚠️ `TypeSnapshot.EstimatedRetainedBytes` now populated for top types; shallow bytes available from `TypeAggregateIndexEntry`; no treemap artifact produced yet
 - Retention graph: dominator candidates as Graphviz `.dot` or JSON adjacency list (section 4.2)
-  - ❌ Dominator tree not implemented; no `.dot` or adjacency-list artifact
+  - ⚠️ `DominatorDomainResult.TopDominatorTypes` with retained bytes now available; no `.dot` or adjacency-list artifact produced yet
 - Thread timeline: states per thread ID (section 7)
   - ⚠️ Thread state data available in `ThreadDomainResult.ThreadStateDistribution`; no timeline artifact produced; `ThreadStackClusterAnalyzer` emits `thread-clusters.json` (`ReportArtifact`) which can be consumed as a grouping basis
 - LOH fragmentation heatmap: segment ranges with free blocks (section 10.2)
   - ⚠️ `LohFragmentationDomainResult.TopFragmentedSegments` and `FreeGapHistogram` available; no heatmap artifact produced
 - Leak score bar: suspicion scores per type (section 6.1)
-  - ❌ No leak score model (§6.1 gap)
+  - ⚠️ `LeakCandidateDomainResult.TopCandidates` with `SuspicionScore` per type now available; no bar-chart artifact produced yet
 - Diff waterfall: byte delta per type (section 14.1)
-  - ⚠️ Delta data available via `MemoryAnalyzerTrendComparer`; no waterfall chart artifact produced
-- `ReportArtifact` system exists and is used by `StringAnalyzer`, `WeakReferenceAnalyzer`, `ThreadStackClusterAnalyzer` (JSON/NDJSON.gz exports) — visualization artifacts follow the same pattern
+  - ✅ `TrendReportComposer` emits a chart-backed waterfall block for trend deltas
+- `ReportArtifact` system exists and is used by `StringAnalyzer`, `WeakReferenceAnalyzer`, `ThreadStackClusterAnalyzer` (JSON/NDJSON.gz exports) — trend visuals should follow the same pattern when a data payload is cheaper than recomputing in the renderer
 
 ---
 
@@ -677,15 +693,16 @@ Via `InsightEngine` across all `AnalyzerRunResult[]`:
 - Ranked: Critical -> Warning -> Info
   - ✅ `InsightEngine.Rank()` sorts findings by `FindingSeverity` (Critical > Warning > Info)
 - Each finding: `Source`, `Title`, `Detail`, `Severity`, `ConfidenceScore` (0.0-1.0), `Caveats[]`
-  - ⚠️ `InsightFinding` record has: `Analyzer` (= Source), `Title`, `Evidence` (= Detail), `Severity`, `Recommendation`, `Tags`, `MetricValue`, `MetricUnit`, `Fingerprint`
-  - ❌ No `ConfidenceScore` field on `InsightFinding` (only surfaced in report serialization output as nullable via `FindingRecord.ConfidenceScore`)
-  - ❌ No `Caveats[]` collection on `InsightFinding`
+  - ✅ `InsightFinding` record has: `Analyzer` (= Source), `Title`, `Evidence` (= Detail), `Severity`, `Recommendation`, `Tags`, `MetricValue`, `MetricUnit`, `Fingerprint`
+  - ✅ `InsightFinding.ConfidenceScore` (nullable double) added; defaults to severity-based value (Critical=0.9, Warning=0.7, Info=0.5) when not explicitly set; `EffectiveConfidenceScore` always non-null
+  - ✅ `InsightFinding.Caveats` is now `IReadOnlyList<string>?`; serialized output carries `FindingRecord.CaveatItems`
 - Cross-analyzer correlations (e.g., high LOH % + high pinned handle count -> compaction blocked)
   - ✅ `InsightEngine` has cross-correlation methods: `DetectAllocationPressureCrossCorrelation()`, `DetectBoxingGCCorrelation()`, and others that join results from multiple analyzers into single findings
 - >= 3 failed analyzers = Warning finding
-  - ❌ Not implemented; `AnalyzerRunResult.Status` (`Success/Failed/Skipped/Canceled`) is available but no aggregated "too many failures" finding is emitted
+  - ✅ `InsightEngine.DetectAnalyzerFailures()` emits a Warning finding with `Tags: ["analysis-quality", "failed-analyzer"]` when `failCount >= 3` (threshold = `AnalyzerFailureWarning = 3`)
 - Critical/Warning provenance: source analyzer, metric key, address list, artifact path, snapshot index
-  - ⚠️ `InsightFinding` stores `Analyzer` (source) and `MetricValue`/`MetricUnit`; no address list, artifact path, or snapshot index on the finding model
+  - ✅ Serialized findings now populate `FindingRecord.EvidenceRefs` with `Analyzer` plus best-effort `MetricKey`; single-dump serialization also attaches analyzer artifact file paths when available, and trend serialization adds `SnapshotIndex`
+  - ⚠️ Address lists are still not carried by `InsightFinding`, so `EvidenceRef.Addresses` remains null in the current pipeline; metric keys are heuristic (derived from tags), not analyzer-authored
 
 ## 16.2 Root Cause Narratives
 
@@ -695,7 +712,7 @@ Per Critical/Warning finding:
 - Evidence chain: contributing findings with section refs
 - Confidence: High (>= 0.8) / Medium (0.5-0.8) / Low (< 0.5)
 - ❌ No `RootCauseNarrative` type or template infrastructure exists; `InsightFinding.Evidence` is a single freeform string; multi-step evidence chains with section refs not modeled
-- ❌ `InsightFinding` has no `ConfidenceScore` field; confidence is not recorded in the domain model
+- ✅ `InsightFinding.ConfidenceScore` (nullable double) now available; `EffectiveConfidenceScore` uses severity-based default when not set
 - ⚠️ Individual findings include `Recommendation` text and `Evidence` string — these serve as the narrative substrate; structured narrative assembly requires section-builder work
 
 ## 16.3 Suggested Fixes
@@ -712,7 +729,8 @@ Per Critical/Warning finding:
 
 Each fix includes owner/team, effort, validation step, and tracking status.
 - ⚠️ Fix text for each leak type is emitted as prose in individual section builders (e.g., `EventLeakSectionBuilder`, `LohFragmentationSectionBuilder`) via `InsightFinding.Recommendation`
-- ❌ No structured fix record with owner, effort, validation step, tracking status — these fields don't exist in any model
+- ✅ Serialized findings (`FindingRecord`) now carry `SuggestedOwner`, `Effort`, `ValidationStep`, and `TrackingStatus`; values are populated in `ReportSerializer` from finding category/severity heuristics
+- ⚠️ These fields exist in the serialized/report model, not on `InsightFinding` itself; ownership and effort remain heuristic rather than analyzer-authored
 
 ---
 
@@ -727,14 +745,14 @@ Each fix includes owner/team, effort, validation step, and tracking status.
 | 0.5 | Moderate heuristic (e.g., type name pattern for cache detection) |
 | < 0.5 | Speculative (e.g., allocation pattern from Gen0/Gen2 ratio alone) |
 
-- ❌ `InsightFinding` has no `ConfidenceScore` field; confidence values are not persisted in any domain model or report artifact; the scale above is spec-only
+- ✅ `InsightFinding.ConfidenceScore` (nullable double) now a first-class field; confidence values persisted in domain model and surfaced in HTML/JSON outputs via `BuildConfidenceScore(finding)` → `finding.EffectiveConfidenceScore`
 
 ## Per-Analyzer Status Fields
 
 `AnalyzerRunResult`: `Status`, `ElapsedMs`, `ObjectsScanned`, `SkipReason`/`ErrorMessage`.
 Run-status summary (completed/failed/skipped/timed-out counts) emitted in all formats.
-- ✅ `AnalyzerRunResult`: `Status` (`AnalyzerExecutionStatus`: Success/Failed/Skipped/Canceled), `Duration` (TimeSpan), `ObjectScanCount` (long), `ErrorMessage`, `ErrorType`, `FindingGeneratorError`
-- ⚠️ No `SkipReason` field; only `ErrorMessage`/`ErrorType` for failures and `Status = Skipped` for skips; skip reason string not stored
+- ✅ `AnalyzerRunResult`: `Status` (`AnalyzerExecutionStatus`: `Success` / `Failed` / `SkippedByFilter` / `SkippedByCancellation`), `Duration` (TimeSpan), `ObjectScanCount` (long), `ErrorMessage`, `ErrorType`, `FindingGeneratorError`, `SkipReason`
+- ✅ `SkipReason` is populated by pipeline/filter services and rendered in `ConfidenceSectionBuilder`
 - ✅ Run-status summary emitted via `ReportSerializer.BuildConfidenceNotes()` and surfaced in HTML/JSON outputs
 
 ## Known Heuristic Limitations
@@ -749,8 +767,8 @@ Run-status summary (completed/failed/skipped/timed-out counts) emitted in all fo
 | Deadlock detection misses cooperative waits without `BlockingObjects` | 7.3 |
 
 - ✅ Limitation table is accurate for the current codebase; all entries verified against analyzer implementations
-- ⚠️ "Retained size is bounded BFS" is aspirational for §3.1/4.1/4.2 — retained BFS not yet implemented (see §4.1 gap); the limitation note is still correct but the root cause is absence, not approximation
-- ⚠️ Additional unlisted limitations: GC handle retained bytes are avg-size estimates (§5.1), gen counts for type bytes are approximated (§3.1), string encoding waste not detected (§11.2), per-heap cross-heap distribution not computed (§9.2)
+- ⚠️ "Retained size is bounded BFS, not true dominator" is now accurate (not aspirational): `BoundedRetainedSizeBfs` is implemented and called by `MemoryAnalyzer` and `DominatorAnalyzer`; the BFS is exclusive (claims visited set) so it approximates, but does not guarantee, exclusive retained bytes
+- ⚠️ Additional unlisted limitations: GC handle retained bytes are avg-size estimates (§5.1), gen counts for type bytes are approximated (§3.1), string encoding waste not detected (§11.2)
 
 ---
 
@@ -762,9 +780,9 @@ Via `ClrRuntime.AppDomains`:
 - Domain name, address, numeric ID, module count
   - ✅ `AppDomainSnapshot`: Name, Address, DomainId, ModuleCount, EstimatedManagedBytes
 - Per domain module list: assembly name, path, size (`ClrModule.Size`), `IsDynamic`, `IsPEFile`
-  - ⚠️ `AppDomainAnalyzer` reads `domain.Modules` and iterates them; however the per-domain module list is NOT stored in `AppDomainSnapshot` — only aggregate counts are; per-module detail is in `TopModulesByTypeCount` (global, not per-domain)
-  - Module fields (`IsDynamic`, `IsPEFile`, path) are available via `ModuleDomainResult.TopModulesBySize` (`IReadOnlyList<LoadedModuleSnapshot>`): Name, AssemblyName, FullPath, Address, Size, IsDynamic
-  - ❌ `IsPEFile` is a ClrMD property but not stored in `LoadedModuleSnapshot`
+  - ✅ `AppDomainSnapshot.TopModules: IReadOnlyList<string>` populated by `AppDomainAnalyzer` (top module names per domain)
+  - ✅ `LoadedModuleSnapshot` (in `ModuleDomainResult.TopModulesBySize`): Name, AssemblyName, FullPath, Address, Size, IsDynamic, `IsPEFile` — all fields present
+  - ⚠️ `AppDomainSnapshot.TopModules` is a name-only list; full `LoadedModuleSnapshot` detail is global (not per-domain)
 - Managed memory attributable per domain (cross-ref heap index by `ClrType.Module`)
   - ⚠️ `AppDomainSnapshot.EstimatedManagedBytes` exists; built by joining heap index type aggregates with module assignment — approximation (avg-size based)
 - Types loaded in > 1 domain flagged
@@ -777,10 +795,9 @@ Via `ClrRuntime.AppDomains`:
 - Grouped: assembly name -> conflicting instances with paths and addresses
   - ✅ `ModuleConflictGroup.Instances` (`IReadOnlyList<LoadedModuleSnapshot>`) with FullPath and Address
 - Dynamic assemblies (`IsDynamic = true`): never unloaded; total count and size
-  - ✅ `ModuleDomainResult.DynamicModules` (count); size of dynamic modules not aggregated separately
-  - ❌ No `DynamicModuleBytes` field
+  - ✅ `ModuleDomainResult.DynamicModules` (count); `AppDomainDomainResult.DynamicModuleBytes` (ulong) aggregated in `AppDomainAnalyzer`
 - Anonymous modules (no file path): in-memory code generation
-  - ⚠️ Not explicitly counted; `LoadedModuleSnapshot.FullPath` could be empty/null for anonymous modules; no `AnonymousModuleCount` in `ModuleDomainResult` (it IS in `AppDomainDomainResult.AnonymousModuleCount`)
+  - ✅ `AppDomainDomainResult.AnonymousModuleCount` (int) tracked in `AppDomainAnalyzer`; finding emitted by `AppDomainFindingGenerator` when count >= threshold
 
 ## 18.3 Type Density per Module
 
@@ -1080,28 +1097,30 @@ Via `ClrSegment.CommittedMemory` / `ClrSegment.ReservedMemory`:
 | `MemoryAnalyzer` | 1, 2.1, 3.1 | ✅ Full; size histogram from Phase 1 index |
 | `AllocationPatternAnalyzer` | 2.3, 9.1-9.2 | ⚠️ Profile enum names differ from spec |
 | `GCGenerationAnalyzer` | 2.2, 9.1, 9.2, 10.1 | ⚠️ Byte counts approximated (avg × gen count) |
-| `ObjectShapeAnalyzer` | 3.3 | ⚠️ Thresholds differ from spec; IsArray not surfaced |
-| `SegmentAnalyzer` | 2.1, 9.2, 10.4, 10.5, 25.1, 25.2 | ⚠️ No ReservedMemory, no per-heap breakdown, no FrozenPercent |
+| `ObjectShapeAnalyzer` | 3.3 | ⚠️ Thresholds differ from spec (`Balanced` vs `Mixed`); `IsArray` now surfaced in `TypeShapeProfile` ✅ |
+| `SegmentAnalyzer` | 2.1, 9.2, 10.4, 10.5, 25.1, 25.2 | ✅ `FrozenPercent`, `ReservedBytes`, `UsedBytes`, and `PerLogicalHeapSummaries` now implemented |
 | `GCRootAnalyzer` | 5.1-5.3 | ⚠️ Retained bytes are avg-size estimates; paths flat (not grouped by type) |
-| `RetentionAnalyzer` | 4.1-4.2, 6.1-6.4 | ❌ Counts incoming refs only; no BFS retained size; EstimatedRetainedBytes = 0 |
+| `RetentionAnalyzer` | 4.1-4.2, 6.1-6.4 | ⚠️ Counts incoming refs only; `EstimatedRetainedBytes` via BFS now done by `MemoryAnalyzer` and `DominatorAnalyzer` instead |
 | `StringAnalyzer` | 11.1-11.2 | ✅ Comprehensive; encoding waste detection missing |
-| `StaticRootLeakDetector` | 4.3, 6.2 | ⚠️ Chain depth not captured; no RetentionPatternHints |
+| `StaticRootLeakDetector` | 4.3, 6.2 | ⚠️ Chain depth not captured; `LeakCandidateAnalyzer` now cross-references static root reachability |
 | `LohFragmentationAnalyzer` | 10.1-10.3 | ✅ Full; severity band not in model; per-object lifetimes ❌ |
-| `ThreadAnalyzer` | 7.1-7.2 | ⚠️ Thread pool details not in ThreadDomainResult; stack size not computed |
-| `LockGraphAnalyzer` | 7.3 | ⚠️ Lock addresses missing from DeadlockCandidateSnapshot |
-| `HangAnalyzer` | 7.1, 8.1-8.3 | ⚠️ Thread pool fields not surfaced in HangDomainResult |
-| `AsyncTaskAnalyzer` | 8.1-8.3 | ⚠️ No exception message on orphaned tasks; no depth-sequence chains |
+| `ThreadAnalyzer` | 7.1-7.2 | ✅ `ThreadStateSnapshot.StackSizeBytes` now computed; thread pool detail in `HangDomainResult` |
+| `LockGraphAnalyzer` | 7.3 | ✅ `LockObjectAddresses` now in `DeadlockCandidateSnapshot` |
+| `HangAnalyzer` | 7.1, 8.1-8.3 | ✅ All ThreadPool fields now surfaced; `RuntimeQueueLength` is read opportunistically via reflection and reported when available |
+| `AsyncTaskAnalyzer` | 8.1-8.3 | ✅ `ExceptionType`/`ExceptionMessage` on orphaned tasks; `TopDeepestChains` with ordered type sequences; `TotalTaskContinuations`; depth > 50 flag in section builder |
 | `ThreadStackClusterAnalyzer` | 7.2 | ✅ JSON/NDJSON artifact export |
 | `GCHandleAnalyzer` | 5.1, 9.3, 24.1 | ⚠️ Gen0/Gen1 pinning correlation ❌; retained bytes are estimates |
 | `DependentHandleAnalyzer` | 5.1, 24.3 | ⚠️ Per-table entry count ❌; type-pair counts ✅ |
 | `EventLeakAnalyzer` | 4.3, 12.1-12.2 | ✅ Comprehensive; publisher gen not propagated to group level |
 | `CollectionAnalyzer` | 3.3, 4.3, 22.3 | ⚠️ Container fill-rate for section 22.3 not cross-referenced |
-| `CrashAnalyzer` | 13.1-13.2 | ⚠️ Inner chain depth not counted; frame origin classification ❌ |
-| `ModuleAnalyzer` | 13.2, 18.1-18.3 | ⚠️ IsPEFile not in LoadedModuleSnapshot; DynamicModuleBytes not aggregated |
+| `CrashAnalyzer` | 13.1-13.2 | ✅ `ChainDepth` per exception and depth histogram; frame origin classification in section builder |
+| `ModuleAnalyzer` | 13.2, 18.1-18.3 | ✅ `IsPEFile` in `LoadedModuleSnapshot`; `DynamicModuleBytes` aggregated in `AppDomainAnalyzer` |
 | `ReferenceChainAnalyzer` | 4.1-4.2, 5.3 | ⚠️ Root paths for §5.2 severity roots, not wired to §6.1 candidates |
-| `InsightEngine` | 16.1-16.3 | ⚠️ No ConfidenceScore/Caveats on InsightFinding; no failed-analyzer warning |
-| `TrendAnalyzer` | 14.1-14.2 | ⚠️ New-type list not explicit; classification as prose only |
-| `AppDomainAnalyzer` | 18.1-18.3 | ⚠️ Per-domain module list not in AppDomainSnapshot; cross-domain types ❌ |
+| `InsightEngine` | 16.1-16.3 | ✅ `ConfidenceScore`/`Caveats[]` on `InsightFinding`; ≥ 3 failed-analyzer Warning emitted |
+| `TrendAnalyzer` | 14.1-14.2 | ✅ Leak-candidate new-signal comparison; `TrendReportComposer` now emits explicit new-type and severity-escalation blocks; classification remains prose-only ⚠️ |
+| `AppDomainAnalyzer` | 18.1-18.3 | ✅ `TopModules` per domain; `DynamicModuleBytes`; `AnonymousModuleCount`; cross-domain types ❌ |
+| `LeakCandidateAnalyzer` | 6.1-6.4 | ✅ New; suspicion scoring, `LeakClass` classification, `LeakCandidateDomainResult` |
+| `DominatorAnalyzer` | 4.1-4.2 | ✅ New; bounded BFS exclusive retained per top-N type via `BoundedRetainedSizeBfs` |
 | `JitAnalyzer` | 19.1-19.3 | ⚠️ R2R detection ❌; >64KB flag not in model; Tier0-stub flag not stored |
 | `BoxingAnalyzer` | 20.1-20.2 | ⚠️ Container boxing context ❌; mutable ref-struct detection ❌; stack-size ❌ |
 | `FinalizableObjectAnalyzer` | 21.1-21.3 | ⚠️ LOH finalizable count not separate; retained bytes avg-estimate only |

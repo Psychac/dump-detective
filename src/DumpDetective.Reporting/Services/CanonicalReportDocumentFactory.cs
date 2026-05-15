@@ -16,8 +16,9 @@ internal sealed class CanonicalReportDocumentFactory(ReportSerializer serializer
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
         ReportAudience audience = ReportAudience.All,
-        AnalysisIncidentContext? incidentContext = null)
-        => _serializer.Serialize(dumpPath, runs, elapsed, analyzerBuilders, reportBuilders, audience, incidentContext);
+        AnalysisIncidentContext? incidentContext = null,
+        IReadOnlyList<InsightFinding>? additionalFindings = null)
+        => _serializer.Serialize(dumpPath, runs, elapsed, analyzerBuilders, reportBuilders, audience, incidentContext, additionalFindings);
 
     public AnalysisReportDocument BuildSnapshotDocument(
         string dumpPath,

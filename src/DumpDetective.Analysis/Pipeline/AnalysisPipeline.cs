@@ -320,6 +320,9 @@ internal sealed class AnalysisPipeline(
         long latestScannedCount = 0;
         string latestPhase = "scanning";
         string? latestDetail = null;
+        long lastHeartbeatScannedCount = -1;
+        string? lastHeartbeatPhase = null;
+        string? lastHeartbeatDetail = null;
 
         var analyzerProgress = new Progress<AnalyzerProgressReport>(report =>
         {
@@ -342,7 +345,11 @@ internal sealed class AnalysisPipeline(
                 ExceptionMessage: null));
         });
 
-        context.Progress = analyzerProgress;
+        // Rate-gate context.Progress so every analyzer can call Report freely without
+        // flooding ConsoleDiagnosticsSink. Applied here (per analyzer run), NOT at the
+        // outer pipeline stage — phase-transition markers in the indexing path must not
+        // be dropped, and they don't flow through context.Progress.
+        context.Progress = new ThrottledProgress<AnalyzerProgressReport>(analyzerProgress, 150);
 
         Task<AnalyzerDomainResult> analyzeTask = Task.Run(
             async () => await analyzer.AnalyzeAsync(context, cancellationToken),
@@ -362,6 +369,17 @@ internal sealed class AnalysisPipeline(
                 // Analyzer hasn't called Progress yet — fall back to cache counter (legacy path)
                 heartbeatScanCount = context.Cache.ObjectScanCount;
             }
+
+            if (heartbeatScanCount == lastHeartbeatScannedCount
+                && string.Equals(latestPhase, lastHeartbeatPhase, StringComparison.Ordinal)
+                && string.Equals(latestDetail, lastHeartbeatDetail, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            lastHeartbeatScannedCount = heartbeatScanCount;
+            lastHeartbeatPhase = latestPhase;
+            lastHeartbeatDetail = latestDetail;
 
             PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                 RunId: runId,

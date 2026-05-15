@@ -18,74 +18,71 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (StringDomainResult)result;
-        var blocks = new List<SectionBlock>();
+        var tables = new List<SectionTable>();
+        var blocks = new List<SectionBlock>
+        {
+            BuildConfidenceBand(0.85, ["String statistics are measured from analyzed heap data."]),
+        };
 
-        // ── Summary ──────────────────────────────────────────────────────────
-        blocks.Add(H("SUMMARY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total Strings", $"{d.TotalStrings:N0}", d.TotalStrings));
-        blocks.Add(M("Total String Memory", FormatHelper.FormatBytes(d.TotalStringMemoryBytes), (double)d.TotalStringMemoryBytes));
-        blocks.Add(M("% of Managed Heap", $"{d.PctOfManagedHeap:F2}%", d.PctOfManagedHeap));
-        blocks.Add(M("Unique Strings", $"{d.UniqueStrings:N0}", d.UniqueStrings));
-        // New sampling/dedup metadata
-        blocks.Add(M("Sampling Mode", d.SamplingMode ?? "(unknown)", null));
-        blocks.Add(M("Dedup Mode", d.DeduplicationMode ?? "(unknown)", null));
-        blocks.Add(M("Dedup Threshold", $"{d.DeduplicationThreshold:N0}", d.DeduplicationThreshold));
-        blocks.Add(M("Max To Dedup", $"{d.MaxStringsToDedup:N0}", d.MaxStringsToDedup));
-        string dedupLine = d.DeduplicationSkipped
-            ? "Skipped"
-            : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
-        blocks.Add(M("Deduplication", dedupLine, d.DeduplicationSkipped ? 0 : d.StringsSampled));
-        blocks.Add(M("Dedup Source", d.DedupSource ?? "(none)", null));
-        blocks.Add(M("Analysis Duration", d.AnalysisDurationMs > 0 ? $"{d.AnalysisDurationMs} ms" : "(n/a)", (double)d.AnalysisDurationMs));
-        if (!string.IsNullOrEmpty(d.DedupSkipReason)) blocks.Add(M("Dedup Skip Reason", d.DedupSkipReason, null));
-        blocks.Add(M("Duplication Ratio", $"{d.DuplicationRatio:P1}", d.DuplicationRatio));
-        blocks.Add(M("Duplicate Waste", FormatHelper.FormatBytes(d.DuplicateWastedBytes), (double)d.DuplicateWastedBytes));
         ulong estimatedInterningSaving = 0;
         int interningLimit = Math.Min(d.TopDuplicatesByWaste.Count, 20);
         for (int i = 0; i < interningLimit; i++)
             estimatedInterningSaving += d.TopDuplicatesByWaste[i].WastedBytes;
-        blocks.Add(M("Estimated Interning Saving", FormatHelper.FormatBytes(estimatedInterningSaving), (double)estimatedInterningSaving));
-        blocks.Add(M("LOH String Bytes", FormatHelper.FormatBytes(d.LohStringBytes), (double)d.LohStringBytes));
-        blocks.Add(M("Gen2 String Count", $"{d.Gen2StringCount:N0}", d.Gen2StringCount));
-        blocks.Add(M("Interned Strings (FOH)", $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount));
 
-        // ── Distribution summary (percentiles + histogram) ─────────────────────────
+        string dedupLine = d.DeduplicationSkipped
+            ? "Skipped"
+            : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
+
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Total Strings",              $"{d.TotalStrings:N0}",                                    d.TotalStrings),
+            KM("Total String Memory",        FormatHelper.FormatBytes(d.TotalStringMemoryBytes),         (double)d.TotalStringMemoryBytes),
+            KM("% of Managed Heap",          $"{d.PctOfManagedHeap:F2}%",                              d.PctOfManagedHeap),
+            KM("Unique Strings",             $"{d.UniqueStrings:N0}",                                   d.UniqueStrings),
+            KM("Sampling Mode",              d.SamplingMode ?? "(unknown)"),
+            KM("Dedup Mode",                 d.DeduplicationMode ?? "(unknown)"),
+            KM("Dedup Threshold",            $"{d.DeduplicationThreshold:N0}",                          d.DeduplicationThreshold),
+            KM("Max To Dedup",               $"{d.MaxStringsToDedup:N0}",                              d.MaxStringsToDedup),
+            KM("Deduplication",              dedupLine,                                                  d.DeduplicationSkipped ? 0 : d.StringsSampled),
+            KM("Dedup Source",               d.DedupSource ?? "(none)"),
+            KM("Analysis Duration",          d.AnalysisDurationMs > 0 ? $"{d.AnalysisDurationMs} ms" : "(n/a)", (double)d.AnalysisDurationMs),
+            KM("Duplication Ratio",          $"{d.DuplicationRatio:P1}",                               d.DuplicationRatio),
+            KM("Duplicate Waste",            FormatHelper.FormatBytes(d.DuplicateWastedBytes),           (double)d.DuplicateWastedBytes),
+            KM("Estimated Interning Saving", FormatHelper.FormatBytes(estimatedInterningSaving),         (double)estimatedInterningSaving),
+            KM("LOH String Bytes",           FormatHelper.FormatBytes(d.LohStringBytes),                (double)d.LohStringBytes),
+            KM("Gen2 String Count",          $"{d.Gen2StringCount:N0}",                                  d.Gen2StringCount),
+            KM("Interned Strings (FOH)",     $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount),
+        };
+        if (!string.IsNullOrEmpty(d.DedupSkipReason))
+            keyMetrics.Add(KM("Dedup Skip Reason", d.DedupSkipReason));
+
         if (d.Distribution is not null && d.Distribution.SampleCount > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("STRING LENGTH DISTRIBUTION"));
-            blocks.Add(Divider());
-            blocks.Add(M("Samples", $"{d.Distribution.SampleCount:N0}", d.Distribution.SampleCount));
-
+            keyMetrics.Add(KM("Samples", $"{d.Distribution.SampleCount:N0}", d.Distribution.SampleCount));
             var p = d.Distribution.Percentiles ?? new System.Collections.Generic.Dictionary<string, double>();
             if (p.Count > 0)
             {
-                blocks.Add(M("p50 (median)", $"{p.GetValueOrDefault("p50", 0):F0} chars", (double)p.GetValueOrDefault("p50", 0)));
-                blocks.Add(M("p75", $"{p.GetValueOrDefault("p75", 0):F0} chars", (double)p.GetValueOrDefault("p75", 0)));
-                blocks.Add(M("p90", $"{p.GetValueOrDefault("p90", 0):F0} chars", (double)p.GetValueOrDefault("p90", 0)));
-                blocks.Add(M("p95", $"{p.GetValueOrDefault("p95", 0):F0} chars", (double)p.GetValueOrDefault("p95", 0)));
+                keyMetrics.Add(KM("p50 (median)", $"{p.GetValueOrDefault("p50", 0):F0} chars", (double)p.GetValueOrDefault("p50", 0)));
+                keyMetrics.Add(KM("p75",           $"{p.GetValueOrDefault("p75", 0):F0} chars", (double)p.GetValueOrDefault("p75", 0)));
+                keyMetrics.Add(KM("p90",           $"{p.GetValueOrDefault("p90", 0):F0} chars", (double)p.GetValueOrDefault("p90", 0)));
+                keyMetrics.Add(KM("p95",           $"{p.GetValueOrDefault("p95", 0):F0} chars", (double)p.GetValueOrDefault("p95", 0)));
             }
 
-            // Length buckets table
             var lb = d.Distribution.LengthBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
             if (lb.Count > 0)
             {
-                blocks.Add(Blank());
                 var lbRows = new System.Collections.Generic.List<TableRow>(lb.Count);
                 foreach (var kv in lb)
                 {
                     double pct = d.Distribution.SampleCount > 0 ? kv.Value * 100.0 / d.Distribution.SampleCount : 0.0;
                     lbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                blocks.Add(new TableBlock("String length buckets", ["Range", "Count", "% of samples"], lbRows));
+                tables.Add(ST("String length buckets", ["Range", "Count", "% of samples"], lbRows));
             }
 
-            // Frequency buckets (how many patterns appear X times)
             var fb = d.Distribution.FrequencyBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
             if (fb.Count > 0)
             {
-                blocks.Add(Blank());
                 var fbRows = new System.Collections.Generic.List<TableRow>(fb.Count);
                 int totalPatterns = fb.Values.Sum();
                 foreach (var kv in fb)
@@ -93,16 +90,21 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     double pct = totalPatterns > 0 ? kv.Value * 100.0 / totalPatterns : 0.0;
                     fbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                blocks.Add(new TableBlock("Duplicate frequency buckets", ["Frequency", "Pattern Count", "% of patterns"], fbRows));
+                tables.Add(ST("Duplicate frequency buckets", ["Frequency", "Pattern Count", "% of patterns"], fbRows));
             }
         }
 
-        // ── Top Duplicates by Waste ───────────────────────────────────────────
+        if (d.TopDuplicateTypes is not null && d.TopDuplicateTypes.Count > 0)
+        {
+            var rows = new List<TableRow>(d.TopDuplicateTypes.Count);
+            foreach (var t in d.TopDuplicateTypes)
+                rows.Add(Row(Cell(t.Name), Cell($"{t.Count:N0}", t.Count)));
+            tables.Add(ST("Types by duplicate occurrence", ["Type", "Duplicate Count"], rows));
+        }
+
+        // Duplicates by waste → typed Tables slot (renderer collapses automatically)
         if (d.TopDuplicatesByWaste.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP DUPLICATES BY WASTED BYTES"));
-            blocks.Add(CollapseBegin("Top duplicate strings by memory waste"));
             var rows = new List<TableRow>(d.TopDuplicatesByWaste.Count);
             for (int i = 0; i < d.TopDuplicatesByWaste.Count; i++)
             {
@@ -125,16 +127,14 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(dup.SamplingSource ?? string.Empty),
                     Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by wasted bytes", ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
-            blocks.Add(CollapseEnd());
+            tables.Add(ST("Duplicates ranked by wasted bytes",
+                ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"],
+                rows));
         }
 
-        // ── Top Duplicates by Count ───────────────────────────────────────────
+        // Duplicates by count → typed Tables slot
         if (d.TopDuplicatesByCount.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP DUPLICATES BY COUNT"));
-            blocks.Add(CollapseBegin("Top duplicate strings by occurrence count"));
             var rows = new List<TableRow>(d.TopDuplicatesByCount.Count);
             for (int i = 0; i < d.TopDuplicatesByCount.Count; i++)
             {
@@ -157,27 +157,14 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(dup.SamplingSource ?? string.Empty),
                     Cell(examples)));
             }
-            blocks.Add(new TableBlock("Duplicates ranked by count", ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"], rows));
-            blocks.Add(CollapseEnd());
+            tables.Add(ST("Duplicates ranked by count",
+                ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"],
+                rows));
         }
 
-        // ── Top types contributing to duplicates ─────────────────────────────────
-        if (d.TopDuplicateTypes is not null && d.TopDuplicateTypes.Count > 0)
-        {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP TYPES CONTRIBUTING TO DUPLICATION"));
-            var rows = new List<TableRow>(d.TopDuplicateTypes.Count);
-            foreach (var t in d.TopDuplicateTypes)
-                rows.Add(Row(Cell(t.Name), Cell($"{t.Count:N0}", t.Count)));
-            blocks.Add(new TableBlock("Types by duplicate occurrence", ["Type", "Duplicate Count"], rows));
-        }
-
-        // ── Very Long Strings (LOH residents) ────────────────────────────────
+        // Very long strings → typed Tables slot
         if (d.VeryLongStrings.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("VERY LONG STRINGS (> 85 KB)"));
-            blocks.Add(CollapseBegin("Very long strings on LOH"));
             var rows = new List<TableRow>(d.VeryLongStrings.Count);
             for (int i = 0; i < d.VeryLongStrings.Count; i++)
             {
@@ -187,10 +174,12 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{s.CharLength:N0} chars", s.CharLength),
                     Cell(FormatHelper.FormatBytes(s.SizeBytes), (long)s.SizeBytes)));
             }
-            blocks.Add(new TableBlock("Strings exceeding LOH threshold", ["Address", "Char Length", "Size"], rows));
-            blocks.Add(CollapseEnd());
+            tables.Add(ST("Strings exceeding LOH threshold", ["Address", "Char Length", "Size"], rows));
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

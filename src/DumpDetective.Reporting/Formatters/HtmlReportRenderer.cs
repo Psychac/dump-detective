@@ -24,9 +24,12 @@ internal sealed class HtmlReportRenderer : IReportFormatter
     {
         string json = JsonSerializer.Serialize(doc, ReportJsonContext.Default.AnalysisReportDocument);
         string preFindings = string.Empty;
+        string preHealthScorecard = string.Empty;
         string preAnalyzers = string.Empty;
         bool shouldPreRender = ForcePreRender;
         if (!shouldPreRender && (json.Length > 2_000_000 || doc.Findings?.Count >= 1000)) shouldPreRender = true;
+        if (shouldPreRender && _template.Contains("{{PRE_RENDERED_HEALTH_SCORECARD}}"))
+            preHealthScorecard = ReportHtmlShared.RenderHealthScorecard(doc.HealthScorecard);
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_FINDINGS}}"))
             preFindings = ReportHtmlShared.RenderFindings(doc.Findings);
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_ANALYZER_SECTIONS}}"))
@@ -36,6 +39,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             .Replace("{{CSS}}", _css)
             .Replace("{{REPORT_JSON}}", json)
             .Replace("{{JS}}", _js)
+            .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
             .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)
             .Replace("{{PRE_RENDERED_ANALYZER_SECTIONS}}", preAnalyzers);
     }

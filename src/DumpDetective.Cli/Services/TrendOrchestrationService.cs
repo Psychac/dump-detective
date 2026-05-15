@@ -159,7 +159,8 @@ internal sealed class TrendOrchestrationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await _outputWriter.WriteAsync(resolved, trendDoc, renderedReport, cancellationToken);
+            IReadOnlyList<ReportArtifact> artifacts = trendExecutions.SelectMany(e => e.Runs.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>())).ToList();
+            await _outputWriter.WriteAsync(resolved, trendDoc, renderedReport, artifacts, cancellationToken);
 
             IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
 
@@ -223,20 +224,97 @@ internal sealed class TrendOrchestrationService(
         CancellationToken cancellationToken)
     {
         AnalyzerMemoryStats? memoryStats = null;
-        PerDumpExecutionResult execution = await _perDumpExecutionService.ExecuteAsync(
-            "Trend",
-            resolved,
-            allAnalyzers,
-            activeAnalyzers,
-            dumpPath,
-            new Progress<AnalyzerProgressReport>(r =>
-                ConsoleUx.ObjectScanProgress($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", r.ScannedCount, r.Elapsed ?? TimeSpan.Zero, "streaming objects to index")),
+        string fileLabel = $"[{Path.GetFileName(dumpPath)}]";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long lastScanned = 0;
+        string lastPhase = "loading dump";
+        string? lastDetail = null;
+        bool loadDone = false;
+        bool indexDone = false;
+        TimeSpan loadElapsed = TimeSpan.Zero;
+        long indexScanned = 0;
+        TimeSpan indexElapsed = TimeSpan.Zero;
+        string? indexDetail = null;
+        var progressLock = new object();
+
+        var progress = new Progress<AnalyzerProgressReport>(r =>
+        {
+            Interlocked.Exchange(ref lastScanned, r.ScannedCount);
+            lock (progressLock)
+            {
+                lastPhase = r.Phase;
+                lastDetail = string.IsNullOrWhiteSpace(r.Detail) ? r.Phase : r.Detail;
+                if (!loadDone && r.Phase == "preparing index")
+                {
+                    loadDone = true;
+                    loadElapsed = r.Elapsed ?? sw.Elapsed;
+                }
+                if (!indexDone && r.Phase == "running analyzers")
+                {
+                    indexDone = true;
+                    indexScanned = r.ScannedCount;
+                    indexElapsed = r.Elapsed ?? sw.Elapsed;
+                    indexDetail = r.Detail;
+                }
+            }
+        });
+
+        Task<PerDumpExecutionResult> execTask = Task.Run(
+            () => _perDumpExecutionService.ExecuteAsync(
+                "Trend", resolved, allAnalyzers, activeAnalyzers, dumpPath, progress, cancellationToken),
             cancellationToken);
 
-        string indexTarget = execution.HeapIndex.StorageKind == Analysis.Indexing.HeapIndexStorageKind.Memory
-            ? "in-memory"
-            : Path.GetFileName(execution.HeapIndex.IndexPath);
-        ConsoleUx.ObjectScanComplete($"[{Path.GetFileName(dumpPath)}] Scan + Index heap", execution.HeapIndex.ObjectCount, execution.HeapIndex.Elapsed, $"{execution.HeapIndex.StorageKind} • {indexTarget}");
+        bool renderedLoadComplete = false;
+        bool renderedIndexComplete = false;
+        const int HeartbeatMs = 300;
+        while (true)
+        {
+            Task done = await Task.WhenAny(execTask, Task.Delay(HeartbeatMs, cancellationToken));
+            if (done == execTask) break;
+
+            bool isLoadDone, isIndexDone;
+            TimeSpan loadEl, idxEl;
+            long idxScanned;
+            string? idxDtl, details;
+            lock (progressLock)
+            {
+                isLoadDone = loadDone;
+                isIndexDone = indexDone;
+                loadEl = loadElapsed;
+                idxEl = indexElapsed;
+                idxScanned = indexScanned;
+                idxDtl = indexDetail;
+                details = string.IsNullOrWhiteSpace(lastDetail) ? lastPhase : lastDetail;
+            }
+            long scanned = Interlocked.Read(ref lastScanned);
+
+            if (isLoadDone && !renderedLoadComplete)
+            {
+                ConsoleUx.ObjectScanComplete($"{fileLabel} Load dump", 0, loadEl, null);
+                renderedLoadComplete = true;
+            }
+
+            if (isIndexDone && !renderedIndexComplete)
+            {
+                ConsoleUx.ObjectScanComplete($"{fileLabel} Scan + Index heap", idxScanned, idxEl, idxDtl);
+                renderedIndexComplete = true;
+                break;
+            }
+
+            ConsoleUx.ObjectScanProgress($"{fileLabel} Scan + Index heap", scanned, sw.Elapsed, details);
+        }
+
+        PerDumpExecutionResult execution = await execTask;
+
+        if (!renderedLoadComplete)
+            ConsoleUx.ObjectScanComplete($"{fileLabel} Load dump", 0, sw.Elapsed, null);
+        if (!renderedIndexComplete)
+        {
+            string indexTarget = execution.HeapIndex.StorageKind == Analysis.Indexing.HeapIndexStorageKind.Memory
+                ? "in-memory"
+                : Path.GetFileName(execution.HeapIndex.IndexPath);
+            ConsoleUx.ObjectScanComplete($"{fileLabel} Scan + Index heap", execution.HeapIndex.ObjectCount, execution.HeapIndex.Elapsed, $"{execution.HeapIndex.StorageKind} • {indexTarget}");
+        }
 
         return new TrendDumpExecution(dumpPath, execution.Runs, execution.Elapsed, execution.IncidentContext, DateTime.UtcNow, execution.StageMemoryStats, memoryStats);
     }

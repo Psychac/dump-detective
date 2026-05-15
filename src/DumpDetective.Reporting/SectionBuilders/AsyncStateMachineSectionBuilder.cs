@@ -20,67 +20,56 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (AsyncStateMachineDomainResult)result;
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        // ── Summary ──────────────────────────────────────────────────────────
-        blocks.Add(H("ASYNC STATE MACHINE SUMMARY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total State Machines", $"{d.TotalStateMachines:N0}", d.TotalStateMachines));
-        blocks.Add(M("Total Memory", FormatHelper.FormatBytes(d.TotalStateMachineBytes)));
-        blocks.Add(M("Distinct Types", $"{d.TopStateMachineTypes.Count:N0}"));
-        blocks.Add(M("Suspended Methods", $"{d.SuspendedMethodMap.Count:N0}"));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Total State Machines", $"{d.TotalStateMachines:N0}", d.TotalStateMachines),
+            KM("Total Memory",         FormatHelper.FormatBytes(d.TotalStateMachineBytes)),
+            KM("Distinct Types",       $"{d.TopStateMachineTypes.Count:N0}"),
+            KM("Suspended Methods",    $"{d.SuspendedMethodMap.Count:N0}"),
+        };
         if (d.ScanLimited)
-            blocks.Add(M("Scan Limit Reached", "Yes — type candidate cap hit; results may be partial", 1.0));
+            keyMetrics.Add(KM("Scan Limit Reached", "Yes — type candidate cap hit; results may be partial", 1.0));
 
-        // ── Top state machine types ───────────────────────────────────────────
         if (d.TopStateMachineTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP ASYNC STATE MACHINE TYPES"));
             blocks.Add(T("Each entry represents a distinct suspended async method. " +
                           "High counts for the same method indicate fire-and-forget patterns or unbounded parallelism."));
             int limit = Math.Min(d.TopStateMachineTypes.Count, TopTypeRows);
-            blocks.Add(new TableBlock(
-                Caption: "Top async state machine types by instance count",
-                Headers: ["Type Name", "Originating Method", "Declaring Type", "Count", "Total Size", "Avg State", "Ref Fields"],
-                Rows: BuildTypeRows(d.TopStateMachineTypes, limit)));
-            if (d.TopStateMachineTypes.Count > limit)
-                blocks.Add(T($"Showing top {limit} async state machine types. {d.TopStateMachineTypes.Count - limit} additional type(s) omitted."));
+            tables.Add(ST(
+                "Top async state machine types by instance count",
+                ["Type Name", "Originating Method", "Declaring Type", "Count", "Total Size", "Avg State", "Ref Fields"],
+                BuildTypeRows(d.TopStateMachineTypes, limit)));
         }
 
-        // ── High-capture instances ─────────────────────────────────────────────
         if (d.TopByCapturedSize.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP INSTANCES BY CAPTURED REFERENCE SIZE"));
             blocks.Add(T("Async methods capture all variables referenced across await boundaries. " +
                           "Instances with large captured closures may indicate long-lived objects being retained unintentionally."));
             int limit = Math.Min(d.TopByCapturedSize.Count, TopCaptureRows);
-            blocks.Add(new TableBlock(
-                Caption: "Top async state machine instances by captured reference bytes",
-                Headers: ["Address", "Type Name", "Captured Ref Bytes", "Large Captures"],
-                Rows: BuildCaptureRows(d.TopByCapturedSize, limit)));
-            if (d.TopByCapturedSize.Count > limit)
-                blocks.Add(T($"Showing top {limit} captured-state-machine instances. {d.TopByCapturedSize.Count - limit} additional instance(s) omitted."));
+            tables.Add(ST(
+                "Top async state machine instances by captured reference bytes",
+                ["Address", "Type Name", "Captured Ref Bytes", "Large Captures"],
+                BuildCaptureRows(d.TopByCapturedSize, limit)));
         }
 
-        // ── Suspended method map ───────────────────────────────────────────────
         if (d.SuspendedMethodMap.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("SUSPENDED METHOD MAP"));
             blocks.Add(T("Methods with the most suspended instances. " +
                           "High counts for a single method typically indicate fire-and-forget usage or long-running awaits."));
             int limit = Math.Min(d.SuspendedMethodMap.Count, TopSuspendedRows);
-            blocks.Add(new TableBlock(
-                Caption: "Suspended async methods by instance count",
-                Headers: ["Declaring Type", "Method Name", "Suspended Count", "Total Size"],
-                Rows: BuildSuspendedRows(d.SuspendedMethodMap, limit)));
-            if (d.SuspendedMethodMap.Count > limit)
-                blocks.Add(T($"Showing top {limit} suspended methods. {d.SuspendedMethodMap.Count - limit} additional method(s) omitted."));
+            tables.Add(ST(
+                "Suspended async methods by instance count",
+                ["Declaring Type", "Method Name", "Suspended Count", "Total Size"],
+                BuildSuspendedRows(d.SuspendedMethodMap, limit)));
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, "Async State Machine Analysis", SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, "Async State Machine Analysis", SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static List<TableRow> BuildTypeRows(IReadOnlyList<StateMachineTypeProfile> types, int limit)

@@ -29,17 +29,38 @@ async function bootstrap() {
 
   main.appendChild(R.buildHeader(doc));
 
-  const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
+  const scorecard = R.buildHealthScorecard(doc);
+  if (scorecard) main.appendChild(scorecard);
+
+  const executive = R.buildExecutiveSummary(doc);
+  if (executive) main.appendChild(executive);
+
+  const domains = R.buildDomains(doc);
+  if (domains) main.appendChild(domains);
+
+  const crossDomain = R.buildCrossDomainInsights(doc);
+  if (crossDomain) main.appendChild(crossDomain);
+
+  if (!domains) {
+    const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
+  }
   const toc = R.buildTOC(doc);
 
   UI.buildSidebar(toc, doc);
 
   const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
 
-  const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
+  if (!domains) {
+    const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
+  }
 
   const sections = doc.analyzerSections || [];
-  for (let i = 0; i < sections.length; i++) main.appendChild(R.buildAnalyzerSection(sections[i], i));
+  if (!domains) {
+    for (let i = 0; i < sections.length; i++) main.appendChild(R.buildAnalyzerSection(sections[i], i));
+  }
+
+  const appendix = R.buildAppendix(doc);
+  if (appendix) main.appendChild(appendix);
 
   // Ensure details aria-expanded sync
   document.querySelectorAll('.analyzer-section details').forEach(function (d) { const s = d.querySelector('summary'); if (s) s.setAttribute('aria-expanded', String(d.open)); d.addEventListener('toggle', function () { if (s) s.setAttribute('aria-expanded', String(d.open)); }); });

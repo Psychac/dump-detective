@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Core.Abstractions;
@@ -22,6 +23,21 @@ internal static class IncidentContextFactory
         string? gcMode = GetGcMode(loadContext?.Runtime);
         int? heapCount = GetIntProperty(GetPropertyValue(loadContext?.Runtime, "Heap"), "HeapCount");
 
+        string? dumpSizeTierLabel = null;
+        long? dumpFileSizeBytes = null;
+        try
+        {
+            if (File.Exists(dumpPath))
+            {
+                long bytes = new FileInfo(dumpPath).Length;
+                dumpFileSizeBytes = bytes;
+                dumpSizeTierLabel = bytes > 4L * 1024 * 1024 * 1024 ? "Large (> 4 GB)"
+                                  : bytes > 512L * 1024 * 1024     ? "Medium (512 MB – 4 GB)"
+                                  : "Small (< 512 MB)";
+            }
+        }
+        catch { /* best-effort — skip if file not accessible */ }
+
         return new AnalysisIncidentContext(
             Mode: mode,
             DumpPath: dumpPath,
@@ -42,7 +58,9 @@ internal static class IncidentContextFactory
             HeapCanWalk: loadContext?.Heap?.CanWalkHeap ?? false,
             IsTrendReport: string.Equals(mode, "Trend", StringComparison.OrdinalIgnoreCase),
             AnalysisElapsedSeconds: elapsed.TotalSeconds,
-            TrendSnapshots: trendSnapshots);
+            TrendSnapshots: trendSnapshots,
+            DumpSizeTierLabel: dumpSizeTierLabel,
+            DumpFileSizeBytes: dumpFileSizeBytes);
     }
 
     public static TrendSnapshotContext CreateSnapshot(

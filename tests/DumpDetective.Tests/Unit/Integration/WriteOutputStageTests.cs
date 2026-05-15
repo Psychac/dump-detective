@@ -40,7 +40,15 @@ public sealed class WriteOutputStageTests
                 ContentType: "application/gzip",
                 FilePath: tmpGz);
 
-            var doc = new SingleDumpReportDocument { Artifacts = new[] { artifact } };
+            var run = new AnalyzerRunResult(
+                AnalyzerName: "Test",
+                Status: AnalyzerExecutionStatus.Success,
+                Duration: TimeSpan.FromMilliseconds(1),
+                Result: null,
+                ErrorMessage: null,
+                ErrorType: null,
+                Findings: [],
+                Artifacts: [artifact]);
 
             var state = new SingleDumpPipelineState
             {
@@ -48,7 +56,8 @@ public sealed class WriteOutputStageTests
                 ActiveAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
                 AllAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
                 RenderedReport = "dummy",
-                ReportDocument = doc
+                ReportDocument = new SingleDumpReportDocument(),
+                Runs = [run]
             };
 
             var stage = new WriteOutputStage(new ReportOutputWriter());

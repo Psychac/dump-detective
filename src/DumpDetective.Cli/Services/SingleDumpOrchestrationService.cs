@@ -17,11 +17,13 @@ namespace DumpDetective.Cli.Services;
 internal sealed class SingleDumpOrchestrationService(
     ReportBuilderFacade reportBuilderFacade,
     ReportOutputWriter outputWriter,
-    PerDumpExecutionService perDumpExecutionService)
+    IDumpLoader dumpLoader,
+    AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly ReportOutputWriter _outputWriter = outputWriter;
-    private readonly PerDumpExecutionService _perDumpExecutionService = perDumpExecutionService;
+    private readonly IDumpLoader _dumpLoader = dumpLoader;
+    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -81,7 +83,9 @@ internal sealed class SingleDumpOrchestrationService(
 
     private IReadOnlyList<IAnalysisStage> BuildStages() =>
     [
-        new ExecutePerDumpPipelineStage(_perDumpExecutionService),
+        new LoadDumpStage(_dumpLoader),
+        new BuildHeapIndexStage(),
+        new RunAnalyzersPipelineStage(_analyzerExecutionService),
         new BuildReportStage(_reportBuilderFacade),
         new WriteOutputStage(_outputWriter)
     ];

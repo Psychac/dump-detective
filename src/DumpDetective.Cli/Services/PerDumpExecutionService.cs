@@ -35,7 +35,9 @@ internal sealed class PerDumpExecutionService(
         long wsBeforeLoad = currentProcess.WorkingSet64;
         long managedBeforeLoad = GC.GetTotalMemory(false);
 
+        progress?.Report(new AnalyzerProgressReport(0, "loading dump", Detail: null, Elapsed: stopwatch.Elapsed));
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
+        progress?.Report(new AnalyzerProgressReport(0, "preparing index", Detail: null, Elapsed: stopwatch.Elapsed));
 
         currentProcess.Refresh();
         long wsAfterLoad = currentProcess.WorkingSet64;
@@ -50,6 +52,16 @@ internal sealed class PerDumpExecutionService(
             cancellationToken,
             progress: progress,
             mode: resolved.IndexPrebuildMode);
+
+        // Signal stage transition: outer heartbeat uses this to commit the "Scan + Index heap"
+        // section and stop rendering, handing off to ConsoleDiagnosticsSink for analyzers.
+        progress?.Report(new AnalyzerProgressReport(
+            heapIndex.ObjectCount,
+            "running analyzers",
+            Detail: heapIndex.StorageKind == HeapIndexStorageKind.Memory
+                ? "in-memory"
+                : Path.GetFileName(heapIndex.IndexPath),
+            Elapsed: heapIndex.Elapsed));
 
         currentProcess.Refresh();
         long wsAfterIndex = currentProcess.WorkingSet64;

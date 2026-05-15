@@ -21,7 +21,8 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
             state.Resolved.Report.Audience,
             state.Runs,
             state.AnalysisElapsed,
-            state.IncidentContext);
+            state.IncidentContext,
+            state.Insights);
         state.ReportDocument = doc;
 
         // Render the report string for the chosen output format.

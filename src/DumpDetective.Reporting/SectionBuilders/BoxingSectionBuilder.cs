@@ -20,27 +20,23 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (BoxingDomainResult)result;
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        // ── §20.1 Boxed Value Type Inventory ─────────────────────────────────
-        blocks.Add(H("BOXED VALUE TYPE INVENTORY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total boxed objects", $"{d.TotalBoxedObjects:N0}", d.TotalBoxedObjects));
-        blocks.Add(M("Total boxed bytes", FormatHelper.FormatBytes(d.TotalBoxedBytes), (double)d.TotalBoxedBytes));
-        blocks.Add(M("Boxed enum instances", $"{d.BoxedEnumCount:N0}", d.BoxedEnumCount));
-        blocks.Add(M("Boxed enum bytes", FormatHelper.FormatBytes(d.BoxedEnumBytes), (double)d.BoxedEnumBytes));
-        blocks.Add(M("Oversized value types", $"{d.OversizedValueTypeCount:N0}", d.OversizedValueTypeCount));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Total boxed objects",    $"{d.TotalBoxedObjects:N0}",                         d.TotalBoxedObjects),
+            KM("Total boxed bytes",      FormatHelper.FormatBytes(d.TotalBoxedBytes),          (double)d.TotalBoxedBytes),
+            KM("Boxed enum instances",   $"{d.BoxedEnumCount:N0}",                            d.BoxedEnumCount),
+            KM("Boxed enum bytes",       FormatHelper.FormatBytes(d.BoxedEnumBytes),           (double)d.BoxedEnumBytes),
+            KM("Oversized value types",  $"{d.OversizedValueTypeCount:N0}",                   d.OversizedValueTypeCount),
+        };
 
         if (d.TypeScanCapped)
             blocks.Add(T("⚠ Type scan was capped at 10 000 entries — totals may be underestimated."));
 
-        // Top boxed types by total bytes
         if (d.TopBoxedTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP BOXED TYPES BY SIZE"));
-            blocks.Add(Divider());
-
             var rows = new List<TableRow>(Math.Min(d.TopBoxedTypes.Count, TopTypesToShow));
             foreach (BoxedTypeEntry e in d.TopBoxedTypes.Take(TopTypesToShow))
             {
@@ -50,22 +46,13 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.BoxCount:N0}",                       e.BoxCount),
                     Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes)]));
             }
-            blocks.Add(new TableBlock("Top boxed types by total size",
-                ["Type", "Kind", "Count", "Total Size"], rows));
+            tables.Add(ST("Top boxed types by total size", ["Type", "Kind", "Count", "Total Size"], rows));
             if (d.TopBoxedTypes.Count > TopTypesToShow)
                 blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
         }
 
-        // ── §20.2 Value Type Shape Issues ────────────────────────────────────
-        blocks.Add(Blank());
-        blocks.Add(H("VALUE TYPE SHAPE ISSUES"));
-        blocks.Add(Divider());
-
         if (d.TopPaddingWasteTypes.Count > 0)
         {
-            blocks.Add(H("TOP STRUCT PADDING WASTE", indent: 1));
-            blocks.Add(Divider());
-
             var padRows = new List<TableRow>(Math.Min(d.TopPaddingWasteTypes.Count, TopPaddingToShow));
             foreach (StructPaddingEntry e in d.TopPaddingWasteTypes.Take(TopPaddingToShow))
             {
@@ -76,7 +63,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WastedPaddingBytes} B",  e.WastedPaddingBytes),
                     Cell($"{e.WasteRatio:P0}")]));
             }
-            blocks.Add(new TableBlock("Struct types with highest padding waste",
+            tables.Add(ST("Struct types with highest padding waste",
                 ["Type", "Size", "Field Bytes", "Wasted", "Waste %"], padRows));
             if (d.TopPaddingWasteTypes.Count > TopPaddingToShow)
                 blocks.Add(T($"Showing top {TopPaddingToShow} padding-waste types. {d.TopPaddingWasteTypes.Count - TopPaddingToShow} additional type(s) omitted."));
@@ -86,6 +73,9 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             blocks.Add(T("No significant struct padding waste detected."));
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, "Boxing & Value Type Pressure", SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, "Boxing & Value Type Pressure", SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

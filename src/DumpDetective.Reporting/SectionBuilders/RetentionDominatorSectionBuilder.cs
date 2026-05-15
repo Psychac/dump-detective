@@ -6,6 +6,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
+    public IReadOnlyList<string> SourceAnalyzers => ["RetentionAnalyzer", "DominatorAnalyzer", "GCRootAnalyzer", "StaticRootLeakDetector", "EventLeakAnalyzer", "LeakCandidateAnalyzer", "FinalizableObjectAnalyzer"];
+
     public string SectionId => "prof.retention-dominators";
     public string DisplayTitle => "Retention & Dominators";
     public int SortOrder => 1150;
@@ -28,21 +30,29 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
         LeakCandidateDomainResult? leakCandidates = results.Get<LeakCandidateDomainResult>();
         DominatorDomainResult? dominators = results.Get<DominatorDomainResult>();
 
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>
         {
-            H("RETENTION INTELLIGENCE SUMMARY"),
-            M("Highly referenced objects", retention?.HighlyReferencedObjectCount.ToString("N0") ?? "N/A", retention?.HighlyReferencedObjectCount),
-            M("Finalizer queue objects", finalizers?.FinalizerQueueCount.ToString("N0") ?? "N/A", finalizers?.FinalizerQueueCount),
-            M("GC roots", gcRoot?.TotalRoots.ToString("N0") ?? "N/A", gcRoot?.TotalRoots),
-            M("Static roots", staticRoots?.RootCount.ToString("N0") ?? "N/A", staticRoots?.RootCount),
-            M("Event leak groups", eventLeaks?.TopLeakGroups?.Count.ToString("N0") ?? "N/A", eventLeaks?.TopLeakGroups?.Count),
-            M("Leak candidates", leakCandidates?.TopCandidates.Count.ToString("N0") ?? "N/A", leakCandidates?.TopCandidates.Count),
-            M("Dominator suspects", dominators?.TopDominatorTypes.Count.ToString("N0") ?? "N/A", dominators?.TopDominatorTypes.Count),
+            BuildConfidenceBand(
+                retention is not null && !retention.ReferenceCountingSkipped ? 0.85 : 0.55,
+                retention is not null && !retention.ReferenceCountingSkipped
+                    ? ["Retention counts are available for the scanned subset."]
+                    : ["Retention counts are approximate because reference counting was skipped or unavailable."]),
+        };
+
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Highly referenced objects", retention?.HighlyReferencedObjectCount.ToString("N0") ?? "N/A", retention?.HighlyReferencedObjectCount),
+            KM("Finalizer queue objects",   finalizers?.FinalizerQueueCount.ToString("N0") ?? "N/A",        finalizers?.FinalizerQueueCount),
+            KM("GC roots",                  gcRoot?.TotalRoots.ToString("N0") ?? "N/A",                     gcRoot?.TotalRoots),
+            KM("Static roots",              staticRoots?.RootCount.ToString("N0") ?? "N/A",                 staticRoots?.RootCount),
+            KM("Event leak groups",         eventLeaks?.TopLeakGroups?.Count.ToString("N0") ?? "N/A",        eventLeaks?.TopLeakGroups?.Count),
+            KM("Leak candidates",           leakCandidates?.TopCandidates.Count.ToString("N0") ?? "N/A",    leakCandidates?.TopCandidates.Count),
+            KM("Dominator suspects",        dominators?.TopDominatorTypes.Count.ToString("N0") ?? "N/A",    dominators?.TopDominatorTypes.Count),
         };
 
         if (retention is not null)
         {
-            blocks.Add(Blank());
             blocks.Add(H("RETENTION HOTSPOTS"));
             blocks.Add(T(retention.ReferenceCountingSkipped
                 ? "Reference counting was skipped; retention counts are unavailable for this dump."
@@ -55,10 +65,10 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
                 var proxyRows = new List<RetentionTypeSnapshot>(retention.TopRetentionTypes);
                 proxyRows.Sort((a, b) => CompareRetentionRatio(b, a));
 
-                blocks.Add(new TableBlock(
-                    Caption: "Top retention types",
-                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
-                    Rows: retention.TopRetentionTypes.Take(10).Select(type => Row(
+                tables.Add(ST(
+                    "Top retention types",
+                    ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
+                    retention.TopRetentionTypes.Take(10).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
                         Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
@@ -66,13 +76,12 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
                         Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
                         Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)))).ToList()));
 
-                blocks.Add(Blank());
                 blocks.Add(H("TOP 20 BY RETENTION RATIO"));
                 blocks.Add(T("Retention ratio is estimated from bounded BFS retained bytes on the top highly referenced objects. Results remain capped by breadth and depth."));
-                blocks.Add(new TableBlock(
-                    Caption: "Top retention types by ratio",
-                    Headers: ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
-                    Rows: proxyRows.Take(20).Select(type => Row(
+                tables.Add(ST(
+                    "Top retention types by ratio",
+                    ["Type", "Objects", "Footprint", "Incoming Refs", "Retained", "Ratio"],
+                    proxyRows.Take(20).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.ObjectCount.ToString("N0"), type.ObjectCount),
                         Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
@@ -84,14 +93,12 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
         if (gcRoot is not null)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("GC ROOT DISTRIBUTION"));
             if (gcRoot.ByKind.Count > 0)
             {
-                blocks.Add(new TableBlock(
-                    Caption: "GC root kinds",
-                    Headers: ["Root Kind", "Count", "Est. Retained", "% of Heap"],
-                    Rows: gcRoot.ByKind.Take(10).Select(kind => Row(
+                tables.Add(ST(
+                    "GC root kinds",
+                    ["Root Kind", "Count", "Est. Retained", "% of Heap"],
+                    gcRoot.ByKind.Take(10).Select(kind => Row(
                         Cell(kind.Kind),
                         Cell(kind.Count.ToString("N0"), kind.Count),
                         Cell(FormatBytes(kind.EstimatedRetainedBytes), (long)Math.Min(kind.EstimatedRetainedBytes, long.MaxValue)),
@@ -100,12 +107,10 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
             if (gcRoot.TopRootsBySeverity.Count > 0)
             {
-                blocks.Add(Blank());
-                blocks.Add(H("TOP ROOT SEVERITY"));
-                blocks.Add(new TableBlock(
-                    Caption: "Top GC roots by severity",
-                    Headers: ["Root Kind", "Target Type", "Est. Retained", "Severity", "Root Addr"],
-                    Rows: gcRoot.TopRootsBySeverity.Take(10).Select(root => Row(
+                tables.Add(ST(
+                    "Top GC roots by severity",
+                    ["Root Kind", "Target Type", "Est. Retained", "Severity", "Root Addr"],
+                    gcRoot.TopRootsBySeverity.Take(10).Select(root => Row(
                         Cell(root.RootKind),
                         Cell(root.TargetTypeName),
                         Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
@@ -115,13 +120,12 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
             if (gcRoot.RootPaths.Count > 0)
             {
-                blocks.Add(Blank());
                 blocks.Add(H("ROOT PATHS"));
                 blocks.Add(T("Forward BFS root paths show how objects remain reachable from the GC root target object."));
-                blocks.Add(new TableBlock(
-                    Caption: "Root retention paths",
-                    Headers: ["Root Kind", "Target Type", "Path Length", "Capped", "First Types Seen"],
-                    Rows: gcRoot.RootPaths.Take(10).Select(path => Row(
+                tables.Add(ST(
+                    "Root retention paths",
+                    ["Root Kind", "Target Type", "Path Length", "Capped", "First Types Seen"],
+                    gcRoot.RootPaths.Take(10).Select(path => Row(
                         Cell(path.RootKind),
                         Cell(path.TargetTypeName),
                         Cell(path.PathLength.ToString("N0"), path.PathLength),
@@ -132,16 +136,14 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
         if (staticRoots is not null)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("STATIC ROOT HOTSPOTS"));
-            blocks.Add(M("Root count", staticRoots.RootCount.ToString("N0"), staticRoots.RootCount));
-            blocks.Add(M("Total retained bytes", FormatBytes(staticRoots.TotalRetainedBytes), (double)Math.Min(staticRoots.TotalRetainedBytes, long.MaxValue)));
+            keyMetrics.Add(KM("Static root count",         staticRoots.RootCount.ToString("N0"),                                                                staticRoots.RootCount));
+            keyMetrics.Add(KM("Static total retained",     FormatBytes(staticRoots.TotalRetainedBytes), (double)Math.Min(staticRoots.TotalRetainedBytes, long.MaxValue)));
             if (staticRoots.TopRootsByRetainedBytes is { Count: > 0 })
             {
-                blocks.Add(new TableBlock(
-                    Caption: "Static roots by retained bytes",
-                    Headers: ["Field / Type", "Retained Bytes"],
-                    Rows: staticRoots.TopRootsByRetainedBytes.Take(8).Select(root => Row(
+                tables.Add(ST(
+                    "Static roots by retained bytes",
+                    ["Field / Type", "Retained Bytes"],
+                    staticRoots.TopRootsByRetainedBytes.Take(8).Select(root => Row(
                         Cell(root.Name),
                         Cell(FormatBytes(root.Bytes), (long)Math.Min(root.Bytes, long.MaxValue)))).ToList()));
             }
@@ -149,25 +151,20 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
         if (eventLeaks is not null)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("EVENT RETENTION"));
-            blocks.Add(M("Static event leaks", eventLeaks.StaticEventLeakCount.ToString("N0"), eventLeaks.StaticEventLeakCount));
-            blocks.Add(M("Instance event leaks", eventLeaks.InstanceEventLeakCount.ToString("N0"), eventLeaks.InstanceEventLeakCount));
-            blocks.Add(M("Total subscribers", eventLeaks.TotalSubscribers.ToString("N0"), eventLeaks.TotalSubscribers));
+            keyMetrics.Add(KM("Static event leaks",  eventLeaks.StaticEventLeakCount.ToString("N0"),  eventLeaks.StaticEventLeakCount));
+            keyMetrics.Add(KM("Instance event leaks",eventLeaks.InstanceEventLeakCount.ToString("N0"),eventLeaks.InstanceEventLeakCount));
+            keyMetrics.Add(KM("Total subscribers",   eventLeaks.TotalSubscribers.ToString("N0"),       eventLeaks.TotalSubscribers));
         }
 
         if (finalizers is not null)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("FINALIZER RETENTION"));
-            blocks.Add(M("Finalizer queue count", finalizers.FinalizerQueueCount.ToString("N0"), finalizers.FinalizerQueueCount));
-            blocks.Add(M("Queue retained bytes", FormatBytes(finalizers.FinalizerQueueRetainedBytes), (double)Math.Min(finalizers.FinalizerQueueRetainedBytes, long.MaxValue)));
-            blocks.Add(M("Potential resurrection", finalizers.PotentialResurrectionDetected ? "Yes" : "No", finalizers.PotentialResurrectionDetected ? 1.0 : 0.0));
+            keyMetrics.Add(KM("Finalizer queue count",  finalizers.FinalizerQueueCount.ToString("N0"),                                                                     finalizers.FinalizerQueueCount));
+            keyMetrics.Add(KM("Queue retained bytes",   FormatBytes(finalizers.FinalizerQueueRetainedBytes), (double)Math.Min(finalizers.FinalizerQueueRetainedBytes, long.MaxValue)));
+            keyMetrics.Add(KM("Potential resurrection", finalizers.PotentialResurrectionDetected ? "Yes" : "No",                                                           finalizers.PotentialResurrectionDetected ? 1.0 : 0.0));
         }
 
         if (leakCandidates is not null)
         {
-            blocks.Add(Blank());
             blocks.Add(H("LEAK CANDIDATE NARRATIVE"));
             if (leakCandidates.TopCandidates.Count > 0)
             {
@@ -179,15 +176,14 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
 
         if (dominators is not null && dominators.TopDominatorTypes.Count > 0)
         {
-            blocks.Add(Blank());
             blocks.Add(H("DOMINATOR SUSPECTS"));
             blocks.Add(T(dominators.HeuristicOnly
                 ? $"Retained bytes are estimated with a bounded BFS over {dominators.AnalyzedCount:N0} suspects (breadth cap {dominators.MaxBreadth:N0}, depth cap {dominators.MaxDepth:N0})."
                 : "Retained bytes are available for the listed suspects."));
-            blocks.Add(new TableBlock(
-                Caption: "Top dominator suspects",
-                Headers: ["Type", "Objects", "Shallow", "Retained", "Ratio"],
-                Rows: dominators.TopDominatorTypes.Take(10).Select(type => Row(
+            tables.Add(ST(
+                "Top dominator suspects",
+                ["Type", "Objects", "Shallow", "Retained", "Ratio"],
+                dominators.TopDominatorTypes.Take(10).Select(type => Row(
                     Cell(type.TypeName),
                     Cell(type.Count.ToString("N0"), type.Count),
                     Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
@@ -199,7 +195,9 @@ internal sealed class RetentionDominatorSectionBuilder : SectionBuilderBase, IRe
             AnalyzerName: "Retention Intelligence",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static string TrimTypeName(string typeName)

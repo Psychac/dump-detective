@@ -95,9 +95,10 @@ internal sealed class ReportBuilderFacade(
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
+        IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
-        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext);
+        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext, additionalFindings);
     }
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format)

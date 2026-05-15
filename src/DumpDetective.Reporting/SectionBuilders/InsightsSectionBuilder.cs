@@ -6,15 +6,17 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    public string SectionId => "prof.insights";
-    public string DisplayTitle => "Insights & Recommendations";
-    public int SortOrder => 1700;
+    public IReadOnlyList<string> SourceAnalyzers => [];
 
-    public bool CanBuild(AnalyzerResultSet results) => true;
+    public string SectionId => "X1";
+    public string DisplayTitle => "Cross-Domain Insights";
+    public int SortOrder => 1900;
+
+    public bool CanBuild(AnalyzerResultSet results) => GetCrossDomainFindings(results).Count > 0;
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
-        IReadOnlyList<InsightFinding> findings = results.AllFindingsSorted();
+        IReadOnlyList<InsightFinding> findings = GetCrossDomainFindings(results);
 
         int criticalCount = 0;
         int warningCount = 0;
@@ -85,10 +87,30 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName: "Insights & Recommendations",
+            AnalyzerName: "InsightEngine",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            SectionId: SectionId,
+            Domain: "CrossDomain");
+    }
+
+    private static IReadOnlyList<InsightFinding> GetCrossDomainFindings(AnalyzerResultSet results)
+    {
+        IReadOnlyList<InsightFinding> allFindings = results.AllFindingsSorted();
+        var crossDomain = new List<InsightFinding>();
+
+        for (int i = 0; i < allFindings.Count; i++)
+        {
+            InsightFinding finding = allFindings[i];
+            if (string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase)
+                || finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase)))
+            {
+                crossDomain.Add(finding);
+            }
+        }
+
+        return crossDomain;
     }
 
     private static string FormatText(string label, string? value)

@@ -54,6 +54,21 @@ internal static class ReportHtmlShared
                 case ChartBlock chart:
                     sb.AppendLine($"<div class=\"detail-chart detail-indent-{Math.Min(chart.IndentLevel, 3)}\" data-chart-kind=\"{Enc(chart.Kind)}\" data-chart-payload=\"{Enc(chart.PayloadJson)}\" data-chart-title=\"{Enc(chart.Title)}\"></div>");
                     break;
+                case ConfidenceBandBlock band:
+                    {
+                        string bandCss = band.Band.ToLowerInvariant();
+                        sb.AppendLine("<div class=\"detail-confidence\">");
+                        sb.AppendLine($"<span class=\"confidence-band confidence-{bandCss}\">{Enc(band.Symbol)} {Enc(band.Band)} confidence</span>");
+                        if (band.Caveats.Length > 0)
+                        {
+                            sb.AppendLine("<ul class=\"confidence-caveats\">");
+                            foreach (string caveat in band.Caveats)
+                                sb.AppendLine($"<li>{Enc(caveat)}</li>");
+                            sb.AppendLine("</ul>");
+                        }
+                        sb.AppendLine("</div>");
+                        break;
+                    }
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details class=\"detail-nested\"><summary>{Enc(cs.Title)}</summary><div class=\"detail-nested-content\">");
                     break;
@@ -62,6 +77,26 @@ internal static class ReportHtmlShared
                     break;
             }
         }
+    }
+
+    public static string RenderHealthScorecard(HealthScorecard? scorecard)
+    {
+        if (scorecard is null || scorecard.Domains.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
+        sb.AppendLine("<table><thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+        foreach (DomainHealthEntry entry in scorecard.Domains)
+        {
+            string severity = entry.Severity.ToString();
+            string severityCss = $"health-severity health-severity-{severity.ToLowerInvariant()}";
+            sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td class=\"{severityCss}\">{Enc(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+        }
+        sb.AppendLine("</tbody></table>");
+        sb.AppendLine($"<div class=\"health-scorecard__overall\">Overall severity: {Enc(scorecard.OverallSeverity.ToString())}</div>");
+        sb.AppendLine("</section>");
+        return sb.ToString();
     }
 
     public static void RenderTableHtml(TableBlock tbl, StringBuilder sb)

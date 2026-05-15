@@ -110,7 +110,8 @@ export function setupInteractivity(doc, announce) {
   (function () {
     const links = document.querySelectorAll('.toc a'); if (!links || !links.length) return; const idToLink = {}; links.forEach(function (l) { if (l.hash) idToLink[l.hash.substring(1)] = l; });
     const obs = new IntersectionObserver(function (entries) { entries.forEach(function (ent) { if (!ent.target || !ent.target.id) return; if (ent.isIntersecting) { document.querySelectorAll('.toc a.active').forEach(function (x) { x.classList.remove('active'); }); const link = idToLink[ent.target.id]; if (link) link.classList.add('active'); } }); }, { root: null, rootMargin: '-40% 0px -40% 0px', threshold: 0 });
-    const targets = document.querySelectorAll('#main [id^="detail-"]'); targets.forEach(function (t) { obs.observe(t); });
+    // Observe: analyzer sections (stable sectionId or detail-N), domain headers, and top-level sections
+    const targets = document.querySelectorAll('#main .analyzer-section, #main [id^="domain-"], #sec-header, #sec-health, #sec-exec, #sec-appendix'); targets.forEach(function (t) { obs.observe(t); });
   })();
 
   // Copy to clipboard (delegated)

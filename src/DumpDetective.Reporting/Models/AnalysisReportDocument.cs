@@ -1,6 +1,24 @@
 using System.Text.Json.Serialization;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Reporting.Models;
+
+// ── Health Scorecard ──────────────────────────────────────────────────────────
+
+internal enum DomainSeverity { Unknown, OK, Warning, Critical }
+
+internal sealed record DomainHealthEntry(
+    string Domain,
+    DomainSeverity Severity,
+    int FindingCount,
+    int CriticalCount,
+    int WarningCount);
+
+internal sealed record HealthScorecard(
+    IReadOnlyList<DomainHealthEntry> Domains,
+    DomainSeverity OverallSeverity);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
 [JsonDerivedType(typeof(SingleDumpReportDocument), typeDiscriminator: "single")]
@@ -10,20 +28,19 @@ internal abstract record AnalysisReportDocument
     public string SchemaVersion { get; init; } = "2.1";
     public DateTime GeneratedAtUtc { get; init; }
     public double ElapsedSeconds { get; init; }
+    public string? AnalyzerVersion { get; init; }
     public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; init; }
-
-    // Cross-cutting outputs
-    public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
+    public HealthScorecard? HealthScorecard { get; init; }
+    public IReadOnlyList<ReportDomainSection>? Domains { get; init; } = null;
+    public IReadOnlyList<FindingRecord>? CrossDomainInsights { get; init; } = null;
+    public ReportAppendix? Appendix { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
-    public IReadOnlyList<DeveloperActionRecord> DeveloperActionPlan { get; init; } = [];
-    public IReadOnlyList<ConfidenceNote> Confidence { get; init; } = [];
 
-    // Per-analyzer structured sections — ordered by SortOrder
+    [JsonIgnore]
+    public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
+
+    [JsonIgnore]
     public IReadOnlyList<AnalyzerDetailSection> AnalyzerSections { get; init; } = [];
-    // Per-analyzer execution summary for report quality and diagnostics
-    public IReadOnlyList<AnalyzerRunStatusRecord> AnalyzerRunStatuses { get; init; } = [];
-    // Serialized raw artifacts produced by analyzers (CSV/JSON) when requested.
-    public IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts { get; init; } = [];
 }
 
 internal sealed record SingleDumpReportDocument : AnalysisReportDocument
@@ -45,7 +62,11 @@ internal sealed record AnalyzerRunStatusRecord(
     int FindingCount,
     int WarningCount,
     long ObjectScanCount,
-    string? ErrorMessage);
+    long CacheHits,
+    long CacheMisses,
+    string? ErrorMessage,
+    string? FindingGeneratorError = null,
+    string? SkipReason = null);
 
 // Serializable projection of InsightFinding — InsightFinding itself is unchanged
 internal sealed partial record FindingRecord(
@@ -94,10 +115,27 @@ internal sealed partial record ExecutiveSummaryRecord(
 // P1.2: Explicit score breakdowns with contributors and trend-mode deltas
 internal partial record ExecutiveSummaryRecord
 {
+    public HealthScorecard? HealthScorecard { get; init; } = null;
+    public IReadOnlyList<FindingRecord>? CriticalFindings { get; init; } = null;
+    public IReadOnlyList<FindingRecord>? WarningFindings { get; init; } = null;
     public IReadOnlyList<ScoreBreakdown>? ScoreBreakdowns { get; init; } = null;
     public int? LeakScoreDelta { get; init; } = null;
     public int? GcPressureScoreDelta { get; init; } = null;
     public int? ThreadContentionScoreDelta { get; init; } = null;
+
+    // Key metrics strip — sourced from domain results
+    public long? LohBytes { get; init; } = null;
+    public double? LohPercent { get; init; } = null;
+    public double? Gen2Percent { get; init; } = null;
+    public int? LeakCandidateCount { get; init; } = null;
+    public int? HangScore { get; init; } = null;
+    public int? BlockedThreads { get; init; } = null;
+    public int? DeadlockCycles { get; init; } = null;
+    public int? ActiveExceptions { get; init; } = null;
+    public int? FinalizerQueueCount { get; init; } = null;
+    public int? TotalObjects { get; init; } = null;
+    public int? UniqueTypes { get; init; } = null;
+    public string? GcPressureLevel { get; init; } = null;
 }
 
 // P1.2: Scoring models
@@ -113,15 +151,24 @@ internal sealed record ScoreBreakdown(
     double Confidence,
     IReadOnlyList<ScoreContributor> Contributors);
 
-internal sealed record DeveloperActionRecord(
-    string Priority,
-    string Title,
-    string Action,
-    string Impact);
+internal sealed record ReportAppendix(
+    IReadOnlyList<AnalyzerRunStatusRecord> AnalyzerRunSummary,
+    IReadOnlyList<AnalyzerMemoryDiagnosticRecord>? MemoryDiagnostics,
+    IReadOnlyList<string> KnownLimitations);
 
-internal sealed record ConfidenceNote(
-    string Analyzer,
-    bool Capped,
-    string Reason);
+internal sealed record AnalyzerMemoryDiagnosticRecord(
+    string AnalyzerName,
+    long WorkingSetBefore,
+    long WorkingSetAfter,
+    long WorkingSetDelta,
+    long ManagedHeapBefore,
+    long ManagedHeapAfter,
+    long ManagedHeapDelta);
+
+internal sealed record ReportDomainSection(
+    string Domain,
+    FindingSeverity? LeadSeverity,
+    IReadOnlyList<AnalyzerDetailSection> Sections,
+    IReadOnlyList<FindingRecord> DomainInsights);
 
 // DedupRecord removed — dedup diagnostics are no longer produced

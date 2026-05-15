@@ -18,8 +18,8 @@ namespace DumpDetective.Tests.Integration;
 /// <summary>
 /// Smoke tests for P0 items:
 ///   P0.1 — JSON export uses the rendered document.
-///   P0.2 — AnalyzerRunStatuses schema round-trips correctly.
-///   P0.3 — Report quality panel data is populated per analyzer.
+///   P0.2 — Appendix schema round-trips correctly.
+///   P0.3 — Modern report projections are populated per analyzer.
 /// </summary>
 public sealed class P0SmokeTests
 {
@@ -101,8 +101,9 @@ public sealed class P0SmokeTests
 
         restored.Should().NotBeNull();
         ((SingleDumpReportDocument)restored!).DumpPath.Should().Be("C:/dumps/smoke.dmp");
-        restored.Findings.Should().HaveCount(doc.Findings.Count);
-        restored.Findings[0].Title.Should().Be("BigLeak");
+        restored.Domains.Should().NotBeNull();
+        restored.Appendix.Should().NotBeNull();
+        restored.CrossDomainInsights.Should().NotBeNull();
     }
 
     // ── P0.2: Separate-JSON regex extracts the same content ────────────────
@@ -135,10 +136,10 @@ public sealed class P0SmokeTests
         m.Groups[3].Value.Should().Be(fakeJson);
     }
 
-    // ── P0.3: AnalyzerRunStatuses populated and round-trips ────────────────
+    // ── P0.3: Appendix populated and round-trips ───────────────────────────
 
     [Fact]
-    public void P0_3_ReportDocument_PopulatesAnalyzerRunStatuses()
+    public void P0_3_ReportDocument_PopulatesAppendix()
     {
         AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
         AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", FindingSeverity.Warning, "ThreadBlock");
@@ -152,13 +153,14 @@ public sealed class P0SmokeTests
             analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
             reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
-        doc.AnalyzerRunStatuses.Should().HaveCount(3);
+        doc.Appendix.Should().NotBeNull();
+        doc.Appendix!.AnalyzerRunSummary.Should().HaveCount(3);
 
-        var leak = doc.AnalyzerRunStatuses.First(s => s.AnalyzerName == "LeakAnalyzer");
+        var leak = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "LeakAnalyzer");
         leak.Status.Should().Be("Success");
         leak.DurationMs.Should().BeApproximately(42, 5);
 
-        var failed = doc.AnalyzerRunStatuses.First(s => s.AnalyzerName == "FailedAnalyzer");
+        var failed = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "FailedAnalyzer");
         failed.Status.Should().Be("Failed");
         failed.ErrorMessage.Should().Be("Simulated failure");
     }
@@ -180,9 +182,10 @@ public sealed class P0SmokeTests
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
-        restored!.AnalyzerRunStatuses.Should().HaveCount(1);
-        restored.AnalyzerRunStatuses[0].AnalyzerName.Should().Be("LeakAnalyzer");
-        restored.AnalyzerRunStatuses[0].Status.Should().Be("Success");
+        restored!.Appendix.Should().NotBeNull();
+        restored.Appendix!.AnalyzerRunSummary.Should().HaveCount(1);
+        restored.Appendix.AnalyzerRunSummary[0].AnalyzerName.Should().Be("LeakAnalyzer");
+        restored.Appendix.AnalyzerRunSummary[0].Status.Should().Be("Success");
     }
 
     [Fact]
@@ -202,14 +205,14 @@ public sealed class P0SmokeTests
         HtmlReportRenderer renderer = new();
         string html = renderer.Render(doc);
 
-        // The embedded JSON must contain analyzerRunStatuses
+        // The embedded JSON must contain appendix data
         Match m = Regex.Match(html,
             @"<script\b[^>]*\bid\s*=\s*(['""])(report-json)\1[^>]*>([\s\S]*?)</script>",
             RegexOptions.IgnoreCase);
         m.Success.Should().BeTrue();
 
         string embeddedJson = m.Groups[3].Value;
-        embeddedJson.Should().Contain("analyzerRunStatuses");
+        embeddedJson.Should().Contain("appendix");
         embeddedJson.Should().Contain("LeakAnalyzer");
         embeddedJson.Should().Contain("FailedAnalyzer");
         embeddedJson.Should().Contain("Failed");

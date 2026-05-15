@@ -19,44 +19,26 @@ internal sealed class ReportSerializer
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
         ReportAudience audience = ReportAudience.All,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null)
+        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
+        IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
         List<AnalyzerDetailSection> analyzerSections = BuildAnalyzerSections(runs, analyzerBuilders);
-        AnalyzerResultSet resultSet = new(runs, incidentContext);
+        AnalyzerResultSet resultSet = new(runs, incidentContext, additionalFindings);
         List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
         analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
         specSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
         List<AnalyzerDetailSection> mergedSections = MergeSections(analyzerSections, specSections);
 
-        // If analyzers produced exported artifact files (NDJSON/CSV etc.), append
-        // a short informational note to the corresponding analyzer section so
-        // users are aware extra artifacts exist alongside the main report.
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Artifacts is null || run.Artifacts.Count == 0)
-                continue;
+        // Annotate sections with Domain / SectionId / LeadSeverity via SectionIdDomainMap
+        ApplySectionMetadata(mergedSections, runs);
 
-            var dupArtifacts = run.Artifacts.Where(a =>
-                (a.FileName is not null && (a.FileName.Contains("ndjson", StringComparison.OrdinalIgnoreCase)
-                                           || a.FileName.Contains("duplicates", StringComparison.OrdinalIgnoreCase)
-                                           || a.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)))
-                || string.Equals(a.ContentType, "application/gzip", StringComparison.OrdinalIgnoreCase)
-            ).ToList();
+        // Extract typed contract slots (LeadFinding, KeyMetrics, Tables, Provenance) from block stream
+        NormalizeSectionContractSlots(mergedSections, runs, reportBuilders);
 
-            if (dupArtifacts.Count == 0)
-                continue;
+        // Apply domain-priority ordering (Critical domains first, then by domain priority, then SortOrder)
+        ApplyDomainOrdering(mergedSections);
 
-            int idx = mergedSections.FindIndex(s => string.Equals(s.AnalyzerName, run.AnalyzerName, StringComparison.OrdinalIgnoreCase));
-            if (idx < 0)
-                continue;
-
-            AnalyzerDetailSection section = mergedSections[idx];
-            var blocks = section.Blocks.ToList();
-            blocks.Add(new DividerBlock());
-            blocks.Add(new TextBlock($"Note: This analyzer produced {dupArtifacts.Count} artifact file(s) (e.g. NDJSON/CSV) containing exported snapshots or duplicate records. These artifacts are written to the report's artifacts folder and can be downloaded for deeper analysis."));
-            mergedSections[idx] = section with { Blocks = blocks };
-        }
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
         List<FindingRecord> allFindings = [];
         
@@ -100,8 +82,18 @@ internal sealed class ReportSerializer
             }
         }
 
+        if (additionalFindings is { Count: > 0 })
+        {
+            foreach (InsightFinding finding in additionalFindings)
+                allFindings.Add(MapFinding(finding));
+        }
+
         // ── 3. (no dedup) Use collected findings as-is
         List<FindingRecord> deduped = allFindings;
+
+        IReadOnlyList<ReportDomainSection> domains = BuildDomainSections(mergedSections, deduped);
+        IReadOnlyList<FindingRecord> crossDomainInsights = BuildCrossDomainInsights(deduped);
+        ReportAppendix appendix = BuildAppendix(runs);
 
         // Sort: Critical → Warning → Info, then by Category, then by Title
         deduped.Sort(static (a, b) =>
@@ -115,10 +107,7 @@ internal sealed class ReportSerializer
 
         // dedup diagnostics removed
 
-        // ── 4. Confidence notes ───────────────────────────────────────────────
-        List<ConfidenceNote> confidence = BuildConfidenceNotes(runs);
-
-        // ── 5. Audience-specific projections ─────────────────────────────────
+        // ── 4. Audience-specific projections ─────────────────────────────────
         // Compute total managed bytes from available analyzer domain results (Memory, GC generation, AppDomain)
         long totalManagedBytes = 0;
         foreach (AnalyzerRunResult run in runs)
@@ -152,37 +141,26 @@ internal sealed class ReportSerializer
         }
 
         // Include Executive summary for explicit Executive audience or when Audience==All
+        HealthScorecard scorecard = HealthScorecardBuilder.Build(runs);
+
         ExecutiveSummaryRecord? executiveSummary = (audience == ReportAudience.Executive || audience == ReportAudience.All)
-            ? BuildExecutiveSummary(deduped, totalManagedBytes)
+            ? BuildExecutiveSummary(deduped, totalManagedBytes, scorecard, runs)
             : null;
 
-        IReadOnlyList<DeveloperActionRecord> developerActionPlan = audience == ReportAudience.Developer
-            ? BuildDeveloperActionPlan(deduped)
-            : [];
-
-        // Executive audience strips raw findings (summary replaces them)
-        IReadOnlyList<FindingRecord> outputFindings = audience == ReportAudience.Executive ? [] : deduped;
+        string? analyzerVersion = typeof(ReportSerializer).Assembly.GetName().Version?.ToString(3);
 
         return new SingleDumpReportDocument
         {
             DumpPath = dumpPath,
             GeneratedAtUtc = DateTime.UtcNow,
             ElapsedSeconds = elapsed.TotalSeconds,
+            AnalyzerVersion = analyzerVersion,
             IncidentContext = incidentContext,
-            Findings = outputFindings,
-            AnalyzerSections = mergedSections,
+            HealthScorecard = scorecard,
+            Domains = domains,
+            CrossDomainInsights = crossDomainInsights,
+            Appendix = appendix,
             ExecutiveSummary = executiveSummary,
-            DeveloperActionPlan = developerActionPlan,
-            Confidence = confidence,
-            Artifacts = runs.SelectMany(r => r.Artifacts ?? Array.Empty<DumpDetective.Core.Models.ReportArtifact>()).ToList(),
-            AnalyzerRunStatuses = runs.Select(r => new AnalyzerRunStatusRecord(
-                AnalyzerName: r.AnalyzerName,
-                Status: r.Status.ToString(),
-                DurationMs: r.Duration.TotalMilliseconds,
-                FindingCount: r.FindingCount,
-                WarningCount: r.WarningCount,
-                ObjectScanCount: r.ObjectScanCount,
-                ErrorMessage: r.ErrorMessage)).ToList()
         };
     }
 
@@ -259,6 +237,414 @@ internal sealed class ReportSerializer
         merged.AddRange(specSections);
         merged.AddRange(analyzerSections);
         return merged;
+    }
+
+    // ── Section metadata + ordering ───────────────────────────────────────────
+
+    /// <summary>
+    /// Annotates each section with Domain, SectionId, and LeadSeverity using
+    /// <see cref="SectionIdDomainMap"/>. Mutates the list in-place.
+    /// </summary>
+    private static void ApplySectionMetadata(List<AnalyzerDetailSection> sections, IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        // Build analyzerName → max finding severity
+        var severityByAnalyzer = new Dictionary<string, FindingSeverity>(runs.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (AnalyzerRunResult run in runs)
+        {
+            FindingSeverity maxSev = FindingSeverity.Info;
+            foreach (InsightFinding f in run.Findings)
+            {
+                if (f.Severity > maxSev) maxSev = f.Severity;
+            }
+            severityByAnalyzer[run.AnalyzerName] = maxSev;
+        }
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            AnalyzerDetailSection section = sections[i];
+            if (!SectionIdDomainMap.TryGet(section.AnalyzerName, out string domain, out string sectionId))
+                continue;
+
+            severityByAnalyzer.TryGetValue(section.AnalyzerName, out FindingSeverity leadSev);
+            FindingSeverity? lead = leadSev == FindingSeverity.Info && section.LeadSeverity is null ? null : leadSev;
+
+            sections[i] = section with
+            {
+                Domain      = domain,
+                SectionId   = sectionId,
+                LeadSeverity = lead,
+            };
+        }
+    }
+
+    /// <summary>
+    /// Re-sorts the merged section list by domain priority then lead severity.
+    /// Sections without a domain preserve their relative order at the end.
+    /// </summary>
+    private static void ApplyDomainOrdering(List<AnalyzerDetailSection> sections)
+    {
+        sections.Sort(static (a, b) =>
+        {
+            int domA = DomainOrder(a.Domain);
+            int domB = DomainOrder(b.Domain);
+            if (domA != domB) return domA.CompareTo(domB);
+
+            int sevA = LeadSeverityOrder(a.LeadSeverity);
+            int sevB = LeadSeverityOrder(b.LeadSeverity);
+            if (sevA != sevB) return sevA.CompareTo(sevB);
+
+            return a.SortOrder.CompareTo(b.SortOrder);
+        });
+    }
+
+    private static int DomainOrder(string domain) => domain switch
+    {
+        "Leaks"      => 0,
+        "Memory"     => 1,
+        "GC"         => 2,
+        "Threads"    => 3,
+        "Async"      => 4,
+        "Exceptions" => 5,
+        "TypeSystem" => 6,
+        "Runtime"    => 7,
+        _            => 99   // unmapped / cross-cutting sections go last
+    };
+
+    private static int LeadSeverityOrder(FindingSeverity? s) => s switch
+    {
+        FindingSeverity.Critical => 0,
+        FindingSeverity.Warning  => 1,
+        FindingSeverity.Info     => 2,
+        null                     => 3,
+        _                        => 3
+    };
+
+    private static IReadOnlyList<ReportDomainSection> BuildDomainSections(
+        IReadOnlyList<AnalyzerDetailSection> sections,
+        IReadOnlyList<FindingRecord> findings)
+    {
+        var domainOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var groupedSections = new Dictionary<string, List<AnalyzerDetailSection>>(StringComparer.OrdinalIgnoreCase);
+        var domainInsights = new Dictionary<string, List<FindingRecord>>(StringComparer.OrdinalIgnoreCase);
+        var domainSeverity = new Dictionary<string, FindingSeverity?>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            AnalyzerDetailSection section = sections[i];
+            if (string.IsNullOrWhiteSpace(section.Domain) || string.Equals(section.Domain, "CrossDomain", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!groupedSections.TryGetValue(section.Domain, out List<AnalyzerDetailSection>? list))
+            {
+                list = [];
+                groupedSections[section.Domain] = list;
+                domainOrder[section.Domain] = DomainOrder(section.Domain);
+            }
+
+            list.Add(section);
+            if (!domainSeverity.TryGetValue(section.Domain, out FindingSeverity? current) || LeadSeverityOrder(section.LeadSeverity) < LeadSeverityOrder(current))
+                domainSeverity[section.Domain] = section.LeadSeverity;
+        }
+
+        for (int i = 0; i < findings.Count; i++)
+        {
+            FindingRecord finding = findings[i];
+            if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            string domain = InferFindingDomain(finding);
+            if (string.IsNullOrWhiteSpace(domain))
+                continue;
+
+            if (!domainInsights.TryGetValue(domain, out List<FindingRecord>? list))
+            {
+                list = [];
+                domainInsights[domain] = list;
+                if (!domainOrder.ContainsKey(domain))
+                    domainOrder[domain] = DomainOrder(domain);
+            }
+
+            list.Add(finding);
+        }
+
+        var domains = new List<ReportDomainSection>(groupedSections.Count);
+        foreach (var pair in groupedSections)
+        {
+            string domain = pair.Key;
+            domains.Add(new ReportDomainSection(
+                Domain: domain,
+                LeadSeverity: domainSeverity.TryGetValue(domain, out FindingSeverity? severity) ? severity : null,
+                Sections: pair.Value,
+                DomainInsights: domainInsights.TryGetValue(domain, out List<FindingRecord>? insights) ? insights : []));
+        }
+
+        domains.Sort((a, b) =>
+        {
+            // Spec: "Domains ordered by MaxSeverityInDomain descending" — severity first
+            int sevA = LeadSeverityOrder(a.LeadSeverity);
+            int sevB = LeadSeverityOrder(b.LeadSeverity);
+            if (sevA != sevB) return sevA.CompareTo(sevB);
+
+            // Within equal severity, use the canonical domain priority order as a tiebreaker
+            int orderA = domainOrder.TryGetValue(a.Domain, out int oa) ? oa : 99;
+            int orderB = domainOrder.TryGetValue(b.Domain, out int ob) ? ob : 99;
+            if (orderA != orderB) return orderA.CompareTo(orderB);
+
+            return StringComparer.OrdinalIgnoreCase.Compare(a.Domain, b.Domain);
+        });
+
+        return domains;
+    }
+
+    private static IReadOnlyList<FindingRecord> BuildCrossDomainInsights(IReadOnlyList<FindingRecord> findings)
+    {
+        var cross = new List<FindingRecord>();
+        for (int i = 0; i < findings.Count; i++)
+        {
+            FindingRecord finding = findings[i];
+            if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase))
+                || string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase))
+            {
+                cross.Add(finding);
+            }
+        }
+        return cross;
+    }
+
+    private static string InferFindingDomain(FindingRecord finding)
+    {
+        string analyzer = finding.Analyzer;
+        return analyzer switch
+        {
+            "LeakCandidateAnalyzer" => "Leaks",
+            "MemoryAnalyzer" => "Memory",
+            "DominatorAnalyzer" => "Memory",
+            "RetentionAnalyzer" => "Memory",
+            "GCRootAnalyzer" => "Memory",
+            "StaticRootLeakDetector" => "Memory",
+            "StringAnalyzer" => "Memory",
+            "GCGenerationAnalyzer" => "GC",
+            "AllocationPatternAnalyzer" => "GC",
+            "SegmentAnalyzer" => "GC",
+            "LohFragmentationAnalyzer" => "GC",
+            "SegmentReservationAnalyzer" => "GC",
+            "FinalizableObjectAnalyzer" => "GC",
+            "GCHandleAnalyzer" => "GC",
+            "WeakReferenceAnalyzer" => "GC",
+            "DependentHandleAnalyzer" => "GC",
+            "ObjectShapeAnalyzer" => "TypeSystem",
+            "CollectionAnalyzer" => "TypeSystem",
+            "ArrayAnalyzer" => "TypeSystem",
+            "BoxingAnalyzer" => "TypeSystem",
+            "ThreadAnalyzer" => "Threads",
+            "HangAnalyzer" => "Threads",
+            "LockGraphAnalyzer" => "Threads",
+            "ThreadStackClusterAnalyzer" => "Threads",
+            "EventLeakAnalyzer" => "Threads",
+            "AsyncTaskAnalyzer" => "Async",
+            "AsyncStateMachineAnalyzer" => "Async",
+            "CrashAnalyzer" => "Exceptions",
+            "ModuleAnalyzer" => "Runtime",
+            "AppDomainAnalyzer" => "Runtime",
+            "JitAnalyzer" => "Runtime",
+            _ => string.Empty
+        };
+    }
+
+    // ── Section contract-slot normalization ───────────────────────────────────
+
+    /// <summary>
+    /// Extracts typed contract slots from each section's raw block stream and populates
+    /// <see cref="AnalyzerDetailSection.LeadFinding"/>, <see cref="AnalyzerDetailSection.KeyMetrics"/>,
+    /// <see cref="AnalyzerDetailSection.Tables"/>, and <see cref="AnalyzerDetailSection.Provenance"/>.
+    /// MetricBlocks and TableBlocks are removed from <c>Blocks</c> once promoted.
+    /// Runs that have no matching analyzer run still get metric/table extraction from blocks.
+    /// For cross-cutting <see cref="IReportSectionBuilder"/> sections, provenance is built from all
+    /// contributing analyzer runs listed in <see cref="IReportSectionBuilder.SourceAnalyzers"/>.
+    /// </summary>
+    private static void NormalizeSectionContractSlots(
+        List<AnalyzerDetailSection> sections,
+        IReadOnlyList<AnalyzerRunResult> runs,
+        IReadOnlyList<IReportSectionBuilder>? reportBuilders = null)
+    {
+        // Build analyzerName → run for O(1) lookup
+        var runMap = new Dictionary<string, AnalyzerRunResult>(runs.Count, StringComparer.OrdinalIgnoreCase);
+        for (int r = 0; r < runs.Count; r++)
+            runMap[runs[r].AnalyzerName] = runs[r];
+
+        // Build sectionAnalyzerName → SourceAnalyzers[] for cross-cutting sections
+        var sourceAnalyzerMap = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (reportBuilders is not null)
+        {
+            for (int b = 0; b < reportBuilders.Count; b++)
+            {
+                IReportSectionBuilder rb = reportBuilders[b];
+                if (rb.SourceAnalyzers.Count > 0)
+                    sourceAnalyzerMap[rb.DisplayTitle] = rb.SourceAnalyzers;
+            }
+        }
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            AnalyzerDetailSection section = sections[i];
+
+            // ── Build LeadFinding from the top finding of the matching run ────
+            // Blocks are intentionally left unchanged — MetricBlocks and TableBlocks
+            // remain in the narrative stream where renderBlocks() handles them in context.
+            // KeyMetrics and Tables typed slots are reserved for builders that explicitly
+            // populate them; auto-extraction from blocks would destroy narrative ordering.
+            SectionLeadFinding? leadFinding = section.LeadFinding;
+            AnalyzerRunResult? matchedRun = null;
+            runMap.TryGetValue(section.AnalyzerName, out matchedRun);
+
+            if (leadFinding is null && matchedRun is { } run && run.Findings.Count > 0)
+            {
+                InsightFinding? top = null;
+                for (int f = 0; f < run.Findings.Count; f++)
+                {
+                    InsightFinding finding = run.Findings[f];
+                    if (top is null || finding.Severity > top.Severity)
+                        top = finding;
+                }
+
+                if (top is not null)
+                {
+                    double score = top.EffectiveConfidenceScore;
+                    string symbol = score >= 0.85 ? "●●●●"
+                                  : score >= 0.65 ? "●●●○"
+                                  : score >= 0.45 ? "●●○○"
+                                  : "●○○○";
+
+                    leadFinding = new SectionLeadFinding(
+                        Severity:          top.Severity.ToString(),
+                        Title:             top.Title,
+                        Evidence:          top.Evidence,
+                        Recommendation:    top.Recommendation,
+                        ConfidenceSymbol:  symbol,
+                        ConfidenceScore:   score,
+                        Caveats:           top.EffectiveCaveats);
+                }
+            }
+
+            // ── Build Provenance from run diagnostics ─────────────────────────
+            SectionProvenance? provenance = section.Provenance;
+            if (provenance is null && matchedRun is not null)
+            {
+                provenance = new SectionProvenance(
+                    Analyzer:         matchedRun.AnalyzerName,
+                    Status:           matchedRun.Status.ToString(),
+                    DurationMs:       matchedRun.Duration.TotalMilliseconds,
+                    ObjectScanCount:  matchedRun.Diagnostics?.ObjectScanCount ?? 0,
+                    CacheHits:        matchedRun.Diagnostics?.CacheHits ?? 0,
+                    CacheMisses:      matchedRun.Diagnostics?.CacheMisses ?? 0);
+            }
+            else if (provenance is null && sourceAnalyzerMap.TryGetValue(section.AnalyzerName, out IReadOnlyList<string>? sourceNames))
+            {
+                // Cross-cutting section: aggregate provenance from all contributing runs
+                double totalMs = 0;
+                long totalScans = 0, totalHits = 0, totalMisses = 0;
+                bool allSuccess = true;
+                var cappingNotes = new List<string>();
+                int matched = 0;
+
+                for (int s = 0; s < sourceNames.Count; s++)
+                {
+                    if (!runMap.TryGetValue(sourceNames[s], out AnalyzerRunResult? sourceRun))
+                        continue;
+
+                    matched++;
+                    totalMs     += sourceRun.Duration.TotalMilliseconds;
+                    totalScans  += sourceRun.Diagnostics?.ObjectScanCount ?? 0;
+                    totalHits   += sourceRun.Diagnostics?.CacheHits ?? 0;
+                    totalMisses += sourceRun.Diagnostics?.CacheMisses ?? 0;
+                    if (sourceRun.Status != AnalyzerExecutionStatus.Success)
+                        allSuccess = false;
+                }
+
+                if (matched > 0)
+                {
+                    provenance = new SectionProvenance(
+                        Analyzer:        section.AnalyzerName,
+                        Status:          allSuccess ? "Success" : "Partial",
+                        DurationMs:      totalMs,
+                        ObjectScanCount: totalScans,
+                        CacheHits:       totalHits,
+                        CacheMisses:     totalMisses,
+                        CappingNotes:    cappingNotes.Count > 0 ? cappingNotes : null);
+                }
+            }
+
+            // ── Write back only if something changed ──────────────────────────
+            bool changed = leadFinding is not null && section.LeadFinding is null
+                        || provenance is not null && section.Provenance is null;
+
+            if (changed)
+            {
+                sections[i] = section with
+                {
+                    LeadFinding = leadFinding,
+                    Provenance  = provenance,
+                };
+            }
+        }
+    }
+
+    private static ReportAppendix BuildAppendix(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        var memoryDiagnostics = new List<AnalyzerMemoryDiagnosticRecord>();
+        var limitations = new List<string>
+        {
+            // Z3 canonical list from SingleDumpReportFormat.md
+            "Retained size is bounded BFS, not a true dominator tree (affects A3, A4).",
+            "GC root retained bytes are estimated from average type size, not exact measurement (A5).",
+            "Allocation sites are unavailable from .dmp files; ETW capture is required (B2).",
+            "Gen byte counts are approximated as avg-size × gen count, not measured per-object (B1).",
+            "Task orphan detection relies on CLR private field name stability across runtime versions (E1).",
+            "FOH/POH sizes include runtime-internal objects that are not application objects (B3).",
+            "ClrThread.StackBase/StackLimit may be 0 for GC and finalizer threads (D1).",
+            "Deadlock detection misses cooperative waits that do not appear in BlockingObjects (D3).",
+            "String encoding waste (UTF-16 overhead vs ASCII content) is not detected (A7).",
+            "Async state machine state-value distribution is unavailable; only averages are reported (E2).",
+            "Collection generation field is not yet available from ClrMD; generation breakdown for collections is omitted (C3).",
+            "Gen0/Gen1 pinned object generation correlation is not computed (B7).",
+            "RuntimeQueueLength is obtained via reflection probe and may be null when inaccessible (D2).",
+        };
+
+        var runSummary = new List<AnalyzerRunStatusRecord>(runs.Count);
+        for (int i = 0; i < runs.Count; i++)
+        {
+            AnalyzerRunResult run = runs[i];
+            runSummary.Add(new AnalyzerRunStatusRecord(
+                AnalyzerName:          run.AnalyzerName,
+                Status:                run.Status.ToString(),
+                DurationMs:            run.Duration.TotalMilliseconds,
+                FindingCount:          run.FindingCount,
+                WarningCount:          run.WarningCount,
+                ObjectScanCount:       run.ObjectScanCount,
+                CacheHits:             run.CacheHits,
+                CacheMisses:           run.CacheMisses,
+                ErrorMessage:          run.ErrorMessage,
+                FindingGeneratorError: run.FindingGeneratorError,
+                SkipReason:            run.SkipReason));
+
+            if (run.MemoryStats is null)
+                continue;
+
+            AnalyzerMemoryStats s = run.MemoryStats;
+            memoryDiagnostics.Add(new AnalyzerMemoryDiagnosticRecord(
+                AnalyzerName:        run.AnalyzerName,
+                WorkingSetBefore:    s.WorkingSetBefore,
+                WorkingSetAfter:     s.WorkingSetAfter,
+                WorkingSetDelta:     s.WorkingSetDelta,
+                ManagedHeapBefore:   s.ManagedHeapBefore,
+                ManagedHeapAfter:    s.ManagedHeapAfter,
+                ManagedHeapDelta:    s.ManagedHeapDelta));
+        }
+
+        return new ReportAppendix(
+            AnalyzerRunSummary: runSummary,
+            MemoryDiagnostics: memoryDiagnostics.Count > 0 ? memoryDiagnostics : null,
+            KnownLimitations: limitations);
     }
 
     // ── Finding mapping ───────────────────────────────────────────────────────
@@ -344,83 +730,35 @@ internal sealed class ReportSerializer
         return $"{a}{Environment.NewLine}{b}";
     }
 
-    // ── Confidence notes ──────────────────────────────────────────────────────
-
-    private static List<ConfidenceNote> BuildConfidenceNotes(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        var notes = new List<ConfidenceNote>();
-
-        for (int i = 0; i < runs.Count; i++)
-        {
-            AnalyzerRunResult run = runs[i];
-            if (run.Result is null) continue;
-
-            if (run.Result is RetentionDomainResult ml && ml.SkippedReferenceAddresses > 0)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: $"Reference tracking cap hit; {ml.SkippedReferenceAddresses:N0} addresses skipped — highly-referenced-object counts may be partial."));
-            }
-
-            if (run.Result is RetentionDomainResult mlCap && mlCap.ObjectScanCapped)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: "Object scan cap reached; incoming-reference counts are based on a partial heap traversal — increase MaxLeakScanObjects for deeper coverage."));
-            }
-
-            if (run.Result is HangDomainResult hang && hang.TaskScanLimited)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: "Task scan limited due to heap size; task totals may be partial."));
-            }
-
-            if (run.Result is AsyncTaskDomainResult asyncTask && asyncTask.TaskScanLimited)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: "Async task scan was capped at 50 000 entries; orphan counts and state totals may be partial."));
-            }
-
-            if (run.Result is AsyncStateMachineDomainResult asm && asm.ScanLimited)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: "Async state machine type scan was capped at 200 candidate types; total counts and top-type list may be partial."));
-            }
-
-            if (run.Result is ArrayDomainResult arr && arr.ScanLimited)
-            {
-                notes.Add(new ConfidenceNote(
-                    Analyzer: run.AnalyzerName,
-                    Capped: true,
-                    Reason: "Array sparse sampling was capped at 500 candidate arrays; sparse/wasteful array list may be partial."));
-            }
-        }
-
-        return notes;
-    }
-
     // ── Executive summary ─────────────────────────────────────────────────────
 
-    private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings, long totalManagedBytes)
+    private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings, long totalManagedBytes, HealthScorecard scorecard, IReadOnlyList<AnalyzerRunResult> runs)
     {
         // P1.2: Use ExplainableScoringEngine for reproducible, contributor-backed scores.
         var (leak, gcPressure, thread) = ExplainableScoringEngine.ComputeScores(findings);
 
-        // Top 3 Critical or Warning findings
+        // Top Critical/Warning findings
+        var criticalFindings = new List<FindingRecord>(5);
+        var warningFindings = new List<FindingRecord>(5);
         var top3 = new List<FindingRecord>(3);
         for (int i = 0; i < findings.Count && top3.Count < 3; i++)
         {
             int ord = SeverityOrdinal(findings[i].Severity);
             if (ord >= 1)
                 top3.Add(findings[i]);
+        }
+
+        for (int i = 0; i < findings.Count; i++)
+        {
+            FindingRecord finding = findings[i];
+            int ord = SeverityOrdinal(finding.Severity);
+            if (ord == 2 && criticalFindings.Count < 5)
+                criticalFindings.Add(finding);
+            else if (ord == 1 && warningFindings.Count < 5)
+                warningFindings.Add(finding);
+
+            if (criticalFindings.Count == 5 && warningFindings.Count == 5)
+                break;
         }
 
         return new ExecutiveSummaryRecord(
@@ -430,70 +768,135 @@ internal sealed class ReportSerializer
             ThreadContentionScore: thread.Score,
             TopRecommendations: top3)
         {
+            HealthScorecard = scorecard,
+            CriticalFindings = criticalFindings,
+            WarningFindings = warningFindings,
             ScoreBreakdowns = [leak, gcPressure, thread],
+            LohBytes = ExtractLohBytes(runs),
+            LohPercent = ExtractLohPercent(runs),
+            Gen2Percent = ExtractGen2Percent(runs),
+            LeakCandidateCount = ExtractLeakCandidateCount(runs),
+            HangScore = ExtractHangScore(runs),
+            BlockedThreads = ExtractBlockedThreads(runs),
+            DeadlockCycles = ExtractDeadlockCycles(runs),
+            ActiveExceptions = ExtractActiveExceptions(runs),
+            FinalizerQueueCount = ExtractFinalizerQueueCount(runs),
+            TotalObjects = ExtractTotalObjects(runs),
+            UniqueTypes = ExtractUniqueTypes(runs),
+            GcPressureLevel = ExtractGcPressureLevel(runs),
         };
     }
 
-    // ── Developer action plan ─────────────────────────────────────────────────
-
-    private static List<DeveloperActionRecord> BuildDeveloperActionPlan(IReadOnlyList<FindingRecord> findings)
+    private static long? ExtractLohBytes(IReadOnlyList<AnalyzerRunResult> runs)
     {
-        const int ActionPlanCap = 10;
-
-        // Collect all Critical first, then fill remaining slots with Warning/Info
-        var criticals = new List<FindingRecord>();
-        var remainder = new List<FindingRecord>();
-
-        for (int i = 0; i < findings.Count; i++)
+        foreach (AnalyzerRunResult run in runs)
         {
-            FindingRecord f = findings[i];
-            if (!string.IsNullOrWhiteSpace(f.Recommendation))
-            {
-                if (SeverityOrdinal(f.Severity) == 2)
-                    criticals.Add(f);
-                else
-                    remainder.Add(f);
-            }
+            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return (long)mem.LohBytes;
+            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return (long)gc.LohBytes;
         }
+        return null;
+    }
 
-        int remainderCap = Math.Max(0, ActionPlanCap - criticals.Count);
-        var actions = new List<DeveloperActionRecord>(criticals.Count + Math.Min(remainder.Count, remainderCap));
-
-        int totalToProcess = criticals.Count + Math.Min(remainder.Count, remainderCap);
-        for (int i = 0; i < totalToProcess; i++)
+    private static double? ExtractLohPercent(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
         {
-            FindingRecord f = i < criticals.Count ? criticals[i] : remainder[i - criticals.Count];
-            int ord = SeverityOrdinal(f.Severity);
-
-            string priority = ord == 2 ? "P0" : ord == 1 ? "P1" : "P2";
-            string impact = f.Category switch
-            {
-                var c when c.Contains("Leak", StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Memory", StringComparison.OrdinalIgnoreCase)
-                    => "Unchecked growth will increase GC pressure, slow the application, and risk process recycling under load.",
-                var c when c.Contains("Fragmentation", StringComparison.OrdinalIgnoreCase)
-                    => "Heap fragmentation reduces allocation efficiency and can trigger premature LOH collections.",
-                var c when c.Contains("Crash", StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Stability", StringComparison.OrdinalIgnoreCase)
-                    => "Active exceptions can cause request failures and unhandled crashes visible to end-users.",
-                var c when c.Contains("Hang", StringComparison.OrdinalIgnoreCase) ||
-                           c.Contains("Threading", StringComparison.OrdinalIgnoreCase)
-                    => "Thread contention will increase response latency and can lead to request timeouts.",
-                var c when c.Contains("Retention", StringComparison.OrdinalIgnoreCase)
-                    => "Unnecessary object retention increases memory footprint and delays garbage collection.",
-                var c when c.Contains("Pipeline", StringComparison.OrdinalIgnoreCase)
-                    => "Analyzer failures may have left diagnostic gaps; re-running after the fix ensures complete coverage.",
-                _ => "Leaving this unaddressed risks degraded reliability or performance over time."
-            };
-
-            actions.Add(new DeveloperActionRecord(
-                Priority: priority,
-                Title: f.Title,
-                Action: f.Recommendation,
-                Impact: impact));
+            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.LohPercent;
+            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.LohPercent;
         }
+        return null;
+    }
 
-        return actions;
+    private static double? ExtractGen2Percent(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.Gen2Pct;
+        }
+        return null;
+    }
+
+    private static int? ExtractLeakCandidateCount(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.LeakCandidateDomainResult leak) return leak.TotalCandidates;
+        }
+        return null;
+    }
+
+    private static int? ExtractHangScore(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.HangDomainResult hang) return hang.HealthScore;
+        }
+        return null;
+    }
+
+    private static int? ExtractBlockedThreads(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.ThreadDomainResult thread) return thread.BlockedThreadCount;
+        }
+        return null;
+    }
+
+    private static int? ExtractDeadlockCycles(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.LockGraphDomainResult lockGraph) return lockGraph.DeadlockCandidateCount;
+        }
+        return null;
+    }
+
+    private static int? ExtractActiveExceptions(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.CrashDomainResult crash) return crash.ActiveExceptions;
+        }
+        return null;
+    }
+
+    private static int? ExtractFinalizerQueueCount(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.FinalizableObjectDomainResult fin) return fin.FinalizerQueueCount;
+        }
+        return null;
+    }
+
+    private static int? ExtractTotalObjects(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.TotalObjects;
+            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.TotalObjects;
+        }
+        return null;
+    }
+
+    private static int? ExtractUniqueTypes(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.UniqueTypes;
+        }
+        return null;
+    }
+
+    private static string? ExtractGcPressureLevel(IReadOnlyList<AnalyzerRunResult> runs)
+    {
+        foreach (AnalyzerRunResult run in runs)
+        {
+            if (run.Result is DumpDetective.Analysis.Models.AllocationPatternDomainResult alloc)
+                return alloc.GCPressure.ToString();
+        }
+        return null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

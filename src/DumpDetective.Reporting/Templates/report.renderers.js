@@ -506,30 +506,615 @@ function truncateLabel(value, maxLength) {
 
 export function buildHeader(doc) {
   const isTrend = !!doc.isTrendReport;
-  const title = isTrend ? 'DumpDetective Trend Analysis Report' : 'DumpDetective Analysis Report';
+  const title = isTrend ? 'Trend Analysis Report' : 'Analysis Report';
   const dumpLabel = isTrend ? 'Latest dump' : 'Dump';
   const rawName = (doc.dumpPath || 'report').replace(/\\/g, '/').split('/').pop() || 'report';
   const exportName = rawName.replace(/\.[^.]+$/, '') || 'report';
-  const sec = el('section', 'header-card'); const h1 = document.createElement('h1'); h1.textContent = title; sec.appendChild(h1);
-  function metaItem(label, value, extraClass) { const d = el('div', 'meta-item' + (extraClass ? ' ' + extraClass : '')); const s = el('span', 'meta-label'); s.textContent = label + ':'; d.appendChild(s); d.appendChild(t(' ' + value)); return d; }
-  const mainRow = el('div', 'meta-grid meta-grid-main');
-  mainRow.appendChild(metaItem(dumpLabel, doc.dumpPath || '', 'meta-item--full'));
-  sec.appendChild(mainRow);
 
-  const grid = el('div', 'meta-grid meta-grid-secondary');
+  const sec = el('section', 'header-card');
+  sec.id = 'sec-header';
+
+  // ── Hero band ────────────────────────────────────────────────────────────
+  const hero = el('div', 'header-hero');
+
+  const heroLeft = el('div', 'header-hero__left');
+  const badge = el('div', 'header-hero__badge');
+  const dot = el('span', 'header-hero__badge-dot'); badge.appendChild(dot); badge.appendChild(t('DumpDetective'));
+  heroLeft.appendChild(badge);
+  const h1 = document.createElement('h1'); h1.className = 'header-hero__title'; h1.textContent = title; heroLeft.appendChild(h1);
+  if (rawName) { const fn = el('div', 'header-hero__filename'); fn.textContent = rawName; heroLeft.appendChild(fn); }
+  hero.appendChild(heroLeft);
+
+  const heroActions = el('div', 'header-hero__actions');
+  heroActions.setAttribute('role', 'toolbar'); heroActions.setAttribute('aria-label', 'Report actions');
+  function heroBtn(id, ariaLabel, txt) { const btn = el('button', 'header-hero__btn'); btn.type = 'button'; btn.id = id; btn.dataset.filename = exportName; btn.setAttribute('aria-label', ariaLabel); btn.textContent = txt; return btn; }
+  heroActions.appendChild(heroBtn('btn-download-json', 'Download report as JSON', '\u2B07\u202FJSON'));
+  heroActions.appendChild(heroBtn('btn-export-csv', 'Export findings as CSV', '\u2B07\u202FCSV'));
+  heroActions.appendChild(heroBtn('btn-print', 'Print this report', '\u2399\u202FPrint'));
+  heroActions.appendChild(heroBtn('btn-toggle-contrast', 'Toggle high contrast mode', '\u25D1\u202FContrast'));
+  hero.appendChild(heroActions);
+  sec.appendChild(hero);
+
+  // ── Body ─────────────────────────────────────────────────────────────────
+  const body = el('div', 'header-body');
+  const ctx = doc.incidentContext || {};
+  const execSum = doc.executiveSummary || {};
+
+  // Path + file size row
+  if (doc.dumpPath) {
+    const pathRow = el('div', 'header-path');
+    const pathLabel = el('span', 'header-path__label'); pathLabel.textContent = dumpLabel + ':'; pathRow.appendChild(pathLabel);
+    const pathVal = el('span', 'header-path__value'); pathVal.textContent = doc.dumpPath; pathRow.appendChild(pathVal);
+    const fsBytes = ctx.dumpFileSizeBytes != null ? Number(ctx.dumpFileSizeBytes) : null;
+    if (fsBytes !== null && fsBytes > 0) {
+      const sizeBadge = el('span', 'header-path__size');
+      sizeBadge.textContent = formatBytes(fsBytes) + (ctx.dumpSizeTierLabel ? '\u2002\u00B7\u2002' + ctx.dumpSizeTierLabel : '');
+      pathRow.appendChild(sizeBadge);
+    }
+    body.appendChild(pathRow);
+  }
+
+  function statItem(label, value) { const d = el('div', 'header-stat'); const l = el('span', 'header-stat__label'); l.textContent = label; const v = el('span', 'header-stat__value'); v.textContent = value; d.appendChild(l); d.appendChild(v); return d; }
+  function statRow(groupLabel, items) {
+    if (!items.length) return null;
+    const row = el('div', 'header-meta-row');
+    const badge = el('span', 'header-meta-row__group'); badge.textContent = groupLabel; row.appendChild(badge);
+    for (const [lbl, val] of items) row.appendChild(statItem(lbl, val));
+    return row;
+  }
+
+  // Row 1 — Analysis run
   const genRaw = doc.generatedAtUtc; const genStr = genRaw ? (new Date(genRaw)).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
-  grid.appendChild(metaItem('Generated (UTC)', genStr)); grid.appendChild(metaItem('Elapsed', ((doc.elapsedSeconds) || 0).toFixed(1) + 's')); grid.appendChild(metaItem('Schema', doc.schemaVersion || ''));
-  sec.appendChild(grid);
-  // dedup diagnostics removed
-  if (isTrend) { const td = el('div', 'dedup-note'); td.textContent = 'Dumps analyzed: ' + (doc.trendDumpCount || 0); sec.appendChild(td); if (doc.trendDumpPaths && doc.trendDumpPaths.length) { const dp = el('div', 'dedup-note'); const strong = document.createElement('strong'); strong.textContent = 'Analyzed dumps:'; dp.appendChild(strong); for (const p of doc.trendDumpPaths) { dp.appendChild(document.createElement('br')); dp.appendChild(t('\u2022 ' + p)); } sec.appendChild(dp); } }
-  const bar = el('div', 'action-bar'); bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Report actions');
-  function actionBtn(id, ariaLabel, txt) { const btn = el('button', 'action-btn'); btn.type = 'button'; btn.id = id; btn.dataset.filename = exportName; btn.setAttribute('aria-label', ariaLabel); btn.textContent = txt; return btn; }
-  bar.appendChild(actionBtn('btn-download-json', 'Download report as JSON', '\u2B07 JSON'));
-  bar.appendChild(actionBtn('btn-export-csv', 'Export findings as CSV', '\u2B07 CSV'));
-  bar.appendChild(actionBtn('btn-print', 'Print this report', '\u2399 Print'));
-  bar.appendChild(actionBtn('btn-toggle-contrast', 'Toggle high contrast mode', '\u263C Contrast'));
-  sec.appendChild(bar);
+  const runItems = [];
+  if (genStr) runItems.push(['Analyzed at', genStr]);
+  runItems.push(['Elapsed', ((doc.elapsedSeconds) || 0).toFixed(1) + 's']);
+  if (doc.schemaVersion) runItems.push(['Schema', doc.schemaVersion]);
+  if (doc.analyzerVersion) runItems.push(['Version', doc.analyzerVersion]);
+  const runRow = statRow('Analysis run', runItems); if (runRow) body.appendChild(runRow);
+
+  // Row 2 — Runtime environment
+  const rtItems = [];
+  if (ctx.runtimeVersion || ctx.runtimeFlavor) { const rv = [ctx.runtimeVersion, ctx.runtimeFlavor].filter(Boolean).join(' / '); rtItems.push(['Runtime', rv]); }
+  if (ctx.gcMode) rtItems.push(['GC mode', ctx.gcMode]);
+  if (ctx.heapCount != null) rtItems.push(['Logical heaps', String(ctx.heapCount)]);
+  if (ctx.heapCanWalk != null) rtItems.push(['Heap walkable', ctx.heapCanWalk ? 'Yes' : 'No']);
+  const rtRow = statRow('Runtime', rtItems); if (rtRow) body.appendChild(rtRow);
+
+  // Row 3 — Managed heap snapshot
+  const heapItems = [];
+  if (execSum.totalManagedBytes != null) heapItems.push(['Total managed', formatBytes(Number(execSum.totalManagedBytes || 0))]);
+  if (execSum.totalObjects != null) heapItems.push(['Objects', Number(execSum.totalObjects).toLocaleString('en-US')]);
+  if (execSum.uniqueTypes != null) heapItems.push(['Unique types', Number(execSum.uniqueTypes).toLocaleString('en-US')]);
+  const heapRow = statRow('Managed heap', heapItems); if (heapRow) body.appendChild(heapRow);
+
+  // Trend dump list
+  if (isTrend) {
+    const td = el('div', 'dedup-note'); td.textContent = 'Dumps analyzed: ' + (doc.trendDumpCount || 0); body.appendChild(td);
+    if (doc.trendDumpPaths && doc.trendDumpPaths.length) { const dp = el('div', 'dedup-note'); const strong = document.createElement('strong'); strong.textContent = 'Analyzed dumps:'; dp.appendChild(strong); for (const p of doc.trendDumpPaths) { dp.appendChild(document.createElement('br')); dp.appendChild(t('\u2022 ' + p)); } body.appendChild(dp); }
+  }
+
+  sec.appendChild(body);
   return sec;
+}
+
+export function buildHealthScorecard(doc) {
+  const scorecard = doc.healthScorecard;
+  if (!scorecard || !Array.isArray(scorecard.domains) || !scorecard.domains.length) return null;
+
+  function sevInfo(sev) {
+    const s = String(sev).toLowerCase(); const n = Number(sev);
+    if (n === 3 || s === 'critical') return { label: 'Critical', css: 'critical', dot: '\u25CF' };
+    if (n === 2 || s === 'warning')  return { label: 'Warning',  css: 'warning',  dot: '\u25CF' };
+    if (n === 1 || s === 'ok')       return { label: 'OK',       css: 'ok',       dot: '\u2713' };
+    return                                   { label: 'Unknown',  css: 'unknown',  dot: '\u25CB' };
+  }
+
+  const sec = el('section', 'section-card health-scorecard');
+  sec.id = 'sec-health';
+
+  // ── Overall banner ────────────────────────────────────────────────────────
+  const overall = sevInfo(scorecard.overallSeverity);
+  const banner = el('div', 'health-scorecard__banner health-scorecard__banner--' + overall.css);
+
+  const bannerLeft = el('div', 'health-scorecard__banner-left');
+  const bannerTitle = el('span', 'health-scorecard__banner-title'); bannerTitle.textContent = 'Health Summary'; bannerLeft.appendChild(bannerTitle);
+  const verdict = el('span', 'health-scorecard__banner-verdict'); verdict.textContent = overall.dot + '\u2002' + overall.label; bannerLeft.appendChild(verdict);
+  banner.appendChild(bannerLeft);
+
+  // Aggregate counts across all domains
+  const totalCrit = scorecard.domains.reduce((s, d) => s + (d.criticalCount || 0), 0);
+  const totalWarn = scorecard.domains.reduce((s, d) => s + (d.warningCount || 0), 0);
+  if (totalCrit > 0 || totalWarn > 0) {
+    const bannerRight = el('div', 'health-scorecard__banner-right');
+    if (totalCrit > 0) {
+      const cs = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--critical');
+      const cl = el('span', 'health-scorecard__banner-stat-label'); cl.textContent = 'Critical'; cs.appendChild(cl);
+      const cv = el('span', 'health-scorecard__banner-stat-value'); cv.textContent = String(totalCrit); cs.appendChild(cv);
+      bannerRight.appendChild(cs);
+    }
+    if (totalWarn > 0) {
+      const ws = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--warning');
+      const wl = el('span', 'health-scorecard__banner-stat-label'); wl.textContent = 'Warning'; ws.appendChild(wl);
+      const wv = el('span', 'health-scorecard__banner-stat-value'); wv.textContent = String(totalWarn); ws.appendChild(wv);
+      bannerRight.appendChild(ws);
+    }
+    banner.appendChild(bannerRight);
+  }
+  sec.appendChild(banner);
+
+  // ── Domain grid ───────────────────────────────────────────────────────────
+  const grid = el('div', 'health-scorecard__grid');
+  grid.setAttribute('role', 'list');
+  const domainOrder = ['Leaks', 'Memory', 'GC', 'Threads', 'Async', 'Exceptions', 'TypeSystem', 'Runtime'];
+  const domainMap = new Map();
+  for (const entry of scorecard.domains) domainMap.set((entry.domain || '').toLowerCase(), entry);
+  const ordered = [];
+  for (const d of domainOrder) { const e = domainMap.get(d.toLowerCase()); if (e) ordered.push(e); }
+  for (const [, e] of domainMap) { if (!domainOrder.map(d => d.toLowerCase()).includes((e.domain || '').toLowerCase())) ordered.push(e); }
+
+  for (const entry of ordered) {
+    const si = sevInfo(entry.severity);
+    const row = el('div', 'health-domain-row health-domain-row--' + si.css);
+    row.setAttribute('role', 'listitem');
+
+    const name = el('span', 'health-domain-row__name'); name.textContent = entry.domain || ''; row.appendChild(name);
+
+    const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
+    pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);
+
+    const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
+    if (crit > 0 || warn > 0) {
+      const counts = el('span', 'health-domain-row__counts');
+      const parts = [];
+      if (crit > 0) parts.push(crit + '\u00A0crit');
+      if (warn > 0) parts.push(warn + '\u00A0warn');
+      counts.textContent = parts.join('\u2002\u00B7\u2002'); row.appendChild(counts);
+    }
+    grid.appendChild(row);
+  }
+  sec.appendChild(grid);
+  return sec;
+}
+
+export function buildExecutiveSummary(doc) {
+  const summary = doc.executiveSummary;
+  if (!summary) return null;
+
+  const sec = el('section', 'section-card executive-summary');
+  sec.id = 'sec-exec';
+
+  // ── KPI strip ─────────────────────────────────────────────────────────────
+  const strip = el('div', 'exec-kpi-strip');
+
+  function kpi(label, value, sev) {
+    if (value == null) return null;
+    const d = el('div', 'exec-kpi');
+    const lbl = el('span', 'exec-kpi__label'); lbl.textContent = label; d.appendChild(lbl);
+    const val = el('span', 'exec-kpi__value' + (sev ? ' exec-kpi__value--' + sev : '')); val.textContent = String(value); d.appendChild(val);
+    return d;
+  }
+  function kpiGroup(...items) {
+    const g = el('div', 'exec-kpi-group');
+    for (const item of items) { if (item) g.appendChild(item); }
+    return g.children.length ? g : null;
+  }
+
+  // Memory
+  const g1 = kpiGroup(
+    kpi('Total heap', formatBytes(Number(summary.totalManagedBytes || 0))),
+    summary.lohBytes != null ? kpi('LOH', formatBytes(Number(summary.lohBytes)) + (summary.lohPercent != null ? ' (' + Number(summary.lohPercent).toFixed(1) + '%)' : '')) : null,
+    summary.gen2Percent != null ? kpi('Gen2', Number(summary.gen2Percent).toFixed(1) + '%', Number(summary.gen2Percent) > 60 ? 'warning' : null) : null
+  );
+  // GC & Leaks
+  const gcPressureVal = summary.gcPressureLevel || (summary.gcPressureScore != null ? summary.gcPressureScore + '/100' : null);
+  const g2 = kpiGroup(
+    gcPressureVal ? kpi('GC pressure', gcPressureVal, summary.gcPressureScore > 66 ? 'warning' : null) : null,
+    summary.leakCandidateCount != null ? kpi('Leak suspects', String(summary.leakCandidateCount), summary.leakCandidateCount > 0 ? 'warning' : 'ok') : null,
+    summary.finalizerQueueCount != null ? kpi('Finalizer queue', Number(summary.finalizerQueueCount).toLocaleString('en-US'), summary.finalizerQueueCount > 1000 ? 'warning' : null) : null
+  );
+  // Threads
+  const g3 = kpiGroup(
+    summary.blockedThreads != null ? kpi('Blocked threads', String(summary.blockedThreads), summary.blockedThreads > 0 ? 'warning' : 'ok') : null,
+    summary.deadlockCycles != null ? kpi('Deadlocks', String(summary.deadlockCycles), summary.deadlockCycles > 0 ? 'critical' : 'ok') : null,
+    summary.hangScore != null ? kpi('Hang score', summary.hangScore + '/100', summary.hangScore < 50 ? 'warning' : 'ok') : null
+  );
+  // Exceptions
+  const g4 = kpiGroup(
+    summary.activeExceptions != null ? kpi('Active exceptions', String(summary.activeExceptions), summary.activeExceptions > 0 ? 'critical' : 'ok') : null
+  );
+
+  for (const g of [g1, g2, g3, g4]) { if (g && g.children.length) strip.appendChild(g); }
+  if (strip.children.length) sec.appendChild(strip);
+
+  // ── Score triplet ─────────────────────────────────────────────────────────
+  function scoreLevel(s) { return s >= 67 ? 'ok' : s >= 34 ? 'warning' : 'critical'; }
+  if (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null) {
+    const scores = el('div', 'exec-scores');
+    function scoreCard(label, sub, score) {
+      if (score == null) return;
+      const lv = scoreLevel(score);
+      const card = el('div', 'exec-score');
+      const dial = el('div', 'exec-score__dial exec-score__dial--' + lv); dial.textContent = String(score); card.appendChild(dial);
+      const info = el('div', 'exec-score__info');
+      const lbl = el('div', 'exec-score__label'); lbl.textContent = label; info.appendChild(lbl);
+      const sl = el('div', 'exec-score__sublabel'); sl.textContent = sub; info.appendChild(sl);
+      card.appendChild(info);
+      scores.appendChild(card);
+    }
+    scoreCard('Leak Likelihood', 'memory retention risk', summary.leakLikelihoodScore);
+    scoreCard('GC Pressure', 'collection burden', summary.gcPressureScore);
+    scoreCard('Thread Contention', 'concurrency health', summary.threadContentionScore);
+    sec.appendChild(scores);
+  }
+
+  // ── Findings ──────────────────────────────────────────────────────────────
+  const critFindings = summary.criticalFindings || [];
+  const warnFindings = summary.warningFindings || [];
+  if (critFindings.length || warnFindings.length) {
+    const findingsWrap = el('div', 'exec-findings');
+    appendExecFindingGroup(findingsWrap, 'critical', critFindings);
+    appendExecFindingGroup(findingsWrap, 'warning', warnFindings);
+    sec.appendChild(findingsWrap);
+  }
+
+  // ── Recommendations ───────────────────────────────────────────────────────
+  const recs = summary.topRecommendations || [];
+  if (recs.length) {
+    const recWrap = el('div', 'exec-recommendations');
+    const heading = el('div', 'exec-recommendations__heading'); heading.textContent = 'Top recommendations'; recWrap.appendChild(heading);
+    const ol = el('ol', 'exec-rec-list');
+    for (const finding of recs.slice(0, 3)) {
+      const li = el('li', 'exec-rec-item');
+      const num = el('span', 'exec-rec-num'); num.textContent = String(ol.children.length + 1); li.appendChild(num);
+      const body = el('div', 'exec-rec-body');
+      if (finding.title) { const title = el('div', 'exec-rec-title'); title.textContent = finding.title; body.appendChild(title); }
+      if (finding.recommendation) { const text = el('div', 'exec-rec-text'); text.textContent = finding.recommendation; body.appendChild(text); }
+      li.appendChild(body);
+      ol.appendChild(li);
+    }
+    recWrap.appendChild(ol);
+    sec.appendChild(recWrap);
+  }
+
+  return sec;
+}
+
+function appendExecFindingGroup(parent, sev, findings) {
+  if (!findings || !findings.length) return;
+  const block = el('div', 'exec-findings-block');
+  const header = el('div', 'exec-findings-block__header');
+  const badge = el('span', 'exec-findings-block__badge exec-findings-block__badge--' + sev);
+  badge.textContent = sev === 'critical' ? 'Critical' : 'Warning'; header.appendChild(badge);
+  const count = el('span', 'exec-findings-block__count');
+  count.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : ''); header.appendChild(count);
+  block.appendChild(header);
+  for (const f of findings.slice(0, 5)) {
+    const row = el('div', 'exec-finding-row exec-finding-row--' + sev);
+    const title = el('div', 'exec-finding-row__title'); title.textContent = f.title || ''; row.appendChild(title);
+    if (f.evidence) { const ev = el('div', 'exec-finding-row__evidence'); ev.textContent = f.evidence; row.appendChild(ev); }
+    if (f.recommendation) { const rec = el('div', 'exec-finding-row__rec'); rec.textContent = '\u2192\u2002' + f.recommendation; row.appendChild(rec); }
+    if (f.analyzer) { const meta = el('div', 'exec-finding-row__meta'); meta.textContent = f.analyzer + (f.confidenceScore != null ? '\u2002\u00B7\u2002confidence\u00A0' + Number(f.confidenceScore).toFixed(2) : ''); row.appendChild(meta); }
+    block.appendChild(row);
+  }
+  parent.appendChild(block);
+}
+
+function sevRank(sev) {
+  if (sev == null) return -1;
+  const s = String(sev).toLowerCase();
+  if (s === 'critical' || s === '2') return 3;
+  if (s === 'warning'  || s === '1') return 2;
+  if (s === 'info'     || s === '0') return 1;
+  if (s === 'ok') return 1;
+  return -1;
+}
+
+export function buildDomains(doc) {
+  const domains = doc.domains;
+  if (!Array.isArray(domains) || !domains.length) return null;
+
+  // Sort domains: Critical first, then Warning, then Info/OK, then Unknown
+  const sortedDomains = domains.slice().sort(function (a, b) {
+    return sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
+  });
+
+  const wrap = el('div', 'report-domains');
+  for (let i = 0; i < sortedDomains.length; i++) {
+    const domain = sortedDomains[i] || {};
+    const domainSev = String(domain.leadSeverity || 'Info').toLowerCase();
+    const sec = el('section', 'section-card report-domain report-domain--' + domainSev);
+    sec.id = 'domain-' + i;
+    sec.dataset.domain = domain.domain || '';
+    sec.dataset.leadSeverity = domainSev;
+
+    const title = document.createElement('h2');
+    title.textContent = domain.domain || 'Domain';
+    sec.appendChild(title);
+
+    const meta = document.createElement('p');
+    meta.className = 'report-domain__meta';
+    function domainSevIcon(sev) {
+      const s = String(sev == null ? '' : sev).toLowerCase();
+      // handle numeric FindingSeverity: Info=0, Warning=1, Critical=2
+      if (s === 'critical' || s === '2') return '🔴';
+      if (s === 'warning'  || s === '1') return '🟡';
+      if (s === 'info'     || s === '0') return '🟢';
+      if (s === 'ok') return '🟢';
+      return '⚪';
+    }
+    function domainSevLabel(sev) {
+      if (sev == null) return 'Info';
+      const s = String(sev).toLowerCase();
+      if (s === '2' || s === 'critical') return 'Critical';
+      if (s === '1' || s === 'warning')  return 'Warning';
+      if (s === '0' || s === 'info')     return 'Info';
+      // already a label string — title-case it
+      return String(sev).charAt(0).toUpperCase() + String(sev).slice(1).toLowerCase();
+    }
+    meta.textContent = domainSevIcon(domain.leadSeverity) + ' ' + domainSevLabel(domain.leadSeverity);
+    sec.appendChild(meta);
+
+    const sections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
+      return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
+    }) : [];
+    for (let j = 0; j < sections.length; j++) {
+      sec.appendChild(buildAnalyzerSection(sections[j], i * 1000 + j));
+    }
+
+    const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
+    if (insights.length) {
+      const insightsSec = el('section', 'section-card report-domain__insights');
+      insightsSec.id = 'domain-' + i + '-insights';
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Domain Insights';
+      insightsSec.appendChild(h3);
+      for (let k = 0; k < insights.length; k++) {
+        insightsSec.appendChild(buildFindingCard(insights[k], `${i}-insight-${k}`));
+      }
+      sec.appendChild(insightsSec);
+    }
+
+    wrap.appendChild(sec);
+  }
+
+  return wrap;
+}
+
+export function buildCrossDomainInsights(doc) {
+  const findings = Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : [];
+  if (!findings.length) return null;
+
+  const sec = el('section', 'section-card cross-domain-insights');
+  const hdr = el('div', 'cross-domain-insights__header');
+  const title = el('span', 'cross-domain-insights__title'); title.textContent = 'Cross-Domain Insights';
+  const cnt = el('span', 'cross-domain-insights__count'); cnt.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : '');
+  hdr.appendChild(title); hdr.appendChild(cnt);
+  sec.appendChild(hdr);
+
+  const list = el('div', 'cross-domain-insights__list');
+  for (let i = 0; i < findings.length; i++) {
+    list.appendChild(buildFindingCard(findings[i], 'cross-' + i));
+  }
+  sec.appendChild(list);
+
+  return sec;
+}
+
+export function buildAppendix(doc) {
+  const appendix = doc.appendix;
+  if (!appendix) return null;
+
+  const sec = el('section', 'section-card report-appendix');
+  sec.id = 'sec-appendix';
+
+  // ── Z1. Analyzer Run Summary ──────────────────────────────────────────────
+  const runs = appendix.analyzerRunSummary || [];
+  if (runs.length) {
+    const panel = document.createElement('details');
+    panel.className = 'appendix-panel';
+    panel.open = true;
+    const summary = document.createElement('summary');
+
+    const titleSpan = el('span', 'appendix-panel__title'); titleSpan.textContent = 'Analyzer Run Summary';
+    summary.appendChild(titleSpan);
+
+    // Tally counts
+    const tally = { completed: 0, failed: 0, skipped: 0, timedout: 0 };
+    for (const r of runs) {
+      const s = (r.status || '').toLowerCase();
+      if (s === 'completed') tally.completed++;
+      else if (s === 'failed') tally.failed++;
+      else if (s === 'skipped') tally.skipped++;
+      else if (s === 'timedout') tally.timedout++;
+    }
+    const metaSpan = el('span', 'appendix-panel__meta');
+    metaSpan.textContent = runs.length + ' analyzers';
+    summary.appendChild(metaSpan);
+    panel.appendChild(summary);
+
+    const body = el('div', 'appendix-panel__body');
+
+    // Tally chips
+    const tallyRow = el('div', 'appendix-tally');
+    function chip(count, label, mod) {
+      if (!count) return;
+      const c = el('span', 'appendix-tally__chip appendix-tally__chip--' + mod);
+      c.textContent = count + '\u00A0' + label; tallyRow.appendChild(c);
+    }
+    chip(tally.completed, 'Completed', 'completed');
+    chip(tally.failed,    'Failed',    'failed');
+    chip(tally.timedout,  'Timed out', 'timedout');
+    chip(tally.skipped,   'Skipped',   'skipped');
+    body.appendChild(tallyRow);
+
+    // Per-analyzer rows
+    const list = el('div', 'appendix-run-list');
+    for (const run of runs) {
+      const s = (run.status || 'unknown').toLowerCase();
+      const row = el('div', 'appendix-run-row appendix-run-row--' + s);
+
+      const name = el('div', 'appendix-run-row__name'); name.textContent = run.analyzerName || ''; row.appendChild(name);
+
+      const stats = el('div', 'appendix-run-row__stats');
+      const parts = [];
+      if (run.findingCount) parts.push(run.findingCount + '\u00A0findings');
+      if (run.objectScanCount) parts.push(Number(run.objectScanCount).toLocaleString('en-US') + '\u00A0objs scanned');
+      if (run.cacheHits || run.cacheMisses) parts.push('cache\u00A0' + (run.cacheHits || 0) + '/' + ((run.cacheHits || 0) + (run.cacheMisses || 0)));
+      stats.textContent = parts.join('\u2002\u00B7\u2002'); row.appendChild(stats);
+
+      const dur = el('div', 'appendix-run-row__dur');
+      dur.textContent = Number(run.durationMs || 0) >= 1000
+        ? (Number(run.durationMs) / 1000).toFixed(2) + '\u00A0s'
+        : Number(run.durationMs || 0).toFixed(0) + '\u00A0ms';
+      row.appendChild(dur);
+
+      const pill = el('span', 'appendix-run-row__pill appendix-run-row__pill--' + s);
+      pill.textContent = run.status || 'unknown'; row.appendChild(pill);
+
+      const note = run.errorMessage || run.findingGeneratorError || run.skipReason || '';
+      if (note) { const noteEl = el('div', 'appendix-run-row__note'); noteEl.textContent = note; row.appendChild(noteEl); }
+
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+    panel.appendChild(body);
+    sec.appendChild(panel);
+  }
+
+  // ── Z2. Memory Diagnostics ────────────────────────────────────────────────
+  const memory = appendix.memoryDiagnostics || [];
+  if (memory.length) {
+    const panel = document.createElement('details');
+    panel.className = 'appendix-panel';
+    const summary = document.createElement('summary');
+    const titleSpan = el('span', 'appendix-panel__title'); titleSpan.textContent = 'Memory Diagnostics';
+    const metaSpan = el('span', 'appendix-panel__meta'); metaSpan.textContent = memory.length + ' analyzers';
+    summary.appendChild(titleSpan); summary.appendChild(metaSpan);
+    panel.appendChild(summary);
+
+    const body = el('div', 'appendix-panel__body');
+    const wrap = el('div', 'detail-block');
+    wrap.appendChild(buildSimpleTable(
+      ['Analyzer', 'WS Before', 'WS After', 'WS \u0394', 'Heap Before', 'Heap After', 'Heap \u0394'],
+      memory.map(r => [
+        r.analyzerName || '',
+        formatBytes(Number(r.workingSetBefore || 0)),
+        formatBytes(Number(r.workingSetAfter || 0)),
+        (Number(r.workingSetDelta || 0) > 0 ? '+' : '') + formatBytes(Number(r.workingSetDelta || 0)),
+        formatBytes(Number(r.managedHeapBefore || 0)),
+        formatBytes(Number(r.managedHeapAfter || 0)),
+        (Number(r.managedHeapDelta || 0) > 0 ? '+' : '') + formatBytes(Number(r.managedHeapDelta || 0))
+      ])
+    ));
+    body.appendChild(wrap);
+    panel.appendChild(body);
+    sec.appendChild(panel);
+  }
+
+  // ── Z3. Known Limitations ─────────────────────────────────────────────────
+  const limitations = appendix.knownLimitations || [];
+  if (limitations.length) {
+    const panel = document.createElement('details');
+    panel.className = 'appendix-panel';
+    const summary = document.createElement('summary');
+    const titleSpan = el('span', 'appendix-panel__title'); titleSpan.textContent = 'Known Limitations';
+    const metaSpan = el('span', 'appendix-panel__meta'); metaSpan.textContent = limitations.length + ' notes';
+    summary.appendChild(titleSpan); summary.appendChild(metaSpan);
+    panel.appendChild(summary);
+
+    const body = el('div', 'appendix-panel__body');
+    const ul = el('ul', 'appendix-limitations');
+    for (const item of limitations) { const li = document.createElement('li'); li.textContent = item; ul.appendChild(li); }
+    body.appendChild(ul);
+    panel.appendChild(body);
+    sec.appendChild(panel);
+  }
+
+  return sec;
+}
+
+function buildSimpleTable(headers, rows) {
+  const table = el('table');
+  const thead = el('thead');
+  const htr = el('tr');
+  for (const h of headers) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = h;
+    htr.appendChild(th);
+  }
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    for (const cell of row) tr.appendChild(tdText(String(cell ?? '')));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function appendMetricRow(tbody, label, value) {
+  const tr = el('tr');
+  tr.appendChild(tdText(label));
+  tr.appendChild(tdText(value));
+  tbody.appendChild(tr);
+}
+
+function appendFindingGroup(parent, title, findings) {
+  const group = el('section', 'executive-summary__findings');
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  group.appendChild(heading);
+
+  if (!findings || !findings.length) {
+    const empty = document.createElement('p');
+    empty.textContent = 'None.';
+    group.appendChild(empty);
+    parent.appendChild(group);
+    return;
+  }
+
+  for (const finding of findings.slice(0, 5)) {
+    const details = el('details', 'detail-nested');
+    const summary = document.createElement('summary');
+    summary.textContent = finding.title || '';
+    details.appendChild(summary);
+    const content = el('div', 'detail-nested-content');
+    content.appendChild(metricLine('Analyzer', finding.analyzer || 'n/a'));
+    content.appendChild(metricLine('Confidence', formatConfidence(finding.confidenceScore)));
+    content.appendChild(metricLine('Evidence', finding.evidence || ''));
+    content.appendChild(metricLine('Recommendation', finding.recommendation || ''));
+    details.appendChild(content);
+    group.appendChild(details);
+  }
+
+  parent.appendChild(group);
+}
+
+function metricLine(label, value) {
+  const line = el('div', 'detail-line');
+  const key = el('span', 'detail-key');
+  key.textContent = label + ':';
+  const val = el('span', 'detail-value wrap');
+  val.textContent = value || '';
+  line.appendChild(key);
+  line.appendChild(t(' '));
+  line.appendChild(val);
+  return line;
+}
+
+function formatConfidence(value) {
+  if (value == null || Number.isNaN(Number(value))) return 'N/A';
+  return Number(value).toFixed(2);
+}
+
+function tdText(text) {
+  const td = document.createElement('td');
+  td.textContent = text;
+  return td;
 }
 
 export function buildIncidentContext(doc) {
@@ -586,21 +1171,72 @@ export function buildIncidentContext(doc) {
 }
 
 export function buildDevActionPlan(doc) {
-  const plan = doc.developerActionPlan; if (!plan || !plan.length) return null; const sec = el('section', 'section-card'); const h2 = document.createElement('h2'); h2.textContent = 'Developer Action Plan'; sec.appendChild(h2); const tbl = el('table'); const thead = el('thead'); const htr = el('tr'); for (const col of ['Priority', 'Title', 'Action', 'Impact']) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = col; htr.appendChild(th); } thead.appendChild(htr); tbl.appendChild(thead); const tbody = el('tbody'); for (const action of plan) { const tr = el('tr'); [action.priority, action.title, action.action, action.impact].forEach(function (v, i) { const td = document.createElement('td'); if (i >= 2) td.className = 'wrap'; td.textContent = v || ''; tr.appendChild(td); }); tbody.appendChild(tr); } tbl.appendChild(tbody); sec.appendChild(tbl); return sec; }
+  if (Array.isArray(doc.domains) && doc.domains.length) return null;
+  const plan = doc.developerActionPlan;
+  if (!plan || !plan.length) return null;
+  const sec = el('section', 'section-card');
+  const h2 = document.createElement('h2'); h2.textContent = 'Developer Action Plan'; sec.appendChild(h2);
+  const tbl = el('table');
+  const thead = el('thead'); const htr = el('tr');
+  for (const col of ['Priority', 'Title', 'Action', 'Impact']) {
+    const th = document.createElement('th'); th.scope = 'col'; th.textContent = col; htr.appendChild(th);
+  }
+  thead.appendChild(htr); tbl.appendChild(thead);
+  const tbody = el('tbody');
+  for (const action of plan) {
+    const tr = el('tr');
+    [action.priority, action.title, action.action, action.impact].forEach(function (v, i) {
+      const td = document.createElement('td');
+      if (i >= 2) td.className = 'wrap';
+      td.textContent = v || '';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody); sec.appendChild(tbl);
+  return sec;
+}
 
 export function buildFilterBar(doc) {
-  const findings = doc.findings || []; if (!findings.length) return null; let crit = 0, warn = 0, info = 0; for (const f of findings) { const s = (f.severity || '').toLowerCase(); if (s === 'critical') crit++; else if (s === 'warning') warn++; else info++; }
-  const bar = el('div', 'filter-bar'); bar.id = 'filter-bar'; bar.setAttribute('role', 'search'); bar.setAttribute('aria-label', 'Filter findings'); const group = el('div', 'filter-group'); group.setAttribute('aria-label', 'Severity filter'); function fbtn(sev, label, extra) { const btn = el('button', 'filter-btn' + (extra ? ' ' + extra : '') + (sev === 'all' ? ' active' : '')); btn.type = 'button'; btn.dataset.sev = sev; btn.setAttribute('aria-pressed', sev === 'all' ? 'true' : 'false'); btn.textContent = label; return btn; }
-  group.appendChild(fbtn('all', 'All (' + findings.length + ')')); if (crit) group.appendChild(fbtn('critical', 'Critical (' + crit + ')', 'filter-critical')); if (warn) group.appendChild(fbtn('warning', 'Warning (' + warn + ')', 'filter-warning')); if (info) group.appendChild(fbtn('info', 'Info (' + info + ')', 'filter-info'));
+  const findings = doc.findings || [];
+  if (!findings.length) return null;
+  let crit = 0, warn = 0, info = 0;
+  for (const f of findings) {
+    const s = (f.severity || '').toLowerCase();
+    if (s === 'critical') crit++; else if (s === 'warning') warn++; else info++;
+  }
+  const bar = el('div', 'filter-bar'); bar.id = 'filter-bar';
+  bar.setAttribute('role', 'search'); bar.setAttribute('aria-label', 'Filter findings');
+  const group = el('div', 'filter-group'); group.setAttribute('aria-label', 'Severity filter');
+  function fbtn(sev, label, extra) {
+    const btn = el('button', 'filter-btn' + (extra ? ' ' + extra : '') + (sev === 'all' ? ' active' : ''));
+    btn.type = 'button'; btn.dataset.sev = sev;
+    btn.setAttribute('aria-pressed', sev === 'all' ? 'true' : 'false');
+    btn.textContent = label; return btn;
+  }
+  group.appendChild(fbtn('all', 'All (' + findings.length + ')'));
+  if (crit) group.appendChild(fbtn('critical', 'Critical (' + crit + ')', 'filter-critical'));
+  if (warn) group.appendChild(fbtn('warning', 'Warning (' + warn + ')', 'filter-warning'));
+  if (info) group.appendChild(fbtn('info', 'Info (' + info + ')', 'filter-info'));
   bar.appendChild(group);
-  const search = document.createElement('input'); search.type = 'search'; search.id = 'filter-search'; search.className = 'filter-search'; search.placeholder = 'Search findings\u2026'; search.setAttribute('aria-label', 'Search findings by title or evidence'); bar.appendChild(search);
-  const count = el('span', 'filter-count'); count.id = 'filter-count'; count.setAttribute('aria-live', 'polite'); count.setAttribute('aria-atomic', 'true'); bar.appendChild(count);
+  const search = document.createElement('input'); search.type = 'search'; search.id = 'filter-search';
+  search.className = 'filter-search'; search.placeholder = 'Search findings\u2026';
+  search.setAttribute('aria-label', 'Search findings by title or evidence');
+  bar.appendChild(search);
+  const count = el('span', 'filter-count'); count.id = 'filter-count';
+  count.setAttribute('aria-live', 'polite'); count.setAttribute('aria-atomic', 'true');
+  bar.appendChild(count);
   return bar;
 }
 
 export function buildTOC(doc) {
+  const rawDomains = Array.isArray(doc.domains) ? doc.domains : [];
+  // Sort to match the same order buildDomains renders
+  const domains = rawDomains.slice().sort(function (a, b) {
+    return sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
+  });
   const sections = doc.analyzerSections || [];
-  if (!sections || !sections.length) return null;
+  if ((!domains || !domains.length) && (!sections || !sections.length)) return null;
 
   const nav = document.getElementById('toc') || el('nav', 'toc');
   nav.className = 'toc report-navbar__toc';
@@ -608,39 +1244,133 @@ export function buildTOC(doc) {
   const existingTitle = nav.querySelector('.toc-title');
   if (existingTitle) existingTitle.remove();
 
-  const container = el('div', 'toc-section');
-  for (let i = 0; i < sections.length; i++) {
-    const sec = sections[i];
-    const det = document.createElement('details');
-    det.open = false;
-    det.dataset.target = '#detail-' + i;
-
-    const summ = document.createElement('summary');
-    summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
-    det.appendChild(summ);
-
+  // ── Shared helper: smooth scroll on details open ─────────────────────────
+  function attachScrollToggle(det) {
     det.addEventListener('toggle', function () {
-      if (!det.open)
-        return;
-
+      if (!det.open) return;
       const target = document.getElementById(det.dataset.target ? det.dataset.target.substring(1) : '');
-      if (!target)
-        return;
-
-      try {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        history.replaceState(null, '', det.dataset.target || '#');
-      } catch (e) { }
+      if (!target) return;
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); history.replaceState(null, '', det.dataset.target || '#'); } catch (e) { }
     });
-
-    const tocNodes = buildTocNodes(sec.blocks || [], i);
-    if (tocNodes.length)
-      det.appendChild(renderTocNodes(tocNodes));
-
-    container.appendChild(det);
   }
 
-  nav.replaceChildren(container);
+  // ── Shared helper: severity dot ───────────────────────────────────────────
+  function sevDot(sev) {
+    const s = String(sev == null ? '' : sev).toLowerCase();
+    const n = Number(sev);
+    if (n === 3 || s === 'critical') return { cls: 'toc-dot--critical', label: 'Critical' };
+    if (n === 2 || s === 'warning')  return { cls: 'toc-dot--warning',  label: 'Warning' };
+    if (n === 1 || s === 'ok')       return { cls: 'toc-dot--ok',       label: 'OK' };
+    return                                   { cls: 'toc-dot--info',     label: 'Info' };
+  }
+
+  // ── Helper: quick nav link ────────────────────────────────────────────────
+  function quickLink(href, text, iconChar) {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = href; a.className = 'toc-quick-link';
+    if (iconChar) { const icon = el('span', 'toc-quick-link__icon'); icon.textContent = iconChar; a.appendChild(icon); }
+    const span = document.createElement('span'); span.textContent = text; a.appendChild(span);
+    li.appendChild(a);
+    return li;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  // ── 1. Pinned quick-nav section ───────────────────────────────────────────
+  const quickSection = el('div', 'toc-quick-nav');
+  const quickLabel = el('div', 'toc-quick-nav__label'); quickLabel.textContent = 'Report'; quickSection.appendChild(quickLabel);
+  const quickList = document.createElement('ul'); quickList.className = 'toc-quick-nav__list';
+  quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u2B05'));
+  if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u2665'));
+  if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u2022\u2022\u2022'));
+  if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u2630'));
+  quickSection.appendChild(quickList);
+  fragment.appendChild(quickSection);
+
+  // ── 2. Domain / section tree ──────────────────────────────────────────────
+  const treeLabel = el('div', 'toc-quick-nav__label');
+  treeLabel.textContent = domains.length ? 'Domains' : 'Sections';
+  fragment.appendChild(treeLabel);
+
+  const container = el('div', 'toc-section');
+  if (domains.length) {
+    for (let i = 0; i < domains.length; i++) {
+      const domain = domains[i] || {};
+      const dot = sevDot(domain.leadSeverity);
+
+      const det = document.createElement('details');
+      det.open = false;
+      det.dataset.target = '#domain-' + i;
+
+      // Summary: dot + anchor link + chevron (chevron is native on <summary>)
+      const summ = document.createElement('summary');
+      summ.className = 'toc-domain-summary';
+
+      const dotEl = el('span', 'toc-dot ' + dot.cls);
+      dotEl.setAttribute('aria-label', dot.label);
+      summ.appendChild(dotEl);
+
+      const domainLink = document.createElement('a');
+      domainLink.className = 'toc-domain-summary__link';
+      domainLink.href = '#domain-' + i;
+      domainLink.textContent = domain.domain || ('Domain ' + i);
+      domainLink.addEventListener('click', function (e) {
+        e.stopPropagation(); // don't toggle the <details>
+      });
+      summ.appendChild(domainLink);
+
+      const sectionCount = (Array.isArray(domain.sections) ? domain.sections : []).length;
+      if (sectionCount) {
+        const cnt = el('span', 'toc-domain-summary__count'); cnt.textContent = String(sectionCount); summ.appendChild(cnt);
+      }
+      det.appendChild(summ);
+      attachScrollToggle(det);
+
+      const list = document.createElement('ol');
+      const domainSections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
+        return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
+      }) : [];
+      for (let j = 0; j < domainSections.length; j++) {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        // Use stable sectionId when available (e.g. "#A1"), fall back to positional
+        const sec = domainSections[j];
+        const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + (i * 1000 + j));
+        a.href = secHref;
+        a.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + j);
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+      if (domain.domainInsights && domain.domainInsights.length) {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = '#domain-' + i + '-insights';
+        a.textContent = 'Domain insights';
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+      if (list.children.length) det.appendChild(list);
+      container.appendChild(det);
+    }
+  } else {
+    for (let i = 0; i < sections.length; i++) {
+      const sec = sections[i];
+      const det = document.createElement('details');
+      det.open = false;
+      det.dataset.target = '#detail-' + i;
+      const summ = document.createElement('summary');
+      summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
+      det.appendChild(summ);
+      attachScrollToggle(det);
+      const tocNodes = buildTocNodes(sec.blocks || [], i);
+      if (tocNodes.length) det.appendChild(renderTocNodes(tocNodes));
+      container.appendChild(det);
+    }
+  }
+  fragment.appendChild(container);
+
+  nav.replaceChildren(fragment);
   return nav;
 }
 
@@ -751,19 +1481,172 @@ export function buildFindingCard(f, i) {
 }
 
 export function buildConfidenceNotes(doc) {
-  const notes = doc.confidence; if (!notes || !notes.length) return null; const sec = el('section', 'section-card'); const h2 = document.createElement('h2'); h2.textContent = 'Confidence Notes'; sec.appendChild(h2); const ul = document.createElement('ul'); for (const note of notes) { const li = document.createElement('li'); const strong = document.createElement('strong'); strong.textContent = '[' + note.analyzer + ']'; li.appendChild(strong); li.appendChild(t(' ' + note.reason)); ul.appendChild(li); } sec.appendChild(ul); return sec; }
+  if (Array.isArray(doc.domains) && doc.domains.length) return null;
+  const notes = doc.confidence;
+  if (!notes || !notes.length) return null;
+  const sec = el('section', 'section-card');
+  const h2 = document.createElement('h2'); h2.textContent = 'Confidence Notes'; sec.appendChild(h2);
+  const ul = document.createElement('ul');
+  for (const note of notes) {
+    const li = document.createElement('li');
+    const strong = document.createElement('strong'); strong.textContent = '[' + note.analyzer + ']'; li.appendChild(strong);
+    li.appendChild(t(' ' + note.reason));
+    ul.appendChild(li);
+  }
+  sec.appendChild(ul);
+  return sec;
+}
 
 export function buildAnalyzerSection(section, i) {
-  const wrapper = el('section', 'analyzer-section detail-color-' + (i % 6)); wrapper.id = 'detail-' + i; const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + i + '-summary';
+  // Use stable sectionId (e.g. "A1", "B4") when available; fall back to positional detail-N
+  const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : ('detail-' + i);
+  const wrapper = el('section', 'analyzer-section detail-color-' + (i % 6));
+  wrapper.id = stableId;
+  // Keep detail-N as a data attribute for internal use by collapsible/heading ID generation
+  wrapper.dataset.detailIndex = String(i);
+
+  // ── Collapsible: section handle (summary) always at top ───────────────────
+  const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + i + '-summary';
+  // Section-ID badge (e.g. "A1") + title
+  if (section.sectionId && section.sectionId.trim()) {
+    const idBadge = el('span', 'detail-summary__section-id'); idBadge.textContent = section.sectionId.trim(); summaryEl.appendChild(idBadge);
+  }
   const title = el('span', 'detail-summary__title'); title.textContent = section.displayTitle || section.analyzerName || '';
   const blocks = section.blocks || [];
   let headingCount = 0;
   for (const block of blocks) { if (block && block.type === 'heading') headingCount++; }
-  const meta = el('span', 'detail-summary__meta'); meta.textContent = headingCount > 0 ? (headingCount + ' insights') : (blocks.length + ' blocks');
-  summaryEl.appendChild(title); summaryEl.appendChild(meta); details.appendChild(summaryEl);
-  const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = String(i); renderBlocks(section.blocks || [], content); details.appendChild(content); wrapper.appendChild(details);
+  // Lead-finding severity badge in the summary row
+  const leadSev = section.leadFinding ? (section.leadFinding.severity || '').toLowerCase() : '';
+  const meta = el('span', 'detail-summary__meta');
+  meta.textContent = headingCount > 0 ? (headingCount + ' insights') : (blocks.length + ' blocks');
+  if (leadSev && leadSev !== 'info') {
+    const sevBadge = el('span', 'detail-summary__sev detail-summary__sev--' + leadSev);
+    sevBadge.textContent = leadSev.charAt(0).toUpperCase() + leadSev.slice(1);
+    summaryEl.appendChild(title); summaryEl.appendChild(meta); summaryEl.appendChild(sevBadge);
+  } else {
+    summaryEl.appendChild(title); summaryEl.appendChild(meta);
+  } details.appendChild(summaryEl);
+
+  const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = String(i);
+
+  // ── Inside the expanded area: Lead Finding first, then Key Metrics strip ──
+  const lead = section.leadFinding;
+  if (lead) {
+    const sev = (lead.severity || 'info').toLowerCase();
+    const lf = el('div', 'lead-finding lead-finding--' + sev);
+    const lfHeader = el('div', 'lead-finding__header');
+    const lfSev = el('span', 'lead-finding__severity'); lfSev.textContent = lead.severity || 'Info';
+    const lfTitle = el('span', 'lead-finding__title'); lfTitle.textContent = lead.title || '';
+    const lfConf = el('span', 'lead-finding__confidence');
+    lfConf.textContent = (lead.confidenceSymbol || '') + ' ' + Math.round((lead.confidenceScore || 0) * 100) + '%';
+    lfHeader.appendChild(lfSev); lfHeader.appendChild(lfTitle); lfHeader.appendChild(lfConf);
+    lf.appendChild(lfHeader);
+    if (lead.evidence) { const lfEv = el('div', 'lead-finding__evidence'); lfEv.textContent = lead.evidence; lf.appendChild(lfEv); }
+    if (lead.recommendation) { const lfRec = el('div', 'lead-finding__recommendation'); lfRec.textContent = '\u2192 ' + lead.recommendation; lf.appendChild(lfRec); }
+    if (lead.caveats && lead.caveats.length) {
+      const lfCav = el('div', 'lead-finding__caveats');
+      for (let ci = 0; ci < lead.caveats.length; ci++) { const c = el('div', 'lead-finding__caveat'); c.textContent = '\u26a0 ' + lead.caveats[ci]; lfCav.appendChild(c); }
+      lf.appendChild(lfCav);
+    }
+    content.appendChild(lf);
+  }
+
+  const metrics = section.keyMetrics;
+  if (metrics && metrics.length) {
+    const strip = el('div', 'key-metrics');
+    for (let mi = 0; mi < metrics.length; mi++) {
+      const m = metrics[mi]; const chip = el('div', 'key-metric');
+      const lbl = el('span', 'key-metric__label'); lbl.textContent = m.label || '';
+      const val = el('span', 'key-metric__value'); val.textContent = m.value || '';
+      chip.appendChild(lbl); chip.appendChild(val); strip.appendChild(chip);
+    }
+    content.appendChild(strip);
+  }
+
+  // ── Narrative blocks (headings, text, confidence bands, collapsibles) ──────
+  renderBlocks(blocks, content);
+
+  // ── Typed section tables (each collapsed by default) ─────────────────────
+  const sectionTables = section.tables;
+  if (sectionTables && sectionTables.length) {
+    for (let ti = 0; ti < sectionTables.length; ti++) {
+      const tbl = sectionTables[ti];
+      const tblDetails = el('details', 'table-collapse');
+      const tblSummary = el('summary', 'table-collapse__summary');
+      const rowCount = tbl.rows ? tbl.rows.length : 0;
+      const limit = tbl.rowLimit || 20;
+      tblSummary.textContent = (tbl.title || 'Table') + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
+      tblDetails.appendChild(tblSummary);
+      if (tbl.headers && tbl.headers.length) {
+        const tblWrap = el('div', 'table-wrap');
+        const tableEl = document.createElement('table');
+        const thead = document.createElement('thead');
+        const hrow = document.createElement('tr');
+        for (let hi = 0; hi < tbl.headers.length; hi++) {
+          const th = document.createElement('th'); th.textContent = tbl.headers[hi]; hrow.appendChild(th);
+        }
+        thead.appendChild(hrow); tableEl.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        const displayRows = limit > 0 && rowCount > limit ? tbl.rows.slice(0, limit) : (tbl.rows || []);
+        for (let ri = 0; ri < displayRows.length; ri++) {
+          const dataRow = displayRows[ri]; const tr = document.createElement('tr');
+          const cells = dataRow.cells || dataRow;
+          for (let ci = 0; ci < cells.length; ci++) {
+            const td = document.createElement('td');
+            const cellData = cells[ci];
+            td.textContent = (cellData && cellData.display != null) ? cellData.display : (cellData != null ? String(cellData) : '');
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        tableEl.appendChild(tbody);
+        if (limit > 0 && rowCount > limit) {
+          const tfoot = document.createElement('tfoot');
+          const tfrow = document.createElement('tr');
+          const tftd = document.createElement('td'); tftd.colSpan = tbl.headers.length;
+          tftd.className = 'table-footer-note'; tftd.textContent = '\u2026 ' + (rowCount - limit) + ' more rows hidden (rowLimit=' + limit + ')';
+          tfrow.appendChild(tftd); tfoot.appendChild(tfrow); tableEl.appendChild(tfoot);
+        }
+        tblWrap.appendChild(tableEl); tblDetails.appendChild(tblWrap);
+      }
+      content.appendChild(tblDetails);
+    }
+  }
+
+  details.appendChild(content); wrapper.appendChild(details);
   const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#detail-' + i; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = '🔗'; summaryEl.appendChild(t(' ')); summaryEl.appendChild(pa);
   const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#detail-' + i; copyBtn.textContent = '\u2398'; summaryEl.appendChild(copyBtn);
+
+  // ── Provenance footer — collapsed, scoped outside main details ────────────
+  const prov = section.provenance;
+  if (prov) {
+    const provDetails = el('details', 'provenance');
+    const provSummary = el('summary', 'provenance__summary');
+    provSummary.textContent = 'Provenance \u2014 ' + (prov.analyzer || '') + ' \u00b7 ' + (prov.status || '') + ' \u00b7 ' + (prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014');
+    provDetails.appendChild(provSummary);
+    const provContent = el('div', 'provenance__content');
+    const rows = [
+      ['Analyzer', prov.analyzer],
+      ['Status', prov.status],
+      ['Duration', prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014'],
+      ['Objects scanned', prov.objectScanCount != null ? Number(prov.objectScanCount).toLocaleString() : '\u2014'],
+      ['Cache hits', prov.cacheHits != null ? Number(prov.cacheHits).toLocaleString() : '\u2014'],
+      ['Cache misses', prov.cacheMisses != null ? Number(prov.cacheMisses).toLocaleString() : '\u2014'],
+    ];
+    for (let ri = 0; ri < rows.length; ri++) {
+      const r = rows[ri];
+      const lbl = el('span', 'provenance__label'); lbl.textContent = r[0];
+      const val = el('span', 'provenance__value'); val.textContent = r[1] || '\u2014';
+      provContent.appendChild(lbl); provContent.appendChild(val);
+    }
+    if (prov.cappingNotes && prov.cappingNotes.length) {
+      for (let ni = 0; ni < prov.cappingNotes.length; ni++) {
+        const note = el('div', 'provenance__note'); note.textContent = '\u26a0 ' + prov.cappingNotes[ni]; provContent.appendChild(note);
+      }
+    }
+    provDetails.appendChild(provContent); wrapper.appendChild(provDetails);
+  }
+
   return wrapper;
 }
 

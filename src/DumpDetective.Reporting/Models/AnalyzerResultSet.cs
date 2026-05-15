@@ -5,12 +5,17 @@ namespace DumpDetective.Reporting.Models;
 internal sealed class AnalyzerResultSet
 {
     private readonly IReadOnlyList<AnalyzerRunResult> _runs;
+    private readonly IReadOnlyList<InsightFinding> _additionalFindings;
     private readonly Dictionary<Type, AnalyzerDomainResult?> _cache = new();
 
-    public AnalyzerResultSet(IReadOnlyList<AnalyzerRunResult> runs, AnalysisIncidentContext? incidentContext = null)
+    public AnalyzerResultSet(
+        IReadOnlyList<AnalyzerRunResult> runs,
+        AnalysisIncidentContext? incidentContext = null,
+        IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
         _runs = runs;
         IncidentContext = incidentContext;
+        _additionalFindings = additionalFindings ?? [];
     }
 
     public AnalysisIncidentContext? IncidentContext { get; }
@@ -46,6 +51,9 @@ internal sealed class AnalyzerResultSet
             if (run.Findings is { Count: > 0 })
                 all.AddRange(run.Findings);
         }
+
+        if (_additionalFindings.Count > 0)
+            all.AddRange(_additionalFindings);
 
         all.Sort(static (a, b) => b.Severity.CompareTo(a.Severity));
         return all;

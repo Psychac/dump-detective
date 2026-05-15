@@ -22,7 +22,9 @@ internal sealed record AnalysisIncidentContext(
     bool HeapCanWalk,
     bool IsTrendReport,
     double AnalysisElapsedSeconds,
-    IReadOnlyList<TrendSnapshotContext>? TrendSnapshots = null);
+    IReadOnlyList<TrendSnapshotContext>? TrendSnapshots = null,
+    string? DumpSizeTierLabel = null,
+    long? DumpFileSizeBytes = null);
 
 internal sealed record TrendSnapshotContext(
     int Index,

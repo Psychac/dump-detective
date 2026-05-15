@@ -15,40 +15,44 @@ internal sealed class DependentHandleSectionBuilder : SectionBuilderBase, IAnaly
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DependentHandleDomainResult)result;
-        var blocks = new List<SectionBlock>();
-
-        blocks.Add(H("DEPENDENT HANDLE SUMMARY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Dependent Handles", $"{d.DependentHandleCount:N0}", d.DependentHandleCount));
-        blocks.Add(M("Resolved Edges", $"{d.ResolvedEdgeCount:N0}", d.ResolvedEdgeCount));
-        blocks.Add(M("Unresolved Targets", $"{d.UnresolvedTargetCount:N0}  ({d.UnresolvedPercent:F1}%)", d.UnresolvedTargetCount));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Dependent Handles", $"{d.DependentHandleCount:N0}", d.DependentHandleCount),
+            KM("Resolved Edges", $"{d.ResolvedEdgeCount:N0}", d.ResolvedEdgeCount),
+            KM("Unresolved Targets", $"{d.UnresolvedTargetCount:N0}  ({d.UnresolvedPercent:F1}%)", d.UnresolvedTargetCount),
+        };
+        var tables = new List<SectionTable>();
 
         var sourceTypes = d.TopSourceTypes ?? [];
         if (sourceTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("SOURCE TYPE DISTRIBUTION"));
-            blocks.Add(Divider());
-
             var stRows = new List<TableRow>(sourceTypes.Count);
             for (int i = 0; i < sourceTypes.Count; i++)
                 stRows.Add(new TableRow([Cell(sourceTypes[i].Name), Cell($"{sourceTypes[i].Count:N0}", sourceTypes[i].Count)]));
-            blocks.Add(new TableBlock("Source type distribution", ["Type", "Count"], stRows));
+            tables.Add(ST("Source type distribution", ["Type", "Count"], stRows));
         }
 
         var targetTypes = d.TopTargetTypes ?? [];
         if (targetTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TARGET TYPE DISTRIBUTION"));
-            blocks.Add(Divider());
-
             var ttRows = new List<TableRow>(targetTypes.Count);
             for (int i = 0; i < targetTypes.Count; i++)
                 ttRows.Add(new TableRow([Cell(targetTypes[i].Name), Cell($"{targetTypes[i].Count:N0}", targetTypes[i].Count)]));
-            blocks.Add(new TableBlock("Target type distribution", ["Type", "Count"], ttRows));
+            tables.Add(ST("Target type distribution", ["Type", "Count"], ttRows));
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+        var sourceTargetEdges = d.TopSourceTargetEdges;
+        if (sourceTargetEdges != null && sourceTargetEdges.Count > 0)
+        {
+            var edgeRows = new List<TableRow>(sourceTargetEdges.Count);
+            for (int i = 0; i < sourceTargetEdges.Count; i++)
+                edgeRows.Add(new TableRow(new[] { Cell(sourceTargetEdges[i].Name), Cell(sourceTargetEdges[i].Count.ToString("N0"), sourceTargetEdges[i].Count) }));
+            tables.Add(ST("Source to target pairs", new[] { "Pair", "Count" }, edgeRows));
+        }
+
+        return new AnalyzerDetailSection(
+            AnalyzerName, AnalyzerName, SortOrder, [],
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

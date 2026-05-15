@@ -68,20 +68,9 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1)).ToList()
                 },
-            Findings = trendFindings.Select(f => MapFinding(f, trendData.Snapshots.Count - 1)).ToList(),
             ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
-            DeveloperActionPlan = baseDoc.DeveloperActionPlan,
-            Confidence = baseDoc.Confidence,
+            Findings = trendFindings.Select(f => MapFinding(f, trendData.Snapshots.Count - 1)).ToList(),
             AnalyzerSections = analyzerSections,
-            AnalyzerRunStatuses = currentRuns.Select(r => new AnalyzerRunStatusRecord(
-                AnalyzerName: r.AnalyzerName,
-                Status: r.Status.ToString(),
-                DurationMs: r.Duration.TotalMilliseconds,
-                FindingCount: r.FindingCount,
-                WarningCount: r.WarningCount,
-                ObjectScanCount: r.ObjectScanCount,
-                ErrorMessage: r.ErrorMessage)).ToList(),
-            Artifacts = currentRuns.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToList()
         };
     }
 

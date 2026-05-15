@@ -215,11 +215,23 @@ internal sealed class EventLeakFastScanner
             if (mt != 0) uniqueMts.Add(mt);
         }
 
+        int resolved = 0;
+        int total = uniqueMts.Count;
+        _progress?.Report(new AnalyzerProgressReport(0, "building event type index",
+            $"0 / {total:N0} types", _reporterStopwatch.Elapsed));
+
         foreach (ulong mt in uniqueMts)
         {
             _mtIndex.TryAdd(mt, BuildFieldLayouts(mt));
-            ReportProgressInterlocked();
+            resolved++;
+            // Report every 100 types to keep call overhead low; ThrottledProgress upstream gates the rate.
+            if (resolved % 100 == 0)
+                _progress?.Report(new AnalyzerProgressReport(resolved, "building event type index",
+                    $"{resolved:N0} / {total:N0} types", _reporterStopwatch.Elapsed));
         }
+
+        _progress?.Report(new AnalyzerProgressReport(resolved, "building event type index",
+            $"{resolved:N0} / {total:N0} types", _reporterStopwatch.Elapsed));
     }
 
     private DelegateFieldLayout[]? BuildFieldLayouts(ulong mt)

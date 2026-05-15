@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
@@ -7,6 +8,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
+    public IReadOnlyList<string> SourceAnalyzers => [];
+
     public string SectionId => "prof.confidence";
     public string DisplayTitle => "Confidence & Limitations";
     public int SortOrder => 1750;
@@ -15,9 +18,9 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>
         {
-            H("RUN STATUS SUMMARY"),
             T("Status mapping: Completed, Failed, Skipped (filter), and Skipped (cancelled)."),
         };
 
@@ -54,20 +57,39 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(string.IsNullOrWhiteSpace(run.SkipReason) ? (string.IsNullOrWhiteSpace(run.ErrorMessage) ? "-" : run.ErrorMessage) : run.SkipReason)));
         }
 
-        blocks.Add(new TableBlock(
-            Caption: "Analyzer run status",
-            Headers: ["Analyzer", "Status", "Duration (ms)", "Objects Scanned", "Error"],
-            Rows: rows));
+        tables.Add(ST("Analyzer run status",
+            ["Analyzer", "Status", "Duration (ms)", "Objects Scanned", "Error/Skip Reason"], rows));
 
-        blocks.Add(Blank());
-        blocks.Add(H("AGGREGATE STATUS"));
-        blocks.Add(M("Completed", completed.ToString("N0"), completed));
-        blocks.Add(M("Failed", failed.ToString("N0"), failed));
-        blocks.Add(M("Skipped by filter", skippedFilter.ToString("N0"), skippedFilter));
-        blocks.Add(M("Skipped by cancellation", skippedCancelled.ToString("N0"), skippedCancelled));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Completed",              completed.ToString("N0"),      completed),
+            KM("Failed",                 failed.ToString("N0"),         failed),
+            KM("Skipped by filter",      skippedFilter.ToString("N0"),  skippedFilter),
+            KM("Skipped by cancellation",skippedCancelled.ToString("N0"),skippedCancelled),
+        };
 
-        blocks.Add(Blank());
-        blocks.Add(H("CONFIDENCE TIERS"));
+        var memoryRows = new List<TableRow>();
+        foreach (var run in results.AllRuns)
+        {
+            if (run.MemoryStats is null)
+                continue;
+
+            AnalyzerMemoryStats stats = run.MemoryStats;
+            memoryRows.Add(Row(
+                Cell(run.AnalyzerName),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetBefore)), stats.WorkingSetBefore),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetAfter)), stats.WorkingSetAfter),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetDelta)), stats.WorkingSetDelta),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapBefore)), stats.ManagedHeapBefore),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapAfter)), stats.ManagedHeapAfter),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapDelta)), stats.ManagedHeapDelta)));
+        }
+
+        if (memoryRows.Count > 0)
+            tables.Add(ST("Analyzer memory impact",
+                ["Analyzer", "WS Before", "WS After", "WS Delta", "MH Before", "MH After", "MH Delta"],
+                memoryRows));
+
         blocks.Add(T("Measured = 1.0, High-confidence heuristic = 0.8, Partial/bounded = 0.5, Speculative < 0.5."));
 
         var limitationRows = new List<TableRow>();
@@ -79,15 +101,9 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         AddLimitation(limitationRows, "Arrays", results.Get<ArrayDomainResult>() is ArrayDomainResult array && array.ScanLimited, BuildArrayText(results.Get<ArrayDomainResult>()));
 
         if (limitationRows.Count > 0)
-        {
-            blocks.Add(H("LIMITATION SIGNALS"));
-            blocks.Add(new TableBlock(
-                Caption: "Current bounded-scan signals",
-                Headers: ["Area", "Flagged", "What it means"],
-                Rows: limitationRows));
-        }
+            tables.Add(ST("Current bounded-scan signals",
+                ["Area", "Flagged", "What it means"], limitationRows));
 
-        blocks.Add(H("LIMITATIONS"));
         blocks.Add(Li("Bounded retained-size BFS still uses a breadth cap and depth cap."));
         blocks.Add(Li("Retention and root-path metrics remain selective, not exhaustive, on large dumps."));
         blocks.Add(Li("Event and finalizer retention numbers are heuristic summaries, not full graph proofs."));
@@ -96,7 +112,9 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             AnalyzerName: "Confidence & Limitations",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static void AddLimitation(List<TableRow> rows, string area, bool flagged, string text)

@@ -53,6 +53,15 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             }
             sb.AppendLine();
         }
+        if (doc.HealthScorecard is { } scorecard)
+        {
+            RenderHealthScorecard(scorecard, sb);
+        }
+
+        if (doc.ExecutiveSummary is { } executiveSummary)
+        {
+            RenderExecutiveSummaryText(executiveSummary, sb);
+        }
 
         if (doc.IncidentContext is { } ctx)
         {
@@ -83,29 +92,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
 
-        if (doc.DeveloperActionPlan.Count > 0)
-        {
-            sb.AppendLine("DEVELOPER ACTION PLAN");
-            sb.AppendLine(StringConstants.Equals80);
-            foreach (DeveloperActionRecord action in doc.DeveloperActionPlan)
-            {
-                sb.AppendLine($"[{action.Priority}] {action.Title}");
-                sb.AppendLine($"  Action: {action.Action}");
-                sb.AppendLine($"  Impact: {action.Impact}");
-                sb.AppendLine();
-            }
-        }
-
-        if (doc.Confidence.Count > 0)
-        {
-            sb.AppendLine("CONFIDENCE NOTES");
-            sb.AppendLine(StringConstants.Separator80);
-            foreach (ConfidenceNote note in doc.Confidence)
-                sb.AppendLine($"- [{note.Analyzer}] {note.Reason}");
-            sb.AppendLine();
-        }
-
-        if (doc.AnalyzerSections.Count > 0)
+        if (doc.Domains is null && doc.AnalyzerSections.Count > 0)
         {
             sb.AppendLine("DETAILED ANALYZER SECTIONS");
             sb.AppendLine(StringConstants.Equals80);
@@ -183,6 +170,10 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine($"{Indent(0)}[Chart] {chart.Title} ({chart.Kind})");
                     sb.AppendLine();
                     break;
+                case ConfidenceBandBlock band:
+                    sb.AppendLine($"{Indent(0)}> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
+                    sb.AppendLine();
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"[{cs.Title}]");
                     break;
@@ -229,6 +220,54 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         sb.AppendLine();
     }
 
+    private static void RenderHealthScorecard(HealthScorecard scorecard, StringBuilder sb)
+    {
+        sb.AppendLine("HEALTH SUMMARY");
+        sb.AppendLine(StringConstants.Equals80);
+        sb.AppendLine("Domain                Severity    Critical  Warning");
+        sb.AppendLine("--------------------   --------    --------  -------");
+        for (int i = 0; i < scorecard.Domains.Count; i++)
+        {
+            DomainHealthEntry entry = scorecard.Domains[i];
+            sb.AppendLine($"{entry.Domain,-21} {entry.Severity,-10} {entry.CriticalCount,8} {entry.WarningCount,8}");
+        }
+        sb.AppendLine($"Overall severity: {scorecard.OverallSeverity}");
+        sb.AppendLine();
+    }
+
+    private static void RenderExecutiveSummaryText(ExecutiveSummaryRecord summary, StringBuilder sb)
+    {
+        sb.AppendLine("EXECUTIVE SUMMARY");
+        sb.AppendLine(StringConstants.Equals80);
+        sb.AppendLine($"- Total managed bytes: {summary.TotalManagedBytes:N0}");
+        sb.AppendLine($"- Leak likelihood score: {summary.LeakLikelihoodScore}");
+        sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
+        sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
+
+        if (summary.CriticalFindings is { Count: > 0 })
+        {
+            sb.AppendLine("Critical findings:");
+            foreach (FindingRecord finding in summary.CriticalFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        if (summary.WarningFindings is { Count: > 0 })
+        {
+            sb.AppendLine("Warning findings:");
+            foreach (FindingRecord finding in summary.WarningFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        if (summary.TopRecommendations is { Count: > 0 })
+        {
+            sb.AppendLine("Top recommendations:");
+            foreach (FindingRecord finding in summary.TopRecommendations)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        sb.AppendLine();
+    }
+
     private static string Indent(int level) => level switch { 1 => "  ", 2 => "    ", >= 3 => "      ", _ => string.Empty };
 }
 
@@ -261,7 +300,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         // Dedup merged summary removed — no longer useful
 
         // Table Of Contents (Markdown)
-        if (doc.AnalyzerSections.Count > 0)
+        if (doc.Domains is null && doc.AnalyzerSections.Count > 0)
         {
             sb.AppendLine("## Table of Contents");
             sb.AppendLine();
@@ -288,6 +327,16 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine($"> - `{path}`");
             }
             sb.AppendLine();
+        }
+
+        if (doc.HealthScorecard is { } scorecard)
+        {
+            RenderHealthScorecard(scorecard, sb);
+        }
+
+        if (doc.ExecutiveSummary is { } executiveSummary)
+        {
+            RenderExecutiveSummaryMarkdown(executiveSummary, sb);
         }
 
         if (doc.IncidentContext is { } ctx)
@@ -326,27 +375,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
 
-        if (doc.DeveloperActionPlan.Count > 0)
-        {
-            sb.AppendLine("## Developer Action Plan");
-            sb.AppendLine();
-            sb.AppendLine("| Priority | Title | Action | Impact |");
-            sb.AppendLine("|---|---|---|---|");
-            foreach (DeveloperActionRecord action in doc.DeveloperActionPlan)
-                sb.AppendLine($"| {action.Priority} | {Esc(action.Title)} | {Esc(action.Action)} | {Esc(action.Impact)} |");
-            sb.AppendLine();
-        }
-
-        if (doc.Confidence.Count > 0)
-        {
-            sb.AppendLine("## Confidence Notes");
-            sb.AppendLine();
-            foreach (ConfidenceNote note in doc.Confidence)
-                sb.AppendLine($"- **[{note.Analyzer}]** {note.Reason}");
-            sb.AppendLine();
-        }
-
-        if (doc.AnalyzerSections.Count > 0)
+        if (doc.Domains is null && doc.AnalyzerSections.Count > 0)
         {
             sb.AppendLine("## Detailed Analyzer Sections");
             sb.AppendLine();
@@ -362,6 +391,102 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         }
 
         return sb.ToString();
+    }
+
+    private static void RenderHealthScorecard(HealthScorecard scorecard, StringBuilder sb)
+    {
+        sb.AppendLine("## Health Summary");
+        sb.AppendLine();
+        sb.AppendLine("| Domain | Severity | Critical | Warning |");
+        sb.AppendLine("|---|---|---|---|");
+        for (int i = 0; i < scorecard.Domains.Count; i++)
+        {
+            DomainHealthEntry entry = scorecard.Domains[i];
+            sb.AppendLine($"| {Esc(entry.Domain)} | {entry.Severity} | {entry.CriticalCount} | {entry.WarningCount} |");
+        }
+        sb.AppendLine();
+    }
+
+    private static void RenderExecutiveSummaryMarkdown(ExecutiveSummaryRecord summary, StringBuilder sb)
+    {
+        sb.AppendLine("## Executive Summary");
+        sb.AppendLine();
+        sb.AppendLine($"- Total managed bytes: {summary.TotalManagedBytes:N0}");
+        sb.AppendLine($"- Leak likelihood score: {summary.LeakLikelihoodScore}");
+        sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
+        sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
+
+        if (summary.CriticalFindings is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Critical Findings");
+            foreach (FindingRecord finding in summary.CriticalFindings)
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+        }
+
+        if (summary.WarningFindings is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Warning Findings");
+            foreach (FindingRecord finding in summary.WarningFindings)
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+        }
+
+        if (summary.TopRecommendations is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Top Recommendations");
+            foreach (FindingRecord finding in summary.TopRecommendations)
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+        }
+
+        sb.AppendLine();
+    }
+
+    private static void RenderExecutiveSummaryText(ExecutiveSummaryRecord summary, StringBuilder sb)
+    {
+        sb.AppendLine("EXECUTIVE SUMMARY");
+        sb.AppendLine(StringConstants.Equals80);
+        sb.AppendLine($"- Total managed bytes: {summary.TotalManagedBytes:N0}");
+        sb.AppendLine($"- Leak likelihood score: {summary.LeakLikelihoodScore}");
+        sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
+        sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
+
+        if (summary.CriticalFindings is { Count: > 0 })
+        {
+            sb.AppendLine("Critical findings:");
+            foreach (FindingRecord finding in summary.CriticalFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        if (summary.WarningFindings is { Count: > 0 })
+        {
+            sb.AppendLine("Warning findings:");
+            foreach (FindingRecord finding in summary.WarningFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        if (summary.TopRecommendations is { Count: > 0 })
+        {
+            sb.AppendLine("Top recommendations:");
+            foreach (FindingRecord finding in summary.TopRecommendations)
+                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+        }
+
+        sb.AppendLine();
+    }
+
+    private static void RenderHealthScorecardHtml(HealthScorecard scorecard, StringBuilder sb)
+    {
+        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
+        sb.AppendLine("<table><thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+        for (int i = 0; i < scorecard.Domains.Count; i++)
+        {
+            DomainHealthEntry entry = scorecard.Domains[i];
+            string severity = entry.Severity.ToString();
+            sb.AppendLine($"<tr><td>{System.Net.WebUtility.HtmlEncode(entry.Domain)}</td><td class=\"health-severity health-severity-{severity.ToLowerInvariant()}\">{System.Net.WebUtility.HtmlEncode(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+        }
+        sb.AppendLine($"</tbody></table><div class=\"health-scorecard__overall\">Overall severity: {System.Net.WebUtility.HtmlEncode(scorecard.OverallSeverity.ToString())}</div></section>");
     }
 
     private static void RenderBlocksMd(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)
@@ -403,6 +528,10 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     break;
                 case ChartBlock chart:
                     sb.AppendLine($"**{chart.Title}** ({chart.Kind})");
+                    sb.AppendLine();
+                    break;
+                case ConfidenceBandBlock band:
+                    sb.AppendLine($"> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
                     sb.AppendLine();
                     break;
                 case CollapsibleSectionBeginBlock cs:
@@ -509,6 +638,11 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             }
         }
 
+        if (doc.HealthScorecard is { } scorecard)
+        {
+            RenderHealthScorecardHtml(scorecard, sb);
+        }
+
         if (doc.IncidentContext is { } ctx)
         {
             string configText = (ctx.UsedConfigFile ? "config file" : "command line")
@@ -550,7 +684,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         }
 
         // ── Table Of Contents (HTML) ───────────────────────────────────────
-        if (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0)
+        if (doc.Domains is null && (doc.Findings.Count > 0 || doc.AnalyzerSections.Count > 0))
         {
             sb.AppendLine("<nav class=\"toc\" aria-label=\"Report table of contents\">\n<div class=\"toc-title\">Table of contents</div>");
             if (doc.Findings.Count > 0)
@@ -570,18 +704,8 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             sb.AppendLine("</nav>");
         }
 
-        // ── Developer action plan ───────────────────────────────────────────
-        if (doc.DeveloperActionPlan.Count > 0)
-        {
-            sb.AppendLine("<section class=\"section-card\"><h2>Developer Action Plan</h2>");
-            sb.AppendLine("<table><thead><tr><th scope=\"col\">Priority</th><th scope=\"col\">Title</th><th scope=\"col\">Action</th><th scope=\"col\">Impact</th></tr></thead><tbody>");
-            foreach (DeveloperActionRecord action in doc.DeveloperActionPlan)
-                sb.AppendLine($"<tr><td>{Enc(action.Priority)}</td><td>{Enc(action.Title)}</td><td class=\"wrap\">{Enc(action.Action)}</td><td class=\"wrap\">{Enc(action.Impact)}</td></tr>");
-            sb.AppendLine("</tbody></table></section>");
-        }
-
         // ── Filter bar ──────────────────────────────────────────────────────
-        if (doc.Findings.Count > 0)
+        if (doc.Domains is null && doc.Findings.Count > 0)
         {
             int crit = 0, warn = 0;
             foreach (FindingRecord f in doc.Findings) { if (f.Severity == "Critical") crit++; else if (f.Severity == "Warning") warn++; }
@@ -653,14 +777,6 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             sb.AppendLine("</tbody></table></section>");
         }
 
-        if (doc.Confidence.Count > 0)
-        {
-            sb.AppendLine("<section class=\"section-card\"><h2>Confidence Notes</h2><ul>");
-            foreach (ConfidenceNote note in doc.Confidence)
-                sb.AppendLine($"<li><strong>[{Enc(note.Analyzer)}]</strong> {Enc(note.Reason)}</li>");
-            sb.AppendLine("</ul></section>");
-        }
-
         // ── Analyzer sections ───────────────────────────────────────────────
         for (int i = 0; i < doc.AnalyzerSections.Count; i++)
         {
@@ -686,6 +802,19 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
     private static void RenderBlocksHtml(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)
     {
         ReportHtmlShared.RenderBlocksHtml(blocks, sb);
+    }
+
+    private static void RenderHealthScorecardHtml(HealthScorecard scorecard, StringBuilder sb)
+    {
+        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
+        sb.AppendLine("<table><thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+        for (int i = 0; i < scorecard.Domains.Count; i++)
+        {
+            DomainHealthEntry entry = scorecard.Domains[i];
+            string severity = entry.Severity.ToString();
+            sb.AppendLine($"<tr><td>{System.Net.WebUtility.HtmlEncode(entry.Domain)}</td><td class=\"health-severity health-severity-{severity.ToLowerInvariant()}\">{System.Net.WebUtility.HtmlEncode(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+        }
+        sb.AppendLine($"</tbody></table><div class=\"health-scorecard__overall\">Overall severity: {System.Net.WebUtility.HtmlEncode(scorecard.OverallSeverity.ToString())}</div></section>");
     }
 
     private static void RenderTableHtml(TableBlock tbl, StringBuilder sb)
@@ -757,6 +886,13 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         sb.AppendLine(".detail-block tbody td{border:1px solid #e2e8f0;padding:5px 8px;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;} ");
         sb.AppendLine(".detail-block tbody tr:nth-child(even){background:rgba(0,0,0,0.02);} ");
         sb.AppendLine(".detail-block caption{color:#6b7280;font-size:13px;font-weight:600;text-align:left;padding:2px 0 4px 0;caption-side:top;} ");
+        sb.AppendLine(".detail-confidence{margin:8px 0 10px;display:flex;flex-direction:column;gap:6px;} ");
+        sb.AppendLine(".confidence-band{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;width:max-content;border:1px solid transparent;} ");
+        sb.AppendLine(".confidence-high{background:#dcfce7;color:#166534;border-color:#bbf7d0;} ");
+        sb.AppendLine(".confidence-medium{background:#fef3c7;color:#92400e;border-color:#fde68a;} ");
+        sb.AppendLine(".confidence-low{background:#fee2e2;color:#b91c1c;border-color:#fecaca;} ");
+        sb.AppendLine(".confidence-caveats{margin:0;padding-left:18px;color:#475569;font-size:12px;} ");
+        sb.AppendLine(".confidence-caveats li{margin:0;} ");
         sb.AppendLine(".detail-nested{margin:6px 0;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;} ");
         sb.AppendLine(".detail-nested>summary{display:flex;align-items:center;gap:8px;padding:8px 10px;color:#374151;font-weight:600;font-size:13px;cursor:pointer;list-style:none;user-select:none;} ");
         sb.AppendLine(".detail-nested>summary::-webkit-details-marker{display:none;} .detail-nested>summary:hover{background:rgba(0,0,0,0.03);} ");

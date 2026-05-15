@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.Models;
+﻿using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -6,238 +6,138 @@ using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase, IReportSectionBuilder
+/// <summary>B3 — Heap Topology. Source: <see cref="SegmentAnalysisDomainResult"/>.</summary>
+internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string SectionId => "prof.heap-segment-diagnostics";
-    public string DisplayTitle => "Heap Segment Diagnostics";
-    public int SortOrder => 1450;
+    public string AnalyzerName => "Segment Analysis";
+    public string DisplayTitle => "Heap Topology";
+    public int SortOrder => 9;
 
-    public bool CanBuild(AnalyzerResultSet results)
-        => results.Get<SegmentAnalysisDomainResult>() is not null
-        || results.Get<LohFragmentationDomainResult>() is not null
-        || results.Get<ArrayDomainResult>() is not null
-        || results.Get<MemoryDomainResult>() is not null;
+    public bool CanHandle(AnalyzerDomainResult result) => result is SegmentAnalysisDomainResult;
 
-    public AnalyzerDetailSection Build(AnalyzerResultSet results)
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
-        SegmentAnalysisDomainResult? segments = results.Get<SegmentAnalysisDomainResult>();
-        LohFragmentationDomainResult? loh = results.Get<LohFragmentationDomainResult>();
-        ArrayDomainResult? arrays = results.Get<ArrayDomainResult>();
-        MemoryDomainResult? memory = results.Get<MemoryDomainResult>();
+        var d = (SegmentAnalysisDomainResult)result;
+        var tables = new List<SectionTable>();
+        var blocks = new List<SectionBlock>();
 
-        var blocks = new List<SectionBlock>
+        var keyMetrics = new List<SectionKeyMetric>
         {
-            H("LOH SUMMARY"),
-            T("Large object heap, pinned object heap, and frozen heap signals are summarized here."),
+            KM("Total segments",  d.TotalSegments.ToString("N0"),           d.TotalSegments),
+            KM("Committed bytes", FormatBytes(d.TotalCommittedBytes),      (double)d.TotalCommittedBytes),
+            KM("Used bytes",      FormatBytes(d.TotalUsedBytes),           (double)d.TotalUsedBytes),
+            KM("Reserved bytes",  FormatBytes(d.TotalReservedBytes),       (double)d.TotalReservedBytes),
+            KM("Reservation gap", FormatBytes(d.ReservationGapBytes),     (double)d.ReservationGapBytes),
+            KM("SOH bytes",       FormatBytes(d.SohBytes),                (double)d.SohBytes),
+            KM("LOH bytes",       FormatBytes(d.LohBytes),                (double)d.LohBytes),
+            KM("LOH %",           $"{d.LohPercent:F1}%",                   d.LohPercent),
+            KM("POH bytes",       FormatBytes(d.PohBytes),                (double)d.PohBytes),
+            KM("POH %",           $"{d.PohPercent:F1}%",                   d.PohPercent),
+            KM("FOH bytes",       FormatBytes(d.FrozenBytes),             (double)d.FrozenBytes),
+            KM("FOH %",           $"{d.FrozenPercent:F1}%",               d.FrozenPercent),
         };
 
-        if (segments is not null)
+        if (d.FrozenBytes > 100UL * 1024 * 1024)
+            blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
+
+        // Kind summary
+        if (d.KindSummaries is { Count: > 0 })
         {
-            blocks.Add(M("LOH bytes", FormatBytes(segments.LohBytes), (double)segments.LohBytes));
-            blocks.Add(M("LOH segments", segments.LohSegmentCount.ToString("N0"), segments.LohSegmentCount));
-            blocks.Add(M("POH bytes", FormatBytes(segments.PohBytes), (double)segments.PohBytes));
-            blocks.Add(M("FOH bytes", FormatBytes(segments.FrozenBytes), (double)segments.FrozenBytes));
-
-            if (segments.FrozenBytes > 100UL * 1024 * 1024)
+            var rows = new List<TableRow>(d.KindSummaries.Count);
+            for (int i = 0; i < d.KindSummaries.Count; i++)
             {
-                blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
+                SegmentKindSummary s = d.KindSummaries[i];
+                if (s.SegmentCount == 0) continue;
+                rows.Add(Row(
+                    Cell(s.Kind.ToString()),
+                    Cell(s.SegmentCount.ToString("N0"), s.SegmentCount),
+                    Cell(s.ObjectCount >= 0 ? s.ObjectCount.ToString("N0") : "N/A", s.ObjectCount >= 0 ? s.ObjectCount : null),
+                    Cell(FormatBytes(s.TotalBytes), (long)Math.Min(s.TotalBytes, long.MaxValue)),
+                    Cell(FormatBytes(s.ReservedBytes), (long)Math.Min(s.ReservedBytes, long.MaxValue))));
             }
-
-            if (segments.PerLogicalHeapSummaries.Count > 0)
-            {
-                blocks.Add(Blank());
-                blocks.Add(H("CROSS-HEAP DISTRIBUTION"));
-                blocks.Add(T("Per-logical-heap committed bytes, object counts, and segment counts. This is a direct view of heap balance across subheaps."));
-
-                var heapRows = new List<TableRow>(segments.PerLogicalHeapSummaries.Count);
-                for (int i = 0; i < segments.PerLogicalHeapSummaries.Count; i++)
-                {
-                    PerLogicalHeapSummary heap = segments.PerLogicalHeapSummaries[i];
-                    double share = segments.TotalCommittedBytes == 0 ? 0.0 : heap.Bytes * 100.0 / segments.TotalCommittedBytes;
-
-                    heapRows.Add(Row(
-                        Cell(heap.LogicalHeapIndex.ToString("N0"), heap.LogicalHeapIndex),
-                        Cell(FormatBytes(heap.Bytes), (long)Math.Min(heap.Bytes, long.MaxValue)),
-                        Cell(share.ToString("F1") + "%"),
-                        Cell(heap.ObjectCount >= 0 ? heap.ObjectCount.ToString("N0") : "N/A", heap.ObjectCount),
-                        Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
-                }
-
-                blocks.Add(new TableBlock("Per logical heap distribution", ["Heap", "Committed Bytes", "% of Total", "Objects", "Segments"], heapRows));
-            }
+            if (rows.Count > 0)
+                tables.Add(ST("Kind summary", ["Kind", "Segments", "Objects", "Committed", "Reserved"], rows));
         }
 
-        if (loh is not null)
+        // Per-logical-heap breakdown
+        if (d.PerLogicalHeapSummaries.Count > 0)
         {
-            blocks.Add(Blank());
-            if (memory?.TopTypesBySize is { Count: > 0 })
+            var rows = new List<TableRow>(d.PerLogicalHeapSummaries.Count);
+            ulong maxBytes = 0, minBytes = ulong.MaxValue;
+            for (int i = 0; i < d.PerLogicalHeapSummaries.Count; i++)
             {
-                var nearLohRows = new List<TableRow>();
-                for (int i = 0; i < memory.TopTypesBySize.Count; i++)
-                {
-                    TypeSnapshot type = memory.TopTypesBySize[i];
-                    if (type.AverageSize <= 85_000 || type.AverageSize >= 200_000)
-                        continue;
-
-                    nearLohRows.Add(Row(
-                        Cell(type.TypeName),
-                        Cell(type.Count.ToString("N0"), type.Count),
-                        Cell(FormatBytes(type.AverageSize), (long)Math.Min(type.AverageSize, long.MaxValue)),
-                        Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue))));
-
-                    if (nearLohRows.Count >= 10)
-                        break;
-                }
-
-                if (nearLohRows.Count > 0)
-                {
-                    blocks.Add(Blank());
-                    blocks.Add(H("TYPES JUST OVER THE LOH THRESHOLD"));
-                    blocks.Add(new TableBlock("Approximate near-LOH types", ["Type", "Count", "Avg Size", "Total Size"], nearLohRows));
-                }
+                PerLogicalHeapSummary heap = d.PerLogicalHeapSummaries[i];
+                double share = d.TotalCommittedBytes == 0 ? 0.0 : heap.Bytes * 100.0 / d.TotalCommittedBytes;
+                if (heap.Bytes > maxBytes) maxBytes = heap.Bytes;
+                if (heap.Bytes < minBytes) minBytes = heap.Bytes;
+                rows.Add(Row(
+                    Cell(heap.LogicalHeapIndex.ToString("N0"), heap.LogicalHeapIndex),
+                    Cell(FormatBytes(heap.Bytes), (long)Math.Min(heap.Bytes, long.MaxValue)),
+                    Cell($"{share:F1}%"),
+                    Cell(heap.ObjectCount >= 0 ? heap.ObjectCount.ToString("N0") : "N/A", heap.ObjectCount >= 0 ? heap.ObjectCount : null),
+                    Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
-            blocks.Add(H("FRAGMENTATION METRICS"));
-            blocks.Add(M("Fragmentation percent", $"{loh.FragmentationPercent:F1}%", loh.FragmentationPercent));
-            blocks.Add(M("Free blocks", loh.FreeBlockCount.ToString("N0"), loh.FreeBlockCount));
-            blocks.Add(M("Largest free block", FormatBytes(loh.LargestFreeBlock), (double)loh.LargestFreeBlock));
-            blocks.Add(T(loh.FragmentationPercent > 60.0
-                ? "Fragmentation is critical; compaction or large-object pooling is recommended."
-                : loh.FragmentationPercent > 30.0
-                    ? "Fragmentation is elevated; monitor large-object churn."
-                    : "LOH fragmentation is within a lower-risk band."));
-
-            if (loh.TopFragmentedSegments is { Count: > 0 })
-            {
-                var rows = new List<TableRow>(loh.TopFragmentedSegments.Count);
-                for (int i = 0; i < loh.TopFragmentedSegments.Count; i++)
-                {
-                    LohSegmentSnapshot snapshot = loh.TopFragmentedSegments[i];
-                    rows.Add(Row(
-                        Cell($"0x{snapshot.Address:X}"),
-                        Cell(FormatBytes(snapshot.FreeBytes), (long)Math.Min(snapshot.FreeBytes, long.MaxValue)),
-                        Cell(snapshot.FragmentationPercent.ToString("F1") + "%"),
-                        Cell(FormatBytes(snapshot.LargestFreeBlock), (long)Math.Min(snapshot.LargestFreeBlock, long.MaxValue))));
-                }
-
-                blocks.Add(Blank());
-                blocks.Add(H("TOP FRAGMENTED SEGMENTS"));
-                blocks.Add(new TableBlock("Top fragmented segments", ["Address", "Free Bytes", "Frag %", "Largest Free Block"], rows));
-            }
-
-            if (loh.FreeGapHistogram is { Count: > 0 })
-            {
-                var rows = new List<TableRow>(loh.FreeGapHistogram.Count);
-                int total = 0;
-                for (int i = 0; i < loh.FreeGapHistogram.Count; i++)
-                    total += loh.FreeGapHistogram[i].GapCount;
-
-                for (int i = 0; i < loh.FreeGapHistogram.Count; i++)
-                {
-                    FreeGapBucket bucket = loh.FreeGapHistogram[i];
-                    rows.Add(Row(
-                        Cell(bucket.GapSizeRange),
-                        Cell(bucket.GapCount.ToString("N0"), bucket.GapCount),
-                        Cell(total == 0 ? "0.0%" : (bucket.GapCount * 100.0 / total).ToString("F1") + "%")));
-                }
-
-                blocks.Add(Blank());
-                blocks.Add(H("FREE GAP DISTRIBUTION"));
-                blocks.Add(new TableBlock("Free-gap histogram", ["Gap Size Range", "Count", "% of Gaps"], rows));
-            }
-
-            if (loh.TopLargeObjects is { Count: > 0 })
-            {
-                var rows = new List<TableRow>(loh.TopLargeObjects.Count);
-                for (int i = 0; i < loh.TopLargeObjects.Count; i++)
-                {
-                    LargeObjectSnapshot snapshot = loh.TopLargeObjects[i];
-                    rows.Add(Row(
-                        Cell(snapshot.TypeName),
-                        Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
-                        Cell($"0x{snapshot.Address:X}")));
-                }
-
-                blocks.Add(Blank());
-                blocks.Add(H("TOP LARGE OBJECTS"));
-                blocks.Add(new TableBlock("Top large objects", ["Type", "Size", "Address"], rows));
-            }
+            tables.Add(ST("Per logical heap", ["Heap", "Committed Bytes", "% of Total", "Objects", "Segments"], rows));
+            if (d.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
+                blocks.Add(T("Warning: Logical heaps are skewed: largest heap is more than 2x the smallest."));
         }
 
-        if (arrays is not null)
+        // Top segments by size
+        if (d.TopSegmentsBySize is { Count: > 0 })
         {
-            blocks.Add(Blank());
-            blocks.Add(H("LARGE OBJECT LIFETIMES"));
-            blocks.Add(M("Array objects", arrays.TotalArrayObjects.ToString("N0"), arrays.TotalArrayObjects));
-            blocks.Add(M("LOH arrays", arrays.LohArrayCount.ToString("N0"), arrays.LohArrayCount));
-            blocks.Add(M("LOH array bytes", FormatBytes(arrays.LohArrayBytes), (double)arrays.LohArrayBytes));
-            blocks.Add(T(arrays.ScanLimited
-                ? "Array scan was limited; only the sampled large arrays are shown."
-                : "Array scan completed within the configured cap."));
-
-            if (arrays.TopLargeArrays.Count > 0)
+            var rows = new List<TableRow>(d.TopSegmentsBySize.Count);
+            for (int i = 0; i < d.TopSegmentsBySize.Count; i++)
             {
-                var rows = new List<TableRow>(arrays.TopLargeArrays.Count);
-                for (int i = 0; i < arrays.TopLargeArrays.Count; i++)
-                {
-                    LargeArrayEntry entry = arrays.TopLargeArrays[i];
-                    rows.Add(Row(
-                        Cell($"0x{entry.Address:X}"),
-                        Cell(entry.ElementTypeName),
-                        Cell(entry.Length.ToString("N0"), entry.Length),
-                        Cell(entry.Rank.ToString("N0"), entry.Rank),
-                        Cell(FormatBytes(entry.Size), (long)Math.Min(entry.Size, long.MaxValue))));
-                }
-
-                blocks.Add(new TableBlock("Large arrays", ["Address", "Element Type", "Length", "Rank", "Size"], rows));
+                HeapSegmentSnapshot seg = d.TopSegmentsBySize[i];
+                rows.Add(Row(
+                    Cell($"0x{seg.Address:X}"),
+                    Cell(seg.Kind.ToString()),
+                    Cell(FormatBytes(seg.Length), (long)Math.Min(seg.Length, long.MaxValue)),
+                    Cell(FormatBytes(seg.CommittedBytes), (long)Math.Min(seg.CommittedBytes, long.MaxValue)),
+                    Cell(FormatBytes(seg.UsedBytes), (long)Math.Min(seg.UsedBytes, long.MaxValue)),
+                    Cell(FormatBytes(seg.ReservedBytes), (long)Math.Min(seg.ReservedBytes, long.MaxValue)),
+                    Cell(seg.Generation.ToString("N0"), seg.Generation),
+                    Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount)));
             }
+            tables.Add(ST("Top segments by size",
+                ["Address", "Kind", "Length", "Committed", "Used", "Reserved", "Gen", "Objects"], rows));
         }
 
-        blocks.Add(Blank());
-        blocks.Add(H("POH / FOH NOTES"));
-        if (segments?.TopPohTypes is { Count: > 0 })
+        // POH types
+        if (d.TopPohTypes is { Count: > 0 })
         {
-            var pohRows = new List<TableRow>(segments.TopPohTypes.Count);
-            for (int i = 0; i < segments.TopPohTypes.Count; i++)
+            var rows = new List<TableRow>(d.TopPohTypes.Count);
+            for (int i = 0; i < d.TopPohTypes.Count; i++)
             {
-                TypeSnapshot type = segments.TopPohTypes[i];
-                pohRows.Add(Row(
-                    Cell(type.TypeName),
-                    Cell(type.Count.ToString("N0"), type.Count),
-                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
-                    Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—")));
+                TypeSnapshot t = d.TopPohTypes[i];
+                rows.Add(Row(Cell(t.TypeName), Cell(t.Count.ToString("N0"), t.Count),
+                    Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
+                    Cell(t.AverageSize > 0 ? FormatBytes(t.AverageSize) : "—")));
             }
-
-            blocks.Add(H("TOP POH TYPES"));
-            blocks.Add(new TableBlock("Pinned object heap types", ["Type", "Count", "Size", "Avg Size"], pohRows));
-        }
-        else
-        {
-            blocks.Add(T("POH type distribution is not currently available for this dump; use the segment summaries above for pressure analysis."));
+            tables.Add(ST("POH types", ["Type", "Count", "Size", "Avg Size"], rows));
         }
 
-        if (segments?.TopFrozenTypes is { Count: > 0 })
+        // Frozen types
+        if (d.TopFrozenTypes is { Count: > 0 })
         {
-            var frozenRows = new List<TableRow>(segments.TopFrozenTypes.Count);
-            for (int i = 0; i < segments.TopFrozenTypes.Count; i++)
+            var rows = new List<TableRow>(d.TopFrozenTypes.Count);
+            for (int i = 0; i < d.TopFrozenTypes.Count; i++)
             {
-                TypeSnapshot type = segments.TopFrozenTypes[i];
-                frozenRows.Add(Row(
-                    Cell(type.TypeName),
-                    Cell(type.Count.ToString("N0"), type.Count),
-                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
-                    Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—")));
+                TypeSnapshot t = d.TopFrozenTypes[i];
+                rows.Add(Row(Cell(t.TypeName), Cell(t.Count.ToString("N0"), t.Count),
+                    Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
+                    Cell(t.AverageSize > 0 ? FormatBytes(t.AverageSize) : "—")));
             }
-
-            blocks.Add(Blank());
-            blocks.Add(H("TOP FOH TYPES"));
-            blocks.Add(new TableBlock("Frozen object heap types", ["Type", "Count", "Size", "Avg Size"], frozenRows));
-        }
-        else
-        {
-            blocks.Add(T("FOH type distribution is not currently available for this dump; use the segment summaries above for pressure analysis."));
+            tables.Add(ST("FOH types", ["Type", "Count", "Size", "Avg Size"], rows));
         }
 
-        return new AnalyzerDetailSection("Heap Segment Diagnostics", DisplayTitle, SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName: "Segment Analysis",
+            DisplayTitle: DisplayTitle,
+            SortOrder: SortOrder,
+            Blocks: blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static string FormatBytes(ulong value)
@@ -245,12 +145,7 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
         string[] units = ["B", "KB", "MB", "GB", "TB"];
         double bytes = value;
         int unitIndex = 0;
-        while (bytes >= 1024 && unitIndex < units.Length - 1)
-        {
-            bytes /= 1024;
-            unitIndex++;
-        }
-
+        while (bytes >= 1024 && unitIndex < units.Length - 1) { bytes /= 1024; unitIndex++; }
         return unitIndex == 0 ? $"{value:N0} B" : $"{bytes:F1} {units[unitIndex]}";
     }
 }

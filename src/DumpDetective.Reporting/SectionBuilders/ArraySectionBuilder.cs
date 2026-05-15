@@ -20,68 +20,60 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ArrayDomainResult)result;
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        // ── Summary ──────────────────────────────────────────────────────────
-        blocks.Add(H("ARRAY ANALYSIS SUMMARY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total Array Objects", $"{d.TotalArrayObjects:N0}", d.TotalArrayObjects));
-        blocks.Add(M("Total Array Memory", FormatHelper.FormatBytes(d.TotalArrayBytes)));
-        blocks.Add(M("LOH Arrays", $"{d.LohArrayCount:N0} ({FormatHelper.FormatBytes(d.LohArrayBytes)})",
-                                                 d.LohArrayCount));
-        blocks.Add(M("Multi-Dimensional Arrays", $"{d.MultiDimArrayCount:N0}", d.MultiDimArrayCount));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Total Array Objects",     $"{d.TotalArrayObjects:N0}",                                    d.TotalArrayObjects),
+            KM("Total Array Memory",      FormatHelper.FormatBytes(d.TotalArrayBytes)),
+            KM("LOH Arrays",              $"{d.LohArrayCount:N0} ({FormatHelper.FormatBytes(d.LohArrayBytes)})", d.LohArrayCount),
+            KM("Multi-Dimensional Arrays",$"{d.MultiDimArrayCount:N0}",                                   d.MultiDimArrayCount),
+        };
         if (d.ScanLimited)
-            blocks.Add(M("Scan Limit Reached", "Yes — sparse sampling cap hit; results may be partial", 1.0));
+            keyMetrics.Add(KM("Scan Limit Reached", "Yes — sparse sampling cap hit; results may be partial", 1.0));
 
-        // ── Top array types by memory ─────────────────────────────────────────
         if (d.TopArrayTypesBySize.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP ARRAY TYPES BY MEMORY"));
-            blocks.Add(T("Array types ranked by total heap bytes consumed. " +
-                          "Multi-dimensional arrays (rank ≥ 2) are flagged and are generally slower than jagged arrays."));
             int limit = Math.Min(d.TopArrayTypesBySize.Count, TopTypeRows);
-            blocks.Add(new TableBlock(
-                Caption: "Top array types by total bytes",
-                Headers: ["Element Type", "Rank", "Count", "Total Size", "Multi-Dim"],
-                Rows: BuildTypeRows(d.TopArrayTypesBySize, limit)));
+            tables.Add(ST(
+                "Top array types by total bytes",
+                ["Element Type", "Rank", "Count", "Total Size", "Multi-Dim"],
+                BuildTypeRows(d.TopArrayTypesBySize, limit)));
             if (d.TopArrayTypesBySize.Count > limit)
                 blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
         }
 
-        // ── Top large arrays ──────────────────────────────────────────────────
         if (d.TopLargeArrays.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("LARGEST INDIVIDUAL ARRAYS"));
             blocks.Add(T("Individual array instances on the Large Object Heap (≥85 KB). " +
                           "LOH allocations are never compacted and contribute to heap fragmentation."));
             int limit = Math.Min(d.TopLargeArrays.Count, TopLargeRows);
-            blocks.Add(new TableBlock(
-                Caption: "Largest individual array instances",
-                Headers: ["Address", "Element Type", "Length", "Rank", "Size", "Label"],
-                Rows: BuildLargeRows(d.TopLargeArrays, limit)));
+            tables.Add(ST(
+                "Largest individual array instances",
+                ["Address", "Element Type", "Length", "Rank", "Size", "Label"],
+                BuildLargeRows(d.TopLargeArrays, limit)));
             if (d.TopLargeArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} large arrays. {d.TopLargeArrays.Count - limit} additional array(s) omitted."));
         }
 
-        // ── Sparse arrays ─────────────────────────────────────────────────────
         if (d.TopSparseArrays.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("SPARSE / WASTEFUL ARRAYS"));
             blocks.Add(T("Arrays where the majority of elements are null or default. " +
                           "These waste heap memory and could be replaced with sparse data structures such as Dictionary<int, T>."));
             int limit = Math.Min(d.TopSparseArrays.Count, TopSparseRows);
-            blocks.Add(new TableBlock(
-                Caption: "Sparse arrays by estimated wasted bytes",
-                Headers: ["Address", "Element Type", "Length", "Null/Default %", "Wasted Bytes"],
-                Rows: BuildSparseRows(d.TopSparseArrays, limit)));
+            tables.Add(ST(
+                "Sparse arrays by estimated wasted bytes",
+                ["Address", "Element Type", "Length", "Null/Default %", "Wasted Bytes"],
+                BuildSparseRows(d.TopSparseArrays, limit)));
             if (d.TopSparseArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, "Array Analysis", SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, "Array Analysis", SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static List<TableRow> BuildTypeRows(IReadOnlyList<ArrayTypeProfile> types, int limit)

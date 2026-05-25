@@ -14,7 +14,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
 
     public string AnalyzerName => "Array Analysis";
     public string DisplayTitle => "Arrays";
-    public int SortOrder => 47; // §22 arrays (before §23 async state machines)
+    public int SortOrder => 400; // §22 arrays (before §23 async state machines)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ArrayDomainResult;
 
@@ -72,7 +72,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName, "Array Analysis", SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

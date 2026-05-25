@@ -9,7 +9,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
 {
     public string AnalyzerName => "Collection Analysis";
     public string DisplayTitle => "Collection Health";
-    public int SortOrder => 50;
+    public int SortOrder => 300;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is CollectionDomainResult;
 
@@ -90,7 +90,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName, AnalyzerName, SortOrder, [],
+            AnalyzerName, DisplayTitle, SortOrder, [],
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

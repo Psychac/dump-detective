@@ -32,6 +32,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         LockGraphDomainResult? lockGraph = results.Get<LockGraphDomainResult>();
         CrashDomainResult? crash = results.Get<CrashDomainResult>();
         FinalizableObjectDomainResult? finalizable = results.Get<FinalizableObjectDomainResult>();
+        HangDomainResult? hang = results.Get<HangDomainResult>();
         IReadOnlyList<InsightFinding> findings = results.AllFindingsSorted();
         IReadOnlyList<InsightFinding> criticalFindings = BuildFindingsBySeverity(findings, FindingSeverity.Critical, 5);
         IReadOnlyList<InsightFinding> warningFindings = BuildFindingsBySeverity(findings, FindingSeverity.Warning, 5);
@@ -43,6 +44,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
             KM("Gen2 %",               gcGen is null  ? "N/A" : gcGen.Gen2Pct.ToString("F1") + "%",    gcGen is null  ? null : (double?)gcGen.Gen2Pct),
             KM("GC pressure",          allocation?.GCPressure.ToString() ?? "N/A",                      allocation is null ? null : (double?)allocation.GCPressure),
             KM("Leak candidates",      leakCandidates?.TotalCandidates.ToString("N0") ?? "N/A",         leakCandidates is null ? null : (double?)leakCandidates.TotalCandidates),
+            KM("Hang score",           hang?.HealthScore.ToString("N0") ?? "N/A",                       hang is null ? null : (double?)hang.HealthScore),
             KM("Blocked threads",      threads?.BlockedThreadCount.ToString("N0") ?? "N/A",             threads is null ? null : (double?)threads.BlockedThreadCount),
             KM("Deadlock cycles",      lockGraph?.DeadlockCandidateCount.ToString("N0") ?? "N/A",       lockGraph is null ? null : (double?)lockGraph.DeadlockCandidateCount),
             KM("Active exceptions",    crash?.ActiveExceptions.ToString("N0") ?? "N/A",                 crash is null ? null : (double?)crash.ActiveExceptions),

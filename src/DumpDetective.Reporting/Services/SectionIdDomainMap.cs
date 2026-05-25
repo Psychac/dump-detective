@@ -128,6 +128,6 @@ internal static class SectionIdDomainMap
     /// <summary>Returns all distinct domain strings in priority render order.</summary>
     public static IReadOnlyList<string> DomainsInOrder { get; } =
     [
-        "Leaks", "Memory", "GC", "Threads", "Async", "Exceptions", "TypeSystem", "Runtime"
+        "Leaks", "Memory", "GC", "TypeSystem", "Threads", "Async", "Exceptions", "Runtime"
     ];
 }

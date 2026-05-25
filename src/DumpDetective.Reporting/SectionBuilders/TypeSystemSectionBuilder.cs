@@ -15,7 +15,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
     public string SectionId => "C1";
     public string DisplayTitle => "Type Table";
-    public int SortOrder => 300;
+    public int SortOrder => 100;
 
     public bool CanBuild(AnalyzerResultSet results)
         => results.Get<MemoryDomainResult>() is not null
@@ -56,12 +56,16 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(FormatHelper.TruncateString(type.TypeName, 70)),
                 Cell(type.Count.ToString("N0"), type.Count),
                 Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                Cell(type.LohBytes > 0 ? FormatBytes(type.LohBytes) : "—"),
                 Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : (type.Count > 0 ? FormatBytes(type.TotalBytes / (ulong)type.Count) : "—")),
                 Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—"),
+                Cell(gen is null ? "—" : GenPct(gen, 0)),
+                Cell(gen is null ? "—" : GenPct(gen, 1)),
                 Cell(gen is null ? "—" : GenRatio(gen)),
                 Cell(profile is null ? "—" : profile.IsFinalizable ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.IsValueType ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.ReferenceFields.ToString("N0"), profile is null ? null : profile.ReferenceFields),
+                Cell(profile is null ? "—" : profile.ReferenceFieldRatio.ToString("F2")),
                 Cell(profile is null ? "—" : profile.IsArray ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.BaseTypeChainDepth.ToString("N0"), profile is null ? null : profile.BaseTypeChainDepth),
                 Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
@@ -90,7 +94,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         tables.Add(ST(
             "Type table",
-            ["Type", "Count", "Shallow Size", "Avg Size", "Estimated Retained", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
+            ["Type", "Count", "Shallow Size", "LOH Bytes", "Avg Size", "Est. Retained", "Gen0%", "Gen1%", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Ref Ratio", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
             rows));
 
         if (shape?.TopValueHeavyTypes is { Count: > 0 })
@@ -249,6 +253,15 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             return "—";
 
         return $"{profile.Gen2Count * 100.0 / total:F1}%";
+    }
+
+    private static string GenPct(TypeGenerationProfile profile, int gen)
+    {
+        int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
+        if (total == 0)
+            return "—";
+        int count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
+        return $"{count * 100.0 / total:F1}%";
     }
 
     private sealed record DominatorCandidate(

@@ -12,7 +12,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
     public string SectionId => "G1";
     public string DisplayTitle => "Modules & Assemblies";
-    public int SortOrder => 1800;
+    public int SortOrder => 100;
 
     public bool CanBuild(AnalyzerResultSet results)
         => results.Get<AppDomainDomainResult>() is not null
@@ -29,9 +29,13 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
         if (domains is not null)
         {
-            keyMetrics.Add(KM("Total domains",    domains.TotalDomains.ToString("N0"),          domains.TotalDomains));
-            keyMetrics.Add(KM("Anonymous modules",domains.AnonymousModuleCount.ToString("N0"),   domains.AnonymousModuleCount));
-            keyMetrics.Add(KM("Dynamic modules",  domains.TotalDynamicModules.ToString("N0"),    domains.TotalDynamicModules));
+            keyMetrics.Add(KM("Total domains",         domains.TotalDomains.ToString("N0"),          domains.TotalDomains));
+            keyMetrics.Add(KM("Anonymous modules",     domains.AnonymousModuleCount.ToString("N0"),   domains.AnonymousModuleCount));
+            keyMetrics.Add(KM("Dynamic modules",       domains.TotalDynamicModules.ToString("N0"),    domains.TotalDynamicModules));
+            if (domains.DynamicModuleBytes > 0)
+                keyMetrics.Add(KM("Dynamic module bytes",  FormatBytes(domains.DynamicModuleBytes),   (double)domains.DynamicModuleBytes));
+            if (domains.ExcludedModuleCount > 0)
+                keyMetrics.Add(KM("Excluded modules",      domains.ExcludedModuleCount.ToString("N0"), domains.ExcludedModuleCount));
             tables.Add(ST(
                 "AppDomain inventory",
                 ["Domain Name", "ID", "Address", "Module Count", "Estimated Managed Bytes"],
@@ -40,8 +44,10 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
         if (modules is not null)
         {
-            keyMetrics.Add(KM("Conflict groups",     modules.VersionConflictGroups.ToString("N0"), modules.VersionConflictGroups));
-            keyMetrics.Add(KM("Dynamic module count",modules.DynamicModules.ToString("N0"),         modules.DynamicModules));
+            keyMetrics.Add(KM("Total modules",       modules.TotalModules.ToString("N0"),          modules.TotalModules));
+            keyMetrics.Add(KM("Unique module names", modules.UniqueModuleNames.ToString("N0"),      modules.UniqueModuleNames));
+            keyMetrics.Add(KM("Conflict groups",     modules.VersionConflictGroups.ToString("N0"),  modules.VersionConflictGroups));
+            keyMetrics.Add(KM("Dynamic module count",modules.DynamicModules.ToString("N0"),          modules.DynamicModules));
 
             blocks.Add(T(modules.ConflictingAssemblyNames.Count > 0
                 ? $"Conflict groups include: {string.Join(", ", modules.ConflictingAssemblyNames.Take(6))}."
@@ -56,10 +62,13 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                     rows.Add(Row(
                         Cell(FormatHelper.TruncateString(m.Name, 55)),
                         Cell(FormatHelper.TruncateString(m.AssemblyName, 55)),
+                        Cell(FormatHelper.TruncateString(m.FullPath, 80)),
+                        Cell($"0x{m.Address:X}"),
                         Cell(FormatBytes(m.Size), (long)Math.Min(m.Size, long.MaxValue)),
-                        Cell(m.IsDynamic ? "Dynamic" : (m.IsPEFile ? "PE" : "Other"))));
+                        Cell(m.IsDynamic ? "Yes" : "No"),
+                        Cell(m.IsPEFile ? "Yes" : "No")));
                 }
-                tables.Add(ST("Top modules by size", ["Name", "Assembly", "Size", "Kind"], rows));
+                tables.Add(ST("Top modules by size", ["Name", "Assembly", "Full Path", "Address", "Size", "Dynamic", "PE File"], rows));
             }
 
             if (modules.ConflictDetails.Count > 0)

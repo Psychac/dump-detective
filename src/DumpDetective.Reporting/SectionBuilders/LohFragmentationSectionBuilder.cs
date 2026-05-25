@@ -10,7 +10,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
 {
     public string AnalyzerName => "LOH Fragmentation Analysis";
     public string DisplayTitle => "LOH Fragmentation";
-    public int SortOrder => 55;
+    public int SortOrder => 400;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 
@@ -22,11 +22,12 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
 
         var keyMetrics = new List<SectionKeyMetric>
         {
-            KM("Total LOH Bytes",        FormatHelper.FormatBytes(d.TotalBytes),          (double)d.TotalBytes),
             KM("Segment Count",          $"{d.SegmentCount:N0}",                          d.SegmentCount),
-            KM("Overall Fragmentation",  $"{d.FragmentationPercent:F1}%",                 d.FragmentationPercent),
+            KM("Total LOH Bytes",        FormatHelper.FormatBytes(d.TotalBytes),          (double)d.TotalBytes),
+            KM("Used Bytes",             FormatHelper.FormatBytes(d.UsedBytes),           (double)d.UsedBytes),
             KM("Free Bytes",             FormatHelper.FormatBytes(d.FreeBytes),           (double)d.FreeBytes),
             KM("Free Blocks",            $"{d.FreeBlockCount:N0}",                        d.FreeBlockCount),
+            KM("Overall Fragmentation",  $"{d.FragmentationPercent:F1}%",                 d.FragmentationPercent),
             KM("Largest Free Block",     FormatHelper.FormatBytes(d.LargestFreeBlock),    (double)d.LargestFreeBlock),
             KM("Severity Band",          GetSeverityBand(d.FragmentationPercent)),
         };
@@ -103,20 +104,41 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             tables.Add(ST("Top large objects by size", ["Type", "Size", "Address"], loRows));
         }
 
+        SectionLeadFinding? leadFinding = null;
+        if (d.FragmentationPercent > 60)
+            leadFinding = new SectionLeadFinding(
+                Severity: "Critical",
+                Title: $"Severe LOH fragmentation — {d.FragmentationPercent:F1}% of LOH is free space",
+                Evidence: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                Recommendation: "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
+                ConfidenceScore: 0.9,
+                Caveats: []);
+        else if (d.FragmentationPercent > 30)
+            leadFinding = new SectionLeadFinding(
+                Severity: "Warning",
+                Title: $"Elevated LOH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
+                Evidence: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                Recommendation: "Monitor LOH allocation patterns. Consider using ArrayPool<T> or MemoryPool<T> for large buffers to reduce fragmentation over time.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
+                ConfidenceScore: 0.9,
+                Caveats: []);
+
         return new AnalyzerDetailSection(
-            AnalyzerName, AnalyzerName, SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
 
     private static string GetSeverityBand(double fragmentationPercent)
     {
-        if (fragmentationPercent >= 40)
-            return "Critical (>= 40%)";
+        if (fragmentationPercent > 60)
+            return "Critical (> 60%)";
 
-        if (fragmentationPercent >= 20)
-            return "Warning (20% to 39.9%)";
+        if (fragmentationPercent > 30)
+            return "Warning (30%\u201360%)";
 
-        return "OK (< 20%)";
+        return "OK (\u2264 30%)";
     }
 }

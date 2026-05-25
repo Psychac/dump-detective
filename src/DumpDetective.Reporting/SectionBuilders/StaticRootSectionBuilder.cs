@@ -11,7 +11,7 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
 
     public string AnalyzerName => "Static Root Leak Detection";
     public string DisplayTitle => "Static Roots";
-    public int SortOrder => 27;
+    public int SortOrder => 600;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is StaticRootDomainResult;
 
@@ -51,7 +51,7 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
             : T("Static-root pressure appears moderate in this dump."));
 
         return new AnalyzerDetailSection(
-            AnalyzerName, AnalyzerName, SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

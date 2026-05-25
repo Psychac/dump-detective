@@ -9,7 +9,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
 {
     public string AnalyzerName => "Crash Analysis";
     public string DisplayTitle => "Exception Analysis";
-    public int SortOrder => 1600;
+    public int SortOrder => 100;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is CrashDomainResult;
 
@@ -39,7 +39,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                 Title: $"Active exceptions detected ({crash.ActiveExceptions:N0} on thread stacks)",
                 Evidence: $"{crash.ActiveExceptions:N0} active exception(s) found on thread stacks. Primary type: {topType}.",
                 Recommendation: "Investigate the crash thread candidates below; correlate with the thread section for full context.",
-                ConfidenceSymbol: "★★★☆",
+                ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,
                 Caveats: ["Active exception count is based on measured runtime objects and thread snapshots."]);
         }
@@ -91,10 +91,11 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                     Cell(candidate.ActiveExceptionCount.ToString("N0"), candidate.ActiveExceptionCount),
                     Cell(candidate.PrimaryExceptionType),
                     Cell(candidate.OriginalStackTraceConfidence.ToString()),
-                    Cell(candidate.OriginalStackTraceInferredFrom ?? "—")));
+                    Cell(candidate.OriginalStackTraceInferredFrom ?? "—"),
+                    Cell(candidate.TopFrames.Count > 0 ? candidate.TopFrames[0] : "—")));
             }
             tables.Add(ST("Crash thread candidates",
-                ["Managed Thread", "OS Thread", "Active Exceptions", "Primary Exception", "Trace Confidence", "Trace Source"],
+                ["Managed Thread", "OS Thread", "Active Exceptions", "Primary Exception", "Trace Confidence", "Trace Source", "Top Frame"],
                 hotspotRows));
 
             var originRows = new List<TableRow>(crash.TopCrashThreadCandidates.Count);

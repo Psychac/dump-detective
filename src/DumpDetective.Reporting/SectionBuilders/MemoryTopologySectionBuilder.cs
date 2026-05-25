@@ -13,7 +13,7 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
 
     public string AnalyzerName => "Memory Analysis";
     public string DisplayTitle => "Memory Overview";
-    public int SortOrder => 2;
+    public int SortOrder => 200;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is MemoryDomainResult;
 

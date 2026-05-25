@@ -14,7 +14,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
     public string AnalyzerName => "Boxing Analysis";
     public string DisplayTitle => "Boxing & Value Type Pressure";
-    public int SortOrder => 50; // §20 — after WeakReferenceSectionBuilder (49)
+    public int SortOrder => 500; // §20 — after WeakReferenceSectionBuilder (49)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is BoxingDomainResult;
 
@@ -43,11 +43,11 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             {
                 rows.Add(new TableRow([
                     Cell(e.ValueTypeName),
-                    Cell(e.IsEnum ? "Enum" : "Struct"),
                     Cell($"{e.BoxCount:N0}",                       e.BoxCount),
-                    Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes)]));
+                    Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes),
+                    Cell(e.IsEnum ? "Yes" : "No")]));
             }
-            tables.Add(ST("Top boxed types by total size", ["Type", "Kind", "Count", "Total Size"], rows));
+            tables.Add(ST("Top boxed types by total size", ["Value Type", "Box Count", "Total Box Bytes", "IsEnum"], rows));
             if (d.TopBoxedTypes.Count > TopTypesToShow)
                 blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
         }

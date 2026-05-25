@@ -9,7 +9,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 {
     public string AnalyzerName => "Thread Analysis";
     public string DisplayTitle => "Thread Overview";
-    public int SortOrder => 12;
+    public int SortOrder => 100;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ThreadDomainResult;
 
@@ -21,19 +21,26 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         var keyMetrics = new List<SectionKeyMetric>
         {
-            KM("Total Threads",       $"{d.TotalThreadCount:N0}",     d.TotalThreadCount),
-            KM("Alive Threads",       $"{d.AliveThreadCount:N0}",     d.AliveThreadCount),
-            KM("Background Threads",  $"{d.BackgroundThreadCount:N0}", d.BackgroundThreadCount),
-            KM("Thread Pool Workers", $"{d.ThreadPoolWorkerCount:N0}", d.ThreadPoolWorkerCount),
-            KM("Blocked Threads",     $"{d.BlockedThreadCount:N0}",    d.BlockedThreadCount),
-            KM("Lock-Holding Threads",$"{d.LockHoldingThreadCount:N0}",d.LockHoldingThreadCount),
-            KM("Finalizer Blocked",   d.FinalizerThreadBlocked ? "Yes" : "No"),
-            KM("Finalizer Lock Count",$"{d.FinalizerLockCount:N0}",    d.FinalizerLockCount),
-            KM("Async Chain Threads", $"{d.AsyncChainThreadCount:N0}", d.AsyncChainThreadCount),
-            KM("Max Async Chain Depth",$"{d.MaxAsyncChainDepth:N0}",   d.MaxAsyncChainDepth),
+            KM("Total Threads",        $"{d.TotalThreadCount:N0}",      d.TotalThreadCount),
+            KM("Alive Threads",        $"{d.AliveThreadCount:N0}",      d.AliveThreadCount),
+            KM("Inactive Threads",     $"{d.InactiveThreadCount:N0}",   d.InactiveThreadCount),
+            KM("Background Threads",   $"{d.BackgroundThreadCount:N0}", d.BackgroundThreadCount),
+            KM("GC Threads",           $"{d.GcThreadCount:N0}",         d.GcThreadCount),
+            KM("Thread Pool Workers",  $"{d.ThreadPoolWorkerCount:N0}", d.ThreadPoolWorkerCount),
+            KM("Blocked Threads",      $"{d.BlockedThreadCount:N0}",    d.BlockedThreadCount),
+            KM("Lock-Holding Threads", $"{d.LockHoldingThreadCount:N0}",d.LockHoldingThreadCount),
+            KM("Threads w/ Exceptions",$"{d.ThreadsWithActiveExceptionsCount:N0}", d.ThreadsWithActiveExceptionsCount),
+            KM("Finalizer Blocked",    d.FinalizerThreadBlocked ? "Yes" : "No"),
+            KM("Finalizer Lock Count", $"{d.FinalizerLockCount:N0}",    d.FinalizerLockCount),
+            KM("Async Chain Threads",  $"{d.AsyncChainThreadCount:N0}", d.AsyncChainThreadCount),
+            KM("Max Async Chain Depth",$"{d.MaxAsyncChainDepth:N0}",    d.MaxAsyncChainDepth),
         };
         if (d.FinalizerManagedThreadId.HasValue)
-            keyMetrics.Add(KM("Finalizer Thread ID", $"{d.FinalizerManagedThreadId.Value:N0}", d.FinalizerManagedThreadId.Value));
+        {
+            keyMetrics.Add(KM("Finalizer Thread ID",    $"{d.FinalizerManagedThreadId.Value:N0}", d.FinalizerManagedThreadId.Value));
+            if (d.FinalizerOsThreadId.HasValue)
+                keyMetrics.Add(KM("Finalizer OS Thread", $"{d.FinalizerOsThreadId.Value:N0}",     d.FinalizerOsThreadId.Value));
+        }
         if (d.SamplingCapacity > 0 || d.SampledSnapshotCount > 0)
         {
             keyMetrics.Add(KM("Sampled Snapshots", $"{d.SampledSnapshotCount:N0} sampled (capacity {d.SamplingCapacity:N0})", d.SampledSnapshotCount));
@@ -55,6 +62,50 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             foreach (var kvp in d.WaitPatternBreakdown)
                 wcRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
             tables.Add(ST("Wait category distribution", ["Category", "Count"], wcRows));
+        }
+
+        if (d.TopBlockedThreads is { Count: > 0 })
+        {
+            var bRows = new List<TableRow>(d.TopBlockedThreads.Count);
+            for (int i = 0; i < d.TopBlockedThreads.Count; i++)
+            {
+                ThreadStateSnapshot s = d.TopBlockedThreads[i];
+                bRows.Add(new TableRow([
+                    Cell(s.ThreadId.ToString("N0"),    s.ThreadId),
+                    Cell(s.OSThreadId.ToString("N0"),  s.OSThreadId),
+                    Cell(s.LockCount.ToString("N0"),   s.LockCount),
+                    Cell(s.ThreadState),
+                    Cell(s.GcMode),
+                    Cell(s.WaitCategory ?? "—"),
+                    Cell(s.WaitReason   ?? "—"),
+                    Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
+                    Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
+            }
+            tables.Add(ST("Top blocked threads",
+                ["Thread ID", "OS Thread", "Lock Count", "State", "GC Mode", "Wait Category", "Wait Reason", "Stack Size", "Top Frame"],
+                bRows));
+        }
+
+        if (d.TopLockedThreads is { Count: > 0 })
+        {
+            var lRows = new List<TableRow>(d.TopLockedThreads.Count);
+            for (int i = 0; i < d.TopLockedThreads.Count; i++)
+            {
+                ThreadStateSnapshot s = d.TopLockedThreads[i];
+                lRows.Add(new TableRow([
+                    Cell(s.ThreadId.ToString("N0"),    s.ThreadId),
+                    Cell(s.OSThreadId.ToString("N0"),  s.OSThreadId),
+                    Cell(s.LockCount.ToString("N0"),   s.LockCount),
+                    Cell(s.ThreadState),
+                    Cell(s.GcMode),
+                    Cell(s.WaitCategory ?? "—"),
+                    Cell(s.WaitReason   ?? "—"),
+                    Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
+                    Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
+            }
+            tables.Add(ST("Top lock-holding threads",
+                ["Thread ID", "OS Thread", "Lock Count", "State", "GC Mode", "Wait Category", "Wait Reason", "Stack Size", "Top Frame"],
+                lRows));
         }
 
         if (d.ThreadStateDistribution is { Count: > 0 })
@@ -139,7 +190,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName, AnalyzerName, SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

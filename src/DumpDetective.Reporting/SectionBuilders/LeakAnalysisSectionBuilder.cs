@@ -9,7 +9,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
 {
     public string AnalyzerName => "Leak Candidate Analysis";
     public string DisplayTitle => "Leak Candidates";
-    public int SortOrder => 1250;
+    public int SortOrder => 100;
 
     private const int TopCandidateCount = 30;
 
@@ -38,7 +38,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
                     Evidence: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
                     Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
-                    ConfidenceSymbol: leak.HeuristicOnly ? "★★☆☆" : "★★★☆",
+                    ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
                     ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,
                     Caveats: leak.HeuristicOnly ? ["Heuristic-only analysis; confirm with root-path review."] : []);
             }

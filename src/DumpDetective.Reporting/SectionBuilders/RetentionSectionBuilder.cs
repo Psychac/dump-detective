@@ -10,7 +10,7 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
 {
     public string AnalyzerName => "Retention Analysis";
     public string DisplayTitle => "Retention Hotspots";
-    public int SortOrder => 1150;
+    public int SortOrder => 400;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is RetentionDomainResult;
 

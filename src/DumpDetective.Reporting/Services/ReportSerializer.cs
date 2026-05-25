@@ -208,6 +208,37 @@ internal sealed class ReportSerializer
             sections.Add(builder.Build(run.Result));
         }
 
+        // Emit stub sections for skipped/failed runs where a builder is registered.
+        // Spec: "show ⚪ Skipped — {SkipReason}" / "⚠️ Failed — {ErrorMessage}" in section header.
+        for (int r = 0; r < runs.Count; r++)
+        {
+            AnalyzerRunResult run = runs[r];
+            if (run.Status == AnalyzerExecutionStatus.Success)
+                continue;
+
+            if (!buildersByName.TryGetValue(run.AnalyzerName, out IAnalyzerSectionBuilder? builder))
+                continue;
+
+            bool isSkipped = run.Status is AnalyzerExecutionStatus.SkippedByFilter
+                          or AnalyzerExecutionStatus.SkippedByCancellation;
+            string statusNote = isSkipped
+                ? $"⚪ Skipped — {run.SkipReason ?? "no reason provided"}"
+                : $"⚠️ Failed — {run.ErrorMessage ?? "no error details"}";
+
+            sections.Add(new AnalyzerDetailSection(
+                AnalyzerName: run.AnalyzerName,
+                DisplayTitle: builder.DisplayTitle,
+                SortOrder:    builder.SortOrder,
+                Blocks:       [new TextBlock(statusNote)],
+                Provenance:   new SectionProvenance(
+                    Analyzer:        run.AnalyzerName,
+                    Status:          NormalizeStatus(run.Status),
+                    DurationMs:      run.Duration.TotalMilliseconds,
+                    ObjectScanCount: 0,
+                    CacheHits:       0,
+                    CacheMisses:     0)));
+        }
+
         return sections;
     }
 
@@ -302,10 +333,10 @@ internal sealed class ReportSerializer
         "Leaks"      => 0,
         "Memory"     => 1,
         "GC"         => 2,
-        "Threads"    => 3,
-        "Async"      => 4,
-        "Exceptions" => 5,
-        "TypeSystem" => 6,
+        "TypeSystem" => 3,   // Domain C — before Threads (D) per spec A/B/C/D/E/F/G order
+        "Threads"    => 4,
+        "Async"      => 5,
+        "Exceptions" => 6,
         "Runtime"    => 7,
         _            => 99   // unmapped / cross-cutting sections go last
     };
@@ -510,6 +541,7 @@ internal sealed class ReportSerializer
                 if (top is not null)
                 {
                     double score = top.EffectiveConfidenceScore;
+                    // Bands: High ≥0.8 ●●●●, Medium-High ≥0.65 ●●●○, Medium ≥0.45 ●●○○, Low <0.45 ●○○○
                     string symbol = score >= 0.85 ? "●●●●"
                                   : score >= 0.65 ? "●●●○"
                                   : score >= 0.45 ? "●●○○"
@@ -532,7 +564,7 @@ internal sealed class ReportSerializer
             {
                 provenance = new SectionProvenance(
                     Analyzer:         matchedRun.AnalyzerName,
-                    Status:           matchedRun.Status.ToString(),
+                    Status:           NormalizeStatus(matchedRun.Status),
                     DurationMs:       matchedRun.Duration.TotalMilliseconds,
                     ObjectScanCount:  matchedRun.Diagnostics?.ObjectScanCount ?? 0,
                     CacheHits:        matchedRun.Diagnostics?.CacheHits ?? 0,
@@ -616,7 +648,7 @@ internal sealed class ReportSerializer
             AnalyzerRunResult run = runs[i];
             runSummary.Add(new AnalyzerRunStatusRecord(
                 AnalyzerName:          run.AnalyzerName,
-                Status:                run.Status.ToString(),
+                Status:                NormalizeStatus(run.Status),
                 DurationMs:            run.Duration.TotalMilliseconds,
                 FindingCount:          run.FindingCount,
                 WarningCount:          run.WarningCount,
@@ -995,5 +1027,14 @@ internal sealed class ReportSerializer
         FindingSeverity.Critical => "Untracked",
         FindingSeverity.Warning => "InProgress",
         _ => "Review"
+    };
+
+    private static string NormalizeStatus(AnalyzerExecutionStatus status) => status switch
+    {
+        AnalyzerExecutionStatus.Success                 => "Completed",
+        AnalyzerExecutionStatus.Failed                  => "Failed",
+        AnalyzerExecutionStatus.SkippedByFilter         => "Skipped",
+        AnalyzerExecutionStatus.SkippedByCancellation   => "Skipped",
+        _                                               => status.ToString()
     };
 }

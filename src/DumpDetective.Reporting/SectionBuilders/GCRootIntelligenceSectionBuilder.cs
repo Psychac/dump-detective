@@ -9,7 +9,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
 {
     public string AnalyzerName => "GC Root Analysis";
     public string DisplayTitle => "GC Root Intelligence";
-    public int SortOrder => 1200;
+    public int SortOrder => 500;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is GCRootDomainResult;
 
@@ -84,7 +84,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         }
 
         return new AnalyzerDetailSection(
-            "GC Root Intelligence", DisplayTitle, SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

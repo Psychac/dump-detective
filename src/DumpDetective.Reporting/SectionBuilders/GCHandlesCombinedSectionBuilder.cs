@@ -17,7 +17,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
 
     public string SectionId => "B7";
     public string DisplayTitle => "GC Handles, Weak References & Dependent Handles";
-    public int SortOrder => 1480;
+    public int SortOrder => 700;
 
     public bool CanBuild(AnalyzerResultSet results)
         => results.Get<GCHandleDomainResult>() is not null

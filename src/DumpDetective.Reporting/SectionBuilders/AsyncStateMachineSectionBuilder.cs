@@ -14,7 +14,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
 
     public string AnalyzerName => "Async State Machine Analysis";
     public string DisplayTitle => "Async State Machines";
-    public int SortOrder => 48; // §23 async state machines
+    public int SortOrder => 200; // §23 async state machines
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AsyncStateMachineDomainResult;
 
@@ -68,7 +68,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName, "Async State Machine Analysis", SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

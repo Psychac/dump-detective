@@ -10,7 +10,7 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
     private const int TopSignaturesToShow = 5;
 
     public string AnalyzerName => "Thread Stack Signature Clustering";
-    public int SortOrder => 65;
+    public int SortOrder => 110;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ThreadStackClusterDomainResult;
 

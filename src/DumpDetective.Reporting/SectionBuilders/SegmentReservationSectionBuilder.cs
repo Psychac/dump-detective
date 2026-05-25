@@ -10,7 +10,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
 {
     public string AnalyzerName => "Segment Reservation Analysis";
     public string DisplayTitle => "Segment Reservation & Virtual Memory";
-    public int SortOrder => 47; // §B5
+    public int SortOrder => 500; // §B5
 
     public bool CanHandle(AnalyzerDomainResult result) => result is SegmentReservationDomainResult;
 
@@ -22,15 +22,32 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         var blocks = new List<SectionBlock>();
 
         SectionLeadFinding? leadFinding = null;
-        if (d.AddressSpacePressureRisk)
+        if (d.ReservedToCommittedRatio > 10.0 || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > 4.0))
         {
-            string severity = d.ReservedToCommittedRatio > 10.0 ? "Critical" : "Warning";
+            bool critical = d.ReservedToCommittedRatio > 10.0;
+            string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
+                ? d.PressureRiskReason
+                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7.";
             leadFinding = new SectionLeadFinding(
-                Severity: severity,
-                Title: $"Address space pressure detected (reserved/committed ratio {d.ReservedToCommittedRatio:F1}×)",
-                Evidence: d.PressureRiskReason,
+                Severity: critical ? "Critical" : "Warning",
+                Title: $"Address space pressure \u2014 reserved/committed ratio {d.ReservedToCommittedRatio:F1}\u00d7",
+                Evidence: reason,
                 Recommendation: "Review segment reservation settings. On Server GC, consider reducing MaxHeapSize or enabling DATAS. On Workstation GC, check for LOH fragmentation or large pinned regions.",
-                ConfidenceSymbol: "★★★☆",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
+                ConfidenceScore: 0.85,
+                Caveats: []);
+        }
+        else if (d.ReservedToCommittedRatio > 4.0)
+        {
+            string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
+                ? d.PressureRiskReason
+                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: 4\u00d7).";
+            leadFinding = new SectionLeadFinding(
+                Severity: "Warning",
+                Title: $"Elevated segment reservation \u2014 ratio {d.ReservedToCommittedRatio:F1}\u00d7",
+                Evidence: reason,
+                Recommendation: "Monitor heap reservation growth. Reduce MaxHeapSize or consolidate heap segments if address space is constrained.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.85,
                 Caveats: []);
         }

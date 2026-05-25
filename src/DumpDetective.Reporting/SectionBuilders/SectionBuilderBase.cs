@@ -13,8 +13,8 @@ internal abstract class SectionBuilderBase
     protected static ConfidenceBandBlock BuildConfidenceBand(double? score, IReadOnlyList<string>? caveats)
     {
         double resolvedScore = score ?? 0.5;
-        string band = resolvedScore >= 0.8 ? "High" : resolvedScore >= 0.5 ? "Medium" : "Low";
-        string symbol = resolvedScore >= 0.8 ? "★★★☆" : resolvedScore >= 0.5 ? "★★☆☆" : "★☆☆☆";
+        string band   = resolvedScore >= 0.85 ? "High" : resolvedScore >= 0.65 ? "Med-High" : resolvedScore >= 0.45 ? "Medium" : "Low";
+        string symbol = resolvedScore >= 0.85 ? "●●●●" : resolvedScore >= 0.65 ? "●●●○" : resolvedScore >= 0.45 ? "●●○○" : "●○○○";
         return new ConfidenceBandBlock(band, resolvedScore, symbol, caveats?.ToArray() ?? []);
     }
     protected static ListItemBlock Li(string text, int indent = 0) => new(text, indent);

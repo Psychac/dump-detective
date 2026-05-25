@@ -10,7 +10,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
 {
     public string AnalyzerName => "Allocation Pattern Analysis";
     public string DisplayTitle => "Allocation Patterns";
-    public int SortOrder => 8;
+    public int SortOrder => 200;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AllocationPatternDomainResult;
 

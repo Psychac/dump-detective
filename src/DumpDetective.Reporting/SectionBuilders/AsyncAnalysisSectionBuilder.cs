@@ -10,7 +10,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
 {
     public string AnalyzerName => "Async Task Analysis";
     public string DisplayTitle => "Task Overview";
-    public int SortOrder => 1350;
+    public int SortOrder => 100;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AsyncTaskDomainResult;
 
@@ -32,7 +32,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 Title: $"Deep continuation chain detected (depth {asyncTasks.MaxContinuationDepth:N0})",
                 Evidence: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 50-hop warning threshold.",
                 Recommendation: "Inspect the deepest chain table below. Deep chains can indicate async deadlocks or unbounded recursive continuations.",
-                ConfidenceSymbol: "★★★☆",
+                ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,
                 Caveats: asyncTasks.TaskScanLimited ? ["Task scan was limited; chain depth may be underestimated."] : []);
         }

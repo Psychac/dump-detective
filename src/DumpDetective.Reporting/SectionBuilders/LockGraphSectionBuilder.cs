@@ -9,7 +9,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 {
     public string AnalyzerName => "Lock Graph Analysis";
     public string DisplayTitle => "Lock Graph & Deadlocks";
-    public int SortOrder => 70;
+    public int SortOrder => 300;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 
@@ -123,8 +123,20 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }
         }
 
+        SectionLeadFinding? leadFinding = null;
+        if (d.DeadlockCandidateCount > 0)
+            leadFinding = new SectionLeadFinding(
+                Severity: "Critical",
+                Title: $"Deadlock detected \u2014 {d.DeadlockCandidateCount} cycle(s) identified",
+                Evidence: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
+                Recommendation: "Enforce a consistent lock acquisition order across all threads. Use lock timeouts or restructure code to eliminate nested locking.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
+                ConfidenceScore: 0.85,
+                Caveats: ["Detection is based on recorded BlockingObjects; cooperative waits (e.g. SemaphoreSlim) may not appear."]);
+
         return new AnalyzerDetailSection(
-            AnalyzerName, AnalyzerName, SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

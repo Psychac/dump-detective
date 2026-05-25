@@ -12,7 +12,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
     public string AnalyzerName => "Event Leak Analysis";
     public string DisplayTitle => "Event & Delegate Leaks";
-    public int SortOrder => 80;
+    public int SortOrder => 400;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;
 
@@ -71,6 +71,55 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             tables.Add(ST("Publisher events by subscriber count",
                 ["Publisher Type", "Event Field", "Subscribers", "Instances", "Est. Retained"],
                 pubRows));
+        }
+
+        var leakGroupsForTable = d.TopLeakGroups ?? [];
+        if (leakGroupsForTable.Count > 0)
+        {
+            var groupRows = new List<TableRow>(leakGroupsForTable.Count);
+            for (int i = 0; i < leakGroupsForTable.Count; i++)
+            {
+                var g = leakGroupsForTable[i];
+                groupRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(g.PublisherType, 70)),
+                    Cell(FormatHelper.TruncateString(g.EventFieldName, 40)),
+                    Cell(g.IsStatic ? "Yes" : "No"),
+                    Cell($"{g.SeverityScore:N0}", g.SeverityScore),
+                    Cell($"{g.InstanceCount:N0}", g.InstanceCount),
+                    Cell($"{g.TotalSubscribers:N0}", g.TotalSubscribers),
+                    Cell($"{g.AverageSubscribers:F1}"),
+                    Cell($"{g.MinSubscribers}/{g.MaxSubscribers}"),
+                    Cell(g.EstimatedSubscriberRetainedBytes > 0 ? FormatHelper.FormatBytes(g.EstimatedSubscriberRetainedBytes) : "-"),
+                    Cell(g.HasDuplicateSubscriptions ? "Yes" : "No"),
+                    Cell(g.HasLifetimeMismatch ? "Yes" : "No"),
+                    Cell($"{g.OrphanedSubscriberInstances:N0}", g.OrphanedSubscriberInstances)]));
+            }
+            tables.Add(ST("Leak groups",
+                ["Publisher Type", "Event Field", "Static", "Severity", "Instances", "Subscribers", "Avg Subs", "Min/Max", "Est. Retained", "Dup Subs", "Lifetime Mismatch", "Orphaned"],
+                groupRows));
+        }
+
+        var leakInstancesForTable = d.TopLeakInstances ?? [];
+        if (leakInstancesForTable.Count > 0)
+        {
+            var instRows = new List<TableRow>(leakInstancesForTable.Count);
+            for (int i = 0; i < leakInstancesForTable.Count; i++)
+            {
+                var inst = leakInstancesForTable[i];
+                instRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(inst.PublisherType, 70)),
+                    Cell(FormatHelper.TruncateString(inst.EventFieldName, 40)),
+                    Cell(inst.IsStatic ? "Yes" : "No"),
+                    Cell($"0x{inst.PublisherAddress:X}"),
+                    Cell($"{inst.SeverityScore:N0}", inst.SeverityScore),
+                    Cell($"{inst.SubscriberCount:N0}", inst.SubscriberCount),
+                    Cell(inst.RootHint ?? "-"),
+                    Cell(inst.PublisherGeneration >= 0 ? $"Gen{inst.PublisherGeneration}" : "-"),
+                    Cell($"{inst.DuplicateSubscriptionCount:N0}", inst.DuplicateSubscriptionCount)]));
+            }
+            tables.Add(ST("Top leak instances",
+                ["Publisher Type", "Event Field", "Static", "Publisher Addr", "Severity", "Subscribers", "Root Hint", "Publisher Gen", "Dup Subs"],
+                instRows));
         }
 
         // Per-group collapsibles — all content stays in blocks (per-item detail)

@@ -100,6 +100,20 @@ export function renderBlocks(blocks, container, announce) {
         if (stack.length > 1) stack.pop();
         break;
       }
+      case 'confidenceBand': {
+        const d = el('div', 'confidence-band confidence-band--' + (block.band || 'medium').toLowerCase().replace('-', ''));
+        const sym = el('span', 'confidence-band__symbol'); sym.textContent = block.symbol || '';
+        const lbl = el('span', 'confidence-band__band'); lbl.textContent = block.band || '';
+        d.appendChild(sym); d.appendChild(document.createTextNode('\u2002')); d.appendChild(lbl);
+        if (block.score != null) {
+          const sc = el('span', 'confidence-band__score'); sc.textContent = '\u2002' + (Number(block.score) * 100).toFixed(0) + '%'; d.appendChild(sc);
+        }
+        if (block.caveats && block.caveats.length) {
+          for (const cav of block.caveats) { const c = el('div', 'confidence-band__caveat'); c.textContent = '\u26a0 ' + cav; d.appendChild(c); }
+        }
+        top.appendChild(d);
+        break;
+      }
       default:
         break;
     }
@@ -645,7 +659,7 @@ export function buildHealthScorecard(doc) {
   // ── Domain grid ───────────────────────────────────────────────────────────
   const grid = el('div', 'health-scorecard__grid');
   grid.setAttribute('role', 'list');
-  const domainOrder = ['Leaks', 'Memory', 'GC', 'Threads', 'Async', 'Exceptions', 'TypeSystem', 'Runtime'];
+  const domainOrder = ['Leaks', 'Memory', 'GC', 'TypeSystem', 'Threads', 'Async', 'Exceptions', 'Runtime'];
   const domainMap = new Map();
   for (const entry of scorecard.domains) domainMap.set((entry.domain || '').toLowerCase(), entry);
   const ordered = [];
@@ -827,9 +841,15 @@ export function buildDomains(doc) {
     sec.dataset.domain = domain.domain || '';
     sec.dataset.leadSeverity = domainSev;
 
-    const title = document.createElement('h2');
-    title.textContent = domain.domain || 'Domain';
-    sec.appendChild(title);
+    const hdr = el('div', 'domain-header domain-header--' + domainSev);
+    const dot = el('span', 'toc-dot toc-dot--' + domainSev); hdr.appendChild(dot);
+    const title = el('span', 'domain-header__name'); title.textContent = domain.domain || 'Domain';
+    hdr.appendChild(title);
+    const domSevLabel = domainSevLabel(domain.leadSeverity);
+    if (domSevLabel !== 'Info') {
+      const pill = el('span', 'domain-header__sev domain-header__sev--' + domainSev); pill.textContent = domSevLabel; hdr.appendChild(pill);
+    }
+    sec.appendChild(hdr);
 
     const meta = document.createElement('p');
     meta.className = 'report-domain__meta';
@@ -857,8 +877,12 @@ export function buildDomains(doc) {
     const sections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
       return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
     }) : [];
-    for (let j = 0; j < sections.length; j++) {
-      sec.appendChild(buildAnalyzerSection(sections[j], i * 1000 + j));
+    if (sections.length) {
+      const body = el('div', 'domain-body');
+      for (let j = 0; j < sections.length; j++) {
+        body.appendChild(buildAnalyzerSection(sections[j], i * 1000 + j));
+      }
+      sec.appendChild(body);
     }
 
     const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
@@ -922,9 +946,9 @@ export function buildAppendix(doc) {
     const tally = { completed: 0, failed: 0, skipped: 0, timedout: 0 };
     for (const r of runs) {
       const s = (r.status || '').toLowerCase();
-      if (s === 'completed') tally.completed++;
+      if (s === 'completed' || s === 'success') tally.completed++;
       else if (s === 'failed') tally.failed++;
-      else if (s === 'skipped') tally.skipped++;
+      else if (s.startsWith('skipped')) tally.skipped++;
       else if (s === 'timedout') tally.timedout++;
     }
     const metaSpan = el('span', 'appendix-panel__meta');
@@ -951,7 +975,9 @@ export function buildAppendix(doc) {
     const list = el('div', 'appendix-run-list');
     for (const run of runs) {
       const s = (run.status || 'unknown').toLowerCase();
-      const row = el('div', 'appendix-run-row appendix-run-row--' + s);
+      // Normalize 'success' → 'completed' for display/styling
+      const sNorm = (s === 'success') ? 'completed' : s;
+      const row = el('div', 'appendix-run-row appendix-run-row--' + sNorm);
 
       const name = el('div', 'appendix-run-row__name'); name.textContent = run.analyzerName || ''; row.appendChild(name);
 
@@ -968,8 +994,8 @@ export function buildAppendix(doc) {
         : Number(run.durationMs || 0).toFixed(0) + '\u00A0ms';
       row.appendChild(dur);
 
-      const pill = el('span', 'appendix-run-row__pill appendix-run-row__pill--' + s);
-      pill.textContent = run.status || 'unknown'; row.appendChild(pill);
+      const pill = el('span', 'appendix-run-row__pill appendix-run-row__pill--' + sNorm);
+      pill.textContent = sNorm.charAt(0).toUpperCase() + sNorm.slice(1); row.appendChild(pill);
 
       const note = run.errorMessage || run.findingGeneratorError || run.skipReason || '';
       if (note) { const noteEl = el('div', 'appendix-run-row__note'); noteEl.textContent = note; row.appendChild(noteEl); }
@@ -1513,18 +1539,14 @@ export function buildAnalyzerSection(section, i) {
   }
   const title = el('span', 'detail-summary__title'); title.textContent = section.displayTitle || section.analyzerName || '';
   const blocks = section.blocks || [];
-  let headingCount = 0;
-  for (const block of blocks) { if (block && block.type === 'heading') headingCount++; }
   // Lead-finding severity badge in the summary row
   const leadSev = section.leadFinding ? (section.leadFinding.severity || '').toLowerCase() : '';
-  const meta = el('span', 'detail-summary__meta');
-  meta.textContent = headingCount > 0 ? (headingCount + ' insights') : (blocks.length + ' blocks');
   if (leadSev && leadSev !== 'info') {
     const sevBadge = el('span', 'detail-summary__sev detail-summary__sev--' + leadSev);
     sevBadge.textContent = leadSev.charAt(0).toUpperCase() + leadSev.slice(1);
-    summaryEl.appendChild(title); summaryEl.appendChild(meta); summaryEl.appendChild(sevBadge);
+    summaryEl.appendChild(title); summaryEl.appendChild(sevBadge);
   } else {
-    summaryEl.appendChild(title); summaryEl.appendChild(meta);
+    summaryEl.appendChild(title);
   } details.appendChild(summaryEl);
 
   const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = String(i);
@@ -1538,7 +1560,9 @@ export function buildAnalyzerSection(section, i) {
     const lfSev = el('span', 'lead-finding__severity'); lfSev.textContent = lead.severity || 'Info';
     const lfTitle = el('span', 'lead-finding__title'); lfTitle.textContent = lead.title || '';
     const lfConf = el('span', 'lead-finding__confidence');
-    lfConf.textContent = (lead.confidenceSymbol || '') + ' ' + Math.round((lead.confidenceScore || 0) * 100) + '%';
+    const confScore = lead.confidenceScore || 0;
+    const confBand = confScore >= 0.85 ? 'High' : confScore >= 0.65 ? 'Med-High' : confScore >= 0.45 ? 'Medium' : 'Low';
+    lfConf.textContent = (lead.confidenceSymbol || '') + '\u2002' + confBand;
     lfHeader.appendChild(lfSev); lfHeader.appendChild(lfTitle); lfHeader.appendChild(lfConf);
     lf.appendChild(lfHeader);
     if (lead.evidence) { const lfEv = el('div', 'lead-finding__evidence'); lfEv.textContent = lead.evidence; lf.appendChild(lfEv); }
@@ -1571,9 +1595,10 @@ export function buildAnalyzerSection(section, i) {
   if (sectionTables && sectionTables.length) {
     for (let ti = 0; ti < sectionTables.length; ti++) {
       const tbl = sectionTables[ti];
+      const rowCount = tbl.rows ? tbl.rows.length : 0;
+      if (rowCount === 0) continue; // spec: omit empty tables entirely
       const tblDetails = el('details', 'table-collapse');
       const tblSummary = el('summary', 'table-collapse__summary');
-      const rowCount = tbl.rows ? tbl.rows.length : 0;
       const limit = tbl.rowLimit || 20;
       tblSummary.textContent = (tbl.title || 'Table') + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
       tblDetails.appendChild(tblSummary);
@@ -1614,8 +1639,6 @@ export function buildAnalyzerSection(section, i) {
   }
 
   details.appendChild(content); wrapper.appendChild(details);
-  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#detail-' + i; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = '🔗'; summaryEl.appendChild(t(' ')); summaryEl.appendChild(pa);
-  const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#detail-' + i; copyBtn.textContent = '\u2398'; summaryEl.appendChild(copyBtn);
 
   // ── Provenance footer — collapsed, scoped outside main details ────────────
   const prov = section.provenance;

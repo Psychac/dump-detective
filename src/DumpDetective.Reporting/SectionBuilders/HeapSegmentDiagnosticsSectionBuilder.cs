@@ -11,7 +11,7 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
 {
     public string AnalyzerName => "Segment Analysis";
     public string DisplayTitle => "Heap Topology";
-    public int SortOrder => 9;
+    public int SortOrder => 300;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is SegmentAnalysisDomainResult;
 

@@ -10,7 +10,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 {
     public string AnalyzerName => "Dominator Analysis";
     public string DisplayTitle => "Dominator Analysis";
-    public int SortOrder => 1140;
+    public int SortOrder => 300;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is DominatorDomainResult;
 

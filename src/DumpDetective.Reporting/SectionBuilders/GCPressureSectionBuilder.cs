@@ -10,7 +10,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
 {
     public string AnalyzerName => "GC Generation Analysis";
     public string DisplayTitle => "Generation Pressure";
-    public int SortOrder => 7;
+    public int SortOrder => 100;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is GCGenerationDomainResult;
 

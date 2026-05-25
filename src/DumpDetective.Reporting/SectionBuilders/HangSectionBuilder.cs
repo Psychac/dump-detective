@@ -10,7 +10,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
 {
     public string AnalyzerName => "Hang Analysis";
     public string DisplayTitle => "Hang & Blocking";
-    public int SortOrder => 14;
+    public int SortOrder => 200;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is HangDomainResult;
 
@@ -32,7 +32,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     ? $"Queued work items: {d.QueuedWorkItems:N0}, active workers at max ({d.RuntimeMaxThreads:N0})."
                     : $"Health score {d.HealthScore:N0} is below the healthy threshold of 50.",
                 Recommendation: "Increase thread pool min/max threads, reduce synchronous blocking on async paths, or profile CPU-bound work.",
-                ConfidenceSymbol: "★★★☆",
+                ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,
                 Caveats: d.RuntimeThreadPoolDataAvailable
                     ? []

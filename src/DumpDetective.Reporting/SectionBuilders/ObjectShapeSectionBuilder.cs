@@ -10,7 +10,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
 {
     public string AnalyzerName => "Object Shape Analysis";
     public string DisplayTitle => "Object Shape Analysis";
-    public int SortOrder => 305; // §C2 — after C1 TypeSystem (300)
+    public int SortOrder => 200; // §C2 — after C1 TypeSystem (100)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ObjectShapeAnalyzerDomainResult;
 

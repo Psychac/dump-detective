@@ -11,7 +11,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 {
     public string AnalyzerName => "String Analysis";
     public string DisplayTitle => "String Analysis";
-    public int SortOrder => 26;
+    public int SortOrder => 700;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is StringDomainResult;
 

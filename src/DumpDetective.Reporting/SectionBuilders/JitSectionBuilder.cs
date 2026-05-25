@@ -14,7 +14,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
 
     public string AnalyzerName => "JIT Analysis";
     public string DisplayTitle => "JIT & Code Footprint";
-    public int SortOrder => 51; // §19 — after BoxingSectionBuilder (50)
+    public int SortOrder => 200; // §19 — after BoxingSectionBuilder (50)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is JitDomainResult;
 
@@ -59,13 +59,16 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
                 string largeFlag = total > 64_000 ? ">64 KB" : string.Empty;
                 methodRows.Add(new TableRow([
                     Cell(m.Signature),
+                    Cell(FormatHelper.TruncateString(m.DeclaringType, 60)),
+                    Cell($"0x{m.NativeCodeAddress:X}"),
                     Cell(FormatHelper.FormatBytes(m.HotSize),  m.HotSize),
                     Cell(FormatHelper.FormatBytes(m.ColdSize), m.ColdSize),
                     Cell(FormatHelper.FormatBytes(total),      (long)total),
+                    Cell(m.IsTiered ? "Yes" : "No"),
                     Cell(largeFlag)]));
             }
             tables.Add(ST("Large JIT-compiled methods (native code size)",
-                ["Signature", "Hot", "Cold", "Total", "Flag"], methodRows));
+                ["Signature", "Declaring Type", "Native Code Addr", "Hot", "Cold", "Total", "Tiered", "Flag"], methodRows));
         }
 
         if (d.TieredMethodCount == 0)
@@ -76,7 +79,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
                          "metadata token (Tier0 → Tier1 recompilation). This is expected behaviour under tiered compilation."));
 
         return new AnalyzerDetailSection(
-            AnalyzerName, "JIT & Native Code Footprint", SortOrder, blocks,
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }

@@ -39,6 +39,8 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         // Domain F — Exceptions
         new ExceptionAnalysisSectionBuilder(),     // F1
         // Domain G — Runtime
+        new ModuleSectionBuilder(),                // G1
+        new AppDomainSectionBuilder(),             // G1b
         new ReferenceChainSectionBuilder(),
         new JitSectionBuilder(),
     ];
@@ -47,7 +49,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     [
         new ExecutiveSummarySectionBuilder(),
         new TypeSystemSectionBuilder(),            // C1
-        new AppDomainAssemblySectionBuilder(),     // G1
         new GCHandlesCombinedSectionBuilder(),     // B7
         new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights
         new ConfidenceSectionBuilder(),            // Z3 — Known Limitations

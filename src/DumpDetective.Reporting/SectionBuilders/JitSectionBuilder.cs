@@ -14,7 +14,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
 
     public string AnalyzerName => "JIT Analysis";
     public string DisplayTitle => "JIT & Code Footprint";
-    public int SortOrder => 200; // §19 — after BoxingSectionBuilder (50)
+    public int SortOrder => 200; // §G3 — after AppDomainSectionBuilder (120)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is JitDomainResult;
 

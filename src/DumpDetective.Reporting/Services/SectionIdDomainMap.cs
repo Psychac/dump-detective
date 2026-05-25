@@ -82,11 +82,12 @@ internal static class SectionIdDomainMap
         // Domain G — Runtime Infrastructure
         ["ModuleAnalyzer"]             = ("Runtime",    "G1"),
         ["Module Analysis"]            = ("Runtime",    "G1"),
-        ["AppDomainAnalyzer"]          = ("Runtime",    "G1"),
-        ["AppDomain Analysis"]         = ("Runtime",    "G1"),
-        ["Modules & Assemblies"]       = ("Runtime",    "G1"),   // AppDomainAssemblySectionBuilder display title
-        ["JitAnalyzer"]                = ("Runtime",    "G2"),
-        ["JIT Analysis"]               = ("Runtime",    "G2"),
+        ["Modules & Assemblies"]       = ("Runtime",    "G1"),   // ModuleSectionBuilder display title
+        ["AppDomainAnalyzer"]          = ("Runtime",    "G2"),
+        ["AppDomain Analysis"]         = ("Runtime",    "G2"),
+        ["AppDomains"]                 = ("Runtime",    "G2"),   // AppDomainSectionBuilder display title
+        ["JitAnalyzer"]                = ("Runtime",    "G3"),
+        ["JIT Analysis"]               = ("Runtime",    "G3"),
 
         // IReportSectionBuilder display-title aliases (for sections where DisplayTitle is used as AnalyzerName in the AnalyzerDetailSection)
         ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title

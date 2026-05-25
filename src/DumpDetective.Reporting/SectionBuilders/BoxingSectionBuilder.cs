@@ -13,6 +13,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     private const int TopPaddingToShow = 10;
 
     public string AnalyzerName => "Boxing Analysis";
+    public string DisplayTitle => "Boxing & Value Type Pressure";
     public int SortOrder => 50; // §20 — after WeakReferenceSectionBuilder (49)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is BoxingDomainResult;

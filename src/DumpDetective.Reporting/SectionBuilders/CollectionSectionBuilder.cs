@@ -8,6 +8,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Collection Analysis";
+    public string DisplayTitle => "Collection Health";
     public int SortOrder => 50;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is CollectionDomainResult;

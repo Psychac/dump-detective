@@ -10,6 +10,7 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
     private const int TopRootsToShow = 8;
 
     public string AnalyzerName => "Static Root Leak Detection";
+    public string DisplayTitle => "Static Roots";
     public int SortOrder => 27;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is StaticRootDomainResult;

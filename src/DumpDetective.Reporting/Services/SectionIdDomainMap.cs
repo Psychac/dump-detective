@@ -83,22 +83,20 @@ internal static class SectionIdDomainMap
         ["ModuleAnalyzer"]             = ("Runtime",    "G1"),
         ["Module Analysis"]            = ("Runtime",    "G1"),
         ["AppDomainAnalyzer"]          = ("Runtime",    "G1"),
-        ["AppDomain Analysis"]        = ("Runtime",    "G1"),
-        ["AppDomain & Assembly"]       = ("Runtime",    "G1"),   // AppDomainAssemblySectionBuilder display name
+        ["AppDomain Analysis"]         = ("Runtime",    "G1"),
+        ["Modules & Assemblies"]       = ("Runtime",    "G1"),   // AppDomainAssemblySectionBuilder display title
         ["JitAnalyzer"]                = ("Runtime",    "G2"),
         ["JIT Analysis"]               = ("Runtime",    "G2"),
 
-        // Aggregating IReportSectionBuilder display names not covered above
-        ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder
-        ["Retention Intelligence"]     = ("Memory",     "A4"),   // RetentionDominatorSectionBuilder
-        ["Memory Topology"]            = ("Memory",     "A2"),   // MemoryTopologySectionBuilder
-        ["GC & Allocation Pressure"]   = ("GC",         "B1"),   // GCPressureSectionBuilder
-        ["Heap Segment Diagnostics"]   = ("GC",         "B3"),   // HeapSegmentDiagnosticsSectionBuilder
-        ["Thread & Concurrency"]       = ("Threads",    "D1"),   // ThreadConcurrencySectionBuilder
-        ["Async & Task"]               = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder
+        // IReportSectionBuilder display-title aliases (for sections where DisplayTitle is used as AnalyzerName in the AnalyzerDetailSection)
+        ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title
+        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryTopologySectionBuilder display title
+        ["Generation Pressure"]        = ("GC",         "B1"),   // GCPressureSectionBuilder display title
+        ["Heap Topology"]              = ("GC",         "B3"),   // HeapSegmentDiagnosticsSectionBuilder display title
+        ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
 
         // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder
-        ["GC Handles, Weak Refs & Dependent Handles"] = ("GC", "B7"),
+        ["GC Handles, Weak References & Dependent Handles"] = ("GC", "B7"),
 
         // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
         ["Reference Chain Analysis"]   = ("Memory",     ""),

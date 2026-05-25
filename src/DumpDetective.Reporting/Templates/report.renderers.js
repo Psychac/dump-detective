@@ -1281,10 +1281,10 @@ export function buildTOC(doc) {
   const quickSection = el('div', 'toc-quick-nav');
   const quickLabel = el('div', 'toc-quick-nav__label'); quickLabel.textContent = 'Report'; quickSection.appendChild(quickLabel);
   const quickList = document.createElement('ul'); quickList.className = 'toc-quick-nav__list';
-  quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u2B05'));
-  if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u2665'));
-  if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u2022\u2022\u2022'));
-  if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u2630'));
+  quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u25CE'));
+  if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u271A'));
+  if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u00A7'));
+  if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u00B6'));
   quickSection.appendChild(quickList);
   fragment.appendChild(quickSection);
 

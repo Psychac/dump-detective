@@ -12,6 +12,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
     private const int TopQueueRows = 10;
 
     public string AnalyzerName => "Finalizable Object Analysis";
+    public string DisplayTitle => "Finalizable Objects";
     public int SortOrder => 46; // §21 finalizable objects
 
     public bool CanHandle(AnalyzerDomainResult result) => result is FinalizableObjectDomainResult;

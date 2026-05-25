@@ -10,8 +10,8 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
 {
     public IReadOnlyList<string> SourceAnalyzers => [];
 
-    public string SectionId => "prof.confidence";
-    public string DisplayTitle => "Confidence & Limitations";
+    public string SectionId => "Z3";
+    public string DisplayTitle => "Known Limitations";
     public int SortOrder => 1750;
 
     public bool CanBuild(AnalyzerResultSet results) => results.AllRuns.Count > 0;
@@ -109,7 +109,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         blocks.Add(Li("Event and finalizer retention numbers are heuristic summaries, not full graph proofs."));
 
         return new AnalyzerDetailSection(
-            AnalyzerName: "Confidence & Limitations",
+            AnalyzerName: "Known Limitations",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
             Blocks: blocks,

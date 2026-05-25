@@ -13,6 +13,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
     private const int TopFrameTypesToShow = 15;
 
     public string AnalyzerName => "JIT Analysis";
+    public string DisplayTitle => "JIT & Code Footprint";
     public int SortOrder => 51; // §19 — after BoxingSectionBuilder (50)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is JitDomainResult;

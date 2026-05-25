@@ -13,6 +13,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
     private const int TopSparseRows = 10;
 
     public string AnalyzerName => "Array Analysis";
+    public string DisplayTitle => "Arrays";
     public int SortOrder => 47; // §22 arrays (before §23 async state machines)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ArrayDomainResult;

@@ -8,7 +8,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Leak Candidate Analysis";
-    public string DisplayTitle => "Leak Analysis";
+    public string DisplayTitle => "Leak Candidates";
     public int SortOrder => 1250;
 
     private const int TopCandidateCount = 30;

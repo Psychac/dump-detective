@@ -8,6 +8,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Lock Graph Analysis";
+    public string DisplayTitle => "Lock Graph & Deadlocks";
     public int SortOrder => 70;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;

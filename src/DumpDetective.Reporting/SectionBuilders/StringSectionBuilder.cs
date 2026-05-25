@@ -10,7 +10,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "String Analysis";
-    public string DisplayTitle => "String & Duplicate Analysis";
+    public string DisplayTitle => "String Analysis";
     public int SortOrder => 26;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is StringDomainResult;

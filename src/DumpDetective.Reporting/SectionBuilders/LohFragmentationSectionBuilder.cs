@@ -9,6 +9,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "LOH Fragmentation Analysis";
+    public string DisplayTitle => "LOH Fragmentation";
     public int SortOrder => 55;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;

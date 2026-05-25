@@ -46,11 +46,10 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
     [
         new ExecutiveSummarySectionBuilder(),
-        new TypeSystemSectionBuilder(),
-        new AppDomainAssemblySectionBuilder(),
+        new TypeSystemSectionBuilder(),            // C1
+        new AppDomainAssemblySectionBuilder(),     // G1
         new GCHandlesCombinedSectionBuilder(),     // B7
-        new FindingNarrativeSectionBuilder(),
-        new InsightsSectionBuilder(),
-        new ConfidenceSectionBuilder(),
+        new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights
+        new ConfidenceSectionBuilder(),            // Z3 — Known Limitations
     ];
 }

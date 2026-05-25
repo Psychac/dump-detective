@@ -15,8 +15,8 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
 {
     public IReadOnlyList<string> SourceAnalyzers => ["GCHandleAnalyzer", "WeakReferenceAnalyzer", "DependentHandleAnalyzer"];
 
-    public string SectionId => "prof.gc-handles";
-    public string DisplayTitle => "GC Handles, Weak Refs & Dependent Handles";
+    public string SectionId => "B7";
+    public string DisplayTitle => "GC Handles, Weak References & Dependent Handles";
     public int SortOrder => 1480;
 
     public bool CanBuild(AnalyzerResultSet results)
@@ -153,7 +153,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName: "GC Handles, Weak Refs & Dependent Handles",
+            AnalyzerName: "GC Handles, Weak References & Dependent Handles",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
             Blocks: blocks,

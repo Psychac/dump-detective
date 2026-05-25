@@ -9,7 +9,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Async Task Analysis";
-    public string DisplayTitle => "Async & Task";
+    public string DisplayTitle => "Task Overview";
     public int SortOrder => 1350;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AsyncTaskDomainResult;

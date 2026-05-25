@@ -11,7 +11,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
     private const int MaxInstancesToShow = 10;
 
     public string AnalyzerName => "Event Leak Analysis";
-    public string DisplayTitle => "Event & Delegate Analysis";
+    public string DisplayTitle => "Event & Delegate Leaks";
     public int SortOrder => 80;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;

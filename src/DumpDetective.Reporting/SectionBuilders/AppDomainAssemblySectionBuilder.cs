@@ -10,8 +10,8 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 {
     public IReadOnlyList<string> SourceAnalyzers => ["AppDomainAnalyzer", "ModuleAnalyzer"];
 
-    public string SectionId => "prof.appdomain-assembly";
-    public string DisplayTitle => "AppDomain & Assembly";
+    public string SectionId => "G1";
+    public string DisplayTitle => "Modules & Assemblies";
     public int SortOrder => 1800;
 
     public bool CanBuild(AnalyzerResultSet results)
@@ -136,7 +136,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
             blocks.Add(T("No appdomain or module result was available."));
 
         return new AnalyzerDetailSection(
-            "AppDomain & Assembly", DisplayTitle, SortOrder, blocks,
+            "Modules & Assemblies", DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics.Count > 0 ? keyMetrics : null,
             Tables: tables.Count > 0 ? tables : null);
     }

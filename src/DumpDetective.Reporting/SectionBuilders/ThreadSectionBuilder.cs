@@ -8,6 +8,7 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Thread Analysis";
+    public string DisplayTitle => "Thread Overview";
     public int SortOrder => 12;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is ThreadDomainResult;

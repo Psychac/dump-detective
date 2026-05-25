@@ -13,6 +13,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
     private const int TopSuspendedRows = 20;
 
     public string AnalyzerName => "Async State Machine Analysis";
+    public string DisplayTitle => "Async State Machines";
     public int SortOrder => 48; // §23 async state machines
 
     public bool CanHandle(AnalyzerDomainResult result) => result is AsyncStateMachineDomainResult;

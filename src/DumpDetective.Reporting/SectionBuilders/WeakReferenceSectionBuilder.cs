@@ -12,7 +12,8 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
     private const int TopTypesToShow = 15;
 
     public string AnalyzerName => "Weak Reference Analysis";
-    public int SortOrder => 49; // §24 — after AsyncStateMachine (48)
+    public string DisplayTitle => "Weak References";
+    public int SortOrder => 720;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is WeakReferenceDomainResult;
 

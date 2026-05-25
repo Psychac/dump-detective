@@ -8,7 +8,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class DependentHandleSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Dependent Handle Analysis";
-    public int SortOrder => 46;
+    public string DisplayTitle => "Dependent Handles";
+    public int SortOrder => 730;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is DependentHandleDomainResult;
 

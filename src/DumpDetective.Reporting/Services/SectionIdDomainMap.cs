@@ -99,6 +99,15 @@ internal static class SectionIdDomainMap
         // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder
         ["GC Handles, Weak References & Dependent Handles"] = ("GC", "B7"),
 
+        // Individual B7/B8/B9 — split builders
+        ["GCHandleAnalyzer"]            = ("GC",      "B7"),
+        ["GC Handle Analysis"]          = ("GC",      "B7"),
+        ["GC Handles"]                  = ("GC",      "B7"),
+        ["WeakReferenceAnalyzer"]       = ("GC",      "B8"),
+        ["Weak Reference Analysis"]     = ("GC",      "B8"),
+        ["DependentHandleAnalyzer"]     = ("GC",      "B9"),
+        ["Dependent Handle Analysis"]   = ("GC",      "B9"),
+
         // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
         ["Reference Chain Analysis"]   = ("Memory",     ""),
 

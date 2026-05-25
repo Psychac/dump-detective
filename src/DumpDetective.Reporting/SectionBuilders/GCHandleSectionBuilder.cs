@@ -8,7 +8,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "GC Handle Analysis";
-    public int SortOrder => 45;
+    public string DisplayTitle => "GC Handles";
+    public int SortOrder => 710;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is GCHandleDomainResult;
 

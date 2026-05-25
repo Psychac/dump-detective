@@ -34,10 +34,13 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new ThreadStackClusterSectionBuilder(),    // D3 (stack clusters)
         new EventLeakSectionBuilder(),             // D4
         // Domain E — Async
+        new WeakReferenceSectionBuilder(),         // B8
         new AsyncAnalysisSectionBuilder(),         // E1
         new AsyncStateMachineSectionBuilder(),     // E2
         // Domain F — Exceptions
         new ExceptionAnalysisSectionBuilder(),     // F1
+        new GCHandleSectionBuilder(),              // B7
+        new DependentHandleSectionBuilder(),       // B9
         // Domain G — Runtime
         new ModuleSectionBuilder(),                // G1
         new AppDomainSectionBuilder(),             // G1b
@@ -49,7 +52,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     [
         new ExecutiveSummarySectionBuilder(),
         new TypeSystemSectionBuilder(),            // C1
-        new GCHandlesCombinedSectionBuilder(),     // B7
         new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights
         new ConfidenceSectionBuilder(),            // Z3 — Known Limitations
     ];

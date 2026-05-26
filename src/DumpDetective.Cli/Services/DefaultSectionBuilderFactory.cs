@@ -46,6 +46,10 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new AppDomainSectionBuilder(),             // G1b
         new ReferenceChainSectionBuilder(),
         new JitSectionBuilder(),
+        // Domain H — Infrastructure / Network
+        new DbConnectionSectionBuilder(),          // H1
+        new WcfChannelSectionBuilder(),            // H2
+        new HttpObjectSectionBuilder(),            // H3
     ];
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>

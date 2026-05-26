@@ -76,6 +76,9 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, JitFindingGenerator>();
         services.AddSingleton<IFindingGenerator, LeakCandidateFindingGenerator>();
         services.AddSingleton<IFindingGenerator, DominatorFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, DbConnectionFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, WcfChannelFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, HttpObjectFindingGenerator>();
 
         services.AddSingleton<FindingGenerationPipeline>();
         services.AddSingleton<CanonicalReportDocumentFactory>();
@@ -115,6 +118,9 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, JitTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, LeakCandidateTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, DominatorTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, DbConnectionTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, WcfChannelTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, HttpObjectTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

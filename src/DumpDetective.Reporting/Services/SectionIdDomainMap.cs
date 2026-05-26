@@ -111,6 +111,14 @@ internal static class SectionIdDomainMap
         // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
         ["Reference Chain Analysis"]   = ("Memory",     ""),
 
+        // Domain H — Infrastructure / Network
+        ["DbConnectionAnalyzer"]       = ("Infrastructure", "H1"),
+        ["DB Connection Analysis"]     = ("Infrastructure", "H1"),
+        ["WcfChannelAnalyzer"]         = ("Infrastructure", "H2"),
+        ["WCF Channel Analysis"]       = ("Infrastructure", "H2"),
+        ["HttpObjectAnalyzer"]         = ("Infrastructure", "H3"),
+        ["HTTP Object Analysis"]       = ("Infrastructure", "H3"),
+
         // C1 (TypeTable) is built by TypeSystemSectionBuilder as an IReportSectionBuilder — no analyzerName entry needed.
     };
 
@@ -138,6 +146,6 @@ internal static class SectionIdDomainMap
     /// <summary>Returns all distinct domain strings in priority render order.</summary>
     public static IReadOnlyList<string> DomainsInOrder { get; } =
     [
-        "Leaks", "Memory", "GC", "TypeSystem", "Threads", "Async", "Exceptions", "Runtime"
+        "Leaks", "Memory", "GC", "TypeSystem", "Threads", "Async", "Exceptions", "Runtime", "Infrastructure"
     ];
 }

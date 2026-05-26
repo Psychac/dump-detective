@@ -48,7 +48,11 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new SegmentReservationAnalyzer(),
             new WeakReferenceAnalyzer(),
             new BoxingAnalyzer(),
-            new JitAnalyzer()
+            new JitAnalyzer(),
+            // Domain H — Infrastructure / Network
+            new DbConnectionAnalyzer(),
+            new WcfChannelAnalyzer(),
+            new HttpObjectAnalyzer(),
         ];
     }
 }

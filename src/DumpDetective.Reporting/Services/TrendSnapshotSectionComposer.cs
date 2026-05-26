@@ -1,3 +1,6 @@
+using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.Services;
@@ -11,7 +14,9 @@ internal static class TrendSnapshotSectionComposer
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
         IReadOnlyList<AnalyzerDetailSection> sections,
         int dumpIndex,
-        int totalDumps)
+        int totalDumps,
+        AnalysisSnapshot? snapshot = null,
+        AnalysisSnapshot? baseline = null)
     {
         string title = $"Dump {dumpIndex + 1} of {totalDumps}: {Path.GetFileName(dumpPath)}";
         var blocks = new List<SectionBlock>();
@@ -41,6 +46,10 @@ internal static class TrendSnapshotSectionComposer
 
         if (findings.Count > 0)
         {
+            // Key metrics for this snapshot (with Δ vs baseline)
+            if (snapshot != null)
+                AddKeyMetricsBlock(blocks, snapshot, baseline);
+
             blocks.Add(new BlankBlock());
             blocks.Add(new HeadingBlock("FINDINGS"));
             blocks.Add(new DividerBlock());
@@ -49,6 +58,10 @@ internal static class TrendSnapshotSectionComposer
                 blocks.Add(new HeadingBlock($"[{finding.Severity}] {finding.Title}", 1));
                 blocks.Add(new TextBlock(finding.Evidence, 2));
             }
+        }
+        else if (snapshot != null)
+        {
+            AddKeyMetricsBlock(blocks, snapshot, baseline);
         }
 
         foreach (AnalyzerDetailSection section in sections)
@@ -60,6 +73,158 @@ internal static class TrendSnapshotSectionComposer
             blocks.Add(new CollapsibleSectionEndBlock());
         }
 
-        return new AnalyzerDetailSection(title, title, dumpIndex * 10 + 200, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName:  title,
+            DisplayTitle:  title,
+            SortOrder:     dumpIndex * 10 + 200,
+            Blocks:        blocks,
+            SectionId:     $"detail-{dumpIndex}",
+            Domain:        "SnapshotDetail");
+    }
+
+    // ── Key Metrics Helpers ───────────────────────────────────────────────────
+
+    private static void AddKeyMetricsBlock(
+        List<SectionBlock> blocks,
+        AnalysisSnapshot snapshot,
+        AnalysisSnapshot? baseline)
+    {
+        blocks.Add(new BlankBlock());
+        blocks.Add(new HeadingBlock("Key Metrics"));
+
+        // Extract values from domain results
+        ulong? totalBytes = null;
+        double? gen2Pct = null;
+        int? leakCandidates = null;
+        int? blockedThreads = null;
+        int? finalizerQueue = null;
+        int? activeExceptions = null;
+
+        if (snapshot.DomainResults.TryGetValue("Memory Analysis", out AnalyzerDomainResult? memRaw) && memRaw is MemoryDomainResult mem)
+            totalBytes = mem.TotalBytes;
+        else if (snapshot.DomainResults.TryGetValue("MemoryAnalyzer", out AnalyzerDomainResult? memRaw2) && memRaw2 is MemoryDomainResult mem2)
+            totalBytes = mem2.TotalBytes;
+
+        if (snapshot.DomainResults.TryGetValue("GC Generation Analysis", out AnalyzerDomainResult? gcRaw) && gcRaw is GCGenerationDomainResult gc)
+            gen2Pct = gc.Gen2Pct;
+        else if (snapshot.DomainResults.TryGetValue("GCGenerationAnalyzer", out AnalyzerDomainResult? gcRaw2) && gcRaw2 is GCGenerationDomainResult gc2)
+            gen2Pct = gc2.Gen2Pct;
+
+        if (snapshot.DomainResults.TryGetValue("Leak Candidate Analysis", out AnalyzerDomainResult? leakRaw) && leakRaw is LeakCandidateDomainResult leak)
+            leakCandidates = leak.TotalCandidates;
+        else if (snapshot.DomainResults.TryGetValue("LeakCandidateAnalyzer", out AnalyzerDomainResult? leakRaw2) && leakRaw2 is LeakCandidateDomainResult leak2)
+            leakCandidates = leak2.TotalCandidates;
+
+        if (snapshot.DomainResults.TryGetValue("Thread Analysis", out AnalyzerDomainResult? threadRaw) && threadRaw is ThreadDomainResult thread)
+        {
+            blockedThreads    = thread.BlockedThreadCount;
+            activeExceptions  = thread.ThreadsWithActiveExceptionsCount;
+        }
+        else if (snapshot.DomainResults.TryGetValue("ThreadAnalyzer", out AnalyzerDomainResult? threadRaw2) && threadRaw2 is ThreadDomainResult thread2)
+        {
+            blockedThreads   = thread2.BlockedThreadCount;
+            activeExceptions = thread2.ThreadsWithActiveExceptionsCount;
+        }
+
+        if (snapshot.DomainResults.TryGetValue("Finalizable Object Analysis", out AnalyzerDomainResult? finRaw) && finRaw is FinalizableObjectDomainResult fin)
+            finalizerQueue = fin.FinalizerQueueCount;
+        else if (snapshot.DomainResults.TryGetValue("FinalizableObjectAnalyzer", out AnalyzerDomainResult? finRaw2) && finRaw2 is FinalizableObjectDomainResult fin2)
+            finalizerQueue = fin2.FinalizerQueueCount;
+
+        // Baseline values for Δ computation
+        ulong? bTotalBytes = null;
+        double? bGen2Pct = null;
+        int? bLeakCandidates = null;
+        int? bBlockedThreads = null;
+        int? bFinalizerQueue = null;
+        int? bActiveExceptions = null;
+
+        if (baseline != null)
+        {
+            if (baseline.DomainResults.TryGetValue("Memory Analysis", out AnalyzerDomainResult? bMemRaw) && bMemRaw is MemoryDomainResult bMem)
+                bTotalBytes = bMem.TotalBytes;
+            else if (baseline.DomainResults.TryGetValue("MemoryAnalyzer", out AnalyzerDomainResult? bMemRaw2) && bMemRaw2 is MemoryDomainResult bMem2)
+                bTotalBytes = bMem2.TotalBytes;
+
+            if (baseline.DomainResults.TryGetValue("GC Generation Analysis", out AnalyzerDomainResult? bGcRaw) && bGcRaw is GCGenerationDomainResult bGc)
+                bGen2Pct = bGc.Gen2Pct;
+            else if (baseline.DomainResults.TryGetValue("GCGenerationAnalyzer", out AnalyzerDomainResult? bGcRaw2) && bGcRaw2 is GCGenerationDomainResult bGc2)
+                bGen2Pct = bGc2.Gen2Pct;
+
+            if (baseline.DomainResults.TryGetValue("Leak Candidate Analysis", out AnalyzerDomainResult? bLeakRaw) && bLeakRaw is LeakCandidateDomainResult bLeak)
+                bLeakCandidates = bLeak.TotalCandidates;
+            else if (baseline.DomainResults.TryGetValue("LeakCandidateAnalyzer", out AnalyzerDomainResult? bLeakRaw2) && bLeakRaw2 is LeakCandidateDomainResult bLeak2)
+                bLeakCandidates = bLeak2.TotalCandidates;
+
+            if (baseline.DomainResults.TryGetValue("Thread Analysis", out AnalyzerDomainResult? bThreadRaw) && bThreadRaw is ThreadDomainResult bThread)
+            {
+                bBlockedThreads   = bThread.BlockedThreadCount;
+                bActiveExceptions = bThread.ThreadsWithActiveExceptionsCount;
+            }
+            else if (baseline.DomainResults.TryGetValue("ThreadAnalyzer", out AnalyzerDomainResult? bThreadRaw2) && bThreadRaw2 is ThreadDomainResult bThread2)
+            {
+                bBlockedThreads   = bThread2.BlockedThreadCount;
+                bActiveExceptions = bThread2.ThreadsWithActiveExceptionsCount;
+            }
+
+            if (baseline.DomainResults.TryGetValue("Finalizable Object Analysis", out AnalyzerDomainResult? bFinRaw) && bFinRaw is FinalizableObjectDomainResult bFin)
+                bFinalizerQueue = bFin.FinalizerQueueCount;
+            else if (baseline.DomainResults.TryGetValue("FinalizableObjectAnalyzer", out AnalyzerDomainResult? bFinRaw2) && bFinRaw2 is FinalizableObjectDomainResult bFin2)
+                bFinalizerQueue = bFin2.FinalizerQueueCount;
+        }
+
+        bool isBaseline = baseline == null;
+
+        var rows = new List<TableRow>();
+        if (totalBytes.HasValue)
+            rows.Add(MetricRow("Total Bytes", FormatHelper.FormatBytes(totalBytes.Value),
+                isBaseline ? null : DeltaBytes(totalBytes, bTotalBytes)));
+        if (gen2Pct.HasValue)
+            rows.Add(MetricRow("Gen2 %", $"{gen2Pct.Value:F1}%",
+                isBaseline ? null : DeltaPct(gen2Pct, bGen2Pct)));
+        if (leakCandidates.HasValue)
+            rows.Add(MetricRow("Leak Candidates", leakCandidates.Value.ToString(),
+                isBaseline ? null : DeltaInt(leakCandidates, bLeakCandidates)));
+        if (blockedThreads.HasValue)
+            rows.Add(MetricRow("Blocked Threads", blockedThreads.Value.ToString(),
+                isBaseline ? null : DeltaInt(blockedThreads, bBlockedThreads)));
+        if (activeExceptions.HasValue)
+            rows.Add(MetricRow("Active Exceptions", activeExceptions.Value.ToString(),
+                isBaseline ? null : DeltaInt(activeExceptions, bActiveExceptions)));
+        if (finalizerQueue.HasValue)
+            rows.Add(MetricRow("Finalizer Queue", finalizerQueue.Value.ToString(),
+                isBaseline ? null : DeltaInt(finalizerQueue, bFinalizerQueue)));
+
+        if (rows.Count > 0)
+        {
+            blocks.Add(new TableBlock(
+                Caption: "Snapshot Key Metrics",
+                Headers: ["Metric", "Value", "Δ vs Baseline"],
+                Rows: rows));
+        }
+    }
+
+    private static TableRow MetricRow(string metric, string value, string? delta) =>
+        new([new TableCell(metric), new TableCell(value), new TableCell(delta ?? "—")]);
+
+    private static string DeltaBytes(ulong? current, ulong? baseline)
+    {
+        if (!current.HasValue || !baseline.HasValue) return "—";
+        long delta = (long)current.Value - (long)baseline.Value;
+        return delta == 0 ? "=" : $"{(delta > 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, "bytes")}";
+    }
+
+    private static string DeltaPct(double? current, double? baseline)
+    {
+        if (!current.HasValue || !baseline.HasValue) return "—";
+        double delta = current.Value - baseline.Value;
+        return delta == 0 ? "=" : $"{delta:+0.0;-0.0}pp";
+    }
+
+    private static string DeltaInt(int? current, int? baseline)
+    {
+        if (!current.HasValue || !baseline.HasValue) return "—";
+        int delta = current.Value - baseline.Value;
+        return delta == 0 ? "=" : $"{delta:+0;-0}";
     }
 }

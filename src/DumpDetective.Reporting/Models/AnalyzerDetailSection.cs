@@ -68,6 +68,7 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(ConfidenceBandBlock), "confidenceBand")]
 [JsonDerivedType(typeof(CollapsibleSectionBeginBlock), "collapsibleBegin")]
 [JsonDerivedType(typeof(CollapsibleSectionEndBlock), "collapsibleEnd")]
+[JsonDerivedType(typeof(SparklineBlock), "sparkline")]
 internal abstract record SectionBlock;
 
 internal sealed record HeadingBlock(string Text, int IndentLevel = 0) : SectionBlock;
@@ -97,7 +98,13 @@ internal sealed record ConfidenceBandBlock(
     string[] Caveats) : SectionBlock;
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
-internal sealed record TableCell(string Display, long? RawValue = null);   // RawValue for client-side sort
+internal sealed record TableCell(string Display, long? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links
 
 internal sealed record CollapsibleSectionBeginBlock(string Title) : SectionBlock;
 internal sealed record CollapsibleSectionEndBlock : SectionBlock;
+
+internal sealed record SparklineBlock(
+    string MetricKey,
+    string Unit,
+    IReadOnlyList<double> Values,
+    string Direction) : SectionBlock;  // Direction: "HigherIsWorse" | "LowerIsWorse" | "Neutral"

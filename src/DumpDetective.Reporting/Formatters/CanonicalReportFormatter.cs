@@ -51,6 +51,8 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                 foreach (string path in trendDoc.TrendDumpPaths)
                     sb.AppendLine($"  - {path}");
             }
+            // T2.2: Lifecycle summary
+            sb.AppendLine($"Finding lifecycle:  New={trendDoc.TrendNewFindingCount}  Persistent={trendDoc.TrendPersistentFindingCount}  Resolved={trendDoc.TrendResolvedFindingCount}");
             sb.AppendLine();
         }
         if (doc.HealthScorecard is { } scorecard)
@@ -180,6 +182,17 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                 case CollapsibleSectionEndBlock:
                     sb.AppendLine();
                     break;
+                case SparklineBlock spark:
+                    {
+                        double first = spark.Values.FirstOrDefault(v => !double.IsNaN(v));
+                        double last  = spark.Values.LastOrDefault(v => !double.IsNaN(v));
+                        int n = spark.Values.Count;
+                        string label = n <= 2
+                            ? $"{first} → {last}"
+                            : $"{first} → [{n} pts] → {last}";
+                        sb.AppendLine($"[Sparkline] {spark.MetricKey} ({spark.Unit}): {label}");
+                        break;
+                    }
             }
         }
     }
@@ -326,6 +339,8 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 foreach (string path in trendDoc.TrendDumpPaths)
                     sb.AppendLine($"> - `{path}`");
             }
+            // T2.2: Lifecycle summary
+            sb.AppendLine($"> Finding lifecycle: **New={trendDoc.TrendNewFindingCount}** / Persistent={trendDoc.TrendPersistentFindingCount} / Resolved={trendDoc.TrendResolvedFindingCount}");
             sb.AppendLine();
         }
 
@@ -382,7 +397,8 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             for (int si = 0; si < doc.AnalyzerSections.Count; si++)
             {
                 AnalyzerDetailSection section = doc.AnalyzerSections[si];
-                sb.AppendLine($"<a id=\"detail-{si}\"></a>");
+                string anchor = string.IsNullOrEmpty(section.SectionId) ? $"detail-{si}" : section.SectionId;
+                sb.AppendLine($"<a id=\"{anchor}\"></a>");
                 sb.AppendLine($"### {Esc(section.DisplayTitle)}");
                 sb.AppendLine();
                 RenderBlocksMd(section.Blocks, sb);
@@ -397,12 +413,32 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
     {
         sb.AppendLine("## Health Summary");
         sb.AppendLine();
-        sb.AppendLine("| Domain | Severity | Critical | Warning |");
-        sb.AppendLine("|---|---|---|---|");
-        for (int i = 0; i < scorecard.Domains.Count; i++)
+        bool hasTrend = scorecard.Domains.Any(d => d.Change.HasValue);
+        if (hasTrend)
         {
-            DomainHealthEntry entry = scorecard.Domains[i];
-            sb.AppendLine($"| {Esc(entry.Domain)} | {entry.Severity} | {entry.CriticalCount} | {entry.WarningCount} |");
+            sb.AppendLine("| Domain | Baseline | Current | Change | Critical | Warning |");
+            sb.AppendLine("|---|---|---|---|---|---|");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+            {
+                string cur = entry.Severity.ToString();
+                string bas = entry.BaselineSeverity?.ToString() ?? "—";
+                string chg = entry.Change switch
+                {
+                    DomainSeverityChange.Regressed => "⬆ Regressed",
+                    DomainSeverityChange.Improved  => "⬇ Improved",
+                    DomainSeverityChange.NewDomain => "🆕 New",
+                    DomainSeverityChange.Removed   => "🗑 Removed",
+                    _                              => "= Stable"
+                };
+                sb.AppendLine($"| {Esc(entry.Domain)} | {bas} | {cur} | {chg} | {entry.CriticalCount} | {entry.WarningCount} |");
+            }
+        }
+        else
+        {
+            sb.AppendLine("| Domain | Severity | Critical | Warning |");
+            sb.AppendLine("|---|---|---|---|");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+                sb.AppendLine($"| {Esc(entry.Domain)} | {entry.Severity} | {entry.CriticalCount} | {entry.WarningCount} |");
         }
         sb.AppendLine();
     }
@@ -542,6 +578,18 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine("</details>");
                     sb.AppendLine();
                     break;
+                case SparklineBlock spark:
+                    {
+                        double first = spark.Values.FirstOrDefault(v => !double.IsNaN(v));
+                        double last  = spark.Values.LastOrDefault(v => !double.IsNaN(v));
+                        int n = spark.Values.Count;
+                        string label = n <= 2
+                            ? $"{first} → {last}"
+                            : $"{first} → [{n} pts] → {last}";
+                        sb.AppendLine($"**{Esc(spark.MetricKey)}** `{Esc(spark.Unit)}`: {label}");
+                        sb.AppendLine();
+                        break;
+                    }
             }
         }
     }
@@ -562,7 +610,11 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             for (int c = 0; c < tbl.Headers.Count; c++)
             {
                 string cell = c < row.Cells.Count ? Esc(row.Cells[c].Display) : string.Empty;
-                sb.Append(cell); sb.Append(c < tbl.Headers.Count - 1 ? " | " : " |");
+                string? linkTarget = c < row.Cells.Count ? row.Cells[c].LinkTarget : null;
+                string rendered = (linkTarget is { Length: > 0 })
+                    ? $"[{cell}](#{Esc(linkTarget)})"
+                    : cell;
+                sb.Append(rendered); sb.Append(c < tbl.Headers.Count - 1 ? " | " : " |");
             }
             sb.AppendLine();
         }
@@ -636,6 +688,8 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
                 string dumpList = string.Join("<br/>", trendDoc.TrendDumpPaths.Select(p => $"&bull; {Enc(p)}"));
                 sb.AppendLine($"<div class=\"dedup-note\"><strong>Analyzed dumps:</strong><br/>{dumpList}</div>");
             }
+            // T2.2: Lifecycle summary
+            sb.AppendLine($"<div class=\"dedup-note\"><strong>Finding lifecycle:</strong> New={trendDoc.TrendNewFindingCount} &nbsp;|&nbsp; Persistent={trendDoc.TrendPersistentFindingCount} &nbsp;|&nbsp; Resolved={trendDoc.TrendResolvedFindingCount}</div>");
         }
 
         if (doc.HealthScorecard is { } scorecard)
@@ -782,9 +836,11 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         {
             AnalyzerDetailSection section = doc.AnalyzerSections[i];
             string colorClass = $"detail-color-{i % 6}";
-            sb.AppendLine($"<section id=\"detail-{i}\" class=\"analyzer-section {colorClass}\">");
+            // Use SectionId as id when available (enables stable anchor links e.g. detail-0, T3, T4)
+            string sectionId = string.IsNullOrEmpty(section.SectionId) ? $"detail-{i}" : section.SectionId;
+            sb.AppendLine($"<section id=\"{Enc(sectionId)}\" class=\"analyzer-section {colorClass}\">");
             sb.AppendLine("<details>");
-            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)} <a class=\"permalink\" href=\"#detail-{i}\" aria-label=\"Permalink\">🔗</a></summary>");
+            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)} <a class=\"permalink\" href=\"#{Enc(sectionId)}\" aria-label=\"Permalink\">🔗</a></summary>");
             sb.AppendLine("<div class=\"detail-block\">");
             RenderBlocksHtml(section.Blocks, sb);
             sb.AppendLine("</div></details></section>");
@@ -806,15 +862,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
 
     private static void RenderHealthScorecardHtml(HealthScorecard scorecard, StringBuilder sb)
     {
-        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
-        sb.AppendLine("<table><thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-        for (int i = 0; i < scorecard.Domains.Count; i++)
-        {
-            DomainHealthEntry entry = scorecard.Domains[i];
-            string severity = entry.Severity.ToString();
-            sb.AppendLine($"<tr><td>{System.Net.WebUtility.HtmlEncode(entry.Domain)}</td><td class=\"health-severity health-severity-{severity.ToLowerInvariant()}\">{System.Net.WebUtility.HtmlEncode(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
-        }
-        sb.AppendLine($"</tbody></table><div class=\"health-scorecard__overall\">Overall severity: {System.Net.WebUtility.HtmlEncode(scorecard.OverallSeverity.ToString())}</div></section>");
+        sb.Append(ReportHtmlShared.RenderHealthScorecard(scorecard));
     }
 
     private static void RenderTableHtml(TableBlock tbl, StringBuilder sb)

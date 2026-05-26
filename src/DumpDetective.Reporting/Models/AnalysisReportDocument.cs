@@ -7,12 +7,17 @@ namespace DumpDetective.Reporting.Models;
 
 internal enum DomainSeverity { Unknown, OK, Warning, Critical }
 
+internal enum DomainSeverityChange { Stable, Improved, Regressed, NewDomain, Removed }
+
 internal sealed record DomainHealthEntry(
     string Domain,
     DomainSeverity Severity,
     int FindingCount,
     int CriticalCount,
-    int WarningCount);
+    int WarningCount,
+    // Trend-mode additions (null in single-dump mode):
+    DomainSeverity? BaselineSeverity = null,
+    DomainSeverityChange? Change = null);
 
 internal sealed record HealthScorecard(
     IReadOnlyList<DomainHealthEntry> Domains,
@@ -53,6 +58,15 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     public string DumpPath { get; init; } = "";
     public int TrendDumpCount { get; init; }
     public IReadOnlyList<string> TrendDumpPaths { get; init; } = [];
+    public int TrendNewFindingCount { get; init; }
+    public int TrendPersistentFindingCount { get; init; }
+    public int TrendResolvedFindingCount { get; init; }
+    /// <summary>
+    /// Serialized trend sections (T2–T7) for the JavaScript renderer.
+    /// These mirror <see cref="AnalysisReportDocument.AnalyzerSections"/> but are NOT [JsonIgnore],
+    /// so they are available in the embedded JSON that the JS reads.
+    /// </summary>
+    public IReadOnlyList<AnalyzerDetailSection> TrendAnalyzerSections { get; init; } = [];
 }
 
 internal sealed record AnalyzerRunStatusRecord(
@@ -96,6 +110,10 @@ internal partial record FindingRecord
     public string? Effort { get; init; } = null;                       // e.g., "Low", "Medium", "High"
     public string? ValidationStep { get; init; } = null;               // short validation/check step
     public string? TrackingStatus { get; init; } = null;               // e.g., "Untracked", "InProgress", "Fixed"
+    // T9: Trend regression baseline/current values
+    public double? MetricBaseline { get; init; } = null;
+    public double? MetricCurrent  { get; init; } = null;
+    public string? MetricUnit     { get; init; } = null;
 }
 
 internal sealed record EvidenceRef(

@@ -9,6 +9,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(HealthScorecard))]
 [JsonSerializable(typeof(DomainHealthEntry))]
 [JsonSerializable(typeof(List<DomainHealthEntry>))]
+[JsonSerializable(typeof(DomainSeverityChange))]
 [JsonSerializable(typeof(ReportDomainSection))]
 [JsonSerializable(typeof(List<ReportDomainSection>))]
 [JsonSerializable(typeof(ReportAppendix))]
@@ -35,6 +36,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(SectionProvenance))]
 [JsonSerializable(typeof(List<SectionKeyMetric>))]
 [JsonSerializable(typeof(List<SectionTable>))]
+[JsonSerializable(typeof(SparklineBlock))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = false,

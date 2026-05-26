@@ -5,6 +5,9 @@ export function renderBlocks(blocks, container, announce) {
   const stack = [container];
   if (container && !container._headingCounter) container._headingCounter = 0;
   if (container && !container._collapseCounter) container._collapseCounter = 0;
+  // Pre-build sparkline registry so __SPARKREF__ table cells can look up inline data
+  const sparkRegistry = new Map();
+  for (const b of blocks) { if (b && b.type === 'sparkline' && b.metricKey) sparkRegistry.set(b.metricKey, b); }
   for (const block of blocks) {
     const top = stack[stack.length - 1];
     switch (block.type) {
@@ -71,7 +74,11 @@ export function renderBlocks(blocks, container, announce) {
         break;
       }
       case 'table': {
-        top.appendChild(buildDetailTable(block, announce));
+        top.appendChild(buildDetailTable(block, announce, sparkRegistry));
+        break;
+      }
+      case 'sparkline': {
+        top.appendChild(buildSparklineBlock(block));
         break;
       }
       case 'chart': {
@@ -120,7 +127,51 @@ export function renderBlocks(blocks, container, announce) {
   }
 }
 
-export function buildDetailTable(block, announce) {
+function buildSparklineSvg(values, direction) {
+  const w = 84, h = 20, pad = 2;
+  const nums = (values || []).map(function (v) { return (v != null && isFinite(Number(v))) ? Number(v) : NaN; });
+  const valid = nums.filter(function (n) { return !Number.isNaN(n); });
+  if (!valid.length) return null;
+  const min = Math.min.apply(null, valid), max = Math.max.apply(null, valid);
+  const range = max - min || 1;
+  const points = [];
+  for (let i = 0; i < nums.length; i++) {
+    const v = nums[i];
+    const x = pad + (i * (w - pad*2) / Math.max(1, nums.length - 1));
+    const y = Number.isNaN(v) ? h - pad : pad + (1 - (v - min) / range) * (h - pad*2);
+    points.push(x.toFixed(1) + ',' + y.toFixed(1));
+  }
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  svg.classList.add('sparkline'); svg.style.width = '6.5em'; svg.style.height = '1.6em'; svg.setAttribute('role', 'img');
+  const poly = document.createElementNS(ns, 'polyline');
+  poly.setAttribute('fill', 'none'); poly.setAttribute('stroke-width', '1.5');
+  let trend = 'flat';
+  if (valid.length >= 2) { const diff = valid[valid.length - 1] - valid[0]; trend = Math.abs(diff) < Math.max(1e-6, Math.abs(valid[0]) * 0.005) ? 'flat' : diff > 0 ? 'up' : 'down'; }
+  const dir = (direction || 'Neutral').toLowerCase();
+  const higherWorse = dir === 'higherisworse' || dir === 'higherworse';
+  const lowerWorse  = dir === 'lowerisworse'  || dir === 'lowerworse';
+  const strokeColor = trend === 'flat' ? '#6b7280' : trend === 'up' ? (higherWorse ? '#b91c1c' : '#059669') : (lowerWorse ? '#b91c1c' : '#059669');
+  poly.setAttribute('stroke', strokeColor); poly.setAttribute('points', points.join(' '));
+  svg.appendChild(poly);
+  const titleEl = document.createElementNS(ns, 'title');
+  titleEl.textContent = 'min: ' + valid[0] + '  max: ' + valid[valid.length - 1] + '  latest: ' + valid[valid.length - 1];
+  svg.appendChild(titleEl);
+  return svg;
+}
+
+function buildSparklineBlock(block) {
+  const wrap = el('div', 'detail-sparkline-wrap');
+  if (block.metricKey) {
+    const lbl = el('span', 'detail-key'); lbl.textContent = block.metricKey + (block.unit ? ' (' + block.unit + ')' : '') + ':'; wrap.appendChild(lbl);
+  }
+  const svg = buildSparklineSvg(block.values || [], block.direction || 'Neutral');
+  if (svg) wrap.appendChild(svg);
+  return wrap;
+}
+
+export function buildDetailTable(block, announce, sparkRegistry) {
   const container = el('div', 'table-with-pagination');
   const tbl = el('table');
   if (block.caption) { const cap = document.createElement('caption'); cap.textContent = block.caption; tbl.appendChild(cap); }
@@ -136,8 +187,24 @@ export function buildDetailTable(block, announce) {
       const td = document.createElement('td');
       const disp = cell.display || '';
       if (disp.startsWith('__SPARK__')) {
+        // Legacy embedded sparkline payload
         const payload = disp.substring('__SPARK__'.length);
         td.setAttribute('data-sparkline', payload);
+      } else if (disp.startsWith('__SPARKREF__')) {
+        // New-style sparkline reference — look up from the section registry
+        const key = disp.substring('__SPARKREF__'.length);
+        const sparkBlock = sparkRegistry && sparkRegistry.get(key);
+        if (sparkBlock) {
+          const svg = buildSparklineSvg(sparkBlock.values || [], sparkBlock.direction || 'Neutral');
+          if (svg) td.appendChild(svg);
+        } else {
+          td.textContent = '∼'; // fallback if registry miss
+        }
+      } else if (cell.linkTarget) {
+        // New-style explicit link target field
+        td.textContent = disp;
+        const a = document.createElement('a'); a.className = 'trend-jump'; a.href = '#' + cell.linkTarget;
+        a.setAttribute('aria-label', 'Jump to section'); a.textContent = ' ↳'; td.appendChild(a);
       } else {
         const linkMarker = '||__LINK__';
         const li = disp.indexOf(linkMarker);
@@ -145,7 +212,7 @@ export function buildDetailTable(block, announce) {
           const left = disp.substring(0, li);
           const target = disp.substring(li + linkMarker.length);
           td.textContent = left;
-          const a = document.createElement('a'); a.className = 'trend-jump'; a.href = '#' + target; a.setAttribute('aria-label', 'Jump to snapshot'); a.textContent = ' â†³'; td.appendChild(a);
+          const a = document.createElement('a'); a.className = 'trend-jump'; a.href = '#' + target; a.setAttribute('aria-label', 'Jump to snapshot'); a.textContent = ' ↳'; td.appendChild(a);
         } else {
           td.textContent = disp;
         }
@@ -601,10 +668,46 @@ export function buildHeader(doc) {
   if (execSum.uniqueTypes != null) heapItems.push(['Unique types', Number(execSum.uniqueTypes).toLocaleString('en-US')]);
   const heapRow = statRow('Managed heap', heapItems); if (heapRow) body.appendChild(heapRow);
 
-  // Trend dump list
+  // Trend dump list + finding lifecycle
   if (isTrend) {
-    const td = el('div', 'dedup-note'); td.textContent = 'Dumps analyzed: ' + (doc.trendDumpCount || 0); body.appendChild(td);
-    if (doc.trendDumpPaths && doc.trendDumpPaths.length) { const dp = el('div', 'dedup-note'); const strong = document.createElement('strong'); strong.textContent = 'Analyzed dumps:'; dp.appendChild(strong); for (const p of doc.trendDumpPaths) { dp.appendChild(document.createElement('br')); dp.appendChild(t('\u2022 ' + p)); } body.appendChild(dp); }
+    const snapshots = (doc.incidentContext && Array.isArray(doc.incidentContext.trendSnapshots))
+      ? doc.incidentContext.trendSnapshots : [];
+    const paths = Array.isArray(doc.trendDumpPaths) ? doc.trendDumpPaths : [];
+    // Baseline / Current — always show these two prominently per T0 spec
+    if (paths.length >= 2) {
+      function dumpRow(roleLabel, roleCss, path, tsUtc) {
+        const row = el('div', 'header-trend-dump header-trend-dump--' + roleCss);
+        const badge = el('span', 'header-trend-dump__role'); badge.textContent = roleLabel; row.appendChild(badge);
+        const pv = el('span', 'header-trend-dump__path'); pv.textContent = path; row.appendChild(pv);
+        if (tsUtc) {
+          const ts = el('span', 'header-trend-dump__ts');
+          ts.textContent = (new Date(tsUtc)).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+          row.appendChild(ts);
+        }
+        return row;
+      }
+      const baseSnap = snapshots.find(function (s) { return s && s.isBaseline; });
+      const curSnap  = snapshots.find(function (s) { return s && s.isCurrent; });
+      body.appendChild(dumpRow('Baseline', 'baseline', paths[0], baseSnap ? baseSnap.generatedAtUtc : null));
+      body.appendChild(dumpRow('Current',  'current',  paths[paths.length - 1], curSnap ? curSnap.generatedAtUtc : null));
+      if (paths.length > 2) {
+        const mid = el('div', 'dedup-note'); mid.textContent = '\u2026 ' + (paths.length - 2) + ' intermediate snapshot' + (paths.length - 2 > 1 ? 's' : '');
+        body.appendChild(mid);
+      }
+    } else {
+      const td = el('div', 'dedup-note'); td.textContent = 'Dumps analyzed: ' + (doc.trendDumpCount || 0); body.appendChild(td);
+    }
+    // Finding lifecycle
+    if (doc.trendNewFindingCount != null || doc.trendPersistentFindingCount != null || doc.trendResolvedFindingCount != null) {
+      const lc = el('div', 'dedup-note');
+      const strong = document.createElement('strong'); strong.textContent = 'Finding lifecycle: '; lc.appendChild(strong);
+      const parts = [];
+      if (doc.trendNewFindingCount != null) parts.push('New: ' + doc.trendNewFindingCount);
+      if (doc.trendPersistentFindingCount != null) parts.push('Persistent: ' + doc.trendPersistentFindingCount);
+      if (doc.trendResolvedFindingCount != null) parts.push('Resolved: ' + doc.trendResolvedFindingCount);
+      lc.appendChild(document.createTextNode(parts.join('\u2002|\u2002')));
+      body.appendChild(lc);
+    }
   }
 
   sec.appendChild(body);
@@ -666,6 +769,19 @@ export function buildHealthScorecard(doc) {
   for (const d of domainOrder) { const e = domainMap.get(d.toLowerCase()); if (e) ordered.push(e); }
   for (const [, e] of domainMap) { if (!domainOrder.map(d => d.toLowerCase()).includes((e.domain || '').toLowerCase())) ordered.push(e); }
 
+  // Detect trend mode: any entry has a non-null 'change' field
+  const isTrendScorecard = ordered.some(function (e) { return e.change != null; });
+
+  // change enum: 0=Stable, 1=Improved, 2=Regressed, 3=NewDomain, 4=Removed
+  function changeInfo(change) {
+    const c = Number(change);
+    if (c === 1) return { label: '\u2191 Improved',  css: 'improved'  };
+    if (c === 2) return { label: '\u2193 Regressed', css: 'regressed' };
+    if (c === 3) return { label: '\u2665 New',        css: 'new'       };
+    if (c === 4) return { label: '\u2715 Resolved',   css: 'resolved'  };
+    return           { label: '\u2192 Stable',      css: 'stable'    };
+  }
+
   for (const entry of ordered) {
     const si = sevInfo(entry.severity);
     const row = el('div', 'health-domain-row health-domain-row--' + si.css);
@@ -675,6 +791,18 @@ export function buildHealthScorecard(doc) {
 
     const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
     pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);
+
+    // Trend mode: show baseline and change indicator
+    if (isTrendScorecard && entry.baselineSeverity != null) {
+      const baseSi = sevInfo(entry.baselineSeverity);
+      const basePill = el('span', 'health-domain-row__pill health-domain-row__pill--' + baseSi.css + ' health-domain-row__pill--baseline');
+      basePill.title = 'Baseline'; basePill.textContent = '\u21d0 ' + baseSi.label; row.appendChild(basePill);
+    }
+    if (isTrendScorecard && entry.change != null) {
+      const ci = changeInfo(entry.change);
+      const changePill = el('span', 'health-domain-row__change health-domain-row__change--' + ci.css);
+      changePill.textContent = ci.label; row.appendChild(changePill);
+    }
 
     const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
     if (crit > 0 || warn > 0) {
@@ -696,6 +824,30 @@ export function buildExecutiveSummary(doc) {
 
   const sec = el('section', 'section-card executive-summary');
   sec.id = 'sec-exec';
+
+  // T2a — Lifecycle Summary strip (trend reports only)
+  const isTrendExecSection = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
+  if (isTrendExecSection) {
+    const lifecycle = el('div', 'exec-lifecycle-strip');
+    const lcTitle = el('div', 'exec-lifecycle-strip__title'); lcTitle.textContent = 'Finding Lifecycle'; lifecycle.appendChild(lcTitle);
+    const chips = el('div', 'exec-lifecycle-strip__chips');
+    function lcChip(label, count, mod) {
+      if (count == null) return;
+      const chip = el('div', 'exec-lifecycle-chip exec-lifecycle-chip--' + mod);
+      const cv = el('span', 'exec-lifecycle-chip__count'); cv.textContent = String(count); chip.appendChild(cv);
+      const cl = el('span', 'exec-lifecycle-chip__label'); cl.textContent = label; chip.appendChild(cl);
+      chips.appendChild(chip);
+    }
+    lcChip('New', doc.trendNewFindingCount, 'new');
+    lcChip('Persistent', doc.trendPersistentFindingCount, 'persistent');
+    lcChip('Resolved', doc.trendResolvedFindingCount, 'resolved');
+    if (doc.trendDumpCount != null) {
+      const net = (doc.trendNewFindingCount || 0) - (doc.trendResolvedFindingCount || 0);
+      lcChip('Net', net, net > 0 ? 'worse' : net < 0 ? 'better' : 'flat');
+    }
+    lifecycle.appendChild(chips);
+    sec.appendChild(lifecycle);
+  }
 
   // â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const strip = el('div', 'exec-kpi-strip');
@@ -742,9 +894,10 @@ export function buildExecutiveSummary(doc) {
 
   // â”€â”€ Score triplet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function scoreLevel(s) { return s >= 67 ? 'ok' : s >= 34 ? 'warning' : 'critical'; }
+  const isTrendExec = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
   if (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null) {
     const scores = el('div', 'exec-scores');
-    function scoreCard(label, sub, score) {
+    function scoreCard(label, sub, score, delta) {
       if (score == null) return;
       const lv = scoreLevel(score);
       const card = el('div', 'exec-score');
@@ -752,12 +905,17 @@ export function buildExecutiveSummary(doc) {
       const info = el('div', 'exec-score__info');
       const lbl = el('div', 'exec-score__label'); lbl.textContent = label; info.appendChild(lbl);
       const sl = el('div', 'exec-score__sublabel'); sl.textContent = sub; info.appendChild(sl);
+      if (isTrendExec && delta != null) {
+        const dv = Number(delta);
+        const dBadge = el('span', 'score-delta ' + (dv > 0 ? 'score-delta-up' : dv < 0 ? 'score-delta-down' : 'score-delta-flat'));
+        dBadge.textContent = (dv > 0 ? '\u2191+' : dv < 0 ? '\u2193' : '\u2192') + Math.abs(dv); info.appendChild(dBadge);
+      }
       card.appendChild(info);
       scores.appendChild(card);
     }
-    scoreCard('Leak Likelihood', 'memory retention risk', summary.leakLikelihoodScore);
-    scoreCard('GC Pressure', 'collection burden', summary.gcPressureScore);
-    scoreCard('Thread Contention', 'concurrency health', summary.threadContentionScore);
+    scoreCard('Leak Likelihood', 'memory retention risk', summary.leakLikelihoodScore, summary.leakScoreDelta);
+    scoreCard('GC Pressure', 'collection burden', summary.gcPressureScore, summary.gcPressureScoreDelta);
+    scoreCard('Thread Contention', 'concurrency health', summary.threadContentionScore, summary.threadContentionScoreDelta);
     sec.appendChild(scores);
   }
 
@@ -1188,12 +1346,14 @@ export function buildFilterBar(doc) {
 }
 
 export function buildTOC(doc) {
+  const isTrendToc = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
   const rawDomains = Array.isArray(doc.domains) ? doc.domains : [];
   // Sort to match the same order buildDomains renders
   const domains = rawDomains.slice().sort(function (a, b) {
     return sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
   });
-  const sections = doc.analyzerSections || [];
+  // For trend reports use trendAnalyzerSections (serialized); for single-dump use analyzerSections
+  const sections = isTrendToc ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []);
   if ((!domains || !domains.length) && (!sections || !sections.length)) return null;
 
   const nav = document.getElementById('toc') || el('nav', 'toc');
@@ -1314,9 +1474,11 @@ export function buildTOC(doc) {
   } else {
     for (let i = 0; i < sections.length; i++) {
       const sec = sections[i];
+      // Use stable sectionId (e.g. "T3", "detail-0") when available; fall back to positional
+      const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + i);
       const det = document.createElement('details');
       det.open = false;
-      det.dataset.target = '#detail-' + i;
+      det.dataset.target = secHref;
       const summ = document.createElement('summary');
       summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
       det.appendChild(summ);

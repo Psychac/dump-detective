@@ -35,16 +35,48 @@ internal sealed class TrendReportComposer(
 
         AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, [], reportBuilders, audience, currentIncidentContext);
 
-        // Build trend-specific analyzer sections
+        // T1.3: Build trend scorecard using baseline vs current findings
+        HealthScorecard? trendScorecard = trendData.Snapshots.Count >= 2
+            ? TrendHealthScorecardBuilder.Build(
+                trendData.Snapshots[0].Findings,
+                trendData.Snapshots[^1].Findings)
+            : baseDoc.HealthScorecard;
+
+        // T8: Build trend-specific analyzer sections using dedicated builders
         var analyzerSections = new List<AnalyzerDetailSection>();
-        analyzerSections.Add(BuildTrendComparisonSection(
-            trendData.Steps,
-            trendData.Overall,
-            trendData.NewLeakSignalsByAnalyzer,
-            lifecycle,
-            trendData.Timeline,
-            trendData.Snapshots));
+
+        // T2.1 + T2.3 — Score movement + top regressions executive section
+        ExecutiveSummaryRecord? trendSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience);
+        AnalyzerDetailSection? scoreSection = BuildTrendScoreMovementSection(trendSummary, trendFindings);
+        if (scoreSection is not null)
+            analyzerSections.Add(scoreSection);
+
+        // T3 — Regression Dashboard (when there is anything to report)
+        bool hasEscalations = trendData.Snapshots.Count >= 2 &&
+            trendData.Snapshots[0].Findings.Any(f => trendData.Snapshots[^1].Findings
+                .Any(c => c.EffectiveFingerprint == f.EffectiveFingerprint &&
+                          f.Severity == FindingSeverity.Warning && c.Severity == FindingSeverity.Critical));
+        if (trendData.NewFindings.Count > 0 || hasEscalations || trendData.NewLeakSignalsByAnalyzer.Values.Any(v => v.Count > 0))
+            analyzerSections.Add(TrendRegressionDashboardBuilder.Build(trendData, trendData.Snapshots));
+
+        // T4 — Metric Timeline
+        if (trendData.Timeline.Count > 0)
+            analyzerSections.Add(TrendMetricTimelineSectionBuilder.Build(trendData, trendData.Snapshots));
+
+        // T5 — Snapshot Strip
+        analyzerSections.Add(TrendSnapshotStripBuilder.Build(trendData.Snapshots));
+
+        // T6 — Per-dump details (with SectionId and key metrics)
         analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, audience));
+
+        // T7 — Trend Appendix
+        analyzerSections.Add(TrendAppendixBuilder.Build(trendData, currentRuns));
+
+        // T9: Map regression findings with MetricBaseline/MetricCurrent populated
+        var regressionDeltaLookup = BuildRegressionDeltaLookup(trendData.Overall);
+        List<FindingRecord> mappedFindings = trendFindings
+            .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, regressionDeltaLookup))
+            .ToList();
 
         return new TrendReportDocument
         {
@@ -54,6 +86,10 @@ internal sealed class TrendReportComposer(
             ElapsedSeconds = baseDoc.ElapsedSeconds,
             TrendDumpCount = trendData.Snapshots.Count,
             TrendDumpPaths = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
+            TrendNewFindingCount = trendData.NewFindings.Count,
+            TrendPersistentFindingCount = trendData.PersistentFindings.Count,
+            TrendResolvedFindingCount = trendData.ResolvedFindings.Count,
+            HealthScorecard = trendScorecard,
             IncidentContext = currentIncidentContext is null
                 ? baseDoc.IncidentContext
                 : currentIncidentContext with
@@ -68,9 +104,10 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1)).ToList()
                 },
-            ExecutiveSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience),
-            Findings = trendFindings.Select(f => MapFinding(f, trendData.Snapshots.Count - 1)).ToList(),
+            ExecutiveSummary = trendSummary,
+            Findings = mappedFindings,
             AnalyzerSections = analyzerSections,
+            TrendAnalyzerSections = analyzerSections,
         };
     }
 
@@ -178,6 +215,78 @@ internal sealed class TrendReportComposer(
         };
     }
 
+    // ── T2: Score Movement + Top Regressions section ──────────────────────────
+
+    private static AnalyzerDetailSection? BuildTrendScoreMovementSection(
+        ExecutiveSummaryRecord? summary,
+        IReadOnlyList<InsightFinding> trendFindings)
+    {
+        bool hasDeltas = summary is not null &&
+            (summary.LeakScoreDelta.HasValue || summary.GcPressureScoreDelta.HasValue || summary.ThreadContentionScoreDelta.HasValue);
+
+        var regressionFindings = trendFindings
+            .Where(f => f.Tags is not null && f.Tags.Contains("regression"))
+            .OrderByDescending(f => f.Severity)
+            .Take(5)
+            .ToList();
+
+        if (!hasDeltas && regressionFindings.Count == 0)
+            return null;
+
+        var blocks = new List<SectionBlock>();
+
+        // T2.1 — Score Movement
+        if (hasDeltas && summary is not null)
+        {
+            blocks.Add(new HeadingBlock("Score Movement (Baseline \u2192 Current)"));
+
+            static string Arrow(int? delta) => delta switch
+            {
+                null   => "\u2014",
+                > 0    => $"\u2191 +{delta} (worse)",
+                < 0    => $"\u2193 {delta} (better)",
+                _      => "= stable"
+            };
+
+            var rows = new List<TableRow>
+            {
+                new([new TableCell("Leak Likelihood"),     new TableCell(summary.LeakLikelihoodScore.ToString()),  new TableCell(Arrow(summary.LeakScoreDelta))]),
+                new([new TableCell("GC Pressure"),         new TableCell(summary.GcPressureScore.ToString()),      new TableCell(Arrow(summary.GcPressureScoreDelta))]),
+                new([new TableCell("Thread Contention"),   new TableCell(summary.ThreadContentionScore.ToString()), new TableCell(Arrow(summary.ThreadContentionScoreDelta))]),
+            };
+
+            blocks.Add(new TableBlock(
+                Caption: "Composite score deltas vs baseline",
+                Headers: ["Dimension", "Current Score", "Delta"],
+                Rows: rows));
+        }
+
+        // T2.3 — Top Regressions
+        if (regressionFindings.Count > 0)
+        {
+            blocks.Add(new HeadingBlock("Top Metric Regressions"));
+            var rows = regressionFindings.Select(f => new TableRow([
+                new TableCell(f.Severity.ToString()),
+                new TableCell(f.Analyzer),
+                new TableCell(f.Title),
+                new TableCell(f.Evidence.Length > 120 ? f.Evidence[..117] + "\u2026" : f.Evidence)
+            ])).ToList();
+
+            blocks.Add(new TableBlock(
+                Caption: "Top regression findings (sorted by severity)",
+                Headers: ["Severity", "Analyzer", "Title", "Evidence"],
+                Rows: rows));
+        }
+
+        return new AnalyzerDetailSection(
+            AnalyzerName:  "TrendScoreMovement",
+            DisplayTitle:  "Score Movement & Top Regressions",
+            SortOrder:     5,
+            Blocks:        blocks,
+            SectionId:     "T2",
+            Domain:        "Trend");
+    }
+
     // ── Per-dump sections ─────────────────────────────────────────────────────
 
     private IReadOnlyList<AnalyzerDetailSection> BuildPerDumpSections(
@@ -200,7 +309,9 @@ internal sealed class TrendReportComposer(
                 snapshot.IncidentContext,
                 snapshotSections,
                 i,
-                snapshots.Count));
+                snapshots.Count,
+                snapshot: snapshot,
+                baseline: i == 0 ? null : snapshots[0]));
         }
 
         return sections;
@@ -411,6 +522,51 @@ internal sealed class TrendReportComposer(
 
         blocks.Add(new DividerBlock());
         return new AnalyzerDetailSection("Trend Comparison", "Trend Comparison", 0, blocks);
+    }
+
+    // ── T9: Regression delta lookup for MetricBaseline/MetricCurrent ─────────
+
+    private static Dictionary<string, MetricDelta> BuildRegressionDeltaLookup(IReadOnlyList<AnalyzerTrendResult> overall)
+    {
+        var lookup = new Dictionary<string, MetricDelta>(StringComparer.Ordinal);
+        foreach (AnalyzerTrendResult result in overall)
+        {
+            foreach (MetricDelta delta in result.Regressions)
+            {
+                // Key by "AnalyzerName/MetricKey" to identify a regression finding
+                string key = $"{result.AnalyzerName}/{delta.Key}";
+                lookup.TryAdd(key, delta);
+            }
+        }
+        return lookup;
+    }
+
+    private static FindingRecord MapTrendFinding(
+        InsightFinding finding,
+        int? snapshotIndex,
+        Dictionary<string, MetricDelta> regressionLookup)
+    {
+        FindingRecord record = MapFinding(finding, snapshotIndex);
+
+        // T9: Inject MetricBaseline/MetricCurrent for regression findings
+        if (finding.Tags.Contains("regression"))
+        {
+            // Tags are: ["trend","regression",analyzerName,metricKey]
+            string? analyzerName = finding.Tags.Count > 2 ? finding.Tags[2] : null;
+            string? metricKey    = finding.Tags.Count > 3 ? finding.Tags[3] : null;
+            if (analyzerName != null && metricKey != null &&
+                regressionLookup.TryGetValue($"{analyzerName}/{metricKey}", out MetricDelta? delta))
+            {
+                record = record with
+                {
+                    MetricBaseline = delta.Baseline,
+                    MetricCurrent  = delta.Current,
+                    MetricUnit     = delta.Unit,
+                };
+            }
+        }
+
+        return record;
     }
 
     private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)

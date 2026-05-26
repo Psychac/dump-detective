@@ -41,6 +41,8 @@ async function bootstrap() {
   const crossDomain = R.buildCrossDomainInsights(doc);
   if (crossDomain) main.appendChild(crossDomain);
 
+  const isTrend = !!doc.isTrendReport || doc['$kind'] === 'trend';
+
   if (!domains) {
     const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
   }
@@ -54,8 +56,9 @@ async function bootstrap() {
     const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
   }
 
-  const sections = doc.analyzerSections || [];
-  if (!domains) {
+  // For trend reports use trendAnalyzerSections (serialized); for single-dump fall back to analyzerSections
+  const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
+  if (!domains || isTrend) {
     for (let i = 0; i < sections.length; i++) main.appendChild(R.buildAnalyzerSection(sections[i], i));
   }
 

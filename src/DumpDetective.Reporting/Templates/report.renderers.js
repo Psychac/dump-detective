@@ -1,4 +1,4 @@
-import { el, t, sevCss, formatBytes, wrapAddresses, linkifyAnchors, indentClass } from './report.dom.js';
+﻿import { el, t, sevCss, formatBytes, wrapAddresses, linkifyAnchors, indentClass } from './report.dom.js';
 
 export function renderBlocks(blocks, container, announce) {
   if (!blocks || !blocks.length) return;
@@ -145,7 +145,7 @@ export function buildDetailTable(block, announce) {
           const left = disp.substring(0, li);
           const target = disp.substring(li + linkMarker.length);
           td.textContent = left;
-          const a = document.createElement('a'); a.className = 'trend-jump'; a.href = '#' + target; a.setAttribute('aria-label', 'Jump to snapshot'); a.textContent = ' ↳'; td.appendChild(a);
+          const a = document.createElement('a'); a.className = 'trend-jump'; a.href = '#' + target; a.setAttribute('aria-label', 'Jump to snapshot'); a.textContent = ' â†³'; td.appendChild(a);
         } else {
           td.textContent = disp;
         }
@@ -160,8 +160,8 @@ export function buildDetailTable(block, announce) {
   tbl.appendChild(tbody);
 
   const controls = el('div', 'table-pagination-controls'); controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Table pagination');
-  const prev = el('button', 'action-btn table-prev'); prev.type = 'button'; prev.textContent = '← Prev'; prev.setAttribute('aria-label', 'Previous rows');
-  const next = el('button', 'action-btn table-next'); next.type = 'button'; next.textContent = 'Next →'; next.setAttribute('aria-label', 'Next rows');
+  const prev = el('button', 'action-btn table-prev'); prev.type = 'button'; prev.textContent = 'â† Prev'; prev.setAttribute('aria-label', 'Previous rows');
+  const next = el('button', 'action-btn table-next'); next.type = 'button'; next.textContent = 'Next â†’'; next.setAttribute('aria-label', 'Next rows');
   const info = el('span', 'page-info');
   const sizeSel = document.createElement('select'); sizeSel.setAttribute('aria-label', 'Rows per page');
   [[10,'10'],[20,'20'],[50,'50'],[0,'All']].forEach(function (opt) { const o = document.createElement('option'); o.value = String(opt[0]); o.text = String(opt[1]); sizeSel.appendChild(o); });
@@ -515,7 +515,7 @@ function formatCountChart(value) {
 
 function truncateLabel(value, maxLength) {
   const text = String(value || '');
-  return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 1)) + '…' : text;
+  return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 1)) + 'â€¦' : text;
 }
 
 export function buildHeader(doc) {
@@ -528,7 +528,7 @@ export function buildHeader(doc) {
   const sec = el('section', 'header-card');
   sec.id = 'sec-header';
 
-  // ── Hero band ────────────────────────────────────────────────────────────
+  // â”€â”€ Hero band â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const hero = el('div', 'header-hero');
 
   const heroLeft = el('div', 'header-hero__left');
@@ -549,7 +549,7 @@ export function buildHeader(doc) {
   hero.appendChild(heroActions);
   sec.appendChild(hero);
 
-  // ── Body ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const body = el('div', 'header-body');
   const ctx = doc.incidentContext || {};
   const execSum = doc.executiveSummary || {};
@@ -577,7 +577,7 @@ export function buildHeader(doc) {
     return row;
   }
 
-  // Row 1 — Analysis run
+  // Row 1 â€” Analysis run
   const genRaw = doc.generatedAtUtc; const genStr = genRaw ? (new Date(genRaw)).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
   const runItems = [];
   if (genStr) runItems.push(['Analyzed at', genStr]);
@@ -586,7 +586,7 @@ export function buildHeader(doc) {
   if (doc.analyzerVersion) runItems.push(['Version', doc.analyzerVersion]);
   const runRow = statRow('Analysis run', runItems); if (runRow) body.appendChild(runRow);
 
-  // Row 2 — Runtime environment
+  // Row 2 â€” Runtime environment
   const rtItems = [];
   if (ctx.runtimeVersion || ctx.runtimeFlavor) { const rv = [ctx.runtimeVersion, ctx.runtimeFlavor].filter(Boolean).join(' / '); rtItems.push(['Runtime', rv]); }
   if (ctx.gcMode) rtItems.push(['GC mode', ctx.gcMode]);
@@ -594,7 +594,7 @@ export function buildHeader(doc) {
   if (ctx.heapCanWalk != null) rtItems.push(['Heap walkable', ctx.heapCanWalk ? 'Yes' : 'No']);
   const rtRow = statRow('Runtime', rtItems); if (rtRow) body.appendChild(rtRow);
 
-  // Row 3 — Managed heap snapshot
+  // Row 3 â€” Managed heap snapshot
   const heapItems = [];
   if (execSum.totalManagedBytes != null) heapItems.push(['Total managed', formatBytes(Number(execSum.totalManagedBytes || 0))]);
   if (execSum.totalObjects != null) heapItems.push(['Objects', Number(execSum.totalObjects).toLocaleString('en-US')]);
@@ -626,7 +626,7 @@ export function buildHealthScorecard(doc) {
   const sec = el('section', 'section-card health-scorecard');
   sec.id = 'sec-health';
 
-  // ── Overall banner ────────────────────────────────────────────────────────
+  // â”€â”€ Overall banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const overall = sevInfo(scorecard.overallSeverity);
   const banner = el('div', 'health-scorecard__banner health-scorecard__banner--' + overall.css);
 
@@ -656,7 +656,7 @@ export function buildHealthScorecard(doc) {
   }
   sec.appendChild(banner);
 
-  // ── Domain grid ───────────────────────────────────────────────────────────
+  // â”€â”€ Domain grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const grid = el('div', 'health-scorecard__grid');
   grid.setAttribute('role', 'list');
   const domainOrder = ['Leaks', 'Memory', 'GC', 'TypeSystem', 'Threads', 'Async', 'Exceptions', 'Runtime'];
@@ -697,7 +697,7 @@ export function buildExecutiveSummary(doc) {
   const sec = el('section', 'section-card executive-summary');
   sec.id = 'sec-exec';
 
-  // ── KPI strip ─────────────────────────────────────────────────────────────
+  // â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const strip = el('div', 'exec-kpi-strip');
 
   function kpi(label, value, sev) {
@@ -740,7 +740,7 @@ export function buildExecutiveSummary(doc) {
   for (const g of [g1, g2, g3, g4]) { if (g && g.children.length) strip.appendChild(g); }
   if (strip.children.length) sec.appendChild(strip);
 
-  // ── Score triplet ─────────────────────────────────────────────────────────
+  // â”€â”€ Score triplet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function scoreLevel(s) { return s >= 67 ? 'ok' : s >= 34 ? 'warning' : 'critical'; }
   if (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null) {
     const scores = el('div', 'exec-scores');
@@ -761,7 +761,7 @@ export function buildExecutiveSummary(doc) {
     sec.appendChild(scores);
   }
 
-  // ── Findings ──────────────────────────────────────────────────────────────
+  // â”€â”€ Findings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const critFindings = summary.criticalFindings || [];
   const warnFindings = summary.warningFindings || [];
   if (critFindings.length || warnFindings.length) {
@@ -771,7 +771,7 @@ export function buildExecutiveSummary(doc) {
     sec.appendChild(findingsWrap);
   }
 
-  // ── Recommendations ───────────────────────────────────────────────────────
+  // â”€â”€ Recommendations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const recs = summary.topRecommendations || [];
   if (recs.length) {
     const recWrap = el('div', 'exec-recommendations');
@@ -823,6 +823,15 @@ function sevRank(sev) {
   return -1;
 }
 
+function domainSevLabel(sev) {
+  if (sev == null) return 'Info';
+  const s = String(sev).toLowerCase();
+  if (s === '2' || s === 'critical') return 'Critical';
+  if (s === '1' || s === 'warning')  return 'Warning';
+  if (s === '0' || s === 'info')     return 'Info';
+  return String(sev).charAt(0).toUpperCase() + String(sev).slice(1).toLowerCase();
+}
+
 export function buildDomains(doc) {
   const domains = doc.domains;
   if (!Array.isArray(domains) || !domains.length) return null;
@@ -851,28 +860,6 @@ export function buildDomains(doc) {
     }
     sec.appendChild(hdr);
 
-    const meta = document.createElement('p');
-    meta.className = 'report-domain__meta';
-    function domainSevIcon(sev) {
-      const s = String(sev == null ? '' : sev).toLowerCase();
-      // handle numeric FindingSeverity: Info=0, Warning=1, Critical=2
-      if (s === 'critical' || s === '2') return '🔴';
-      if (s === 'warning'  || s === '1') return '🟡';
-      if (s === 'info'     || s === '0') return '🟢';
-      if (s === 'ok') return '🟢';
-      return '⚪';
-    }
-    function domainSevLabel(sev) {
-      if (sev == null) return 'Info';
-      const s = String(sev).toLowerCase();
-      if (s === '2' || s === 'critical') return 'Critical';
-      if (s === '1' || s === 'warning')  return 'Warning';
-      if (s === '0' || s === 'info')     return 'Info';
-      // already a label string — title-case it
-      return String(sev).charAt(0).toUpperCase() + String(sev).slice(1).toLowerCase();
-    }
-    meta.textContent = domainSevIcon(domain.leadSeverity) + ' ' + domainSevLabel(domain.leadSeverity);
-    sec.appendChild(meta);
 
     const sections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
       return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
@@ -931,7 +918,7 @@ export function buildAppendix(doc) {
   const sec = el('section', 'section-card report-appendix');
   sec.id = 'sec-appendix';
 
-  // ── Z1. Analyzer Run Summary ──────────────────────────────────────────────
+  // â”€â”€ Z1. Analyzer Run Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const runs = appendix.analyzerRunSummary || [];
   if (runs.length) {
     const panel = document.createElement('details');
@@ -975,7 +962,7 @@ export function buildAppendix(doc) {
     const list = el('div', 'appendix-run-list');
     for (const run of runs) {
       const s = (run.status || 'unknown').toLowerCase();
-      // Normalize 'success' → 'completed' for display/styling
+      // Normalize 'success' â†’ 'completed' for display/styling
       const sNorm = (s === 'success') ? 'completed' : s;
       const row = el('div', 'appendix-run-row appendix-run-row--' + sNorm);
 
@@ -1007,7 +994,7 @@ export function buildAppendix(doc) {
     sec.appendChild(panel);
   }
 
-  // ── Z2. Memory Diagnostics ────────────────────────────────────────────────
+  // â”€â”€ Z2. Memory Diagnostics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const memory = appendix.memoryDiagnostics || [];
   if (memory.length) {
     const panel = document.createElement('details');
@@ -1037,7 +1024,7 @@ export function buildAppendix(doc) {
     sec.appendChild(panel);
   }
 
-  // ── Z3. Known Limitations ─────────────────────────────────────────────────
+  // â”€â”€ Z3. Known Limitations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const limitations = appendix.knownLimitations || [];
   if (limitations.length) {
     const panel = document.createElement('details');
@@ -1082,61 +1069,6 @@ function buildSimpleTable(headers, rows) {
   return table;
 }
 
-function appendMetricRow(tbody, label, value) {
-  const tr = el('tr');
-  tr.appendChild(tdText(label));
-  tr.appendChild(tdText(value));
-  tbody.appendChild(tr);
-}
-
-function appendFindingGroup(parent, title, findings) {
-  const group = el('section', 'executive-summary__findings');
-  const heading = document.createElement('h3');
-  heading.textContent = title;
-  group.appendChild(heading);
-
-  if (!findings || !findings.length) {
-    const empty = document.createElement('p');
-    empty.textContent = 'None.';
-    group.appendChild(empty);
-    parent.appendChild(group);
-    return;
-  }
-
-  for (const finding of findings.slice(0, 5)) {
-    const details = el('details', 'detail-nested');
-    const summary = document.createElement('summary');
-    summary.textContent = finding.title || '';
-    details.appendChild(summary);
-    const content = el('div', 'detail-nested-content');
-    content.appendChild(metricLine('Analyzer', finding.analyzer || 'n/a'));
-    content.appendChild(metricLine('Confidence', formatConfidence(finding.confidenceScore)));
-    content.appendChild(metricLine('Evidence', finding.evidence || ''));
-    content.appendChild(metricLine('Recommendation', finding.recommendation || ''));
-    details.appendChild(content);
-    group.appendChild(details);
-  }
-
-  parent.appendChild(group);
-}
-
-function metricLine(label, value) {
-  const line = el('div', 'detail-line');
-  const key = el('span', 'detail-key');
-  key.textContent = label + ':';
-  const val = el('span', 'detail-value wrap');
-  val.textContent = value || '';
-  line.appendChild(key);
-  line.appendChild(t(' '));
-  line.appendChild(val);
-  return line;
-}
-
-function formatConfidence(value) {
-  if (value == null || Number.isNaN(Number(value))) return 'N/A';
-  return Number(value).toFixed(2);
-}
-
 function tdText(text) {
   const td = document.createElement('td');
   td.textContent = text;
@@ -1153,11 +1085,11 @@ export function buildIncidentContext(doc) {
   function stat(label, value) {
     const item = el('div', 'incident-context__stat');
     const statLabel = el('div', 'incident-context__stat-label'); statLabel.textContent = label;
-    const statValue = el('div', 'incident-context__stat-value'); statValue.textContent = value || '—';
+    const statValue = el('div', 'incident-context__stat-value'); statValue.textContent = value || 'â€”';
     item.appendChild(statLabel); item.appendChild(statValue); summary.appendChild(item);
   }
   stat('Mode', ctx.mode || '');
-  stat('Report', ((ctx.reportFormat || '') + ' / ' + (ctx.reportAudience || '')).trim().replace(/^\s*\/\s*|\s*\/\s*$/g, '').replace(/^\s*$/, '—'));
+  stat('Report', ((ctx.reportFormat || '') + ' / ' + (ctx.reportAudience || '')).trim().replace(/^\s*\/\s*|\s*\/\s*$/g, '').replace(/^\s*$/, 'â€”'));
   stat('Runtime', ((ctx.runtimeFlavor || 'n/a') + (ctx.runtimeVersion ? ' ' + ctx.runtimeVersion : '')).trim());
   stat('GC Mode', ctx.gcMode || 'n/a');
   stat('Heap Count', ctx.heapCount != null ? String(ctx.heapCount) : 'n/a');
@@ -1168,7 +1100,7 @@ export function buildIncidentContext(doc) {
   function detail(label, value) {
     const item = el('div', 'incident-context__detail');
     const detailLabel = el('div', 'incident-context__detail-label'); detailLabel.textContent = label;
-    const detailValue = el('div', 'incident-context__detail-value'); detailValue.textContent = value || '—';
+    const detailValue = el('div', 'incident-context__detail-value'); detailValue.textContent = value || 'â€”';
     item.appendChild(detailLabel); item.appendChild(detailValue); details.appendChild(item);
   }
   detail('Dump Path', ctx.dumpPath || '');
@@ -1187,8 +1119,8 @@ export function buildIncidentContext(doc) {
       const card = el('div', 'incident-context__snapshot');
       const label = snap.isBaseline ? 'Baseline' : (snap.isCurrent ? 'Current' : ('Snapshot ' + (snap.index + 1)));
       const title = el('div', 'incident-context__snapshot-title'); title.textContent = label;
-      const path = el('div', 'incident-context__snapshot-path'); path.textContent = snap.dumpPath || '—';
-      const meta = el('div', 'incident-context__snapshot-meta'); meta.textContent = (Number(snap.elapsedSeconds || 0)).toFixed(1) + 's • ' + String(snap.analyzerCount || 0) + ' analyzers • ' + String(snap.findingCount || 0) + ' findings';
+      const path = el('div', 'incident-context__snapshot-path'); path.textContent = snap.dumpPath || 'â€”';
+      const meta = el('div', 'incident-context__snapshot-meta'); meta.textContent = (Number(snap.elapsedSeconds || 0)).toFixed(1) + 's â€¢ ' + String(snap.analyzerCount || 0) + ' analyzers â€¢ ' + String(snap.findingCount || 0) + ' findings';
       card.appendChild(title); card.appendChild(path); card.appendChild(meta); snaps.appendChild(card);
     }
     sec.appendChild(snaps);
@@ -1270,7 +1202,7 @@ export function buildTOC(doc) {
   const existingTitle = nav.querySelector('.toc-title');
   if (existingTitle) existingTitle.remove();
 
-  // ── Shared helper: smooth scroll on details open ─────────────────────────
+  // â”€â”€ Shared helper: smooth scroll on details open â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function attachScrollToggle(det) {
     det.addEventListener('toggle', function () {
       if (!det.open) return;
@@ -1280,7 +1212,7 @@ export function buildTOC(doc) {
     });
   }
 
-  // ── Shared helper: severity dot ───────────────────────────────────────────
+  // â”€â”€ Shared helper: severity dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function sevDot(sev) {
     const s = String(sev == null ? '' : sev).toLowerCase();
     const n = Number(sev);
@@ -1290,7 +1222,7 @@ export function buildTOC(doc) {
     return                                   { cls: 'toc-dot--info',     label: 'Info' };
   }
 
-  // ── Helper: quick nav link ────────────────────────────────────────────────
+  // â”€â”€ Helper: quick nav link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function quickLink(href, text, iconChar) {
     const li = document.createElement('li');
     const a = document.createElement('a');
@@ -1303,7 +1235,7 @@ export function buildTOC(doc) {
 
   const fragment = document.createDocumentFragment();
 
-  // ── 1. Pinned quick-nav section ───────────────────────────────────────────
+  // â”€â”€ 1. Pinned quick-nav section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const quickSection = el('div', 'toc-quick-nav');
   const quickLabel = el('div', 'toc-quick-nav__label'); quickLabel.textContent = 'Report'; quickSection.appendChild(quickLabel);
   const quickList = document.createElement('ul'); quickList.className = 'toc-quick-nav__list';
@@ -1314,7 +1246,7 @@ export function buildTOC(doc) {
   quickSection.appendChild(quickList);
   fragment.appendChild(quickSection);
 
-  // ── 2. Domain / section tree ──────────────────────────────────────────────
+  // â”€â”€ 2. Domain / section tree â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const treeLabel = el('div', 'toc-quick-nav__label');
   treeLabel.textContent = domains.length ? 'Domains' : 'Sections';
   fragment.appendChild(treeLabel);
@@ -1476,7 +1408,7 @@ export function buildFindingCard(f, i) {
   const cat = el('span', 'category'); cat.textContent = f.category || 'Finding'; eyebrow.appendChild(cat);
   header.appendChild(eyebrow);
   const actions = el('div', 'finding-card__actions');
-  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#finding-' + i; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = '🔗';
+  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#finding-' + i; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = 'ðŸ”—';
   const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#finding-' + i; copyBtn.textContent = '\u2398';
   actions.appendChild(pa); actions.appendChild(copyBtn); header.appendChild(actions); sec.appendChild(header);
 
@@ -1489,7 +1421,7 @@ export function buildFindingCard(f, i) {
   function detailField(label, value) {
     const field = el('div', 'finding-card__field');
     const fieldLabel = el('div', 'finding-card__field-label'); fieldLabel.textContent = label;
-    const fieldValue = el('div', 'finding-card__field-value'); fieldValue.textContent = value || '—'; wrapAddresses(fieldValue); linkifyAnchors(fieldValue);
+    const fieldValue = el('div', 'finding-card__field-value'); fieldValue.textContent = value || 'â€”'; wrapAddresses(fieldValue); linkifyAnchors(fieldValue);
     field.appendChild(fieldLabel); field.appendChild(fieldValue); details.appendChild(field);
   }
   if (f.cause) detailField('Cause', f.cause);
@@ -1531,7 +1463,7 @@ export function buildAnalyzerSection(section, i) {
   // Keep detail-N as a data attribute for internal use by collapsible/heading ID generation
   wrapper.dataset.detailIndex = String(i);
 
-  // ── Collapsible: section handle (summary) always at top ───────────────────
+  // â”€â”€ Collapsible: section handle (summary) always at top â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + i + '-summary';
   // Section-ID badge (e.g. "A1") + title
   if (section.sectionId && section.sectionId.trim()) {
@@ -1551,7 +1483,7 @@ export function buildAnalyzerSection(section, i) {
 
   const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = String(i);
 
-  // ── Inside the expanded area: Lead Finding first, then Key Metrics strip ──
+  // â”€â”€ Inside the expanded area: Lead Finding first, then Key Metrics strip â”€â”€
   const lead = section.leadFinding;
   if (lead) {
     const sev = (lead.severity || 'info').toLowerCase();
@@ -1587,10 +1519,10 @@ export function buildAnalyzerSection(section, i) {
     content.appendChild(strip);
   }
 
-  // ── Narrative blocks (headings, text, confidence bands, collapsibles) ──────
+  // â”€â”€ Narrative blocks (headings, text, confidence bands, collapsibles) â”€â”€â”€â”€â”€â”€
   renderBlocks(blocks, content);
 
-  // ── Typed section tables (each collapsed by default) ─────────────────────
+  // â”€â”€ Typed section tables (each collapsed by default) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const sectionTables = section.tables;
   if (sectionTables && sectionTables.length) {
     for (let ti = 0; ti < sectionTables.length; ti++) {
@@ -1640,7 +1572,7 @@ export function buildAnalyzerSection(section, i) {
 
   details.appendChild(content); wrapper.appendChild(details);
 
-  // ── Provenance footer — collapsed, scoped outside main details ────────────
+  // â”€â”€ Provenance footer â€” collapsed, scoped outside main details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const prov = section.provenance;
   if (prov) {
     const provDetails = el('details', 'provenance');
@@ -1679,6 +1611,6 @@ export function renderFindingsPaged(doc, announce) {
   const title = document.createElement('h2'); title.textContent = 'Findings';
   header.appendChild(title);
 
-  const controls = el('div', 'pagination-controls'); controls.setAttribute('role', 'region'); controls.setAttribute('aria-label', 'Findings pagination'); const prevBtn = el('button', 'action-btn findings-prev'); prevBtn.type = 'button'; prevBtn.setAttribute('aria-label', 'Previous page'); prevBtn.textContent = '← Prev'; const nextBtn = el('button', 'action-btn findings-next'); nextBtn.type = 'button'; nextBtn.setAttribute('aria-label', 'Next page'); nextBtn.textContent = 'Next →'; const pageInfo = el('span', 'page-info'); const sizeSel = document.createElement('select'); sizeSel.setAttribute('aria-label', 'Findings per page'); [[10,'10'],[20,'20'],[50,'50'],[100,'100'],[0,'All']].forEach(function (opt) { const o = document.createElement('option'); o.value = String(opt[0]); o.text = String(opt[1]); sizeSel.appendChild(o); }); controls.appendChild(prevBtn); controls.appendChild(pageInfo); controls.appendChild(nextBtn); controls.appendChild(t(' ')); controls.appendChild(sizeSel);
+  const controls = el('div', 'pagination-controls'); controls.setAttribute('role', 'region'); controls.setAttribute('aria-label', 'Findings pagination'); const prevBtn = el('button', 'action-btn findings-prev'); prevBtn.type = 'button'; prevBtn.setAttribute('aria-label', 'Previous page'); prevBtn.textContent = 'â† Prev'; const nextBtn = el('button', 'action-btn findings-next'); nextBtn.type = 'button'; nextBtn.setAttribute('aria-label', 'Next page'); nextBtn.textContent = 'Next â†’'; const pageInfo = el('span', 'page-info'); const sizeSel = document.createElement('select'); sizeSel.setAttribute('aria-label', 'Findings per page'); [[10,'10'],[20,'20'],[50,'50'],[100,'100'],[0,'All']].forEach(function (opt) { const o = document.createElement('option'); o.value = String(opt[0]); o.text = String(opt[1]); sizeSel.appendChild(o); }); controls.appendChild(prevBtn); controls.appendChild(pageInfo); controls.appendChild(nextBtn); controls.appendChild(t(' ')); controls.appendChild(sizeSel);
   const list = el('div', 'findings-list'); list.setAttribute('role', 'list'); let pageSize = 10; let pageIndex = 0; function renderPage() { list.innerHTML = ''; const total = findings.length; const start = pageSize === 0 ? 0 : pageIndex * pageSize; const end = pageSize === 0 ? total : Math.min(total, start + pageSize); for (let i = start; i < end; i++) list.appendChild(buildFindingCard(findings[i], i)); pageInfo.textContent = pageSize === 0 ? `${total} findings` : `${start + 1}-${end} of ${total}`; prevBtn.disabled = (pageIndex === 0) || (pageSize === 0); nextBtn.disabled = (end >= total) || (pageSize === 0); controls.style.display = (total <= pageSize || pageSize === 0) ? 'none' : ''; if (pageSize !== 0 && announce) announce(`Showing ${start + 1} to ${end} of ${total} findings`); }
   prevBtn.addEventListener('click', function () { if (pageSize === 0) return; if (pageIndex > 0) { pageIndex--; renderPage(); } }); nextBtn.addEventListener('click', function () { if (pageSize === 0) return; pageIndex++; renderPage(); }); sizeSel.addEventListener('change', function () { pageSize = parseInt(sizeSel.value, 10) || 0; pageIndex = 0; renderPage(); }); sizeSel.value = String(pageSize); container.appendChild(header); container.appendChild(controls); container.appendChild(list); renderPage(); return container; }

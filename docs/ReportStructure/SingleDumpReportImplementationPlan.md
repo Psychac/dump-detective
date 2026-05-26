@@ -423,6 +423,8 @@ Add `CrossDomainInsightsSectionBuilder` to the `IReportSectionBuilder` list, wit
 
 ## Step 5 — `HealthScorecard` Renderer Updates
 
+**Status:** Implemented in markdown and HTML renderers.
+
 ### 5.1 Markdown renderer — `CanonicalReportFormatter.cs`
 
 Add a `RenderHealthScorecard(HealthScorecard scorecard)` method called before all sections:
@@ -566,6 +568,8 @@ Register in DI alongside other `IReportSectionBuilder` registrations.
 
 ## Step 9 — B7 Compound Section (GC Handles + Weak Refs + Dependent Handles)
 
+**Status:** Implemented as adjacent GC-domain sections with shared ordering.
+
 **Goal:** Merge `GCHandleSectionBuilder`, `WeakReferenceSectionBuilder`, and `DependentHandleSectionBuilder` into a single rendered section (B7) without changing the builder classes themselves.
 
 ### 9.1 New `IReportSectionBuilder` — `GCHandleCompoundSectionBuilder.cs`
@@ -585,6 +589,8 @@ Alternatively — if compound building is too complex — set the three individu
 ---
 
 ## Step 10 — LOH Fragmentation Section Builder (identify correct file)
+
+**Status:** Implemented; LOH large-object tables already exist in the reporting layer.
 
 **Check:** Confirm which section builder handles `LohFragmentationDomainResult`. It may be inside `HeapSegmentDiagnosticsSectionBuilder` or a dedicated `LohFragmentationSectionBuilder`.
 
@@ -645,6 +651,8 @@ Ensure `AnalyzerDetailSection` new fields (`SectionId`, `Domain`, `LeadSeverity`
 ---
 
 ## Step 13 — `ProfessionalTierReport.md` Reference Update
+
+**Status:** Implemented.
 
 Once the new format is implemented and validated, update `ProfessionalTierReport.md` to note that:
 - The data availability audit remains authoritative for gap tracking.

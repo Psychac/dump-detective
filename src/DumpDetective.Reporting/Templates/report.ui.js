@@ -124,6 +124,29 @@ export function setupInteractivity(doc, announce) {
   // Download JSON
   const btnJson = document.getElementById('btn-download-json'); if (btnJson) btnJson.addEventListener('click', function () { try { const jsonEl = document.getElementById('report-json'); let payload = null; if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) { try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; } } else payload = window.__REPORT__ || null; const json = JSON.stringify(payload, null, 2); const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnJson.dataset.filename || 'report') + '.json'; a.click(); URL.revokeObjectURL(a.href); } catch (e) { console.error(e); } });
 
+  // Export CSV
+  const btnCsv = document.getElementById('btn-export-csv');
+  if (btnCsv) btnCsv.addEventListener('click', function () {
+    try {
+      const jsonEl = document.getElementById('report-json');
+      let payload = null;
+      if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
+        try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
+      } else { payload = window.__REPORT__ || null; }
+      const findings = (payload && Array.isArray(payload.findings)) ? payload.findings : [];
+      if (!findings.length) { alert('No findings to export.'); return; }
+      const headers = ['ID', 'Severity', 'Category', 'Title', 'Evidence', 'Recommendation', 'Analyzer', 'Confidence'];
+      function csvCell(v) { const s = String(v == null ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
+      const rows = [headers.map(csvCell).join(',')];
+      findings.forEach(function (f, i) {
+        rows.push([i + 1, f.severity, f.category, f.title, f.evidence, f.recommendation, f.analyzer, f.confidenceScore != null ? Number(f.confidenceScore).toFixed(2) : ''].map(csvCell).join(','));
+      });
+      const csv = rows.join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnCsv.dataset.filename || 'report') + '-findings.csv'; a.click(); URL.revokeObjectURL(a.href);
+    } catch (e) { console.error(e); }
+  });
+
   // Print
   const btnPrint = document.getElementById('btn-print'); if (btnPrint) btnPrint.addEventListener('click', function () { window.print(); });
 

@@ -105,7 +105,7 @@ LeadFinding:
   title: string                  — one sentence, actionable
   evidence: string               — metric-grounded, not vague
   recommendation: string
-  confidence: ★★★☆ | ★★☆☆ | ★☆☆☆   — inline band, not footnote
+  confidence: ●●●● | ●●●○ | ●●○○ | ●○○○   — inline band, not footnote
   caveats: string[]              — heuristic disclosures
 
 KeyMetrics:
@@ -131,9 +131,10 @@ Confidence bands (inline, not a separate section):
 
 | Band | Score | Symbol | Meaning |
 |---|---|---|---|
-| High | ≥ 0.8 | ★★★☆ | Directly measured (GC root, exact count) |
-| Medium | 0.5–0.8 | ★★☆☆ | Heuristic with strong signals |
-| Low | < 0.5 | ★☆☆☆ | Pattern-match or estimate only |
+| High | ≥ 0.85 | ●●●● | Directly measured (GC root, exact count) |
+| Med-High | 0.65–0.85 | ●●●○ | Heuristic with strong signals |
+| Medium | 0.45–0.65 | ●●○○ | Pattern-match or estimate |
+| Low | < 0.45 | ●○○○ | Weak signal or highly approximate |
 
 ---
 
@@ -159,7 +160,7 @@ Tables:
   Columns: TypeName | Score | Severity | Classification | TotalSize | InstanceCount | Gen2% | RootKind | IsFinalizable | IsContainer | RefFieldRatio
 - **By leak class** — `CandidatesByClass` summary
 
-Confidence: `HeuristicOnly = true` → always ★★☆☆ max.
+Confidence: `HeuristicOnly = true` → always ●●○○ max.
 
 ---
 
@@ -188,7 +189,7 @@ Tables:
   - RetentionRatio = EstimatedRetainedBytes / TotalBytes (computed in renderer)
 - **Dominator impact per-mille** — (EstimatedRetainedBytes / heap total) × 1000 per type
 
-Confidence: ★★☆☆ — bounded BFS, not true Lengauer-Tarjan.  
+Confidence: ●●○○ — bounded BFS, not true Lengauer-Tarjan.  
 Caveats: breadth and depth limits; "HeuristicOnly" flag forwarded as caveat text.
 
 ---
@@ -354,23 +355,52 @@ Cross-ref: `ThreadDomainResult.FinalizerThreadBlocked` — combine with queue de
 
 ---
 
-**B7. GC Handles, Weak References & Dependent Handles**  
-Sources: `GCHandleDomainResult`, `WeakReferenceDomainResult`, `DependentHandleDomainResult`
+**B7. GC Handles**  
+Source: `GCHandleDomainResult`
 
-KeyMetrics (GC handles): TotalHandles, StrongLikeHandles, WeakLikeHandles, PinnedHandleTargets, PinnedRetainedBytes.  
-KeyMetrics (weak refs): TotalWeakHandles, AliveWeakTargets, DeadWeakTargets, DeadTargetRatio, WeakReferenceObjectCount, StaleWrapperCount.  
-KeyMetrics (dependent): DependentHandleCount, ResolvedEdgeCount, UnresolvedPercent.
+KeyMetrics: TotalHandles, StrongLikeHandles, WeakLikeHandles, PinnedHandleTargets, PinnedRetainedBytes.
 
 Tables:
-- **Handle kind breakdown** — `HandlesByKind`
-- **Top pinned target types** — `TopPinnedTargetTypes`
-- **Top pinned by size** — `TopPinnedObjectsBySize`
-- **Weak handle kinds** — `WeakHandleKinds` (per-kind count breakdown, not just total)
-- **Top weak target types** — `TopWeakTargetTypes`
-- **Stale wrapper holders** — `TopStaleWrapperHolderTypes`
-- **Dependent handle source types** — `TopSourceTypes`
-- **Dependent handle target types** — `TopTargetTypes`
-- **Dependent handle source→target pairs** — `TopSourceTargetEdges`
+- **Handles by kind** — `HandlesByKind`  
+  Columns: Kind | Count | % Total
+- **Top handle target types** — `TopTargetTypes`  
+  Columns: Type | Count
+- **Pinned handle target types** — `TopPinnedTargetTypes`  
+  Columns: Type | Count
+- **Top pinned by size** — `TopPinnedObjectsBySize`  
+  Columns: Type | Bytes | % Pinned
+
+---
+
+**B8. Weak References**  
+Source: `WeakReferenceDomainResult`
+
+KeyMetrics: TotalWeakHandles, AliveWeakTargets, DeadWeakTargets, DeadTargetRatio, WeakReferenceObjectCount, WeakReferenceObjectBytes, StaleWrapperCount, DependentHandleDeadKeyCount.
+
+Tables:
+- **Weak handle kinds** — `WeakHandleKinds`  
+  Columns: Kind | Count
+- **Top alive weak target types** — `TopWeakTargetTypes`  
+  Columns: Type | Count
+- **Stale wrapper holder types** — `TopStaleWrapperHolderTypes`  
+  Columns: Type | Count
+
+Caveat: handle scan capped at 50 000 entries when `ScanCapped = true`.
+
+---
+
+**B9. Dependent Handles**  
+Source: `DependentHandleDomainResult`
+
+KeyMetrics: DependentHandleCount, ResolvedEdgeCount, UnresolvedTargetCount, UnresolvedPercent.
+
+Tables:
+- **Source type distribution** — `TopSourceTypes`  
+  Columns: Type | Count
+- **Target type distribution** — `TopTargetTypes`  
+  Columns: Type | Count
+- **Source → target pairs** — `TopSourceTargetEdges`  
+  Columns: Pair | Count
 
 ---
 
@@ -606,29 +636,36 @@ Tables:
 ### Domain G — Runtime Infrastructure
 
 **G1. Modules & Assemblies**  
-Sources: `ModuleDomainResult`, `AppDomainDomainResult`
+Source: `ModuleDomainResult`
 
-KeyMetrics: TotalModules, DynamicModules, UniqueModuleNames, VersionConflictGroups, TotalDomains, TotalDynamicModules, DynamicModuleBytes, AnonymousModuleCount, ExcludedModuleCount.
+KeyMetrics: TotalModules, DynamicModules, UniqueModuleNames, VersionConflictGroups.
 
 Tables:
-- **AppDomain inventory** — `Domains` (AppDomainSnapshot)  
-  Columns: Name | Address | DomainId | ModuleCount | EstimatedManagedBytes  
-  Expand: TopModules
 - **Top modules by size** — `TopModulesBySize` (LoadedModuleSnapshot)  
   Columns: Name | AssemblyName | FullPath | Address | Size | IsDynamic | IsPEFile
 - **Top modules by heap memory** — `TopModulesByHeapMemory` (ModuleHeapStats)  
   Columns: ModuleName | AssemblyName | UniqueTypeCount | ObjectCount | TotalBytes
-- **Top modules by type count** — `TopModulesByTypeCount` (ModuleTypeCountEntry)  
-  Columns: ModuleName | AssemblyName | TypeCount | LiveTypeCount | ObjectCount | TotalBytes
 - **High type-density modules** — `HeavyTypeDensityModules` (ModuleTypeDensity)  
-  ← *Absent from old format.*  
   Columns: ModuleName | AssemblyName | UniqueTypeCount | ObjectCount | TotalBytes | BytesPerType
 - **Version conflict groups** — `ConflictDetails` (ModuleConflictGroup)  
   Columns: ModuleName | conflicting instances (path, address, size)
 
 ---
 
-**G2. JIT & Code Footprint**  
+**G2. AppDomains**  
+Source: `AppDomainDomainResult`
+
+KeyMetrics: TotalDomains, AnonymousModuleCount, TotalDynamicModules, DynamicModuleBytes, ExcludedModuleCount.
+
+Tables:
+- **AppDomain inventory** — `Domains` (AppDomainSnapshot)  
+  Columns: Domain Name | ID | Address | Module Count | EstimatedManagedBytes
+- **Top modules by type count** — `TopModulesByTypeCount` (ModuleTypeCountEntry)  
+  Columns: Module | Assembly | Types | Live Types | Objects | Bytes
+
+---
+
+**G3. JIT & Code Footprint**  
 Source: `JitDomainResult`
 
 KeyMetrics: TotalJitHeapBytes, JitManagerCount, JitHeapPctOfTotalProcess, ActiveMethodsOnStacks, TieredMethodCount, UnmanagedFrameCount, ManagedFrameCount.
@@ -705,6 +742,7 @@ Source: `AnalyzerRunResult.Diagnostics.MemoryStats` per analyzer.
 | Async state machine state-value distribution not available (avg only) | E2 |
 | Collection generation field not yet available | C3 |
 | Gen0/Gen1 pinned object generation correlation not computed | B7 |
+| Weak reference handle scan capped at 50 000 entries; totals may be underestimated | B8 |
 | `RuntimeQueueLength` is a reflection probe; may be null | D2 |
 
 ---
@@ -725,7 +763,7 @@ Source: `AnalyzerRunResult.Diagnostics.MemoryStats` per analyzer.
 
 ### Finding display
 ```
-[🔴 Critical] Title of finding                           ★★★☆ High confidence
+[🔴 Critical] Title of finding                           ●●●● High
   Evidence: metric-grounded sentence
   Recommendation: actionable sentence
   Caveats: heuristic disclosure if any

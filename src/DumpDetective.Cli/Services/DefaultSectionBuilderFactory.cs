@@ -50,10 +50,12 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         new DbConnectionSectionBuilder(),          // H1
         new WcfChannelSectionBuilder(),            // H2
         new HttpObjectSectionBuilder(),            // H3
+        new TimerLeakSectionBuilder(),             // H4
     ];
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
     [
+        new HeapOverviewSectionBuilder(),
         new ExecutiveSummarySectionBuilder(),
         new TypeSystemSectionBuilder(),            // C1
         new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights

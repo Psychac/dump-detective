@@ -79,6 +79,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, DbConnectionFindingGenerator>();
         services.AddSingleton<IFindingGenerator, WcfChannelFindingGenerator>();
         services.AddSingleton<IFindingGenerator, HttpObjectFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, TimerLeakFindingGenerator>();
 
         services.AddSingleton<FindingGenerationPipeline>();
         services.AddSingleton<CanonicalReportDocumentFactory>();
@@ -121,6 +122,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, DbConnectionTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, WcfChannelTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, HttpObjectTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, TimerLeakTrendComparer>();
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

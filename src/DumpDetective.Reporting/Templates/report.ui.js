@@ -72,6 +72,124 @@ function filterTocList(list, query) {
 }
 
 export function setupInteractivity(doc, announce) {
+  function revealTargetForHash(id) {
+    if (!id) return null;
+    const target = document.getElementById(id);
+    if (!target) return null;
+
+    const hostSection = target.closest && target.closest('.analyzer-section');
+    if (hostSection) {
+      const details = hostSection.querySelector('details');
+      if (details) details.open = true;
+    }
+
+    const detailParent = target.closest && target.closest('details');
+    if (detailParent) detailParent.open = true;
+    return target;
+  }
+
+  // Global report search (cross-section, cross-finding)
+  (function () {
+    const input = document.getElementById('global-search-input');
+    const count = document.getElementById('global-search-count');
+    const prev = document.getElementById('global-search-prev');
+    const next = document.getElementById('global-search-next');
+    const clear = document.getElementById('global-search-clear');
+    if (!input || !count || !prev || !next || !clear) return;
+
+    let matches = [];
+    let activeIndex = -1;
+
+    function setActive(index) {
+      if (!matches.length) {
+        activeIndex = -1;
+        return;
+      }
+
+      matches.forEach(function (node) { node.classList.remove('global-search-match--active'); });
+      activeIndex = ((index % matches.length) + matches.length) % matches.length;
+      const target = matches[activeIndex];
+      target.classList.add('global-search-match--active');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      try { target.focus({ preventScroll: true }); } catch (e) { }
+      count.textContent = (activeIndex + 1) + ' / ' + matches.length + ' matches';
+      if (announce) announce('Search result ' + (activeIndex + 1) + ' of ' + matches.length);
+    }
+
+    function applyGlobalSearch() {
+      const query = input.value.trim().toLowerCase();
+      const nodes = Array.from(document.querySelectorAll('#main .section-card, #main .analyzer-section'));
+
+      nodes.forEach(function (node) {
+        node.classList.remove('global-search-match');
+        node.classList.remove('global-search-match--active');
+      });
+
+      if (!query) {
+        matches = [];
+        activeIndex = -1;
+        count.textContent = '';
+        prev.disabled = true;
+        next.disabled = true;
+        return;
+      }
+
+      matches = nodes.filter(function (node) {
+        if (node.hidden) return false;
+        const text = (node.textContent || '').toLowerCase();
+        if (!text.includes(query)) return false;
+        node.classList.add('global-search-match');
+        return true;
+      });
+
+      prev.disabled = matches.length === 0;
+      next.disabled = matches.length === 0;
+
+      if (!matches.length) {
+        count.textContent = 'No matches';
+        if (announce) announce('No matches found');
+        return;
+      }
+
+      setActive(0);
+    }
+
+    input.addEventListener('input', applyGlobalSearch);
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        if (!matches.length) return;
+        if (ev.shiftKey) setActive(activeIndex - 1);
+        else setActive(activeIndex + 1);
+      }
+
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        input.value = '';
+        applyGlobalSearch();
+      }
+    });
+
+    prev.addEventListener('click', function () {
+      if (!matches.length) return;
+      setActive(activeIndex - 1);
+    });
+
+    next.addEventListener('click', function () {
+      if (!matches.length) return;
+      setActive(activeIndex + 1);
+    });
+
+    clear.addEventListener('click', function () {
+      input.value = '';
+      applyGlobalSearch();
+      input.focus();
+    });
+
+    applyGlobalSearch();
+  })();
+
   // Keyboard shortcuts for paginated areas
   document.addEventListener('keydown', function (ev) {
     const active = document.activeElement;
@@ -88,23 +206,40 @@ export function setupInteractivity(doc, announce) {
     const a = e.target.closest && e.target.closest('.toc a, .permalink'); if (!a) return; const href = a.getAttribute('href'); if (!href || href.charAt(0) !== '#') return; e.preventDefault(); const id = href.substring(1);
     try {
       const tocLink = a.closest && a.closest('.toc'); if (tocLink) { const parentDet = a.closest && a.closest('details'); if (parentDet) parentDet.open = true; }
-      const m = id.match(/^detail-(\d+)-heading-(\d+)$/);
+      const m = id.match(/^detail-(.+)-heading-(\d+)$/);
       if (m) {
         const sec = document.getElementById('detail-' + m[1]); if (sec) { const det = sec.querySelector('details'); if (det) det.open = true; }
       }
-      const c = id.match(/^detail-(\d+)-collapse-(\d+)$/);
+      const c = id.match(/^detail-(.+)-collapse-(\d+)$/);
       if (c) {
         const sec = document.getElementById('detail-' + c[1]); if (sec) { const det = sec.querySelector('details'); if (det) det.open = true; }
         const collapse = document.getElementById(id); if (collapse && collapse.tagName === 'DETAILS') collapse.open = true;
       }
     } catch (ex) { }
-    const target = document.getElementById(id);
+    const target = revealTargetForHash(id);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       try { if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); } catch (ex) { }
       try { history.replaceState(null, '', '#' + id); } catch (ex) { }
     }
   });
+
+  window.addEventListener('hashchange', function () {
+    const id = (location.hash || '').replace(/^#/, '');
+    if (!id) return;
+    const target = revealTargetForHash(id);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  if (location.hash && location.hash.length > 1) {
+    const id = location.hash.substring(1);
+    const target = revealTargetForHash(id);
+    if (target) {
+      window.setTimeout(function () {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }, 0);
+    }
+  }
 
   // Active TOC highlighting
   (function () {
@@ -135,11 +270,50 @@ export function setupInteractivity(doc, announce) {
       } else { payload = window.__REPORT__ || null; }
       const findings = (payload && Array.isArray(payload.findings)) ? payload.findings : [];
       if (!findings.length) { alert('No findings to export.'); return; }
-      const headers = ['ID', 'Severity', 'Category', 'Title', 'Evidence', 'Recommendation', 'Analyzer', 'Confidence'];
+      const headers = [
+        'ID',
+        'Fingerprint',
+        'Severity',
+        'Category',
+        'Title',
+        'Evidence',
+        'EvidenceItems',
+        'Recommendation',
+        'RecommendationItems',
+        'Fix',
+        'Analyzer',
+        'Confidence',
+        'Owner',
+        'Effort',
+        'Status',
+        'Validation',
+        'Tags'
+      ];
       function csvCell(v) { const s = String(v == null ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
       const rows = [headers.map(csvCell).join(',')];
+      function joinItems(items) {
+        return Array.isArray(items) ? items.filter(function (x) { return !!x; }).join(' | ') : '';
+      }
       findings.forEach(function (f, i) {
-        rows.push([i + 1, f.severity, f.category, f.title, f.evidence, f.recommendation, f.analyzer, f.confidenceScore != null ? Number(f.confidenceScore).toFixed(2) : ''].map(csvCell).join(','));
+        rows.push([
+          i + 1,
+          f.fingerprint || '',
+          f.severity,
+          f.category,
+          f.title,
+          f.evidence,
+          joinItems(f.evidenceItems),
+          f.recommendation,
+          joinItems(f.recommendationItems),
+          f.fix,
+          f.analyzer,
+          f.confidenceScore != null ? Number(f.confidenceScore).toFixed(2) : '',
+          f.suggestedOwner,
+          f.effort,
+          f.trackingStatus,
+          f.validationStep,
+          joinItems(f.tags)
+        ].map(csvCell).join(','));
       });
       const csv = rows.join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv' });

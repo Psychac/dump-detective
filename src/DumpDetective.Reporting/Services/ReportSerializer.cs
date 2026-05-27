@@ -335,10 +335,11 @@ internal sealed class ReportSerializer
         "GC"         => 2,
         "TypeSystem" => 3,   // Domain C — before Threads (D) per spec A/B/C/D/E/F/G order
         "Threads"    => 4,
-        "Async"      => 5,
-        "Exceptions" => 6,
-        "Runtime"    => 7,
-        _            => 99   // unmapped / cross-cutting sections go last
+        "Async"          => 5,
+        "Exceptions"     => 6,
+        "Runtime"        => 7,
+        "Infrastructure" => 8,
+        _                => 99   // unmapped / cross-cutting sections go last
     };
 
     private static int LeadSeverityOrder(FindingSeverity? s) => s switch
@@ -478,6 +479,14 @@ internal sealed class ReportSerializer
             "ModuleAnalyzer" => "Runtime",
             "AppDomainAnalyzer" => "Runtime",
             "JitAnalyzer" => "Runtime",
+            "DbConnectionAnalyzer"   => "Infrastructure",
+            "DB Connection Analysis" => "Infrastructure",
+            "WcfChannelAnalyzer"     => "Infrastructure",
+            "WCF Channel Analysis"   => "Infrastructure",
+            "HttpObjectAnalyzer"     => "Infrastructure",
+            "HTTP Object Analysis"   => "Infrastructure",
+            "TimerLeakAnalyzer"      => "Infrastructure",
+            "Timer Leak Analysis"    => "Infrastructure",
             _ => string.Empty
         };
     }

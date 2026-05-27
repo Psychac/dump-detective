@@ -53,6 +53,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new DbConnectionAnalyzer(),
             new WcfChannelAnalyzer(),
             new HttpObjectAnalyzer(),
+            new TimerLeakAnalyzer(),
         ];
     }
 }

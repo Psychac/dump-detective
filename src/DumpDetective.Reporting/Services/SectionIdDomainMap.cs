@@ -118,6 +118,11 @@ internal static class SectionIdDomainMap
         ["WCF Channel Analysis"]       = ("Infrastructure", "H2"),
         ["HttpObjectAnalyzer"]         = ("Infrastructure", "H3"),
         ["HTTP Object Analysis"]       = ("Infrastructure", "H3"),
+        ["TimerLeakAnalyzer"]         = ("Infrastructure", "H4"),
+        ["Timer Leak Analysis"]       = ("Infrastructure", "H4"),
+
+        // Report-level chapter aliases
+        ["Heap Overview"]             = ("Memory", "A2x"),
 
         // C1 (TypeTable) is built by TypeSystemSectionBuilder as an IReportSectionBuilder — no analyzerName entry needed.
     };

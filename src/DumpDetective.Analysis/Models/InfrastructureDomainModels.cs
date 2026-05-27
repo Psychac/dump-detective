@@ -96,3 +96,27 @@ internal sealed record HttpObjectDomainResult(
     int ServicePointCount,
     ulong TotalBytes,
     IReadOnlyList<HttpObjectTypeSummary> ByType) : DumpDetective.Core.Models.AnalyzerDomainResult;
+
+// ── Timer Objects ───────────────────────────────────────────────────────────
+
+/// <summary>
+/// Per-type count/size summary for timer-related objects found on the heap.
+/// </summary>
+internal sealed record TimerObjectTypeSummary(
+    string TypeName,
+    int Count,
+    ulong TotalBytes);
+
+/// <summary>
+/// Domain result produced by <c>TimerLeakAnalyzer</c>.
+/// </summary>
+internal sealed record TimerLeakDomainResult(
+    bool TimersFound,
+    int TotalTimers,
+    int ThreadingTimerCount,
+    int TimersTimerCount,
+    int TimerQueueTimerCount,
+    int TimerHolderCount,
+    int OtherTimerCount,
+    ulong TotalBytes,
+    IReadOnlyList<TimerObjectTypeSummary> ByType) : DumpDetective.Core.Models.AnalyzerDomainResult;

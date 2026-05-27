@@ -17,9 +17,8 @@ export function renderBlocks(blocks, container, announce) {
         try {
           const sidx = container && container.dataset && container.dataset.sectionIndex;
           if (sidx != null) {
-            const idx = Number(sidx);
             const counter = (container._headingCounter = (container._headingCounter || 0) + 1) - 1;
-            d.id = `detail-${idx}-heading-${counter}`;
+            d.id = `detail-${String(sidx)}-heading-${counter}`;
           }
         } catch (e) { }
         top.appendChild(d);
@@ -90,9 +89,8 @@ export function renderBlocks(blocks, container, announce) {
         try {
           const sidx = container && container.dataset && container.dataset.sectionIndex;
           if (sidx != null) {
-            const idx = Number(sidx);
             const counter = (container._collapseCounter = (container._collapseCounter || 0) + 1) - 1;
-            details.id = `detail-${idx}-collapse-${counter}`;
+            details.id = `detail-${String(sidx)}-collapse-${counter}`;
           }
         } catch (e) { }
         const summary = el('summary'); summary.textContent = block.title || '';
@@ -981,6 +979,94 @@ function sevRank(sev) {
   return -1;
 }
 
+const DOMAIN_RENDER_ORDER = [
+  'Leaks',
+  'Memory',
+  'GC',
+  'TypeSystem',
+  'Threads',
+  'Async',
+  'Exceptions',
+  'Runtime',
+  'Infrastructure'
+];
+
+function domainOrderRank(domain) {
+  if (!domain) return 999;
+  const idx = DOMAIN_RENDER_ORDER.findIndex(function (d) {
+    return d.toLowerCase() === String(domain).toLowerCase();
+  });
+  return idx >= 0 ? idx : 999;
+}
+
+function sortDomainsForRender(doc, domains) {
+  const prioritizeSeverity = !!doc.prioritizeDomainsBySeverity;
+
+  return domains.slice().sort(function (a, b) {
+    if (prioritizeSeverity) {
+      const sevCmp = sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
+      if (sevCmp !== 0) return sevCmp;
+    }
+
+    const orderCmp = domainOrderRank(a.domain) - domainOrderRank(b.domain);
+    if (orderCmp !== 0) return orderCmp;
+
+    const sevCmp = sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
+    if (sevCmp !== 0) return sevCmp;
+
+    return String(a.domain || '').localeCompare(String(b.domain || ''));
+  });
+}
+
+function sortSectionsForRender(sections) {
+  return sections.slice().sort(function (a, b) {
+    const idCmp = String(a.sectionId || '').localeCompare(String(b.sectionId || ''));
+    if (idCmp !== 0) return idCmp;
+
+    const sevCmp = sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
+    if (sevCmp !== 0) return sevCmp;
+
+    const aName = String(a.displayTitle || a.analyzerName || '');
+    const bName = String(b.displayTitle || b.analyzerName || '');
+    return aName.localeCompare(bName);
+  });
+}
+
+function slugifyAnchor(value, fallback) {
+  const raw = String(value || '').trim().toLowerCase();
+  const slug = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (slug) return slug;
+  return fallback || 'item';
+}
+
+function stableHash(value) {
+  const str = String(value || '');
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function domainAnchorId(domain, fallbackIndex) {
+  const name = domain && domain.domain ? String(domain.domain) : '';
+  return 'domain-' + slugifyAnchor(name, 'domain-' + fallbackIndex);
+}
+
+function findingAnchorId(finding, fallbackId) {
+  if (finding && finding.fingerprint)
+    return 'finding-' + slugifyAnchor(finding.fingerprint, stableHash(finding.fingerprint));
+
+  const key = [
+    finding && finding.title,
+    finding && finding.analyzer,
+    finding && finding.category,
+    finding && finding.evidence
+  ].join('|');
+  return 'finding-' + stableHash(key || fallbackId || 'finding');
+}
+
 function domainSevLabel(sev) {
   if (sev == null) return 'Info';
   const s = String(sev).toLowerCase();
@@ -994,17 +1080,15 @@ export function buildDomains(doc) {
   const domains = doc.domains;
   if (!Array.isArray(domains) || !domains.length) return null;
 
-  // Sort domains: Critical first, then Warning, then Info/OK, then Unknown
-  const sortedDomains = domains.slice().sort(function (a, b) {
-    return sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
-  });
+  const sortedDomains = sortDomainsForRender(doc, domains);
 
   const wrap = el('div', 'report-domains');
   for (let i = 0; i < sortedDomains.length; i++) {
     const domain = sortedDomains[i] || {};
     const domainSev = String(domain.leadSeverity || 'Info').toLowerCase();
+    const domainId = domainAnchorId(domain, i);
     const sec = el('section', 'section-card report-domain report-domain--' + domainSev);
-    sec.id = 'domain-' + i;
+    sec.id = domainId;
     sec.dataset.domain = domain.domain || '';
     sec.dataset.leadSeverity = domainSev;
 
@@ -1019,13 +1103,35 @@ export function buildDomains(doc) {
     sec.appendChild(hdr);
 
 
-    const sections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
-      return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
-    }) : [];
+    const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
     if (sections.length) {
       const body = el('div', 'domain-body');
-      for (let j = 0; j < sections.length; j++) {
-        body.appendChild(buildAnalyzerSection(sections[j], i * 1000 + j));
+      const batchSize = 8;
+      let rendered = 0;
+
+      function renderNextBatch() {
+        const end = Math.min(sections.length, rendered + batchSize);
+        for (let j = rendered; j < end; j++) {
+          body.appendChild(buildAnalyzerSection(sections[j], j, domainId));
+        }
+        rendered = end;
+      }
+
+      renderNextBatch();
+      if (rendered < sections.length) {
+        const loadMore = el('button', 'action-btn domain-load-more');
+        loadMore.type = 'button';
+        loadMore.textContent = 'Load more sections (' + (sections.length - rendered) + ' remaining)';
+        loadMore.addEventListener('click', function () {
+          renderNextBatch();
+          const remaining = sections.length - rendered;
+          if (remaining > 0) {
+            loadMore.textContent = 'Load more sections (' + remaining + ' remaining)';
+          } else {
+            loadMore.remove();
+          }
+        });
+        body.appendChild(loadMore);
       }
       sec.appendChild(body);
     }
@@ -1033,12 +1139,12 @@ export function buildDomains(doc) {
     const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
     if (insights.length) {
       const insightsSec = el('section', 'section-card report-domain__insights');
-      insightsSec.id = 'domain-' + i + '-insights';
+      insightsSec.id = domainId + '-insights';
       const h3 = document.createElement('h3');
       h3.textContent = 'Domain Insights';
       insightsSec.appendChild(h3);
       for (let k = 0; k < insights.length; k++) {
-        insightsSec.appendChild(buildFindingCard(insights[k], `${i}-insight-${k}`));
+        insightsSec.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`));
       }
       sec.appendChild(insightsSec);
     }
@@ -1313,6 +1419,148 @@ export function buildDevActionPlan(doc) {
   return sec;
 }
 
+export function buildActionQueuePanel(doc) {
+  const findings = Array.isArray(doc.findings) ? doc.findings : [];
+  if (!findings.length) return null;
+
+  function sevWeight(sev) {
+    const s = String(sev || '').toLowerCase();
+    if (s === 'critical') return 3;
+    if (s === 'warning') return 2;
+    return 1;
+  }
+
+  const actionable = findings.filter(function (f) {
+    return !!(f.recommendation || f.fix || (Array.isArray(f.recommendationItems) && f.recommendationItems.length));
+  }).sort(function (a, b) {
+    const sevCmp = sevWeight(b.severity) - sevWeight(a.severity);
+    if (sevCmp !== 0) return sevCmp;
+    const confA = Number(a.confidenceScore || 0);
+    const confB = Number(b.confidenceScore || 0);
+    if (confB !== confA) return confB - confA;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+
+  if (!actionable.length) return null;
+
+  const sec = el('section', 'section-card action-queue-card');
+  sec.id = 'sec-action-queue';
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Action Queue';
+  sec.appendChild(h2);
+
+  const subtitle = el('p', 'action-queue-card__subtitle');
+  subtitle.textContent = 'Prioritized workflow view from high-impact findings.';
+  sec.appendChild(subtitle);
+
+  const tbl = el('table');
+  const thead = el('thead');
+  const htr = el('tr');
+  ['Priority', 'Finding', 'Owner', 'Effort', 'Status', 'Validation'].forEach(function (col) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = col;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  tbl.appendChild(thead);
+
+  const tbody = el('tbody');
+  const maxRows = 20;
+  for (let i = 0; i < actionable.length && i < maxRows; i++) {
+    const finding = actionable[i];
+    const tr = el('tr');
+
+    const tdPri = document.createElement('td');
+    tdPri.textContent = String(i + 1);
+    tr.appendChild(tdPri);
+
+    const tdFinding = document.createElement('td');
+    const anchor = document.createElement('a');
+    anchor.href = '#' + findingAnchorId(finding, 'queue-' + i);
+    anchor.textContent = finding.title || ('Finding ' + (i + 1));
+    tdFinding.appendChild(anchor);
+    const recText = finding.fix || finding.recommendation || ((Array.isArray(finding.recommendationItems) && finding.recommendationItems.length) ? finding.recommendationItems[0] : '');
+    if (recText) {
+      const note = el('div', 'action-queue-card__note');
+      note.textContent = recText;
+      tdFinding.appendChild(note);
+    }
+    tr.appendChild(tdFinding);
+
+    const tdOwner = document.createElement('td');
+    tdOwner.textContent = finding.suggestedOwner || '-';
+    tr.appendChild(tdOwner);
+
+    const tdEffort = document.createElement('td');
+    tdEffort.textContent = finding.effort || '-';
+    tr.appendChild(tdEffort);
+
+    const tdStatus = document.createElement('td');
+    tdStatus.textContent = finding.trackingStatus || 'Open';
+    tr.appendChild(tdStatus);
+
+    const tdValidation = document.createElement('td');
+    tdValidation.textContent = finding.validationStep || '-';
+    tdValidation.className = 'wrap';
+    tr.appendChild(tdValidation);
+
+    tbody.appendChild(tr);
+  }
+
+  tbl.appendChild(tbody);
+  sec.appendChild(tbl);
+  return sec;
+}
+
+export function buildGlobalSearchBar(doc) {
+  const bar = el('div', 'filter-bar global-search-bar');
+  bar.id = 'global-search-bar';
+  bar.setAttribute('role', 'search');
+  bar.setAttribute('aria-label', 'Search across full report');
+
+  const label = el('span', 'global-search-label');
+  label.textContent = 'Global search';
+  bar.appendChild(label);
+
+  const input = document.createElement('input');
+  input.type = 'search';
+  input.id = 'global-search-input';
+  input.className = 'filter-search global-search-input';
+  input.placeholder = 'Search across all sections, findings, and tables…';
+  input.setAttribute('aria-label', 'Search entire report');
+  bar.appendChild(input);
+
+  const prev = el('button', 'action-btn global-search-nav');
+  prev.type = 'button';
+  prev.id = 'global-search-prev';
+  prev.textContent = 'Prev';
+  prev.setAttribute('aria-label', 'Previous search result');
+  bar.appendChild(prev);
+
+  const next = el('button', 'action-btn global-search-nav');
+  next.type = 'button';
+  next.id = 'global-search-next';
+  next.textContent = 'Next';
+  next.setAttribute('aria-label', 'Next search result');
+  bar.appendChild(next);
+
+  const clear = el('button', 'action-btn global-search-clear');
+  clear.type = 'button';
+  clear.id = 'global-search-clear';
+  clear.textContent = 'Clear';
+  clear.setAttribute('aria-label', 'Clear report search');
+  bar.appendChild(clear);
+
+  const count = el('span', 'filter-count global-search-count');
+  count.id = 'global-search-count';
+  count.setAttribute('aria-live', 'polite');
+  count.setAttribute('aria-atomic', 'true');
+  bar.appendChild(count);
+
+  return bar;
+}
+
 export function buildFilterBar(doc) {
   const findings = doc.findings || [];
   if (!findings.length) return null;
@@ -1348,10 +1596,7 @@ export function buildFilterBar(doc) {
 export function buildTOC(doc) {
   const isTrendToc = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
   const rawDomains = Array.isArray(doc.domains) ? doc.domains : [];
-  // Sort to match the same order buildDomains renders
-  const domains = rawDomains.slice().sort(function (a, b) {
-    return sevRank(b.leadSeverity) - sevRank(a.leadSeverity);
-  });
+  const domains = sortDomainsForRender(doc, rawDomains);
   // For trend reports use trendAnalyzerSections (serialized); for single-dump use analyzerSections
   const sections = isTrendToc ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []);
   if ((!domains || !domains.length) && (!sections || !sections.length)) return null;
@@ -1402,6 +1647,7 @@ export function buildTOC(doc) {
   quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u25CE'));
   if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u271A'));
   if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u00A7'));
+  if (Array.isArray(doc.findings) && doc.findings.length) quickList.appendChild(quickLink('#sec-action-queue', 'Action Queue', '!'));
   if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u00B6'));
   quickSection.appendChild(quickList);
   fragment.appendChild(quickSection);
@@ -1416,10 +1662,11 @@ export function buildTOC(doc) {
     for (let i = 0; i < domains.length; i++) {
       const domain = domains[i] || {};
       const dot = sevDot(domain.leadSeverity);
+      const domainId = domainAnchorId(domain, i);
 
       const det = document.createElement('details');
       det.open = false;
-      det.dataset.target = '#domain-' + i;
+      det.dataset.target = '#' + domainId;
 
       // Summary: dot + anchor link + chevron (chevron is native on <summary>)
       const summ = document.createElement('summary');
@@ -1431,7 +1678,7 @@ export function buildTOC(doc) {
 
       const domainLink = document.createElement('a');
       domainLink.className = 'toc-domain-summary__link';
-      domainLink.href = '#domain-' + i;
+      domainLink.href = '#' + domainId;
       domainLink.textContent = domain.domain || ('Domain ' + i);
       domainLink.addEventListener('click', function (e) {
         e.stopPropagation(); // don't toggle the <details>
@@ -1446,9 +1693,7 @@ export function buildTOC(doc) {
       attachScrollToggle(det);
 
       const list = document.createElement('ol');
-      const domainSections = Array.isArray(domain.sections) ? domain.sections.slice().sort(function (a, b) {
-        return sevRank(b.leadFinding && b.leadFinding.severity) - sevRank(a.leadFinding && a.leadFinding.severity);
-      }) : [];
+      const domainSections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
       for (let j = 0; j < domainSections.length; j++) {
         const li = document.createElement('li');
         const a = document.createElement('a');
@@ -1463,7 +1708,7 @@ export function buildTOC(doc) {
       if (domain.domainInsights && domain.domainInsights.length) {
         const li = document.createElement('li');
         const a = document.createElement('a');
-        a.href = '#domain-' + i + '-insights';
+        a.href = '#' + domainId + '-insights';
         a.textContent = 'Domain insights';
         li.appendChild(a);
         list.appendChild(li);
@@ -1563,21 +1808,50 @@ function renderTocNodes(nodes) {
 }
 
 export function buildFindingCard(f, i) {
-  const sec = el('section', 'section-card finding-card'); sec.id = 'finding-' + i; sec.dataset.severity = (f.severity || 'info').toLowerCase(); sec.dataset.title = f.title || ''; sec.dataset.summary = (f.evidence || '').substring(0, 200);
+  const evidenceItems = Array.isArray(f.evidenceItems) ? f.evidenceItems.filter(function (x) { return !!x; }) : [];
+  const recommendationItems = Array.isArray(f.recommendationItems) ? f.recommendationItems.filter(function (x) { return !!x; }) : [];
+  const evidenceSummary = evidenceItems.length > 0 ? evidenceItems[0] : (f.evidence || '');
+
+  const findingId = findingAnchorId(f, i);
+  const sec = el('section', 'section-card finding-card'); sec.id = findingId; sec.dataset.severity = (f.severity || 'info').toLowerCase(); sec.dataset.title = f.title || ''; sec.dataset.summary = evidenceSummary.substring(0, 200);
   const header = el('div', 'finding-card__header');
   const eyebrow = el('div', 'finding-card__eyebrow');
   const badge = el('span', 'severity-badge ' + sevCss(f.severity)); badge.textContent = f.severity || 'Info'; eyebrow.appendChild(badge);
   const cat = el('span', 'category'); cat.textContent = f.category || 'Finding'; eyebrow.appendChild(cat);
   header.appendChild(eyebrow);
   const actions = el('div', 'finding-card__actions');
-  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#finding-' + i; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = 'ðŸ”—';
-  const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#finding-' + i; copyBtn.textContent = '\u2398';
+  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#' + findingId; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = 'Link';
+  const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#' + findingId; copyBtn.textContent = 'Copy';
   actions.appendChild(pa); actions.appendChild(copyBtn); header.appendChild(actions); sec.appendChild(header);
 
   const h2 = document.createElement('h2'); h2.className = 'finding-card__title'; h2.textContent = f.title || '';
   sec.appendChild(h2);
 
-  const summary = document.createElement('p'); summary.className = 'finding-card__summary'; summary.textContent = f.evidence || ''; sec.appendChild(summary); linkifyAnchors(summary);
+  const summary = document.createElement('p'); summary.className = 'finding-card__summary'; summary.textContent = evidenceSummary; sec.appendChild(summary); linkifyAnchors(summary);
+
+  if (f.confidenceScore != null) {
+    const conf = Number(f.confidenceScore);
+    const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
+    const label = conf >= 0.85 ? 'High confidence' : conf >= 0.65 ? 'Med-High confidence' : conf >= 0.45 ? 'Medium confidence' : 'Low confidence';
+
+    const confBand = el('div', 'finding-card__confidence finding-card__confidence--' + band);
+    const confSymbol = el('span', 'finding-card__confidence-symbol'); confSymbol.textContent = conf >= 0.85 ? '●●●●' : conf >= 0.65 ? '●●●○' : conf >= 0.45 ? '●●○○' : '●○○○';
+    const confText = el('span', 'finding-card__confidence-text'); confText.textContent = label + ' (' + conf.toFixed(2) + ')';
+    confBand.appendChild(confSymbol);
+    confBand.appendChild(confText);
+    sec.appendChild(confBand);
+
+    const caveats = Array.isArray(f.caveatItems) ? f.caveatItems.filter(function (x) { return !!x; }) : [];
+    if (caveats.length > 0) {
+      const caveatWrap = el('div', 'finding-card__caveats');
+      for (let ci = 0; ci < caveats.length; ci++) {
+        const caveat = el('div', 'finding-card__caveat');
+        caveat.textContent = '⚠ ' + caveats[ci];
+        caveatWrap.appendChild(caveat);
+      }
+      sec.appendChild(caveatWrap);
+    }
+  }
 
   const details = el('div', 'finding-card__details');
   function detailField(label, value) {
@@ -1586,6 +1860,25 @@ export function buildFindingCard(f, i) {
     const fieldValue = el('div', 'finding-card__field-value'); fieldValue.textContent = value || 'â€”'; wrapAddresses(fieldValue); linkifyAnchors(fieldValue);
     field.appendChild(fieldLabel); field.appendChild(fieldValue); details.appendChild(field);
   }
+
+  function detailListField(label, values) {
+    const field = el('div', 'finding-card__field');
+    const fieldLabel = el('div', 'finding-card__field-label'); fieldLabel.textContent = label;
+    const fieldValue = el('div', 'finding-card__field-value');
+    const ul = document.createElement('ul');
+    ul.className = 'finding-card__list';
+    for (let idx = 0; idx < values.length; idx++) {
+      const li = document.createElement('li');
+      li.textContent = values[idx];
+      wrapAddresses(li);
+      linkifyAnchors(li);
+      ul.appendChild(li);
+    }
+    fieldValue.appendChild(ul);
+    field.appendChild(fieldLabel);
+    field.appendChild(fieldValue);
+    details.appendChild(field);
+  }
   if (f.cause) detailField('Cause', f.cause);
   if (f.effect) detailField('Effect', f.effect);
   if (f.confidenceScore != null) detailField('Confidence', Number(f.confidenceScore).toFixed(2));
@@ -1593,9 +1886,11 @@ export function buildFindingCard(f, i) {
   if (f.effort) detailField('Effort', f.effort);
   if (f.validationStep) detailField('Validation', f.validationStep);
   if (f.trackingStatus) detailField('Status', f.trackingStatus);
-  detailField('Evidence', f.evidence || '');
+  if (evidenceItems.length > 0) detailListField('Evidence', evidenceItems);
+  else detailField('Evidence', f.evidence || '');
   if (f.fix) detailField('Fix', f.fix);
-  if (f.recommendation) detailField('Recommendation', f.recommendation);
+  if (recommendationItems.length > 0) detailListField('Recommendation', recommendationItems);
+  else if (f.recommendation) detailField('Recommendation', f.recommendation);
   sec.appendChild(details);
   return sec;
 }
@@ -1618,15 +1913,18 @@ export function buildConfidenceNotes(doc) {
 }
 
 export function buildAnalyzerSection(section, i) {
-  // Use stable sectionId (e.g. "A1", "B4") when available; fall back to positional detail-N
-  const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : ('detail-' + i);
+  const anchorScope = arguments.length > 2 ? arguments[2] : '';
+  // Use stable sectionId (e.g. "A1", "B4") when available; fall back to scoped detail anchor
+  const scopedFallback = anchorScope ? ('detail-' + slugifyAnchor(anchorScope, 'scope') + '-' + i) : ('detail-' + i);
+  const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : scopedFallback;
+  const sectionIndexKey = anchorScope ? (slugifyAnchor(anchorScope, 'scope') + '-' + i) : String(i);
   const wrapper = el('section', 'analyzer-section detail-color-' + (i % 6));
   wrapper.id = stableId;
   // Keep detail-N as a data attribute for internal use by collapsible/heading ID generation
-  wrapper.dataset.detailIndex = String(i);
+  wrapper.dataset.detailIndex = sectionIndexKey;
 
   // â”€â”€ Collapsible: section handle (summary) always at top â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + i + '-summary';
+  const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + sectionIndexKey + '-summary';
   // Section-ID badge (e.g. "A1") + title
   if (section.sectionId && section.sectionId.trim()) {
     const idBadge = el('span', 'detail-summary__section-id'); idBadge.textContent = section.sectionId.trim(); summaryEl.appendChild(idBadge);
@@ -1643,7 +1941,7 @@ export function buildAnalyzerSection(section, i) {
     summaryEl.appendChild(title);
   } details.appendChild(summaryEl);
 
-  const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = String(i);
+  const content = el('div', 'detail-block'); content.setAttribute('role', 'region'); content.setAttribute('aria-labelledby', summaryEl.id); content.dataset.sectionIndex = sectionIndexKey;
 
   // â”€â”€ Inside the expanded area: Lead Finding first, then Key Metrics strip â”€â”€
   const lead = section.leadFinding;

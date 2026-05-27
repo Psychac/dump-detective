@@ -35,6 +35,15 @@ async function bootstrap() {
   const executive = R.buildExecutiveSummary(doc);
   if (executive) main.appendChild(executive);
 
+  const actionQueue = R.buildActionQueuePanel(doc);
+  if (actionQueue) main.appendChild(actionQueue);
+
+  const globalSearch = R.buildGlobalSearchBar(doc);
+  if (globalSearch) main.appendChild(globalSearch);
+
+  const filterBar = R.buildFilterBar(doc);
+  if (filterBar) main.appendChild(filterBar);
+
   const domains = R.buildDomains(doc);
   if (domains) main.appendChild(domains);
 
@@ -59,7 +68,25 @@ async function bootstrap() {
   // For trend reports use trendAnalyzerSections (serialized); for single-dump fall back to analyzerSections
   const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
   if (!domains || isTrend) {
-    for (let i = 0; i < sections.length; i++) main.appendChild(R.buildAnalyzerSection(sections[i], i));
+    const chunkSize = 12;
+    let index = 0;
+
+    const renderChunk = function () {
+      const end = Math.min(sections.length, index + chunkSize);
+      for (; index < end; index++) {
+        main.appendChild(R.buildAnalyzerSection(sections[index], index));
+      }
+
+      if (index < sections.length) {
+        if (window.requestIdleCallback) {
+          window.requestIdleCallback(renderChunk, { timeout: 120 });
+        } else {
+          window.setTimeout(renderChunk, 0);
+        }
+      }
+    };
+
+    renderChunk();
   }
 
   const appendix = R.buildAppendix(doc);

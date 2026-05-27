@@ -18,7 +18,8 @@ function fallbackRender() {
   try {
     const jsonEl = document.getElementById('report-json');
     if (!jsonEl) return;
-    const doc = JSON.parse(jsonEl.textContent || jsonEl.innerText || '{}');
+    const payload = JSON.parse(jsonEl.textContent || jsonEl.innerText || '{}');
+    const doc = (payload && payload.report) ? payload.report : payload;
     const main = document.getElementById('main') || document.body;
     let html = '';
 

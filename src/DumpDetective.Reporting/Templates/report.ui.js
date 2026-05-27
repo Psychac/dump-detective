@@ -268,7 +268,8 @@ export function setupInteractivity(doc, announce) {
       if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
         try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
       } else { payload = window.__REPORT__ || null; }
-      const findings = (payload && Array.isArray(payload.findings)) ? payload.findings : [];
+      const report = (payload && payload.report) ? payload.report : payload;
+      const findings = (report && Array.isArray(report.findings)) ? report.findings : [];
       if (!findings.length) { alert('No findings to export.'); return; }
       const headers = [
         'ID',

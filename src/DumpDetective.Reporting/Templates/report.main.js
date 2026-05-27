@@ -2,24 +2,41 @@ import * as Dom from './report.dom.js';
 import * as R from './report.renderers.js';
 import * as UI from './report.ui.js';
 
-async function loadDoc() {
+async function loadPayload() {
   try {
     const el = document.getElementById('report-json');
     if (el && el.textContent && el.textContent.trim()) {
       try {
         const parsed = JSON.parse(el.textContent);
-        if (parsed && parsed._external) {
-          const href = parsed._external;
-          try { const resp = await fetch(href); if (resp.ok) return await resp.json(); } catch (e) { /* ignore */ }
+        const doc = (parsed && parsed.report) ? parsed.report : parsed;
+        const perDumpDocs = (parsed && Array.isArray(parsed.perDumpDocs)) ? parsed.perDumpDocs : [];
+        if (doc && doc._external) {
+          const href = doc._external;
+          try {
+            const resp = await fetch(href);
+            if (resp.ok) {
+              const externalParsed = await resp.json();
+              const externalDoc = (externalParsed && externalParsed.report) ? externalParsed.report : externalParsed;
+              const externalPerDumpDocs = (externalParsed && Array.isArray(externalParsed.perDumpDocs))
+                ? externalParsed.perDumpDocs
+                : perDumpDocs;
+              return { doc: externalDoc, perDumpDocs: externalPerDumpDocs };
+            }
+          } catch (e) { /* ignore */ }
         }
-        return parsed;
+        return { doc: doc, perDumpDocs: perDumpDocs };
       } catch (e) { /* fall through */ }
     }
   } catch (e) { }
-  return window.__REPORT__ || null;
+  const fallback = window.__REPORT__ || null;
+  if (!fallback) return null;
+  return {
+    doc: (fallback && fallback.report) ? fallback.report : fallback,
+    perDumpDocs: (fallback && Array.isArray(fallback.perDumpDocs)) ? fallback.perDumpDocs : []
+  };
 }
 
-function loadPerDumpDocs() {
+function loadLegacyPerDumpDocs() {
   try {
     const el = document.getElementById('per-dump-json');
     if (el && el.textContent && el.textContent.trim()) {
@@ -30,8 +47,12 @@ function loadPerDumpDocs() {
 }
 
 async function bootstrap() {
-  const doc = await loadDoc();
-  if (!doc) return;
+  const payload = await loadPayload();
+  if (!payload || !payload.doc) return;
+  const doc = payload.doc;
+  if ((!doc.perDumpDocs || !doc.perDumpDocs.length) && Array.isArray(payload.perDumpDocs) && payload.perDumpDocs.length) {
+    doc.perDumpDocs = payload.perDumpDocs;
+  }
   const { announce } = Dom.createAriaLive();
 
   const main = document.getElementById('main');
@@ -77,7 +98,9 @@ async function bootstrap() {
     const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
   }
 
-  const perDumpDocs = isTrend ? loadPerDumpDocs() : [];
+  const perDumpDocs = isTrend
+    ? ((payload.perDumpDocs && payload.perDumpDocs.length) ? payload.perDumpDocs : loadLegacyPerDumpDocs())
+    : [];
   const toc = R.buildTOC(doc, perDumpDocs);
 
   UI.buildSidebar(toc, doc);

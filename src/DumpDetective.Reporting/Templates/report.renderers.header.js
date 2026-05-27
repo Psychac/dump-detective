@@ -9,6 +9,17 @@ export function buildHeader(doc) {
   const title = isTrend ? 'Trend Analysis' : 'Analysis Report';
   const rawName = (doc.dumpPath || 'report').replace(/\\/g, '/').split('/').pop() || 'report';
   const exportName = rawName.replace(/\.[^.]+$/, '') || 'report';
+  const ctx = doc.incidentContext || {};
+  const execSum = doc.executiveSummary || {};
+  const snapshots = Array.isArray(ctx.trendSnapshots) ? ctx.trendSnapshots : [];
+  const paths = Array.isArray(doc.trendDumpPaths) && doc.trendDumpPaths.length
+    ? doc.trendDumpPaths
+    : (snapshots.length
+      ? snapshots.map(function (s) { return s && s.dumpPath ? s.dumpPath : ''; }).filter(function (p) { return !!p; })
+      : (Array.isArray(doc.perDumpDocs)
+        ? doc.perDumpDocs.map(function (d) { return d && d.dumpPath ? d.dumpPath : ''; }).filter(function (p) { return !!p; })
+        : []));
+  const trendDumpCount = doc.trendDumpCount || paths.length || snapshots.length;
 
   const sec = el('section', 'header-card');
   sec.id = 'sec-header';
@@ -22,9 +33,9 @@ export function buildHeader(doc) {
   heroLeft.appendChild(badge);
   const titleWrap = el('div', 'header-hero__title-wrap');
   const h1 = document.createElement('h1'); h1.className = 'header-hero__title'; h1.textContent = title; titleWrap.appendChild(h1);
-  if (isTrend && doc.trendDumpCount > 0) {
+  if (isTrend && trendDumpCount > 0) {
     const dumpBadge = el('span', 'header-hero__trend-count');
-    dumpBadge.textContent = doc.trendDumpCount + '\u202Fdumps'; titleWrap.appendChild(dumpBadge);
+    dumpBadge.textContent = trendDumpCount + '\u202Fdumps'; titleWrap.appendChild(dumpBadge);
   }
   heroLeft.appendChild(titleWrap);
   if (!isTrend && rawName) { const fn = el('div', 'header-hero__filename'); fn.textContent = rawName; heroLeft.appendChild(fn); }
@@ -42,10 +53,6 @@ export function buildHeader(doc) {
 
   // ── Body (meta-stat rows) ────────────────────────────────────────────────
   const body = el('div', 'header-body');
-  const ctx = doc.incidentContext || {};
-  const execSum = doc.executiveSummary || {};
-  const snapshots = Array.isArray(ctx.trendSnapshots) ? ctx.trendSnapshots : [];
-  const paths = Array.isArray(doc.trendDumpPaths) ? doc.trendDumpPaths : [];
 
   function statItem(label, value) {
     const d = el('div', 'header-stat');
@@ -94,7 +101,7 @@ export function buildHeader(doc) {
     rd.textContent = fmtShort(baseMsN) + '\u2002\u2192\u2002' + fmtShort(curMsN);
     rangeRow.appendChild(rd);
     const span = fmtSpan(baseMsN, curMsN);
-    const dumpCount = doc.trendDumpCount || paths.length;
+    const dumpCount = trendDumpCount;
     const meta = el('span', 'header-trend-range__count');
     meta.textContent = (span ? span + '\u2002\u00B7\u2002' : '') + dumpCount + ' dump' + (dumpCount !== 1 ? 's' : '');
     rangeRow.appendChild(meta);
@@ -157,7 +164,7 @@ export function buildHeader(doc) {
       if (useCollapse) {
         const details = document.createElement('details'); details.className = 'header-trend-dumps__details';
         const summary = document.createElement('summary'); summary.className = 'header-trend-dumps__summary';
-        summary.textContent = doc.trendDumpCount + ' dumps \u2014 expand to see all'; details.appendChild(summary);
+        summary.textContent = trendDumpCount + ' dumps \u2014 expand to see all'; details.appendChild(summary);
         listEl = el('div', 'header-trend-dumps__list'); details.appendChild(listEl);
         dumpListWrap.appendChild(details);
       } else {

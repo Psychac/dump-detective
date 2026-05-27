@@ -35,6 +35,12 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_ANALYZER_SECTIONS}}"))
             preAnalyzers = ReportHtmlShared.RenderAnalyzerSections(doc.AnalyzerSections);
 
+        AnalysisReportDocument docForClient = doc with
+        {
+            RenderMode = shouldPreRender ? "prerendered" : "client"
+        };
+        json = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
+
         // For trend reports: serialize each per-dump document independently using the proven
         // AnalysisReportDocument serializer (same path that produces working single-dump JSON).
         string perDumpJson = "[]";

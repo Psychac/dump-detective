@@ -34,6 +34,8 @@ internal sealed record HealthScorecard(
 internal abstract record AnalysisReportDocument
 {
     public string SchemaVersion { get; init; } = "2.1";
+    // Rendering contract: "client" for full client render, "prerendered" when server pre-rendered heavy sections.
+    public string RenderMode { get; init; } = "client";
     public DateTime GeneratedAtUtc { get; init; }
     public double ElapsedSeconds { get; init; }
     public string? AnalyzerVersion { get; init; }

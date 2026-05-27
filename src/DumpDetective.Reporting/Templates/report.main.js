@@ -36,11 +36,17 @@ async function bootstrap() {
 
   const main = document.getElementById('main');
   if (!main) return;
+  const renderMode = String((doc && doc.renderMode) || '').toLowerCase();
+  const reportContent = document.getElementById('report-content');
+  const hasPreRenderedContent = renderMode === 'prerendered'
+    || !!(reportContent && reportContent.children && reportContent.children.length > 0);
 
   main.appendChild(R.buildHeader(doc));
 
-  const scorecard = R.buildHealthScorecard(doc);
-  if (scorecard) main.appendChild(scorecard);
+  if (!hasPreRenderedContent) {
+    const scorecard = R.buildHealthScorecard(doc);
+    if (scorecard) main.appendChild(scorecard);
+  }
 
   const executive = R.buildExecutiveSummary(doc);
   if (executive) main.appendChild(executive);
@@ -54,15 +60,20 @@ async function bootstrap() {
   const filterBar = R.buildFilterBar(doc);
   if (filterBar) main.appendChild(filterBar);
 
-  const domains = R.buildDomains(doc);
-  if (domains) main.appendChild(domains);
+  let domains = null;
+  if (!hasPreRenderedContent) {
+    domains = R.buildDomains(doc);
+    if (domains) main.appendChild(domains);
+  }
 
-  const crossDomain = R.buildCrossDomainInsights(doc);
-  if (crossDomain) main.appendChild(crossDomain);
+  if (!hasPreRenderedContent) {
+    const crossDomain = R.buildCrossDomainInsights(doc);
+    if (crossDomain) main.appendChild(crossDomain);
+  }
 
   const isTrend = !!doc.isTrendReport || doc['$kind'] === 'trend';
 
-  if (!domains) {
+  if (!domains && !hasPreRenderedContent) {
     const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
   }
 
@@ -73,13 +84,13 @@ async function bootstrap() {
 
   const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
 
-  if (!domains) {
+  if (!domains && !hasPreRenderedContent) {
     const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
   }
 
   // For trend reports use trendAnalyzerSections (serialized); for single-dump fall back to analyzerSections
   const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
-  if (!domains || isTrend) {
+  if ((!domains || isTrend) && !hasPreRenderedContent) {
     if (isTrend) {
       R.renderTrendDumpGroups(main, sections, perDumpDocs);
     } else {

@@ -2,7 +2,7 @@
 // buildDomains and buildCrossDomainInsights call buildFindingCard (findings.js)
 // and buildAnalyzerSection (sections.js) — resolved via hoisting in the IIFE bundle.
 import { el } from './report.dom.js';
-import { sortDomainsForRender, sortSectionsForRender, sortFindingsBySeverity, buildInsightStats, domainAnchorId, domainSevLabel } from './report.renderers.shared.js';
+import { sortSectionsForRender, buildInsightStats, domainAnchorId, domainSevLabel } from './report.renderers.shared.js';
 
 // ── Domain sections list ──────────────────────────────────────────────────────
 
@@ -10,11 +10,9 @@ export function buildDomains(doc) {
   const domains = doc.domains;
   if (!Array.isArray(domains) || !domains.length) return null;
 
-  const sortedDomains = sortDomainsForRender(doc, domains);
-
   const wrap = el('div', 'report-domains');
-  for (let i = 0; i < sortedDomains.length; i++) {
-    const domain = sortedDomains[i] || {};
+  for (let i = 0; i < domains.length; i++) {
+    const domain = domains[i] || {};
     const domainSev = String(domain.leadSeverity || 'Info').toLowerCase();
     const domainId = domainAnchorId(domain, i);
     const sec = el('section', 'section-card report-domain report-domain--' + domainSev);
@@ -32,7 +30,7 @@ export function buildDomains(doc) {
     }
     sec.appendChild(hdr);
 
-    const insights = sortFindingsBySeverity(Array.isArray(domain.domainInsights) ? domain.domainInsights : []);
+    const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
     if (insights.length) {
       const insightsSec = el('section', 'report-domain__insights');
       insightsSec.id = domainId + '-insights';
@@ -98,7 +96,7 @@ export function buildDomains(doc) {
 // ── Cross-domain insights ────────────────────────────────────────────────────
 
 export function buildCrossDomainInsights(doc) {
-  const findings = sortFindingsBySeverity(Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : []);
+  const findings = Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : [];
   if (!findings.length) return null;
 
   const sec = el('section', 'section-card cross-domain-insights');
@@ -126,8 +124,7 @@ export function buildCrossDomainInsights(doc) {
 export function buildTOC(doc, perDumpDocs) {
   const isTrendToc = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
   if (!Array.isArray(perDumpDocs)) perDumpDocs = [];
-  const rawDomains = Array.isArray(doc.domains) ? doc.domains : [];
-  const domains = sortDomainsForRender(doc, rawDomains);
+  const domains = Array.isArray(doc.domains) ? doc.domains : [];
   const sections = isTrendToc ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []);
   if ((!domains || !domains.length) && (!sections || !sections.length)) return null;
 
@@ -275,7 +272,7 @@ export function buildTOC(doc, perDumpDocs) {
 
         const list = document.createElement('ol');
         if (Array.isArray(subDoc.domains) && subDoc.domains.length) {
-          const subDomains = sortDomainsForRender(subDoc, subDoc.domains);
+          const subDomains = subDoc.domains;
           for (let sdi = 0; sdi < subDomains.length; sdi++) {
             const domain = subDomains[sdi];
             const domainId = domainAnchorId(domain, sdi);

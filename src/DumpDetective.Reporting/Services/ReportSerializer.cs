@@ -403,11 +403,27 @@ internal sealed class ReportSerializer
         foreach (var pair in groupedSections)
         {
             string domain = pair.Key;
+            List<FindingRecord> sortedInsights = [];
+            if (domainInsights.TryGetValue(domain, out List<FindingRecord>? insights) && insights is not null)
+            {
+                sortedInsights = [.. insights];
+                sortedInsights.Sort(static (a, b) =>
+                {
+                    int sev = SeverityOrdinal(b.Severity).CompareTo(SeverityOrdinal(a.Severity));
+                    if (sev != 0) return sev;
+
+                    int analyzer = StringComparer.OrdinalIgnoreCase.Compare(a.Analyzer, b.Analyzer);
+                    if (analyzer != 0) return analyzer;
+
+                    return StringComparer.OrdinalIgnoreCase.Compare(a.Title, b.Title);
+                });
+            }
+
             domains.Add(new ReportDomainSection(
                 Domain: domain,
                 LeadSeverity: domainSeverity.TryGetValue(domain, out FindingSeverity? severity) ? severity : null,
                 Sections: pair.Value,
-                DomainInsights: domainInsights.TryGetValue(domain, out List<FindingRecord>? insights) ? insights : []));
+                DomainInsights: sortedInsights));
         }
 
         domains.Sort((a, b) =>
@@ -440,53 +456,39 @@ internal sealed class ReportSerializer
                 cross.Add(finding);
             }
         }
+
+        cross.Sort(static (a, b) =>
+        {
+            int sev = SeverityOrdinal(b.Severity).CompareTo(SeverityOrdinal(a.Severity));
+            if (sev != 0) return sev;
+
+            int analyzer = StringComparer.OrdinalIgnoreCase.Compare(a.Analyzer, b.Analyzer);
+            if (analyzer != 0) return analyzer;
+
+            return StringComparer.OrdinalIgnoreCase.Compare(a.Title, b.Title);
+        });
+
         return cross;
     }
 
     private static string InferFindingDomain(FindingRecord finding)
     {
-        string analyzer = finding.Analyzer;
-        return analyzer switch
+        string domain = SectionIdDomainMap.GetDomain(finding.Analyzer);
+        if (!string.IsNullOrWhiteSpace(domain))
+            return domain;
+
+        // Fallback for uncommon/custom analyzer names where category is still reliable.
+        return finding.Category switch
         {
-            "LeakCandidateAnalyzer" => "Leaks",
-            "MemoryAnalyzer" => "Memory",
-            "DominatorAnalyzer" => "Memory",
-            "RetentionAnalyzer" => "Memory",
-            "GCRootAnalyzer" => "Memory",
-            "StaticRootLeakDetector" => "Memory",
-            "StringAnalyzer" => "Memory",
-            "GCGenerationAnalyzer" => "GC",
-            "AllocationPatternAnalyzer" => "GC",
-            "SegmentAnalyzer" => "GC",
-            "LohFragmentationAnalyzer" => "GC",
-            "SegmentReservationAnalyzer" => "GC",
-            "FinalizableObjectAnalyzer" => "GC",
-            "GCHandleAnalyzer" => "GC",
-            "WeakReferenceAnalyzer" => "GC",
-            "DependentHandleAnalyzer" => "GC",
-            "ObjectShapeAnalyzer" => "TypeSystem",
-            "CollectionAnalyzer" => "TypeSystem",
-            "ArrayAnalyzer" => "TypeSystem",
-            "BoxingAnalyzer" => "TypeSystem",
-            "ThreadAnalyzer" => "Threads",
-            "HangAnalyzer" => "Threads",
-            "LockGraphAnalyzer" => "Threads",
-            "ThreadStackClusterAnalyzer" => "Threads",
-            "EventLeakAnalyzer" => "Threads",
-            "AsyncTaskAnalyzer" => "Async",
-            "AsyncStateMachineAnalyzer" => "Async",
-            "CrashAnalyzer" => "Exceptions",
-            "ModuleAnalyzer" => "Runtime",
-            "AppDomainAnalyzer" => "Runtime",
-            "JitAnalyzer" => "Runtime",
-            "DbConnectionAnalyzer"   => "Infrastructure",
-            "DB Connection Analysis" => "Infrastructure",
-            "WcfChannelAnalyzer"     => "Infrastructure",
-            "WCF Channel Analysis"   => "Infrastructure",
-            "HttpObjectAnalyzer"     => "Infrastructure",
-            "HTTP Object Analysis"   => "Infrastructure",
-            "TimerLeakAnalyzer"      => "Infrastructure",
-            "Timer Leak Analysis"    => "Infrastructure",
+            "Leak" => "Leaks",
+            "Memory" => "Memory",
+            "GC" => "GC",
+            "TypeSystem" => "TypeSystem",
+            "Threads" => "Threads",
+            "Async" => "Async",
+            "Exceptions" => "Exceptions",
+            "Runtime" => "Runtime",
+            "Infrastructure" => "Infrastructure",
             _ => string.Empty
         };
     }

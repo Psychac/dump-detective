@@ -402,6 +402,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine($"### {Esc(section.DisplayTitle)}");
                 sb.AppendLine();
                 RenderBlocksMd(section.Blocks, sb);
+                RenderSectionTablesMd(section.Tables, sb);
                 sb.AppendLine();
             }
         }
@@ -619,6 +620,23 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
         }
         sb.AppendLine();
+    }
+
+    private static void RenderSectionTablesMd(IReadOnlyList<SectionTable>? tables, StringBuilder sb)
+    {
+        if (tables is not { Count: > 0 })
+            return;
+
+        for (int i = 0; i < tables.Count; i++)
+        {
+            SectionTable table = tables[i];
+            RenderTableMd(
+                new TableBlock(
+                    Caption: table.Title,
+                    Headers: table.Headers,
+                    Rows: table.Rows),
+                sb);
+        }
     }
 
     private static string Esc(string s) => s.Replace("|", "\\|");

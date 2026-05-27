@@ -1,6 +1,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.SectionBuilders;
@@ -379,6 +380,54 @@ public sealed class ReportingCompositionTests
         output.Should().Contain("Type table");
     }
 
+    [Fact]
+    public void Serialize_ShouldMapDisplayNameFindings_ToTheirDomains()
+    {
+        InsightFinding memoryFinding = new(
+            Analyzer: "Memory Analysis",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Memory pressure",
+            Evidence: "Heap pressure observed",
+            Recommendation: "Investigate retention",
+            Tags: ["memory"],
+            Fingerprint: "mem-1");
+
+        InsightFinding threadFinding = new(
+            Analyzer: "Thread Analysis",
+            Category: "Threads",
+            Severity: FindingSeverity.Warning,
+            Title: "Thread contention",
+            Evidence: "Blocked threads observed",
+            Recommendation: "Inspect lock owners",
+            Tags: ["threads"],
+            Fingerprint: "thr-1");
+
+        AnalyzerRunResult memoryRun = CreateRun("MemoryAnalyzer", memoryFinding);
+        AnalyzerRunResult threadRun = CreateRun("ThreadAnalyzer", threadFinding);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/domain-map.dmp",
+            runs: [memoryRun, threadRun],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders:
+            [
+                new StubAnalyzerSectionBuilder("MemoryAnalyzer", "Memory"),
+                new StubAnalyzerSectionBuilder("ThreadAnalyzer", "Threads")
+            ],
+            reportBuilders: []);
+
+        doc.Domains.Should().NotBeNull();
+        doc.Domains!.Should().ContainSingle(d => d.Domain == "Memory");
+        doc.Domains.Should().ContainSingle(d => d.Domain == "Threads");
+
+        ReportDomainSection memoryDomain = doc.Domains.Single(d => d.Domain == "Memory");
+        ReportDomainSection threadsDomain = doc.Domains.Single(d => d.Domain == "Threads");
+
+        memoryDomain.DomainInsights.Should().ContainSingle(f => f.Analyzer == "Memory Analysis");
+        threadsDomain.DomainInsights.Should().ContainSingle(f => f.Analyzer == "Thread Analysis");
+    }
+
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
     {
         GenericAnalyzerDomainResult result = new()
@@ -396,5 +445,21 @@ public sealed class ReportingCompositionTests
             ErrorMessage: null,
             ErrorType: null,
             Findings: [finding]);
+    }
+
+    private sealed class StubAnalyzerSectionBuilder(string analyzerName, string displayTitle) : IAnalyzerSectionBuilder
+    {
+        public string AnalyzerName { get; } = analyzerName;
+        public string DisplayTitle { get; } = displayTitle;
+        public int SortOrder => 0;
+
+        public bool CanHandle(AnalyzerDomainResult result) => true;
+
+        public AnalyzerDetailSection Build(AnalyzerDomainResult result) =>
+            new(
+                AnalyzerName: AnalyzerName,
+                DisplayTitle: DisplayTitle,
+                SortOrder: SortOrder,
+                Blocks: [new TextBlock("stub")]);
     }
 }

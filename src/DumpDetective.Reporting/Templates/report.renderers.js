@@ -1103,9 +1103,33 @@ export function buildDomains(doc) {
     sec.appendChild(hdr);
 
 
+    const insights = sortFindingsBySeverity(Array.isArray(domain.domainInsights) ? domain.domainInsights : []);
+    if (insights.length) {
+      const insightsSec = el('section', 'report-domain__insights');
+      insightsSec.id = domainId + '-insights';
+      const insightsHdr = el('div', 'domain-insights__header');
+      const h3 = el('h3', 'domain-insights__title');
+      h3.textContent = 'Domain Insights';
+      const stats = buildInsightStats(insights, 'domain-insights__stats');
+      insightsHdr.appendChild(h3);
+      insightsHdr.appendChild(stats);
+      insightsSec.appendChild(insightsHdr);
+
+      const insightsList = el('div', 'domain-insights__list');
+      for (let k = 0; k < insights.length; k++) {
+        insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`));
+      }
+      insightsSec.appendChild(insightsList);
+      sec.appendChild(insightsSec);
+    }
+
     const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
     if (sections.length) {
       const body = el('div', 'domain-body');
+      const heading = el('div', 'domain-body__heading');
+      heading.textContent = 'Analyzer Details';
+      body.appendChild(heading);
+
       const batchSize = 8;
       let rendered = 0;
 
@@ -1136,19 +1160,6 @@ export function buildDomains(doc) {
       sec.appendChild(body);
     }
 
-    const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
-    if (insights.length) {
-      const insightsSec = el('section', 'section-card report-domain__insights');
-      insightsSec.id = domainId + '-insights';
-      const h3 = document.createElement('h3');
-      h3.textContent = 'Domain Insights';
-      insightsSec.appendChild(h3);
-      for (let k = 0; k < insights.length; k++) {
-        insightsSec.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`));
-      }
-      sec.appendChild(insightsSec);
-    }
-
     wrap.appendChild(sec);
   }
 
@@ -1156,15 +1167,19 @@ export function buildDomains(doc) {
 }
 
 export function buildCrossDomainInsights(doc) {
-  const findings = Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : [];
+  const findings = sortFindingsBySeverity(Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : []);
   if (!findings.length) return null;
 
   const sec = el('section', 'section-card cross-domain-insights');
   const hdr = el('div', 'cross-domain-insights__header');
   const title = el('span', 'cross-domain-insights__title'); title.textContent = 'Cross-Domain Insights';
-  const cnt = el('span', 'cross-domain-insights__count'); cnt.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : '');
-  hdr.appendChild(title); hdr.appendChild(cnt);
+  const stats = buildInsightStats(findings, 'cross-domain-insights__stats');
+  hdr.appendChild(title); hdr.appendChild(stats);
   sec.appendChild(hdr);
+
+  const cnt = el('span', 'cross-domain-insights__count');
+  cnt.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : '');
+  sec.appendChild(cnt);
 
   const list = el('div', 'cross-domain-insights__list');
   for (let i = 0; i < findings.length; i++) {
@@ -1173,6 +1188,52 @@ export function buildCrossDomainInsights(doc) {
   sec.appendChild(list);
 
   return sec;
+}
+
+function findingSeverityRank(severity) {
+  const s = String(severity || 'info').toLowerCase();
+  if (s === 'critical') return 3;
+  if (s === 'warning') return 2;
+  return 1;
+}
+
+function sortFindingsBySeverity(findings) {
+  return findings.slice().sort(function (a, b) {
+    const sev = findingSeverityRank(b && b.severity) - findingSeverityRank(a && a.severity);
+    if (sev !== 0) return sev;
+
+    const analyzer = String((a && a.analyzer) || '').localeCompare(String((b && b.analyzer) || ''));
+    if (analyzer !== 0) return analyzer;
+
+    return String((a && a.title) || '').localeCompare(String((b && b.title) || ''));
+  });
+}
+
+function buildInsightStats(findings, className) {
+  const wrap = el('div', className + ' insight-stats');
+  const counts = { critical: 0, warning: 0, info: 0 };
+  for (let i = 0; i < findings.length; i++) {
+    const sev = String((findings[i] && findings[i].severity) || 'info').toLowerCase();
+    if (sev === 'critical' || sev === 'warning' || sev === 'info') counts[sev]++;
+  }
+
+  function addChip(kind, label) {
+    if (!counts[kind]) return;
+    const chip = el('span', 'insight-stats__chip insight-stats__chip--' + kind);
+    chip.textContent = counts[kind] + ' ' + label;
+    wrap.appendChild(chip);
+  }
+
+  addChip('critical', 'critical');
+  addChip('warning', 'warning');
+  addChip('info', 'info');
+
+  if (!wrap.childNodes.length) {
+    const chip = el('span', 'insight-stats__chip insight-stats__chip--info');
+    chip.textContent = '0 insights';
+    wrap.appendChild(chip);
+  }
+  return wrap;
 }
 
 export function buildAppendix(doc) {
@@ -1808,90 +1869,97 @@ function renderTocNodes(nodes) {
 }
 
 export function buildFindingCard(f, i) {
+  const severity = String((f && f.severity) || 'Info').toLowerCase();
+
   const evidenceItems = Array.isArray(f.evidenceItems) ? f.evidenceItems.filter(function (x) { return !!x; }) : [];
   const recommendationItems = Array.isArray(f.recommendationItems) ? f.recommendationItems.filter(function (x) { return !!x; }) : [];
   const evidenceSummary = evidenceItems.length > 0 ? evidenceItems[0] : (f.evidence || '');
+  const recommendationLine = recommendationItems.length > 0 ? recommendationItems[0] : (f.recommendation || f.fix || '');
+
+  const normalize = function (text) {
+    return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  };
+  const toOneLine = function (text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  };
+  const sameText = function (a, b) {
+    return normalize(a) && normalize(a) === normalize(b);
+  };
 
   const findingId = findingAnchorId(f, i);
-  const sec = el('section', 'section-card finding-card'); sec.id = findingId; sec.dataset.severity = (f.severity || 'info').toLowerCase(); sec.dataset.title = f.title || ''; sec.dataset.summary = evidenceSummary.substring(0, 200);
+  const sec = el('section', 'finding-card finding-card--' + severity);
+  sec.id = findingId;
+  sec.dataset.severity = severity;
+  sec.dataset.title = f.title || '';
+  sec.dataset.summary = evidenceSummary.substring(0, 200);
   const header = el('div', 'finding-card__header');
   const eyebrow = el('div', 'finding-card__eyebrow');
   const badge = el('span', 'severity-badge ' + sevCss(f.severity)); badge.textContent = f.severity || 'Info'; eyebrow.appendChild(badge);
   const cat = el('span', 'category'); cat.textContent = f.category || 'Finding'; eyebrow.appendChild(cat);
   header.appendChild(eyebrow);
-  const actions = el('div', 'finding-card__actions');
-  const pa = document.createElement('a'); pa.className = 'permalink'; pa.href = '#' + findingId; pa.setAttribute('aria-label', 'Permalink'); pa.textContent = 'Link';
-  const copyBtn = el('button', 'copy-btn'); copyBtn.type = 'button'; copyBtn.setAttribute('aria-label', 'Copy permalink'); copyBtn.title = 'Copy permalink'; copyBtn.dataset.copy = (location.href || '').split('#')[0] + '#' + findingId; copyBtn.textContent = 'Copy';
-  actions.appendChild(pa); actions.appendChild(copyBtn); header.appendChild(actions); sec.appendChild(header);
+  const headerMeta = el('div', 'finding-card__header-meta');
+  if (f.confidenceScore != null) {
+    const conf = Number(f.confidenceScore);
+    const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
+    const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
+    confChip.textContent = (conf >= 0.85 ? '●●●●' : conf >= 0.65 ? '●●●○' : conf >= 0.45 ? '●●○○' : '●○○○') + ' ' + conf.toFixed(2);
+    headerMeta.appendChild(confChip);
+  }
+  if (headerMeta.childNodes.length) header.appendChild(headerMeta);
+  sec.appendChild(header);
 
   const h2 = document.createElement('h2'); h2.className = 'finding-card__title'; h2.textContent = f.title || '';
   sec.appendChild(h2);
 
-  const summary = document.createElement('p'); summary.className = 'finding-card__summary'; summary.textContent = evidenceSummary; sec.appendChild(summary); linkifyAnchors(summary);
+  const issueLine = toOneLine(evidenceSummary);
+  const brief = el('div', 'finding-card__brief');
+  if (issueLine) {
+    const issueRow = el('div', 'finding-card__brief-row finding-card__brief-row--issue');
+    const issueLabel = el('span', 'finding-card__brief-label finding-card__brief-label--issue');
+    issueLabel.textContent = '!';
+    issueLabel.setAttribute('aria-label', 'Issue');
+    issueLabel.title = 'Issue';
+    const issueValue = el('span', 'finding-card__brief-value'); issueValue.textContent = issueLine;
+    issueRow.appendChild(issueLabel);
+    issueRow.appendChild(issueValue);
+    brief.appendChild(issueRow);
+    linkifyAnchors(issueValue);
+  }
 
-  if (f.confidenceScore != null) {
-    const conf = Number(f.confidenceScore);
-    const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
-    const label = conf >= 0.85 ? 'High confidence' : conf >= 0.65 ? 'Med-High confidence' : conf >= 0.45 ? 'Medium confidence' : 'Low confidence';
+  const meta = el('div', 'finding-card__meta');
+  if (f.analyzer) {
+    const chip = el('span', 'finding-chip');
+    chip.textContent = 'Analyzer: ' + f.analyzer;
+    meta.appendChild(chip);
+  }
+  if (meta.childNodes.length) sec.appendChild(meta);
 
-    const confBand = el('div', 'finding-card__confidence finding-card__confidence--' + band);
-    const confSymbol = el('span', 'finding-card__confidence-symbol'); confSymbol.textContent = conf >= 0.85 ? '●●●●' : conf >= 0.65 ? '●●●○' : conf >= 0.45 ? '●●○○' : '●○○○';
-    const confText = el('span', 'finding-card__confidence-text'); confText.textContent = label + ' (' + conf.toFixed(2) + ')';
-    confBand.appendChild(confSymbol);
-    confBand.appendChild(confText);
-    sec.appendChild(confBand);
+  if (recommendationLine && !sameText(recommendationLine, issueLine)) {
+    const recRow = el('div', 'finding-card__brief-row finding-card__brief-row--recommendation');
+    const recLabel = el('span', 'finding-card__brief-label finding-card__brief-label--recommendation');
+    recLabel.textContent = '→';
+    recLabel.setAttribute('aria-label', 'Recommendation');
+    recLabel.title = 'Recommendation';
+    const recValue = el('span', 'finding-card__brief-value'); recValue.textContent = toOneLine(recommendationLine);
+    recRow.appendChild(recLabel);
+    recRow.appendChild(recValue);
+    brief.appendChild(recRow);
+    linkifyAnchors(recValue);
+  }
 
-    const caveats = Array.isArray(f.caveatItems) ? f.caveatItems.filter(function (x) { return !!x; }) : [];
-    if (caveats.length > 0) {
-      const caveatWrap = el('div', 'finding-card__caveats');
-      for (let ci = 0; ci < caveats.length; ci++) {
-        const caveat = el('div', 'finding-card__caveat');
-        caveat.textContent = '⚠ ' + caveats[ci];
-        caveatWrap.appendChild(caveat);
-      }
-      sec.appendChild(caveatWrap);
+  if (brief.childNodes.length) sec.appendChild(brief);
+
+  const caveats = Array.isArray(f.caveatItems) ? f.caveatItems.filter(function (x) { return !!x; }) : [];
+  if (caveats.length > 0) {
+    const caveatWrap = el('div', 'finding-card__caveats');
+    for (let ci = 0; ci < caveats.length; ci++) {
+      const caveat = el('div', 'finding-card__caveat');
+      caveat.textContent = '⚠ ' + caveats[ci];
+      caveatWrap.appendChild(caveat);
     }
+    sec.appendChild(caveatWrap);
   }
 
-  const details = el('div', 'finding-card__details');
-  function detailField(label, value) {
-    const field = el('div', 'finding-card__field');
-    const fieldLabel = el('div', 'finding-card__field-label'); fieldLabel.textContent = label;
-    const fieldValue = el('div', 'finding-card__field-value'); fieldValue.textContent = value || 'â€”'; wrapAddresses(fieldValue); linkifyAnchors(fieldValue);
-    field.appendChild(fieldLabel); field.appendChild(fieldValue); details.appendChild(field);
-  }
-
-  function detailListField(label, values) {
-    const field = el('div', 'finding-card__field');
-    const fieldLabel = el('div', 'finding-card__field-label'); fieldLabel.textContent = label;
-    const fieldValue = el('div', 'finding-card__field-value');
-    const ul = document.createElement('ul');
-    ul.className = 'finding-card__list';
-    for (let idx = 0; idx < values.length; idx++) {
-      const li = document.createElement('li');
-      li.textContent = values[idx];
-      wrapAddresses(li);
-      linkifyAnchors(li);
-      ul.appendChild(li);
-    }
-    fieldValue.appendChild(ul);
-    field.appendChild(fieldLabel);
-    field.appendChild(fieldValue);
-    details.appendChild(field);
-  }
-  if (f.cause) detailField('Cause', f.cause);
-  if (f.effect) detailField('Effect', f.effect);
-  if (f.confidenceScore != null) detailField('Confidence', Number(f.confidenceScore).toFixed(2));
-  if (f.suggestedOwner) detailField('Owner', f.suggestedOwner);
-  if (f.effort) detailField('Effort', f.effort);
-  if (f.validationStep) detailField('Validation', f.validationStep);
-  if (f.trackingStatus) detailField('Status', f.trackingStatus);
-  if (evidenceItems.length > 0) detailListField('Evidence', evidenceItems);
-  else detailField('Evidence', f.evidence || '');
-  if (f.fix) detailField('Fix', f.fix);
-  if (recommendationItems.length > 0) detailListField('Recommendation', recommendationItems);
-  else if (f.recommendation) detailField('Recommendation', f.recommendation);
-  sec.appendChild(details);
   return sec;
 }
 

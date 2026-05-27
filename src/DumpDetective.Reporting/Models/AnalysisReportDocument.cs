@@ -67,6 +67,13 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     /// so they are available in the embedded JSON that the JS reads.
     /// </summary>
     public IReadOnlyList<AnalyzerDetailSection> TrendAnalyzerSections { get; init; } = [];
+
+    /// <summary>
+    /// Full per-dump documents — [JsonIgnore] because they are serialized separately
+    /// in the HTML renderer using the proven AnalysisReportDocument serializer path.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<AnalysisReportDocument> PerDumpDocuments { get; init; } = [];
 }
 
 internal sealed record AnalyzerRunStatusRecord(

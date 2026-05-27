@@ -66,11 +66,19 @@ internal sealed class TrendReportComposer(
         // T5 — Snapshot Strip
         analyzerSections.Add(TrendSnapshotStripBuilder.Build(trendData.Snapshots));
 
-        // T6 — Per-dump details (with SectionId and key metrics)
-        analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, audience));
+        // T6 — Per-dump sections (for text/markdown/JSON canonical output)
+        analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, reportBuilders, audience));
+
+        // T6 — Per-dump full documents (serialized separately by HtmlReportRenderer; JS renders them via perDumpDocs)
+        List<AnalysisReportDocument> perDumpDocuments = BuildPerDumpDocuments(trendData.Snapshots, builders, reportBuilders, audience);
 
         // T7 — Trend Appendix
         analyzerSections.Add(TrendAppendixBuilder.Build(trendData, currentRuns));
+
+        // TrendAnalyzerSections: T2–T7 without per-dump entries — the JS renderer uses perDumpDocs directly
+        var trendHtmlSections = analyzerSections
+            .Where(static s => !s.SectionId.StartsWith("detail-", StringComparison.Ordinal))
+            .ToList();
 
         // T9: Map regression findings with MetricBaseline/MetricCurrent populated
         var regressionDeltaLookup = BuildRegressionDeltaLookup(trendData.Overall);
@@ -107,7 +115,8 @@ internal sealed class TrendReportComposer(
             ExecutiveSummary = trendSummary,
             Findings = mappedFindings,
             AnalyzerSections = analyzerSections,
-            TrendAnalyzerSections = analyzerSections,
+            TrendAnalyzerSections = trendHtmlSections,
+            PerDumpDocuments = perDumpDocuments,
         };
     }
 
@@ -287,34 +296,71 @@ internal sealed class TrendReportComposer(
             Domain:        "Trend");
     }
 
-    // ── Per-dump sections ─────────────────────────────────────────────────────
+    // ── Per-dump sections (canonical text/markdown/JSON output) ──────────────
 
     private IReadOnlyList<AnalyzerDetailSection> BuildPerDumpSections(
         IReadOnlyList<AnalysisSnapshot> snapshots,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
+        IReadOnlyList<IReportSectionBuilder> reportBuilders,
         ReportAudience audience)
     {
-        var sections = new List<AnalyzerDetailSection>(snapshots.Count);
+        var sections = new List<AnalyzerDetailSection>();
 
         for (int i = 0; i < snapshots.Count; i++)
         {
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
-                .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, audience, snapshot.IncidentContext);
+                .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, reportBuilders, audience, snapshot.IncidentContext);
             IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(f => MapFinding(f, snapshot.Index)).ToList();
+
             sections.Add(TrendSnapshotSectionComposer.Build(
                 snapshot.DumpPath,
                 snapshot.GeneratedAtUtc,
                 findings,
                 snapshot.IncidentContext,
-                snapshotSections,
+                [],
                 i,
                 snapshots.Count,
                 snapshot: snapshot,
                 baseline: i == 0 ? null : snapshots[0]));
+
+            for (int sectionIndex = 0; sectionIndex < snapshotSections.Count; sectionIndex++)
+            {
+                AnalyzerDetailSection section = snapshotSections[sectionIndex];
+                string sectionId = string.IsNullOrWhiteSpace(section.SectionId)
+                    ? $"detail-{i}-analyzer-{sectionIndex}"
+                    : $"detail-{i}-{section.SectionId}";
+
+                sections.Add(section with
+                {
+                    SortOrder = (i * 1000) + 300 + section.SortOrder,
+                    SectionId = sectionId,
+                    Domain = "SnapshotDetail"
+                });
+            }
         }
 
         return sections;
+    }
+
+    private List<AnalysisReportDocument> BuildPerDumpDocuments(
+        IReadOnlyList<AnalysisSnapshot> snapshots,
+        IReadOnlyList<IAnalyzerSectionBuilder> builders,
+        IReadOnlyList<IReportSectionBuilder> reportBuilders,
+        ReportAudience audience)
+    {
+        var docs = new List<AnalysisReportDocument>(snapshots.Count);
+
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            AnalysisSnapshot snapshot = snapshots[i];
+            // Build a full single-dump document — same path that produces standalone single-dump reports.
+            AnalysisReportDocument fullDoc = _documentFactory.BuildDocument(
+                snapshot.DumpPath, snapshot.Runs, TimeSpan.Zero, builders, reportBuilders, audience, snapshot.IncidentContext);
+            docs.Add(fullDoc);
+        }
+
+        return docs;
     }
 
     // ── Trend comparison section ──────────────────────────────────────────────

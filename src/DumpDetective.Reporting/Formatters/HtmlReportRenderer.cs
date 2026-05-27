@@ -35,9 +35,25 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_ANALYZER_SECTIONS}}"))
             preAnalyzers = ReportHtmlShared.RenderAnalyzerSections(doc.AnalyzerSections);
 
+        // For trend reports: serialize each per-dump document independently using the proven
+        // AnalysisReportDocument serializer (same path that produces working single-dump JSON).
+        string perDumpJson = "[]";
+        if (doc is TrendReportDocument trend && trend.PerDumpDocuments.Count > 0)
+        {
+            var sb = new StringBuilder("[");
+            for (int i = 0; i < trend.PerDumpDocuments.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(JsonSerializer.Serialize(trend.PerDumpDocuments[i], ReportJsonContext.Default.AnalysisReportDocument));
+            }
+            sb.Append(']');
+            perDumpJson = sb.ToString();
+        }
+
         return _template
             .Replace("{{CSS}}", _css)
             .Replace("{{REPORT_JSON}}", json)
+            .Replace("{{PER_DUMP_JSON}}", perDumpJson)
             .Replace("{{JS}}", _js)
             .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
             .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)

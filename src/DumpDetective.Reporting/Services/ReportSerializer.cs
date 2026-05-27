@@ -175,7 +175,14 @@ internal sealed class ReportSerializer
         List<AnalyzerDetailSection> specSections = BuildSpecSections(resultSet, reportBuilders);
         analyzerSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
         specSections.Sort(static (a, b) => a.SortOrder.CompareTo(b.SortOrder));
-        return MergeSections(analyzerSections, specSections);
+        List<AnalyzerDetailSection> mergedSections = MergeSections(analyzerSections, specSections);
+
+        // Keep section shape parity with full report serialization.
+        ApplySectionMetadata(mergedSections, runs);
+        NormalizeSectionContractSlots(mergedSections, runs, reportBuilders);
+        ApplyDomainOrdering(mergedSections);
+
+        return mergedSections;
     }
 
     // ── Section routing ───────────────────────────────────────────────────────

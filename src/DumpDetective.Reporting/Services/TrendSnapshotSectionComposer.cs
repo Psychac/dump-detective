@@ -68,8 +68,7 @@ internal static class TrendSnapshotSectionComposer
         {
             blocks.Add(new BlankBlock());
             blocks.Add(new CollapsibleSectionBeginBlock(section.DisplayTitle));
-            foreach (SectionBlock block in section.Blocks)
-                blocks.Add(block);
+            AddEmbeddedAnalyzerSectionBlocks(blocks, section);
             blocks.Add(new CollapsibleSectionEndBlock());
         }
 
@@ -80,6 +79,54 @@ internal static class TrendSnapshotSectionComposer
             Blocks:        blocks,
             SectionId:     $"detail-{dumpIndex}",
             Domain:        "SnapshotDetail");
+    }
+
+    private static void AddEmbeddedAnalyzerSectionBlocks(List<SectionBlock> blocks, AnalyzerDetailSection section)
+    {
+        if (section.LeadFinding is { } lead)
+        {
+            blocks.Add(new HeadingBlock($"Lead Finding [{lead.Severity}]", 1));
+            if (!string.IsNullOrWhiteSpace(lead.Title))
+                blocks.Add(new TextBlock(lead.Title, 2));
+            if (!string.IsNullOrWhiteSpace(lead.Evidence))
+                blocks.Add(new TextBlock(lead.Evidence, 2));
+            if (!string.IsNullOrWhiteSpace(lead.Recommendation))
+                blocks.Add(new TextBlock($"Recommendation: {lead.Recommendation}", 2));
+        }
+
+        if (section.KeyMetrics is { Count: > 0 })
+        {
+            blocks.Add(new HeadingBlock("Analyzer Key Metrics", 1));
+            foreach (SectionKeyMetric metric in section.KeyMetrics)
+            {
+                blocks.Add(new MetricBlock(metric.Label, metric.Value, metric.RawValue, 2));
+            }
+        }
+
+        if (section.Tables is { Count: > 0 })
+        {
+            foreach (SectionTable table in section.Tables)
+            {
+                blocks.Add(new TableBlock(
+                    Caption: table.Title,
+                    Headers: table.Headers,
+                    Rows: table.Rows));
+            }
+        }
+
+        foreach (SectionBlock block in section.Blocks)
+            blocks.Add(block);
+
+        if (section.Provenance is { } provenance)
+        {
+            blocks.Add(new HeadingBlock("Provenance", 1));
+            blocks.Add(new MetricBlock("Analyzer", provenance.Analyzer, null, 2));
+            blocks.Add(new MetricBlock("Status", provenance.Status, null, 2));
+            blocks.Add(new MetricBlock("Duration", $"{provenance.DurationMs:F0} ms", provenance.DurationMs, 2));
+            blocks.Add(new MetricBlock("Objects Scanned", provenance.ObjectScanCount.ToString("N0"), provenance.ObjectScanCount, 2));
+            blocks.Add(new MetricBlock("Cache Hits", provenance.CacheHits.ToString("N0"), provenance.CacheHits, 2));
+            blocks.Add(new MetricBlock("Cache Misses", provenance.CacheMisses.ToString("N0"), provenance.CacheMisses, 2));
+        }
     }
 
     // ── Key Metrics Helpers ───────────────────────────────────────────────────

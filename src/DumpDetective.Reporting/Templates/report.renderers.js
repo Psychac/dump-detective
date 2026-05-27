@@ -181,7 +181,14 @@ export function buildDetailTable(block, announce, sparkRegistry) {
   const rowElements = [];
   for (const row of (block.rows || [])) {
     const tr = el('tr');
-    for (const cell of (row.cells || [])) {
+    const cells = Array.isArray(row)
+      ? row
+      : (row && Array.isArray(row.cells) ? row.cells : []);
+    for (const cell of cells) {
+      if (!cell) {
+        tr.appendChild(document.createElement('td'));
+        continue;
+      }
       const td = document.createElement('td');
       const disp = cell.display || '';
       if (disp.startsWith('__SPARK__')) {
@@ -225,8 +232,8 @@ export function buildDetailTable(block, announce, sparkRegistry) {
   tbl.appendChild(tbody);
 
   const controls = el('div', 'table-pagination-controls'); controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Table pagination');
-  const prev = el('button', 'action-btn table-prev'); prev.type = 'button'; prev.textContent = 'â† Prev'; prev.setAttribute('aria-label', 'Previous rows');
-  const next = el('button', 'action-btn table-next'); next.type = 'button'; next.textContent = 'Next â†’'; next.setAttribute('aria-label', 'Next rows');
+  const prev = el('button', 'action-btn table-prev'); prev.type = 'button'; prev.textContent = '\u2190 Prev'; prev.setAttribute('aria-label', 'Previous rows');
+  const next = el('button', 'action-btn table-next'); next.type = 'button'; next.textContent = 'Next \u2192'; next.setAttribute('aria-label', 'Next rows');
   const info = el('span', 'page-info');
   const sizeSel = document.createElement('select'); sizeSel.setAttribute('aria-label', 'Rows per page');
   [[10,'10'],[20,'20'],[50,'50'],[0,'All']].forEach(function (opt) { const o = document.createElement('option'); o.value = String(opt[0]); o.text = String(opt[1]); sizeSel.appendChild(o); });
@@ -1654,8 +1661,9 @@ export function buildFilterBar(doc) {
   return bar;
 }
 
-export function buildTOC(doc) {
+export function buildTOC(doc, perDumpDocs) {
   const isTrendToc = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
+  if (!Array.isArray(perDumpDocs)) perDumpDocs = [];
   const rawDomains = Array.isArray(doc.domains) ? doc.domains : [];
   const domains = sortDomainsForRender(doc, rawDomains);
   // For trend reports use trendAnalyzerSections (serialized); for single-dump use analyzerSections
@@ -1778,20 +1786,72 @@ export function buildTOC(doc) {
       container.appendChild(det);
     }
   } else {
-    for (let i = 0; i < sections.length; i++) {
-      const sec = sections[i];
-      // Use stable sectionId (e.g. "T3", "detail-0") when available; fall back to positional
-      const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + i);
-      const det = document.createElement('details');
-      det.open = false;
-      det.dataset.target = secHref;
-      const summ = document.createElement('summary');
-      summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
-      det.appendChild(summ);
-      attachScrollToggle(det);
-      const tocNodes = buildTocNodes(sec.blocks || [], i);
-      if (tocNodes.length) det.appendChild(renderTocNodes(tocNodes));
-      container.appendChild(det);
+    if (isTrendToc) {
+      // Standalone trend sections (T2, T3, T4, T5, T7, etc.)
+      for (let i = 0; i < sections.length; i++) {
+        const sec = sections[i];
+        const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + i);
+        const det = document.createElement('details');
+        det.open = false;
+        det.dataset.target = secHref;
+        const summ = document.createElement('summary');
+        summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
+        det.appendChild(summ);
+        attachScrollToggle(det);
+        const tocNodes = buildTocNodes(sec.blocks || [], i);
+        if (tocNodes.length) det.appendChild(renderTocNodes(tocNodes));
+        container.appendChild(det);
+      }
+
+      // Per-dump groups driven directly from perDumpDocs
+      for (let dumpIndex = 0; dumpIndex < perDumpDocs.length; dumpIndex++) {
+        const subDoc = perDumpDocs[dumpIndex];
+        if (!subDoc) continue;
+
+        const rawPath = subDoc.dumpPath || '';
+        const dumpName = rawPath ? rawPath.replace(/^.*[\\/]/, '') : ('Dump ' + (dumpIndex + 1));
+        const targetHref = '#dump-detail-' + dumpIndex;
+        const det = document.createElement('details');
+        det.open = false;
+        det.dataset.target = targetHref;
+        const summ = document.createElement('summary');
+        summ.textContent = dumpName;
+        det.appendChild(summ);
+        attachScrollToggle(det);
+
+        const list = document.createElement('ol');
+        if (Array.isArray(subDoc.domains) && subDoc.domains.length) {
+          const subDomains = sortDomainsForRender(subDoc, subDoc.domains);
+          for (let sdi = 0; sdi < subDomains.length; sdi++) {
+            const domain = subDomains[sdi];
+            const domainId = domainAnchorId(domain, sdi);
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#' + domainId;
+            a.textContent = domain.domain || ('Domain ' + sdi);
+            li.appendChild(a);
+            list.appendChild(li);
+          }
+        }
+        if (list.children.length) det.appendChild(list);
+        container.appendChild(det);
+      }
+    } else {
+      for (let i = 0; i < sections.length; i++) {
+        const sec = sections[i];
+        // Use stable sectionId (e.g. "T3", "detail-0") when available; fall back to positional
+        const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + i);
+        const det = document.createElement('details');
+        det.open = false;
+        det.dataset.target = secHref;
+        const summ = document.createElement('summary');
+        summ.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + i);
+        det.appendChild(summ);
+        attachScrollToggle(det);
+        const tocNodes = buildTocNodes(sec.blocks || [], i);
+        if (tocNodes.length) det.appendChild(renderTocNodes(tocNodes));
+        container.appendChild(det);
+      }
     }
   }
   fragment.appendChild(container);
@@ -2075,7 +2135,9 @@ export function buildAnalyzerSection(section, i) {
         const displayRows = limit > 0 && rowCount > limit ? tbl.rows.slice(0, limit) : (tbl.rows || []);
         for (let ri = 0; ri < displayRows.length; ri++) {
           const dataRow = displayRows[ri]; const tr = document.createElement('tr');
-          const cells = dataRow.cells || dataRow;
+          const cells = Array.isArray(dataRow)
+            ? dataRow
+            : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
           for (let ci = 0; ci < cells.length; ci++) {
             const td = document.createElement('td');
             const cellData = cells[ci];
@@ -2133,12 +2195,149 @@ export function buildAnalyzerSection(section, i) {
   return wrapper;
 }
 
+export function renderTrendDumpGroups(main, sections, perDumpDocs) {
+  if (!main) return;
+  if (!Array.isArray(perDumpDocs)) perDumpDocs = [];
+
+  // Render standalone trend sections (T2, T3, T4, T5, T7, etc.)
+  if (Array.isArray(sections)) {
+    for (let i = 0; i < sections.length; i++) {
+      main.appendChild(buildAnalyzerSection(sections[i], i));
+    }
+  }
+
+  // Render each per-dump document as a full single-dump report in a collapsible group
+  for (let dumpIndex = 0; dumpIndex < perDumpDocs.length; dumpIndex++) {
+    const subDoc = perDumpDocs[dumpIndex];
+    if (!subDoc) continue;
+
+    const groupSection = el('section', 'analyzer-section trend-dump-group detail-color-' + (dumpIndex % 6));
+    groupSection.id = 'dump-detail-' + dumpIndex;
+    groupSection.dataset.trendDumpIndex = String(dumpIndex);
+
+    const details = el('details');
+    const summaryEl = el('summary');
+    const rawPath = subDoc.dumpPath || '';
+    summaryEl.textContent = rawPath ? rawPath.replace(/^.*[\\/]/, '') : ('Dump ' + (dumpIndex + 1));
+    details.appendChild(summaryEl);
+
+    const content = el('div', 'detail-block trend-dump-group__content');
+
+    const scorecard = buildHealthScorecard(subDoc);
+    if (scorecard) content.appendChild(scorecard);
+
+    const executive = buildExecutiveSummary(subDoc);
+    if (executive) content.appendChild(executive);
+
+    const actionQueue = buildActionQueuePanel(subDoc);
+    if (actionQueue) content.appendChild(actionQueue);
+
+    const domainsEl = buildDomains(subDoc);
+    if (domainsEl) content.appendChild(domainsEl);
+
+    const crossDomain = buildCrossDomainInsights(subDoc);
+    if (crossDomain) content.appendChild(crossDomain);
+
+    const incident = buildIncidentContext(subDoc);
+    if (incident) content.appendChild(incident);
+
+    const appendix = buildAppendix(subDoc);
+    if (appendix) content.appendChild(appendix);
+
+    details.appendChild(content);
+    groupSection.appendChild(details);
+    main.appendChild(groupSection);
+  }
+}
+
 export function renderFindingsPaged(doc, announce) {
-  const findings = doc.findings || []; if (!findings.length) return null; const container = el('div', 'findings-paged');
+  const findings = doc.findings || [];
+  if (!findings.length) return null;
+
+  const container = el('div', 'findings-paged');
   const header = el('div', 'findings-paged__header');
-  const title = document.createElement('h2'); title.textContent = 'Findings';
+  const title = document.createElement('h2');
+  title.textContent = 'Findings';
   header.appendChild(title);
 
-  const controls = el('div', 'pagination-controls'); controls.setAttribute('role', 'region'); controls.setAttribute('aria-label', 'Findings pagination'); const prevBtn = el('button', 'action-btn findings-prev'); prevBtn.type = 'button'; prevBtn.setAttribute('aria-label', 'Previous page'); prevBtn.textContent = 'â† Prev'; const nextBtn = el('button', 'action-btn findings-next'); nextBtn.type = 'button'; nextBtn.setAttribute('aria-label', 'Next page'); nextBtn.textContent = 'Next â†’'; const pageInfo = el('span', 'page-info'); const sizeSel = document.createElement('select'); sizeSel.setAttribute('aria-label', 'Findings per page'); [[10,'10'],[20,'20'],[50,'50'],[100,'100'],[0,'All']].forEach(function (opt) { const o = document.createElement('option'); o.value = String(opt[0]); o.text = String(opt[1]); sizeSel.appendChild(o); }); controls.appendChild(prevBtn); controls.appendChild(pageInfo); controls.appendChild(nextBtn); controls.appendChild(t(' ')); controls.appendChild(sizeSel);
-  const list = el('div', 'findings-list'); list.setAttribute('role', 'list'); let pageSize = 10; let pageIndex = 0; function renderPage() { list.innerHTML = ''; const total = findings.length; const start = pageSize === 0 ? 0 : pageIndex * pageSize; const end = pageSize === 0 ? total : Math.min(total, start + pageSize); for (let i = start; i < end; i++) list.appendChild(buildFindingCard(findings[i], i)); pageInfo.textContent = pageSize === 0 ? `${total} findings` : `${start + 1}-${end} of ${total}`; prevBtn.disabled = (pageIndex === 0) || (pageSize === 0); nextBtn.disabled = (end >= total) || (pageSize === 0); controls.style.display = (total <= pageSize || pageSize === 0) ? 'none' : ''; if (pageSize !== 0 && announce) announce(`Showing ${start + 1} to ${end} of ${total} findings`); }
-  prevBtn.addEventListener('click', function () { if (pageSize === 0) return; if (pageIndex > 0) { pageIndex--; renderPage(); } }); nextBtn.addEventListener('click', function () { if (pageSize === 0) return; pageIndex++; renderPage(); }); sizeSel.addEventListener('change', function () { pageSize = parseInt(sizeSel.value, 10) || 0; pageIndex = 0; renderPage(); }); sizeSel.value = String(pageSize); container.appendChild(header); container.appendChild(controls); container.appendChild(list); renderPage(); return container; }
+  const controls = el('div', 'pagination-controls');
+  controls.setAttribute('role', 'region');
+  controls.setAttribute('aria-label', 'Findings pagination');
+
+  const prevBtn = el('button', 'action-btn findings-prev');
+  prevBtn.type = 'button';
+  prevBtn.setAttribute('aria-label', 'Previous page');
+  prevBtn.textContent = '\u2190 Prev';
+
+  const nextBtn = el('button', 'action-btn findings-next');
+  nextBtn.type = 'button';
+  nextBtn.setAttribute('aria-label', 'Next page');
+  nextBtn.textContent = 'Next \u2192';
+
+  const pageInfo = el('span', 'page-info');
+  const sizeSel = document.createElement('select');
+  sizeSel.setAttribute('aria-label', 'Findings per page');
+  [[10, '10'], [20, '20'], [50, '50'], [100, '100'], [0, 'All']].forEach(function (opt) {
+    const o = document.createElement('option');
+    o.value = String(opt[0]);
+    o.text = String(opt[1]);
+    sizeSel.appendChild(o);
+  });
+
+  controls.appendChild(prevBtn);
+  controls.appendChild(pageInfo);
+  controls.appendChild(nextBtn);
+  controls.appendChild(t(' '));
+  controls.appendChild(sizeSel);
+
+  const list = el('div', 'findings-list');
+  list.setAttribute('role', 'list');
+
+  let pageSize = 10;
+  let pageIndex = 0;
+
+  function renderPage() {
+    list.innerHTML = '';
+    const total = findings.length;
+    const start = pageSize === 0 ? 0 : pageIndex * pageSize;
+    const end = pageSize === 0 ? total : Math.min(total, start + pageSize);
+
+    for (let i = start; i < end; i++) list.appendChild(buildFindingCard(findings[i], i));
+
+    pageInfo.textContent = pageSize === 0 ? `${total} findings` : `${start + 1}-${end} of ${total}`;
+    prevBtn.disabled = (pageIndex === 0) || (pageSize === 0);
+    nextBtn.disabled = (end >= total) || (pageSize === 0);
+    controls.style.display = (total <= pageSize || pageSize === 0) ? 'none' : '';
+
+    if (pageSize !== 0 && announce) {
+      announce(`Showing ${start + 1} to ${end} of ${total} findings`);
+    }
+  }
+
+  prevBtn.addEventListener('click', function () {
+    if (pageSize === 0) return;
+    if (pageIndex > 0) {
+      pageIndex--;
+      renderPage();
+    }
+  });
+
+  nextBtn.addEventListener('click', function () {
+    if (pageSize === 0) return;
+    pageIndex++;
+    renderPage();
+  });
+
+  sizeSel.addEventListener('change', function () {
+    pageSize = parseInt(sizeSel.value, 10) || 0;
+    pageIndex = 0;
+    renderPage();
+  });
+
+  sizeSel.value = String(pageSize);
+  container.appendChild(header);
+  container.appendChild(controls);
+  container.appendChild(list);
+  renderPage();
+  return container;
+}

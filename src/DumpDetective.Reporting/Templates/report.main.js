@@ -19,6 +19,16 @@ async function loadDoc() {
   return window.__REPORT__ || null;
 }
 
+function loadPerDumpDocs() {
+  try {
+    const el = document.getElementById('per-dump-json');
+    if (el && el.textContent && el.textContent.trim()) {
+      return JSON.parse(el.textContent);
+    }
+  } catch (e) { /* ignore */ }
+  return [];
+}
+
 async function bootstrap() {
   const doc = await loadDoc();
   if (!doc) return;
@@ -55,7 +65,9 @@ async function bootstrap() {
   if (!domains) {
     const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
   }
-  const toc = R.buildTOC(doc);
+
+  const perDumpDocs = isTrend ? loadPerDumpDocs() : [];
+  const toc = R.buildTOC(doc, perDumpDocs);
 
   UI.buildSidebar(toc, doc);
 
@@ -68,13 +80,20 @@ async function bootstrap() {
   // For trend reports use trendAnalyzerSections (serialized); for single-dump fall back to analyzerSections
   const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
   if (!domains || isTrend) {
+    if (isTrend) {
+      R.renderTrendDumpGroups(main, sections, perDumpDocs);
+    } else {
     const chunkSize = 12;
     let index = 0;
 
     const renderChunk = function () {
       const end = Math.min(sections.length, index + chunkSize);
       for (; index < end; index++) {
-        main.appendChild(R.buildAnalyzerSection(sections[index], index));
+        try {
+          main.appendChild(R.buildAnalyzerSection(sections[index], index));
+        } catch (err) {
+          console.error('Failed to render analyzer section', sections[index], err);
+        }
       }
 
       if (index < sections.length) {
@@ -87,6 +106,7 @@ async function bootstrap() {
     };
 
     renderChunk();
+    }
   }
 
   const appendix = R.buildAppendix(doc);

@@ -41,5 +41,6 @@ namespace DumpDetective.Reporting.Serialization;
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    UseStringEnumConverter = true)]
+    UseStringEnumConverter = true,
+    NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals)]
 internal sealed partial class ReportJsonContext : JsonSerializerContext { }

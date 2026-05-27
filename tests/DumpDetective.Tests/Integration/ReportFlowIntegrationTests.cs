@@ -189,6 +189,20 @@ public sealed class ReportFlowIntegrationTests
         regressionDashboardIndex.Should().BeGreaterThan(-1);
         dumpOneIndex.Should().BeGreaterThan(-1);
         regressionDashboardIndex.Should().BeLessThan(dumpOneIndex);
+
+        // Verify HTML format contains perDumpDocuments in the embedded JSON
+        string htmlOutput = facade.BuildRenderedTrendReport(
+            dumpPath: "C:/dumps/current.dmp",
+            format: ReportFormat.Html,
+            audience: ReportAudience.All,
+            currentRuns: [currentRun],
+            elapsed: TimeSpan.FromSeconds(2),
+            trendData: trendData,
+            cancellationToken: CancellationToken.None);
+
+        // HtmlCanonicalReportFormatter embeds report JSON with the document; verify it includes trend data
+        htmlOutput.Should().Contain("report-data");
+        htmlOutput.Should().Contain("trendAnalyzerSections");
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

@@ -637,11 +637,11 @@ internal sealed class TrendReportComposer(
             return [];
 
         var baselineTypes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (TypeSnapshot type in baseline.TopTypesBySize)
+        foreach (TypeSnapshot type in baseline.TopTypes)
             baselineTypes.Add(type.TypeName);
 
         var results = new List<NewTypeEntry>();
-        foreach (TypeSnapshot type in current.TopTypesBySize.OrderByDescending(t => t.TotalBytes))
+        foreach (TypeSnapshot type in current.TopTypes.OrderByDescending(t => t.TotalBytes))
         {
             if (baselineTypes.Contains(type.TypeName))
                 continue;

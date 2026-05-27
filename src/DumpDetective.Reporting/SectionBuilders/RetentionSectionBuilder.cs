@@ -56,25 +56,10 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         if (d.TopRetentionTypes is { Count: > 0 })
         {
-            var sorted = new List<RetentionTypeSnapshot>(d.TopRetentionTypes);
-            sorted.Sort((a, b) => CompareRatio(b, a));
-
             tables.Add(ST(
                 "Top retention types",
                 ["Type", "Objects", "Footprint", "Total Incoming Refs", "Max Incoming Refs", "Est. Retained", "Ratio"],
                 d.TopRetentionTypes.Take(20).Select(t => Row(
-                    Cell(t.TypeName),
-                    Cell(t.ObjectCount.ToString("N0"), t.ObjectCount),
-                    Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
-                    Cell(t.TotalIncomingReferences.ToString("N0"), t.TotalIncomingReferences),
-                    Cell(t.MaxIncomingReferences.ToString("N0"), (long)t.MaxIncomingReferences),
-                    Cell(t.EstimatedRetainedBytes > 0 ? FormatBytes(t.EstimatedRetainedBytes) : "—", (long)Math.Min(t.EstimatedRetainedBytes, long.MaxValue)),
-                    Cell(FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes), (long)Math.Round(Ratio(t.EstimatedRetainedBytes, t.TotalBytes) * 1000)))).ToList()));
-
-            tables.Add(ST(
-                "Top retention types by ratio",
-                ["Type", "Objects", "Footprint", "Total Incoming Refs", "Max Incoming Refs", "Est. Retained", "Ratio"],
-                sorted.Take(20).Select(t => Row(
                     Cell(t.TypeName),
                     Cell(t.ObjectCount.ToString("N0"), t.ObjectCount),
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
@@ -102,11 +87,4 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
     private static double Ratio(ulong retained, ulong shallow)
         => shallow == 0 ? 0.0 : (double)retained / shallow;
 
-    private static int CompareRatio(RetentionTypeSnapshot a, RetentionTypeSnapshot b)
-    {
-        double ra = Ratio(a.EstimatedRetainedBytes, a.TotalBytes);
-        double rb = Ratio(b.EstimatedRetainedBytes, b.TotalBytes);
-        int cmp = rb.CompareTo(ra);
-        return cmp != 0 ? cmp : b.TotalBytes.CompareTo(a.TotalBytes);
-    }
 }

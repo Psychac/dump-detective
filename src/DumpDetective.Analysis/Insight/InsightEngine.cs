@@ -1100,9 +1100,9 @@ internal sealed class InsightEngine
         int dataRowHeap = 0;
         if (memory is not null)
         {
-            for (int i = 0; i < memory.TopTypesByCount.Count; i++)
+            for (int i = 0; i < memory.TopTypes.Count; i++)
             {
-                TypeSnapshot t = memory.TopTypesByCount[i];
+                TypeSnapshot t = memory.TopTypes[i];
                 if (t.TypeName.Contains("DataRow", StringComparison.OrdinalIgnoreCase))
                     dataRowHeap += t.Count;
             }
@@ -1147,9 +1147,9 @@ internal sealed class InsightEngine
         // TdsParser closure accumulation — known .NET Framework 4.x System.Data.SqlClient issue.
         // Async SqlCommand continuations capture closures that linger when connections are not disposed promptly.
         int tdsClosureCount = 0;
-        for (int i = 0; i < memory.TopTypesByCount.Count; i++)
+        for (int i = 0; i < memory.TopTypes.Count; i++)
         {
-            TypeSnapshot t = memory.TopTypesByCount[i];
+            TypeSnapshot t = memory.TopTypes[i];
             if (t.TypeName.Contains("TdsParser", StringComparison.OrdinalIgnoreCase) &&
                 (t.TypeName.Contains("DisplayClass", StringComparison.OrdinalIgnoreCase) ||
                  t.TypeName.Contains("c__", StringComparison.OrdinalIgnoreCase) ||
@@ -1180,9 +1180,9 @@ internal sealed class InsightEngine
         // Reflection metadata accumulation: RuntimeMethodInfo / RuntimePropertyInfo > 50 k
         // indicates hot-path reflection (Type.GetMethod / GetProperty) without result caching.
         int reflectionCount = 0;
-        for (int i = 0; i < memory.TopTypesByCount.Count; i++)
+        for (int i = 0; i < memory.TopTypes.Count; i++)
         {
-            TypeSnapshot t = memory.TopTypesByCount[i];
+            TypeSnapshot t = memory.TopTypes[i];
             if (t.TypeName is "System.Reflection.RuntimeMethodInfo" or
                 "System.Reflection.RuntimePropertyInfo" or
                 "System.Reflection.RuntimeFieldInfo" or

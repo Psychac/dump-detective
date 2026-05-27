@@ -36,18 +36,18 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             T("Types are ranked by shallow size; retained size remains approximate unless the BFS-backed analysis is present."),
         };
 
-        if (memory?.TopTypesBySize is not { Count: > 0 })
+        if (memory?.TopTypes is not { Count: > 0 })
         {
             blocks.Add(T("No memory top-type data was available."));
             return new AnalyzerDetailSection("TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem");
         }
 
-        var rows = new List<TableRow>(Math.Min(memory.TopTypesBySize.Count, TopRows));
+        var rows = new List<TableRow>(Math.Min(memory.TopTypes.Count, TopRows));
         var finalizableOverheadRows = new List<FinalizableOverheadCandidate>();
-        int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
+        int limit = Math.Min(memory.TopTypes.Count, TopRows);
         for (int i = 0; i < limit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             TypeShapeProfile? profile = FindShape(shape, type.TypeName);
             TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
             string moduleName = string.IsNullOrWhiteSpace(type.ModuleName) ? "N/A" : type.ModuleName;
@@ -123,10 +123,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         var treemapItems = new List<object>();
-        int treemapLimit = Math.Min(memory.TopTypesBySize.Count, 8);
+        int treemapLimit = Math.Min(memory.TopTypes.Count, 8);
         for (int i = 0; i < treemapLimit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             treemapItems.Add(new { label = type.TypeName, value = type.TotalBytes });
         }
 
@@ -143,8 +143,8 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 })));
         }
 
-        if (memory.TopTypesBySize.Count > TopRows)
-            blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypesBySize.Count - TopRows} additional type(s) omitted."));
+        if (memory.TopTypes.Count > TopRows)
+            blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypes.Count - TopRows} additional type(s) omitted."));
 
         var keyMetrics = new List<SectionKeyMetric>();
 
@@ -295,10 +295,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 rootedTypes.Add(roots.RootPaths[i].TargetTypeName);
         }
 
-        int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
+        int limit = Math.Min(memory.TopTypes.Count, TopRows);
         for (int i = 0; i < limit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
             TypeShapeProfile? profile = FindShape(shape, type.TypeName);
 

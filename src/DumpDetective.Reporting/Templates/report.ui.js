@@ -336,7 +336,43 @@ export function setupInteractivity(doc, announce) {
 
   // Sortable tables
   document.querySelectorAll('table').forEach(function (tbl) {
-    const ths = tbl.querySelectorAll('thead th'); ths.forEach(function (th, col) { th.classList.add('sortable'); th.setAttribute('tabindex', '0'); let dir = 1; function doSort() { const tb = tbl.querySelector('tbody'); if (!tb) return; const rows = Array.from(tb.querySelectorAll('tr')); rows.sort(function (a, b) { const ac = a.cells[col], bc = b.cells[col]; const av = ac && ac.dataset.value !== undefined && ac.dataset.value !== '' ? parseFloat(ac.dataset.value) : NaN; const bv = bc && bc.dataset.value !== undefined && bc.dataset.value !== '' ? parseFloat(bc.dataset.value) : NaN; if (!isNaN(av) && !isNaN(bv)) return dir * (av - bv); const at = (ac ? ac.textContent : '').toLowerCase(); const bt = (bc ? bc.textContent : '').toLowerCase(); return dir * (at < bt ? -1 : at > bt ? 1 : 0); }); rows.forEach(function (r) { tb.appendChild(r); }); ths.forEach(function (h) { h.removeAttribute('aria-sort'); }); th.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending'); dir = -dir; }
+    const parseSortableNumber = function (cell) {
+      if (!cell) return NaN;
+
+      const raw = cell.dataset && cell.dataset.value;
+      if (raw !== undefined && raw !== null && raw !== '') {
+        const n = Number(String(raw).replace(/,/g, '').trim());
+        if (!Number.isNaN(n)) return n;
+      }
+
+      const text = (cell.textContent || '').trim();
+
+      // Parse byte values like "1.2 GB", "850 KB", or "42 B".
+      const bytesMatch = text.match(/^([+-]?\d[\d,]*(?:\.\d+)?)\s*(B|KB|MB|GB|TB|PB|EB)$/i);
+      if (bytesMatch) {
+        const value = Number(bytesMatch[1].replace(/,/g, ''));
+        if (!Number.isNaN(value)) {
+          const unit = bytesMatch[2].toUpperCase();
+          const power = unit === 'B' ? 0 :
+            unit === 'KB' ? 1 :
+            unit === 'MB' ? 2 :
+            unit === 'GB' ? 3 :
+            unit === 'TB' ? 4 :
+            unit === 'PB' ? 5 : 6;
+          return value * Math.pow(1024, power);
+        }
+      }
+
+      // Parse plain numeric text like "12,345", "-10", "42.5", or "87%".
+      if (/^[+-]?\d[\d,]*(?:\.\d+)?%?$/.test(text)) {
+        const n = Number(text.replace(/,/g, '').replace(/%$/, ''));
+        if (!Number.isNaN(n)) return n;
+      }
+
+      return NaN;
+    };
+
+    const ths = tbl.querySelectorAll('thead th'); ths.forEach(function (th, col) { th.classList.add('sortable'); th.setAttribute('tabindex', '0'); let dir = 0; function doSort() { const tb = tbl.querySelector('tbody'); if (!tb) return; const rows = Array.from(tb.querySelectorAll('tr')); if (dir === 0) { let numericColumn = false; for (let i = 0; i < rows.length; i++) { const n = parseSortableNumber(rows[i].cells[col]); if (!isNaN(n)) { numericColumn = true; break; } } dir = numericColumn ? -1 : 1; } rows.sort(function (a, b) { const ac = a.cells[col], bc = b.cells[col]; const av = parseSortableNumber(ac); const bv = parseSortableNumber(bc); if (!isNaN(av) && !isNaN(bv)) return dir * (av - bv); const at = (ac ? ac.textContent : '').toLowerCase(); const bt = (bc ? bc.textContent : '').toLowerCase(); return dir * (at < bt ? -1 : at > bt ? 1 : 0); }); rows.forEach(function (r) { tb.appendChild(r); }); ths.forEach(function (h) { h.removeAttribute('aria-sort'); }); th.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending'); dir = -dir; }
       th.addEventListener('click', doSort); th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doSort(); } });
     });
   });

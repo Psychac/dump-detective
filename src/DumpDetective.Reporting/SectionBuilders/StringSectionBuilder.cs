@@ -25,9 +25,9 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         };
 
         ulong estimatedInterningSaving = 0;
-        int interningLimit = Math.Min(d.TopDuplicatesByWaste.Count, 20);
+        int interningLimit = Math.Min(d.TopDuplicates.Count, 20);
         for (int i = 0; i < interningLimit; i++)
-            estimatedInterningSaving += d.TopDuplicatesByWaste[i].WastedBytes;
+            estimatedInterningSaving += d.TopDuplicates[i].WastedBytes;
 
         string dedupLine = d.DeduplicationSkipped
             ? "Skipped"
@@ -102,19 +102,19 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             tables.Add(ST("Types by duplicate occurrence", ["Type", "Duplicate Count"], rows));
         }
 
-        // Duplicates by waste → typed Tables slot (renderer collapses automatically)
-        if (d.TopDuplicatesByWaste.Count > 0)
+        if (d.TopDuplicates.Count > 0)
         {
-            var rows = new List<TableRow>(d.TopDuplicatesByWaste.Count);
-            for (int i = 0; i < d.TopDuplicatesByWaste.Count; i++)
+            var rows = new List<TableRow>(d.TopDuplicates.Count);
+            for (int i = 0; i < d.TopDuplicates.Count; i++)
             {
-                var dup = d.TopDuplicatesByWaste[i];
+                var dup = d.TopDuplicates[i];
                 double pct = d.TotalStringMemoryBytes > 0 ? dup.WastedBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
                 string preview = FormatHelper.TruncateString(dup.Preview, Math.Max(32, d.PreviewMaxLength));
                 string examples = dup.SampleAddresses is not null ? string.Join(", ", dup.SampleAddresses.Select(a => $"0x{a:X}")) : string.Empty;
-                string fingerprint = dup.FingerprintHash is not null ? $"0x{dup.FingerprintHash.Value:X16}" : string.Empty;
+                string fingerprint = dup.FingerprintHash is not null ? $"0x{dup.FingerprintHash.Value:X16}" : "—";
                 string totalSize = dup.TotalSize > 0 ? FormatHelper.FormatBytes(dup.TotalSize) : "(n/a)";
                 string avgSize = dup.AvgSize > 0 ? FormatHelper.FormatBytes((ulong)dup.AvgSize) : "(n/a)";
+                string sampling = string.IsNullOrWhiteSpace(dup.SamplingSource) ? "—" : dup.SamplingSource;
                 rows.Add(Row(
                     Cell(fingerprint),
                     Cell(preview),
@@ -124,40 +124,10 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes),
                     Cell($"{pct:F1}%", null),
                     Cell(dup.DominantType ?? (dup.DominantMethodTable != 0 ? $"0x{dup.DominantMethodTable:X}" : string.Empty)),
-                    Cell(dup.SamplingSource ?? string.Empty),
+                    Cell(sampling),
                     Cell(examples)));
             }
-            tables.Add(ST("Duplicates ranked by wasted bytes",
-                ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"],
-                rows));
-        }
-
-        // Duplicates by count → typed Tables slot
-        if (d.TopDuplicatesByCount.Count > 0)
-        {
-            var rows = new List<TableRow>(d.TopDuplicatesByCount.Count);
-            for (int i = 0; i < d.TopDuplicatesByCount.Count; i++)
-            {
-                var dup = d.TopDuplicatesByCount[i];
-                double pct = d.TotalStringMemoryBytes > 0 ? dup.WastedBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
-                string preview = FormatHelper.TruncateString(dup.Preview, Math.Max(32, d.PreviewMaxLength));
-                string examples = dup.SampleAddresses is not null ? string.Join(", ", dup.SampleAddresses.Select(a => $"0x{a:X}")) : string.Empty;
-                string fingerprint = dup.FingerprintHash is not null ? $"0x{dup.FingerprintHash.Value:X16}" : string.Empty;
-                string totalSize = dup.TotalSize > 0 ? FormatHelper.FormatBytes(dup.TotalSize) : "(n/a)";
-                string avgSize = dup.AvgSize > 0 ? FormatHelper.FormatBytes((ulong)dup.AvgSize) : "(n/a)";
-                rows.Add(Row(
-                    Cell(fingerprint),
-                    Cell(preview),
-                    Cell($"{dup.Count:N0}", dup.Count),
-                    Cell(avgSize, dup.AvgSize),
-                    Cell(totalSize, (long)dup.TotalSize),
-                    Cell(FormatHelper.FormatBytes(dup.WastedBytes), (long)dup.WastedBytes),
-                    Cell($"{pct:F1}%", null),
-                    Cell(dup.DominantType ?? (dup.DominantMethodTable != 0 ? $"0x{dup.DominantMethodTable:X}" : string.Empty)),
-                    Cell(dup.SamplingSource ?? string.Empty),
-                    Cell(examples)));
-            }
-            tables.Add(ST("Duplicates ranked by count",
+            tables.Add(ST("Top duplicate strings",
                 ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"],
                 rows));
         }

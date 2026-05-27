@@ -61,7 +61,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
             ? "No memory analyzer result was available."
             : "Top memory consumers are shown by shallow size; retained size is surfaced elsewhere when available."));
 
-        if (memory?.TopTypesBySize is { Count: > 0 } topTypes)
+        if (memory?.TopTypes is { Count: > 0 } topTypes)
         {
             int limit = Math.Min(topTypes.Count, TopMemoryItems);
             var rows = new List<TableRow>(limit);

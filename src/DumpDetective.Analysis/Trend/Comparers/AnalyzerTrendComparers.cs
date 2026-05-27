@@ -32,9 +32,9 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("memory.loh.percent", null, r.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
                 new("memory.unique.types", null, r.UniqueTypes, "types", MetricTrendDirection.Neutral)
             };
-            foreach (var t in r.TopTypesBySize.Take(10))
+            foreach (var t in r.TopTypes.OrderByDescending(t => t.TotalBytes).Take(10))
                 metrics.Add(new("type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
-            foreach (var t in r.TopTypesByCount.Take(10))
+            foreach (var t in r.TopTypes.OrderByDescending(t => t.Count).Take(10))
                 metrics.Add(new("type.count", t.TypeName, t.Count, "objects", MetricTrendDirection.HigherIsWorse));
             // Histogram bucket counts — useful for spotting shifts in allocation size profile
             if (r.SizeBucketHistogram is { Count: > 0 })
@@ -58,8 +58,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("memory.loh.percent", null, b.LohPercent, c.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("memory.unique.types", null, b.UniqueTypes, c.UniqueTypes, "types", MetricTrendDirection.Neutral)
             };
-            var baseTypeMap = b.TopTypesBySize.ToDictionary(t => t.TypeName, StringComparer.Ordinal);
-            foreach (var t in c.TopTypesBySize)
+            var baseTypeMap = b.TopTypes.OrderByDescending(t => t.TotalBytes).ToDictionary(t => t.TypeName, StringComparer.Ordinal);
+            foreach (var t in c.TopTypes.OrderByDescending(t => t.TotalBytes))
             {
                 if (baseTypeMap.TryGetValue(t.TypeName, out var bt))
                     deltas.Add(MetricDeltaHelper.Compute("type.bytes", t.TypeName, bt.TotalBytes, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));

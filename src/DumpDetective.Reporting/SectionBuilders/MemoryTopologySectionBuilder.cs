@@ -9,8 +9,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 /// <summary>A2 — Memory Overview. Source: <see cref="MemoryDomainResult"/>.</summary>
 internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypesToShow = 20;
-
     public string AnalyzerName => "Memory Analysis";
     public string DisplayTitle => "Memory Overview";
     public int SortOrder => 200;
@@ -32,13 +30,13 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
             KM("LOH %",          $"{d.LohPercent:F1}%",                    d.LohPercent),
         };
 
-        if (d.TopTypesBySize.Count > 0)
+        if (d.TopTypes.Count > 0)
         {
-            int limit = Math.Min(d.TopTypesBySize.Count, TopTypesToShow);
+            int limit = d.TopTypes.Count;
             var rows = new List<TableRow>(limit);
             for (int i = 0; i < limit; i++)
             {
-                TypeSnapshot t = d.TopTypesBySize[i];
+                TypeSnapshot t = d.TopTypes[i];
                 rows.Add(Row(
                     Cell(t.TypeName),
                     Cell(t.Count.ToString("N0"), t.Count),
@@ -49,29 +47,7 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
                     Cell($"0x{t.SampleAddress:X}"),
                     Cell(t.ModuleName ?? "—")));
             }
-            tables.Add(ST("Top types by size",
-                ["Type", "Count", "Total Bytes", "LOH Bytes", "Avg Size", "Est. Retained", "Sample Addr", "Module"],
-                rows));
-        }
-
-        if (d.TopTypesByCount.Count > 0)
-        {
-            int limit = Math.Min(d.TopTypesByCount.Count, TopTypesToShow);
-            var rows = new List<TableRow>(limit);
-            for (int i = 0; i < limit; i++)
-            {
-                TypeSnapshot t = d.TopTypesByCount[i];
-                rows.Add(Row(
-                    Cell(t.TypeName),
-                    Cell(t.Count.ToString("N0"), t.Count),
-                    Cell(FormatHelper.FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
-                    Cell(t.LohBytes > 0 ? FormatHelper.FormatBytes(t.LohBytes) : "—"),
-                    Cell(t.AverageSize > 0 ? FormatHelper.FormatBytes(t.AverageSize) : "—"),
-                    Cell(t.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(t.EstimatedRetainedBytes) : "—"),
-                    Cell($"0x{t.SampleAddress:X}"),
-                    Cell(t.ModuleName ?? "—")));
-            }
-            tables.Add(ST("Top types by count",
+                    tables.Add(ST("Top types",
                 ["Type", "Count", "Total Bytes", "LOH Bytes", "Avg Size", "Est. Retained", "Sample Addr", "Module"],
                 rows));
         }

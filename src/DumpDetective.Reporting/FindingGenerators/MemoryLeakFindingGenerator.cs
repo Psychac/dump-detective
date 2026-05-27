@@ -34,7 +34,14 @@ internal sealed class RetentionFindingGenerator : IFindingGenerator
         var topTypes = r.TopRetentionTypes ?? [];
         if (topTypes.Count > 0)
         {
-            var topType = topTypes[0];
+            RetentionTypeSnapshot topType = topTypes[0];
+            for (int i = 1; i < topTypes.Count; i++)
+            {
+                RetentionTypeSnapshot candidate = topTypes[i];
+                if (candidate.TotalIncomingReferences > topType.TotalIncomingReferences)
+                    topType = candidate;
+            }
+
             if (topType.TotalIncomingReferences >= 1_000)
             {
                 findings.Add(new InsightFinding(

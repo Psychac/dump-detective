@@ -402,8 +402,9 @@ namespace DumpDetective.Analysis.Analyzers
                     TotalIncomingReferences: kvp.Value.TotalIncomingReferences,
                     MaxIncomingReferences: kvp.Value.MaxIncomingReferences,
                     EstimatedRetainedBytes: kvp.Value.EstimatedRetainedBytes))
-                .OrderByDescending(static t => t.EstimatedRetainedBytes > 0 ? (double)t.EstimatedRetainedBytes / Math.Max(1.0, t.TotalBytes) : (double)t.TotalIncomingReferences)
+                .OrderByDescending(static t => t.EstimatedRetainedBytes)
                 .ThenByDescending(static t => t.TotalBytes)
+                .ThenByDescending(static t => t.TotalIncomingReferences)
                 .ToList();
         }
 

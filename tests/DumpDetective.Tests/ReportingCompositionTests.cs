@@ -288,11 +288,8 @@ public sealed class ReportingCompositionTests
             LohObjects: 0,
             LohThresholdBytes: 85000,
             UniqueTypes: 1,
-            TopTypesBySize:
+            TopTypes:
             [
-                new TypeSnapshot("Demo.Type", 10, 1024, 0, 102, 0, 0, "Demo.Module")
-            ],
-            TopTypesByCount: [
                 new TypeSnapshot("Demo.Type", 10, 1024, 0, 102, 0, 0, "Demo.Module")
             ],
             SizeBucketHistogram: []);

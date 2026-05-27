@@ -1,4 +1,5 @@
 using DumpDetective.Core.Models;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -87,6 +88,22 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             {
                 // note will be shown in narrative blocks
             }
+        }
+
+        if (d.GenerationBreakdown is { Count: > 0 })
+        {
+            var genRows = new List<TableRow>(d.GenerationBreakdown.Count);
+            foreach (var s in d.GenerationBreakdown)
+            {
+                genRows.Add(new TableRow([
+                    Cell(s.Kind.ToString()),
+                    Cell($"{s.Gen0Count:N0}", s.Gen0Count),
+                    Cell($"{s.Gen1Count:N0}", s.Gen1Count),
+                    Cell($"{s.Gen2Count:N0}", s.Gen2Count),
+                    Cell($"{s.LohCount:N0}", s.LohCount)
+                ]));
+            }
+            tables.Add(ST("Collections by GC generation", ["Type", "Gen0", "Gen1", "Gen2", "LOH"], genRows));
         }
 
         return new AnalyzerDetailSection(

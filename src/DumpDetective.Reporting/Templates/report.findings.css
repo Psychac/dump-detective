@@ -1,11 +1,11 @@
-﻿.findings-paged { padding: 18px 20px; margin-bottom: 16px; }
+﻿.findings-paged { padding: 16px 18px; margin-bottom: 0; }
 .findings-paged__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   border-bottom: 1px solid rgba(17,24,39,0.08);
 }
 .findings-paged__header h2 { margin: 0; font-size: 1rem; letter-spacing: -0.02em; font-weight: 650; color: var(--muted); text-transform: uppercase; }
@@ -27,12 +27,12 @@
 .finding-card--critical {
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 .finding-card--warning {
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  padding: 11px 13px;
+  padding: 10px 12px;
 }
 .finding-card--info {
   background: #ffffff;

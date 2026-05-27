@@ -4,7 +4,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  padding: 14px 20px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--border);
   gap: 0;
 }
@@ -37,7 +37,7 @@
 
 /* T2a Lifecycle strip (trend mode) */
 .exec-lifecycle-strip {
-  padding: 10px 20px 8px;
+  padding: 8px 18px 7px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -75,11 +75,12 @@
 /* T0 Trend header dump rows */
 .header-trend-dump {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
   font-size: 13px;
   flex-wrap: wrap;
+  border-bottom: 1px dashed var(--border);
 }
 .header-trend-dump__role {
   flex-shrink: 0;
@@ -87,7 +88,10 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .05em;
-  padding: 1px 6px;
+  line-height: 1.2;
+  min-width: 72px;
+  text-align: center;
+  padding: 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
@@ -95,9 +99,56 @@
 .header-trend-dump--last     .header-trend-dump__role { background: #dbeafe; color: #1d4ed8; }
 .header-trend-dump--mid      .header-trend-dump__role { background: #f1f5f9; color: #64748b; }
 .header-trend-dump--current  .header-trend-dump__role { background: #dbeafe; color: #1d4ed8; }
-.header-trend-dump__path { font-family: var(--font-mono, Consolas, monospace); font-size: 12px; color: var(--text-muted, #374151); word-break: break-all; }
-.header-trend-dump__size { flex-shrink: 0; font-size: 11px; font-weight: 600; color: #6b7280; background: #f3f4f6; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
-.header-trend-dump__ts   { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.header-trend-dump__source {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.header-trend-dump__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.header-trend-dump__path {
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 11px;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.header-trend-dump__meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.header-trend-dump__size {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+.header-trend-dump__ts {
+  font-size: 11px;
+  color: #3730a3;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  line-height: 1.35;
+}
 
 /* Trend header: title wrap with dump count badge */
 .header-hero__title-wrap {
@@ -125,7 +176,6 @@
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 .header-trend-range__label {
@@ -155,8 +205,8 @@
 }
 
 /* Trend header: dump list */
-.header-trend-dumps { margin-top: 12px; }
-.header-trend-dumps__list { display: flex; flex-direction: column; gap: 1px; }
+.header-trend-dumps { margin-top: 10px; }
+.header-trend-dumps__list { display: flex; flex-direction: column; gap: 0; }
 .header-trend-dumps__details { }
 .header-trend-dumps__summary {
   cursor: pointer;
@@ -170,6 +220,7 @@
 .header-trend-dumps__summary::-webkit-details-marker { display: none; }
 .header-trend-dumps__summary::before { content: '\25B6\A0'; font-size: 9px; }
 details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
+.header-trend-dumps__list .header-trend-dump:last-child { border-bottom: none; }
 
 /* Score triplet */
 .exec-scores {
@@ -379,7 +430,8 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 .appendix-panel__body .detail-block { margin: 0; border-radius: var(--radius-sm); }
 
 /* ΓöÇΓöÇ Domain sections ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
-.report-domains { display: flex; flex-direction: column; gap: 20px; }
+.report-domains { display: block; }
+.report-domains > * + * { margin-top: var(--section-gap); }
 .report-domain {
   background: var(--surface);
   border: 1px solid var(--border);

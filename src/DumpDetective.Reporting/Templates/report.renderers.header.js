@@ -38,7 +38,6 @@ export function buildHeader(doc) {
     dumpBadge.textContent = trendDumpCount + '\u202Fdumps'; titleWrap.appendChild(dumpBadge);
   }
   heroLeft.appendChild(titleWrap);
-  if (!isTrend && rawName) { const fn = el('div', 'header-hero__filename'); fn.textContent = rawName; heroLeft.appendChild(fn); }
   hero.appendChild(heroLeft);
 
   const heroActions = el('div', 'header-hero__actions');
@@ -53,6 +52,16 @@ export function buildHeader(doc) {
 
   // ── Body (meta-stat rows) ────────────────────────────────────────────────
   const body = el('div', 'header-body');
+
+  function splitPathParts(path) {
+    const normalized = String(path || '').replace(/\\/g, '/');
+    const lastSlash = normalized.lastIndexOf('/');
+    if (lastSlash < 0) return { fileName: normalized, directory: '' };
+    return {
+      fileName: normalized.slice(lastSlash + 1),
+      directory: normalized.slice(0, lastSlash)
+    };
+  }
 
   function statItem(label, value) {
     const d = el('div', 'header-stat');
@@ -69,7 +78,29 @@ export function buildHeader(doc) {
   }
   function fmtDate(utcStr) {
     if (!utcStr) return '';
-    return new Date(utcStr).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const dt = new Date(utcStr);
+    if (Number.isNaN(dt.getTime())) return '';
+    return dt.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function fmtDateWithZone(utcStr) {
+    if (!utcStr) return '';
+    const dt = new Date(utcStr);
+    if (Number.isNaN(dt.getTime())) return '';
+    return dt.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
   }
 
   if (isTrend) {
@@ -107,23 +138,43 @@ export function buildHeader(doc) {
     rangeRow.appendChild(meta);
     body.appendChild(rangeRow);
   } else if (doc.dumpPath) {
-    // ── Single dump: path + size row ─────────────────────────────────────
+    // ── Single dump: source row (name + path + size/time badges) ────────
+    const dumpParts = splitPathParts(doc.dumpPath);
     const pathRow = el('div', 'header-path');
-    const pathLabel = el('span', 'header-path__label'); pathLabel.textContent = 'Dump:'; pathRow.appendChild(pathLabel);
-    const pathVal = el('span', 'header-path__value'); pathVal.textContent = doc.dumpPath; pathRow.appendChild(pathVal);
+    const pathLabel = el('span', 'header-path__label'); pathLabel.textContent = 'Source'; pathRow.appendChild(pathLabel);
+
+    const source = el('div', 'header-path__source');
+    const pathName = el('span', 'header-path__name');
+    pathName.textContent = dumpParts.fileName || rawName;
+    source.appendChild(pathName);
+
+    const pathVal = el('span', 'header-path__value');
+    pathVal.textContent = dumpParts.directory || doc.dumpPath;
+    source.appendChild(pathVal);
+    pathRow.appendChild(source);
+
+    const meta = el('div', 'header-path__meta');
     const fsBytes = ctx.dumpFileSizeBytes != null ? Number(ctx.dumpFileSizeBytes) : null;
     if (fsBytes !== null && fsBytes > 0) {
       const sizeBadge = el('span', 'header-path__size');
       sizeBadge.textContent = formatBytes(fsBytes) + (ctx.dumpSizeTierLabel ? '\u2002\u00B7\u2002' + ctx.dumpSizeTierLabel : '');
-      pathRow.appendChild(sizeBadge);
+      meta.appendChild(sizeBadge);
     }
+    const capturedAt = fmtDate(ctx.dumpCapturedAtUtc || ctx.generatedAtUtc || doc.generatedAtUtc);
+    if (capturedAt) {
+      const tsBadge = el('span', 'header-path__generated');
+      tsBadge.textContent = 'Generated ' + capturedAt;
+      meta.appendChild(tsBadge);
+    }
+    if (meta.childNodes.length > 0) pathRow.appendChild(meta);
     body.appendChild(pathRow);
   }
 
   // Row 1 — Analysis run (both modes)
-  const genRaw = doc.generatedAtUtc; const genStr = genRaw ? (new Date(genRaw)).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
+  const genRaw = doc.generatedAtUtc;
+  const genStr = fmtDateWithZone(genRaw);
   const runItems = [];
-  if (genStr) runItems.push(['Analyzed at', genStr]);
+  if (genStr) runItems.push(['Analyzed at (local)', genStr]);
   runItems.push(['Elapsed', ((doc.elapsedSeconds) || 0).toFixed(1) + 's']);
   if (doc.schemaVersion) runItems.push(['Schema', doc.schemaVersion]);
   if (doc.analyzerVersion) runItems.push(['Version', doc.analyzerVersion]);
@@ -173,19 +224,29 @@ export function buildHeader(doc) {
       }
       for (let i = 0; i < paths.length; i++) {
         const snap = snapshots.find(function (s) { return s && s.index === i; });
+        const pathParts = splitPathParts(paths[i]);
         const roleLabel = i === 0 ? 'Baseline' : 'D' + (i + 1);
         const roleCss   = i === 0 ? 'baseline' : i === paths.length - 1 ? 'last' : 'mid';
         const drow = el('div', 'header-trend-dump header-trend-dump--' + roleCss);
         const roleBadge = el('span', 'header-trend-dump__role'); roleBadge.textContent = roleLabel; drow.appendChild(roleBadge);
-        const pv = el('span', 'header-trend-dump__path'); pv.textContent = paths[i]; drow.appendChild(pv);
+        const src = el('div', 'header-trend-dump__source');
+        const name = el('span', 'header-trend-dump__name'); name.textContent = pathParts.fileName || ('Dump ' + (i + 1)); src.appendChild(name);
+        const pv = el('span', 'header-trend-dump__path'); pv.textContent = pathParts.directory || paths[i]; src.appendChild(pv);
+        drow.appendChild(src);
+
+        const meta = el('div', 'header-trend-dump__meta');
         if (snap && snap.dumpFileSizeBytes != null && snap.dumpFileSizeBytes > 0) {
-          const sz = el('span', 'header-trend-dump__size'); sz.textContent = formatBytes(Number(snap.dumpFileSizeBytes)); drow.appendChild(sz);
+          const sz = el('span', 'header-trend-dump__size'); sz.textContent = formatBytes(Number(snap.dumpFileSizeBytes)); meta.appendChild(sz);
         }
         if (snap) {
           const ts = el('span', 'header-trend-dump__ts');
-          ts.textContent = fmtDate(snap.dumpCapturedAtUtc || snap.generatedAtUtc);
-          drow.appendChild(ts);
+          const tsText = fmtDate(snap.dumpCapturedAtUtc || snap.generatedAtUtc);
+          if (tsText) {
+            ts.textContent = 'Generated ' + tsText;
+            meta.appendChild(ts);
+          }
         }
+        if (meta.childNodes.length > 0) drow.appendChild(meta);
         listEl.appendChild(drow);
       }
       body.appendChild(dumpListWrap);

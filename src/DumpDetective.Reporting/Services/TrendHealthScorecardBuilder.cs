@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 
@@ -5,27 +6,31 @@ namespace DumpDetective.Reporting.Services;
 
 /// <summary>
 /// Builds a <see cref="HealthScorecard"/> for trend mode.
-/// Compares baseline (snapshots[0]) findings against current (snapshots[^1]) findings
-/// and annotates each <see cref="DomainHealthEntry"/> with <see cref="DomainSeverityChange"/>
-/// and the baseline severity.
+/// Considers ALL snapshots, not just baseline vs current, so that intermediate
+/// regressions/improvements are visible in the scorecard history.
 /// </summary>
 internal static class TrendHealthScorecardBuilder
 {
-    public static HealthScorecard Build(
-        IReadOnlyList<InsightFinding> baselineFindings,
-        IReadOnlyList<InsightFinding> currentFindings)
+    public static HealthScorecard Build(IReadOnlyList<AnalysisSnapshot> snapshots)
     {
-        var baselineDomainSeverity = ComputeDomainSeverities(baselineFindings);
-        var currentDomainSeverity  = ComputeDomainSeverities(currentFindings);
+        // Per-snapshot domain-severity maps (index 0 = baseline, last = current)
+        var snapshotSeverities = new Dictionary<string, DomainSeverity>[snapshots.Count];
+        for (int i = 0; i < snapshots.Count; i++)
+            snapshotSeverities[i] = ComputeDomainSeverities(snapshots[i].Findings);
 
-        // Union of all domains that appeared in either snapshot
+        var baselineDomainSeverity = snapshotSeverities[0];
+        var currentDomainSeverity  = snapshotSeverities[^1];
+
+        // Union of all domains that appeared in any snapshot
         var allDomains = new HashSet<string>(StringComparer.Ordinal);
-        foreach (string d in baselineDomainSeverity.Keys) allDomains.Add(d);
-        foreach (string d in currentDomainSeverity.Keys)  allDomains.Add(d);
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            foreach (string d in snapshotSeverities[i].Keys) allDomains.Add(d);
+        }
 
-        // Accumulate counts per domain from current findings
+        // Accumulate counts per domain from current (latest) findings
         var currentCounts = new Dictionary<string, (int FindingCount, int CriticalCount, int WarningCount)>(StringComparer.Ordinal);
-        foreach (InsightFinding f in currentFindings)
+        foreach (InsightFinding f in snapshots[^1].Findings)
         {
             string domain = SectionIdDomainMap.GetDomain(f.Analyzer);
             if (string.IsNullOrEmpty(domain)) continue;
@@ -50,6 +55,8 @@ internal static class TrendHealthScorecardBuilder
             if (!orderedDomains.Contains(d)) orderedDomains.Add(d);
         }
 
+        bool hasIntermediates = snapshots.Count > 2;
+
         foreach (string domain in orderedDomains)
         {
             bool hasBaseline = baselineDomainSeverity.TryGetValue(domain, out DomainSeverity baseSev);
@@ -71,6 +78,20 @@ internal static class TrendHealthScorecardBuilder
 
             currentCounts.TryGetValue(domain, out var counts);
 
+            // Build per-snapshot severity history when there are 3+ snapshots
+            IReadOnlyList<DomainSeverity>? history = null;
+            if (hasIntermediates)
+            {
+                var hist = new DomainSeverity[snapshots.Count];
+                for (int i = 0; i < snapshots.Count; i++)
+                {
+                    hist[i] = snapshotSeverities[i].TryGetValue(domain, out DomainSeverity s)
+                        ? s
+                        : DomainSeverity.Unknown;
+                }
+                history = hist;
+            }
+
             var entry = new DomainHealthEntry(
                 Domain:          domain,
                 Severity:        hasCurrent ? curSev : DomainSeverity.Unknown,
@@ -78,7 +99,8 @@ internal static class TrendHealthScorecardBuilder
                 CriticalCount:   counts.CriticalCount,
                 WarningCount:    counts.WarningCount,
                 BaselineSeverity: hasBaseline ? baseSev : null,
-                Change:           change);
+                Change:           change,
+                SeverityHistory:  history);
 
             entries.Add(entry);
 
@@ -110,8 +132,6 @@ internal static class TrendHealthScorecardBuilder
                 map[domain] = fSev;
         }
 
-        // domains with no findings → DomainSeverity.OK
-        // (we only receive findings for domains that had runs, so absent == not run / no findings)
         return map;
     }
 }

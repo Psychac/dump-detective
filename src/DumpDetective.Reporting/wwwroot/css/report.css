@@ -47,6 +47,8 @@ body{margin:0;background:var(--bg);color:var(--text);line-height:1.35}
 .health-severity-warning{color:#92400e}
 .health-severity-ok{color:#166534}
 .health-severity-unknown{color:#6b7280}
+.health-progression{white-space:nowrap}
+.health-progress-arrow{color:#9ca3af;margin:0 3px;font-weight:400}
 
 .table-wrapper{overflow:auto;margin-top:12px}
 .report-table{width:100%;border-collapse:collapse;background:#fff}

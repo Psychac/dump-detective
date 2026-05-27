@@ -35,11 +35,9 @@ internal sealed class TrendReportComposer(
 
         AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, [], reportBuilders, audience, currentIncidentContext);
 
-        // T1.3: Build trend scorecard using baseline vs current findings
+        // T1.3: Build trend scorecard using all snapshots (not just baseline vs current)
         HealthScorecard? trendScorecard = trendData.Snapshots.Count >= 2
-            ? TrendHealthScorecardBuilder.Build(
-                trendData.Snapshots[0].Findings,
-                trendData.Snapshots[^1].Findings)
+            ? TrendHealthScorecardBuilder.Build(trendData.Snapshots)
             : baseDoc.HealthScorecard;
 
         // T8: Build trend-specific analyzer sections using dedicated builders

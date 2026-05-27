@@ -237,12 +237,42 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
     {
         sb.AppendLine("HEALTH SUMMARY");
         sb.AppendLine(StringConstants.Equals80);
-        sb.AppendLine("Domain                Severity    Critical  Warning");
-        sb.AppendLine("--------------------   --------    --------  -------");
-        for (int i = 0; i < scorecard.Domains.Count; i++)
+        bool hasTrend   = scorecard.Domains.Any(d => d.Change.HasValue);
+        bool hasHistory = hasTrend && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
+        if (hasTrend)
         {
-            DomainHealthEntry entry = scorecard.Domains[i];
-            sb.AppendLine($"{entry.Domain,-21} {entry.Severity,-10} {entry.CriticalCount,8} {entry.WarningCount,8}");
+            sb.AppendLine("Domain                Baseline    Current     Change       Critical  Warning");
+            sb.AppendLine("--------------------   --------    -------     ------       --------  -------");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+            {
+                string bas = entry.BaselineSeverity?.ToString() ?? "—";
+                string cur = entry.Severity.ToString();
+                string chg = entry.Change switch
+                {
+                    DomainSeverityChange.Regressed => "Regressed",
+                    DomainSeverityChange.Improved  => "Improved",
+                    DomainSeverityChange.NewDomain => "New",
+                    DomainSeverityChange.Removed   => "Removed",
+                    _                              => "Stable"
+                };
+                sb.AppendLine($"{entry.Domain,-21} {bas,-10} {cur,-10} {chg,-12} {entry.CriticalCount,8} {entry.WarningCount,8}");
+                if (hasHistory && entry.SeverityHistory is { Count: > 2 })
+                {
+                    string progression = string.Join(" → ", entry.SeverityHistory.Select((s, i) =>
+                    {
+                        string label = i == 0 ? "base" : i == entry.SeverityHistory.Count - 1 ? "cur" : $"#{i + 1}";
+                        return $"{s}({label})";
+                    }));
+                    sb.AppendLine($"  Progression: {progression}");
+                }
+            }
+        }
+        else
+        {
+            sb.AppendLine("Domain                Severity    Critical  Warning");
+            sb.AppendLine("--------------------   --------    --------  -------");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+                sb.AppendLine($"{entry.Domain,-21} {entry.Severity,-10} {entry.CriticalCount,8} {entry.WarningCount,8}");
         }
         sb.AppendLine($"Overall severity: {scorecard.OverallSeverity}");
         sb.AppendLine();
@@ -414,11 +444,20 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
     {
         sb.AppendLine("## Health Summary");
         sb.AppendLine();
-        bool hasTrend = scorecard.Domains.Any(d => d.Change.HasValue);
+        bool hasTrend   = scorecard.Domains.Any(d => d.Change.HasValue);
+        bool hasHistory = hasTrend && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
         if (hasTrend)
         {
-            sb.AppendLine("| Domain | Baseline | Current | Change | Critical | Warning |");
-            sb.AppendLine("|---|---|---|---|---|---|");
+            if (hasHistory)
+            {
+                sb.AppendLine("| Domain | Baseline | Progression | Current | Change | Critical | Warning |");
+                sb.AppendLine("|---|---|---|---|---|---|---|");
+            }
+            else
+            {
+                sb.AppendLine("| Domain | Baseline | Current | Change | Critical | Warning |");
+                sb.AppendLine("|---|---|---|---|---|---|");
+            }
             foreach (DomainHealthEntry entry in scorecard.Domains)
             {
                 string cur = entry.Severity.ToString();
@@ -431,7 +470,18 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     DomainSeverityChange.Removed   => "🗑 Removed",
                     _                              => "= Stable"
                 };
-                sb.AppendLine($"| {Esc(entry.Domain)} | {bas} | {cur} | {chg} | {entry.CriticalCount} | {entry.WarningCount} |");
+                if (hasHistory)
+                {
+                    // Render intermediates only (skip index 0 = baseline, skip last = current; they have their own columns)
+                    string progression = entry.SeverityHistory is { Count: > 2 }
+                        ? string.Join(" → ", entry.SeverityHistory.Skip(1).SkipLast(1).Select((s, i) => $"{s}(#{i + 2})"))
+                        : "—";
+                    sb.AppendLine($"| {Esc(entry.Domain)} | {bas} | {progression} | {cur} | {chg} | {entry.CriticalCount} | {entry.WarningCount} |");
+                }
+                else
+                {
+                    sb.AppendLine($"| {Esc(entry.Domain)} | {bas} | {cur} | {chg} | {entry.CriticalCount} | {entry.WarningCount} |");
+                }
             }
         }
         else
@@ -515,15 +565,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
 
     private static void RenderHealthScorecardHtml(HealthScorecard scorecard, StringBuilder sb)
     {
-        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
-        sb.AppendLine("<table><thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-        for (int i = 0; i < scorecard.Domains.Count; i++)
-        {
-            DomainHealthEntry entry = scorecard.Domains[i];
-            string severity = entry.Severity.ToString();
-            sb.AppendLine($"<tr><td>{System.Net.WebUtility.HtmlEncode(entry.Domain)}</td><td class=\"health-severity health-severity-{severity.ToLowerInvariant()}\">{System.Net.WebUtility.HtmlEncode(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
-        }
-        sb.AppendLine($"</tbody></table><div class=\"health-scorecard__overall\">Overall severity: {System.Net.WebUtility.HtmlEncode(scorecard.OverallSeverity.ToString())}</div></section>");
+        sb.Append(ReportHtmlShared.RenderHealthScorecard(scorecard));
     }
 
     private static void RenderBlocksMd(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)

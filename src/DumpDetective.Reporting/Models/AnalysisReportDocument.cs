@@ -17,7 +17,10 @@ internal sealed record DomainHealthEntry(
     int WarningCount,
     // Trend-mode additions (null in single-dump mode):
     DomainSeverity? BaselineSeverity = null,
-    DomainSeverityChange? Change = null);
+    DomainSeverityChange? Change = null,
+    // Per-snapshot severity across all dumps (index 0 = baseline, last = current).
+    // Null in single-dump mode or when only 2 snapshots (baseline/current already cover it).
+    IReadOnlyList<DomainSeverity>? SeverityHistory = null);
 
 internal sealed record HealthScorecard(
     IReadOnlyList<DomainHealthEntry> Domains,

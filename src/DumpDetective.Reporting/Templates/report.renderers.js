@@ -777,47 +777,120 @@ export function buildHealthScorecard(doc) {
   // Detect trend mode: any entry has a non-null 'change' field
   const isTrendScorecard = ordered.some(function (e) { return e.change != null; });
 
-  // change enum: 0=Stable, 1=Improved, 2=Regressed, 3=NewDomain, 4=Removed
+  // For trend mode: add a single legend above the grid explaining the timeline bar
+  if (isTrendScorecard) {
+    const hasAnyHistory = ordered.some(function (e) { return Array.isArray(e.severityHistory) && e.severityHistory.length > 2; });
+    if (hasAnyHistory) {
+      const snapshotCount = ordered.find(function (e) { return Array.isArray(e.severityHistory); })?.severityHistory?.length || 0;
+      const legend = el('div', 'health-scorecard__legend');
+      const legendBar = el('span', 'health-scorecard__legend-bar');
+      for (const css of ['ok', 'warning', 'critical']) {
+        const seg = el('span', 'health-timeline-seg health-timeline-seg--' + css); legendBar.appendChild(seg);
+      }
+      legend.appendChild(legendBar);
+      const legendText = el('span', 'health-scorecard__legend-text');
+      legendText.textContent = 'Severity trend bar — Base \u2192 D' + snapshotCount + ' (' + snapshotCount + ' dumps)';
+      legend.appendChild(legendText);
+      sec.appendChild(legend);
+    }
+  }
+
+  // change enum: Stable=0, Improved=1, Regressed=2, NewDomain=3, Removed=4
+  // Serialized as string ("Regressed") due to UseStringEnumConverter=true
   function changeInfo(change) {
-    const c = Number(change);
-    if (c === 1) return { label: '\u2191 Improved',  css: 'improved'  };
-    if (c === 2) return { label: '\u2193 Regressed', css: 'regressed' };
-    if (c === 3) return { label: '\u2665 New',        css: 'new'       };
-    if (c === 4) return { label: '\u2715 Resolved',   css: 'resolved'  };
-    return           { label: '\u2192 Stable',      css: 'stable'    };
+    const c = Number(change); const s = String(change).toLowerCase();
+    if (c === 1 || s === 'improved')   return { label: '\u2191 Improved',  css: 'improved'  };
+    if (c === 2 || s === 'regressed')  return { label: '\u2193 Regressed', css: 'regressed' };
+    if (c === 3 || s === 'newdomain')  return { label: '\u2605 New',       css: 'new'       };
+    if (c === 4 || s === 'removed')    return { label: '\u2715 Removed',   css: 'resolved'  };
+    return                                    { label: '\u2192 Stable',    css: 'stable'    };
   }
 
   for (const entry of ordered) {
     const si = sevInfo(entry.severity);
-    const row = el('div', 'health-domain-row health-domain-row--' + si.css);
-    row.setAttribute('role', 'listitem');
 
-    const name = el('span', 'health-domain-row__name'); name.textContent = entry.domain || ''; row.appendChild(name);
+    if (isTrendScorecard) {
+      // ── Trend: vertical card layout ─────────────────────────────────────
+      const card = el('div', 'health-domain-card health-domain-card--' + si.css);
+      card.setAttribute('role', 'listitem');
 
-    const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
-    pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);
+      // Head: domain name + change badge
+      const head = el('div', 'health-domain-card__head');
+      const nameEl = el('span', 'health-domain-card__name'); nameEl.textContent = entry.domain || ''; head.appendChild(nameEl);
+      if (entry.change != null) {
+        const ci = changeInfo(entry.change);
+        const chg = el('span', 'health-domain-card__change health-domain-card__change--' + ci.css);
+        chg.textContent = ci.label; head.appendChild(chg);
+      }
+      card.appendChild(head);
 
-    // Trend mode: show baseline and change indicator
-    if (isTrendScorecard && entry.baselineSeverity != null) {
-      const baseSi = sevInfo(entry.baselineSeverity);
-      const basePill = el('span', 'health-domain-row__pill health-domain-row__pill--' + baseSi.css + ' health-domain-row__pill--baseline');
-      basePill.title = 'Baseline'; basePill.textContent = '\u21d0 ' + baseSi.label; row.appendChild(basePill);
+      // Middle: visual timeline (3+ snapshots) or baseline→current transition (2 snapshots)
+      const hasHistory = Array.isArray(entry.severityHistory) && entry.severityHistory.length > 2;
+      if (hasHistory) {
+        const wrap = el('div', 'health-domain-card__timeline-wrap');
+
+        // Bar: one colored segment per snapshot
+        const bar = el('div', 'health-domain-card__timeline');
+        for (let i = 0; i < entry.severityHistory.length; i++) {
+          const hsi = sevInfo(entry.severityHistory[i]);
+          const seg = el('span', 'health-timeline-seg health-timeline-seg--' + hsi.css);
+          const role = i === 0 ? 'Baseline' : i === entry.severityHistory.length - 1 ? 'Current' : 'Dump';
+          seg.title = role + ' #' + (i + 1) + ' \u2014 ' + hsi.label;
+          bar.appendChild(seg);
+        }
+        wrap.appendChild(bar);
+
+        // Index row: #1 … #N below each segment
+        const indices = el('div', 'health-domain-card__timeline-indices');
+        for (let i = 0; i < entry.severityHistory.length; i++) {
+          const idx = el('span', 'health-timeline-idx' + (i === 0 ? ' health-timeline-idx--first' : ''));
+          idx.textContent = i === 0 ? 'Base' : 'D' + (i + 1);
+          indices.appendChild(idx);
+        }
+        wrap.appendChild(indices);
+        card.appendChild(wrap);
+      } else if (entry.baselineSeverity != null) {
+        const baseSi = sevInfo(entry.baselineSeverity);
+        const transition = el('div', 'health-domain-card__transition');
+        const baseSpan = el('span', 'health-domain-card__trans-sev health-domain-card__trans-sev--' + baseSi.css);
+        baseSpan.textContent = baseSi.label; baseSpan.title = 'Baseline'; transition.appendChild(baseSpan);
+        const arrow = el('span', 'health-domain-card__trans-arrow'); arrow.textContent = '\u2192'; transition.appendChild(arrow);
+        const curSpan = el('span', 'health-domain-card__trans-sev health-domain-card__trans-sev--' + si.css + ' health-domain-card__trans-sev--current');
+        curSpan.textContent = si.label; curSpan.title = 'Current'; transition.appendChild(curSpan);
+        card.appendChild(transition);
+      }
+
+      // Foot: current severity pill + finding counts
+      const foot = el('div', 'health-domain-card__foot');
+      const curPill = el('span', 'health-domain-card__sev health-domain-card__sev--' + si.css);
+      curPill.textContent = si.dot + '\u2002' + si.label; foot.appendChild(curPill);
+      const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
+      if (crit > 0 || warn > 0) {
+        const counts = el('span', 'health-domain-card__counts');
+        if (crit > 0) { const c = el('span', 'health-domain-card__count-chip health-domain-card__count-chip--crit'); c.textContent = crit + '\u00A0crit'; counts.appendChild(c); }
+        if (warn > 0) { const w = el('span', 'health-domain-card__count-chip health-domain-card__count-chip--warn'); w.textContent = warn + '\u00A0warn'; counts.appendChild(w); }
+        foot.appendChild(counts);
+      }
+      card.appendChild(foot);
+      grid.appendChild(card);
+
+    } else {
+      // ── Single-dump: compact horizontal row (unchanged) ──────────────────
+      const row = el('div', 'health-domain-row health-domain-row--' + si.css);
+      row.setAttribute('role', 'listitem');
+      const name = el('span', 'health-domain-row__name'); name.textContent = entry.domain || ''; row.appendChild(name);
+      const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
+      pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);
+      const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
+      if (crit > 0 || warn > 0) {
+        const counts = el('span', 'health-domain-row__counts');
+        const parts = [];
+        if (crit > 0) parts.push(crit + '\u00A0crit');
+        if (warn > 0) parts.push(warn + '\u00A0warn');
+        counts.textContent = parts.join('\u2002\u00B7\u2002'); row.appendChild(counts);
+      }
+      grid.appendChild(row);
     }
-    if (isTrendScorecard && entry.change != null) {
-      const ci = changeInfo(entry.change);
-      const changePill = el('span', 'health-domain-row__change health-domain-row__change--' + ci.css);
-      changePill.textContent = ci.label; row.appendChild(changePill);
-    }
-
-    const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
-    if (crit > 0 || warn > 0) {
-      const counts = el('span', 'health-domain-row__counts');
-      const parts = [];
-      if (crit > 0) parts.push(crit + '\u00A0crit');
-      if (warn > 0) parts.push(warn + '\u00A0warn');
-      counts.textContent = parts.join('\u2002\u00B7\u2002'); row.appendChild(counts);
-    }
-    grid.appendChild(row);
   }
   sec.appendChild(grid);
   return sec;

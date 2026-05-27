@@ -8,6 +8,26 @@ internal static class ReportHtmlShared
 {
     public static string Enc(string? v) => System.Net.WebUtility.HtmlEncode(v ?? string.Empty);
 
+    /// <summary>
+    /// Renders a compact per-snapshot severity progression strip as inline HTML badges.
+    /// E.g. OK → Warning → Critical → Warning
+    /// </summary>
+    private static string RenderSeverityProgressionHtml(IReadOnlyList<DomainSeverity>? history)
+    {
+        if (history is null or { Count: 0 }) return "—";
+        var sb = new StringBuilder();
+        for (int i = 0; i < history.Count; i++)
+        {
+            string sev = history[i].ToString();
+            string css = $"health-severity health-severity-{sev.ToLowerInvariant()}";
+            string label = i == 0 ? $"#{i + 1} (baseline)" : i == history.Count - 1 ? $"#{i + 1} (current)" : $"#{i + 1}";
+            sb.Append($"<span class=\"{css}\" title=\"Snapshot {label}\">{Enc(sev)}</span>");
+            if (i < history.Count - 1)
+                sb.Append("<span class=\"health-progress-arrow\">→</span>");
+        }
+        return sb.ToString();
+    }
+
     public static string WrapAddr(string html) =>
         Regex.Replace(html, @"0x[0-9A-Fa-f]{4,}",
             m => $"<span class=\"addr\">{m.Value}<button class=\"copy-btn\" type=\"button\" aria-label=\"Copy {m.Value}\" data-copy=\"{m.Value}\" title=\"Copy\">&#x2398;</button></span>",
@@ -93,10 +113,14 @@ internal static class ReportHtmlShared
         var sb = new StringBuilder();
         sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
         bool hasTrendData = scorecard.Domains.Any(d => d.Change.HasValue);
+        bool hasHistory   = hasTrendData && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
         sb.Append("<table>");
         if (hasTrendData)
         {
-            sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+            if (hasHistory)
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+            else
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
             foreach (DomainHealthEntry entry in scorecard.Domains)
             {
                 string cur = entry.Severity.ToString();
@@ -116,7 +140,16 @@ internal static class ReportHtmlShared
                     _                              => string.Empty
                 };
                 string sevCss = $"health-severity health-severity-{cur.ToLowerInvariant()}";
-                sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+
+                if (hasHistory)
+                {
+                    string progression = RenderSeverityProgressionHtml(entry.SeverityHistory);
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"health-progression\">{progression}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                }
+                else
+                {
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                }
             }
         }
         else

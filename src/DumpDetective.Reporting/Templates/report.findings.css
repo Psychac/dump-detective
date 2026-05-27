@@ -1,0 +1,215 @@
+﻿.findings-paged { padding: 18px 20px; margin-bottom: 16px; }
+.findings-paged__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(17,24,39,0.08);
+}
+.findings-paged__header h2 { margin: 0; font-size: 1rem; letter-spacing: -0.02em; font-weight: 650; color: var(--muted); text-transform: uppercase; }
+.section-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.severity-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.severity-critical { background: var(--sev-critical-bg); color: var(--sev-critical-text); }
+.severity-warning  { background: var(--sev-warning-bg);  color: var(--sev-warning-text); }
+.severity-info     { background: var(--sev-info-bg);     color: var(--sev-info-text); }
+.category { font-size: 12px; color: var(--muted); }
+.summary { margin: 8px 0 10px 0; }
+.finding-card { position: relative; overflow: hidden; border-radius: 8px; }
+/* Finding cards nested inside domain insights or cross-domain list get tighter padding */
+.domain-insights__list .finding-card,
+.cross-domain-insights__list .finding-card {
+  padding: 11px 13px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.finding-card--critical {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 12px 14px;
+}
+.finding-card--warning {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 11px 13px;
+}
+.finding-card--info {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 10px 12px;
+}
+.finding-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--accent);
+}
+.finding-card[data-severity="critical"]::before { background: var(--sev-critical-text); }
+.finding-card[data-severity="warning"]::before { background: var(--sev-warning-bar); }
+.finding-card[data-severity="info"]::before { background: var(--accent); }
+.finding-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.finding-card__eyebrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.finding-card__header-meta { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.finding-card__confidence-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  border: 1px solid transparent;
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+.finding-card__confidence-chip--high { background: #dcfce7; color: #166534; border-color: #86efac; }
+.finding-card__confidence-chip--medhigh { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+.finding-card__confidence-chip--medium { background: #fff7ed; color: #9a3412; border-color: #fdba74; }
+.finding-card__confidence-chip--low { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+.finding-card__title {
+  margin: 0;
+  padding-left: 0;
+  font-size: 0.98rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--text);
+}
+.finding-card__title::before { display: none; }
+.finding-card__brief {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.finding-card__brief-row {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 3px 0;
+}
+.finding-card__brief-row + .finding-card__brief-row {
+  border-top: 1px solid #eef2f7;
+  padding-top: 6px;
+}
+.finding-card__brief-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  line-height: 1;
+}
+.finding-card__brief-label--issue { color: #b45309; background: #fff7ed; border-color: #fed7aa; }
+.finding-card__brief-label--recommendation { color: #0369a1; background: #eff6ff; border-color: #bfdbfe; }
+.finding-card__brief-value {
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.finding-card__brief-row--issue .finding-card__brief-value {
+  color: #0f172a;
+  font-weight: 600;
+}
+.finding-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.finding-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 0;
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: 0;
+  letter-spacing: .01em;
+}
+/* Recommendation now renders in the brief rows above. */
+
+.finding-card__quick {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  margin: 0 0 8px;
+}
+.finding-card__quick-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 4px 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+}
+.finding-card__quick-row--critical {
+  border: 0;
+}
+.finding-card__quick-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #334155;
+  letter-spacing: .02em;
+}
+.finding-card__quick-value {
+  font-size: 11px;
+  line-height: 1.42;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.finding-card__confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.finding-card__confidence--high { background: #dcfce7; color: #166534; border-color: #86efac; }
+.finding-card__confidence--medhigh { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+.finding-card__confidence--medium { background: #fff7ed; color: #9a3412; border-color: #fdba74; }
+.finding-card__confidence--low { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+
+.finding-card__confidence-symbol {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+}
+
+.finding-card__caveats {
+  margin: 0 0 8px;
+}
+
+.finding-card__caveat {
+  font-size: 11px;
+  color: #b45309;
+}
+
+/* ΓöÇΓöÇ Tables ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */

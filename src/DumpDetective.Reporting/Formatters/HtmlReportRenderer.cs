@@ -14,7 +14,7 @@ namespace DumpDetective.Reporting.Formatters;
 internal sealed class HtmlReportRenderer : IReportFormatter
 {
     private static readonly string _template = EmbeddedResourceLoader.LoadText("report.html");
-    private static readonly string _css = EmbeddedResourceLoader.LoadText("report.css");
+    private static readonly string _css = BuildInlinedCss();
     private static readonly string _js = BuildInlinedBundle();
     public static bool ForcePreRender { get; set; } = false;
 
@@ -61,8 +61,33 @@ internal sealed class HtmlReportRenderer : IReportFormatter
     }
 
     /// <summary>
-    /// Bundles the four JS modules into one self-contained &lt;script&gt; block.
-    /// Bundles the four JS modules into one self-contained <script> block.
+    /// Bundles modular CSS parts into one inline style block payload.
+    /// </summary>
+    private static string BuildInlinedCss()
+    {
+        var cssFiles = new[]
+        {
+            "report.base.css",
+            "report.header.css",
+            "report.body.css",
+            "report.findings.css",
+            "report.detail.css",
+            "report.utilities.css"
+        };
+
+        var sb = new StringBuilder(256 * 1024);
+        for (int i = 0; i < cssFiles.Length; i++)
+        {
+            if (i > 0) sb.AppendLine();
+            sb.AppendLine(EmbeddedResourceLoader.LoadText(cssFiles[i]));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Bundles modular JS assets into one self-contained &lt;script&gt; block.
+    /// Bundles modular JS assets into one self-contained <script> block.
     /// The module imports are stripped and the bootstrap file is flattened into
     /// the shared closure scope so the report can run under file://.
     /// </summary>
@@ -73,7 +98,14 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             var sb = new StringBuilder(512 * 1024);
 
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.dom.js")));
-            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.shared.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.blocks.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.charts.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.header.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.nav.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.panels.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.findings.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.sections.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.js")));
 
             string main = StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.main.js"));
@@ -99,8 +131,8 @@ internal sealed class HtmlReportRenderer : IReportFormatter
 
     private static string StripModuleKeywords(string src)
     {
-        // Remove all import lines
-        src = Regex.Replace(src, @"^import\b[^\r\n]*[\r\n]*", string.Empty, RegexOptions.Multiline);
+        // Remove ESM imports (single-line and multiline forms).
+        src = Regex.Replace(src, @"^\s*import[\s\S]*?;\s*", string.Empty, RegexOptions.Multiline);
         // Strip export keyword from declarations so functions land in shared scope
         return src
             .Replace("export function ", "function ")

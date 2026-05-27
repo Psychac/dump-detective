@@ -25,15 +25,20 @@ internal static class IncidentContextFactory
 
         string? dumpSizeTierLabel = null;
         long? dumpFileSizeBytes = null;
+        DateTime? dumpCapturedAtUtc = null;
         try
         {
             if (File.Exists(dumpPath))
             {
-                long bytes = new FileInfo(dumpPath).Length;
+                var fi = new FileInfo(dumpPath);
+                long bytes = fi.Length;
                 dumpFileSizeBytes = bytes;
                 dumpSizeTierLabel = bytes > 4L * 1024 * 1024 * 1024 ? "Large (> 4 GB)"
-                                  : bytes > 512L * 1024 * 1024     ? "Medium (512 MB – 4 GB)"
+                                  : bytes > 512L * 1024 * 1024     ? "Medium (512 MB \u2013 4 GB)"
                                   : "Small (< 512 MB)";
+                // Try reading TimeDateStamp from minidump header (offset 20, 4-byte Unix epoch)
+                dumpCapturedAtUtc = TryReadMinidumpTimestamp(dumpPath)
+                                 ?? DateTime.SpecifyKind(fi.LastWriteTimeUtc, DateTimeKind.Utc);
             }
         }
         catch { /* best-effort — skip if file not accessible */ }
@@ -60,7 +65,8 @@ internal static class IncidentContextFactory
             AnalysisElapsedSeconds: elapsed.TotalSeconds,
             TrendSnapshots: trendSnapshots,
             DumpSizeTierLabel: dumpSizeTierLabel,
-            DumpFileSizeBytes: dumpFileSizeBytes);
+            DumpFileSizeBytes: dumpFileSizeBytes,
+            DumpCapturedAtUtc: dumpCapturedAtUtc);
     }
 
     public static TrendSnapshotContext CreateSnapshot(
@@ -80,6 +86,26 @@ internal static class IncidentContextFactory
             FindingCount: runs.Sum(r => r.FindingCount),
             IsBaseline: isBaseline,
             IsCurrent: isCurrent);
+
+    /// <summary>
+    /// Reads the TimeDateStamp field from a Windows minidump header (MINIDUMP_HEADER offset 20).
+    /// Returns null if the file is not a valid minidump or the timestamp is zero/invalid.
+    /// </summary>
+    private static DateTime? TryReadMinidumpTimestamp(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 32);
+            Span<byte> buf = stackalloc byte[24];
+            if (fs.Read(buf) < 24) return null;
+            // Signature: "MDMP" = 0x504D444D
+            if (buf[0] != 0x4D || buf[1] != 0x44 || buf[2] != 0x4D || buf[3] != 0x50) return null;
+            uint unixTs = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(buf.Slice(20, 4));
+            if (unixTs == 0) return null;
+            return DateTimeOffset.FromUnixTimeSeconds(unixTs).UtcDateTime;
+        }
+        catch { return null; }
+    }
 
     private static object? GetPropertyValue(object? instance, string propertyName)
     {

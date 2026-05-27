@@ -108,7 +108,9 @@ internal sealed class TrendReportComposer(
                         s.DomainResults.Count,
                         s.Findings.Count,
                         s.Index == 0,
-                        s.Index == trendData.Snapshots.Count - 1)).ToList()
+                        s.Index == trendData.Snapshots.Count - 1,
+                        s.IncidentContext?.DumpFileSizeBytes,
+                        s.IncidentContext?.DumpCapturedAtUtc)).ToList()
                 },
             ExecutiveSummary = trendSummary,
             Findings = mappedFindings,

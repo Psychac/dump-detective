@@ -30,6 +30,45 @@
 .table-collapse > summary::before { content: 'Γû╢'; margin-right: 6px; font-size: 10px; display: inline-block; transition: transform 0.15s; }
 .table-collapse[open] > summary::before { transform: rotate(90deg); }
 
+.table-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.table-filter-input {
+  min-height: 32px;
+  min-width: 220px;
+  flex: 1 1 220px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+
+.table-filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.table-tools__count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.table-show-all-btn {
+  margin-left: auto;
+}
+
 /* Provenance footer ΓÇö collapsed by default */
 .provenance { border-top: 1px solid var(--border); margin-top: 0; background: #f8fafc; }
 .provenance__summary { font-size: 11px; color: #94a3b8; padding: 7px 16px; background: transparent; }

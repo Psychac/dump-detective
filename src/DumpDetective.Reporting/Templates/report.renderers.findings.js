@@ -38,7 +38,16 @@ export function buildFindingCard(f, i) {
     const conf = Number(f.confidenceScore);
     const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
     const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
-    confChip.textContent = (conf >= 0.85 ? '\u25CF\u25CF\u25CF\u25CF' : conf >= 0.65 ? '\u25CF\u25CF\u25CF\u25CB' : conf >= 0.45 ? '\u25CF\u25CF\u25CB\u25CB' : '\u25CF\u25CB\u25CB\u25CB') + ' ' + conf.toFixed(2);
+    const meter = el('span', 'finding-card__confidence-meter');
+    const slots = Math.max(1, Math.min(4, Math.round(conf * 4)));
+    for (let si = 0; si < 4; si++) {
+      const slot = el('span', 'finding-card__confidence-slot' + (si < slots ? ' finding-card__confidence-slot--on' : ''));
+      meter.appendChild(slot);
+    }
+    const score = el('span', 'finding-card__confidence-score');
+    score.textContent = conf.toFixed(2);
+    confChip.appendChild(meter);
+    confChip.appendChild(score);
     headerMeta.appendChild(confChip);
   }
   if (headerMeta.childNodes.length) header.appendChild(headerMeta);

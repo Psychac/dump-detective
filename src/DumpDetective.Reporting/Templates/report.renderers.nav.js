@@ -10,6 +10,34 @@ export function buildDomains(doc) {
   const domains = doc.domains;
   if (!Array.isArray(domains) || !domains.length) return null;
 
+  function buildDomainHistogram(domain) {
+    const critical = Number(domain.criticalCount || 0);
+    const warning = Number(domain.warningCount || 0);
+    const totalFindings = Number(domain.findingCount || 0);
+    const info = Math.max(0, totalFindings - critical - warning);
+    const buckets = [
+      { cls: 'critical', count: critical },
+      { cls: 'warning', count: warning },
+      { cls: 'info', count: info },
+      { cls: 'ok', count: 0 },
+      { cls: 'unknown', count: 0 }
+    ];
+
+    const wrap = el('span', 'domain-header__histogram');
+    const max = Math.max(1, ...buckets.map(function (b) { return b.count; }));
+    for (let i = 0; i < buckets.length; i++) {
+      const b = buckets[i];
+      const seg = el('span', 'domain-header__histogram-bar domain-header__histogram-bar--' + b.cls);
+      const scaled = b.count <= 0 ? 1 : Math.min(5, Math.max(1, Math.round((b.count / max) * 5)));
+      seg.style.height = String(4 + scaled * 2) + 'px';
+      seg.title = b.cls + ': ' + b.count;
+      wrap.appendChild(seg);
+    }
+
+    wrap.setAttribute('aria-label', 'Domain finding distribution');
+    return wrap;
+  }
+
   const wrap = el('div', 'report-domains');
   for (let i = 0; i < domains.length; i++) {
     const domain = domains[i] || {};
@@ -20,15 +48,21 @@ export function buildDomains(doc) {
     sec.dataset.domain = domain.domain || '';
     sec.dataset.leadSeverity = domainSev;
 
-    const hdr = el('div', 'domain-header domain-header--' + domainSev);
+    const details = el('details', 'report-domain__details');
+    details.open = domainSev === 'critical' || domainSev === 'warning';
+
+    const hdr = document.createElement('summary');
+    hdr.className = 'domain-header domain-header--' + domainSev;
     const dot = el('span', 'toc-dot toc-dot--' + domainSev); hdr.appendChild(dot);
     const title = el('span', 'domain-header__name'); title.textContent = domain.domain || 'Domain';
     hdr.appendChild(title);
+    const histogram = buildDomainHistogram(domain);
+    hdr.appendChild(histogram);
     const domSevLabel = domainSevLabel(domain.leadSeverity);
     if (domSevLabel !== 'Info') {
       const pill = el('span', 'domain-header__sev domain-header__sev--' + domainSev); pill.textContent = domSevLabel; hdr.appendChild(pill);
     }
-    sec.appendChild(hdr);
+    details.appendChild(hdr);
 
     const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
     if (insights.length) {
@@ -47,7 +81,7 @@ export function buildDomains(doc) {
         insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`));
       }
       insightsSec.appendChild(insightsList);
-      sec.appendChild(insightsSec);
+      details.appendChild(insightsSec);
     }
 
     const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
@@ -84,8 +118,10 @@ export function buildDomains(doc) {
         });
         body.appendChild(loadMore);
       }
-      sec.appendChild(body);
+      details.appendChild(body);
     }
+
+    sec.appendChild(details);
 
     wrap.appendChild(sec);
   }

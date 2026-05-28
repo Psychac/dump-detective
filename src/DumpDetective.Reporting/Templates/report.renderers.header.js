@@ -1,6 +1,7 @@
 // Header, health scorecard, and executive summary renderers.
 // Covers both single-dump and trend modes; the isTrend flag selects the appropriate layout.
 import { el, t, formatBytes } from './report.dom.js';
+import { domainAnchorId } from './report.renderers.shared.js';
 
 // ── Report header (hero + meta-stat rows) ────────────────────────────────────
 
@@ -490,45 +491,131 @@ export function buildExecutiveSummary(doc) {
     }
   }
 
-  // ── KPI strip (single dump only) ────────────────────────────────────────
-  if (!isTrendExecSection) {
-    const strip = el('div', 'exec-kpi-strip');
-
-  function kpi(label, value, sev) {
+  function toNumber(value) {
     if (value == null) return null;
-    const d = el('div', 'exec-kpi');
-    const lbl = el('span', 'exec-kpi__label'); lbl.textContent = label; d.appendChild(lbl);
-    const val = el('span', 'exec-kpi__value' + (sev ? ' exec-kpi__value--' + sev : '')); val.textContent = String(value); d.appendChild(val);
-    return d;
-  }
-  function kpiGroup(...items) {
-    const g = el('div', 'exec-kpi-group');
-    for (const item of items) { if (item) g.appendChild(item); }
-    return g.children.length ? g : null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 
-  const g1 = kpiGroup(
-    kpi('Total heap', formatBytes(Number(summary.totalManagedBytes || 0))),
-    summary.lohBytes != null ? kpi('LOH', formatBytes(Number(summary.lohBytes)) + (summary.lohPercent != null ? ' (' + Number(summary.lohPercent).toFixed(1) + '%)' : '')) : null,
-    summary.gen2Percent != null ? kpi('Gen2', Number(summary.gen2Percent).toFixed(1) + '%', Number(summary.gen2Percent) > 60 ? 'warning' : null) : null
-  );
-  const gcPressureVal = summary.gcPressureLevel || (summary.gcPressureScore != null ? summary.gcPressureScore + '/100' : null);
-  const g2 = kpiGroup(
-    gcPressureVal ? kpi('GC pressure', gcPressureVal, summary.gcPressureScore > 66 ? 'warning' : null) : null,
-    summary.leakCandidateCount != null ? kpi('Leak suspects', String(summary.leakCandidateCount), summary.leakCandidateCount > 0 ? 'warning' : 'ok') : null,
-    summary.finalizerQueueCount != null ? kpi('Finalizer queue', Number(summary.finalizerQueueCount).toLocaleString('en-US'), summary.finalizerQueueCount > 1000 ? 'warning' : null) : null
-  );
-  const g3 = kpiGroup(
-    summary.blockedThreads != null ? kpi('Blocked threads', String(summary.blockedThreads), summary.blockedThreads > 0 ? 'warning' : 'ok') : null,
-    summary.deadlockCycles != null ? kpi('Deadlocks', String(summary.deadlockCycles), summary.deadlockCycles > 0 ? 'critical' : 'ok') : null,
-    summary.hangScore != null ? kpi('Hang score', summary.hangScore + '/100', summary.hangScore < 50 ? 'warning' : 'ok') : null
-  );
-  const g4 = kpiGroup(
-    summary.activeExceptions != null ? kpi('Active exceptions', String(summary.activeExceptions), summary.activeExceptions > 0 ? 'critical' : 'ok') : null
-  );
+  function formatInt(value) {
+    const n = toNumber(value);
+    return n == null ? null : Math.round(n).toLocaleString('en-US');
+  }
 
-    for (const g of [g1, g2, g3, g4]) { if (g && g.children.length) strip.appendChild(g); }
-    if (strip.children.length) sec.appendChild(strip);
+  function statusClass(level) {
+    return level === 'critical' || level === 'warning' || level === 'ok' ? level : 'ok';
+  }
+
+  // ── KPI dashboard (single dump only) ────────────────────────────────────
+  if (!isTrendExecSection) {
+    const dashboard = el('div', 'exec-kpi-dashboard');
+
+    const totalManagedBytes = toNumber(summary.totalManagedBytes);
+    const lohBytes = toNumber(summary.lohBytes);
+    const lohPercent = toNumber(summary.lohPercent);
+    const gen2Percent = toNumber(summary.gen2Percent);
+    const leakCandidateCount = toNumber(summary.leakCandidateCount);
+    const finalizerQueueCount = toNumber(summary.finalizerQueueCount);
+    const blockedThreads = toNumber(summary.blockedThreads);
+    const deadlockCycles = toNumber(summary.deadlockCycles);
+    const hangScore = toNumber(summary.hangScore);
+    const gcPressureScore = toNumber(summary.gcPressureScore);
+    const activeExceptions = toNumber(summary.activeExceptions);
+
+    function buildKpiTile(label, value, context, status, thresholdText) {
+      if (value == null || value === '') return null;
+      const tile = el('section', 'exec-kpi-tile exec-kpi-tile--' + statusClass(status));
+      const head = el('div', 'exec-kpi-tile__head');
+      const lbl = el('span', 'exec-kpi-tile__label'); lbl.textContent = label; head.appendChild(lbl);
+      const state = el('span', 'exec-kpi-tile__state exec-kpi-tile__state--' + statusClass(status));
+      state.textContent = statusClass(status).toUpperCase();
+      head.appendChild(state);
+      tile.appendChild(head);
+
+      const val = el('div', 'exec-kpi-tile__value'); val.textContent = String(value); tile.appendChild(val);
+      if (context) {
+        const ctx = el('div', 'exec-kpi-tile__context');
+        ctx.textContent = context;
+        tile.appendChild(ctx);
+      }
+      if (thresholdText) {
+        const hint = el('div', 'exec-kpi-tile__threshold');
+        hint.textContent = thresholdText;
+        tile.appendChild(hint);
+      }
+      return tile;
+    }
+
+    let heapStatus = 'ok';
+    if ((lohPercent != null && lohPercent >= 25) || (gen2Percent != null && gen2Percent >= 75)) heapStatus = 'critical';
+    else if ((lohPercent != null && lohPercent >= 15) || (gen2Percent != null && gen2Percent >= 60)) heapStatus = 'warning';
+    const heapContext = [
+      lohBytes != null ? ('LOH ' + formatBytes(lohBytes) + (lohPercent != null ? ' (' + lohPercent.toFixed(1) + '%)' : '')) : null,
+      gen2Percent != null ? ('Gen2 ' + gen2Percent.toFixed(1) + '%') : null
+    ].filter(Boolean).join(' | ');
+
+    let leakStatus = 'ok';
+    if ((leakCandidateCount != null && leakCandidateCount >= 10) || (finalizerQueueCount != null && finalizerQueueCount > 5000)) leakStatus = 'critical';
+    else if ((leakCandidateCount != null && leakCandidateCount > 0) || (finalizerQueueCount != null && finalizerQueueCount > 1000)) leakStatus = 'warning';
+    const leakContext = [
+      leakCandidateCount != null ? (Math.round(leakCandidateCount) + ' suspects') : null,
+      finalizerQueueCount != null ? ('Finalizer queue ' + finalizerQueueCount.toLocaleString('en-US')) : null
+    ].filter(Boolean).join(' | ');
+
+    let threadStatus = 'ok';
+    if ((deadlockCycles != null && deadlockCycles > 0) || (blockedThreads != null && blockedThreads >= 20) || (hangScore != null && hangScore < 25)) threadStatus = 'critical';
+    else if ((blockedThreads != null && blockedThreads > 0) || (hangScore != null && hangScore < 50)) threadStatus = 'warning';
+    const threadContext = [
+      blockedThreads != null ? ('Blocked ' + Math.round(blockedThreads)) : null,
+      deadlockCycles != null ? ('Deadlocks ' + Math.round(deadlockCycles)) : null,
+      hangScore != null ? ('Hang score ' + Math.round(hangScore) + '/100') : null
+    ].filter(Boolean).join(' | ');
+
+    let runtimeStatus = 'ok';
+    if ((activeExceptions != null && activeExceptions > 0) || (gcPressureScore != null && gcPressureScore >= 85)) runtimeStatus = 'critical';
+    else if ((gcPressureScore != null && gcPressureScore >= 66)) runtimeStatus = 'warning';
+    const gcPressureLabel = summary.gcPressureLevel || (gcPressureScore != null ? (Math.round(gcPressureScore) + '/100') : null);
+    const runtimeContext = [
+      gcPressureLabel ? ('GC pressure ' + gcPressureLabel) : null,
+      activeExceptions != null ? ('Active exceptions ' + formatInt(activeExceptions)) : null
+    ].filter(Boolean).join(' | ');
+
+    const tiles = [
+      buildKpiTile(
+        'Managed Heap',
+        totalManagedBytes != null ? formatBytes(totalManagedBytes) : null,
+        heapContext,
+        heapStatus,
+        'Warn: LOH >= 15% or Gen2 >= 60% | Crit: LOH >= 25% or Gen2 >= 75%'
+      ),
+      buildKpiTile(
+        'Leak Signals',
+        leakCandidateCount != null ? Math.round(leakCandidateCount).toLocaleString('en-US') : null,
+        leakContext,
+        leakStatus,
+        'Warn: suspects > 0 or finalizer queue > 1,000 | Crit: suspects >= 10 or finalizer queue > 5,000'
+      ),
+      buildKpiTile(
+        'Threading Risk',
+        blockedThreads != null ? Math.round(blockedThreads).toLocaleString('en-US') : null,
+        threadContext,
+        threadStatus,
+        'Warn: blocked > 0 or hang < 50 | Crit: deadlocks > 0, blocked >= 20, or hang < 25'
+      ),
+      buildKpiTile(
+        'Runtime Pressure',
+        gcPressureLabel,
+        runtimeContext,
+        runtimeStatus,
+        'Warn: GC pressure >= 66 | Crit: GC pressure >= 85 or active exceptions > 0'
+      )
+    ];
+
+    for (const tile of tiles) {
+      if (tile) dashboard.appendChild(tile);
+    }
+
+    if (dashboard.children.length) sec.appendChild(dashboard);
   }
 
   // ── Score summary ─────────────────────────────────────────────────────────
@@ -698,27 +785,100 @@ export function buildExecutiveSummary(doc) {
 
   // ── Findings (single dump only) ──────────────────────────────────────────
   if (!isTrendExecSection) {
-  const critFindings = summary.criticalFindings || [];
-  const warnFindings = summary.warningFindings || [];
-  if (critFindings.length || warnFindings.length) {
-    const findingsWrap = el('div', 'exec-findings');
-    appendExecFindingGroup(findingsWrap, 'critical', critFindings);
-    appendExecFindingGroup(findingsWrap, 'warning', warnFindings);
-    sec.appendChild(findingsWrap);
-  }
+    const critFindings = summary.criticalFindings || [];
+    const warnFindings = summary.warningFindings || [];
+    if (critFindings.length || warnFindings.length) {
+      const findingsWrap = el('div', 'exec-triage');
+      const heading = el('div', 'exec-recommendations__heading');
+      heading.textContent = 'Triage';
+      findingsWrap.appendChild(heading);
+
+      const grid = el('div', 'exec-triage__grid');
+      const combined = critFindings.concat(warnFindings).slice(0, 10);
+      for (let fi = 0; fi < combined.length; fi++) {
+        const finding = combined[fi];
+        const sev = String(finding.severity || 'Info').toLowerCase();
+        const row = el('article', 'exec-triage-card exec-triage-card--' + sev);
+
+        const title = el('div', 'exec-triage-card__title');
+        title.textContent = finding.title || '';
+        row.appendChild(title);
+
+        if (finding.evidence) {
+          const ev = el('div', 'exec-triage-card__evidence');
+          ev.textContent = finding.evidence;
+          row.appendChild(ev);
+        }
+
+        if (finding.recommendation) {
+          const rec = el('div', 'exec-triage-card__rec');
+          rec.textContent = '-> ' + finding.recommendation;
+          row.appendChild(rec);
+        }
+
+        const meta = el('div', 'exec-triage-card__meta');
+        if (finding.analyzer) {
+          const analyzer = el('span', 'exec-triage-card__analyzer');
+          analyzer.textContent = finding.analyzer;
+          meta.appendChild(analyzer);
+        }
+
+        if (finding.confidenceScore != null) {
+          const confidenceScore = Number(finding.confidenceScore);
+          const meter = el('span', 'exec-confidence-meter');
+          const slots = Math.max(1, Math.min(4, Math.round(confidenceScore * 4)));
+          meter.setAttribute('aria-label', 'Confidence ' + confidenceScore.toFixed(2));
+          for (let si = 0; si < 4; si++) {
+            const slot = el('span', 'exec-confidence-meter__slot' + (si < slots ? ' exec-confidence-meter__slot--on' : ''));
+            meter.appendChild(slot);
+          }
+          meta.appendChild(meter);
+        }
+
+        if (meta.childNodes.length) row.appendChild(meta);
+        grid.appendChild(row);
+      }
+
+      findingsWrap.appendChild(grid);
+      sec.appendChild(findingsWrap);
+    }
   }
 
   // ── Recommendations ───────────────────────────────────────────────────────
   const recs = summary.topRecommendations || [];
   if (recs.length && !isTrendExecSection) {
     const recWrap = el('div', 'exec-recommendations');
-    const heading = el('div', 'exec-recommendations__heading'); heading.textContent = 'Top recommendations'; recWrap.appendChild(heading);
+    const heading = el('div', 'exec-recommendations__heading'); heading.textContent = 'Top 3 Actions'; recWrap.appendChild(heading);
     const ol = el('ol', 'exec-rec-list');
+    const analyzerSectionMap = new Map();
+    if (Array.isArray(doc.domains)) {
+      for (let di = 0; di < doc.domains.length; di++) {
+        const domain = doc.domains[di];
+        const domainId = domainAnchorId(domain, di);
+        const sections = Array.isArray(domain.sections) ? domain.sections : [];
+        for (let si = 0; si < sections.length; si++) {
+          const section = sections[si];
+          const analyzerName = String(section.analyzerName || '').toLowerCase();
+          if (!analyzerName || analyzerSectionMap.has(analyzerName)) continue;
+          analyzerSectionMap.set(analyzerName, (section.sectionId && section.sectionId.trim()) ? section.sectionId.trim() : domainId);
+        }
+      }
+    }
+
     for (const finding of recs.slice(0, 3)) {
       const li = el('li', 'exec-rec-item');
       const num = el('span', 'exec-rec-num'); num.textContent = String(ol.children.length + 1); li.appendChild(num);
       const body = el('div', 'exec-rec-body');
-      if (finding.title) { const title = el('div', 'exec-rec-title'); title.textContent = finding.title; body.appendChild(title); }
+      if (finding.title) {
+        const targetAnchor = analyzerSectionMap.get(String(finding.analyzer || '').toLowerCase()) || 'sec-action-queue';
+        const titleLink = document.createElement('a');
+        titleLink.className = 'exec-rec-link';
+        titleLink.href = '#' + targetAnchor;
+        titleLink.textContent = finding.title;
+        const title = el('div', 'exec-rec-title');
+        title.appendChild(titleLink);
+        body.appendChild(title);
+      }
       if (finding.recommendation) { const text = el('div', 'exec-rec-text'); text.textContent = finding.recommendation; body.appendChild(text); }
       li.appendChild(body);
       ol.appendChild(li);

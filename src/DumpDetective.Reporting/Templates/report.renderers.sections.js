@@ -4,6 +4,67 @@
 import { el } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
 
+function extractCellDisplay(cellData) {
+  if (cellData && cellData.display != null) return String(cellData.display);
+  if (cellData != null) return String(cellData);
+  return '';
+}
+
+function extractCellRaw(cellData) {
+  if (!cellData || typeof cellData !== 'object') return null;
+  if (cellData.rawValue != null && Number.isFinite(Number(cellData.rawValue))) return Number(cellData.rawValue);
+  return null;
+}
+
+function parseBytesFromDisplay(display) {
+  const text = String(display || '').trim();
+  const m = text.match(/^([+-]?\d[\d,]*(?:\.\d+)?)\s*(B|KB|MB|GB|TB|PB|EB)$/i);
+  if (!m) return null;
+  const value = Number(m[1].replace(/,/g, ''));
+  if (!Number.isFinite(value)) return null;
+  const unit = m[2].toUpperCase();
+  const power = unit === 'B' ? 0 :
+    unit === 'KB' ? 1 :
+    unit === 'MB' ? 2 :
+    unit === 'GB' ? 3 :
+    unit === 'TB' ? 4 :
+    unit === 'PB' ? 5 : 6;
+  return value * Math.pow(1024, power);
+}
+
+function buildTopTypesTreemap(tbl) {
+  const title = String(tbl.title || '').toLowerCase();
+  if (!(title.includes('top') && title.includes('type'))) return null;
+  if (!Array.isArray(tbl.headers) || !Array.isArray(tbl.rows)) return null;
+
+  const headers = tbl.headers.map(function (h) { return String(h || '').toLowerCase(); });
+  const labelIdx = headers.findIndex(function (h) { return h.includes('type') || h.includes('name'); });
+  const sizeIdx = headers.findIndex(function (h) { return h.includes('size') || h.includes('bytes') || h.includes('retained'); });
+  if (labelIdx < 0 || sizeIdx < 0) return null;
+
+  const items = [];
+  for (let ri = 0; ri < tbl.rows.length && items.length < 12; ri++) {
+    const row = tbl.rows[ri];
+    const cells = Array.isArray(row) ? row : (row && Array.isArray(row.cells) ? row.cells : []);
+    if (!cells.length || sizeIdx >= cells.length || labelIdx >= cells.length) continue;
+    const label = extractCellDisplay(cells[labelIdx]);
+    const raw = extractCellRaw(cells[sizeIdx]);
+    const parsed = parseBytesFromDisplay(extractCellDisplay(cells[sizeIdx]));
+    const value = raw != null ? raw : parsed;
+    if (!label || value == null || value <= 0) continue;
+    items.push({ label: label, value: value });
+  }
+
+  if (items.length < 2) return null;
+  const chart = el('div', 'detail-chart');
+  chart.dataset.chartKind = 'treemap';
+  chart.dataset.chartPayload = JSON.stringify({ items: items, caption: 'Top types by size' });
+  const titleEl = el('div', 'detail-chart__title');
+  titleEl.textContent = 'Top Types Treemap';
+  chart.appendChild(titleEl);
+  return chart;
+}
+
 // ── Analyzer section renderer ─────────────────────────────────────────────────
 
 export function buildAnalyzerSection(section, i) {
@@ -90,8 +151,40 @@ export function buildAnalyzerSection(section, i) {
       tblSummary.textContent = (tbl.title || 'Table') + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
       tblDetails.appendChild(tblSummary);
       if (tbl.headers && tbl.headers.length) {
+        const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
+        const tools = el('div', 'table-tools');
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'table-filter-input';
+        search.placeholder = 'Filter table rows...';
+        search.setAttribute('aria-label', 'Filter table rows');
+        search.setAttribute('data-target-table', tableId);
+        tools.appendChild(search);
+
+        const count = el('span', 'table-tools__count');
+        count.setAttribute('data-target-table-count', tableId);
+        count.textContent = rowCount + ' rows';
+        tools.appendChild(count);
+
+        if (limit > 0 && rowCount > limit) {
+          const showAll = document.createElement('button');
+          showAll.type = 'button';
+          showAll.className = 'action-btn table-show-all-btn';
+          showAll.setAttribute('data-target-table', tableId);
+          showAll.textContent = 'Show all ' + rowCount + ' rows';
+          tools.appendChild(showAll);
+        }
+        tblDetails.appendChild(tools);
+
+        const treemap = buildTopTypesTreemap(tbl);
+        if (treemap) tblDetails.appendChild(treemap);
+
         const tblWrap = el('div', 'table-wrap');
         const tableEl = document.createElement('table');
+        tableEl.id = tableId;
+        tableEl.classList.add('detail-filterable-table');
+        tableEl.dataset.limit = String(limit > 0 ? limit : 0);
+        tableEl.dataset.showAll = '0';
         const thead = document.createElement('thead');
         const hrow = document.createElement('tr');
         for (let hi = 0; hi < tbl.headers.length; hi++) {
@@ -99,28 +192,25 @@ export function buildAnalyzerSection(section, i) {
         }
         thead.appendChild(hrow); tableEl.appendChild(thead);
         const tbody = document.createElement('tbody');
-        const displayRows = limit > 0 && rowCount > limit ? tbl.rows.slice(0, limit) : (tbl.rows || []);
-        for (let ri = 0; ri < displayRows.length; ri++) {
-          const dataRow = displayRows[ri]; const tr = document.createElement('tr');
+        const allRows = tbl.rows || [];
+        for (let ri = 0; ri < allRows.length; ri++) {
+          const dataRow = allRows[ri]; const tr = document.createElement('tr');
+          tr.dataset.rowIndex = String(ri);
           const cells = Array.isArray(dataRow)
             ? dataRow
             : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
           for (let ci = 0; ci < cells.length; ci++) {
             const td = document.createElement('td');
             const cellData = cells[ci];
-            td.textContent = (cellData && cellData.display != null) ? cellData.display : (cellData != null ? String(cellData) : '');
+            td.textContent = extractCellDisplay(cellData);
             tr.appendChild(td);
+          }
+          if (limit > 0 && rowCount > limit && ri >= limit) {
+            tr.hidden = true;
           }
           tbody.appendChild(tr);
         }
         tableEl.appendChild(tbody);
-        if (limit > 0 && rowCount > limit) {
-          const tfoot = document.createElement('tfoot');
-          const tfrow = document.createElement('tr');
-          const tftd = document.createElement('td'); tftd.colSpan = tbl.headers.length;
-          tftd.className = 'table-footer-note'; tftd.textContent = '\u2026 ' + (rowCount - limit) + ' more rows hidden (rowLimit=' + limit + ')';
-          tfrow.appendChild(tftd); tfoot.appendChild(tfrow); tableEl.appendChild(tfoot);
-        }
         tblWrap.appendChild(tableEl); tblDetails.appendChild(tblWrap);
       }
       content.appendChild(tblDetails);

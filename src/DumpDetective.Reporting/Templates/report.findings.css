@@ -74,6 +74,19 @@
 .finding-card__confidence-chip--medhigh { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
 .finding-card__confidence-chip--medium { background: #fff7ed; color: #9a3412; border-color: #fdba74; }
 .finding-card__confidence-chip--low { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+.finding-card__confidence-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.finding-card__confidence-slot {
+  width: 8px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.45);
+}
+.finding-card__confidence-slot--on { background: currentColor; }
+.finding-card__confidence-score { font-variant-numeric: tabular-nums; }
 .finding-card__title {
   margin: 0;
   padding-left: 0;

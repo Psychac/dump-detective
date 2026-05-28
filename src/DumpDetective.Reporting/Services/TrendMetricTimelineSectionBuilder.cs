@@ -21,102 +21,131 @@ internal static class TrendMetricTimelineSectionBuilder
         var regressionsByAnalyzer = trendData.Overall.ToDictionary(
             r => r.AnalyzerName, r => r.Regressions.Count, StringComparer.Ordinal);
 
-        var orderedTimeline = trendData.Timeline
-            .OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName))
+        var headlineByAnalyzer = trendData.Timeline
+            .ToDictionary(t => t.AnalyzerName, StringComparer.Ordinal);
+
+        var scopedByAnalyzer = trendData.ScopedTimeline
+            .ToDictionary(t => t.AnalyzerName, StringComparer.Ordinal);
+
+        var analyzers = headlineByAnalyzer.Keys
+            .Union(scopedByAnalyzer.Keys, StringComparer.Ordinal)
+            .OrderByDescending(a => regressionsByAnalyzer.GetValueOrDefault(a))
             .ToList();
 
-        foreach (AnalyzerMetricTimeline analyzerTimeline in orderedTimeline)
+        if (analyzers.Count == 0)
         {
-            var rows = new List<TableRow>();
+            return new AnalyzerDetailSection(
+                AnalyzerName: "TrendMetricTimeline",
+                DisplayTitle: "Metric Timeline",
+                SortOrder: 40,
+                Blocks: [],
+                SectionId: "T4",
+                Domain: "Trend");
+        }
 
-            foreach (MetricTimelinePoint point in analyzerTimeline.Points)
+        var domainBuckets = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (string analyzerName in analyzers)
+        {
+            string domain = SectionIdDomainMap.GetDomain(analyzerName);
+            if (string.IsNullOrWhiteSpace(domain))
+                domain = "Other";
+
+            if (!domainBuckets.TryGetValue(domain, out List<string>? list))
             {
-                if (point.Values.All(double.IsNaN)) continue;
+                list = [];
+                domainBuckets[domain] = list;
+            }
 
-                double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
-                double lastVal  = point.Values.Last(v => !double.IsNaN(v));
-                double delta    = lastVal - firstVal;
-                double? deltaPercent = Math.Abs(firstVal) > double.Epsilon
-                    ? delta * 100.0 / firstVal
-                    : null;
+            list.Add(analyzerName);
+        }
 
-                RegressionSeverity severity = ComputeSeverity(point.Direction, delta, deltaPercent);
-                TrendClassification classification = ClassifyTrend(point.Direction, delta, severity);
+        List<string> orderedDomains = [];
+        foreach (string d in SectionIdDomainMap.DomainsInOrder)
+        {
+            if (domainBuckets.ContainsKey(d))
+                orderedDomains.Add(d);
+        }
 
-                string status = classification switch
+        foreach (string d in domainBuckets.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            if (!orderedDomains.Contains(d, StringComparer.Ordinal))
+                orderedDomains.Add(d);
+        }
+
+        bool firstDomain = true;
+        foreach (string domain in orderedDomains)
+        {
+            List<string> domainAnalyzers = domainBuckets[domain]
+                .OrderByDescending(a => regressionsByAnalyzer.GetValueOrDefault(a))
+                .ToList();
+
+            if (domainAnalyzers.Count == 0)
+                continue;
+
+            if (!firstDomain)
+                blocks.Add(new BlankBlock());
+            firstDomain = false;
+
+            blocks.Add(new HeadingBlock($"Domain: {domain}", 1));
+
+            foreach (string analyzerName in domainAnalyzers)
+            {
+                blocks.Add(new BlankBlock());
+                blocks.Add(new HeadingBlock(analyzerName, 2));
+
+                if (headlineByAnalyzer.TryGetValue(analyzerName, out AnalyzerMetricTimeline? headlineTimeline))
                 {
-                    TrendClassification.SevereRegression => "Severe regression",
-                    TrendClassification.Regression       => "Regression",
-                    TrendClassification.Improvement      => "Improvement",
-                    _                                    => "Stable"
-                };
+                    blocks.Add(new TextBlock("Metric Trends"));
 
-                string deltaDisplay = delta == 0
-                    ? "no change"
-                    : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}";
-                string deltaPercentDisplay = deltaPercent.HasValue
-                    ? $"{deltaPercent.Value:+0.0;-0.0}%"
-                    : "—";
-                string patternDisplay = BuildPatternLabel(point.Values);
+                    List<TableRow> rows = BuildRows(
+                        analyzerName,
+                        headlineTimeline.Points,
+                        snapshots,
+                        includeScopeLabel: false,
+                        scopedMode: false);
 
-                // Determine snapshot with largest adjacent change to link to
-                int linkSnapshot = FindLargestChangeSnapshot(point.Values, snapshots.Count);
-
-                string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    values = point.Values,
-                    unit = point.Unit,
-                    direction = point.Direction.ToString()
-                });
-
-                var rowCells = new List<TableCell>(6 + snapshots.Count)
-                {
-                    new TableCell(point.Key, LinkTarget: $"detail-{linkSnapshot}"),
-                    new TableCell("__SPARK__" + sparkPayload)
-                };
-
-                for (int i = 0; i < snapshots.Count; i++)
-                {
-                    double value = i < point.Values.Count ? point.Values[i] : double.NaN;
-                    string display = double.IsNaN(value)
-                        ? "—"
-                        : FormatHelper.FormatMetricValue(value, point.Unit);
-                    rowCells.Add(new TableCell(display, ToSortableLong(value)));
+                    if (rows.Count > 0)
+                    {
+                        AddTimelineTableBlock(
+                            blocks,
+                            snapshots,
+                            $"{analyzerName} metric timeline",
+                            rows,
+                            firstColumnHeader: "Metric");
+                    }
                 }
 
-                rowCells.Add(new TableCell(deltaDisplay, ToSortableLong(delta)));
-                rowCells.Add(new TableCell(deltaPercentDisplay, ToSortableLong(deltaPercent ?? 0)));
-                rowCells.Add(new TableCell(patternDisplay));
-                rowCells.Add(new TableCell(status, (long)severity));
+                if (scopedByAnalyzer.TryGetValue(analyzerName, out AnalyzerMetricTimeline? scopedTimeline))
+                {
+                    blocks.Add(new TextBlock("Comparison Trends"));
 
-                rows.Add(new TableRow(rowCells));
+                    var scopedMetricGroups = scopedTimeline.Points
+                        .Where(p => ShouldIncludeScopedMetric(analyzerName, p.Key))
+                        .GroupBy(p => p.Key, StringComparer.Ordinal)
+                        .OrderBy(g => g.Key, StringComparer.Ordinal)
+                        .ToList();
+
+                    foreach (var metricGroup in scopedMetricGroups)
+                    {
+                        List<TableRow> rows = BuildRows(
+                            analyzerName,
+                            metricGroup.ToList(),
+                            snapshots,
+                            includeScopeLabel: true,
+                            scopedMode: true);
+
+                        if (rows.Count == 0)
+                            continue;
+
+                        AddTimelineTableBlock(
+                            blocks,
+                            snapshots,
+                            BuildMetricTableCaption(analyzerName, metricGroup.Key, scoped: true),
+                            rows,
+                            firstColumnHeader: BuildScopedFirstColumnHeader(metricGroup.Key));
+                    }
+                }
             }
-
-            if (rows.Count == 0) continue;
-
-            if (blocks.Count > 0)
-                blocks.Add(new BlankBlock());
-
-            var headers = new List<string>(6 + snapshots.Count)
-            {
-                "Metric",
-                $"Trend ({snapshots.Count})"
-            };
-
-            for (int i = 0; i < snapshots.Count; i++)
-            {
-                headers.Add($"Dump {i + 1}");
-            }
-
-            headers.Add("Δ");
-            headers.Add("Δ%");
-            headers.Add("Pattern");
-            headers.Add("Status");
-
-            blocks.Add(new TableBlock(
-                Caption: $"{analyzerTimeline.AnalyzerName}",
-                Headers: headers,
-                Rows: rows));
         }
 
         return new AnalyzerDetailSection(
@@ -126,6 +155,217 @@ internal static class TrendMetricTimelineSectionBuilder
             Blocks:       blocks,
             SectionId:    "T4",
             Domain:       "Trend");
+    }
+
+    private static string BuildMetricTableCaption(string analyzerName, string metricKey, bool scoped)
+    {
+        if (string.Equals(analyzerName, "Memory Analysis", StringComparison.Ordinal))
+        {
+            if (string.Equals(metricKey, "type.bytes", StringComparison.Ordinal))
+                return scoped ? "Memory Analysis top types by bytes" : "Memory Analysis metric trend: type.bytes";
+            if (string.Equals(metricKey, "type.count", StringComparison.Ordinal))
+                return scoped ? "Memory Analysis top types by count" : "Memory Analysis metric trend: type.count";
+        }
+
+        return scoped
+            ? $"{analyzerName} comparison trend: {metricKey}"
+            : $"{analyzerName} metric trend: {metricKey}";
+    }
+
+    private static bool ShouldIncludeScopedMetric(string analyzerName, string metricKey)
+    {
+        if (string.Equals(analyzerName, "Memory Analysis", StringComparison.Ordinal))
+        {
+            return string.Equals(metricKey, "type.bytes", StringComparison.Ordinal)
+                || string.Equals(metricKey, "type.count", StringComparison.Ordinal);
+        }
+
+        return true;
+    }
+
+    private static string BuildScopedFirstColumnHeader(string metricKey)
+    {
+        if (metricKey.Contains(".type.", StringComparison.Ordinal))
+            return "Type";
+        if (metricKey.Contains(".category.", StringComparison.Ordinal))
+            return "Category";
+        if (metricKey.Contains(".kind.", StringComparison.Ordinal))
+            return "Kind";
+        if (metricKey.Contains(".module.", StringComparison.Ordinal))
+            return "Module";
+        if (metricKey.Contains(".source.", StringComparison.Ordinal))
+            return "Source";
+        if (metricKey.Contains(".target.", StringComparison.Ordinal))
+            return "Target";
+        if (metricKey.Contains(".edge.", StringComparison.Ordinal))
+            return "Edge";
+        if (metricKey.Contains(".byname.", StringComparison.Ordinal))
+            return "Name";
+
+        return "Entity";
+    }
+
+    private static void AddTimelineTableBlock(
+        List<SectionBlock> blocks,
+        IReadOnlyList<AnalysisSnapshot> snapshots,
+        string caption,
+        IReadOnlyList<TableRow> rows,
+        string firstColumnHeader)
+    {
+        if (blocks.Count > 0)
+            blocks.Add(new BlankBlock());
+
+        var headers = new List<string>(6 + snapshots.Count)
+        {
+            firstColumnHeader,
+            $"Trend ({snapshots.Count})"
+        };
+
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            headers.Add($"Dump {i + 1}");
+        }
+
+        headers.Add("Δ");
+        headers.Add("Δ%");
+        headers.Add("Pattern");
+        headers.Add("Status");
+
+        blocks.Add(new TableBlock(
+            Caption: caption,
+            Headers: headers,
+            Rows: rows));
+    }
+
+    private static List<TableRow> BuildRows(
+        string analyzerName,
+        IReadOnlyList<MetricTimelinePoint> points,
+        IReadOnlyList<AnalysisSnapshot> snapshots,
+        bool includeScopeLabel,
+        bool scopedMode)
+    {
+        var rows = new List<(TableRow Row, long SortValue)>();
+
+        foreach (MetricTimelinePoint point in points)
+        {
+            if (point.Values.All(double.IsNaN))
+                continue;
+
+            double firstVal = point.Values.FirstOrDefault(v => !double.IsNaN(v));
+            double lastVal = point.Values.Last(v => !double.IsNaN(v));
+            double delta = lastVal - firstVal;
+            double? deltaPercent = Math.Abs(firstVal) > double.Epsilon
+                ? delta * 100.0 / firstVal
+                : null;
+
+            RegressionSeverity severity = ComputeSeverity(point.Direction, delta, deltaPercent);
+            TrendClassification classification = ClassifyTrend(point.Direction, delta, severity);
+
+            string status = classification switch
+            {
+                TrendClassification.SevereRegression => "Severe regression",
+                TrendClassification.Regression => "Regression",
+                TrendClassification.Improvement => "Improvement",
+                _ => "Stable"
+            };
+
+            string deltaDisplay = delta == 0
+                ? "no change"
+                : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}";
+            string deltaPercentDisplay = deltaPercent.HasValue
+                ? $"{deltaPercent.Value:+0.0;-0.0}%"
+                : "—";
+            string patternDisplay = BuildPatternLabel(point.Values);
+
+            int linkSnapshot = FindLargestChangeSnapshot(point.Values, snapshots.Count);
+
+            string sparkPayload = SerializeSparklinePayload(point.Values, point.Unit, point.Direction.ToString());
+
+            string metricLabel = includeScopeLabel
+                ? (string.IsNullOrWhiteSpace(point.Scope) ? point.Key : point.Scope)
+                : point.Key;
+
+            var rowCells = new List<TableCell>(6 + snapshots.Count)
+            {
+                new TableCell(metricLabel, LinkTarget: $"detail-{linkSnapshot}"),
+                new TableCell("__SPARK__" + sparkPayload)
+            };
+
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                double value = i < point.Values.Count ? point.Values[i] : double.NaN;
+                string display = double.IsNaN(value)
+                    ? "—"
+                    : FormatHelper.FormatMetricValue(value, point.Unit);
+                rowCells.Add(new TableCell(display, ToSortableLong(value)));
+            }
+
+            rowCells.Add(new TableCell(deltaDisplay, ToSortableLong(delta)));
+            rowCells.Add(new TableCell(deltaPercentDisplay, ToSortableLong(deltaPercent ?? 0)));
+            rowCells.Add(new TableCell(patternDisplay));
+            rowCells.Add(new TableCell(status, (long)severity));
+
+            long sortValue = scopedMode
+                ? BuildScopedSortValue(analyzerName, point, severity, delta)
+                : ((long)severity * 1_000_000_000L) + ToSortableLong(Math.Abs(delta));
+            rows.Add((new TableRow(rowCells), sortValue));
+        }
+
+        return rows
+            .OrderByDescending(r => r.SortValue)
+            .Select(r => r.Row)
+            .ToList();
+    }
+
+    private static long BuildScopedSortValue(
+        string analyzerName,
+        MetricTimelinePoint point,
+        RegressionSeverity severity,
+        double delta)
+    {
+        long profileRank = GetScopedProfileRank(analyzerName, point);
+        double latest = point.Values.LastOrDefault(v => !double.IsNaN(v));
+        long latestMagnitude = ToSortableLong(Math.Abs(latest));
+        long deltaMagnitude = ToSortableLong(Math.Abs(delta));
+
+        // Sort priority: severity > analyzer-specific profile > latest magnitude > delta magnitude.
+        return ((long)severity * 1_000_000_000_000L)
+             + (profileRank * 1_000_000_000L)
+             + (latestMagnitude * 1_000L)
+             + deltaMagnitude;
+    }
+
+    private static long GetScopedProfileRank(string analyzerName, MetricTimelinePoint point)
+    {
+        string key = point.Key;
+
+        if (analyzerName == "Memory Analysis")
+        {
+            if (key == "type.bytes") return 500;
+            if (key == "type.count") return 450;
+            if (key.StartsWith("memory.bucket.", StringComparison.Ordinal)) return 400;
+            return 150;
+        }
+
+        if (analyzerName == "Hang Analysis")
+        {
+            if (key == "hang.wait.category") return 500;
+            return 200;
+        }
+
+        if (analyzerName == "Thread Analysis")
+        {
+            if (key == "thread.wait.category") return 500;
+            return 200;
+        }
+
+        if (analyzerName == "Crash Analysis")
+        {
+            if (key == "crash.exception.type") return 500;
+            return 200;
+        }
+
+        return 100;
     }
 
     private static int FindLargestChangeSnapshot(IReadOnlyList<double> values, int snapshotCount)
@@ -183,6 +423,23 @@ internal static class TrendMetricTimelineSectionBuilder
         if (rounded > long.MaxValue) return long.MaxValue;
         if (rounded < long.MinValue) return long.MinValue;
         return (long)rounded;
+    }
+
+    private static string SerializeSparklinePayload(
+        IReadOnlyList<double> values,
+        string unit,
+        string direction)
+    {
+        List<double?> safeValues = values
+            .Select(static v => double.IsFinite(v) ? (double?)v : null)
+            .ToList();
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            values = safeValues,
+            unit,
+            direction
+        });
     }
 
     private static string BuildPatternLabel(IReadOnlyList<double> values)

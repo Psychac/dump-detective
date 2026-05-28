@@ -173,6 +173,47 @@ public sealed class TrendAnalyzerTests
         signals["Leak Candidate Analysis"].Should().ContainSingle(s => s.TypeName == "MyApp.CacheBucket");
     }
 
+    [Fact]
+    public void ExtractTimeline_IncludesOnlyUnscopedMetrics()
+    {
+        AnalysisSnapshot first = MakeSnapshot(0, "Scoped Test Analyzer", new ScopedTestDomainResult(10, 4, 7));
+        AnalysisSnapshot second = MakeSnapshot(1, "Scoped Test Analyzer", new ScopedTestDomainResult(12, 5, 9));
+
+        TrendAnalyzer analyzer = new([new ScopedTestTrendComparer()]);
+
+        IReadOnlyList<AnalyzerMetricTimeline> timeline = analyzer.ExtractTimeline([first, second]);
+
+        timeline.Should().ContainSingle();
+        AnalyzerMetricTimeline analyzerTimeline = timeline[0];
+        analyzerTimeline.Points.Should().ContainSingle();
+        analyzerTimeline.Points[0].Key.Should().Be("metric.total");
+        analyzerTimeline.Points[0].Scope.Should().BeNull();
+        analyzerTimeline.Points[0].Values.Should().Equal([10, 12]);
+    }
+
+    [Fact]
+    public void ExtractScopedTimeline_PreservesScopedEntityRowsWithoutCollision()
+    {
+        AnalysisSnapshot first = MakeSnapshot(0, "Scoped Test Analyzer", new ScopedTestDomainResult(10, 4, 7));
+        AnalysisSnapshot second = MakeSnapshot(1, "Scoped Test Analyzer", new ScopedTestDomainResult(12, 5, 9));
+
+        TrendAnalyzer analyzer = new([new ScopedTestTrendComparer()]);
+
+        IReadOnlyList<AnalyzerMetricTimeline> scopedTimeline = analyzer.ExtractScopedTimeline([first, second]);
+
+        scopedTimeline.Should().ContainSingle();
+        AnalyzerMetricTimeline analyzerTimeline = scopedTimeline[0];
+        analyzerTimeline.Points.Should().HaveCount(2);
+
+        MetricTimelinePoint entityA = analyzerTimeline.Points.Single(p => p.Scope == "EntityA");
+        entityA.Key.Should().Be("metric.entity");
+        entityA.Values.Should().Equal([4, 5]);
+
+        MetricTimelinePoint entityB = analyzerTimeline.Points.Single(p => p.Scope == "EntityB");
+        entityB.Key.Should().Be("metric.entity");
+        entityB.Values.Should().Equal([7, 9]);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private static MetricDelta MetricDeltaHelper_Compute(
@@ -224,5 +265,28 @@ public sealed class TrendAnalyzerTests
                 b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount,
                 delta, pct, "objects", MetricTrendDirection.HigherIsWorse)];
         }
+    }
+
+    private sealed record ScopedTestDomainResult(double Total, double EntityA, double EntityB) : AnalyzerDomainResult;
+
+    private sealed class ScopedTestTrendComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Scoped Test Analyzer";
+
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
+        {
+            if (result is not ScopedTestDomainResult r)
+                return [];
+
+            return
+            [
+                new AnalyzerMetric("metric.total", null, r.Total, "items", MetricTrendDirection.HigherIsWorse),
+                new AnalyzerMetric("metric.entity", "EntityA", r.EntityA, "items", MetricTrendDirection.HigherIsWorse),
+                new AnalyzerMetric("metric.entity", "EntityB", r.EntityB, "items", MetricTrendDirection.HigherIsWorse)
+            ];
+        }
+
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
+            => [];
     }
 }

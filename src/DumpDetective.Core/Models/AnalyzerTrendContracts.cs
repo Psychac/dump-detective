@@ -111,7 +111,8 @@ internal sealed record MetricTimelinePoint(
 string Key,
 string Unit,
 MetricTrendDirection Direction,
-IReadOnlyList<double> Values);  // indexed by snapshot position; double.NaN when not available
+IReadOnlyList<double> Values,
+string? Scope = null);  // indexed by snapshot position; double.NaN when not available
 
 /// <summary>
 /// All headline (unscoped) metric timelines for one analyzer across all trend dumps.

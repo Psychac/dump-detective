@@ -111,6 +111,7 @@ internal sealed class TrendOrchestrationService(
             Overall: _trendAnalyzer.CompareAll(baseline, current),
             NewLeakSignalsByAnalyzer: _trendAnalyzer.ComputeNewLeakSignals(baseline, current),
             Timeline: _trendAnalyzer.ExtractTimeline(snapshots),
+            ScopedTimeline: _trendAnalyzer.ExtractScopedTimeline(snapshots),
             Snapshots: snapshots,
             NewFindings: lifecycle.NewFindings,
             PersistentFindings: lifecycle.PersistentFindings,

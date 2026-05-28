@@ -148,6 +148,7 @@ public sealed class ReportFlowIntegrationTests
             Overall: [],
             NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
             Timeline: [],
+            ScopedTimeline: [],
             Snapshots: [baseline, current],
             NewFindings: [finding],
             PersistentFindings: [],

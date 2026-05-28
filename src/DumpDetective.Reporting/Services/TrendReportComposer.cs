@@ -158,7 +158,7 @@ internal sealed class TrendReportComposer(
                 Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Prioritize this regression in the trend timeline and correlate with dump-to-dump finding lifecycle changes.",
-                Tags: ["trend", "regression", analyzerName, delta.Key],
+                Tags: ["trend", "regression", analyzerName, BuildMetricIdentityToken(delta)],
                 MetricValue: delta.DeltaPercent ?? delta.Delta,
                 MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
@@ -189,7 +189,7 @@ internal sealed class TrendReportComposer(
                 Title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
-                Tags: ["trend", "improvement", analyzerName, delta.Key],
+                Tags: ["trend", "improvement", analyzerName, BuildMetricIdentityToken(delta)],
                 MetricValue: delta.DeltaPercent ?? delta.Delta,
                 MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
@@ -444,7 +444,10 @@ internal sealed class TrendReportComposer(
                     catch { }
 
                     // Embed sparkline payload as JSON in a special display token; link token appended to metric cell via ||__LINK__detail-{index}
-                    string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new { values = point.Values, unit = point.Unit });
+                    List<double?> safeValues = point.Values
+                        .Select(static v => double.IsFinite(v) ? (double?)v : null)
+                        .ToList();
+                    string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new { values = safeValues, unit = point.Unit });
                     string sparkToken = "__SPARK__" + sparkPayload;
                     // Use zero-based snapshot index to match `detail-{i}` IDs generated in the report
                     string metricDisplay = point.Key + "||__LINK__detail-" + linkSnapshot;
@@ -547,12 +550,12 @@ internal sealed class TrendReportComposer(
             foreach (MetricDelta delta in result.Regressions)
             {
                 // Key by "AnalyzerName/MetricKey" to identify a regression finding
-                string key = $"{result.AnalyzerName}/{delta.Key}";
+                string key = BuildDeltaLookupKey(result.AnalyzerName, delta);
                 lookup.TryAdd(key, delta);
             }
             foreach (MetricDelta delta in result.Improvements)
             {
-                string key = $"{result.AnalyzerName}/{delta.Key}";
+                string key = BuildDeltaLookupKey(result.AnalyzerName, delta);
                 lookup.TryAdd(key, delta);
             }
         }
@@ -571,9 +574,9 @@ internal sealed class TrendReportComposer(
         {
             // Tags are: ["trend","regression",analyzerName,metricKey]
             string? analyzerName = finding.Tags.Count > 2 ? finding.Tags[2] : null;
-            string? metricKey    = finding.Tags.Count > 3 ? finding.Tags[3] : null;
-            if (analyzerName != null && metricKey != null &&
-                regressionLookup.TryGetValue($"{analyzerName}/{metricKey}", out MetricDelta? delta))
+            string? metricToken  = finding.Tags.Count > 3 ? finding.Tags[3] : null;
+            if (analyzerName != null && metricToken != null &&
+                regressionLookup.TryGetValue($"{analyzerName}/{metricToken}", out MetricDelta? delta))
             {
                 record = record with
                 {
@@ -610,6 +613,14 @@ internal sealed class TrendReportComposer(
             _ => 0,
         };
     }
+
+    private static string BuildDeltaLookupKey(string analyzerName, MetricDelta delta)
+        => $"{analyzerName}/{BuildMetricIdentityToken(delta)}";
+
+    private static string BuildMetricIdentityToken(MetricDelta delta)
+        => string.IsNullOrWhiteSpace(delta.Scope)
+            ? delta.Key
+            : delta.Key + "\u001f" + delta.Scope;
 
     private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)
     {
@@ -743,6 +754,7 @@ internal sealed record TrendReportData(
     IReadOnlyList<AnalyzerTrendResult> Overall,
     IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> NewLeakSignalsByAnalyzer,
     IReadOnlyList<AnalyzerMetricTimeline> Timeline,
+    IReadOnlyList<AnalyzerMetricTimeline> ScopedTimeline,
     IReadOnlyList<AnalysisSnapshot> Snapshots,
     IReadOnlyList<InsightFinding> NewFindings,
     IReadOnlyList<InsightFinding> PersistentFindings,

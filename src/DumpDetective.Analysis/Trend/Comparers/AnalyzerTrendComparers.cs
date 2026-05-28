@@ -90,14 +90,22 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not GCGenerationDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("gc.gen2.bytes", null, r.Gen2Bytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("gc.loh.bytes", null, r.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("gc.loh.percent", null, r.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
                 new("gc.total.objects", null, r.TotalObjects, "objects", MetricTrendDirection.Neutral),
                 new("gc.loh.objects", null, r.LohObjects, "objects", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (TypeSnapshot t in r.TopLohTypes)
+            {
+                metrics.Add(new("gc.loh.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("gc.loh.type.count", t.TypeName, t.Count, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -121,12 +129,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ModuleDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("modules.total", null, r.TotalModules, "modules", MetricTrendDirection.Neutral),
                 new("modules.dynamic", null, r.DynamicModules, "modules", MetricTrendDirection.Neutral),
                 new("modules.conflicts", null, r.VersionConflictGroups, "conflicts", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (ModuleHeapStats m in r.TopModulesByHeapMemory ?? [])
+            {
+                metrics.Add(new("modules.heap.bytes", m.ModuleName, m.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("modules.heap.objects", m.ModuleName, m.ObjectCount, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -224,11 +240,19 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not RetentionDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse),
                 new("leak.highly.referenced.bytes", null, r.TopHighlyReferencedTotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (RetentionTypeSnapshot t in r.TopRetentionTypes ?? [])
+            {
+                metrics.Add(new("leak.retention.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("leak.retention.type.count", t.TypeName, t.ObjectCount, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -249,12 +273,17 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not CollectionDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("collection.total", null, r.TotalCollections, "collections", MetricTrendDirection.Neutral),
                 new("collection.wasted.bytes", null, r.TotalWastedMemory, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("collection.wasteful.count", null, r.WastefulCollectionCount, "collections", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (var kv in r.WasteCountsByKind ?? new Dictionary<CollectionKind, int>())
+                metrics.Add(new("collection.waste.kind.count", kv.Key.ToString(), kv.Value, "collections", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -275,11 +304,16 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not StaticRootDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("static.root.count", null, r.RootCount, "roots", MetricTrendDirection.HigherIsWorse),
                 new("static.root.retained.bytes", null, r.TotalRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (NameBytesEntry root in r.TopRootsByRetainedBytes ?? [])
+                metrics.Add(new("static.root.byname.bytes", root.Name, root.Bytes, "bytes", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -362,13 +396,24 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not GCHandleDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("gchandle.total",              null, r.TotalHandles,          "handles", MetricTrendDirection.HigherIsWorse),
                 new("gchandle.strong",             null, r.StrongLikeHandles,     "handles", MetricTrendDirection.HigherIsWorse),
                 new("gchandle.pinned.targets",     null, r.PinnedHandleTargets,   "targets", MetricTrendDirection.HigherIsWorse),
                 new("gchandle.pinned.bytes",       null, r.PinnedRetainedBytes,   "bytes",   MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (NameCountEntry entry in r.HandlesByKind ?? [])
+                metrics.Add(new("gchandle.kind.count", entry.Name, entry.Count, "handles", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopTargetTypes ?? [])
+                metrics.Add(new("gchandle.target.type.count", entry.Name, entry.Count, "targets", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopPinnedTargetTypes ?? [])
+                metrics.Add(new("gchandle.pinned.type.count", entry.Name, entry.Count, "targets", MetricTrendDirection.HigherIsWorse));
+            foreach (NameBytesEntry entry in r.TopPinnedObjectsBySize ?? [])
+                metrics.Add(new("gchandle.pinned.type.bytes", entry.Name, entry.Bytes, "bytes", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -422,12 +467,21 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not DependentHandleDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("dephandle.total", null, r.DependentHandleCount, "handles", MetricTrendDirection.Neutral),
                 new("dephandle.unresolved.percent", null, r.UnresolvedPercent, "%", MetricTrendDirection.HigherIsWorse),
                 new("dephandle.unresolved.count", null, r.UnresolvedTargetCount, "targets", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
+
+            foreach (NameCountEntry entry in r.TopSourceTypes ?? [])
+                metrics.Add(new("dephandle.source.type.count", entry.Name, entry.Count, "handles", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopTargetTypes ?? [])
+                metrics.Add(new("dephandle.target.type.count", entry.Name, entry.Count, "handles", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopSourceTargetEdges ?? [])
+                metrics.Add(new("dephandle.edge.type.count", entry.Name, entry.Count, "edges", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -565,8 +619,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not StringDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("string.total", null, r.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
                 new("string.total.bytes", null, r.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("string.unique", null, r.UniqueStrings, "objects", MetricTrendDirection.Neutral),
@@ -576,7 +630,12 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("string.loh.bytes", null, r.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("string.pct.heap", null, r.PctOfManagedHeap, "%", MetricTrendDirection.HigherIsWorse),
                 new("string.gen2.count", null, r.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (NameCountEntry entry in r.TopDuplicateTypes ?? [])
+                metrics.Add(new("string.duplicate.type.count", entry.Name, entry.Count, "objects", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -604,8 +663,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not AsyncTaskDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("task.total",             null, r.TotalTasks,            "tasks",   MetricTrendDirection.Neutral),
                 new("task.pending",           null, r.PendingTasks,          "tasks",   MetricTrendDirection.HigherIsWorse),
                 new("task.faulted",           null, r.FaultedTasks,          "tasks",   MetricTrendDirection.HigherIsWorse),
@@ -613,7 +672,16 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("task.orphaned",          null, r.OrphanedTasks,         "tasks",   MetricTrendDirection.HigherIsWorse),
                 new("task.chain.depth.max",   null, r.MaxContinuationDepth,  "depth",   MetricTrendDirection.HigherIsWorse),
                 new("task.chain.depth.avg",   null, r.AvgContinuationDepth,  "depth",   MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (NameCountEntry entry in r.TopPendingTaskTypes)
+                metrics.Add(new("task.pending.type.count", entry.Name, entry.Count, "tasks", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopFaultedTaskTypes)
+                metrics.Add(new("task.faulted.type.count", entry.Name, entry.Count, "tasks", MetricTrendDirection.HigherIsWorse));
+            foreach (NameCountEntry entry in r.TopContinuationTypes)
+                metrics.Add(new("task.continuation.type.count", entry.Name, entry.Count, "tasks", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -639,8 +707,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not AllocationPatternDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("alloc.gen0.count.pct",         null, r.Gen0CountPct,          "%",     MetricTrendDirection.Neutral),
                 new("alloc.gen1.count.pct",         null, r.Gen1CountPct,          "%",     MetricTrendDirection.Neutral),
                 new("alloc.gen2.count.pct",         null, r.Gen2CountPct,          "%",     MetricTrendDirection.HigherIsWorse),
@@ -651,7 +719,19 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("alloc.loh.size.pct",           null, r.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
                 new("alloc.gc.pressure",            null, (double)r.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
                 new("alloc.promotion.pressure",     null, r.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (TypeAllocationProfile p in r.TopTransientTypes)
+                metrics.Add(new("alloc.transient.type.gen0.count", p.TypeName, p.Gen0Count, "objects", MetricTrendDirection.Neutral));
+            foreach (TypeAllocationProfile p in r.TopShortishTypes)
+                metrics.Add(new("alloc.shortish.type.gen1.count", p.TypeName, p.Gen1Count, "objects", MetricTrendDirection.Neutral));
+            foreach (TypeAllocationProfile p in r.TopLongLivedTypes)
+            {
+                metrics.Add(new("alloc.longlived.type.gen2.count", p.TypeName, p.Gen2Count, "objects", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("alloc.longlived.type.ratio", p.TypeName, p.LongLivedRatio, "ratio", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -680,13 +760,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ObjectShapeAnalyzerDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("shape.types.analyzed",    null, r.TotalTypesAnalyzed,   "types", MetricTrendDirection.Neutral),
                 new("shape.avg.ref.fields",    null, r.AvgRefFieldsPerType,  "fields", MetricTrendDirection.HigherIsWorse),
                 new("shape.ref.heavy.count",   null, r.TopReferenceHeavyTypes.Count, "types", MetricTrendDirection.HigherIsWorse),
                 new("shape.val.heavy.count",   null, r.TopValueHeavyTypes.Count,     "types", MetricTrendDirection.Neutral),
-            ];
+            };
+
+            foreach (TypeShapeProfile p in r.TopReferenceHeavyTypes)
+                metrics.Add(new("shape.ref.heavy.type.ratio", p.TypeName, p.ReferenceFieldRatio, "ratio", MetricTrendDirection.HigherIsWorse));
+            foreach (TypeShapeProfile p in r.TopValueHeavyTypes)
+                metrics.Add(new("shape.value.heavy.type.ratio", p.TypeName, p.ReferenceFieldRatio, "ratio", MetricTrendDirection.Neutral));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -709,14 +796,24 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not GCRootDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("gcroot.total.roots",           null, r.TotalRoots,                     "roots",  MetricTrendDirection.Neutral),
                 new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? r.TopRootsBySeverity[0].SeverityScore : 0, "score", MetricTrendDirection.HigherIsWorse),
                 new("gcroot.path.capped.count",     null, r.PathSearchCappedCount,           "paths",  MetricTrendDirection.Neutral),
                 new("gcroot.strong.handle.count",   null, GetKindCount(r, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
                 new("gcroot.finalizer.count",       null, GetKindCount(r, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (RootKindSummary kind in r.ByKind)
+                metrics.Add(new("gcroot.kind.count", kind.Kind, kind.Count, "roots", MetricTrendDirection.HigherIsWorse));
+            foreach (RootFinding root in r.TopRootsBySeverity)
+            {
+                metrics.Add(new("gcroot.top.target.bytes", root.TargetTypeName, root.EstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("gcroot.top.target.severity", root.TargetTypeName, root.SeverityScore, "score", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -746,14 +843,21 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not FinalizableObjectDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("finalizable.total",            null, r.TotalFinalizableObjects, "objects", MetricTrendDirection.HigherIsWorse),
                 new("finalizable.total.bytes",      null, r.TotalFinalizableBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("finalizable.gen2.count",       null, r.Gen2Count,               "objects", MetricTrendDirection.HigherIsWorse),
                 new("finalizable.queue.count",      null, r.FinalizerQueueCount,     "objects", MetricTrendDirection.HigherIsWorse),
                 new("finalizable.queue.retained",   null, r.FinalizerQueueRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (TypeGenerationProfile p in r.TopFinalizableTypesByGen2Count)
+                metrics.Add(new("finalizable.type.gen2.count", p.TypeName, p.Gen2Count, "objects", MetricTrendDirection.HigherIsWorse));
+            foreach (FinalizerQueueEntry e in r.TopQueueEntriesByRetainedSize)
+                metrics.Add(new("finalizable.queue.type.retained.bytes", e.TypeName, e.EstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -802,12 +906,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ArrayDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("array.total",       null, r.TotalArrayObjects, "objects", MetricTrendDirection.HigherIsWorse),
                 new("array.total.bytes", null, r.TotalArrayBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("array.loh.bytes",   null, r.LohArrayBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (ArrayTypeProfile p in r.TopArrayTypesBySize)
+            {
+                metrics.Add(new("array.type.bytes", p.ElementTypeName, p.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("array.type.count", p.ElementTypeName, p.Count, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -829,11 +941,19 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not AppDomainDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("appdomain.count",          null, r.TotalDomains,        "domains", MetricTrendDirection.Neutral),
                 new("appdomain.dynamic.modules", null, r.TotalDynamicModules, "modules", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (ModuleTypeCountEntry entry in r.TopModulesByTypeCount)
+            {
+                metrics.Add(new("appdomain.module.type.count", entry.ModuleName, entry.TypeCount, "types", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("appdomain.module.bytes", entry.ModuleName, entry.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -919,14 +1039,22 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not BoxingDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("boxing.total.objects",     null, r.TotalBoxedObjects,       "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.total.bytes",       null, r.TotalBoxedBytes,         "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.count",        null, r.BoxedEnumCount,          "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.bytes",        null, r.BoxedEnumBytes,          "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("boxing.oversized.count",   null, r.OversizedValueTypeCount, "objects", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (BoxedTypeEntry entry in r.TopBoxedTypes)
+            {
+                metrics.Add(new("boxing.type.bytes", entry.ValueTypeName, entry.TotalBoxBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("boxing.type.count", entry.ValueTypeName, entry.BoxCount, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -981,12 +1109,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not LeakCandidateDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("leak.candidates.total", null, r.TotalCandidates, "candidates", MetricTrendDirection.HigherIsWorse),
                 new("leak.candidates.top.score", null, r.TopCandidates.Count > 0 ? r.TopCandidates[0].SuspicionScore : 0, "score", MetricTrendDirection.HigherIsWorse),
                 new("leak.candidates.top.count", null, r.TopCandidates.Count, "candidates", MetricTrendDirection.Neutral)
-            ];
+            };
+
+            foreach (LeakCandidateRecord candidate in r.TopCandidates)
+            {
+                metrics.Add(new("leak.candidate.type.bytes", candidate.TypeName, candidate.TotalSize, "bytes", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("leak.candidate.type.score", candidate.TypeName, candidate.SuspicionScore, "score", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -1011,13 +1147,18 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not DominatorDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("dominator.candidates", null, r.CandidateCount, "candidates", MetricTrendDirection.HigherIsWorse),
                 new("dominator.analyzed", null, r.AnalyzedCount, "types", MetricTrendDirection.Neutral),
                 new("dominator.retained.bytes", null, r.TotalEstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("dominator.top.count", null, r.TopDominatorTypes.Count, "types", MetricTrendDirection.Neutral)
-            ];
+            };
+
+            foreach (TypeSnapshot t in r.TopDominatorTypes)
+                metrics.Add(new("dominator.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -1040,12 +1181,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not DbConnectionDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("dbconn.total",  null, r.TotalConnections, "connections", MetricTrendDirection.HigherIsWorse),
                 new("dbconn.open",   null, r.OpenConnections,  "connections", MetricTrendDirection.HigherIsWorse),
                 new("dbconn.closed", null, r.ClosedConnections,"connections", MetricTrendDirection.Neutral),
-            ];
+            };
+
+            foreach (DbConnectionTypeSummary t in r.ByType)
+            {
+                metrics.Add(new("dbconn.type.open.count", t.TypeName, t.OpenCount, "connections", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("dbconn.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -1067,12 +1216,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not WcfChannelDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("wcf.total",   null, r.TotalChannels,   "channels", MetricTrendDirection.HigherIsWorse),
                 new("wcf.opened",  null, r.OpenedChannels,  "channels", MetricTrendDirection.Neutral),
                 new("wcf.faulted", null, r.FaultedChannels, "channels", MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (WcfChannelTypeSummary t in r.ByType)
+            {
+                metrics.Add(new("wcf.type.faulted.count", t.TypeName, t.FaultedCount, "channels", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("wcf.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -1094,14 +1251,22 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not HttpObjectDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("http.total",        null, r.TotalHttpObjects,      "objects",  MetricTrendDirection.HigherIsWorse),
                 new("http.httpclient",   null, r.HttpClientCount,       "objects",  MetricTrendDirection.HigherIsWorse),
                 new("http.webrequest",   null, r.HttpWebRequestCount,   "objects",  MetricTrendDirection.HigherIsWorse),
                 new("http.webresponse",  null, r.HttpWebResponseCount,  "objects",  MetricTrendDirection.HigherIsWorse),
                 new("http.bytes",        null, r.TotalBytes,            "bytes",    MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (HttpObjectTypeSummary t in r.ByType)
+            {
+                metrics.Add(new("http.type.count", t.TypeName, t.Count, "objects", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("http.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
@@ -1125,14 +1290,22 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not TimerLeakDomainResult r) return [];
-            return
-            [
+            var metrics = new List<AnalyzerMetric>
+            {
                 new("timer.total",      null, r.TotalTimers,          "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.threading",  null, r.ThreadingTimerCount,  "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.queue",      null, r.TimerQueueTimerCount, "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.holder",     null, r.TimerHolderCount,     "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.bytes",      null, r.TotalBytes,           "bytes",   MetricTrendDirection.HigherIsWorse),
-            ];
+            };
+
+            foreach (TimerObjectTypeSummary t in r.ByType)
+            {
+                metrics.Add(new("timer.type.count", t.TypeName, t.Count, "objects", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("timer.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
+
+            return metrics;
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)

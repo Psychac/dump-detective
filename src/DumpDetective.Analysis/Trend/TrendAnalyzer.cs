@@ -170,13 +170,25 @@ namespace DumpDetective.Analysis.Trend
         /// producing a timeline that shows how each stat evolved across all N dumps.
         /// </summary>
         public IReadOnlyList<AnalyzerMetricTimeline> ExtractTimeline(IReadOnlyList<AnalysisSnapshot> snapshots)
+            => ExtractTimelineCore(snapshots, includeScoped: false);
+
+        /// <summary>
+        /// For every analyzer, extracts scoped (entity-level) metrics as table timelines.
+        /// This enables comparisons like type/category rows across all snapshots.
+        /// </summary>
+        public IReadOnlyList<AnalyzerMetricTimeline> ExtractScopedTimeline(IReadOnlyList<AnalysisSnapshot> snapshots)
+            => ExtractTimelineCore(snapshots, includeScoped: true);
+
+        private IReadOnlyList<AnalyzerMetricTimeline> ExtractTimelineCore(
+            IReadOnlyList<AnalysisSnapshot> snapshots,
+            bool includeScoped)
         {
             var result = new List<AnalyzerMetricTimeline>(_comparers.Count);
 
             foreach (var (analyzerName, comparer) in _comparers)
             {
                 var snapshotLookups = new List<Dictionary<string, double>>(snapshots.Count);
-                var allKeys = new Dictionary<string, (string Unit, MetricTrendDirection Direction)>(StringComparer.Ordinal);
+                var allKeys = new Dictionary<string, (string Key, string? Scope, string Unit, MetricTrendDirection Direction)>(StringComparer.Ordinal);
                 bool anyFound = false;
 
                 foreach (var snapshot in snapshots)
@@ -187,11 +199,16 @@ namespace DumpDetective.Analysis.Trend
                         anyFound = true;
                         foreach (AnalyzerMetric metric in comparer.ExtractMetrics(domainResult))
                         {
-                            if (metric.Scope is not null)
+                            bool isScoped = metric.Scope is not null;
+                            if (includeScoped != isScoped)
                                 continue;
 
-                            lookup[metric.Key] = metric.Value;
-                            allKeys.TryAdd(metric.Key, (metric.Unit, metric.Direction));
+                            string timelineKey = includeScoped
+                                ? metric.Key + "\u001f" + metric.Scope
+                                : metric.Key;
+
+                            lookup[timelineKey] = metric.Value;
+                            allKeys.TryAdd(timelineKey, (metric.Key, metric.Scope, metric.Unit, metric.Direction));
                         }
                     }
 
@@ -202,12 +219,18 @@ namespace DumpDetective.Analysis.Trend
                     continue;
 
                 var points = new List<MetricTimelinePoint>(allKeys.Count);
-                foreach (var (key, (unit, direction)) in allKeys)
+                foreach (var (timelineKey, metricIdentity) in allKeys)
                 {
                     var values = snapshotLookups
-                        .Select(d => d.TryGetValue(key, out double v) ? v : double.NaN)
+                        .Select(d => d.TryGetValue(timelineKey, out double v) ? v : double.NaN)
                         .ToList();
-                    points.Add(new MetricTimelinePoint(key, unit, direction, values));
+
+                    points.Add(new MetricTimelinePoint(
+                        Key: metricIdentity.Key,
+                        Unit: metricIdentity.Unit,
+                        Direction: metricIdentity.Direction,
+                        Values: values,
+                        Scope: metricIdentity.Scope));
                 }
 
                 if (points.Count > 0)

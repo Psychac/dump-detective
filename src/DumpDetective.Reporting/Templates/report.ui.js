@@ -241,6 +241,40 @@ export function setupInteractivity(doc, announce) {
     }
   }
 
+  // Health scorecard domain tiles -> domain section scroll
+  document.addEventListener('click', function (e) {
+    const tile = e.target.closest && e.target.closest('[data-domain-target]');
+    if (!tile) return;
+    const targetId = tile.getAttribute('data-domain-target');
+    if (!targetId) return;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    e.preventDefault();
+    const details = target.querySelector('details.report-domain__details');
+    if (details) details.open = true;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try { history.replaceState(null, '', '#' + targetId); } catch (err) { }
+  });
+
+  // Sticky critical bar (dismissible, session-local)
+  (function () {
+    const key = 'dumpdetective:critical-bar-dismissed';
+    const bar = document.getElementById('critical-sticky-bar');
+    if (!bar) return;
+    try {
+      if (sessionStorage.getItem(key) === '1') {
+        bar.hidden = true;
+      }
+    } catch (err) { }
+
+    const dismiss = document.getElementById('critical-sticky-dismiss');
+    if (!dismiss) return;
+    dismiss.addEventListener('click', function () {
+      bar.hidden = true;
+      try { sessionStorage.setItem(key, '1'); } catch (err) { }
+    });
+  })();
+
   // Active TOC highlighting
   (function () {
     const links = document.querySelectorAll('.toc a'); if (!links || !links.length) return; const idToLink = {}; links.forEach(function (l) { if (l.hash) idToLink[l.hash.substring(1)] = l; });

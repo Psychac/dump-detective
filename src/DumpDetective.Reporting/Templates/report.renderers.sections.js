@@ -102,6 +102,26 @@ export function buildAnalyzerSection(section, i) {
   const lead = section.leadFinding;
   if (lead) {
     const sev = (lead.severity || 'info').toLowerCase();
+    const caveats = Array.isArray(lead.caveats) ? lead.caveats : [];
+    const cautionCaveats = caveats.filter(function (c) {
+      return /heuristic|approximate/i.test(String(c || ''));
+    });
+
+    if (cautionCaveats.length) {
+      const caution = el('details', 'lead-caution');
+      const cautionSummary = el('summary', 'lead-caution__summary');
+      cautionSummary.textContent = 'Heuristic/Approximate signal';
+      caution.appendChild(cautionSummary);
+      const cautionBody = el('div', 'lead-caution__body');
+      for (let ci = 0; ci < cautionCaveats.length; ci++) {
+        const row = el('div', 'lead-caution__item');
+        row.textContent = '\u26A0 ' + cautionCaveats[ci];
+        cautionBody.appendChild(row);
+      }
+      caution.appendChild(cautionBody);
+      content.appendChild(caution);
+    }
+
     const lf = el('div', 'lead-finding lead-finding--' + sev);
     const lfHeader = el('div', 'lead-finding__header');
     const lfSev = el('span', 'lead-finding__severity'); lfSev.textContent = lead.severity || 'Info';

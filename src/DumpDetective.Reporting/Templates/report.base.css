@@ -94,6 +94,9 @@ details > summary::-webkit-details-marker { display: none; }
   max-height: none;
   overflow: hidden;
   z-index: 20;
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
 }
 .report-navbar__brand {
   display: flex;
@@ -160,6 +163,9 @@ details > summary::-webkit-details-marker { display: none; }
   box-shadow: none;
   overflow-y: auto;
   overflow-x: hidden;
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
 }
 .report-navbar__toc .toc-title { display: none; }
 .report-navbar__toc details { margin: 0 0 var(--space-2); padding: 0; }
@@ -174,6 +180,9 @@ details > summary::-webkit-details-marker { display: none; }
   border: 1px solid transparent;
   white-space: normal;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
 }
 .report-navbar__toc summary { background: transparent; border-color: transparent; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .88rem; font-weight: 500; color: #111827; }
 .report-navbar__toc a { background: transparent; text-decoration: none; color: #1f2937; font-size: .86rem; font-weight: 500; line-height: 1.35; }

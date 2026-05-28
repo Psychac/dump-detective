@@ -121,6 +121,17 @@ export function buildDomains(doc) {
       details.appendChild(body);
     }
 
+    if (!sections.length && !insights.length && (domainSev === 'ok' || domainSev === 'info')) {
+      const empty = el('div', 'domain-empty-state');
+      const icon = el('span', 'domain-empty-state__icon');
+      icon.textContent = '\u2713';
+      empty.appendChild(icon);
+      const text = el('div', 'domain-empty-state__text');
+      text.textContent = 'No findings in this domain — system appears healthy';
+      empty.appendChild(text);
+      details.appendChild(empty);
+    }
+
     sec.appendChild(details);
 
     wrap.appendChild(sec);
@@ -179,15 +190,6 @@ export function buildTOC(doc, perDumpDocs) {
     });
   }
 
-  function sevDot(sev) {
-    const s = String(sev == null ? '' : sev).toLowerCase();
-    const n = Number(sev);
-    if (n === 3 || s === 'critical') return { cls: 'toc-dot--critical', label: 'Critical' };
-    if (n === 2 || s === 'warning')  return { cls: 'toc-dot--warning',  label: 'Warning' };
-    if (n === 1 || s === 'ok')       return { cls: 'toc-dot--ok',       label: 'OK' };
-    return                                   { cls: 'toc-dot--info',     label: 'Info' };
-  }
-
   function quickLink(href, text, iconChar) {
     const li = document.createElement('li');
     const a = document.createElement('a');
@@ -196,6 +198,24 @@ export function buildTOC(doc, perDumpDocs) {
     const span = document.createElement('span'); span.textContent = text; a.appendChild(span);
     li.appendChild(a);
     return li;
+  }
+
+
+  let criticalJumpTarget = null;
+  if (Array.isArray(domains)) {
+    for (let i = 0; i < domains.length; i++) {
+      const d = domains[i];
+      if (String(d && d.leadSeverity || '').toLowerCase() === 'critical') {
+        criticalJumpTarget = '#' + domainAnchorId(d, i);
+        break;
+      }
+    }
+  }
+  if (!criticalJumpTarget && Array.isArray(doc.findings)) {
+    const hasCritical = doc.findings.some(function (f) {
+      return String((f && f.severity) || '').toLowerCase() === 'critical';
+    });
+    if (hasCritical) criticalJumpTarget = '#sec-action-queue';
   }
 
   const fragment = document.createDocumentFragment();
@@ -207,6 +227,7 @@ export function buildTOC(doc, perDumpDocs) {
   quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u25CE'));
   if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u271A'));
   if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u00A7'));
+  if (criticalJumpTarget) quickList.appendChild(quickLink(criticalJumpTarget, 'Jump to Critical', '!'));
   if (Array.isArray(doc.findings) && doc.findings.length) quickList.appendChild(quickLink('#sec-action-queue', 'Action Queue', '!'));
   if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u00B6'));
   quickSection.appendChild(quickList);
@@ -221,7 +242,6 @@ export function buildTOC(doc, perDumpDocs) {
   if (domains.length) {
     for (let i = 0; i < domains.length; i++) {
       const domain = domains[i] || {};
-      const dot = sevDot(domain.leadSeverity);
       const domainId = domainAnchorId(domain, i);
 
       const det = document.createElement('details');
@@ -230,10 +250,6 @@ export function buildTOC(doc, perDumpDocs) {
 
       const summ = document.createElement('summary');
       summ.className = 'toc-domain-summary';
-
-      const dotEl = el('span', 'toc-dot ' + dot.cls);
-      dotEl.setAttribute('aria-label', dot.label);
-      summ.appendChild(dotEl);
 
       const domainLink = document.createElement('a');
       domainLink.className = 'toc-domain-summary__link';
@@ -255,9 +271,9 @@ export function buildTOC(doc, perDumpDocs) {
       const domainSections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
       for (let j = 0; j < domainSections.length; j++) {
         const li = document.createElement('li');
-        const a = document.createElement('a');
         const sec = domainSections[j];
         const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + (i * 1000 + j));
+        const a = document.createElement('a');
         a.href = secHref;
         a.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + j);
         li.appendChild(a);

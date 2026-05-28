@@ -469,6 +469,55 @@
   white-space: nowrap;
 }
 
+.health-domain-row[data-domain-target],
+.health-domain-card[data-domain-target] {
+  cursor: pointer;
+}
+
+.health-domain-row[data-domain-target]:hover,
+.health-domain-card[data-domain-target]:hover {
+  filter: brightness(0.98);
+}
+
+.critical-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--sev-critical-border-mid);
+  border-bottom: 1px solid var(--sev-critical-border-mid);
+  background: var(--sev-critical-bg-strong);
+}
+
+.critical-sticky-bar__text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sev-critical-text);
+}
+
+.critical-sticky-bar__jump {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #991b1b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.critical-sticky-bar__dismiss {
+  border: 1px solid var(--sev-critical-border-mid);
+  background: #fff;
+  color: #7f1d1d;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
 .section-card h2,
 .analyzer-section > details > summary {
   margin: 0;

@@ -264,6 +264,16 @@ export function buildHealthScorecard(doc) {
   const scorecard = doc.healthScorecard;
   if (!scorecard || !Array.isArray(scorecard.domains) || !scorecard.domains.length) return null;
 
+  const domainAnchorMap = new Map();
+  if (Array.isArray(doc.domains)) {
+    for (let i = 0; i < doc.domains.length; i++) {
+      const d = doc.domains[i];
+      const key = String((d && d.domain) || '').toLowerCase();
+      if (!key || domainAnchorMap.has(key)) continue;
+      domainAnchorMap.set(key, domainAnchorId(d, i));
+    }
+  }
+
   function sevInfo(sev) {
     const s = String(sev).toLowerCase(); const n = Number(sev);
     if (n === 3 || s === 'critical') return { label: 'Critical', css: 'critical', dot: '\u25CF' };
@@ -303,6 +313,29 @@ export function buildHealthScorecard(doc) {
     banner.appendChild(bannerRight);
   }
   sec.appendChild(banner);
+
+  if (totalCrit > 0) {
+    const sticky = el('div', 'critical-sticky-bar');
+    sticky.id = 'critical-sticky-bar';
+    const txt = el('span', 'critical-sticky-bar__text');
+    txt.textContent = totalCrit + ' Critical finding' + (totalCrit !== 1 ? 's' : '') + ' require immediate attention';
+    sticky.appendChild(txt);
+
+    const jump = document.createElement('a');
+    jump.className = 'critical-sticky-bar__jump';
+    jump.href = '#sec-action-queue';
+    jump.textContent = 'Review now';
+    sticky.appendChild(jump);
+
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'critical-sticky-bar__dismiss';
+    dismiss.id = 'critical-sticky-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss critical banner');
+    dismiss.textContent = 'Dismiss';
+    sticky.appendChild(dismiss);
+    sec.appendChild(sticky);
+  }
 
   // ── Domain grid ──────────────────────────────────────────────────────────
   const grid = el('div', 'health-scorecard__grid');
@@ -352,6 +385,8 @@ export function buildHealthScorecard(doc) {
       // ── Trend: vertical card with timeline bar ───────────────────────────
       const card = el('div', 'health-domain-card health-domain-card--' + si.css);
       card.setAttribute('role', 'listitem');
+      const domainTarget = domainAnchorMap.get(String(entry.domain || '').toLowerCase());
+      if (domainTarget) card.dataset.domainTarget = domainTarget;
 
       const head = el('div', 'health-domain-card__head');
       const nameEl = el('span', 'health-domain-card__name'); nameEl.textContent = entry.domain || ''; head.appendChild(nameEl);
@@ -410,6 +445,8 @@ export function buildHealthScorecard(doc) {
       // ── Single-dump: compact horizontal row ─────────────────────────────
       const row = el('div', 'health-domain-row health-domain-row--' + si.css);
       row.setAttribute('role', 'listitem');
+      const domainTarget = domainAnchorMap.get(String(entry.domain || '').toLowerCase());
+      if (domainTarget) row.dataset.domainTarget = domainTarget;
       const name = el('span', 'health-domain-row__name'); name.textContent = entry.domain || ''; row.appendChild(name);
       const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
       pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);

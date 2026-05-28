@@ -410,10 +410,27 @@ internal sealed class ReportSerializer
         foreach (var pair in groupedSections)
         {
             string domain = pair.Key;
+            var leadKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int s = 0; s < pair.Value.Count; s++)
+            {
+                string? leadKey = BuildLeadDedupKey(pair.Value[s]);
+                if (!string.IsNullOrWhiteSpace(leadKey))
+                    leadKeys.Add(leadKey);
+            }
+
             List<FindingRecord> sortedInsights = [];
             if (domainInsights.TryGetValue(domain, out List<FindingRecord>? insights) && insights is not null)
             {
-                sortedInsights = [.. insights];
+                sortedInsights = [];
+                for (int i = 0; i < insights.Count; i++)
+                {
+                    FindingRecord candidate = insights[i];
+                    if (leadKeys.Contains(BuildLeadDedupKey(candidate)))
+                        continue;
+
+                    sortedInsights.Add(candidate);
+                }
+
                 sortedInsights.Sort(static (a, b) =>
                 {
                     int sev = SeverityOrdinal(b.Severity).CompareTo(SeverityOrdinal(a.Severity));
@@ -476,6 +493,36 @@ internal sealed class ReportSerializer
         });
 
         return cross;
+    }
+
+    private static string BuildLeadDedupKey(AnalyzerDetailSection section)
+    {
+        if (section.LeadFinding is not { } lead)
+            return string.Empty;
+
+        return BuildLeadDedupKey(section.AnalyzerName, lead.Title, lead.Evidence, lead.Recommendation);
+    }
+
+    private static string BuildLeadDedupKey(FindingRecord finding)
+    {
+        return BuildLeadDedupKey(finding.Analyzer, finding.Title, finding.Evidence, finding.Recommendation);
+    }
+
+    private static string BuildLeadDedupKey(string analyzer, string title, string evidence, string recommendation)
+    {
+        return string.Concat(
+            NormalizeForDedup(analyzer), "|",
+            NormalizeForDedup(title), "|",
+            NormalizeForDedup(evidence), "|",
+            NormalizeForDedup(recommendation));
+    }
+
+    private static string NormalizeForDedup(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return value.Trim();
     }
 
     private static string InferFindingDomain(FindingRecord finding)

@@ -243,6 +243,7 @@ export function buildTOC(doc, perDumpDocs) {
     for (let i = 0; i < domains.length; i++) {
       const domain = domains[i] || {};
       const domainId = domainAnchorId(domain, i);
+      const domainSev = String(domain.leadSeverity || 'Info').toLowerCase();
 
       const det = document.createElement('details');
       det.open = false;
@@ -262,7 +263,9 @@ export function buildTOC(doc, perDumpDocs) {
 
       const sectionCount = (Array.isArray(domain.sections) ? domain.sections : []).length;
       if (sectionCount) {
-        const cnt = el('span', 'toc-domain-summary__count'); cnt.textContent = String(sectionCount); summ.appendChild(cnt);
+        const cnt = el('span', 'toc-domain-summary__count toc-domain-summary__count--' + domainSev);
+        cnt.textContent = String(sectionCount);
+        summ.appendChild(cnt);
       }
       det.appendChild(summ);
       attachScrollToggle(det);

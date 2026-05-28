@@ -20,9 +20,18 @@
 /* Finding cards nested inside domain insights or cross-domain list get tighter padding */
 .domain-insights__list .finding-card,
 .cross-domain-insights__list .finding-card {
-  padding: 11px 13px;
+  padding: 12px 14px;
   border-radius: 8px;
+  border: 1px solid #e5eaf1;
+  background: #ffffff;
   box-shadow: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.domain-insights__list .finding-card:hover,
+.cross-domain-insights__list .finding-card:hover {
+  border-color: #d4dde8;
+  background: #fbfdff;
 }
 .finding-card--critical {
   background: #ffffff;
@@ -54,7 +63,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 .finding-card__eyebrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .finding-card__header-meta { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
@@ -90,7 +99,7 @@
 .finding-card__title {
   margin: 0;
   padding-left: 0;
-  font-size: 0.98rem;
+  font-size: 1.02rem;
   line-height: 1.3;
   letter-spacing: -0.02em;
   font-weight: 700;
@@ -111,7 +120,7 @@
   padding: 3px 0;
 }
 .finding-card__brief-row + .finding-card__brief-row {
-  border-top: 1px solid #eef2f7;
+  border-top: 1px solid #e8eef5;
   padding-top: 6px;
 }
 .finding-card__brief-label {
@@ -133,7 +142,7 @@
 .finding-card__brief-value {
   color: #1f2937;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
 }

@@ -9,7 +9,7 @@
   background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: none;
+  box-shadow: var(--shadow-soft);
 }
 .header-card {
   padding: 0;
@@ -155,8 +155,8 @@
 .header-path__size {
   flex-shrink: 0;
   padding: 2px 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: #f8fafc;
+  border: 1px solid #dbe3ee;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
@@ -166,12 +166,12 @@
 .header-path__generated {
   flex-shrink: 0;
   padding: 2px 8px;
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  background: #f2f6ff;
+  border: 1px solid #d3dcf4;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  color: #3730a3;
+  color: #334155;
   white-space: nowrap;
 }
 
@@ -562,7 +562,7 @@
   gap: 0;
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #e3e9f2;
 }
 /* Single-dump header: avoid back-to-back separators after Source row. */
 .header-path + .header-meta-row {
@@ -581,9 +581,10 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #fff;
-  background: #1e293b;
-  border-radius: 3px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #d7e0eb;
+  border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
   user-select: none;
@@ -595,7 +596,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 2px 20px 4px 0;
-  min-width: 80px;
+  min-width: 120px;
 }
 .header-stat + .header-stat {
   padding-left: 16px;

@@ -50,11 +50,15 @@ body{margin:0;background:var(--bg);color:var(--text);line-height:1.35}
 .health-progression{white-space:nowrap}
 .health-progress-arrow{color:#9ca3af;margin:0 3px;font-weight:400}
 
-.table-wrapper{overflow:auto;margin-top:12px}
-.report-table{width:100%;border-collapse:collapse;background:#fff}
-.report-table thead th{position:sticky;top:0;background:#fff;padding:8px;border-bottom:2px solid #eef2f7;text-align:left}
-.report-table tbody td{padding:10px;border-bottom:1px solid #f1f5f9}
-.report-table tbody tr:nth-child(even){background:var(--surface)}
+.table-wrapper{overflow:auto;margin-top:12px;border:1px solid #dbe3ed;border-radius:10px;background:#fff}
+.report-table{width:100%;border-collapse:separate;border-spacing:0;background:#fff}
+.report-table thead th{position:sticky;top:0;background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);color:#334155;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:10px 12px;border-bottom:1px solid #d3deea;border-right:1px solid #e2e8f0;text-align:left}
+.report-table thead th:last-child{border-right:none}
+.report-table tbody td{padding:10px 12px;border-bottom:1px solid #edf2f7;border-right:1px solid #f1f5f9}
+.report-table tbody td:last-child{border-right:none}
+.report-table tbody tr:last-child td{border-bottom:none}
+.report-table tbody tr:nth-child(even) td{background:#fbfdff}
+.report-table tbody tr:hover td{background:#f0f6ff}
 .report-table code{font-family:monospace;font-size:.9rem}
 
 .report-footer{padding:18px 0;color:var(--muted)}

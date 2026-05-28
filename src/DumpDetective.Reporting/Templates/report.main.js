@@ -105,8 +105,6 @@ async function bootstrap() {
 
   UI.buildSidebar(toc, doc);
 
-  const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
-
   if (!domains && !hasPreRenderedContent) {
     const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
   }
@@ -142,6 +140,8 @@ async function bootstrap() {
     renderChunk();
     }
   }
+
+  const incident = R.buildIncidentContext(doc); if (incident) main.appendChild(incident);
 
   const appendix = R.buildAppendix(doc);
   if (appendix) main.appendChild(appendix);

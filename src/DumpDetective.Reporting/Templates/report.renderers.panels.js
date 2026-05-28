@@ -171,9 +171,44 @@ function tdText(text) {
 
 export function buildIncidentContext(doc) {
   const ctx = doc.incidentContext; if (!ctx) return null;
+  const isTrend = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
+  const snapshots = Array.isArray(ctx.trendSnapshots) ? ctx.trendSnapshots : [];
+  function fmtWhen(utc) {
+    if (!utc) return '\u2014';
+    const dt = new Date(utc);
+    if (Number.isNaN(dt.getTime())) return '\u2014';
+    return dt.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function fmtSpan(firstUtc, lastUtc) {
+    if (!firstUtc || !lastUtc) return '\u2014';
+    const a = new Date(firstUtc).getTime();
+    const b = new Date(lastUtc).getTime();
+    if (Number.isNaN(a) || Number.isNaN(b)) return '\u2014';
+    const days = Math.round(Math.abs(b - a) / 86400000);
+    if (days < 1) return 'same day';
+    if (days === 1) return '1 day';
+    if (days < 30) return days + ' days';
+    const months = Math.round(days / 30.44);
+    if (months < 12) return months + (months === 1 ? ' month' : ' months');
+    const years = (days / 365.25).toFixed(1).replace(/\.0$/, '');
+    return years + (years === '1' ? ' year' : ' years');
+  }
+
   const sec = el('section', 'section-card incident-context-card');
   const h2 = document.createElement('h2'); h2.textContent = 'Incident Context'; sec.appendChild(h2);
-  const subtitle = document.createElement('p'); subtitle.className = 'incident-context__subtitle'; subtitle.textContent = 'Runtime settings and snapshot context used to generate this report.'; sec.appendChild(subtitle);
+  const subtitle = document.createElement('p');
+  subtitle.className = 'incident-context__subtitle';
+  subtitle.textContent = isTrend
+    ? 'Runtime settings and trend snapshot context used to generate this report.'
+    : 'Runtime settings and snapshot context used to generate this report.';
+  sec.appendChild(subtitle);
 
   const summary = el('div', 'incident-context__summary');
   function stat(label, value) {
@@ -188,28 +223,106 @@ export function buildIncidentContext(doc) {
   stat('GC Mode', ctx.gcMode || 'n/a');
   stat('Heap Count', ctx.heapCount != null ? String(ctx.heapCount) : 'n/a');
   stat('Active Analyzers', String(ctx.activeAnalyzerCount || 0));
+  if (isTrend) stat('Snapshots', String(doc.trendDumpCount || snapshots.length || 0));
   sec.appendChild(summary);
 
-  const details = el('div', 'incident-context__details');
-  function detail(label, value) {
-    const item = el('div', 'incident-context__detail');
-    const detailLabel = el('div', 'incident-context__detail-label'); detailLabel.textContent = label;
-    const detailValue = el('div', 'incident-context__detail-value'); detailValue.textContent = value || '\u2014';
-    item.appendChild(detailLabel); item.appendChild(detailValue); details.appendChild(item);
-  }
-  detail('Dump Path', ctx.dumpPath || '');
-  if (ctx.baselineDumpPath) detail('Baseline Dump', ctx.baselineDumpPath);
-  detail('Config', (ctx.usedConfigFile ? 'config file' : 'command line') + (ctx.configPath ? ' (' + ctx.configPath + ')' : ''));
-  detail('Diagnostic Mode', ctx.diagnosticMode ? 'on' : 'off');
-  detail('Index Prebuild', ctx.indexPrebuildMode || '');
-  detail('Heap Walkable', ctx.heapCanWalk ? 'yes' : 'no');
-  detail('Analysis Elapsed', (Number(ctx.analysisElapsedSeconds || 0)).toFixed(1) + 's');
-  sec.appendChild(details);
+  if (isTrend) {
+    const baselinePath = snapshots.length ? (snapshots[0].dumpPath || ctx.baselineDumpPath || '') : (ctx.baselineDumpPath || '');
+    const currentPath = snapshots.length ? (snapshots[snapshots.length - 1].dumpPath || ctx.dumpPath || '') : (ctx.dumpPath || '');
+    const baselineSnap = snapshots.length ? snapshots[0] : null;
+    const currentSnap = snapshots.length ? snapshots[snapshots.length - 1] : null;
+    const firstUtc = baselineSnap ? (baselineSnap.dumpCapturedAtUtc || baselineSnap.generatedAtUtc) : null;
+    const lastUtc = currentSnap ? (currentSnap.dumpCapturedAtUtc || currentSnap.generatedAtUtc) : null;
 
-  if (ctx.trendSnapshots && ctx.trendSnapshots.length) {
+    const overview = el('div', 'incident-context__trend-overview');
+    function trendCard(label, value, mod) {
+      const item = el('div', 'incident-context__trend-card' + (mod ? (' incident-context__trend-card--' + mod) : ''));
+      const detailLabel = el('div', 'incident-context__trend-card-label'); detailLabel.textContent = label;
+      const detailValue = el('div', 'incident-context__trend-card-value'); detailValue.textContent = value || '\u2014';
+      item.appendChild(detailLabel); item.appendChild(detailValue); overview.appendChild(item);
+    }
+    trendCard('Baseline Dump', baselinePath, 'baseline');
+    trendCard('Current Dump', currentPath, 'current');
+    trendCard('Snapshot Window', fmtWhen(firstUtc) + ' -> ' + fmtWhen(lastUtc), 'window');
+    trendCard('Span', fmtSpan(firstUtc, lastUtc), 'meta');
+    sec.appendChild(overview);
+  } else {
+    const details = el('div', 'incident-context__details');
+    function detail(label, value) {
+      const item = el('div', 'incident-context__detail');
+      const detailLabel = el('div', 'incident-context__detail-label'); detailLabel.textContent = label;
+      const detailValue = el('div', 'incident-context__detail-value'); detailValue.textContent = value || '\u2014';
+      item.appendChild(detailLabel); item.appendChild(detailValue); details.appendChild(item);
+    }
+    detail('Dump Path', ctx.dumpPath || '');
+    if (ctx.baselineDumpPath) detail('Baseline Dump', ctx.baselineDumpPath);
+    detail('Config', (ctx.usedConfigFile ? 'config file' : 'command line') + (ctx.configPath ? ' (' + ctx.configPath + ')' : ''));
+    detail('Diagnostic Mode', ctx.diagnosticMode ? 'on' : 'off');
+    detail('Index Prebuild', ctx.indexPrebuildMode || '');
+    detail('Heap Walkable', ctx.heapCanWalk ? 'yes' : 'no');
+    detail('Analysis Elapsed', (Number(ctx.analysisElapsedSeconds || 0)).toFixed(1) + 's');
+    sec.appendChild(details);
+  }
+
+  if (isTrend && snapshots.length) {
+    const h3 = document.createElement('h3'); h3.textContent = 'Snapshot Runtime Context'; sec.appendChild(h3);
+    const tableWrap = el('div', 'detail-block');
+
+    const rows = snapshots.map(function (snap) {
+      const role = snap.isBaseline ? 'Baseline' : (snap.isCurrent ? 'Current' : ('Snapshot ' + (Number(snap.index || 0) + 1)));
+      const usedCaptured = !!snap.dumpCapturedAtUtc;
+      const when = fmtWhen(snap.dumpCapturedAtUtc || snap.generatedAtUtc);
+      const size = snap.dumpFileSizeBytes != null && Number(snap.dumpFileSizeBytes) > 0
+        ? formatBytes(Number(snap.dumpFileSizeBytes))
+        : '\u2014';
+      const elapsed = Number(snap.elapsedSeconds || 0).toFixed(1) + 's';
+      const source = usedCaptured ? 'CapturedAtUtc' : (snap.generatedAtUtc ? 'GeneratedAtUtc' : '\u2014');
+      return [
+        role,
+        snap.dumpPath || '\u2014',
+        when,
+        size,
+        elapsed,
+        source
+      ];
+    });
+
+    tableWrap.appendChild(buildSimpleTable(
+      ['Role', 'Dump Path', 'Captured/Generated', 'Dump Size', 'Snapshot Elapsed', 'Timestamp Source'],
+      rows
+    ));
+    const matrixTable = tableWrap.querySelector('table');
+    if (matrixTable) {
+      matrixTable.classList.add('incident-context__matrix');
+      const bodyRows = matrixTable.querySelectorAll('tbody tr');
+      bodyRows.forEach(function (tr) {
+        const roleCell = tr.cells && tr.cells.length ? tr.cells[0] : null;
+        const roleText = roleCell ? String(roleCell.textContent || '').toLowerCase() : '';
+        if (roleCell) {
+          const rawRole = String(roleCell.textContent || '').trim();
+          roleCell.textContent = '';
+          const badge = el('span', 'incident-context__role-badge');
+          badge.textContent = rawRole || '\u2014';
+          if (roleText === 'baseline') badge.classList.add('incident-context__role-badge--baseline');
+          else if (roleText === 'current') badge.classList.add('incident-context__role-badge--current');
+          else badge.classList.add('incident-context__role-badge--snapshot');
+          roleCell.appendChild(badge);
+        }
+        if (tr.cells && tr.cells.length >= 6) {
+          tr.cells[1].classList.add('incident-context__matrix-cell--path');
+          tr.cells[2].classList.add('incident-context__matrix-cell--date');
+          tr.cells[3].classList.add('incident-context__matrix-cell--numeric');
+          tr.cells[4].classList.add('incident-context__matrix-cell--numeric');
+        }
+        if (roleText === 'baseline') tr.classList.add('incident-context__matrix-row--baseline');
+        if (roleText === 'current') tr.classList.add('incident-context__matrix-row--current');
+      });
+    }
+    sec.appendChild(tableWrap);
+  } else if (snapshots.length) {
     const h3 = document.createElement('h3'); h3.textContent = 'Snapshot Contexts'; sec.appendChild(h3);
     const snaps = el('div', 'incident-context__snapshots');
-    for (const snap of ctx.trendSnapshots) {
+    for (const snap of snapshots) {
       const card = el('div', 'incident-context__snapshot');
       const label = snap.isBaseline ? 'Baseline' : (snap.isCurrent ? 'Current' : ('Snapshot ' + (snap.index + 1)));
       const title = el('div', 'incident-context__snapshot-title'); title.textContent = label;

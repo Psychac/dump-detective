@@ -515,6 +515,12 @@
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
+/* Single-dump header: avoid back-to-back separators after Source row. */
+.header-path + .header-meta-row {
+  border-top: none;
+  margin-top: 8px;
+  padding-top: 8px;
+}
 .header-meta-row + .header-meta-row { margin-top: 8px; padding-top: 8px; }
 .header-meta-row__group {
   flex: 0 0 auto;

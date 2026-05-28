@@ -183,6 +183,22 @@ function buildSparklineBlock(block) {
 export function buildDetailTable(block, announce, sparkRegistry) {
   const container = el('div', 'table-with-pagination');
   const tbl = el('table');
+  const captionText = String((block && block.caption) || '').toLowerCase();
+  const headers = Array.isArray(block && block.headers) ? block.headers.map(h => String(h || '').toLowerCase()) : [];
+  const isTimelineTable = captionText.includes('metric timeline') || (
+    headers.length >= 6 &&
+    headers[0] === 'metric' &&
+    headers.includes('pattern') &&
+    headers.includes('status')
+  );
+  const isStepDeltaTable = captionText.includes('step deltas');
+  if (isTimelineTable) {
+    container.classList.add('table-with-pagination--timeline');
+    tbl.classList.add('detail-table--timeline');
+  } else if (isStepDeltaTable) {
+    container.classList.add('table-with-pagination--step-deltas');
+    tbl.classList.add('detail-table--step-deltas');
+  }
   if (block.caption) { const cap = document.createElement('caption'); cap.textContent = block.caption; tbl.appendChild(cap); }
   const thead = el('thead'); const htr = el('tr');
   for (const h of (block.headers || [])) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = h; htr.appendChild(th); }
@@ -195,7 +211,8 @@ export function buildDetailTable(block, announce, sparkRegistry) {
     const cells = Array.isArray(row)
       ? row
       : (row && Array.isArray(row.cells) ? row.cells : []);
-    for (const cell of cells) {
+    for (let ci = 0; ci < cells.length; ci++) {
+      const cell = cells[ci];
       if (!cell) {
         tr.appendChild(document.createElement('td'));
         continue;
@@ -231,9 +248,38 @@ export function buildDetailTable(block, announce, sparkRegistry) {
         }
       }
       if (cell.rawValue != null) td.dataset.value = cell.rawValue;
+
+      if (isTimelineTable) {
+        if (ci === 0) td.classList.add('timeline-metric-cell');
+        if (ci === 1) td.classList.add('timeline-trend-cell');
+        if (ci >= 2 && ci <= cells.length - 5) {
+          td.classList.add('timeline-num-cell');
+          td.classList.add('timeline-dump-cell');
+        }
+        if (ci === cells.length - 4 || ci === cells.length - 3) {
+          td.classList.add('timeline-num-cell');
+        }
+        if (ci === cells.length - 2) {
+          td.classList.add('timeline-pattern-cell');
+        }
+        if (ci === cells.length - 1) {
+          const s = (td.textContent || '').toLowerCase();
+          td.classList.add('timeline-status-cell');
+          if (s.includes('severe')) td.classList.add('timeline-status-cell--severe');
+          else if (s.includes('regression')) td.classList.add('timeline-status-cell--regression');
+          else if (s.includes('improvement')) td.classList.add('timeline-status-cell--improvement');
+          else td.classList.add('timeline-status-cell--stable');
+        }
+      }
+
       wrapAddresses(td);
       tr.appendChild(td);
     }
+
+    if (isTimelineTable) {
+      applyTimelineRowVisualEncoding(tr, cells.length);
+    }
+
     rowElements.push(tr);
   }
 
@@ -270,4 +316,81 @@ export function buildDetailTable(block, announce, sparkRegistry) {
   renderTablePage();
   if (rowElements.length <= pageSize || pageSize === 0) controls.style.display = rowElements.length <= pageSize ? 'none' : '';
   return container;
+}
+
+function applyTimelineRowVisualEncoding(tr, totalCells) {
+  const dumpStart = 2;
+  const dumpEnd = totalCells - 5;
+  if (dumpEnd < dumpStart) return;
+
+  const tds = tr.children;
+  const dumpValues = [];
+  for (let ci = dumpStart; ci <= dumpEnd; ci++) {
+    const raw = parseFloat((tds[ci] && tds[ci].dataset && tds[ci].dataset.value) || 'NaN');
+    dumpValues.push(Number.isFinite(raw) ? raw : NaN);
+  }
+
+  const valid = dumpValues.filter(v => Number.isFinite(v));
+  if (!valid.length) return;
+
+  let peakIdx = 0;
+  for (let i = 1; i < dumpValues.length; i++) {
+    if (!Number.isFinite(dumpValues[i])) continue;
+    if (!Number.isFinite(dumpValues[peakIdx]) || dumpValues[i] > dumpValues[peakIdx]) peakIdx = i;
+  }
+
+  let lastValid = null;
+  for (let i = 0; i < dumpValues.length; i++) {
+    const td = tds[dumpStart + i];
+    const value = dumpValues[i];
+    const originalLabel = td.textContent || '—';
+
+    td.classList.add('timeline-dump-cell--encoded');
+    td.title = `Dump ${i + 1}: ${originalLabel}`;
+    td.textContent = '';
+
+    const inner = el('div', 'timeline-dump-inner');
+    td.appendChild(inner);
+
+    if (!Number.isFinite(value)) {
+      td.classList.add('timeline-dump-cell--na');
+      const na = el('span', 'timeline-dump-na');
+      na.textContent = '—';
+      inner.appendChild(na);
+      continue;
+    }
+
+    let signal = '•';
+    let signalCls = 'timeline-dump-signal--flat';
+    if (lastValid && Number.isFinite(lastValid.value)) {
+      const diff = value - lastValid.value;
+      if (diff > 0) {
+        signal = '↗';
+        signalCls = 'timeline-dump-signal--up';
+        td.classList.add('timeline-dump-cell--up');
+      } else if (diff < 0) {
+        signal = '↘';
+        signalCls = 'timeline-dump-signal--down';
+        td.classList.add('timeline-dump-cell--down');
+      } else {
+        signal = '→';
+        signalCls = 'timeline-dump-signal--flat';
+        td.classList.add('timeline-dump-cell--flat');
+      }
+    } else {
+      td.classList.add('timeline-dump-cell--start');
+    }
+
+    const isKeyValue = i === 0 || i === dumpValues.length - 1 || i === peakIdx;
+
+    const sig = el('span', `timeline-dump-signal ${signalCls}`);
+    sig.textContent = signal;
+    inner.appendChild(sig);
+
+    const valueEl = el('span', isKeyValue ? 'timeline-dump-value timeline-dump-value--key' : 'timeline-dump-value timeline-dump-value--muted');
+    valueEl.textContent = originalLabel;
+    inner.appendChild(valueEl);
+
+    lastValid = { value: value, index: i };
+  }
 }

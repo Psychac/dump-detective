@@ -6,7 +6,7 @@ namespace DumpDetective.Reporting.Services;
 
 /// <summary>
 /// Builds the T4 Metric Timeline <see cref="AnalyzerDetailSection"/>:
-/// per-analyzer metric trend tables with step-by-step delta sub-sections.
+/// per-analyzer metric trend tables with visual timeline columns.
 /// Uses <see cref="TableCell.LinkTarget"/> instead of the legacy __LINK__ token,
 /// and <see cref="SparklineBlock"/> instead of the legacy __SPARK__ token.
 /// </summary>
@@ -17,7 +17,6 @@ internal static class TrendMetricTimelineSectionBuilder
         IReadOnlyList<AnalysisSnapshot> snapshots)
     {
         var blocks = new List<SectionBlock>();
-        blocks.Add(new HeadingBlock($"Metric Timeline ({snapshots.Count} snapshots)"));
 
         var regressionsByAnalyzer = trendData.Overall.ToDictionary(
             r => r.AnalyzerName, r => r.Regressions.Count, StringComparer.Ordinal);
@@ -46,116 +45,78 @@ internal static class TrendMetricTimelineSectionBuilder
 
                 string status = classification switch
                 {
-                    TrendClassification.SevereRegression => "⚠⚠ Severe",
-                    TrendClassification.Regression       => "⚠ Regression",
-                    TrendClassification.Improvement      => "✅ Improvement",
-                    _                                    => "— Stable"
+                    TrendClassification.SevereRegression => "Severe regression",
+                    TrendClassification.Regression       => "Regression",
+                    TrendClassification.Improvement      => "Improvement",
+                    _                                    => "Stable"
                 };
 
-                string pctStr = deltaPercent.HasValue
-                    ? $" ({(deltaPercent.Value >= 0 ? "+" : string.Empty)}{deltaPercent.Value:F1}%)"
-                    : string.Empty;
                 string deltaDisplay = delta == 0
                     ? "no change"
-                    : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}{pctStr}";
+                    : $"{(delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(delta, point.Unit)}";
+                string deltaPercentDisplay = deltaPercent.HasValue
+                    ? $"{deltaPercent.Value:+0.0;-0.0}%"
+                    : "—";
+                string patternDisplay = BuildPatternLabel(point.Values);
 
                 // Determine snapshot with largest adjacent change to link to
                 int linkSnapshot = FindLargestChangeSnapshot(point.Values, snapshots.Count);
 
-                rows.Add(new TableRow([
+                string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    values = point.Values,
+                    unit = point.Unit,
+                    direction = point.Direction.ToString()
+                });
+
+                var rowCells = new List<TableCell>(6 + snapshots.Count)
+                {
                     new TableCell(point.Key, LinkTarget: $"detail-{linkSnapshot}"),
-                    new TableCell($"__SPARKREF__{analyzerTimeline.AnalyzerName}.{point.Key}"),
-                    new TableCell(deltaDisplay, delta == 0 ? 0L : (long)Math.Round(Math.Abs(delta))),
-                    new TableCell(status)
-                ]));
+                    new TableCell("__SPARK__" + sparkPayload)
+                };
+
+                for (int i = 0; i < snapshots.Count; i++)
+                {
+                    double value = i < point.Values.Count ? point.Values[i] : double.NaN;
+                    string display = double.IsNaN(value)
+                        ? "—"
+                        : FormatHelper.FormatMetricValue(value, point.Unit);
+                    rowCells.Add(new TableCell(display, ToSortableLong(value)));
+                }
+
+                rowCells.Add(new TableCell(deltaDisplay, ToSortableLong(delta)));
+                rowCells.Add(new TableCell(deltaPercentDisplay, ToSortableLong(deltaPercent ?? 0)));
+                rowCells.Add(new TableCell(patternDisplay));
+                rowCells.Add(new TableCell(status, (long)severity));
+
+                rows.Add(new TableRow(rowCells));
             }
 
             if (rows.Count == 0) continue;
 
-            blocks.Add(new BlankBlock());
-            blocks.Add(new HeadingBlock($"[{analyzerTimeline.AnalyzerName}]", 1));
+            if (blocks.Count > 0)
+                blocks.Add(new BlankBlock());
 
-            // Sparkline blocks paired with each metric row (insert before table)
-            foreach (MetricTimelinePoint point in analyzerTimeline.Points)
+            var headers = new List<string>(6 + snapshots.Count)
             {
-                if (point.Values.All(double.IsNaN)) continue;
-                string direction = point.Direction switch
-                {
-                    MetricTrendDirection.HigherIsWorse => "HigherIsWorse",
-                    MetricTrendDirection.LowerIsWorse  => "LowerIsWorse",
-                    _                                  => "Neutral"
-                };
-                blocks.Add(new SparklineBlock(
-                    MetricKey: $"{analyzerTimeline.AnalyzerName}.{point.Key}",
-                    Unit:      point.Unit,
-                    Values:    point.Values,
-                    Direction: direction));
+                "Metric",
+                $"Trend ({snapshots.Count})"
+            };
+
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                headers.Add($"Dump {i + 1}");
             }
+
+            headers.Add("Δ");
+            headers.Add("Δ%");
+            headers.Add("Pattern");
+            headers.Add("Status");
 
             blocks.Add(new TableBlock(
-                Caption: $"{analyzerTimeline.AnalyzerName} metric timeline",
-                Headers: ["Metric", $"Trend ({snapshots.Count} snapshots)", "Δ", "Status"],
+                Caption: $"{analyzerTimeline.AnalyzerName}",
+                Headers: headers,
                 Rows: rows));
-
-            // Collapsible step-by-step delta sub-section
-            if (trendData.Steps.Count > 0)
-            {
-                blocks.Add(new CollapsibleSectionBeginBlock($"{analyzerTimeline.AnalyzerName} — Step-by-Step Δ"));
-
-                var stepRows = new List<TableRow>();
-                for (int stepIdx = 0; stepIdx < trendData.Steps.Count; stepIdx++)
-                {
-                    IReadOnlyList<AnalyzerTrendResult> stepResults = trendData.Steps[stepIdx];
-                    AnalyzerTrendResult? analyzerStep = null;
-                    foreach (AnalyzerTrendResult r in stepResults)
-                    {
-                        if (string.Equals(r.AnalyzerName, analyzerTimeline.AnalyzerName, StringComparison.Ordinal))
-                        { analyzerStep = r; break; }
-                    }
-                    if (analyzerStep is null) continue;
-
-                    string fromDump = snapshots.Count > stepIdx     ? Path.GetFileName(snapshots[stepIdx].DumpPath)     : $"S{stepIdx + 1}";
-                    string toDump   = snapshots.Count > stepIdx + 1 ? Path.GetFileName(snapshots[stepIdx + 1].DumpPath) : $"S{stepIdx + 2}";
-
-                    foreach (MetricDelta d in analyzerStep.Deltas)
-                    {
-                        if (d.Delta == 0) continue;
-
-                        string pctStr2 = d.DeltaPercent.HasValue
-                            ? $" ({(d.DeltaPercent.Value >= 0 ? "+" : string.Empty)}{d.DeltaPercent.Value:F1}%)"
-                            : string.Empty;
-                        string deltaStr = $"{(d.Delta >= 0 ? "+" : string.Empty)}{FormatHelper.FormatDeltaValue(d.Delta, d.Unit)}{pctStr2}";
-
-                        string sev = d.Severity switch
-                        {
-                            RegressionSeverity.Severe   => "Severe",
-                            RegressionSeverity.Moderate => "Moderate",
-                            RegressionSeverity.Minor    => "Minor",
-                            _                           => "—"
-                        };
-
-                        stepRows.Add(new TableRow([
-                            new TableCell((stepIdx + 1).ToString()),
-                            new TableCell(fromDump),
-                            new TableCell(toDump),
-                            new TableCell(d.Key),
-                            new TableCell(deltaStr),
-                            new TableCell(d.DeltaPercent.HasValue ? $"{d.DeltaPercent.Value:+0.0;-0.0}%" : "—"),
-                            new TableCell(sev)
-                        ]));
-                    }
-                }
-
-                if (stepRows.Count > 0)
-                {
-                    blocks.Add(new TableBlock(
-                        Caption: "Step Deltas",
-                        Headers: ["Step", "From Dump", "To Dump", "Metric", "Δ", "Δ%", "Severity"],
-                        Rows: stepRows));
-                }
-
-                blocks.Add(new CollapsibleSectionEndBlock());
-            }
         }
 
         return new AnalyzerDetailSection(
@@ -212,4 +173,62 @@ internal static class TrendMetricTimelineSectionBuilder
         if (isRegression)  return severity == RegressionSeverity.Severe ? TrendClassification.SevereRegression : TrendClassification.Regression;
         return TrendClassification.Stable;
     }
+
+    private static long ToSortableLong(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+            return 0L;
+
+        double rounded = Math.Round(value, MidpointRounding.AwayFromZero);
+        if (rounded > long.MaxValue) return long.MaxValue;
+        if (rounded < long.MinValue) return long.MinValue;
+        return (long)rounded;
+    }
+
+    private static string BuildPatternLabel(IReadOnlyList<double> values)
+    {
+        if (values.Count < 2)
+            return "Insufficient data";
+
+        var deltas = new List<double>(values.Count - 1);
+        for (int i = 1; i < values.Count; i++)
+        {
+            double prev = values[i - 1];
+            double curr = values[i];
+            if (double.IsNaN(prev) || double.IsNaN(curr))
+                continue;
+            deltas.Add(curr - prev);
+        }
+
+        if (deltas.Count == 0)
+            return "Sparse";
+
+        const double eps = 1e-9;
+        int nonZero = deltas.Count(d => Math.Abs(d) > eps);
+        if (nonZero == 0)
+            return "Stable";
+
+        double sumAbs = deltas.Sum(d => Math.Abs(d));
+        double maxAbs = deltas.Max(d => Math.Abs(d));
+
+        int signChanges = 0;
+        int? lastSign = null;
+        foreach (double d in deltas)
+        {
+            if (Math.Abs(d) <= eps) continue;
+            int sign = Math.Sign(d);
+            if (lastSign.HasValue && sign != lastSign.Value)
+                signChanges++;
+            lastSign = sign;
+        }
+
+        if (nonZero <= 2 && sumAbs > eps && maxAbs / sumAbs >= 0.7)
+            return "Single jump";
+        if (signChanges == 0)
+            return "Gradual drift";
+        if (signChanges >= 2)
+            return "Oscillating";
+        return "Volatile";
+    }
+
 }

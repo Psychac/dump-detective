@@ -108,6 +108,223 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 .detail-block tbody td { border: 1px solid var(--border); padding: 10px 12px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; background: #fff; }
 .detail-block tbody tr:nth-child(even) td { background: #fcfcfc; }
 .detail-block caption { color: #4b5563; font-size: 13px; font-weight: 600; text-align: left; padding: 2px 0 4px 0; caption-side: top; }
+
+/* T4 metric timeline table (visual refinement) */
+.table-with-pagination--timeline {
+  margin: 8px 0 14px;
+  border: 1px solid #d9e1eb;
+  border-radius: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #ffffff;
+}
+
+.table-with-pagination--timeline table {
+  min-width: max-content;
+}
+
+.table-with-pagination--timeline .table-pagination-controls {
+  padding: 7px 10px;
+  border-bottom: 1px solid #e8eef5;
+  background: #fafcfe;
+}
+
+.detail-table--timeline caption {
+  color: #1e293b;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  padding: 7px 10px 6px;
+}
+
+.detail-table--timeline thead th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-color: #e2e8f0;
+  padding: 8px 10px;
+}
+
+.detail-table--timeline tbody td {
+  border-color: #edf2f7;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.detail-table--timeline tbody tr:nth-child(even) td {
+  background: #fbfdff;
+}
+
+.detail-table--timeline .timeline-metric-cell {
+  font-weight: 700;
+  color: #0f172a;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: inherit;
+}
+
+.detail-table--timeline .timeline-num-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: #1f2937;
+}
+
+.detail-table--timeline .timeline-trend-cell {
+  text-align: center;
+}
+
+.detail-table--timeline .timeline-dump-cell {
+  min-width: 84px;
+}
+
+.detail-table--timeline .timeline-dump-cell--encoded {
+  min-width: 92px;
+  text-align: center;
+  white-space: nowrap;
+  padding: 6px 6px;
+  vertical-align: middle;
+}
+
+.detail-table--timeline .timeline-dump-cell--na {
+  color: #94a3b8;
+}
+
+.detail-table--timeline .timeline-dump-inner {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.detail-table--timeline .timeline-dump-na {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.detail-table--timeline .timeline-dump-signal {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  line-height: 1;
+}
+
+.detail-table--timeline .timeline-dump-signal--up {
+  color: #15803d;
+}
+
+.detail-table--timeline .timeline-dump-signal--down {
+  color: #be123c;
+}
+
+.detail-table--timeline .timeline-dump-signal--flat {
+  color: #0f766e;
+}
+
+.detail-table--timeline .timeline-dump-value {
+  display: inline-block;
+  font-size: 10px;
+  color: #334155;
+}
+
+.detail-table--timeline .timeline-dump-value--key {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.detail-table--timeline .timeline-dump-value--muted {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.detail-table--timeline .timeline-dump-cell--up .timeline-dump-inner {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.detail-table--timeline .timeline-dump-cell--down .timeline-dump-inner {
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
+.detail-table--timeline .timeline-dump-cell--flat .timeline-dump-inner,
+.detail-table--timeline .timeline-dump-cell--start .timeline-dump-inner {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.detail-table--timeline .timeline-status-cell {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  position: relative;
+  background: transparent;
+  border-radius: 0;
+}
+
+.detail-table--timeline .timeline-status-cell::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: #94a3b8;
+}
+
+.detail-table--timeline .timeline-status-cell--severe {
+  color: #991b1b;
+  background: transparent;
+}
+
+.detail-table--timeline .timeline-status-cell--severe::before {
+  background: #dc2626;
+}
+
+.detail-table--timeline .timeline-status-cell--regression {
+  color: #b45309;
+  background: transparent;
+}
+
+.detail-table--timeline .timeline-status-cell--regression::before {
+  background: #d97706;
+}
+
+.detail-table--timeline .timeline-status-cell--improvement {
+  color: #166534;
+  background: transparent;
+}
+
+.detail-table--timeline .timeline-status-cell--improvement::before {
+  background: #16a34a;
+}
+
+.detail-table--timeline .timeline-status-cell--stable {
+  color: #475569;
+  background: transparent;
+}
+
+.detail-table--timeline .timeline-status-cell--stable::before {
+  background: #64748b;
+}
+
+.detail-table--timeline .timeline-pattern-cell {
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  text-align: center;
+  white-space: nowrap;
+}
 .detail-chart { margin: 8px 0 12px 0; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff; overflow: hidden; width: 100%; max-width: 460px; }
 .detail-chart__title { font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px; }
 .detail-chart__frame { display: flex; flex-direction: column; gap: 3px; }

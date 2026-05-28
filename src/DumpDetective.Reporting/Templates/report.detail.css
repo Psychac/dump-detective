@@ -240,11 +240,31 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 }
 
 /* ΓöÇΓöÇ Sortable columns ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
-thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 20px;
+}
 thead th.sortable:hover { background: #e9ebef; }
-thead th.sortable::after { content: ' Γçà'; font-size: 11px; opacity: 0.35; margin-left: 3px; }
-thead th.sortable[aria-sort="ascending"]::after  { content: ' Γåæ'; opacity: 1; }
-thead th.sortable[aria-sort="descending"]::after { content: ' Γåô'; opacity: 1; }
+thead th.sortable::after {
+  content: "\21C5";
+  font-size: 11px;
+  opacity: 0.45;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  line-height: 1;
+}
+thead th.sortable[aria-sort="ascending"]::after  {
+  content: "\25B2";
+  opacity: 1;
+}
+thead th.sortable[aria-sort="descending"]::after {
+  content: "\25BC";
+  opacity: 1;
+}
 
 /* ΓöÇΓöÇ Action bar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .action-bar { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; padding: 12px 14px; }

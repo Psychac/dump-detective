@@ -152,6 +152,9 @@ internal partial record ExecutiveSummaryRecord
     public int? LeakScoreDelta { get; init; } = null;
     public int? GcPressureScoreDelta { get; init; } = null;
     public int? ThreadContentionScoreDelta { get; init; } = null;
+    // Trend-mode highlight tables (T2c/T2d)
+    public IReadOnlyList<FindingRecord>? TopRegressions { get; init; } = null;
+    public IReadOnlyList<FindingRecord>? TopImprovements { get; init; } = null;
 
     // Key metrics strip — sourced from domain results
     public long? LohBytes { get; init; } = null;

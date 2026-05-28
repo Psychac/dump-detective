@@ -30,7 +30,8 @@ internal sealed class TrendReportComposer(
         List<InsightFinding> trendFindings =
         [
             .. BuildTrendFindings(trendData.Overall, lifecycle),
-            .. BuildTopRegressionFindings(trendData.Overall)
+            .. BuildTopRegressionFindings(trendData.Overall),
+            .. BuildTopImprovementFindings(trendData.Overall)
         ];
 
         AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, [], reportBuilders, audience, currentIncidentContext);
@@ -43,11 +44,7 @@ internal sealed class TrendReportComposer(
         // T8: Build trend-specific analyzer sections using dedicated builders
         var analyzerSections = new List<AnalyzerDetailSection>();
 
-        // T2.1 + T2.3 — Score movement + top regressions executive section
         ExecutiveSummaryRecord? trendSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience);
-        AnalyzerDetailSection? scoreSection = BuildTrendScoreMovementSection(trendSummary, trendFindings);
-        if (scoreSection is not null)
-            analyzerSections.Add(scoreSection);
 
         // T3 — Regression Dashboard (when there is anything to report)
         bool hasEscalations = trendData.Snapshots.Count >= 2 &&
@@ -78,11 +75,22 @@ internal sealed class TrendReportComposer(
             .Where(static s => !s.SectionId.StartsWith("detail-", StringComparison.Ordinal))
             .ToList();
 
-        // T9: Map regression findings with MetricBaseline/MetricCurrent populated
-        var regressionDeltaLookup = BuildRegressionDeltaLookup(trendData.Overall);
+        // T9: Map trend findings with MetricBaseline/MetricCurrent populated
+        var trendDeltaLookup = BuildTrendDeltaLookup(trendData.Overall);
         List<FindingRecord> mappedFindings = trendFindings
-            .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, regressionDeltaLookup))
+            .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, trendDeltaLookup))
             .ToList();
+
+        if (trendSummary is not null)
+        {
+            var topRegressions = SelectTopTrendFindings(mappedFindings, "regression", 5);
+            var topImprovements = SelectTopTrendFindings(mappedFindings, "improvement", 3);
+            trendSummary = trendSummary with
+            {
+                TopRegressions = topRegressions,
+                TopImprovements = topImprovements,
+            };
+        }
 
         return new TrendReportDocument
         {
@@ -158,6 +166,37 @@ internal sealed class TrendReportComposer(
         return findings;
     }
 
+    private static IReadOnlyList<InsightFinding> BuildTopImprovementFindings(IReadOnlyList<AnalyzerTrendResult> overall)
+    {
+        var topImprovements = overall
+            .SelectMany(r => r.Improvements.Select(d => (Analyzer: r.AnalyzerName, Delta: d)))
+            .OrderByDescending(x => Math.Abs(x.Delta.DeltaPercent ?? x.Delta.Delta))
+            .Take(5)
+            .ToList();
+
+        List<InsightFinding> findings = new(topImprovements.Count);
+        foreach (var (analyzerName, delta) in topImprovements)
+        {
+            string scopeSuffix = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" ({delta.Scope})";
+            string deltaText = delta.DeltaPercent.HasValue
+                ? $"{(delta.DeltaPercent.Value >= 0 ? "+" : string.Empty)}{delta.DeltaPercent.Value:F1}%"
+                : $"{(delta.Delta >= 0 ? "+" : string.Empty)}{delta.Delta:F1} {delta.Unit}";
+
+            findings.Add(new InsightFinding(
+                Analyzer: "TrendAnalyzer",
+                Category: "Comparison",
+                Severity: FindingSeverity.Info,
+                Title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
+                Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
+                Recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
+                Tags: ["trend", "improvement", analyzerName, delta.Key],
+                MetricValue: delta.DeltaPercent ?? delta.Delta,
+                MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
+        }
+
+        return findings;
+    }
+
     private static List<InsightFinding> BuildTrendFindings(
         IReadOnlyList<AnalyzerTrendResult> overall,
         FindingLifecycleResult lifecycle)
@@ -222,78 +261,6 @@ internal sealed class TrendReportComposer(
             GcPressureScoreDelta = last.GcPressureScore - first.GcPressureScore,
             ThreadContentionScoreDelta = last.ThreadContentionScore - first.ThreadContentionScore,
         };
-    }
-
-    // ── T2: Score Movement + Top Regressions section ──────────────────────────
-
-    private static AnalyzerDetailSection? BuildTrendScoreMovementSection(
-        ExecutiveSummaryRecord? summary,
-        IReadOnlyList<InsightFinding> trendFindings)
-    {
-        bool hasDeltas = summary is not null &&
-            (summary.LeakScoreDelta.HasValue || summary.GcPressureScoreDelta.HasValue || summary.ThreadContentionScoreDelta.HasValue);
-
-        var regressionFindings = trendFindings
-            .Where(f => f.Tags is not null && f.Tags.Contains("regression"))
-            .OrderByDescending(f => f.Severity)
-            .Take(5)
-            .ToList();
-
-        if (!hasDeltas && regressionFindings.Count == 0)
-            return null;
-
-        var blocks = new List<SectionBlock>();
-
-        // T2.1 — Score Movement
-        if (hasDeltas && summary is not null)
-        {
-            blocks.Add(new HeadingBlock("Score Movement (Baseline \u2192 Current)"));
-
-            static string Arrow(int? delta) => delta switch
-            {
-                null   => "\u2014",
-                > 0    => $"\u2191 +{delta} (worse)",
-                < 0    => $"\u2193 {delta} (better)",
-                _      => "= stable"
-            };
-
-            var rows = new List<TableRow>
-            {
-                new([new TableCell("Leak Likelihood"),     new TableCell(summary.LeakLikelihoodScore.ToString()),  new TableCell(Arrow(summary.LeakScoreDelta))]),
-                new([new TableCell("GC Pressure"),         new TableCell(summary.GcPressureScore.ToString()),      new TableCell(Arrow(summary.GcPressureScoreDelta))]),
-                new([new TableCell("Thread Contention"),   new TableCell(summary.ThreadContentionScore.ToString()), new TableCell(Arrow(summary.ThreadContentionScoreDelta))]),
-            };
-
-            blocks.Add(new TableBlock(
-                Caption: "Composite score deltas vs baseline",
-                Headers: ["Dimension", "Current Score", "Delta"],
-                Rows: rows));
-        }
-
-        // T2.3 — Top Regressions
-        if (regressionFindings.Count > 0)
-        {
-            blocks.Add(new HeadingBlock("Top Metric Regressions"));
-            var rows = regressionFindings.Select(f => new TableRow([
-                new TableCell(f.Severity.ToString()),
-                new TableCell(f.Analyzer),
-                new TableCell(f.Title),
-                new TableCell(f.Evidence.Length > 120 ? f.Evidence[..117] + "\u2026" : f.Evidence)
-            ])).ToList();
-
-            blocks.Add(new TableBlock(
-                Caption: "Top regression findings (sorted by severity)",
-                Headers: ["Severity", "Analyzer", "Title", "Evidence"],
-                Rows: rows));
-        }
-
-        return new AnalyzerDetailSection(
-            AnalyzerName:  "TrendScoreMovement",
-            DisplayTitle:  "Score Movement & Top Regressions",
-            SortOrder:     5,
-            Blocks:        blocks,
-            SectionId:     "T2",
-            Domain:        "Trend");
     }
 
     // ── Per-dump sections (canonical text/markdown/JSON output) ──────────────
@@ -570,9 +537,9 @@ internal sealed class TrendReportComposer(
         return new AnalyzerDetailSection("Trend Comparison", "Trend Comparison", 0, blocks);
     }
 
-    // ── T9: Regression delta lookup for MetricBaseline/MetricCurrent ─────────
+    // ── T9: Trend delta lookup for MetricBaseline/MetricCurrent ─────────────
 
-    private static Dictionary<string, MetricDelta> BuildRegressionDeltaLookup(IReadOnlyList<AnalyzerTrendResult> overall)
+    private static Dictionary<string, MetricDelta> BuildTrendDeltaLookup(IReadOnlyList<AnalyzerTrendResult> overall)
     {
         var lookup = new Dictionary<string, MetricDelta>(StringComparer.Ordinal);
         foreach (AnalyzerTrendResult result in overall)
@@ -580,6 +547,11 @@ internal sealed class TrendReportComposer(
             foreach (MetricDelta delta in result.Regressions)
             {
                 // Key by "AnalyzerName/MetricKey" to identify a regression finding
+                string key = $"{result.AnalyzerName}/{delta.Key}";
+                lookup.TryAdd(key, delta);
+            }
+            foreach (MetricDelta delta in result.Improvements)
+            {
                 string key = $"{result.AnalyzerName}/{delta.Key}";
                 lookup.TryAdd(key, delta);
             }
@@ -595,7 +567,7 @@ internal sealed class TrendReportComposer(
         FindingRecord record = MapFinding(finding, snapshotIndex);
 
         // T9: Inject MetricBaseline/MetricCurrent for regression findings
-        if (finding.Tags.Contains("regression"))
+        if (finding.Tags.Contains("regression") || finding.Tags.Contains("improvement"))
         {
             // Tags are: ["trend","regression",analyzerName,metricKey]
             string? analyzerName = finding.Tags.Count > 2 ? finding.Tags[2] : null;
@@ -613,6 +585,30 @@ internal sealed class TrendReportComposer(
         }
 
         return record;
+    }
+
+    private static IReadOnlyList<FindingRecord> SelectTopTrendFindings(
+        IReadOnlyList<FindingRecord> findings,
+        string tag,
+        int take)
+    {
+        return findings
+            .Where(f => f.Tags.Contains(tag))
+            .OrderByDescending(f => SeverityRank(f.Severity))
+            .ThenByDescending(f => Math.Abs(f.MetricCurrent.GetValueOrDefault() - f.MetricBaseline.GetValueOrDefault()))
+            .Take(take)
+            .ToList();
+    }
+
+    private static int SeverityRank(string severity)
+    {
+        return severity switch
+        {
+            "Critical" => 3,
+            "Warning" => 2,
+            "Info" => 1,
+            _ => 0,
+        };
     }
 
     private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)

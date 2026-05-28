@@ -450,19 +450,49 @@ export function buildExecutiveSummary(doc) {
       const cl = el('span', 'exec-lifecycle-chip__label'); cl.textContent = label; chip.appendChild(cl);
       chips.appendChild(chip);
     }
-    lcChip('New', doc.trendNewFindingCount, 'new');
-    lcChip('Persistent', doc.trendPersistentFindingCount, 'persistent');
-    lcChip('Resolved', doc.trendResolvedFindingCount, 'resolved');
-    if (doc.trendDumpCount != null) {
-      const net = (doc.trendNewFindingCount || 0) - (doc.trendResolvedFindingCount || 0);
-      lcChip('Net', net, net > 0 ? 'worse' : net < 0 ? 'better' : 'flat');
-    }
+    const snapshots = (doc.incidentContext && Array.isArray(doc.incidentContext.trendSnapshots))
+      ? doc.incidentContext.trendSnapshots
+      : [];
+    const dumpCount = (doc.trendDumpCount != null)
+      ? Number(doc.trendDumpCount)
+      : (Array.isArray(doc.trendDumpPaths) ? doc.trendDumpPaths.length : snapshots.length);
+    const newCount = (doc.trendNewFindingCount != null) ? Number(doc.trendNewFindingCount) : 0;
+    const persistentCount = (doc.trendPersistentFindingCount != null) ? Number(doc.trendPersistentFindingCount) : 0;
+    const resolvedCount = (doc.trendResolvedFindingCount != null) ? Number(doc.trendResolvedFindingCount) : 0;
+    const net = newCount - resolvedCount;
+
+    lcChip('Dumps', dumpCount, 'meta');
+    lcChip('New', newCount, 'new');
+    lcChip('Persistent', persistentCount, 'persistent');
+    lcChip('Resolved', resolvedCount, 'resolved');
+    lcChip('Net', net, net > 0 ? 'worse' : net < 0 ? 'better' : 'flat');
     lifecycle.appendChild(chips);
     sec.appendChild(lifecycle);
+
+    if (dumpCount > 0 || snapshots.length >= 2) {
+      const windowRow = el('div', 'exec-lifecycle-strip exec-lifecycle-strip--window');
+      const wTitle = el('div', 'exec-lifecycle-strip__title');
+      wTitle.textContent = 'Snapshot Window';
+      windowRow.appendChild(wTitle);
+
+      const first = snapshots.length ? snapshots[0] : null;
+      const last = snapshots.length ? snapshots[snapshots.length - 1] : null;
+      const firstTs = first ? (first.dumpCapturedAtUtc || first.generatedAtUtc) : null;
+      const lastTs = last ? (last.dumpCapturedAtUtc || last.generatedAtUtc) : null;
+      const firstLabel = firstTs ? new Date(firstTs).toLocaleString() : 'baseline';
+      const lastLabel = lastTs ? new Date(lastTs).toLocaleString() : 'current';
+      const count = dumpCount > 0 ? dumpCount : snapshots.length;
+
+      const text = el('div', 'exec-kpi__label');
+      text.textContent = String(count) + ' dump' + (Number(count) === 1 ? '' : 's') + ': ' + firstLabel + ' -> ' + lastLabel;
+      windowRow.appendChild(text);
+      sec.appendChild(windowRow);
+    }
   }
 
-  // ── KPI strip ────────────────────────────────────────────────────────────
-  const strip = el('div', 'exec-kpi-strip');
+  // ── KPI strip (single dump only) ────────────────────────────────────────
+  if (!isTrendExecSection) {
+    const strip = el('div', 'exec-kpi-strip');
 
   function kpi(label, value, sev) {
     if (value == null) return null;
@@ -497,13 +527,58 @@ export function buildExecutiveSummary(doc) {
     summary.activeExceptions != null ? kpi('Active exceptions', String(summary.activeExceptions), summary.activeExceptions > 0 ? 'critical' : 'ok') : null
   );
 
-  for (const g of [g1, g2, g3, g4]) { if (g && g.children.length) strip.appendChild(g); }
-  if (strip.children.length) sec.appendChild(strip);
+    for (const g of [g1, g2, g3, g4]) { if (g && g.children.length) strip.appendChild(g); }
+    if (strip.children.length) sec.appendChild(strip);
+  }
 
-  // ── Score triplet ─────────────────────────────────────────────────────────
+  // ── Score summary ─────────────────────────────────────────────────────────
   function scoreLevel(s) { return s >= 67 ? 'ok' : s >= 34 ? 'warning' : 'critical'; }
   const isTrendExec = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
-  if (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null) {
+  if (isTrendExec && (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null)) {
+    const scoreWrap = el('div', 'exec-trend-scores');
+    const heading = el('div', 'exec-recommendations__heading');
+    heading.textContent = 'Score Deltas (Baseline -> Current)';
+    scoreWrap.appendChild(heading);
+
+    const tableWrap = el('div', 'table-wrap');
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    ['Score', 'Baseline', 'Current', 'Delta'].forEach(function (h) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    function appendDeltaRow(label, current, delta) {
+      if (current == null) return;
+      const tr = document.createElement('tr');
+      const baseline = delta == null ? null : (Number(current) - Number(delta));
+      const deltaNum = delta == null ? null : Number(delta);
+      const deltaClass = deltaNum == null ? 'exec-delta-cell--flat' : (deltaNum > 0 ? 'exec-delta-cell--up' : deltaNum < 0 ? 'exec-delta-cell--down' : 'exec-delta-cell--flat');
+      const deltaText = deltaNum == null
+        ? '\u2014'
+        : ((deltaNum > 0 ? '+' : '') + String(deltaNum) + (deltaNum > 0 ? ' (worse)' : deltaNum < 0 ? ' (better)' : ' (stable)'));
+      const cells = [label, baseline == null ? '\u2014' : String(baseline), String(current), deltaText];
+      cells.forEach(function (v, idx) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        if (idx === 3) td.className = 'exec-delta-cell ' + deltaClass;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+    appendDeltaRow('Leak likelihood', summary.leakLikelihoodScore, summary.leakScoreDelta);
+    appendDeltaRow('GC pressure', summary.gcPressureScore, summary.gcPressureScoreDelta);
+    appendDeltaRow('Thread contention', summary.threadContentionScore, summary.threadContentionScoreDelta);
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    scoreWrap.appendChild(tableWrap);
+    sec.appendChild(scoreWrap);
+  } else if (summary.leakLikelihoodScore != null || summary.gcPressureScore != null || summary.threadContentionScore != null) {
     const scores = el('div', 'exec-scores');
     function scoreCard(label, sub, score, delta) {
       if (score == null) return;
@@ -527,7 +602,102 @@ export function buildExecutiveSummary(doc) {
     sec.appendChild(scores);
   }
 
-  // ── Findings ──────────────────────────────────────────────────────────────
+  if (isTrendExecSection) {
+    const trendFindings = Array.isArray(doc.findings) ? doc.findings : [];
+    const summaryRegressions = Array.isArray(summary.topRegressions) ? summary.topRegressions : [];
+    const summaryImprovements = Array.isArray(summary.topImprovements) ? summary.topImprovements : [];
+    const sevRank = { critical: 3, warning: 2, info: 1 };
+
+    function toPercentDelta(base, current) {
+      if (base == null || current == null) return null;
+      const b = Number(base);
+      const c = Number(current);
+      if (!Number.isFinite(b) || !Number.isFinite(c) || Math.abs(b) < 1e-9) return null;
+      return ((c - b) * 100) / b;
+    }
+
+    function buildTrendTable(title, rows) {
+      if (!rows.length) return;
+      const wrap = el('div', 'exec-trend-findings');
+      const heading = el('div', 'exec-recommendations__heading');
+      heading.textContent = title;
+      wrap.appendChild(heading);
+
+      const tableWrap = el('div', 'table-wrap');
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const hr = document.createElement('tr');
+      ['Severity', 'Analyzer', 'Metric', 'Baseline', 'Current', 'Delta%'].forEach(function (h) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        hr.appendChild(th);
+      });
+      thead.appendChild(hr);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        [row.severity, row.analyzer, row.metric, row.baseline, row.current, row.deltaPct].forEach(function (v, idx) {
+          const td = document.createElement('td');
+          td.textContent = v;
+          if (idx === 5) {
+            const n = Number(String(v).replace('%', ''));
+            const cls = !Number.isFinite(n) ? 'exec-delta-pct-cell--flat' : (n > 0 ? 'exec-delta-pct-cell--up' : n < 0 ? 'exec-delta-pct-cell--down' : 'exec-delta-pct-cell--flat');
+            td.className = 'exec-delta-pct-cell ' + cls;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      wrap.appendChild(tableWrap);
+      sec.appendChild(wrap);
+    }
+
+    function pickRows(source, maxCount) {
+      return source
+        .sort(function (a, b) {
+          const sa = sevRank[String(a.severity || '').toLowerCase()] || 0;
+          const sb = sevRank[String(b.severity || '').toLowerCase()] || 0;
+          if (sb !== sa) return sb - sa;
+          const av = Math.abs(Number(a.metricValue || 0));
+          const bv = Math.abs(Number(b.metricValue || 0));
+          return bv - av;
+        })
+        .slice(0, maxCount)
+        .map(function (f) {
+          const ev0 = Array.isArray(f.evidenceRefs) && f.evidenceRefs.length ? f.evidenceRefs[0] : null;
+          const metric = (ev0 && ev0.metricKey) || f.title || '\u2014';
+          const baseline = f.metricBaseline;
+          const current = f.metricCurrent;
+          const deltaPct = toPercentDelta(baseline, current);
+          const metricUnit = f.metricUnit || '';
+          return {
+            severity: f.severity || '\u2014',
+            analyzer: f.analyzer || '\u2014',
+            metric: metric,
+            baseline: baseline == null ? '\u2014' : String(Number(baseline).toFixed(1)) + (metricUnit ? ' ' + metricUnit : ''),
+            current: current == null ? '\u2014' : String(Number(current).toFixed(1)) + (metricUnit ? ' ' + metricUnit : ''),
+            deltaPct: deltaPct == null ? '\u2014' : ((deltaPct >= 0 ? '+' : '') + deltaPct.toFixed(1) + '%')
+          };
+        });
+    }
+
+    const regressionSource = summaryRegressions.length
+      ? summaryRegressions.slice()
+      : trendFindings.filter(function (f) { return Array.isArray(f.tags) && f.tags.indexOf('regression') >= 0; });
+    const improvementSource = summaryImprovements.length
+      ? summaryImprovements.slice()
+      : trendFindings.filter(function (f) { return Array.isArray(f.tags) && f.tags.indexOf('improvement') >= 0; });
+
+    buildTrendTable('Top Regressions', pickRows(regressionSource, 5));
+    buildTrendTable('Top Improvements', pickRows(improvementSource, 3));
+  }
+
+  // ── Findings (single dump only) ──────────────────────────────────────────
+  if (!isTrendExecSection) {
   const critFindings = summary.criticalFindings || [];
   const warnFindings = summary.warningFindings || [];
   if (critFindings.length || warnFindings.length) {
@@ -536,10 +706,11 @@ export function buildExecutiveSummary(doc) {
     appendExecFindingGroup(findingsWrap, 'warning', warnFindings);
     sec.appendChild(findingsWrap);
   }
+  }
 
   // ── Recommendations ───────────────────────────────────────────────────────
   const recs = summary.topRecommendations || [];
-  if (recs.length) {
+  if (recs.length && !isTrendExecSection) {
     const recWrap = el('div', 'exec-recommendations');
     const heading = el('div', 'exec-recommendations__heading'); heading.textContent = 'Top recommendations'; recWrap.appendChild(heading);
     const ol = el('ol', 'exec-rec-list');

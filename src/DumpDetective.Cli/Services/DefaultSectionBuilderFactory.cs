@@ -55,7 +55,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
     [
-        new HeapOverviewSectionBuilder(),
         new ExecutiveSummarySectionBuilder(),
         new TypeSystemSectionBuilder(),            // C1
         new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights

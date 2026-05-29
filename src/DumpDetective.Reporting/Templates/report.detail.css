@@ -188,7 +188,8 @@ body.reading-mode-forensics .detail-value {
   background: #fcfdff;
   color: #1f2937;
   padding: 18px 20px 20px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 13px;
   line-height: 1.6;
@@ -269,6 +270,14 @@ body.reading-mode-forensics .detail-value {
 .table-with-pagination > table {
   border: none;
   border-radius: 0;
+}
+
+.table-with-pagination,
+.table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* T4 metric timeline table (visual refinement) */
@@ -487,10 +496,10 @@ body.reading-mode-forensics .detail-value {
   text-align: center;
   white-space: nowrap;
 }
-.detail-chart { margin: 8px 0 12px 0; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff; overflow: hidden; width: 100%; max-width: 460px; }
+.detail-chart { margin: 8px 0 12px 0; padding: 10px 12px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff; overflow: hidden; width: 100%; max-width: none; min-width: 0; }
 .detail-chart__title { font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px; }
-.detail-chart__frame { display: flex; flex-direction: column; gap: 3px; }
-.detail-chart__svg { width: 100%; height: auto; display: block; max-width: 100%; max-height: 210px; }
+.detail-chart__frame { display: flex; flex-direction: column; gap: 3px; width: 100%; min-width: 0; overflow: hidden; }
+.detail-chart__svg { width: 100%; height: auto; display: block; max-width: 100%; max-height: 320px; overflow: hidden; }
 .detail-chart__caption { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 1px; }
 .detail-chart text { font-family: inherit; }
 .detail-chart__center-label { font-size: 11px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
@@ -499,6 +508,21 @@ body.reading-mode-forensics .detail-value {
 .detail-chart__tile-label, .detail-chart__tile-value { font-size: 10px; fill: #fff; }
 .detail-chart__axis-label, .detail-chart__axis-value { font-size: 10px; fill: #475569; text-anchor: end; }
 .detail-chart__tile-label--light, .detail-chart__tile-value--light { fill: #fff; }
+.detail-chart__hist-value { font-size: 9px; font-weight: 600; fill: #0f172a; text-anchor: middle; }
+.detail-chart__axis-title { font-size: 11px; font-weight: 600; fill: #334155; text-anchor: start; }
+.detail-chart__bar-rank { font-size: 11px; font-weight: 700; fill: #475569; }
+.detail-chart__bar-label { font-size: 12px; font-weight: 600; fill: #0f172a; }
+.detail-chart__bar-value { font-size: 11px; font-weight: 700; fill: #0f172a; }
+
+@media (max-width: 900px) {
+  .detail-chart__svg--rankedbar {
+    max-height: 420px;
+  }
+}
+
+.detail-chart__svg--rankedbar {
+  max-height: 520px;
+}
 
 /* ΓöÇΓöÇ Nested collapsibles ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .detail-nested {

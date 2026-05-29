@@ -66,6 +66,17 @@ function buildTopTypesTreemap(tbl) {
   return chart;
 }
 
+function hasExplicitTopTypesChart(section) {
+  const blocks = section && Array.isArray(section.blocks) ? section.blocks : [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (!b || String(b.type || '').toLowerCase() !== 'chart') continue;
+    const title = String(b.title || '').toLowerCase();
+    if (title.includes('top') && title.includes('type')) return true;
+  }
+  return false;
+}
+
 // ── Analyzer section renderer ─────────────────────────────────────────────────
 
 export function buildAnalyzerSection(section, i) {
@@ -105,6 +116,7 @@ export function buildAnalyzerSection(section, i) {
   }
   const title = el('span', 'detail-summary__title'); title.textContent = section.displayTitle || section.analyzerName || '';
   const blocks = section.blocks || [];
+  const explicitTopTypesChart = hasExplicitTopTypesChart(section);
   const leadSev = section.leadFinding ? (section.leadFinding.severity || '').toLowerCase() : '';
   if (leadSev && leadSev !== 'info') {
     const sevBadge = el('span', 'detail-summary__sev detail-summary__sev--' + leadSev);
@@ -285,8 +297,10 @@ export function buildAnalyzerSection(section, i) {
         }
         tblDetails.appendChild(tools);
 
-        const treemap = buildTopTypesTreemap(tbl);
-        if (treemap) tblDetails.appendChild(treemap);
+        if (!explicitTopTypesChart) {
+          const treemap = buildTopTypesTreemap(tbl);
+          if (treemap) tblDetails.appendChild(treemap);
+        }
 
         const tblWrap = el('div', 'table-wrap');
         const tableEl = document.createElement('table');

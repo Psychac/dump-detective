@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Text.Json;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -29,6 +30,55 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
             KM("LOH bytes",      FormatHelper.FormatBytes(d.LohBytes),     (double)d.LohBytes),
             KM("LOH %",          $"{d.LohPercent:F1}%",                    d.LohPercent),
         };
+
+        if (d.TopTypes.Count > 0)
+        {
+            int chartLimit = Math.Min(12, d.TopTypes.Count);
+            var items = new object[chartLimit];
+            for (int i = 0; i < chartLimit; i++)
+            {
+                TypeSnapshot t = d.TopTypes[i];
+                items[i] = new { label = t.TypeName, value = t.TotalBytes };
+            }
+
+            blocks.Add(Chart(
+                "Top types by memory",
+                "rankedbar",
+                JsonSerializer.Serialize(new
+                {
+                    title = "Top types by memory",
+                    items
+                })));
+        }
+
+        if (d.SizeBucketHistogram is { Count: > 0 })
+        {
+            var histItems = new List<object>(d.SizeBucketHistogram.Count);
+            for (int i = 0; i < d.SizeBucketHistogram.Count; i++)
+            {
+                SizeBucketEntry b = d.SizeBucketHistogram[i];
+                if (b.ObjectCount <= 0)
+                    continue;
+
+                histItems.Add(new
+                {
+                    label = b.RangeLabel,
+                    value = b.ObjectCount
+                });
+            }
+
+            if (histItems.Count > 0)
+            {
+                blocks.Add(Chart(
+                    "Object size histogram",
+                    "histogram",
+                    JsonSerializer.Serialize(new
+                    {
+                        title = "Object size histogram (by object count)",
+                        items = histItems
+                    })));
+            }
+        }
 
         if (d.TopTypes.Count > 0)
         {

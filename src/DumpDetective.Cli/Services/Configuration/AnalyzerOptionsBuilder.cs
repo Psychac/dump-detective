@@ -74,6 +74,7 @@ internal static class AnalyzerOptionsBuilder
         {
             Format = request.OutputFormat ?? ReportFormat.Html,
             Audience = request.ReportAudience ?? ReportAudience.All,
+            StyleVersion = request.ReportStyleVersion ?? ReportStyleVersion.V1,
             PreRender = request.PreRender,
             SeparateJson = request.SeparateJson
         };

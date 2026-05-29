@@ -28,6 +28,15 @@ internal sealed class InsightEngine
     private const int PinnedHandleWarning = 100;
     private const int AnalyzerFailureWarning = 3;
 
+    // Fatal exception detection
+    private static readonly HashSet<string> FatalExceptionTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "System.OutOfMemoryException",
+        "System.StackOverflowException",
+        "System.ExecutionEngineException",
+        "System.AccessViolationException",
+    };
+
     // New thresholds for Part 4 additions
     private const double StringDuplicationWarningRatio = 0.50;
     private const double WeakRefDeadTargetWarningRatio = 0.50;
@@ -75,6 +84,12 @@ internal sealed class InsightEngine
         AppDomainDomainResult? appDomains = FindResult<AppDomainDomainResult>(runs);
         JitDomainResult? jit = FindResult<JitDomainResult>(runs);
         BoxingDomainResult? boxing = FindResult<BoxingDomainResult>(runs);
+        EventLeakDomainResult? eventLeaks = FindResult<EventLeakDomainResult>(runs);
+
+        // Part 6 — Infrastructure domain results
+        DbConnectionDomainResult? dbConn = FindResult<DbConnectionDomainResult>(runs);
+        WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
+        HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
 
         // Existing detection rules
         DetectLohPressure(findings, memory, gcGen, segments);
@@ -100,6 +115,19 @@ internal sealed class InsightEngine
         DetectDynamicAssemblyAccumulation(findings, appDomains);
         DetectJitHeapBloat(findings, jit, threads);
         DetectBoxingGCCorrelation(findings, boxing, gcGen);
+
+        // Part 5 — fatal exception + cross-domain correlation rules
+        DetectFatalExceptionOnHeap(findings, crash);
+        DetectEventLeakPattern(findings, eventLeaks, gcGen, finalizable);
+        DetectDataTableLifecyclePattern(findings, finalizable, memory);
+        DetectKnownLeakPatterns(findings, memory);
+        DetectKnownFinalizerQueuePatterns(findings, finalizable);
+        DetectRecurringTimeoutPattern(findings, crash);
+
+        // Part 6 — Infrastructure cross-correlations
+        DetectDbConnectionLeak(findings, dbConn, crash);
+        DetectWcfChannelFault(findings, wcf, crash);
+        DetectHttpClientAccumulation(findings, http);
 
         // Sort by severity descending: Critical(2) > Warning(1) > Info(0)
         findings.Sort(static (a, b) => b.Severity.CompareTo(a.Severity));
@@ -946,6 +974,514 @@ internal sealed class InsightEngine
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Raises a Critical finding when fatal exception type(s) — OOM, SOE, EEE, AV —
+    /// are found on the managed heap, even when no exception is currently active.
+    /// Their presence indicates the process experienced a near-fatal event prior to the dump.
+    /// </summary>
+    private static void DetectFatalExceptionOnHeap(
+        List<InsightFinding> findings,
+        CrashDomainResult? crash)
+    {
+        if (crash is null || crash.TotalExceptions == 0)
+            return;
+
+        var fatalFound = new List<string>();
+        foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+        {
+            if (FatalExceptionTypes.Contains(kv.Key))
+                fatalFound.Add($"{kv.Key} ×{kv.Value}");
+        }
+
+        if (fatalFound.Count == 0)
+            return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Crash",
+            Severity: FindingSeverity.Critical,
+            Title: "Fatal exception type(s) found on managed heap",
+            Evidence: $"Fatal exception object(s) present: {string.Join(", ", fatalFound)}. " +
+                      "These exception types indicate a previous near-fatal process event.",
+            Recommendation: "OutOfMemoryException: reduce allocations, enable large address space, or scale out. " +
+                            "StackOverflowException: review recursive call depth and unbounded recursion. " +
+                            "ExecutionEngineException: indicates CLR corruption — check native interop and upgrade runtime. " +
+                            "AccessViolationException: unsafe code or native interop writing beyond allocated buffers.",
+            Tags: ["crash", "fatal-exception", "oom", "soe", "critical"]));
+    }
+
+    /// <summary>
+    /// Cross-correlates event leak subscriptions with high Gen2 and finalizer queue pressure.
+    /// Emits a finding only when at least one other signal is present to avoid duplicate noise.
+    /// </summary>
+    private static void DetectEventLeakPattern(
+        List<InsightFinding> findings,
+        EventLeakDomainResult? eventLeaks,
+        GCGenerationDomainResult? gcGen,
+        FinalizableObjectDomainResult? finalizable)
+    {
+        if (eventLeaks is null || eventLeaks.TotalEventLeakInstances == 0)
+            return;
+
+        bool highGen2 = gcGen is not null && gcGen.Gen2Pct >= 40.0;
+        bool highFinalizer = finalizable is not null && finalizable.FinalizerQueueCount >= FinalizerQueueWarning;
+
+        // Only emit cross-cutting finding when at least one other signal correlates.
+        if (!highGen2 && !highFinalizer)
+            return;
+
+        string gen2Note = highGen2
+            ? $" Gen2 holds {gcGen!.Gen2Pct:F1}% of managed heap — event subscribers may be keeping objects alive across GC generations."
+            : string.Empty;
+
+        string finNote = highFinalizer
+            ? $" Finalizer queue has {finalizable!.FinalizerQueueCount:N0} objects — some may be retained by event subscription chains."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Event subscriptions likely amplify Gen2 and finalizer queue pressure",
+            Evidence: $"{eventLeaks.TotalEventLeakInstances:N0} event-leak group(s) with " +
+                      $"{eventLeaks.TotalSubscribers:N0} total subscribers detected.{gen2Note}{finNote}",
+            Recommendation: "Unsubscribe event handlers in Dispose() to release publisher references. " +
+                            "Use WeakEventManager or weak-reference delegate patterns for long-lived publishers. " +
+                            "Review PropertyChanged and custom event patterns for unbounded subscription growth.",
+            Tags: ["event-leak", "gen2", "finalizer", "cross-cutting"],
+            MetricValue: eventLeaks.TotalSubscribers,
+            MetricUnit: "subscribers"));
+    }
+
+    /// <summary>
+    /// Detects classic DataTable/DataColumn/DataRow accumulation: DataColumn objects carry
+    /// finalizers and delay collection. When combined with large DataRow counts on the heap,
+    /// this indicates DataTable instances are not being disposed.
+    /// </summary>
+    private static void DetectDataTableLifecyclePattern(
+        List<InsightFinding> findings,
+        FinalizableObjectDomainResult? finalizable,
+        MemoryDomainResult? memory)
+    {
+        if (finalizable is null && memory is null)
+            return;
+
+        int dataColumnFinalizer = 0;
+        int dataTableFinalizer = 0;
+
+        if (finalizable is not null)
+        {
+            for (int i = 0; i < finalizable.TopFinalizableTypesByGen2Count.Count; i++)
+            {
+                TypeGenerationProfile profile = finalizable.TopFinalizableTypesByGen2Count[i];
+                if (profile.TypeName.Contains("DataColumn", StringComparison.OrdinalIgnoreCase))
+                    dataColumnFinalizer += profile.Gen2Count;
+                else if (profile.TypeName.Contains("DataTable", StringComparison.OrdinalIgnoreCase))
+                    dataTableFinalizer += profile.Gen2Count;
+            }
+            // Also check finalizer queue entries by counting objects per type
+            var queueTypeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < finalizable.TopQueueEntriesByRetainedSize.Count; i++)
+            {
+                string typeName = finalizable.TopQueueEntriesByRetainedSize[i].TypeName;
+                queueTypeCounts.TryGetValue(typeName, out int existing);
+                queueTypeCounts[typeName] = existing + 1;
+            }
+            foreach (KeyValuePair<string, int> kv in queueTypeCounts)
+            {
+                if (kv.Key.Contains("DataColumn", StringComparison.OrdinalIgnoreCase))
+                    dataColumnFinalizer += kv.Value;
+                else if (kv.Key.Contains("DataTable", StringComparison.OrdinalIgnoreCase))
+                    dataTableFinalizer += kv.Value;
+            }
+        }
+
+        int dataRowHeap = 0;
+        if (memory is not null)
+        {
+            for (int i = 0; i < memory.TopTypes.Count; i++)
+            {
+                TypeSnapshot t = memory.TopTypes[i];
+                if (t.TypeName.Contains("DataRow", StringComparison.OrdinalIgnoreCase))
+                    dataRowHeap += t.Count;
+            }
+        }
+
+        // Trigger: DataColumn in finalizer queue AND/OR DataRow on heap in large numbers.
+        if (dataColumnFinalizer < 100 && dataRowHeap < 10_000)
+            return;
+
+        var evidenceParts = new List<string>(4);
+        if (dataColumnFinalizer > 0) evidenceParts.Add($"DataColumn ×{dataColumnFinalizer:N0} in finalizer queue");
+        if (dataTableFinalizer > 0) evidenceParts.Add($"DataTable ×{dataTableFinalizer:N0} in finalizer queue");
+        if (dataRowHeap > 0) evidenceParts.Add($"DataRow ×{dataRowHeap:N0} on heap");
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "DataTable lifecycle pattern: large DataRow/DataColumn accumulation",
+            Evidence: string.Join("; ", evidenceParts) + ". " +
+                      "DataColumn objects have finalizers and do not release promptly without explicit Dispose().",
+            Recommendation: "Call DataTable.Dispose() and DataSet.Dispose() when tables are no longer needed. " +
+                            "Avoid sharing DataTable instances across request scopes. " +
+                            "Consider replacing DataTable/DataSet with strongly typed models to eliminate finalizer overhead.",
+            Tags: ["datatable", "datarow", "finalizer", "memory-leak", "dispose"],
+            MetricValue: dataColumnFinalizer + dataRowHeap,
+            MetricUnit: "objects"));
+    }
+
+    /// <summary>
+    /// Checks the top heap types for well-known problematic accumulation patterns
+    /// that indicate specific framework or library bugs/anti-patterns.
+    /// Currently detects: TdsParser async closure accumulation (ADO.NET .NET Framework).
+    /// </summary>
+    private static void DetectKnownLeakPatterns(
+        List<InsightFinding> findings,
+        MemoryDomainResult? memory)
+    {
+        if (memory is null)
+            return;
+
+        // TdsParser closure accumulation — known .NET Framework 4.x System.Data.SqlClient issue.
+        // Async SqlCommand continuations capture closures that linger when connections are not disposed promptly.
+        int tdsClosureCount = 0;
+        for (int i = 0; i < memory.TopTypes.Count; i++)
+        {
+            TypeSnapshot t = memory.TopTypes[i];
+            if (t.TypeName.Contains("TdsParser", StringComparison.OrdinalIgnoreCase) &&
+                (t.TypeName.Contains("DisplayClass", StringComparison.OrdinalIgnoreCase) ||
+                 t.TypeName.Contains("c__", StringComparison.OrdinalIgnoreCase) ||
+                 t.TypeName.Contains("<>", StringComparison.OrdinalIgnoreCase)))
+            {
+                tdsClosureCount += t.Count;
+            }
+        }
+
+        if (tdsClosureCount >= 1_000)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "SqlClient TdsParser closure accumulation — known ADO.NET pattern",
+                Evidence: $"{tdsClosureCount:N0} TdsParser compiler-generated closure object(s) on heap. " +
+                          "In .NET Framework System.Data.SqlClient, async SqlCommand continuations can accumulate " +
+                          "closures when connections are not disposed promptly or when async paths are abandoned.",
+                Recommendation: "Upgrade to Microsoft.Data.SqlClient NuGet package which has resolved this issue. " +
+                                "Ensure SqlConnection and SqlCommand are disposed immediately after use via using statements. " +
+                                "Avoid fire-and-forget async ADO.NET operations on .NET Framework.",
+                Tags: ["ado-net", "sqlclient", "closure", "memory-leak", "known-pattern"],
+                MetricValue: tdsClosureCount,
+                MetricUnit: "objects"));
+        }
+
+        // Reflection metadata accumulation: RuntimeMethodInfo / RuntimePropertyInfo > 50 k
+        // indicates hot-path reflection (Type.GetMethod / GetProperty) without result caching.
+        int reflectionCount = 0;
+        for (int i = 0; i < memory.TopTypes.Count; i++)
+        {
+            TypeSnapshot t = memory.TopTypes[i];
+            if (t.TypeName is "System.Reflection.RuntimeMethodInfo" or
+                "System.Reflection.RuntimePropertyInfo" or
+                "System.Reflection.RuntimeFieldInfo" or
+                "System.Reflection.RuntimeConstructorInfo")
+            {
+                reflectionCount += t.Count;
+            }
+        }
+
+        if (reflectionCount >= 50_000)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "Uncached reflection metadata accumulation detected",
+                Evidence: $"{reflectionCount:N0} RuntimeMethodInfo/RuntimePropertyInfo/RuntimeFieldInfo object(s) on heap. " +
+                          "Each call to Type.GetMethod(), GetProperty(), or GetField() allocates a new metadata wrapper " +
+                          "unless results are cached.",
+                Recommendation: "Cache reflection results in static dictionaries keyed by Type. " +
+                                "Use compiled Expression trees or source generators (System.Text.Json, Mapster) " +
+                                "to replace runtime reflection in hot paths.",
+                Tags: ["reflection", "memory-leak", "performance", "known-pattern"],
+                MetricValue: reflectionCount,
+                MetricUnit: "objects"));
+        }
+    }
+
+    /// <summary>
+    /// Identifies well-known problematic types in the finalizer queue that indicate
+    /// specific resource management anti-patterns (abandoned threads, undisposed timers,
+    /// uncached dynamic code generation, old-style lock abandonment).
+    /// </summary>
+    private static void DetectKnownFinalizerQueuePatterns(
+        List<InsightFinding> findings,
+        FinalizableObjectDomainResult? finalizable)
+    {
+        if (finalizable is null || finalizable.TopFinalizableTypesByGen2Count.Count == 0)
+            return;
+
+        int dynamicResolverCount = 0;
+        int threadCount = 0;
+        int timerHolderCount = 0;
+        int readerWriterLockCount = 0;
+
+        for (int i = 0; i < finalizable.TopFinalizableTypesByGen2Count.Count; i++)
+        {
+            TypeGenerationProfile p = finalizable.TopFinalizableTypesByGen2Count[i];
+            int gen2 = p.Gen2Count;
+            if (gen2 == 0) continue;
+
+            if (p.TypeName.Contains("DynamicResolver", StringComparison.OrdinalIgnoreCase))
+                dynamicResolverCount += gen2;
+            else if (p.TypeName is "System.Threading.Thread")
+                threadCount += gen2;
+            else if (p.TypeName.Contains("TimerHolder", StringComparison.OrdinalIgnoreCase) ||
+                     p.TypeName.Contains("TimerQueueTimer", StringComparison.OrdinalIgnoreCase))
+                timerHolderCount += gen2;
+            else if (p.TypeName is "System.Threading.ReaderWriterLock")
+                readerWriterLockCount += gen2;
+        }
+
+        // DynamicResolver in finalizer queue — Expression.Compile / DynamicMethod without caching
+        if (dynamicResolverCount >= 50)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: dynamicResolverCount >= 500 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "DynamicResolver accumulation — uncached dynamic code generation",
+                Evidence: $"{dynamicResolverCount:N0} DynamicResolver object(s) in Gen2 finalizer queue. " +
+                          "DynamicResolver is the CLR internal finalizable backing for DynamicMethod and compiled expressions.",
+                Recommendation: "Cache results of Expression.Compile<T>() and Delegate.CreateDelegate() in static fields. " +
+                                "Consider using a compile-once / reuse pattern for serializers, mappers, and validators.",
+                Tags: ["dynamic-method", "expression-compile", "finalizer", "memory-leak"],
+                MetricValue: dynamicResolverCount,
+                MetricUnit: "objects"));
+        }
+
+        // Thread objects in finalizer queue — threads abandoned without Join()
+        if (threadCount >= 20)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Threads",
+                Severity: threadCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Abandoned Thread objects in finalizer queue",
+                Evidence: $"{threadCount:N0} System.Threading.Thread object(s) in Gen2 finalizer queue. " +
+                          "Thread objects should be joined or tracked; abandonment leaves them in the finalizer queue until collection.",
+                Recommendation: "Always call thread.Join() or use a managed thread pool (Task, ThreadPool) instead of " +
+                                "raw Thread objects. Use CancellationToken to signal graceful thread exit.",
+                Tags: ["threads", "finalizer", "thread-abandonment"],
+                MetricValue: threadCount,
+                MetricUnit: "objects"));
+        }
+
+        // TimerHolder in finalizer queue — System.Threading.Timer not disposed
+        if (timerHolderCount >= 20)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Memory",
+                Severity: timerHolderCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Undisposed System.Threading.Timer instances detected",
+                Evidence: $"{timerHolderCount:N0} TimerHolder/TimerQueueTimer object(s) in Gen2 finalizer queue. " +
+                          "System.Threading.Timer has a finalizer; undisposed instances accumulate in the queue " +
+                          "and may fire callbacks after their intended lifetime.",
+                Recommendation: "Dispose System.Threading.Timer instances (timer.Dispose() or using) when they are " +
+                                "no longer needed. In .NET 6+, prefer PeriodicTimer which is designed for await loops.",
+                Tags: ["timer", "finalizer", "dispose", "memory-leak"],
+                MetricValue: timerHolderCount,
+                MetricUnit: "objects"));
+        }
+
+        // ReaderWriterLock in finalizer queue — old non-slim lock abandoned
+        if (readerWriterLockCount >= 10)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Threads",
+                Severity: FindingSeverity.Warning,
+                Title: "Abandoned System.Threading.ReaderWriterLock instances detected",
+                Evidence: $"{readerWriterLockCount:N0} System.Threading.ReaderWriterLock object(s) in Gen2 finalizer queue. " +
+                          "The old (non-Slim) ReaderWriterLock has a finalizer and carries OS kernel resources.",
+                Recommendation: "Replace System.Threading.ReaderWriterLock with System.Threading.ReaderWriterLockSlim " +
+                                "which is lighter and has no finalizer. Ensure locks are not abandoned in error paths.",
+                Tags: ["reader-writer-lock", "finalizer", "threading", "legacy"],
+                MetricValue: readerWriterLockCount,
+                MetricUnit: "objects"));
+        }
+    }
+
+    /// <summary>
+    /// Raises a Warning when a large number of operational timeout exceptions are present on the heap,
+    /// indicating systematic connection pool exhaustion, network instability, or slow dependencies.
+    /// </summary>
+    private static void DetectRecurringTimeoutPattern(
+        List<InsightFinding> findings,
+        CrashDomainResult? crash)
+    {
+        if (crash is null || crash.TotalExceptions == 0)
+            return;
+
+        int timeoutCount = 0;
+        int objectDisposedCount = 0;
+        int taskCanceledCount = 0;
+
+        foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+        {
+            if (kv.Key is "System.TimeoutException" or
+                "System.OperationCanceledException" or
+                "System.Net.WebException" ||
+                kv.Key.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase))
+            {
+                timeoutCount += kv.Value;
+            }
+            else if (kv.Key is "System.ObjectDisposedException")
+            {
+                objectDisposedCount += kv.Value;
+            }
+            else if (kv.Key is "System.Threading.Tasks.TaskCanceledException" or
+                     "System.OperationCanceledException")
+            {
+                taskCanceledCount += kv.Value;
+            }
+        }
+
+        if (timeoutCount < 10)
+            return;
+
+        string disposedNote = objectDisposedCount >= 5
+            ? $" Combined with {objectDisposedCount:N0} ObjectDisposedException(s), this may indicate connections " +
+              "being used after pool exhaustion or channel faults."
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Exceptions",
+            Severity: timeoutCount >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+            Title: "Recurring timeout exceptions indicate dependency instability",
+            Evidence: $"{timeoutCount:N0} timeout/cancellation exception(s) on heap.{disposedNote}",
+            Recommendation: "Review connection pool sizing, query/call timeouts, and retry policies. " +
+                            "High timeout counts often indicate: (1) DB connection pool exhaustion, " +
+                            "(2) downstream service latency, or (3) network intermittency. " +
+                            "Correlate with DB connections on heap and WCF channel state.",
+            Tags: ["timeout", "exceptions", "connection-pool", "performance"],
+            MetricValue: timeoutCount,
+            MetricUnit: "exceptions"));
+    }
+
+    // ── Infrastructure detection rules ────────────────────────────────────────
+
+    private static void DetectDbConnectionLeak(
+        List<InsightFinding> findings,
+        DbConnectionDomainResult? dbConn,
+        CrashDomainResult? crash)
+    {
+        if (dbConn is null || !dbConn.ConnectionsFound) return;
+
+        // Already covered by DbConnectionFindingGenerator for the direct findings.
+        // InsightEngine cross-correlates with timeout/crash exceptions.
+        if (dbConn.TotalConnections < 10) return;
+
+        int timeoutCount = 0;
+        if (crash?.ExceptionTypeCounts is not null)
+        {
+            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+            {
+                if (kv.Key.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
+                    kv.Key is "System.InvalidOperationException") // "Timeout expired waiting for a pool"
+                    timeoutCount += kv.Value;
+            }
+        }
+
+        if (dbConn.OpenConnections >= 10 && timeoutCount >= 5)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Critical,
+                Title: "DB connection pool exhaustion suspected",
+                Evidence: $"{dbConn.OpenConnections:N0} open connections on heap combined with " +
+                          $"{timeoutCount:N0} timeout/InvalidOperation exception(s) strongly indicates " +
+                          "connection pool exhaustion.",
+                Recommendation: "Verify Max Pool Size in the connection string. " +
+                                "Ensure all SqlConnection objects are disposed (use 'using'). " +
+                                "Check for long-running transactions holding connections open. " +
+                                "Consider connection pool monitoring via Performance Counters.",
+                Tags: ["infrastructure", "connections", "timeout", "pool-exhaustion"],
+                MetricValue: dbConn.OpenConnections,
+                MetricUnit: "open connections"));
+        }
+    }
+
+    private static void DetectWcfChannelFault(
+        List<InsightFinding> findings,
+        WcfChannelDomainResult? wcf,
+        CrashDomainResult? crash)
+    {
+        if (wcf is null || !wcf.WcfPresent) return;
+        if (wcf.FaultedChannels == 0) return;
+
+        // Cross-correlate faulted channels with ObjectDisposedException or CommunicationException
+        int commExCount = 0;
+        if (crash?.ExceptionTypeCounts is not null)
+        {
+            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+            {
+                if (kv.Key.StartsWith("System.ServiceModel.", StringComparison.Ordinal) ||
+                    kv.Key is "System.ObjectDisposedException")
+                    commExCount += kv.Value;
+            }
+        }
+
+        if (commExCount > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Critical,
+                Title: "WCF faulted channels combined with communication exceptions",
+                Evidence: $"{wcf.FaultedChannels:N0} faulted WCF channel(s) on heap with " +
+                          $"{commExCount:N0} WCF/communication exception(s). " +
+                          "Calling any method on a faulted channel throws CommunicationObjectFaultedException.",
+                Recommendation: "In the catch block for any WCF exception, call channel.Abort() instead of Close(). " +
+                                "Create a new channel per operation. Cache ChannelFactory<T>, not the channel itself.",
+                Tags: ["infrastructure", "wcf", "fault", "communication"],
+                MetricValue: wcf.FaultedChannels,
+                MetricUnit: "faulted channels"));
+        }
+    }
+
+    private static void DetectHttpClientAccumulation(
+        List<InsightFinding> findings,
+        HttpObjectDomainResult? http)
+    {
+        if (http is null || !http.HttpObjectsFound) return;
+
+        // Only flag when HttpClient and HttpWebResponse are both present, suggesting mixed API usage.
+        if (http.HttpClientCount >= 3 && http.HttpWebResponseCount >= 10)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: Source,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Warning,
+                Title: "Mixed HTTP API usage: HttpClient and HttpWebResponse both present",
+                Evidence: $"{http.HttpClientCount:N0} HttpClient instance(s) and " +
+                          $"{http.HttpWebResponseCount:N0} HttpWebResponse object(s) found simultaneously. " +
+                          "Mixed usage suggests an incomplete migration from HttpWebRequest to HttpClient.",
+                Recommendation: "Consolidate all HTTP calls to HttpClient/IHttpClientFactory. " +
+                                "HttpWebRequest and HttpWebResponse are legacy and do not benefit from " +
+                                "modern connection pooling or HTTP/2 support.",
+                Tags: ["infrastructure", "http", "httpclient", "legacy"],
+                MetricValue: http.TotalHttpObjects,
+                MetricUnit: "HTTP objects"));
+        }
+    }
+
+    // ── Utilities (last block) ────────────────────────────────────────────────
 
     private static T? FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs) where T : AnalyzerDomainResult
     {

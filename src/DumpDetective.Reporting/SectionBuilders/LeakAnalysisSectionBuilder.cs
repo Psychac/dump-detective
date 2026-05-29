@@ -5,46 +5,59 @@ using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSectionBuilder
+internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string SectionId => "prof.leak-analysis";
-    public string DisplayTitle => "Leak Analysis";
-    public int SortOrder => 1250;
+    public string AnalyzerName => "Leak Candidate Analysis";
+    public string DisplayTitle => "Leak Candidates";
+    public int SortOrder => 100;
 
     private const int TopCandidateCount = 30;
 
-    public bool CanBuild(AnalyzerResultSet results) => results.Get<LeakCandidateDomainResult>() is not null;
+    public bool CanHandle(AnalyzerDomainResult result) => result is LeakCandidateDomainResult;
 
-    public AnalyzerDetailSection Build(AnalyzerResultSet results)
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
-        LeakCandidateDomainResult? leak = results.Get<LeakCandidateDomainResult>();
-        MemoryDomainResult? memory = results.Get<MemoryDomainResult>();
-        if (leak is null)
-        {
-            return new AnalyzerDetailSection(
-                AnalyzerName: "Leak Candidate Analysis",
-                DisplayTitle: DisplayTitle,
-                SortOrder: SortOrder,
-                Blocks: [T("Leak candidate analysis not available.")]);
-        }
+        var leak = (LeakCandidateDomainResult)result;
 
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>
         {
-            H("LEAK CANDIDATES"),
-            M("Total candidates", leak.TotalCandidates.ToString("N0"), leak.TotalCandidates),
-            M("Heuristic only", leak.HeuristicOnly ? "Yes" : "No"),
+            BuildConfidenceBand(leak.HeuristicOnly ? 0.55 : 0.70, leak.HeuristicOnly
+                ? ["Heuristic-only leak analysis; no full retention scan."]
+                : ["Leak analysis is heuristic-guided; confirm with root-path review."]),
         };
 
+        SectionLeadFinding? leadFinding = null;
         if (leak.TopCandidates.Count > 0)
         {
             LeakCandidateRecord top = leak.TopCandidates[0];
-            blocks.Add(M("Top suspect", $"{top.TypeName} ({top.Severity})", top.SuspicionScore));
-            blocks.Add(M("Top suspicion score", top.SuspicionScore.ToString("N0"), top.SuspicionScore));
+            if (top.Severity != FindingSeverity.Info)
+            {
+                leadFinding = new SectionLeadFinding(
+                    Severity: top.Severity.ToString(),
+                    Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
+                    Evidence: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
+                    Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
+                    ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
+                    ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,
+                    Caveats: leak.HeuristicOnly ? ["Heuristic-only analysis; confirm with root-path review."] : []);
+            }
+        }
+
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Total candidates", leak.TotalCandidates.ToString("N0"), leak.TotalCandidates),
+            KM("Heuristic only",   leak.HeuristicOnly ? "Yes" : "No"),
+        };
+        if (leak.TopCandidates.Count > 0)
+        {
+            LeakCandidateRecord top = leak.TopCandidates[0];
+            keyMetrics.Add(KM("Top suspect",        $"{top.TypeName} ({top.Severity})", top.SuspicionScore));
+            keyMetrics.Add(KM("Top suspicion score", top.SuspicionScore.ToString("N0"), top.SuspicionScore));
         }
 
         if (leak.CandidatesByClass.Count > 0)
         {
-            blocks.Add(H("CLASS BREAKDOWN"));
             var classRows = new List<TableRow>(leak.CandidatesByClass.Count);
             foreach ((LeakClass leakClass, int count) in leak.CandidatesByClass.OrderByDescending(kvp => kvp.Value))
             {
@@ -54,12 +67,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
                     .ThenByDescending(candidate => candidate.SuspicionScore)
                     .ToList();
 
-                string topTypes = string.Join(
-                    ", ",
-                    classCandidates
-                        .Take(3)
-                        .Select(candidate => candidate.TypeName));
-
+                string topTypes = string.Join(", ", classCandidates.Take(3).Select(candidate => candidate.TypeName));
                 ulong classSize = 0;
                 for (int i = 0; i < classCandidates.Count; i++)
                     classSize += classCandidates[i].TotalSize;
@@ -70,30 +78,30 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
                     Cell(FormatBytes(classSize), (long)Math.Min(classSize, long.MaxValue)),
                     Cell(string.IsNullOrWhiteSpace(topTypes) ? "—" : topTypes)));
             }
-
-            blocks.Add(new TableBlock(
-                Caption: "Candidate groups by leak class",
-                Headers: ["Class", "Count", "Total Size", "Top Types"],
-                Rows: classRows));
-            blocks.Add(Blank());
+            tables.Add(ST(
+                "Candidate groups by leak class",
+                ["Class", "Count", "Total Size", "Top Types"],
+                classRows));
         }
 
         if (leak.TopCandidates.Count > 0)
         {
-            blocks.Add(H("TOP CANDIDATES"));
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
-            blocks.Add(new TableBlock(
-                Caption: "Top leak candidates by suspicion score",
-                Headers: ["Type", "Score", "Severity", "Total Size", "Instances", "Gen2%", "Class", "Root"],
-                Rows: leak.TopCandidates.Take(TopCandidateCount).Select(candidate => Row(
+            tables.Add(ST(
+                "Top leak candidates by suspicion score",
+                ["Type", "Score", "Severity", "Class", "Total Size", "Instances", "Gen2%", "Root Kind", "Finalizable", "Container", "Ref Ratio"],
+                leak.TopCandidates.Take(TopCandidateCount).Select(candidate => Row(
                     Cell(candidate.TypeName),
                     Cell(candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore),
                     Cell(candidate.Severity.ToString()),
+                    Cell(candidate.Classification.ToString()),
                     Cell(FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)),
                     Cell(candidate.InstanceCount.ToString("N0"), candidate.InstanceCount),
                     Cell(candidate.Gen2Pct.ToString("F1") + "%", (long)Math.Round(candidate.Gen2Pct * 10)),
-                    Cell(candidate.Classification.ToString()),
-                    Cell(candidate.RootKind ?? "—")
+                    Cell(candidate.RootKind ?? "—"),
+                    Cell(candidate.IsFinalizable ? "Yes" : "No"),
+                    Cell(candidate.IsContainer ? "Yes" : "No"),
+                    Cell(candidate.ReferenceFieldRatio.ToString("F2"))
                 )).ToList()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
@@ -107,7 +115,6 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
 
         if (explanationCandidates.Count > 0)
         {
-            blocks.Add(Blank());
             blocks.Add(H("LEAK EXPLANATIONS"));
             blocks.Add(T("These explanations are generated for the highest-signal candidates in the list."));
 
@@ -115,27 +122,24 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
             {
                 LeakCandidateRecord candidate = explanationCandidates[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {candidate.TypeName} — {candidate.Severity} / {candidate.Classification} ({candidate.SuspicionScore:N0})"));
-                blocks.Add(M("Class", candidate.Classification.ToString()));
+                blocks.Add(M("Class",    candidate.Classification.ToString()));
                 blocks.Add(M("Severity", candidate.Severity.ToString()));
-                blocks.Add(M("Score", candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore));
-                blocks.Add(M("Root kind", candidate.RootKind ?? "—"));
-                blocks.Add(M("Instances", candidate.InstanceCount.ToString("N0"), candidate.InstanceCount));
-                blocks.Add(M("Total size", FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
-                blocks.Add(M("Gen2%", candidate.Gen2Pct.ToString("F1") + "%", (long)Math.Round(candidate.Gen2Pct * 10)));
+                blocks.Add(M("Score",    candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore));
+                blocks.Add(M("Root kind",candidate.RootKind ?? "—"));
+                blocks.Add(M("Instances",candidate.InstanceCount.ToString("N0"), candidate.InstanceCount));
+                blocks.Add(M("Total size",FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
+                blocks.Add(M("Gen2%",    candidate.Gen2Pct.ToString("F1") + "%", (long)Math.Round(candidate.Gen2Pct * 10)));
                 blocks.Add(M("Finalizable", candidate.IsFinalizable ? "Yes" : "No"));
-                blocks.Add(M("Container", candidate.IsContainer ? "Yes" : "No"));
+                blocks.Add(M("Container",   candidate.IsContainer ? "Yes" : "No"));
                 blocks.Add(M("Reference field ratio", candidate.ReferenceFieldRatio.ToString("F2"), candidate.ReferenceFieldRatio));
                 blocks.Add(T(LeakExplainer.Explain(candidate)));
                 blocks.Add(CollapseEnd());
-
-                if (i + 1 < explanationCandidates.Count)
-                    blocks.Add(Blank());
+                if (i + 1 < explanationCandidates.Count) blocks.Add(Blank());
             }
         }
 
         if (leak.TopCandidates.Count > 0)
         {
-            blocks.Add(Blank());
             blocks.Add(H("LEAK IMPACT"));
             blocks.Add(T("Impact bands are derived from the candidate's shallow size so the report can rank operational risk without a separate retained-size scan."));
 
@@ -149,20 +153,16 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
                 string lohImpact = candidate.TotalSize > 85_000 && IsLargeObjectLike(candidate.TypeName)
                     ? "Potential LOH fragmentation risk due to large array/string-like allocations."
                     : "No LOH-specific fragmentation note.";
-                string heapShare = memory is null || memory.TotalBytes == 0
-                    ? "N/A"
-                    : $"{candidate.TotalSize * 100.0 / memory.TotalBytes:F1}%";
+                string heapShare = "N/A";
 
                 blocks.Add(CollapseBegin($"[{i + 1}] {candidate.TypeName} — {impactBand}"));
-                blocks.Add(M("Shallow size", FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
-                blocks.Add(M("Heap share", heapShare));
-                blocks.Add(M("Stability risk", impactBand));
+                blocks.Add(M("Shallow size",    FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
+                blocks.Add(M("Heap share",      heapShare));
+                blocks.Add(M("Stability risk",  impactBand));
                 blocks.Add(T(gcImpact));
                 blocks.Add(T(lohImpact));
                 blocks.Add(CollapseEnd());
-
-                if (i + 1 < leak.TopCandidates.Count)
-                    blocks.Add(Blank());
+                if (i + 1 < leak.TopCandidates.Count) blocks.Add(Blank());
             }
         }
 
@@ -170,7 +170,10 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IReportSe
             AnalyzerName: "Leak Candidate Analysis",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            LeadFinding: leadFinding,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static string GetImpactBand(ulong totalSize)

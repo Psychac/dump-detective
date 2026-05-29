@@ -1,5 +1,6 @@
 {
   "Profile": "Balanced",
+  "ReportStyleVersion": "v2",
   "Report": {
     "Format": "Html",
     "Audience": "All"
@@ -11,33 +12,33 @@
   },
   "Indexing": {
     "Mode": "auto"
-  },
-  "Analyzers": {
-    "Crash": {
-      "Profile": "Full",
-      "TopDetailedExceptionInstances": 40,
-      "MaxOriginalStackFramesToPrint": 40
-    },
-    "Collection": {
-      "Profile": "Balanced",
-      "TopWastefulCollectionsToShow": 50
-    },
-    "String": {
-      "Profile": "Balanced",
-      "MaxUniqueStringTracking": 50000,
-      "TopDuplicatesToShow": 10
-    },
-    "GCRoot": {
-      "Profile": "Balanced",
-      "PathSearchTopN": 25,
-      "MaxBfsNodes": 500,
-      "MaxBfsDepth": 20
-    },
-    "Module": {
-      "Profile": "Balanced",
-      "TopLoadedAssembliesCount": 30,
-      "TopModulesByHeapCount": 20
-    }
-  },
-  "IncludeAnalyzers": [ "Event Leak Analysis" ]
+  }//,
+  //"Analyzers": {
+  //  "Crash": {
+  //    "Profile": "Full",
+  //    "TopDetailedExceptionInstances": 40,
+  //    "MaxOriginalStackFramesToPrint": 40
+  //  },
+  //  "Collection": {
+  //    "Profile": "Balanced",
+  //    "TopWastefulCollectionsToShow": 50
+  //  },
+  //  "String": {
+  //    "Profile": "Full",
+  //    "MaxUniqueStringTracking": 50000,
+  //    "TopDuplicatesToShow": 10
+  //  },
+  //  "GCRoot": {
+  //    "Profile": "Balanced",
+  //    "PathSearchTopN": 25,
+  //    "MaxBfsNodes": 500,
+  //    "MaxBfsDepth": 20
+  //  },
+  //  "Module": {
+  //    "Profile": "Balanced",
+  //    "TopLoadedAssembliesCount": 30,
+  //    "TopModulesByHeapCount": 20
+  //  }
+  //} ,
+  //"IncludeAnalyzers": [ "AppDomain Analysis" ]
 }

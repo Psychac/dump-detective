@@ -21,7 +21,8 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
             state.Resolved.Report.Audience,
             state.Runs,
             state.AnalysisElapsed,
-            state.IncidentContext);
+            state.IncidentContext,
+            state.Insights);
         state.ReportDocument = doc;
 
         // Render the report string for the chosen output format.
@@ -29,11 +30,13 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
         try
         {
             DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = state.Resolved.Report.PreRender;
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = state.Resolved.Report.StyleVersion;
             state.RenderedReport = reportBuilderFacade.RenderDocument(doc, state.Resolved.Report.Format);
         }
         finally
         {
             DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = false;
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
         }
 
         return Task.CompletedTask;

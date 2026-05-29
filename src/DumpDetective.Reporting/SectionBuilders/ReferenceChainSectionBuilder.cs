@@ -18,21 +18,18 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ReferenceChainDomainResult)result;
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Analyzed Samples", $"{d.AnalyzedSamples:N0}",    d.AnalyzedSamples),
+            KM("Retained Samples", $"{d.RetainedSamples:N0}",    d.RetainedSamples),
+            KM("Retained %",       $"{d.RetainedPercent:F1}%",   d.RetainedPercent),
+        };
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
-
-        blocks.Add(H("REFERENCE CHAIN ANALYSIS"));
-        blocks.Add(Divider());
-        blocks.Add(M("Analyzed Samples", $"{d.AnalyzedSamples:N0}", d.AnalyzedSamples));
-        blocks.Add(M("Retained Samples", $"{d.RetainedSamples:N0}", d.RetainedSamples));
-        blocks.Add(M("Retained Percentage", $"{d.RetainedPercent:F1}%", d.RetainedPercent));
 
         var traces = d.TopTypeSampleTraces ?? [];
         if (traces.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP TYPE SAMPLE TRACES"));
-            blocks.Add(Divider());
-
             int limit = Math.Min(traces.Count, MaxTraces);
             for (int i = 0; i < limit; i++)
             {
@@ -65,24 +62,16 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
         var topRetained = d.TopRetainedTypes ?? [];
         if (topRetained.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP RETAINED SAMPLED TYPES"));
-            blocks.Add(Divider());
-
             var rtRows = new List<TableRow>(Math.Min(topRetained.Count, 8));
             int rtLimit = Math.Min(topRetained.Count, 8);
             for (int i = 0; i < rtLimit; i++)
                 rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(topRetained[i].Name, 80)), Cell($"{topRetained[i].Count:N0} retained sample(s)", topRetained[i].Count)]));
-            blocks.Add(new TableBlock("Top retained types", ["Type", "Retained Samples"], rtRows));
+            tables.Add(ST("Top retained sampled types", ["Type", "Retained Samples"], rtRows));
         }
 
         var chains = d.SampleReferenceChains ?? [];
         if (chains.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H($"REFERENCE CHAINS (top {Math.Min(chains.Count, MaxChains)})"));
-            blocks.Add(Divider());
-
             int chainLimit = Math.Min(chains.Count, MaxChains);
             for (int i = 0; i < chainLimit; i++)
             {
@@ -92,6 +81,12 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             }
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName: AnalyzerName,
+            DisplayTitle: AnalyzerName,
+            SortOrder: SortOrder,
+            Blocks: blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

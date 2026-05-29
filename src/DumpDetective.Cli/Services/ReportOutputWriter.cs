@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Console;
+using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 
 using System.Text.Json;
@@ -11,6 +12,7 @@ internal sealed class ReportOutputWriter
         ResolvedExecutionOptions resolved,
         AnalysisReportDocument? document,
         string renderedReport,
+        IReadOnlyList<ReportArtifact>? artifacts,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -53,7 +55,7 @@ internal sealed class ReportOutputWriter
                 ConsoleUx.ReportWritten(outPath);
             }
 
-            if (document?.Artifacts is not { Count: > 0 })
+            if (artifacts is not { Count: > 0 })
                 return;
 
             string outDirectory = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
@@ -67,8 +69,8 @@ internal sealed class ReportOutputWriter
             string artifactsDir = Path.Combine(outDirectory, "artifacts", dumpBaseName);
             Directory.CreateDirectory(artifactsDir);
 
-            var artifactsIndex = new List<object>(capacity: document.Artifacts.Count);
-            foreach (var artifact in document.Artifacts)
+            var artifactsIndex = new List<object>(capacity: artifacts.Count);
+            foreach (var artifact in artifacts)
             {
                 try
                 {
@@ -148,7 +150,7 @@ internal sealed class ReportOutputWriter
                 await File.WriteAllTextAsync(idxPath, JsonSerializer.Serialize(artifactsIndex, opts), cancellationToken);
                 ConsoleUx.ReportWritten(idxPath);
 
-                if (document.Artifacts.Any(a => a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase)))
+                if (artifacts.Any(a => a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase)))
                 {
                     ConsoleUx.Info("One or more analyzers produced NDJSON+gzip exports. To stream and pretty-print: 'gzip -cd <file>.ndjson.gz | jq -C '.' (or extract with 7-Zip and open in VS Code). A human-friendly JSON is also provided when available.");
                 }

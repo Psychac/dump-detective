@@ -217,6 +217,15 @@ internal sealed class StringAnalyzer : IAnalyzer
                             entry.Preview = kvp.Value.Preview;
                             entry.SampleAddresses = kvp.Value.SampleAddresses;
                             entry.DominantMethodTable = kvp.Value.DominantMethodTable;
+                            entry.FingerprintHash = kvp.Key;
+                            entry.SamplingSource = "Prebuilt";
+                        }
+                        else
+                        {
+                            if (entry.FingerprintHash == 0)
+                                entry.FingerprintHash = kvp.Key;
+                            if (string.IsNullOrEmpty(entry.SamplingSource))
+                                entry.SamplingSource = "Prebuilt";
                         }
                         entry.Count += kvp.Value.Count;
                         entry.TotalSize += kvp.Value.TotalSize;
@@ -340,6 +349,7 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         IReadOnlyList<DuplicateStringSnapshot> topByWaste = DrainToDescendingWaste(byWasteHeap, mtToName);
         IReadOnlyList<DuplicateStringSnapshot> topByCount = DrainToDescendingCount(byCountHeap, mtToName);
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates = MergeTopDuplicates(topByWaste, topByCount);
 
         // Build frequency buckets from stringStats
         var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -547,7 +557,7 @@ internal sealed class StringAnalyzer : IAnalyzer
                     using (var gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: false))
                     {
                         var jsOpts = new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-                        foreach (var d in topByWaste)
+                        foreach (var d in topDuplicates)
                         {
                             // Tweak NDJSON contents: include preview, count, wasted, totalSize, avgSize, sampling, fingerprint hex, dominant type
                             var lineObj = new
@@ -609,8 +619,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             DuplicateWastedBytes: duplicateWastedBytes,
             DuplicationRatio: duplicationRatio,
             PctOfManagedHeap: pctOfManagedHeap,
-            TopDuplicatesByWaste: topByWaste,
-            TopDuplicatesByCount: topByCount,
+            TopDuplicates: topDuplicates,
             VeryLongStrings: veryLongStrings,
             LohStringBytes: lohStringBytes,
             InternedStringCount: internedStringCount,
@@ -915,6 +924,49 @@ internal sealed class StringAnalyzer : IAnalyzer
         }
         list.Reverse();
         return list;
+    }
+
+    private static IReadOnlyList<DuplicateStringSnapshot> MergeTopDuplicates(
+        IReadOnlyList<DuplicateStringSnapshot> byWaste,
+        IReadOnlyList<DuplicateStringSnapshot> byCount)
+    {
+        if (byWaste.Count == 0 && byCount.Count == 0)
+            return Array.Empty<DuplicateStringSnapshot>();
+
+        var merged = new Dictionary<string, DuplicateStringSnapshot>(StringComparer.Ordinal);
+
+        static string KeyFor(DuplicateStringSnapshot s)
+            => s.FingerprintHash is ulong h ? $"h:{h:X16}" : $"p:{s.Preview}";
+
+        void MergeIn(IReadOnlyList<DuplicateStringSnapshot> source)
+        {
+            for (int i = 0; i < source.Count; i++)
+            {
+                DuplicateStringSnapshot current = source[i];
+                string key = KeyFor(current);
+                if (!merged.TryGetValue(key, out DuplicateStringSnapshot? existing) || existing is null)
+                {
+                    merged[key] = current;
+                    continue;
+                }
+
+                // Prefer the richer/bigger snapshot when the same duplicate appears in both rankings.
+                if (current.WastedBytes > existing.WastedBytes ||
+                    (current.WastedBytes == existing.WastedBytes && current.Count > existing.Count))
+                {
+                    merged[key] = current;
+                }
+            }
+        }
+
+        MergeIn(byWaste);
+        MergeIn(byCount);
+
+        return merged.Values
+            .OrderByDescending(static d => d.WastedBytes)
+            .ThenByDescending(static d => d.Count)
+            .ThenByDescending(static d => d.TotalSize)
+            .ToList();
     }
 
     /// <summary>Create a compact fingerprint for a string value.</summary>

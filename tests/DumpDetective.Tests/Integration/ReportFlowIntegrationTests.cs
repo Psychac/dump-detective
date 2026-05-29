@@ -148,6 +148,7 @@ public sealed class ReportFlowIntegrationTests
             Overall: [],
             NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
             Timeline: [],
+            ScopedTimeline: [],
             Snapshots: [baseline, current],
             NewFindings: [finding],
             PersistentFindings: [],
@@ -177,19 +178,32 @@ public sealed class ReportFlowIntegrationTests
         output.Should().Contain("Analyzed dumps:");
         output.Should().Contain("C:/dumps/base.dmp");
         output.Should().Contain("C:/dumps/current.dmp");
-        output.Should().Contain("LIFECYCLE SUMMARY:");
-        output.Should().Contain("Metric regressions: 0");
-        output.Should().Contain("NEW FINDINGS:");
+        output.Should().Contain("Finding lifecycle:");
+        output.Should().Contain("New=1");
         output.Should().Contain("[Dump 1 of 2: base.dmp]");
         output.Should().Contain("[Dump 2 of 2: current.dmp]");
         output.Should().Contain("DUMP SUMMARY");
-        output.Should().Contain("TREND COMPARISON");
+        output.Should().Contain("Regression Dashboard");
 
-        int trendComparisonIndex = output.IndexOf("[Trend Comparison]", StringComparison.Ordinal);
+        int regressionDashboardIndex = output.IndexOf("Regression Dashboard", StringComparison.Ordinal);
         int dumpOneIndex = output.IndexOf("[Dump 1 of 2: base.dmp]", StringComparison.Ordinal);
-        trendComparisonIndex.Should().BeGreaterThan(-1);
+        regressionDashboardIndex.Should().BeGreaterThan(-1);
         dumpOneIndex.Should().BeGreaterThan(-1);
-        trendComparisonIndex.Should().BeLessThan(dumpOneIndex);
+        regressionDashboardIndex.Should().BeLessThan(dumpOneIndex);
+
+        // Verify HTML format contains perDumpDocuments in the embedded JSON
+        string htmlOutput = facade.BuildRenderedTrendReport(
+            dumpPath: "C:/dumps/current.dmp",
+            format: ReportFormat.Html,
+            audience: ReportAudience.All,
+            currentRuns: [currentRun],
+            elapsed: TimeSpan.FromSeconds(2),
+            trendData: trendData,
+            cancellationToken: CancellationToken.None);
+
+        // HtmlCanonicalReportFormatter embeds report JSON with the document; verify it includes trend data
+        htmlOutput.Should().Contain("report-data");
+        htmlOutput.Should().Contain("trendAnalyzerSections");
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

@@ -437,7 +437,7 @@ namespace DumpDetective.Analysis.Analyzers
             // all types known to the runtime via modules. ProcessPublisherEntry already handles
             // static fields for types that have heap instances; this catches the rest.
             SweepModuleStaticFields(heap, appDomains, processedStaticMethodTables, processedStaticDelegates, rootHints, options,
-                leak => AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup), ref eventsScanned);
+                leak => AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup), ref eventsScanned, progress);
 
             scanCounter.Complete();
 
@@ -800,12 +800,15 @@ namespace DumpDetective.Analysis.Analyzers
             Dictionary<ulong, string> rootHints,
             EventLeakOptions options,
             Action<EventLeakInfo> addLeak,
-            ref int eventsScanned)
+            ref int eventsScanned,
+            IProgress<AnalyzerProgressReport>? progress = null)
         {
             int minSubs = options.MinSubscribers;
             bool includeNonLeaking = options.IncludeNonLeakingEvents;
 
             var seenModuleMTs = new HashSet<ulong>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int typesChecked = 0;
 
             foreach (ClrAppDomain domain in appDomains)
             {
@@ -818,11 +821,13 @@ namespace DumpDetective.Analysis.Analyzers
                         ulong mt = type!.MethodTable;
                         if (mt == 0) continue;
                         if (!seenModuleMTs.Add(mt)) continue;         // dedup across domains
-                        // Do NOT skip if processedStaticMTs contains this MT.
-                        // processedStaticDelegates already deduplicates the delegate objects,
-                        // so re-visiting the static fields of a type already seen on the heap
-                        // is safe and catches cases where the heap-scan static block was skipped
-                        // (e.g. layouts[] was null for instance fields but static fields exist).
+
+                        typesChecked++;
+                        if (typesChecked % 500 == 0)
+                            progress?.Report(new AnalyzerProgressReport(typesChecked,
+                                "scanning static event fields",
+                                $"{typesChecked:N0} types checked",
+                                sw.Elapsed));
 
                         if (TypeFilterHelper.IsSystemType(type.Name)
                             || TypeFilterHelper.IsCompilerGenerated(type.Name)) continue;

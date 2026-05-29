@@ -4,6 +4,8 @@ namespace DumpDetective.Analysis.Models;
 
 // Collections
 
+using DumpDetective.Analysis.Models;
+
 internal sealed record CollectionDomainResult(
     int TotalCollections,
     int Dictionaries,
@@ -17,7 +19,9 @@ internal sealed record CollectionDomainResult(
     ulong TotalWastedMemory,
     int WastefulCollectionCount,
     IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null,
-    IReadOnlyDictionary<CollectionKind, int>? WasteCountsByKind = null) : AnalyzerDomainResult;
+    IReadOnlyDictionary<CollectionKind, int>? WasteCountsByKind = null,
+    IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown = null
+) : AnalyzerDomainResult;
 internal sealed record WastefulCollectionSnapshot(
     string Type,
     CollectionKind Kind,

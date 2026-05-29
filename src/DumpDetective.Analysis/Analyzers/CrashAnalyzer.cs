@@ -430,14 +430,11 @@ namespace DumpDetective.Analysis.Analyzers
             var crashThreadCandidates = new ConcurrentDictionary<uint, CrashThreadCandidate>();
             var candidateLock = new object();
             int totalExceptions = 0, activeExceptionsCount = 0;
-            long scanned = 0;
-            const long progressInterval = 50_000;
+            var scanCounter = new DumpDetective.Analysis.Cache.ObjectScanCounter("scanning for exceptions", progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
             void ProcessEntry(ulong exceptionAddress, ulong mt)
             {
-                long s = Interlocked.Increment(ref scanned);
-                if (s % progressInterval == 0)
-                    progress?.Report(new(s, "scanning for exceptions"));
+                scanCounter.Tick();
 
                 if (exceptionAddress == 0)
                     return;
@@ -517,6 +514,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Sequential post-processing: build per-type exception list with cap enforcement
+            long scanned = scanCounter.Scanned;
             progress?.Report(new(scanned, "aggregating exceptions"));
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
             foreach (var (typeName, instance, isActive) in exceptionInstances)

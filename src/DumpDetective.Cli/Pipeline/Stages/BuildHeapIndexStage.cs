@@ -23,16 +23,26 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
         Stopwatch wallClock = Stopwatch.StartNew();
 
         // Shared state updated by the progress callback and read by the heartbeat.
+        // Progress<T> callbacks run on a ThreadPool thread in a console app (no SynchronizationContext),
+        // so writes here race with the heartbeat reads. Use a simple wrapper class whose string
+        // fields are written under a monitor so the heartbeat always sees a consistent snapshot.
         long lastScanned = 0;
         string lastPhase = "scanning heap";
         string? lastDetail = null;
+        var progressLock = new object();
 
         var progress = new Progress<AnalyzerProgressReport>(r =>
         {
+            // Only update the shared state here — do NOT call ConsoleUx.ObjectScanProgress.
+            // Progress<T> callbacks run on a ThreadPool thread; calling the console renderer
+            // here races with the heartbeat loop below, producing garbled output and stale phases.
+            // The heartbeat is the sole renderer.
             Interlocked.Exchange(ref lastScanned, r.ScannedCount);
-            lastPhase = r.Phase;
-            lastDetail = string.IsNullOrWhiteSpace(r.Detail) ? r.Phase : r.Detail;
-            ConsoleUx.ObjectScanProgress(Name, r.ScannedCount, wallClock.Elapsed, lastDetail);
+            lock (progressLock)
+            {
+                lastPhase = r.Phase;
+                lastDetail = string.IsNullOrWhiteSpace(r.Detail) ? r.Phase : r.Detail;
+            }
         });
 
         // Run the synchronous index build on a thread-pool thread so the heartbeat
@@ -54,7 +64,9 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
 
             // Heartbeat: re-render the spinner with the wall-clock elapsed so the
             // timer keeps ticking even when the writer hasn't fired a progress event.
-            string? details = string.IsNullOrWhiteSpace(lastDetail) ? lastPhase : lastDetail;
+            string details;
+            lock (progressLock)
+                details = string.IsNullOrWhiteSpace(lastDetail) ? lastPhase : lastDetail;
             ConsoleUx.ObjectScanProgress(Name, Interlocked.Read(ref lastScanned), wallClock.Elapsed, details);
         }
 

@@ -17,6 +17,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     private int _completedAnalyzersInCurrentStage;
     private Stopwatch? _currentStageStopwatch;
     private DateTime _lastScanRenderUtc = DateTime.MinValue;
+    private DateTime _lastPhasePrintUtc = DateTime.MinValue;
     private string? _currentAnalyzerName;
     private long _currentAnalyzerStartScanCount;
     private long _currentAnalyzerStartCacheHits;
@@ -289,120 +290,135 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
     private void PrintAnalyzerProgress(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
-        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
-            return;
-
-        // Drop stale progress events that arrive after the analyzer has already completed.
-        // This happens when AnalyzerProgress is dispatched via Progress<T>/ThreadPool and a
-        // queued callback fires after AnalyzerCompleted has already reset _currentAnalyzerName.
-        if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
-            return;
-
-        DateTime utcNow = DateTime.UtcNow;
-        if ((utcNow - _lastScanRenderUtc).TotalMilliseconds < 125)
-            return;
-
-        _lastScanRenderUtc = utcNow;
-        TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
-            ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
-            : TimeSpan.Zero;
-
-        long analyzerScans = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
-        long tickDelta = Math.Max(0, diagnosticsEvent.ObjectScanCount - _currentAnalyzerLastScanCount);
-        _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
-
-        double elapsedMs = elapsed.TotalMilliseconds;
-        double deltaMs = Math.Max(0, elapsedMs - _currentAnalyzerLastElapsedMs);
-        if (tickDelta > 0 && deltaMs > 0)
-            _currentAnalyzerLastNonZeroRate = tickDelta / (deltaMs / 1000.0);
-
-        _currentAnalyzerLastElapsedMs = elapsedMs;
-
-        if (tickDelta == 0)
-            _currentAnalyzerNoGrowthTicks++;
-        else
-            _currentAnalyzerNoGrowthTicks = 0;
-
-        // Extract the base phase (part before " • ") for change detection.
-        // Only emit a ↳ phase line on genuine phase transitions — not when only the detail portion
-        // changes (e.g. "42 wasteful" → "43 wasteful", or "3/10 types" → "4/10 types").
-        // Without this guard those analyzers flood the console with a phase line every 125 ms,
-        // which causes the visible display artefacts (rapid line strobing) the user hears as beeps.
-        string basePhase;
-        if (string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
+        lock (_gate)
         {
-            basePhase = _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : _currentAnalyzerPhase;
-        }
-        else
-        {
-            int phaseSep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
-            basePhase = phaseSep >= 0 ? diagnosticsEvent.Message[..phaseSep] : diagnosticsEvent.Message;
-        }
+            if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+                return;
 
-        if (!string.Equals(_currentAnalyzerPhase, basePhase, StringComparison.Ordinal))
-        {
-            _currentAnalyzerPhase = basePhase;
-            ConsoleUx.AnalyzerPhase(basePhase);
+            // Drop stale progress events that arrive after the analyzer has already completed.
+            // This happens when AnalyzerProgress is dispatched via Progress<T>/ThreadPool and a
+            // queued callback fires after AnalyzerCompleted has already reset _currentAnalyzerName.
+            if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+                return;
+
+            DateTime utcNow = DateTime.UtcNow;
+            if ((utcNow - _lastScanRenderUtc).TotalMilliseconds < 125)
+                return;
+
+            _lastScanRenderUtc = utcNow;
+            TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
+                ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
+                : TimeSpan.Zero;
+
+            long analyzerScans = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
+            long tickDelta = Math.Max(0, diagnosticsEvent.ObjectScanCount - _currentAnalyzerLastScanCount);
+            _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
+
+            double elapsedMs = elapsed.TotalMilliseconds;
+            double deltaMs = Math.Max(0, elapsedMs - _currentAnalyzerLastElapsedMs);
+            if (tickDelta > 0 && deltaMs > 0)
+                _currentAnalyzerLastNonZeroRate = tickDelta / (deltaMs / 1000.0);
+
+            _currentAnalyzerLastElapsedMs = elapsedMs;
+
+            if (tickDelta == 0)
+                _currentAnalyzerNoGrowthTicks++;
+            else
+                _currentAnalyzerNoGrowthTicks = 0;
+
+            // Extract the base phase (part before " • ") for change detection.
+            // Only emit a ↳ phase line on genuine phase transitions — not when only the detail portion
+            // changes (e.g. "42 wasteful" → "43 wasteful", or "3/10 types" → "4/10 types").
+            // Without this guard those analyzers flood the console with a phase line every 125 ms,
+            // which causes the visible display artefacts (rapid line strobing) the user hears as beeps.
+            string basePhase;
+            if (string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
+            {
+                basePhase = _currentAnalyzerNoGrowthTicks >= 3 ? "processing results" : _currentAnalyzerPhase;
+            }
+            else
+            {
+                int phaseSep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
+                basePhase = phaseSep >= 0 ? diagnosticsEvent.Message[..phaseSep] : diagnosticsEvent.Message;
+            }
+
+            if (!string.Equals(_currentAnalyzerPhase, basePhase, StringComparison.Ordinal))
+            {
+                DateTime now = DateTime.UtcNow;
+                if ((now - _lastPhasePrintUtc).TotalMilliseconds >= 500)
+                {
+                    _currentAnalyzerPhase = basePhase;
+                    ConsoleUx.AnalyzerPhase(basePhase);
+                    _lastPhasePrintUtc = now;
+                }
+            }
+
+            // Parse detail out of the message if the analyzer embedded it as "phase • detail".
+            string? detail = null;
+            if (!string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
+            {
+                int sep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
+                if (sep >= 0)
+                    detail = diagnosticsEvent.Message[(sep + 3)..];
+            }
+
+            double displayRate = _currentAnalyzerLastNonZeroRate;
+            if (displayRate <= 0 && elapsed.TotalSeconds > 0)
+                displayRate = analyzerScans / elapsed.TotalSeconds;
+
+            ConsoleUx.ObjectScanProgress(
+                diagnosticsEvent.AnalyzerName,
+                analyzerScans,
+                elapsed,
+                detail,
+                displayRate > 0 ? displayRate : null);
         }
-
-        // Parse detail out of the message if the analyzer embedded it as "phase • detail".
-        string? detail = null;
-        if (!string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
-        {
-            int sep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
-            if (sep >= 0)
-                detail = diagnosticsEvent.Message[(sep + 3)..];
-        }
-
-        double displayRate = _currentAnalyzerLastNonZeroRate;
-        if (displayRate <= 0 && elapsed.TotalSeconds > 0)
-            displayRate = analyzerScans / elapsed.TotalSeconds;
-
-        ConsoleUx.ObjectScanProgress(
-            diagnosticsEvent.AnalyzerName,
-            analyzerScans,
-            elapsed,
-            detail,
-            displayRate > 0 ? displayRate : null);
     }
 
     private void PrintAnalyzerSubmoduleProgress(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
-        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+        lock (_gate)
         {
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+            {
+                return;
+            }
 
-        if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
-        {
-            return;
-        }
+            if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+            {
+                return;
+            }
 
-        string submodule = string.IsNullOrWhiteSpace(diagnosticsEvent.Message) ? "background walk" : diagnosticsEvent.Message;
-        if (!string.Equals(_currentSubmodule, submodule, StringComparison.Ordinal))
-        {
-            _currentSubmodule = submodule;
-            ConsoleUx.AnalyzerPhase(submodule);
+            string submodule = string.IsNullOrWhiteSpace(diagnosticsEvent.Message) ? "background walk" : diagnosticsEvent.Message;
+            if (!string.Equals(_currentSubmodule, submodule, StringComparison.Ordinal))
+            {
+                _currentSubmodule = submodule;
+                ConsoleUx.AnalyzerPhase(submodule);
+            }
         }
     }
 
     private void StartAnalyzerTracking(AnalysisDiagnosticsEvent diagnosticsEvent)
     {
-        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+        lock (_gate)
         {
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+            {
+                return;
+            }
 
-        _currentAnalyzerName = diagnosticsEvent.AnalyzerName;
-        _currentAnalyzerStartScanCount = diagnosticsEvent.ObjectScanCount;
-        _currentAnalyzerStartCacheHits = diagnosticsEvent.CacheHits;
-        _currentAnalyzerStartCacheMisses = diagnosticsEvent.CacheMisses;
-        _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
-        _currentAnalyzerLastElapsedMs = 0;
-        _currentAnalyzerLastNonZeroRate = 0;
-        _currentAnalyzerNoGrowthTicks = 0;
-        _currentAnalyzerPhase = "scanning heap";
-        _currentSubmodule = null;
+            _currentAnalyzerName = diagnosticsEvent.AnalyzerName;
+            _currentAnalyzerStartScanCount = diagnosticsEvent.ObjectScanCount;
+            _currentAnalyzerStartCacheHits = diagnosticsEvent.CacheHits;
+            _currentAnalyzerStartCacheMisses = diagnosticsEvent.CacheMisses;
+            _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
+            _currentAnalyzerLastElapsedMs = 0;
+            _currentAnalyzerLastNonZeroRate = 0;
+            _currentAnalyzerNoGrowthTicks = 0;
+            _currentAnalyzerPhase = "scanning heap";
+            _currentSubmodule = null;
+            _lastPhasePrintUtc = DateTime.MinValue;
+        }
     }
 
     private long GetAnalyzerScanCount(string? analyzerName, long totalScanCount)
@@ -418,16 +434,20 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 
     private void ResetAnalyzerTracking()
     {
-        _currentAnalyzerName = null;
-        _currentAnalyzerStartScanCount = 0;
-        _currentAnalyzerStartCacheHits = 0;
-        _currentAnalyzerStartCacheMisses = 0;
-        _currentAnalyzerLastScanCount = 0;
-        _currentAnalyzerLastElapsedMs = 0;
-        _currentAnalyzerLastNonZeroRate = 0;
-        _currentAnalyzerNoGrowthTicks = 0;
-        _currentAnalyzerPhase = "scanning";
-        _currentSubmodule = null;
+        lock (_gate)
+        {
+            _currentAnalyzerName = null;
+            _currentAnalyzerStartScanCount = 0;
+            _currentAnalyzerStartCacheHits = 0;
+            _currentAnalyzerStartCacheMisses = 0;
+            _currentAnalyzerLastScanCount = 0;
+            _currentAnalyzerLastElapsedMs = 0;
+            _currentAnalyzerLastNonZeroRate = 0;
+            _currentAnalyzerNoGrowthTicks = 0;
+            _currentAnalyzerPhase = "scanning";
+            _currentSubmodule = null;
+            _lastPhasePrintUtc = DateTime.MinValue;
+        }
     }
 
     private (long CacheHits, long CacheMisses) GetAnalyzerCacheDelta(AnalysisDiagnosticsEvent diagnosticsEvent)

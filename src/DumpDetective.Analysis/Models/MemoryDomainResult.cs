@@ -12,6 +12,5 @@ public sealed record MemoryDomainResult(
     int LohObjects,
     ulong LohThresholdBytes,
     int UniqueTypes,
-    IReadOnlyList<TypeSnapshot> TopTypesBySize,
-    IReadOnlyList<TypeSnapshot> TopTypesByCount,
+    IReadOnlyList<TypeSnapshot> TopTypes,
     IReadOnlyList<SizeBucketEntry>? SizeBucketHistogram = null) : AnalyzerDomainResult;

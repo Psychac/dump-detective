@@ -13,65 +13,44 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
     private const int TopFrameTypesToShow = 15;
 
     public string AnalyzerName => "JIT Analysis";
-    public int SortOrder => 51; // §19 — after BoxingSectionBuilder (50)
+    public string DisplayTitle => "JIT & Code Footprint";
+    public int SortOrder => 200; // §G3 — after AppDomainSectionBuilder (120)
 
     public bool CanHandle(AnalyzerDomainResult result) => result is JitDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (JitDomainResult)result;
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        // ── §19.1  JIT Heap Usage ─────────────────────────────────────────────
-        blocks.Add(H("JIT CODE HEAP USAGE"));
-        blocks.Add(Divider());
-        blocks.Add(M("Total JIT code heap", FormatHelper.FormatBytes(d.TotalJitHeapBytes), (double)d.TotalJitHeapBytes));
-        blocks.Add(M("JIT manager count", $"{d.JitManagerCount:N0}", d.JitManagerCount));
-
-        if (d.JitHeapPctOfTotalProcess > 0.0)
-            blocks.Add(M("JIT heap % of process", $"{d.JitHeapPctOfTotalProcess:P1}", d.JitHeapPctOfTotalProcess));
-
-        // ── §19.2  Compiled Method Analysis ──────────────────────────────────
-        blocks.Add(Blank());
-        blocks.Add(H("COMPILED METHOD ANALYSIS"));
-        blocks.Add(Divider());
-        blocks.Add(M("Active managed frames", $"{d.ManagedFrameCount:N0}", d.ManagedFrameCount));
-        blocks.Add(M("Runtime/internal frames", $"{d.UnmanagedFrameCount:N0}", d.UnmanagedFrameCount));
-
         int totalFrames = d.ManagedFrameCount + d.UnmanagedFrameCount;
-        if (totalFrames > 0)
+        double unmanagedRatio = totalFrames > 0 ? (double)d.UnmanagedFrameCount / totalFrames : 0.0;
+
+        var keyMetrics = new List<SectionKeyMetric>
         {
-            double unmanagedRatio = (double)d.UnmanagedFrameCount / totalFrames;
-            blocks.Add(M("Unmanaged frame ratio", $"{unmanagedRatio:P1}", unmanagedRatio));
-        }
+            KM("Total JIT code heap",           FormatHelper.FormatBytes(d.TotalJitHeapBytes),  (double)d.TotalJitHeapBytes),
+            KM("JIT manager count",             $"{d.JitManagerCount:N0}",                       d.JitManagerCount),
+            KM("Active managed frames",         $"{d.ManagedFrameCount:N0}",                     d.ManagedFrameCount),
+            KM("Runtime/internal frames",       $"{d.UnmanagedFrameCount:N0}",                   d.UnmanagedFrameCount),
+            KM("Active method instances on stacks", $"{d.ActiveMethodsOnStacks:N0}",             d.ActiveMethodsOnStacks),
+            KM("Tiered recompilations observed",$"{d.TieredMethodCount:N0}",                     d.TieredMethodCount),
+        };
+        if (d.JitHeapPctOfTotalProcess > 0.0)
+            keyMetrics.Add(KM("JIT heap % of process", $"{d.JitHeapPctOfTotalProcess:P1}", d.JitHeapPctOfTotalProcess));
+        if (totalFrames > 0)
+            keyMetrics.Add(KM("Unmanaged frame ratio", $"{unmanagedRatio:P1}", unmanagedRatio));
 
-        blocks.Add(M("Active method instances on stacks", $"{d.ActiveMethodsOnStacks:N0}", d.ActiveMethodsOnStacks));
-
-        // Top active frame types
         if (d.TopActiveFrameTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP ACTIVE FRAME TYPES (by stack-hit count)", indent: 1));
-            blocks.Add(Divider());
             var typeRows = new List<TableRow>(Math.Min(d.TopActiveFrameTypes.Count, TopFrameTypesToShow));
             foreach (NameCountEntry e in d.TopActiveFrameTypes.Take(TopFrameTypesToShow))
-            {
-                typeRows.Add(new TableRow([
-                    Cell(e.Name),
-                    Cell($"{e.Count:N0}", e.Count)]));
-            }
-            blocks.Add(new TableBlock("Active frame types (stack hotspots)",
-                ["Type", "Stack Hits"], typeRows));
-            if (d.TopActiveFrameTypes.Count > TopFrameTypesToShow)
-                blocks.Add(T($"Showing top {TopFrameTypesToShow} frame types. {d.TopActiveFrameTypes.Count - TopFrameTypesToShow} additional type(s) omitted."));
+                typeRows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
+            tables.Add(ST("Active frame types (stack hotspots)", ["Type", "Stack Hits"], typeRows));
         }
 
-        // Top largest methods (native code ≥ 64 KB) found on stacks
         if (d.TopLargestMethods.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("LARGE JIT-COMPILED METHODS ON STACKS (≥ 64 KB)", indent: 1));
-            blocks.Add(Divider());
             blocks.Add(T("ReadyToRun/native image detection is not available through ClrMD here; treat R2R status as N/A."));
             var methodRows = new List<TableRow>(Math.Min(d.TopLargestMethods.Count, TopMethodsToShow));
             foreach (JitMethodSnapshot m in d.TopLargestMethods.Take(TopMethodsToShow))
@@ -80,22 +59,17 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
                 string largeFlag = total > 64_000 ? ">64 KB" : string.Empty;
                 methodRows.Add(new TableRow([
                     Cell(m.Signature),
+                    Cell(FormatHelper.TruncateString(m.DeclaringType, 60)),
+                    Cell($"0x{m.NativeCodeAddress:X}"),
                     Cell(FormatHelper.FormatBytes(m.HotSize),  m.HotSize),
                     Cell(FormatHelper.FormatBytes(m.ColdSize), m.ColdSize),
                     Cell(FormatHelper.FormatBytes(total),      (long)total),
+                    Cell(m.IsTiered ? "Yes" : "No"),
                     Cell(largeFlag)]));
             }
-            blocks.Add(new TableBlock("Large JIT-compiled methods (native code size)",
-                ["Signature", "Hot", "Cold", "Total", "Flag"], methodRows));
-            if (d.TopLargestMethods.Count > TopMethodsToShow)
-                blocks.Add(T($"Showing top {TopMethodsToShow} JIT methods. {d.TopLargestMethods.Count - TopMethodsToShow} additional method(s) omitted."));
+            tables.Add(ST("Large JIT-compiled methods (native code size)",
+                ["Signature", "Declaring Type", "Native Code Addr", "Hot", "Cold", "Total", "Tiered", "Flag"], methodRows));
         }
-
-        // ── §19.3  Tiered Compilation & ReadyToRun ────────────────────────────
-        blocks.Add(Blank());
-        blocks.Add(H("TIERED COMPILATION & READYTORUN"));
-        blocks.Add(Divider());
-        blocks.Add(M("Tiered recompilations observed", $"{d.TieredMethodCount:N0}", d.TieredMethodCount));
 
         if (d.TieredMethodCount == 0)
             blocks.Add(T("No tiered recompilations detected on live thread stacks. " +
@@ -104,6 +78,9 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             blocks.Add(T($"{d.TieredMethodCount:N0} method(s) observed with multiple native code addresses for the same " +
                          "metadata token (Tier0 → Tier1 recompilation). This is expected behaviour under tiered compilation."));
 
-        return new AnalyzerDetailSection(AnalyzerName, "JIT & Native Code Footprint", SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

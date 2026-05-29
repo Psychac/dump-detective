@@ -49,6 +49,43 @@ internal sealed class SegmentFindingGenerator : IFindingGenerator
                 MetricUnit: "%"));
         }
 
+        // ── Total heap fragmentation ──────────────────────────────────────────
+        // Free space dispersed across segments prevents GC from reclaiming it in aggregate.
+        if (r.TotalCommittedBytes > 0 && r.TotalUsedBytes < r.TotalCommittedBytes)
+        {
+            double heapFragPct = (r.TotalCommittedBytes - r.TotalUsedBytes) * 100.0 / r.TotalCommittedBytes;
+            if (heapFragPct >= 30.0)
+            {
+                FindingSeverity fragSev = heapFragPct >= 50.0 ? FindingSeverity.Critical : FindingSeverity.Warning;
+                ulong freeBytes = r.TotalCommittedBytes - r.TotalUsedBytes;
+
+                findings.Add(new InsightFinding(
+                    Analyzer: AnalyzerName,
+                    Category: "Memory",
+                    Severity: fragSev,
+                    Title: $"Heap fragmentation {heapFragPct:F1}%",
+                    Evidence: $"{FormatBytes(freeBytes)} free but fragmented across segments " +
+                              $"(committed: {FormatBytes(r.TotalCommittedBytes)}, " +
+                              $"used: {FormatBytes(r.TotalUsedBytes)}). " +
+                              $"Gen0: {FormatBytes(r.SohBytes)} SOH | LOH: {FormatBytes(r.LohBytes)}.",
+                    Recommendation: "Reduce GCHandle.Alloc(Pinned) and use Memory<T> for I/O buffers. " +
+                                    "Pinned objects prevent GC from compacting segments and are the primary " +
+                                    "cause of total heap fragmentation. Enable LOH compaction via " +
+                                    "GCSettings.LargeObjectHeapCompactionMode for LOH free-space.",
+                    Tags: ["fragmentation", "memory", "gc", "pinning"],
+                    MetricValue: heapFragPct,
+                    MetricUnit: "%"));
+            }
+        }
+
         return findings;
+    }
+
+    private static string FormatBytes(ulong bytes)
+    {
+        if (bytes >= 1024UL * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+        if (bytes >= 1024UL * 1024) return $"{bytes / (1024.0 * 1024):F2} MB";
+        if (bytes >= 1024UL) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes} B";
     }
 }

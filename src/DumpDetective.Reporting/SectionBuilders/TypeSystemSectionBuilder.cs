@@ -11,9 +11,11 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 {
     private const int TopRows = 30;
 
-    public string SectionId => "prof.type-system";
-    public string DisplayTitle => "Type System";
-    public int SortOrder => 1100;
+    public IReadOnlyList<string> SourceAnalyzers => ["MemoryAnalyzer", "GCGenerationAnalyzer", "ObjectShapeAnalyzer", "ModuleAnalyzer", "GCRootAnalyzer", "DominatorAnalyzer"];
+
+    public string SectionId => "C1";
+    public string DisplayTitle => "Type Table";
+    public int SortOrder => 100;
 
     public bool CanBuild(AnalyzerResultSet results)
         => results.Get<MemoryDomainResult>() is not null
@@ -28,24 +30,24 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         ObjectShapeAnalyzerDomainResult? shape = results.Get<ObjectShapeAnalyzerDomainResult>();
         GCRootDomainResult? roots = results.Get<GCRootDomainResult>();
 
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>
         {
-            H("TYPE TABLE"),
             T("Types are ranked by shallow size; retained size remains approximate unless the BFS-backed analysis is present."),
         };
 
-        if (memory?.TopTypesBySize is not { Count: > 0 })
+        if (memory?.TopTypes is not { Count: > 0 })
         {
             blocks.Add(T("No memory top-type data was available."));
-            return new AnalyzerDetailSection("Type System", DisplayTitle, SortOrder, blocks);
+            return new AnalyzerDetailSection("TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem");
         }
 
-        var rows = new List<TableRow>(Math.Min(memory.TopTypesBySize.Count, TopRows));
+        var rows = new List<TableRow>(Math.Min(memory.TopTypes.Count, TopRows));
         var finalizableOverheadRows = new List<FinalizableOverheadCandidate>();
-        int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
+        int limit = Math.Min(memory.TopTypes.Count, TopRows);
         for (int i = 0; i < limit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             TypeShapeProfile? profile = FindShape(shape, type.TypeName);
             TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
             string moduleName = string.IsNullOrWhiteSpace(type.ModuleName) ? "N/A" : type.ModuleName;
@@ -54,12 +56,16 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(FormatHelper.TruncateString(type.TypeName, 70)),
                 Cell(type.Count.ToString("N0"), type.Count),
                 Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
+                Cell(type.LohBytes > 0 ? FormatBytes(type.LohBytes) : "—"),
                 Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : (type.Count > 0 ? FormatBytes(type.TotalBytes / (ulong)type.Count) : "—")),
                 Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—"),
+                Cell(gen is null ? "—" : GenPct(gen, 0)),
+                Cell(gen is null ? "—" : GenPct(gen, 1)),
                 Cell(gen is null ? "—" : GenRatio(gen)),
                 Cell(profile is null ? "—" : profile.IsFinalizable ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.IsValueType ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.ReferenceFields.ToString("N0"), profile is null ? null : profile.ReferenceFields),
+                Cell(profile is null ? "—" : profile.ReferenceFieldRatio.ToString("F2")),
                 Cell(profile is null ? "—" : profile.IsArray ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.BaseTypeChainDepth.ToString("N0"), profile is null ? null : profile.BaseTypeChainDepth),
                 Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
@@ -86,16 +92,41 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             }
         }
 
-        blocks.Add(new TableBlock(
-            Caption: "Type table",
-            Headers: ["Type", "Count", "Shallow Size", "Avg Size", "Estimated Retained", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
-            Rows: rows));
+        tables.Add(ST(
+            "Type table",
+            ["Type", "Count", "Shallow Size", "LOH Bytes", "Avg Size", "Est. Retained", "Gen0%", "Gen1%", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Ref Ratio", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
+            rows));
+
+        if (shape?.TopValueHeavyTypes is { Count: > 0 })
+        {
+            var valueRows = new List<TableRow>(shape.TopValueHeavyTypes.Count);
+            for (int i = 0; i < shape.TopValueHeavyTypes.Count; i++)
+            {
+                TypeShapeProfile profile = shape.TopValueHeavyTypes[i];
+                valueRows.Add(Row(
+                    Cell(FormatHelper.TruncateString(profile.TypeName, 70)),
+                    Cell(profile.TotalFields.ToString("N0"), profile.TotalFields),
+                    Cell(profile.ReferenceFields.ToString("N0"), profile.ReferenceFields),
+                    Cell(profile.ValueFields.ToString("N0"), profile.ValueFields),
+                    Cell(profile.ReferenceFieldRatio.ToString("F2")),
+                    Cell(profile.InstanceCount.ToString("N0"), profile.InstanceCount > (ulong)long.MaxValue ? long.MaxValue : (long)profile.InstanceCount),
+                    Cell(profile.IsValueType ? "Yes" : "No"),
+                    Cell(profile.IsArray ? "Yes" : "No"),
+                    Cell(profile.BaseTypeChainDepth.ToString("N0"), profile.BaseTypeChainDepth),
+                    Cell(profile.InterfaceCount.ToString("N0"), profile.InterfaceCount),
+                    Cell(profile.Category.ToString())));
+            }
+            tables.Add(ST(
+                "Value-heavy types",
+                ["Type", "Total Fields", "Reference Fields", "Value Fields", "Ref Ratio", "Instances", "Value Type", "Array", "Base Depth", "Interfaces", "Category"],
+                valueRows));
+        }
 
         var treemapItems = new List<object>();
-        int treemapLimit = Math.Min(memory.TopTypesBySize.Count, 8);
+        int treemapLimit = Math.Min(memory.TopTypes.Count, 8);
         for (int i = 0; i < treemapLimit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             treemapItems.Add(new { label = type.TypeName, value = type.TotalBytes });
         }
 
@@ -112,12 +143,13 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 })));
         }
 
-        if (memory.TopTypesBySize.Count > TopRows)
-            blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypesBySize.Count - TopRows} additional type(s) omitted."));
+        if (memory.TopTypes.Count > TopRows)
+            blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypes.Count - TopRows} additional type(s) omitted."));
+
+        var keyMetrics = new List<SectionKeyMetric>();
 
         if (finalizableOverheadRows.Count > 0)
         {
-            blocks.Add(Blank());
             blocks.Add(H("FINALIZABLE GEN2 OVERHEAD"));
             blocks.Add(T("Estimated as Gen2 count multiplied by average shallow size for the finalizable types present in the current type table."));
 
@@ -137,17 +169,16 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(candidate.ModuleName)));
             }
 
-            blocks.Add(M("Estimated finalizable Gen2 bytes", FormatBytes(totalEstimatedBytes), (double)Math.Min(totalEstimatedBytes, long.MaxValue)));
-            blocks.Add(new TableBlock(
-                Caption: "Finalizable types by estimated Gen2 overhead",
-                Headers: ["Type", "Gen2 Count", "Avg Size", "Est. Gen2 Bytes", "Module"],
-                Rows: overheadRows));
+            keyMetrics.Add(KM("Estimated finalizable Gen2 bytes", FormatBytes(totalEstimatedBytes), (double)Math.Min(totalEstimatedBytes, long.MaxValue)));
+            tables.Add(ST(
+                "Finalizable types by estimated Gen2 overhead",
+                ["Type", "Gen2 Count", "Avg Size", "Est. Gen2 Bytes", "Module"],
+                overheadRows));
 
             if (finalizableOverheadRows.Count > finalizableLimit)
                 blocks.Add(T($"Showing top {finalizableLimit} finalizable type(s). {finalizableOverheadRows.Count - finalizableLimit} additional type(s) omitted."));
         }
 
-        blocks.Add(Blank());
         blocks.Add(H("DOMINATOR CANDIDATES"));
         blocks.Add(T("Candidates are nominated from available type, generation, and shape signals."));
 
@@ -172,18 +203,19 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(candidate.SampleAddress == 0 ? "—" : $"0x{candidate.SampleAddress:X}"),
                     Cell(candidate.Rooted ? "Rooted" : "Unknown")));
             }
-
-            blocks.Add(new TableBlock(
-                Caption: "Dominator candidates",
-                Headers: ["Type", "Reason", "Instances", "Shallow Size", "Gen2%", "Estimated Retained", "Sample Address", "GC Root Reachability"],
-                Rows: candidateRows));
+            tables.Add(ST(
+                "Dominator candidates",
+                ["Type", "Reason", "Instances", "Shallow Size", "Gen2%", "Estimated Retained", "Sample Address", "GC Root Reachability"],
+                candidateRows));
         }
 
-        blocks.Add(Blank());
         blocks.Add(H("TYPE SHAPE NOTES"));
         blocks.Add(T("Balanced shapes are surfaced as Mixed; arrays are flagged explicitly in the type table."));
 
-        return new AnalyzerDetailSection("Type System", DisplayTitle, SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            "TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem",
+            KeyMetrics: keyMetrics.Count > 0 ? keyMetrics : null,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static TypeShapeProfile? FindShape(ObjectShapeAnalyzerDomainResult? shape, string typeName)
@@ -223,6 +255,15 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         return $"{profile.Gen2Count * 100.0 / total:F1}%";
     }
 
+    private static string GenPct(TypeGenerationProfile profile, int gen)
+    {
+        int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
+        if (total == 0)
+            return "—";
+        int count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
+        return $"{count * 100.0 / total:F1}%";
+    }
+
     private sealed record DominatorCandidate(
         string TypeName,
         string Reasons,
@@ -254,10 +295,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 rootedTypes.Add(roots.RootPaths[i].TargetTypeName);
         }
 
-        int limit = Math.Min(memory.TopTypesBySize.Count, TopRows);
+        int limit = Math.Min(memory.TopTypes.Count, TopRows);
         for (int i = 0; i < limit; i++)
         {
-            TypeSnapshot type = memory.TopTypesBySize[i];
+            TypeSnapshot type = memory.TopTypes[i];
             TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
             TypeShapeProfile? profile = FindShape(shape, type.TypeName);
 

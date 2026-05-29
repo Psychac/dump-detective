@@ -119,21 +119,30 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             int topN = Math.Min(options.TopBySizeCount, bySize.Count);
-            var topBySize = new List<TypeSnapshot>(topN);
-            HashSet<ulong> retainedClaims = new();
+            int topM = Math.Min(options.TopByCountCount, byCount.Count);
+            var selectedTypes = new List<CachedTypeStatistics>(topN + topM);
+            var selectedTypeNames = new HashSet<string>(StringComparer.Ordinal);
+
             for (int i = 0; i < topN; i++)
             {
                 CachedTypeStatistics stat = bySize[i];
-                topBySize.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
+                if (selectedTypeNames.Add(stat.TypeName))
+                    selectedTypes.Add(stat);
             }
 
-            int topM = Math.Min(options.TopByCountCount, byCount.Count);
-            var topByCount = new List<TypeSnapshot>(topM);
-            HashSet<ulong> retainedCountClaims = new();
             for (int i = 0; i < topM; i++)
             {
                 CachedTypeStatistics stat = byCount[i];
-                topByCount.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedCountClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
+                if (selectedTypeNames.Add(stat.TypeName))
+                    selectedTypes.Add(stat);
+            }
+
+            var topTypes = new List<TypeSnapshot>(selectedTypes.Count);
+            HashSet<ulong> retainedClaims = new();
+            for (int i = 0; i < selectedTypes.Count; i++)
+            {
+                CachedTypeStatistics stat = selectedTypes[i];
+                topTypes.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
             }
 
             return new MemoryDomainResult(
@@ -144,8 +153,7 @@ namespace DumpDetective.Analysis.Analyzers
                 lohObjects,
                 options.LohThresholdBytes,
                 typeStats.Count,
-                topBySize,
-                topByCount,
+                topTypes,
                 SizeBucketHistogram: histogram);
         }
 

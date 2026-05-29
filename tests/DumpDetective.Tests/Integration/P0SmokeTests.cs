@@ -18,8 +18,8 @@ namespace DumpDetective.Tests.Integration;
 /// <summary>
 /// Smoke tests for P0 items:
 ///   P0.1 — JSON export uses the rendered document.
-///   P0.2 — AnalyzerRunStatuses schema round-trips correctly.
-///   P0.3 — Report quality panel data is populated per analyzer.
+///   P0.2 — Appendix schema round-trips correctly.
+///   P0.3 — Modern report projections are populated per analyzer.
 /// </summary>
 public sealed class P0SmokeTests
 {
@@ -101,8 +101,9 @@ public sealed class P0SmokeTests
 
         restored.Should().NotBeNull();
         ((SingleDumpReportDocument)restored!).DumpPath.Should().Be("C:/dumps/smoke.dmp");
-        restored.Findings.Should().HaveCount(doc.Findings.Count);
-        restored.Findings[0].Title.Should().Be("BigLeak");
+        restored.Domains.Should().NotBeNull();
+        restored.Appendix.Should().NotBeNull();
+        restored.CrossDomainInsights.Should().NotBeNull();
     }
 
     // ── P0.2: Separate-JSON regex extracts the same content ────────────────
@@ -135,10 +136,10 @@ public sealed class P0SmokeTests
         m.Groups[3].Value.Should().Be(fakeJson);
     }
 
-    // ── P0.3: AnalyzerRunStatuses populated and round-trips ────────────────
+    // ── P0.3: Appendix populated and round-trips ───────────────────────────
 
     [Fact]
-    public void P0_3_ReportDocument_PopulatesAnalyzerRunStatuses()
+    public void P0_3_ReportDocument_PopulatesAppendix()
     {
         AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
         AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", FindingSeverity.Warning, "ThreadBlock");
@@ -152,13 +153,14 @@ public sealed class P0SmokeTests
             analyzerBuilders: new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
             reportBuilders: new DefaultSectionBuilderFactory().CreateReportBuilders());
 
-        doc.AnalyzerRunStatuses.Should().HaveCount(3);
+        doc.Appendix.Should().NotBeNull();
+        doc.Appendix!.AnalyzerRunSummary.Should().HaveCount(3);
 
-        var leak = doc.AnalyzerRunStatuses.First(s => s.AnalyzerName == "LeakAnalyzer");
+        var leak = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "LeakAnalyzer");
         leak.Status.Should().Be("Success");
         leak.DurationMs.Should().BeApproximately(42, 5);
 
-        var failed = doc.AnalyzerRunStatuses.First(s => s.AnalyzerName == "FailedAnalyzer");
+        var failed = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "FailedAnalyzer");
         failed.Status.Should().Be("Failed");
         failed.ErrorMessage.Should().Be("Simulated failure");
     }
@@ -180,9 +182,10 @@ public sealed class P0SmokeTests
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
-        restored!.AnalyzerRunStatuses.Should().HaveCount(1);
-        restored.AnalyzerRunStatuses[0].AnalyzerName.Should().Be("LeakAnalyzer");
-        restored.AnalyzerRunStatuses[0].Status.Should().Be("Success");
+        restored!.Appendix.Should().NotBeNull();
+        restored.Appendix!.AnalyzerRunSummary.Should().HaveCount(1);
+        restored.Appendix.AnalyzerRunSummary[0].AnalyzerName.Should().Be("LeakAnalyzer");
+        restored.Appendix.AnalyzerRunSummary[0].Status.Should().Be("Success");
     }
 
     [Fact]
@@ -202,17 +205,84 @@ public sealed class P0SmokeTests
         HtmlReportRenderer renderer = new();
         string html = renderer.Render(doc);
 
-        // The embedded JSON must contain analyzerRunStatuses
+        // The embedded JSON must contain appendix data
         Match m = Regex.Match(html,
             @"<script\b[^>]*\bid\s*=\s*(['""])(report-json)\1[^>]*>([\s\S]*?)</script>",
             RegexOptions.IgnoreCase);
         m.Success.Should().BeTrue();
 
         string embeddedJson = m.Groups[3].Value;
-        embeddedJson.Should().Contain("analyzerRunStatuses");
+        embeddedJson.Should().Contain("appendix");
         embeddedJson.Should().Contain("LeakAnalyzer");
         embeddedJson.Should().Contain("FailedAnalyzer");
         embeddedJson.Should().Contain("Failed");
         embeddedJson.Should().Contain("Simulated failure");
+    }
+
+    // ── P0.4: Trend HTML contains per-dump-json with full single-dump documents ──
+
+    [Fact]
+    public void TrendHtml_PerDumpJson_ContainsFullSingleDumpDocuments()
+    {
+        InsightFinding finding = new(
+            Analyzer: "LeakAnalyzer",
+            Category: "Leaks",
+            Severity: FindingSeverity.Warning,
+            Title: "Potential leak in ServiceProvider",
+            Evidence: "50MB retained",
+            Recommendation: "Investigate retention path",
+            Tags: ["leaks"],
+            Fingerprint: "leak-sp-1");
+
+        AnalyzerRunResult run = MakeRun("LeakAnalyzer", FindingSeverity.Warning, "Potential leak");
+
+        AnalysisSnapshot baseline = new(
+            Index: 0, DumpPath: "C:/dumps/baseline.dmp", Runs: [run],
+            Findings: [finding],
+            DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
+            GeneratedAtUtc: DateTime.UtcNow.AddMinutes(-10));
+
+        AnalysisSnapshot current = new(
+            Index: 1, DumpPath: "C:/dumps/current.dmp", Runs: [run],
+            Findings: [finding],
+            DomainResults: new Dictionary<string, AnalyzerDomainResult>(StringComparer.Ordinal),
+            GeneratedAtUtc: DateTime.UtcNow);
+
+        TrendReportData trendData = new(
+            Steps: [], Overall: [],
+            NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
+            Timeline: [], ScopedTimeline: [], Snapshots: [baseline, current],
+            NewFindings: [finding], PersistentFindings: [], ResolvedFindings: []);
+
+        TrendReportComposer composer = new(new CanonicalReportDocumentFactory(new ReportSerializer()));
+        AnalysisReportDocument trendDoc = composer.ComposeCanonicalTrendReport(
+            "C:/dumps/current.dmp", [run], TimeSpan.FromSeconds(2),
+            null, new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders(), trendData);
+
+        HtmlReportRenderer renderer = new();
+        string html = renderer.Render(trendDoc);
+
+        // Extract per-dump-json script tag
+        Match m = Regex.Match(html,
+            @"<script\b[^>]*\bid\s*=\s*(['""])(per-dump-json)\1[^>]*>([\s\S]*?)</script>",
+            RegexOptions.IgnoreCase);
+        m.Success.Should().BeTrue("HTML must contain <script id=\"per-dump-json\">");
+
+        string perDumpJson = m.Groups[3].Value;
+        perDumpJson.Should().NotBe("[]", "per-dump documents should not be empty");
+
+        // Parse as JSON array
+        using var jsonDoc = JsonDocument.Parse(perDumpJson);
+        jsonDoc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        jsonDoc.RootElement.GetArrayLength().Should().Be(2);
+
+        // Each per-dump document should have the same structure as a single-dump report
+        JsonElement firstDoc = jsonDoc.RootElement[0];
+        firstDoc.GetProperty("$kind").GetString().Should().Be("single");
+        firstDoc.GetProperty("dumpPath").GetString().Should().Be("C:/dumps/baseline.dmp");
+        firstDoc.TryGetProperty("domains", out _).Should().BeTrue("per-dump doc should have domains");
+        firstDoc.TryGetProperty("healthScorecard", out _).Should().BeTrue("per-dump doc should have health scorecard");
+        firstDoc.TryGetProperty("appendix", out _).Should().BeTrue("per-dump doc should have appendix");
     }
 }

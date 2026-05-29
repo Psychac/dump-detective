@@ -1,148 +1,131 @@
+﻿using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
-using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IReportSectionBuilder
+/// <summary>B1 — Generation Pressure. Source: <see cref="GCGenerationDomainResult"/>.</summary>
+internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string SectionId => "prof.gc-pressure";
-    public string DisplayTitle => "GC & Allocation Pressure";
-    public int SortOrder => 1400;
+    public string AnalyzerName => "GC Generation Analysis";
+    public string DisplayTitle => "Generation Pressure";
+    public int SortOrder => 100;
 
-    public bool CanBuild(AnalyzerResultSet results)
-        => results.Get<GCGenerationDomainResult>() is not null
-        || results.Get<AllocationPatternDomainResult>() is not null
-        || results.Get<SegmentAnalysisDomainResult>() is not null
-        || results.Get<SegmentReservationDomainResult>() is not null
-        || results.Get<GCHandleDomainResult>() is not null;
+    public bool CanHandle(AnalyzerDomainResult result) => result is GCGenerationDomainResult;
 
-    public AnalyzerDetailSection Build(AnalyzerResultSet results)
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
-        GCGenerationDomainResult? gcGen = results.Get<GCGenerationDomainResult>();
-        AllocationPatternDomainResult? allocation = results.Get<AllocationPatternDomainResult>();
-        SegmentAnalysisDomainResult? segments = results.Get<SegmentAnalysisDomainResult>();
-        SegmentReservationDomainResult? reservation = results.Get<SegmentReservationDomainResult>();
-        GCHandleDomainResult? handles = results.Get<GCHandleDomainResult>();
+        var d = (GCGenerationDomainResult)result;
+        var tables = new List<SectionTable>();
+        var blocks = new List<SectionBlock>();
 
-        var blocks = new List<SectionBlock>
+        var keyMetrics = new List<SectionKeyMetric>
         {
-            H("GC PRESSURE SNAPSHOT"),
-            T("Generation pressure and segment pressure are combined here so the report can show one concise GC health view."),
+            KM("Gen0 bytes",     FormatBytes(d.Gen0Bytes),              (double)d.Gen0Bytes),
+            KM("Gen0 objects",   d.Gen0Objects.ToString("N0"),           d.Gen0Objects),
+            KM("Gen1 bytes",     FormatBytes(d.Gen1Bytes),              (double)d.Gen1Bytes),
+            KM("Gen1 objects",   d.Gen1Objects.ToString("N0"),           d.Gen1Objects),
+            KM("Gen2 bytes",     FormatBytes(d.Gen2Bytes),              (double)d.Gen2Bytes),
+            KM("Gen2 objects",   d.Gen2Objects.ToString("N0"),           d.Gen2Objects),
+            KM("LOH bytes",      FormatBytes(d.LohBytes),              (double)d.LohBytes),
+            KM("LOH objects",    d.LohObjects.ToString("N0"),            d.LohObjects),
+            KM("Total objects",  d.TotalObjects.ToString("N0"),          d.TotalObjects),
+            KM("Gen2 %",         $"{d.Gen2Pct:F1}%",                    d.Gen2Pct),
+            KM("LOH %",          $"{d.LohPercent:F1}%",                 d.LohPercent),
         };
 
-        blocks.Add(new TableBlock(
-            Caption: "Pressure signals",
-            Headers: ["Signal", "Value", "Interpretation"],
-            Rows:
-            [
-                Row(Cell("GC pressure level"), Cell(allocation?.GCPressure.ToString() ?? "N/A"), Cell(DescribeGcPressure(allocation))),
-                Row(Cell("Gen2 share"), Cell(gcGen is null ? "N/A" : $"{gcGen.Gen2Pct:F1}%"), Cell(gcGen is null ? "No GC generation data available." : DescribeGen2(gcGen.Gen2Pct))),
-                Row(Cell("LOH share"), Cell(gcGen is null ? "N/A" : $"{gcGen.LohPercent:F1}%"), Cell(gcGen is null ? "No LOH data available." : DescribeLoh(gcGen.LohPercent))),
-                Row(Cell("Promotion pressure"), Cell(allocation is null ? "N/A" : $"{allocation.PromotionPressureScore:F1}"), Cell(allocation is null ? "No allocation pressure data available." : DescribePromotion(allocation.PromotionPressureScore))),
-                Row(Cell("Reserved / committed"), Cell(reservation is null ? "N/A" : $"{reservation.ReservedToCommittedRatio:F2}x"), Cell(reservation is null ? "No segment reservation data available." : DescribeReservation(reservation))),
-                Row(Cell("Ephemeral fill"), Cell(reservation is null ? "N/A" : $"{reservation.AvgEphemeralFillPct:F1}%"), Cell(reservation is null ? "No ephemeral segment data available." : DescribeEphemeralFill(reservation.AvgEphemeralFillPct))),
-                Row(Cell("Pinned handles"), Cell(handles is null ? "N/A" : $"{handles.PinnedHandleTargets:N0}"), Cell(handles is null ? "No GC handle data available." : DescribePinnedHandles(handles.PinnedHandleTargets))),
-            ]));
+        if (d.Gen2Pct >= 40.0)
+            blocks.Add(T("Gen2 dominates the heap; retention is likely becoming long-lived."));
+        if (d.LohPercent >= 35.0)
+            blocks.Add(T("LOH share is elevated and may be contributing to fragmentation or promotion pressure."));
 
-        blocks.Add(Blank());
-        blocks.Add(H("SEGMENT FOOTPRINT"));
-        if (segments is null)
+        // Top LOH types — prefer PerTypeGenerationProfiles (per-gen counts) when available; fall back to TypeSnapshot
+        if (d.PerTypeGenerationProfiles is { Count: > 0 })
         {
-            blocks.Add(T("No segment analysis result was available."));
-        }
-        else
-        {
-            blocks.Add(M("Committed bytes", FormatBytes(segments.TotalCommittedBytes), (double)segments.TotalCommittedBytes));
-            blocks.Add(M("Used bytes", FormatBytes(segments.TotalUsedBytes), (double)segments.TotalUsedBytes));
-            double utilization = segments.TotalCommittedBytes == 0 ? 0.0 : segments.TotalUsedBytes * 100.0 / segments.TotalCommittedBytes;
-            blocks.Add(M("Utilization", $"{utilization:F1}%", utilization));
-            blocks.Add(M("Reserved bytes", FormatBytes(segments.TotalReservedBytes), (double)segments.TotalReservedBytes));
-            blocks.Add(M("Reservation gap", FormatBytes(segments.ReservationGapBytes), (double)segments.ReservationGapBytes));
-            blocks.Add(M("LOH bytes", FormatBytes(segments.LohBytes), (double)segments.LohBytes));
-            blocks.Add(M("POH bytes", FormatBytes(segments.PohBytes), (double)segments.PohBytes));
-            blocks.Add(M("Frozen bytes", FormatBytes(segments.FrozenBytes), (double)segments.FrozenBytes));
-        }
+            var lohProfiles = new List<TypeGenerationProfile>(16);
+            for (int i = 0; i < d.PerTypeGenerationProfiles.Count; i++)
+            {
+                if (d.PerTypeGenerationProfiles[i].LohCount > 0)
+                    lohProfiles.Add(d.PerTypeGenerationProfiles[i]);
+            }
+            lohProfiles.Sort(static (a, b) => b.LohCount.CompareTo(a.LohCount));
 
-        if (gcGen is not null && gcGen.TopLohTypes.Count > 0)
+            if (lohProfiles.Count > 0)
+            {
+                int limit = Math.Min(lohProfiles.Count, 15);
+                var rows = new List<TableRow>(limit);
+                for (int i = 0; i < limit; i++)
+                {
+                    TypeGenerationProfile p = lohProfiles[i];
+                    rows.Add(Row(
+                        Cell(p.TypeName),
+                        Cell(p.Gen0Count.ToString("N0"), p.Gen0Count),
+                        Cell(p.Gen1Count.ToString("N0"), p.Gen1Count),
+                        Cell(p.Gen2Count.ToString("N0"), p.Gen2Count),
+                        Cell(p.LohCount.ToString("N0"),  p.LohCount),
+                        Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "—")));
+                }
+                tables.Add(ST("Top LOH types", ["Type", "Gen0", "Gen1", "Gen2", "LOH Count", "Total Bytes"], rows));
+            }
+        }
+        else if (d.TopLohTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("TOP LOH OBJECT TYPES"));
-            var rows = new List<TableRow>(Math.Min(gcGen.TopLohTypes.Count, 10));
-            int limit = Math.Min(gcGen.TopLohTypes.Count, 10);
+            int limit = Math.Min(d.TopLohTypes.Count, 15);
+            var rows = new List<TableRow>(limit);
             for (int i = 0; i < limit; i++)
             {
-                TypeSnapshot type = gcGen.TopLohTypes[i];
+                TypeSnapshot t = d.TopLohTypes[i];
                 rows.Add(Row(
-                    Cell(type.TypeName),
-                    Cell(type.Count.ToString("N0"), type.Count),
-                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
-                    Cell(type.LohBytes > 0 ? FormatBytes(type.LohBytes) : "—")));
+                    Cell(t.TypeName),
+                    Cell(t.Count.ToString("N0"), t.Count),
+                    Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
+                    Cell(t.LohBytes > 0 ? FormatBytes(t.LohBytes) : "—")));
             }
-
-            blocks.Add(new TableBlock(
-                Caption: "Top LOH object types",
-                Headers: ["Type", "Count", "Total Size", "LOH Bytes"],
-                Rows: rows));
+            tables.Add(ST("Top LOH types", ["Type", "Count", "Total Bytes", "LOH Bytes"], rows));
         }
 
-        blocks.Add(Blank());
-        blocks.Add(H("ALLOCATOR NOTES"));
-        blocks.Add(T("Allocation-site precision is ETW-dependent; these signals summarize heap pressure and segment state from the dump only."));
+        if (d.PerTypeGenerationProfiles is { Count: > 0 })
+        {
+            int limit = Math.Min(d.PerTypeGenerationProfiles.Count, 30);
+            var rows = new List<TableRow>(limit);
+            for (int i = 0; i < limit; i++)
+            {
+                TypeGenerationProfile p = d.PerTypeGenerationProfiles[i];
+                int total = p.Gen0Count + p.Gen1Count + p.Gen2Count + p.LohCount;
+                double gen2Pct   = total == 0 ? 0.0 : p.Gen2Count  * 100.0 / total;
+                double survivalR = total == 0 ? 0.0 : (p.Gen2Count + p.LohCount) * 1.0 / total;
+                rows.Add(Row(
+                    Cell(p.TypeName),
+                    Cell(p.Gen0Count.ToString("N0"), p.Gen0Count),
+                    Cell(p.Gen1Count.ToString("N0"), p.Gen1Count),
+                    Cell(p.Gen2Count.ToString("N0"), p.Gen2Count),
+                    Cell(p.LohCount.ToString("N0"),  p.LohCount),
+                    Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "-"),
+                    Cell($"{gen2Pct:F1}%"),
+                    Cell($"{survivalR:P1}"),
+                    Cell(p.IsFinalizable ? "Yes" : "No")));
+            }
+            tables.Add(ST("Per-type generation profiles",
+                ["Type", "Gen0", "Gen1", "Gen2", "LOH", "Total Bytes", "Gen2%", "Survival Ratio", "Finalizable"],
+                rows));
+        }
 
         return new AnalyzerDetailSection(
-            AnalyzerName: "GC & Allocation Pressure",
+            AnalyzerName: "GC Generation Analysis",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
-
-    private static string DescribeGcPressure(AllocationPatternDomainResult? allocation)
-    {
-        if (allocation is null)
-            return "No allocation-pattern result was available.";
-
-        return allocation.GCPressure switch
-        {
-            GCPressureLevel.Critical => "Critical GC pressure. Large Gen2/LOH retention is already present.",
-            GCPressureLevel.High => "High GC pressure. Gen2 retention is elevated and should be investigated.",
-            GCPressureLevel.Moderate => "Moderate GC pressure. Monitor for continued growth.",
-            _ => "GC pressure is within normal bounds."
-        };
-    }
-
-    private static string DescribeGen2(double gen2Pct)
-        => gen2Pct >= 40.0 ? "Gen2 dominates the heap; retention is likely becoming long-lived." : "Gen2 share is not yet dominant.";
-
-    private static string DescribeLoh(double lohPct)
-        => lohPct >= 35.0 ? "LOH share is elevated and may be contributing to fragmentation or promotion pressure." : "LOH share is within the lower-risk band.";
-
-    private static string DescribePromotion(double score)
-        => score >= 80.0 ? "Promotion pressure is severe." : score >= 50.0 ? "Promotion pressure is moderate." : "Promotion pressure is low.";
-
-    private static string DescribeReservation(SegmentReservationDomainResult reservation)
-        => reservation.AddressSpacePressureRisk
-            ? $"Address-space pressure risk flagged: {reservation.PressureRiskReason}"
-            : $"Reservation gap remains within the current expected band ({reservation.ReservedToCommittedRatio:F2}x).";
-
-    private static string DescribeEphemeralFill(double fillPct)
-        => fillPct >= 90.0 ? "Ephemeral segments are close to saturation." : fillPct >= 80.0 ? "Ephemeral segments are under noticeable pressure." : "Ephemeral fill is not yet a pressure concern.";
-
-    private static string DescribePinnedHandles(int pinnedTargets)
-        => pinnedTargets > 0 ? $"Pinned handle targets are present ({pinnedTargets:N0}); verify they are expected." : "No pinned handle target pressure is visible.";
 
     private static string FormatBytes(ulong value)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
         double bytes = value;
         int unitIndex = 0;
-        while (bytes >= 1024 && unitIndex < units.Length - 1)
-        {
-            bytes /= 1024;
-            unitIndex++;
-        }
-
+        while (bytes >= 1024 && unitIndex < units.Length - 1) { bytes /= 1024; unitIndex++; }
         return unitIndex == 0 ? $"{value:N0} B" : $"{bytes:F1} {units[unitIndex]}";
     }
 }

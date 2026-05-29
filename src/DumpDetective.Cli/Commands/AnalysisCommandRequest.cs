@@ -23,6 +23,7 @@ internal sealed record AnalysisCommandRequest(
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportAudience? ReportAudience = null,
+    ReportStyleVersion? ReportStyleVersion = null,
     HeapIndexPrebuildMode? IndexPrebuildMode = null,
     bool PreRender = false,
     bool SeparateJson = false);

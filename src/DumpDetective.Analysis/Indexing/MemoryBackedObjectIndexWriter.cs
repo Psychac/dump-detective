@@ -41,8 +41,13 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         // String dedup index: built during phase 2 while dump pages are already hot.
         // Key: XxHash64 of raw UTF-16 bytes. Each segment accumulates a local dict;
         // merge is done under masterBuilder lock to avoid ConcurrentDictionary overhead.
-        const int MaxDedupUnique = 500_000; // hard cap on unique patterns tracked
+        const int MaxDedupUnique = 500_000;    // hard cap on unique patterns tracked
         const int MaxDedupStringLength = 1024;
+        // Adaptive sampling: recalibrate every window to skip AsString() when the
+        // unique-hash yield rate drops (i.e. strings are highly duplicated).
+        const int DedupSampleWindow = 5_000;   // objects between yield-rate checks
+        const double DedupYieldCutoff1 = 0.05; // < 5% unique → sample 1 in 10
+        const double DedupYieldCutoff2 = 0.01; // < 1% unique → sample 1 in 50
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
         var globalLengthSamples = new List<int>();
         var globalLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -53,50 +58,31 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
             MaxDegreeOfParallelism = MaxSegmentParallelism
         };
 
-        // ── Phase 1: count-only parallel scan ────────────────────────────────────────────
-        // Enumerate each segment cheaply — IsValid check only, no type resolution, zero
-        // heap allocations.  The resulting per-segment counts feed exact-size prefix sums
-        // so Phase 2 can write directly into flatEntries without any intermediate buffers,
-        // trimming, or over-allocation.
+        // Single-pass scan: each segment writes into its own List<HeapEntry> so we only
+        // traverse the minidump once.  Per-segment lists are combined into one flat array
+        // after the parallel phase via a fast in-memory copy — no Phase 1 pre-scan needed.
         ClrSegment[] segments = heap.Segments.ToArray();
-        int[] perSegmentCounts = new int[segments.Length];
-
-        progress?.Report(new(0, "pre-scanning heap", Detail: null, Elapsed: stopwatch.Elapsed));
-        long phase1Count = 0;
-        Parallel.For(0, segments.Length, parallelOptions, i =>
+        List<HeapEntry>[] segmentEntryLists = new List<HeapEntry>[segments.Length];
+        for (int k = 0; k < segments.Length; k++)
         {
-            int count = 0;
-            foreach (ClrObject obj in segments[i].EnumerateObjects())
-            {
-                if (obj.IsValid)
-                {
-                    count++;
-                    long c = Interlocked.Increment(ref phase1Count);
-                    if (c % ProgressInterval == 0)
-                        progress?.Report(new(c, "pre-scanning heap", Detail: null, Elapsed: stopwatch.Elapsed));
-                }
-            }
-            perSegmentCounts[i] = count;
-        });
-
-        // Compute per-segment write offsets via prefix sums.
-        int[] segmentOffsets = new int[segments.Length];
-        int phase1Total = 0;
-        for (int i = 0; i < segments.Length; i++)
-        {
-            segmentOffsets[i] = phase1Total;
-            phase1Total += perSegmentCounts[i];
+            // Pre-size from the segment's committed byte range to avoid List<T> doubling
+            // reallocations. 32 bytes is a conservative lower bound for a valid object
+            // on x64 (MT(8)+sync(4 hidden in MT low bits)+fields). Capped at 4M to avoid
+            // over-committing for unusually large or corrupt segments.
+            ClrSegment seg = segments[k];
+            ulong segBytes = seg.Length;   // committed bytes
+            int initCap = (int)Math.Min(segBytes / 32UL, 4_000_000UL);
+            segmentEntryLists[k] = new List<HeapEntry>(Math.Max(initCap, 64));
         }
 
-        // Allocate exactly the right number of slots — no over-allocation, no trim needed.
-        // Phase 1 counts obj.IsValid inclusively; Phase 2 may skip a small number of those
-        // (Type == null or MethodTable == 0).  actualCount tracks the true written count.
-        HeapEntry[] flatEntries = GC.AllocateUninitializedArray<HeapEntry>(Math.Max(phase1Total, 1));
+        HeapEntry[] flatEntries = Array.Empty<HeapEntry>(); // assigned after Phase 2
         long objectCount = 0;
 
-        // ── Phase 2: full parallel scan — direct write into flatEntries ────────────────
-        // Each segment writes into its own pre-computed contiguous slice of flatEntries at
-        // segmentOffsets[i], so there are no cross-thread writes and no per-segment buffers.
+        progress?.Report(new(0, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
+
+        // ── Parallel scan — write into per-segment lists, no cross-thread writes ─────
+        // Each segment has its own List<HeapEntry> written exclusively by the task that
+        // processes that segment index, so no locking is required on the list itself.
         Parallel.For(
             0,
             segments.Length,
@@ -109,9 +95,13 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                 // For Ephemeral segments (workstation GC), generation cannot be inferred from
                 // the segment kind — all of Gen0/1/2 share one segment.  Resolve per-object.
                 bool isEphemeral = segGen < 0;
-                int baseSlot = segmentOffsets[i];
-                int written = 0;
-                int slotCap = perSegmentCounts[i]; // safety: don't overrun this segment's slice
+                List<HeapEntry> segList = segmentEntryLists[i]; // written only by this task
+                // Adaptive string dedup sampling: track yield rate and skip AsString()
+                // when strings are highly duplicated (avoids GC pressure + dump I/O).
+                int segStringsTotal = 0;   // all string objects seen by this segment
+                int segStringsSampled = 0; // actual obj.AsString() calls made
+                int segWindowCount = 0;    // objects in current recalibration window
+                int segSampleDivisor = 1;  // 1 = scan all; 10 = every 10th; 50 = every 50th
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
@@ -148,8 +138,31 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         eventCandidates.Add((obj.Address, mt));
 
                     // Build string dedup index while dump pages are hot from type resolution.
-                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < MaxDedupUnique)
+                    // Adaptive sampling: recalibrate every DedupSampleWindow objects to skip
+                    // AsString() calls when the unique-hash yield rate is low (many dupes).
+                    if ((flags & TypeAggregateFlags.IsStringType) != 0
+                        && state.StringDedup.Count < MaxDedupUnique)
                     {
+                        segStringsTotal++;
+                        segWindowCount++;
+
+                        // Recalibrate the sample divisor every window.
+                        if (segWindowCount >= DedupSampleWindow)
+                        {
+                            segWindowCount = 0;
+                            double yieldRate = segStringsSampled > 0
+                                ? (double)state.StringDedup.Count / segStringsSampled
+                                : 1.0;
+                            segSampleDivisor = yieldRate < DedupYieldCutoff2 ? 50
+                                             : yieldRate < DedupYieldCutoff1 ? 10
+                                             : 1;
+                        }
+
+                        // Apply sampling: skip this string if it falls outside the sample window.
+                        if (segSampleDivisor > 1 && segStringsTotal % segSampleDivisor != 0)
+                            goto WriteEntry;
+
+                        segStringsSampled++;
                         string? val = obj.AsString(maxLength: MaxDedupStringLength);
                         if (val is { Length: > 0 })
                         {
@@ -180,11 +193,8 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                         }
                     }
 
-                    // Write directly into this segment's reserved slice — no intermediate buffer.
-                    if (written < slotCap)
-                        flatEntries[baseSlot + written] = entry;
-
-                    written++;
+                    WriteEntry:
+                    segList.Add(entry);
 
                     long count = Interlocked.Increment(ref objectCount);
                     if (count % ProgressInterval == 0)
@@ -225,21 +235,30 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
 
         int actualCount = (int)Math.Min(objectCount, int.MaxValue);
 
-        // Phase 1 counts obj.IsValid; Phase 2 additionally filters Type==null / MT==0.
-        // For a static dump those counts should be identical, but trim the rare difference.
-        if (flatEntries.Length - actualCount > 50_000)
+        // Combine per-segment lists into one flat array (in-memory memcpy — no dump I/O).
+        // Per-segment lists provide exact counts so no trimming is needed.
+        progress?.Report(new(objectCount, "merging segment data", Detail: $"{actualCount:N0} objects", Elapsed: stopwatch.Elapsed));
         {
-            HeapEntry[] trimmed = GC.AllocateUninitializedArray<HeapEntry>(Math.Max(actualCount, 1));
-            flatEntries.AsSpan(0, actualCount).CopyTo(trimmed);
-            flatEntries = trimmed;
+            int runningOffset = 0;
+            int[] offsets = new int[segments.Length];
+            for (int k = 0; k < segments.Length; k++)
+            {
+                offsets[k] = runningOffset;
+                runningOffset += segmentEntryLists[k].Count;
+            }
+            flatEntries = GC.AllocateUninitializedArray<HeapEntry>(Math.Max(runningOffset, 1));
+            for (int k = 0; k < segments.Length; k++)
+            {
+                CollectionsMarshal.AsSpan(segmentEntryLists[k]).CopyTo(flatEntries.AsSpan(offsets[k]));
+                // Report every segment — ThrottledProgress upstream drops excess calls.
+                progress?.Report(new(objectCount, "merging segment data", Detail: $"{actualCount:N0} objects, segment {k + 1}/{segments.Length}", Elapsed: stopwatch.Elapsed));
+            }
+            segmentEntryLists = null!; // release lists for GC before post-scan work
         }
 
         // Post-scan: enumerate GC roots — mirrors WriteSatelliteFiles/RootIndexWriter in disk mode.
         // Stored in HeapIndexBuildResult so GCRootAnalyzer and FinalizableObjectAnalyzer can
         // consume pre-enumerated root data without re-walking the heap.
-        var rootProgressStopwatch = Stopwatch.StartNew();
-        long lastRootReportElapsedMs = 0;
-
         progress?.Report(new(0, "enumerating GC roots", Detail: "0 roots", Elapsed: stopwatch.Elapsed));
         var rootList = new List<(ulong TargetAddr, ulong RootAddr, byte Kind)>(capacity: 4096);
         long rootCount = 0;
@@ -247,22 +266,15 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         {
             if (cancellationToken.IsCancellationRequested) break;
             rootList.Add((root.Object, root.Address, (byte)root.RootKind));
-
             rootCount++;
-            long currentElapsedMs = rootProgressStopwatch.ElapsedMilliseconds;
-            if (rootCount % 10_000 == 0 || currentElapsedMs - lastRootReportElapsedMs >= 1000)
-            {
+            // Every 1000 roots to keep call overhead low; ThrottledProgress upstream gates the rate.
+            if (rootCount % 1000 == 0)
                 progress?.Report(new(rootCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));
-                lastRootReportElapsedMs = currentElapsedMs;
-            }
         }
 
         progress?.Report(new(rootCount, "enumerating GC roots", Detail: $"{rootCount:N0} roots", Elapsed: stopwatch.Elapsed));
 
-        stopwatch.Stop();
-        progress?.Report(new(objectCount, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
-
-        // Build distribution summary from in-memory results
+        // Build distribution summary from pre-collected in-memory samples (CPU only — no dump I/O).
         DistributionSummary? distribution = null;
         try
         {
@@ -308,7 +320,10 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         var handleList = new List<(ulong Addr, ulong Mt, byte Kind)>();
         try
         {
+            progress?.Report(new(0, "enumerating GC handles", Detail: "0 handles", Elapsed: stopwatch.Elapsed));
             var runtime = heap.Runtime;
+            long lastHandleReportMs = 0;
+            var handleSw = Stopwatch.StartNew();
             foreach (var h in runtime.EnumerateHandles())
             {
                 if (handleList.Count >= MaxHandleSnapshot) break;
@@ -320,9 +335,22 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
                     if (o.IsValid) mt = o.Type?.MethodTable ?? 0UL;
                 }
                 handleList.Add((addr, mt, (byte)h.HandleKind));
+
+                long nowMs = handleSw.ElapsedMilliseconds;
+                if (nowMs - lastHandleReportMs >= 1000)
+                {
+                    lastHandleReportMs = nowMs;
+                    progress?.Report(new(handleList.Count, "enumerating GC handles",
+                        Detail: $"{handleList.Count:N0} handles", Elapsed: stopwatch.Elapsed));
+                }
             }
+            progress?.Report(new(handleList.Count, "enumerating GC handles",
+                Detail: $"{handleList.Count:N0} handles", Elapsed: stopwatch.Elapsed));
         }
         catch { }
+
+        stopwatch.Stop();
+        progress?.Report(new(objectCount, "index complete", Detail: $"{actualCount:N0} objects", Elapsed: stopwatch.Elapsed));
 
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Memory,

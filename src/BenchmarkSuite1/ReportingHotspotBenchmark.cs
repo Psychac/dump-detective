@@ -123,6 +123,7 @@ public class ReportingHotspotBenchmark
         List<AnalyzerTrendResult> overall = new(10);
         Dictionary<string, IReadOnlyList<NewLeakSignal>> leakSignalsByAnalyzer = new(StringComparer.Ordinal);
         List<AnalyzerMetricTimeline> timeline = new(10);
+        List<AnalyzerMetricTimeline> scopedTimeline = new(10);
         List<InsightFinding> newFindings = new();
         List<InsightFinding> persistentFindings = new();
         List<InsightFinding> resolvedFindings = new();
@@ -143,6 +144,12 @@ public class ReportingHotspotBenchmark
                 [
                     new MetricTimelinePoint("objectScans", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(1_000 + analyzerIndex + i * 3)).ToList()),
                     new MetricTimelinePoint("cacheHits", "hits", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(700 + analyzerIndex + i * 2)).ToList())
+                ]));
+            scopedTimeline.Add(new AnalyzerMetricTimeline(
+                analyzerName,
+                [
+                    new MetricTimelinePoint("type.bytes", "bytes", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(120_000 + analyzerIndex * 1_000 + i * 2_500)).ToList(), Scope: "System.String"),
+                    new MetricTimelinePoint("type.count", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(2_000 + analyzerIndex + i * 30)).ToList(), Scope: "System.String")
                 ]));
 
             newFindings.Add(new InsightFinding(
@@ -211,6 +218,7 @@ public class ReportingHotspotBenchmark
             Overall: overall,
             NewLeakSignalsByAnalyzer: leakSignalsByAnalyzer,
             Timeline: timeline,
+            ScopedTimeline: scopedTimeline,
             Snapshots: snapshots,
             NewFindings: newFindings,
             PersistentFindings: persistentFindings,

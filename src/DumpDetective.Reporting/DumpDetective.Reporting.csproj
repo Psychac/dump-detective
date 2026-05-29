@@ -10,9 +10,23 @@
   <ItemGroup>
     <EmbeddedResource Include="Templates\report.html" />
     <EmbeddedResource Include="Templates\report.css" />
+    <EmbeddedResource Include="Templates\report.base.css" />
+    <EmbeddedResource Include="Templates\report.header.css" />
+    <EmbeddedResource Include="Templates\report.body.css" />
+    <EmbeddedResource Include="Templates\report.findings.css" />
+    <EmbeddedResource Include="Templates\report.detail.css" />
+    <EmbeddedResource Include="Templates\report.utilities.css" />
     <EmbeddedResource Include="Templates\report.js" />
     <EmbeddedResource Include="Templates\report.dom.js" />
     <EmbeddedResource Include="Templates\report.renderers.js" />
+    <EmbeddedResource Include="Templates\report.renderers.shared.js" />
+    <EmbeddedResource Include="Templates\report.renderers.blocks.js" />
+    <EmbeddedResource Include="Templates\report.renderers.charts.js" />
+    <EmbeddedResource Include="Templates\report.renderers.header.js" />
+    <EmbeddedResource Include="Templates\report.renderers.nav.js" />
+    <EmbeddedResource Include="Templates\report.renderers.panels.js" />
+    <EmbeddedResource Include="Templates\report.renderers.findings.js" />
+    <EmbeddedResource Include="Templates\report.renderers.sections.js" />
     <EmbeddedResource Include="Templates\report.ui.js" />
     <EmbeddedResource Include="Templates\report.main.js" />
   </ItemGroup>

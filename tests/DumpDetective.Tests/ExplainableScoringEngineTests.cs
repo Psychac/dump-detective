@@ -223,15 +223,15 @@ public sealed class ExplainableScoringEngineTests
         var doc = new ReportSerializer().Serialize("dump.dmp", [run], TimeSpan.FromSeconds(1), [], []);
 
         doc.ExecutiveSummary.Should().NotBeNull();
-        doc.ExecutiveSummary!.LeakLikelihoodScore.Should().Be(40);
+        doc.ExecutiveSummary!.LeakLikelihoodScore.Should().Be(36);
         doc.ExecutiveSummary!.ScoreBreakdowns.Should().NotBeNull();
         doc.ExecutiveSummary!.ScoreBreakdowns!.Should().HaveCount(3);
 
         var leakBreakdown = doc.ExecutiveSummary.ScoreBreakdowns!.First(b => b.Dimension == "Leak");
-        leakBreakdown.Score.Should().Be(40);
+        leakBreakdown.Score.Should().Be(36);
         leakBreakdown.Contributors.Should().HaveCount(1);
         leakBreakdown.Contributors[0].Source.Should().Be("LeakAnalyzer");
-        leakBreakdown.Contributors[0].Points.Should().Be(40);
+        leakBreakdown.Contributors[0].Points.Should().Be(36);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

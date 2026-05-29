@@ -29,31 +29,104 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             ];
         }
 
-        var findings = new List<InsightFinding>(capacity: 5);
         IReadOnlyList<EventLeakGroupSnapshot> groups = r.TopLeakGroups ?? [];
+        var findings = new List<InsightFinding>(capacity: 2);
 
-        int findingsToEmit = Math.Min(5, groups.Count);
-        for (int i = 0; i < findingsToEmit; i++)
-        {
-            EventLeakGroupSnapshot group = groups[i];
-            FindingSeverity severity = group.SeverityScore >= 35 ? FindingSeverity.Critical
-                : group.SeverityScore >= 20 ? FindingSeverity.Warning
-                : FindingSeverity.Info;
-
-            findings.Add(new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Leak",
-                Severity: severity,
-                Title: $"Potential {(group.IsStatic ? "static" : "instance")} event retention in {group.PublisherType}.{group.EventFieldName}",
-                Evidence: $"{group.InstanceCount:N0} publisher instance(s), {group.TotalSubscribers:N0} total subscribers, max {group.MaxSubscribers:N0} per instance.",
-                Recommendation: "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.",
-                Tags: group.IsStatic
-                    ? ["event-leak", "static-event", "retention"]
-                    : ["event-leak", "instance-event", "retention"],
-                MetricValue: group.TotalSubscribers,
-                MetricUnit: "subscribers"));
-        }
+        AddAggregateFinding(findings, groups, isStatic: false, r.InstanceEventLeakCount);
+        AddAggregateFinding(findings, groups, isStatic: true, r.StaticEventLeakCount);
 
         return findings;
+    }
+
+    private static void AddAggregateFinding(
+        List<InsightFinding> findings,
+        IReadOnlyList<EventLeakGroupSnapshot> groups,
+        bool isStatic,
+        int fallbackGroupCount)
+    {
+        int groupCount = 0;
+        int totalPublisherInstances = 0;
+        int totalSubscribers = 0;
+        int maxSubscribersPerInstance = 0;
+        int maxSeverityScore = 0;
+
+        string topPublisherType = string.Empty;
+        string topEventFieldName = string.Empty;
+        int topGroupSubscribers = -1;
+
+        string exampleA = string.Empty;
+        string exampleB = string.Empty;
+
+        for (int i = 0; i < groups.Count; i++)
+        {
+            EventLeakGroupSnapshot group = groups[i];
+            if (group.IsStatic != isStatic) continue;
+
+            groupCount++;
+            totalPublisherInstances += group.InstanceCount;
+            totalSubscribers += group.TotalSubscribers;
+
+            if (group.MaxSubscribers > maxSubscribersPerInstance)
+                maxSubscribersPerInstance = group.MaxSubscribers;
+
+            if (group.SeverityScore > maxSeverityScore)
+                maxSeverityScore = group.SeverityScore;
+
+            if (group.TotalSubscribers > topGroupSubscribers)
+            {
+                topGroupSubscribers = group.TotalSubscribers;
+                topPublisherType = group.PublisherType;
+                topEventFieldName = group.EventFieldName;
+            }
+
+            string example = group.PublisherType + "." + group.EventFieldName;
+            if (string.IsNullOrEmpty(exampleA)) exampleA = example;
+            else if (string.IsNullOrEmpty(exampleB) && !string.Equals(exampleA, example, StringComparison.Ordinal)) exampleB = example;
+        }
+
+        if (groupCount == 0)
+        {
+            groupCount = fallbackGroupCount;
+        }
+
+        if (groupCount <= 0) return;
+
+        FindingSeverity severity = maxSeverityScore >= 35 ? FindingSeverity.Critical
+            : maxSeverityScore >= 20 ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        string leakKind = isStatic ? "static" : "instance";
+        string title = groupCount == 1
+            ? $"Potential {leakKind} event retention pattern detected"
+            : $"Potential {leakKind} event retention patterns detected ({groupCount:N0})";
+
+        string evidence = $"{groupCount:N0} leak group(s), {totalPublisherInstances:N0} publisher instance(s), {totalSubscribers:N0} total subscribers";
+        if (maxSubscribersPerInstance > 0)
+            evidence += $", max {maxSubscribersPerInstance:N0} per instance";
+
+        if (!string.IsNullOrWhiteSpace(topPublisherType) && !string.IsNullOrWhiteSpace(topEventFieldName))
+            evidence += $". Top group: {topPublisherType}.{topEventFieldName} ({topGroupSubscribers:N0} subscribers).";
+        else
+            evidence += ".";
+
+        if (!string.IsNullOrEmpty(exampleA))
+        {
+            evidence += " Examples: " + exampleA;
+            if (!string.IsNullOrEmpty(exampleB)) evidence += ", " + exampleB;
+            evidence += ".";
+        }
+
+        findings.Add(new InsightFinding(
+            Analyzer: "Event Leak Analysis",
+            Category: "Leak",
+            Severity: severity,
+            Title: title,
+            Evidence: evidence,
+            Recommendation: "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.",
+            Tags: isStatic
+                ? ["event-leak", "static-event", "retention"]
+                : ["event-leak", "instance-event", "retention"],
+            MetricValue: totalSubscribers,
+            MetricUnit: "subscribers"));
     }
 }

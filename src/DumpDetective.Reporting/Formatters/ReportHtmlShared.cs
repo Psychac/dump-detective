@@ -8,6 +8,26 @@ internal static class ReportHtmlShared
 {
     public static string Enc(string? v) => System.Net.WebUtility.HtmlEncode(v ?? string.Empty);
 
+    /// <summary>
+    /// Renders a compact per-snapshot severity progression strip as inline HTML badges.
+    /// E.g. OK → Warning → Critical → Warning
+    /// </summary>
+    private static string RenderSeverityProgressionHtml(IReadOnlyList<DomainSeverity>? history)
+    {
+        if (history is null or { Count: 0 }) return "—";
+        var sb = new StringBuilder();
+        for (int i = 0; i < history.Count; i++)
+        {
+            string sev = history[i].ToString();
+            string css = $"health-severity health-severity-{sev.ToLowerInvariant()}";
+            string label = i == 0 ? $"#{i + 1} (baseline)" : i == history.Count - 1 ? $"#{i + 1} (current)" : $"#{i + 1}";
+            sb.Append($"<span class=\"{css}\" title=\"Snapshot {label}\">{Enc(sev)}</span>");
+            if (i < history.Count - 1)
+                sb.Append("<span class=\"health-progress-arrow\">→</span>");
+        }
+        return sb.ToString();
+    }
+
     public static string WrapAddr(string html) =>
         Regex.Replace(html, @"0x[0-9A-Fa-f]{4,}",
             m => $"<span class=\"addr\">{m.Value}<button class=\"copy-btn\" type=\"button\" aria-label=\"Copy {m.Value}\" data-copy=\"{m.Value}\" title=\"Copy\">&#x2398;</button></span>",
@@ -54,14 +74,98 @@ internal static class ReportHtmlShared
                 case ChartBlock chart:
                     sb.AppendLine($"<div class=\"detail-chart detail-indent-{Math.Min(chart.IndentLevel, 3)}\" data-chart-kind=\"{Enc(chart.Kind)}\" data-chart-payload=\"{Enc(chart.PayloadJson)}\" data-chart-title=\"{Enc(chart.Title)}\"></div>");
                     break;
+                case ConfidenceBandBlock band:
+                    {
+                        string bandCss = band.Band.ToLowerInvariant();
+                        sb.AppendLine("<div class=\"detail-confidence\">");
+                        sb.AppendLine($"<span class=\"confidence-band confidence-{bandCss}\">{Enc(band.Symbol)} {Enc(band.Band)} confidence</span>");
+                        if (band.Caveats.Length > 0)
+                        {
+                            sb.AppendLine("<ul class=\"confidence-caveats\">");
+                            foreach (string caveat in band.Caveats)
+                                sb.AppendLine($"<li>{Enc(caveat)}</li>");
+                            sb.AppendLine("</ul>");
+                        }
+                        sb.AppendLine("</div>");
+                        break;
+                    }
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details class=\"detail-nested\"><summary>{Enc(cs.Title)}</summary><div class=\"detail-nested-content\">");
                     break;
                 case CollapsibleSectionEndBlock:
                     sb.AppendLine("</div></details>");
                     break;
+                case SparklineBlock spark:
+                    {
+                        string valuesJson = System.Text.Json.JsonSerializer.Serialize(spark.Values);
+                        sb.AppendLine($"<div class=\"sparkline\" data-metric=\"{Enc(spark.MetricKey)}\" data-unit=\"{Enc(spark.Unit)}\" data-direction=\"{Enc(spark.Direction)}\" data-values=\"{Enc(valuesJson)}\"></div>");
+                        break;
+                    }
             }
         }
+    }
+
+    public static string RenderHealthScorecard(HealthScorecard? scorecard)
+    {
+        if (scorecard is null || scorecard.Domains.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
+        bool hasTrendData = scorecard.Domains.Any(d => d.Change.HasValue);
+        bool hasHistory   = hasTrendData && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
+        sb.Append("<table>");
+        if (hasTrendData)
+        {
+            if (hasHistory)
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+            else
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+            {
+                string cur = entry.Severity.ToString();
+                string bas = entry.BaselineSeverity?.ToString() ?? "—";
+                string chg = entry.Change switch
+                {
+                    DomainSeverityChange.Regressed  => "⬆ Regressed",
+                    DomainSeverityChange.Improved   => "⬇ Improved",
+                    DomainSeverityChange.NewDomain  => "🆕 New",
+                    DomainSeverityChange.Removed    => "🗑 Removed",
+                    _                               => "= Stable"
+                };
+                string chgCss = entry.Change switch
+                {
+                    DomainSeverityChange.Regressed => "trend-regressed",
+                    DomainSeverityChange.Improved  => "trend-improved",
+                    _                              => string.Empty
+                };
+                string sevCss = $"health-severity health-severity-{cur.ToLowerInvariant()}";
+
+                if (hasHistory)
+                {
+                    string progression = RenderSeverityProgressionHtml(entry.SeverityHistory);
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"health-progression\">{progression}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                }
+                else
+                {
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                }
+            }
+        }
+        else
+        {
+            sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+            foreach (DomainHealthEntry entry in scorecard.Domains)
+            {
+                string severity = entry.Severity.ToString();
+                string severityCss = $"health-severity health-severity-{severity.ToLowerInvariant()}";
+                sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td class=\"{severityCss}\">{Enc(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+            }
+        }
+        sb.AppendLine("</tbody></table>");
+        sb.AppendLine($"<div class=\"health-scorecard__overall\">Overall severity: {Enc(scorecard.OverallSeverity.ToString())}</div>");
+        sb.AppendLine("</section>");
+        return sb.ToString();
     }
 
     public static void RenderTableHtml(TableBlock tbl, StringBuilder sb)
@@ -78,14 +182,20 @@ internal static class ReportHtmlShared
             {
                 string da = cell.RawValue.HasValue ? $" data-value=\"{cell.RawValue.Value}\"" : string.Empty;
                 string display = cell.Display ?? string.Empty;
-                // Sparkline payload token: __SPARK__<json>
-                if (display.StartsWith("__SPARK__"))
+                // Sparkline payload token: __SPARK__<json> (legacy)
+                if (display.StartsWith("__SPARK__", StringComparison.Ordinal))
                 {
                     string payload = display.Substring("__SPARK__".Length);
                     sb.Append($"<td data-sparkline=\"{Enc(payload)}\"{da}></td>");
                     continue;
                 }
-                // Link token appended with separator: <text>||__LINK__detail-<n>
+                // Link target via TableCell.LinkTarget (preferred)
+                if (cell.LinkTarget is { Length: > 0 } linkTarget)
+                {
+                    sb.Append($"<td{da}><a class=\"trend-jump\" href=\"#{Enc(linkTarget)}\">{Enc(display)}</a></td>");
+                    continue;
+                }
+                // Legacy link token: <text>||__LINK__detail-<n>
                 const string linkMarker = "||__LINK__";
                 int li = display.IndexOf(linkMarker, StringComparison.Ordinal);
                 if (li >= 0)

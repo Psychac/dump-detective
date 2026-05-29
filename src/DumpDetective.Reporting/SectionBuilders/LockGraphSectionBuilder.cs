@@ -8,45 +8,43 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Lock Graph Analysis";
-    public int SortOrder => 70;
+    public string DisplayTitle => "Lock Graph & Deadlocks";
+    public int SortOrder => 300;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (LockGraphDomainResult)result;
-        var blocks = new List<SectionBlock>();
+        var tables = new List<SectionTable>();
+        var blocks = new List<SectionBlock>
+        {
+            BuildConfidenceBand(0.85, ["Derived from recorded wait chains and lock ownership."]),
+        };
 
-        blocks.Add(H("LOCK CONTENTION SUMMARY"));
-        blocks.Add(Divider());
-        blocks.Add(M("Held Locks", $"{d.TotalHeldLocks:N0}", d.TotalHeldLocks));
-        blocks.Add(M("Contested Locks", $"{d.ContestedLockCount:N0}", d.ContestedLockCount));
-        blocks.Add(M("Max Waiters on Single Lock", $"{d.MaxWaitersOnSingleLock:N0}", d.MaxWaitersOnSingleLock));
-        blocks.Add(M("Deadlock Candidates", $"{d.DeadlockCandidateCount:N0}", d.DeadlockCandidateCount));
+        var keyMetrics = new List<SectionKeyMetric>
+        {
+            KM("Held Locks",                $"{d.TotalHeldLocks:N0}",          d.TotalHeldLocks),
+            KM("Contested Locks",           $"{d.ContestedLockCount:N0}",       d.ContestedLockCount),
+            KM("Max Waiters on Single Lock",$"{d.MaxWaitersOnSingleLock:N0}",   d.MaxWaitersOnSingleLock),
+            KM("Deadlock Candidates",       $"{d.DeadlockCandidateCount:N0}",   d.DeadlockCandidateCount),
+        };
 
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("LOCK CONTENTION HOTSPOTS"));
-            blocks.Add(Divider());
-
             int limit = Math.Min(topTypes.Count, 8);
             var ctRows = new List<TableRow>(limit);
             for (int i = 0; i < limit; i++)
                 ctRows.Add(new TableRow([
                     Cell(FormatHelper.TruncateString(topTypes[i].Name, 70)),
                     Cell($"{topTypes[i].Count:N0} cumulative waiter(s)", topTypes[i].Count)]));
-            blocks.Add(new TableBlock("Top contested lock types", ["Type", "Waiters"], ctRows));
+            tables.Add(ST("Top contested lock types", ["Type", "Waiters"], ctRows));
         }
 
         var contestedDetails = d.ContestedLockDetails ?? [];
         if (contestedDetails.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("CONTESTED LOCK OBJECTS"));
-            blocks.Add(Divider());
-
             var clRows = new List<TableRow>(contestedDetails.Count);
             foreach (var cl in contestedDetails)
             {
@@ -60,14 +58,11 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(owner),
                     Cell($"{cl.RecursionCount:N0}")]));
             }
-            blocks.Add(new TableBlock("Contested lock objects",
+            tables.Add(ST("Contested lock objects",
                 ["Type", "Address", "Waiters", "Owner Thread", "Recursion"],
                 clRows));
         }
 
-        blocks.Add(Blank());
-        blocks.Add(H("DEADLOCK SIGNAL"));
-        blocks.Add(Divider());
         if (d.DeadlockCandidateCount >= 2)
             blocks.Add(T("Probable deadlock pattern detected."));
         else if (d.ContestedLockCount > 0)
@@ -82,10 +77,6 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         if (deadlockDetails.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("DEADLOCK CANDIDATE THREADS"));
-            blocks.Add(Divider());
-
             var dcRows = new List<TableRow>(deadlockDetails.Count);
             foreach (var dc in deadlockDetails)
             {
@@ -102,7 +93,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatHelper.TruncateString(lockAddresses, 70)),
                     Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
             }
-            blocks.Add(new TableBlock("Deadlock candidate threads",
+            tables.Add(ST("Deadlock candidate threads",
                 ["Managed ID", "OS Thread ID", "Held Lock Types", "Held Lock Addresses", "Summary"],
                 dcRows));
         }
@@ -115,7 +106,6 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 ContestedLockSnapshot cl = contestedDetails[i];
                 if (!cl.OwnerManagedThreadId.HasValue || !deadlockOwnerIds.Contains(cl.OwnerManagedThreadId.Value))
                     continue;
-
                 suspectedRows.Add(new TableRow([
                     Cell(FormatHelper.TruncateString(cl.ObjectTypeName, 60)),
                     Cell($"0x{cl.ObjectAddress:x}"),
@@ -126,14 +116,28 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             if (suspectedRows.Count > 0)
             {
-                blocks.Add(Blank());
-                blocks.Add(H("SUSPECTED DEADLOCK LOCKS"));
-                blocks.Add(Divider());
                 blocks.Add(T("Contested locks owned by threads that already participate in a deadlock candidate."));
-                blocks.Add(new TableBlock("Suspected deadlock locks", ["Type", "Address", "Owner Thread", "Waiters", "Recursion"], suspectedRows));
+                tables.Add(ST("Suspected deadlock locks",
+                    ["Type", "Address", "Owner Thread", "Waiters", "Recursion"],
+                    suspectedRows));
             }
         }
 
-        return new AnalyzerDetailSection(AnalyzerName, AnalyzerName, SortOrder, blocks);
+        SectionLeadFinding? leadFinding = null;
+        if (d.DeadlockCandidateCount > 0)
+            leadFinding = new SectionLeadFinding(
+                Severity: "Critical",
+                Title: $"Deadlock detected \u2014 {d.DeadlockCandidateCount} cycle(s) identified",
+                Evidence: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
+                Recommendation: "Enforce a consistent lock acquisition order across all threads. Use lock timeouts or restructure code to eliminate nested locking.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
+                ConfidenceScore: 0.85,
+                Caveats: ["Detection is based on recorded BlockingObjects; cooperative waits (e.g. SemaphoreSlim) may not appear."]);
+
+        return new AnalyzerDetailSection(
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            LeadFinding: leadFinding,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 }

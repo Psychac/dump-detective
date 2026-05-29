@@ -1,8 +1,10 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
+using System.Reflection;
 using System;
 using System.Collections.Generic;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -127,7 +129,8 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.TotalWastedMemory,
                 collectionStats.WastefulCollectionCount,
                 topSnapshots,
-                collectionStats.WasteCountsByKind);
+                collectionStats.WasteCountsByKind,
+                collectionStats.GenerationBreakdown);
 
             if (collectionStats.TotalCollections == 0)
             {
@@ -157,6 +160,15 @@ namespace DumpDetective.Analysis.Analyzers
         // or a per-segment ClrObject walk (no-cache path) using the same concurrent accumulation logic.
         private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken, IHeapAnalysisCache? cache = null)
         {
+            // Cache reflection handles for generation resolution (compatible across ClrMD versions)
+            PropertyInfo? generationProperty = typeof(ClrObject).GetProperty("Generation");
+            MethodInfo? getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
+
+            // Per-kind generation counts: index 0=Gen0,1=Gen1,2=Gen2,3=LOH/large
+            var generationCounts = new ConcurrentDictionary<CollectionKind, int[]>(concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 16);
+            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
+                generationCounts.TryAdd(k, new int[4]);
+
             var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
                 concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 64);
             int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
@@ -224,6 +236,16 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 if (kind == CollectionKind.None)
                     return;
+
+                // determine generation and increment per-kind generation counter
+                try
+                {
+                    int gen = ResolveGeneration(heap, address, generationProperty, getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    var arr = generationCounts.GetOrAdd(kind, _ => new int[4]);
+                    Interlocked.Increment(ref arr[idx]);
+                }
+                catch { /* best-effort, ignore generation failures */ }
 
                 Interlocked.Increment(ref totalCollections);
 
@@ -457,6 +479,22 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalWastedMemory = totalWastedMemory
             };
 
+            // materialize generation breakdown
+            try
+            {
+                var genList = new List<CollectionGenerationStats>();
+                foreach (var kv in generationCounts)
+                {
+                    var a = kv.Value;
+                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
+                }
+                stats.GenerationBreakdown = genList;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing generation breakdown");
+            }
+
             // Post-scan: populate root descriptions for top-N only — never during the scan loop.
             // Fast profile: use cheap cache.GetRootDescription only.
             // Balanced/Deep: additionally run ReferenceChainAnalyzer for items without a description.
@@ -506,6 +544,13 @@ namespace DumpDetective.Analysis.Analyzers
             int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
             var wasteful = new List<WastefulCollection>(topCapacity);
             var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
+            // generation resolution helpers (reflection-safe)
+            PropertyInfo? generationProperty = typeof(ClrObject).GetProperty("Generation");
+            MethodInfo? getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
+
+            var generationCounts = new Dictionary<CollectionKind, int[]>(capacity: 16);
+            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
+                generationCounts[k] = new int[4];
             var scanCounter = new ObjectScanCounter("scanning collections", progress);
             var heapLock = _options.SerializeHeapAccess ? new object() : null;
             int wastefulCount = 0;
@@ -539,6 +584,14 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Dictionaries++;
+                    // increment generation count
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.Dictionary][idx]++;
+                    }
+                    catch { }
                     var waste = AnalyzeDictionary(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -552,6 +605,13 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Lists++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.List][idx]++;
+                    }
+                    catch { }
                     var waste = AnalyzeList(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -565,6 +625,13 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.HashSets++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.HashSet][idx]++;
+                    }
+                    catch { }
                     var waste = AnalyzeHashSet(heap, objectAddress);
                     if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -578,6 +645,13 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     stats.TotalCollections++;
                     stats.Queues++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.Queue][idx]++;
+                    }
+                    catch { }
                     var qWaste = AnalyzeQueue(heap, objectAddress);
                     if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
                     {
@@ -597,6 +671,22 @@ namespace DumpDetective.Analysis.Analyzers
             stats.WastefulCollections = wasteful;
             stats.WastefulCollectionCount = wastefulCount;
             stats.TotalWastedMemory = totalWasted;
+
+            // populate generation breakdown for disk path
+            try
+            {
+                var genList = new List<CollectionGenerationStats>();
+                foreach (var kv in generationCounts)
+                {
+                    var a = kv.Value;
+                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
+                }
+                stats.GenerationBreakdown = genList;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
+            }
 
             // Post-scan root descriptions for top-N — never per-item during the scan.
             PopulateRootDescriptions(heap, heapCache, stats.WastefulCollections, _options);
@@ -1431,6 +1521,32 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
+        private static int ResolveGeneration(ClrHeap heap, ulong address, PropertyInfo? generationProperty, MethodInfo? getGenerationMethod)
+        {
+            try
+            {
+                if (getGenerationMethod != null)
+                {
+                    object? val = getGenerationMethod.Invoke(heap, new object[] { address });
+                    if (val is int gi) return gi;
+                    if (val is uint gu) return (int)gu;
+                }
+
+                if (generationProperty != null)
+                {
+                    ClrObject obj = heap.GetObject(address);
+                    object boxed = obj;
+                    object? value = generationProperty.GetValue(boxed);
+                    if (value is int g) return g;
+                    if (value is uint ug) return (int)ug;
+                }
+            }
+            catch { }
+
+            // Fallback to Gen2 when uncertain
+            return 2;
+        }
+
         private sealed class LocalWasteAccumulator
         {
             public readonly List<WastefulCollection> TopWasteful;
@@ -1454,6 +1570,8 @@ namespace DumpDetective.Analysis.Analyzers
 
     }
 
+    
+
     internal class CollectionStatistics
     {
         public int TotalCollections { get; set; }
@@ -1469,6 +1587,7 @@ namespace DumpDetective.Analysis.Analyzers
         public int WastefulCollectionCount { get; set; }
         public List<WastefulCollection> WastefulCollections { get; set; } = new();
         public IReadOnlyDictionary<CollectionKind, int> WasteCountsByKind { get; set; } = new Dictionary<CollectionKind, int>();
+        public IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown { get; set; }
     }
 
     internal class WastefulCollection

@@ -44,5 +44,12 @@ internal sealed class RunAnalyzersPipelineStage(AnalyzerExecutionService analyze
             .Concat(runs)
             .ToList();
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
+
+        state.IncidentContext = IncidentContextFactory.Create(
+            mode: "Single",
+            loadContext: state.LoadContext,
+            resolved: state.Resolved,
+            activeAnalyzers: state.ActiveAnalyzers,
+            elapsed: state.AnalysisElapsed);
     }
 }

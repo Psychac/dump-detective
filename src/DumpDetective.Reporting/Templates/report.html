@@ -7,7 +7,13 @@
   <style>{{CSS}}</style>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to main content</a>
+  <div class="skip-links" aria-label="Skip links">
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <a class="skip-link" href="#sec-exec">Skip to summary</a>
+    <a class="skip-link" href="#report-domains">Skip to domains</a>
+    <a class="skip-link" href="#sec-appendix">Skip to appendix</a>
+  </div>
+  <p id="report-sr-summary" class="sr-only" aria-live="polite"></p>
   <div role="status" aria-live="polite" aria-atomic="true" id="clipboard-status" class="sr-only"></div>
 
   <div class="container page-shell">
@@ -24,15 +30,21 @@
       </nav>
     </aside>
 
-    <main id="main" tabindex="-1">
+    <main id="main" class="report-main" tabindex="-1">
       <div id="report-content">
+        {{PRE_RENDERED_HEALTH_SCORECARD}}
         {{PRE_RENDERED_FINDINGS}}
         {{PRE_RENDERED_ANALYZER_SECTIONS}}
       </div>
     </main>
+
+    <aside class="report-right-rail" id="report-right-rail" aria-label="Action queue and quick metrics">
+      <div class="report-right-rail__content" id="report-right-rail-content"></div>
+    </aside>
   </div>
 
   <script id="report-json" type="application/json">{{REPORT_JSON}}</script>
+  <footer class="report-print-footer" id="report-print-footer" aria-hidden="true"></footer>
   {{JS}}
 </body>
 </html>

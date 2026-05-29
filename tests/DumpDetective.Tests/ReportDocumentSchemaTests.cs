@@ -18,41 +18,45 @@ public sealed class ReportDocumentSchemaTests
         new(ReportJsonContext.Default.Options) { WriteIndented = true };
 
     [Fact]
-    public void RoundTrip_PreservesAllTopLevelFields()
+    public void RoundTrip_PreservesModernTopLevelFields()
     {
         SingleDumpReportDocument original = new()
         {
             DumpPath = "C:/dumps/test.dmp",
+            ScoringModelVersion = "v1",
             GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
             ElapsedSeconds = 42.5,
-            Findings =
+            HealthScorecard = new HealthScorecard(
+                Domains: [new DomainHealthEntry("Memory", DomainSeverity.Critical, 1, 1, 0)],
+                OverallSeverity: DomainSeverity.Critical),
+            Domains =
             [
-                new FindingRecord(
-                    Analyzer:       "RetentionAnalyzer",
-                    Category:       "Leak",
-                    Severity:       "Critical",
-                    Title:          "Duplicate strings",
-                    Evidence:       "1 000 000 duplicate System.String instances.",
-                    Recommendation: "Pool repeated string payloads.",
-                    Tags:           ["memory", "string"],
-                    Fingerprint:    "dup-strings-01")
-            ],
-            AnalyzerSections =
-            [
-                new AnalyzerDetailSection("RetentionAnalyzer", "Retention Analysis", 25,
-                [
-                    new HeadingBlock("OVERALL SUMMARY"),
-                    new MetricBlock("Total Strings", "1,000,000", 1_000_000),
-                    new DividerBlock(),
-                    new TableBlock(
-                        Caption: "Top duplicate strings",
-                        Headers: ["Value", "Count", "Wasted"],
-                        Rows:
+                new ReportDomainSection(
+                    Domain: "Memory",
+                    LeadSeverity: DumpDetective.Core.Models.FindingSeverity.Critical,
+                    Sections:
+                    [
+                        new AnalyzerDetailSection("RetentionAnalyzer", "Retention Analysis", 25,
                         [
-                            new TableRow([new TableCell("hello", 500), new TableCell("500"), new TableCell("8 KB")])
+                            new HeadingBlock("OVERALL SUMMARY"),
+                            new MetricBlock("Total Strings", "1,000,000", 1_000_000),
+                            new DividerBlock(),
+                            new TableBlock(
+                                Caption: "Top duplicate strings",
+                                Headers: ["Value", "Count", "Wasted"],
+                                Rows:
+                                [
+                                    new TableRow([new TableCell("hello", 500), new TableCell("500"), new TableCell("8 KB")])
+                                ])
                         ])
-                ])
-            ]
+                    ],
+                    DomainInsights: [new FindingRecord("RetentionAnalyzer", "Leak", "Critical", "Duplicate strings", "1 000 000 duplicate System.String instances.", "Pool repeated string payloads.", ["memory", "string"], "dup-strings-01")])
+            ],
+            CrossDomainInsights = [new FindingRecord("InsightEngine", "CrossDomain", "Warning", "Cross-domain issue", "Evidence", "Recommendation", [], "cross-01")],
+            Appendix = new ReportAppendix(
+                AnalyzerRunSummary: [new AnalyzerRunStatusRecord("RetentionAnalyzer", "Success", 42.5, 1, 0, 123, 4, 5, null)],
+                MemoryDiagnostics: [new AnalyzerMemoryDiagnosticRecord("RetentionAnalyzer", 10, 12, 2, 3, 4, 1)],
+                KnownLimitations: ["Limited sample"])
         };
 
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);
@@ -60,18 +64,19 @@ public sealed class ReportDocumentSchemaTests
 
         restored.Should().NotBeNull();
         restored!.SchemaVersion.Should().Be("2.1");
+        restored.ScoringModelVersion.Should().Be("v1");
         restored.ElapsedSeconds.Should().BeApproximately(42.5, 0.001);
         restored.Should().BeOfType<SingleDumpReportDocument>();
         ((SingleDumpReportDocument)restored).DumpPath.Should().Be("C:/dumps/test.dmp");
         // dedup diagnostics removed
 
-        restored.Findings.Should().HaveCount(1);
-        FindingRecord f = restored.Findings[0];
-        f.Analyzer.Should().Be("RetentionAnalyzer");
-        f.Severity.Should().Be("Critical");
-        f.Title.Should().Be("Duplicate strings");
-        f.Fingerprint.Should().Be("dup-strings-01");
-        f.Tags.Should().Contain("memory").And.Contain("string");
+        restored.HealthScorecard.Should().NotBeNull();
+        restored.Domains.Should().HaveCount(1);
+        restored.Domains![0].Domain.Should().Be("Memory");
+        restored.Domains[0].Sections.Should().HaveCount(1);
+        restored.CrossDomainInsights.Should().HaveCount(1);
+        restored.Appendix.Should().NotBeNull();
+        restored.Appendix!.AnalyzerRunSummary.Should().HaveCount(1);
     }
 
     [Fact]
@@ -81,9 +86,11 @@ public sealed class ReportDocumentSchemaTests
         {
             DumpPath = "C:/test.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
-            AnalyzerSections =
+            Domains =
             [
-                new AnalyzerDetailSection("X", "X", 0,
+                new ReportDomainSection("X", null,
+                [
+                    new AnalyzerDetailSection("X", "X", 0,
                 [
                     new HeadingBlock("H"),
                     new MetricBlock("Label", "Val", 1.5, 1),
@@ -95,7 +102,8 @@ public sealed class ReportDocumentSchemaTests
                     new TableBlock("cap", ["A","B"], [new TableRow([new TableCell("a", 1L), new TableCell("b")])]),
                     new CollapsibleSectionBeginBlock("group"),
                     new CollapsibleSectionEndBlock()
-                ])
+                ])],
+                [])
             ]
         };
 
@@ -103,7 +111,7 @@ public sealed class ReportDocumentSchemaTests
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
-        IReadOnlyList<SectionBlock> blocks = restored!.AnalyzerSections[0].Blocks;
+        IReadOnlyList<SectionBlock> blocks = restored!.Domains![0].Sections[0].Blocks;
         blocks.Should().HaveCount(10);
         blocks[0].Should().BeOfType<HeadingBlock>().Which.Text.Should().Be("H");
         blocks[1].Should().BeOfType<MetricBlock>().Which.Label.Should().Be("Label");
@@ -128,6 +136,7 @@ public sealed class ReportDocumentSchemaTests
         TrendReportDocument original = new()
         {
             DumpPath = "C:/trend.dmp",
+            ScoringModelVersion = "v1",
             GeneratedAtUtc = DateTime.UtcNow,
             TrendDumpCount = 3,
             TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"]
@@ -139,6 +148,7 @@ public sealed class ReportDocumentSchemaTests
         restored.Should().BeOfType<TrendReportDocument>();
         TrendReportDocument trend = (TrendReportDocument)restored!;
         trend.DumpPath.Should().Be("C:/trend.dmp");
+        trend.ScoringModelVersion.Should().Be("v1");
         trend.TrendDumpCount.Should().Be(3);
         trend.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");
     }
@@ -171,8 +181,7 @@ public sealed class ReportDocumentSchemaTests
         json.Should().Contain("\"dumpPath\"");
         json.Should().Contain("\"elapsedSeconds\"");
         json.Should().Contain("\"schemaVersion\"");
-        json.Should().Contain("\"findings\"");
-        json.Should().Contain("\"fingerprint\"");
+        json.Should().NotContain("\"findings\"");
         json.Should().NotContain("\"DumpPath\"");
         json.Should().NotContain("\"ElapsedSeconds\"");
     }

@@ -1,53 +1,52 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IReportSectionBuilder
+internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string SectionId => "prof.gc-root-intelligence";
+    public string AnalyzerName => "GC Root Analysis";
     public string DisplayTitle => "GC Root Intelligence";
-    public int SortOrder => 1200;
+    public int SortOrder => 500;
 
-    public bool CanBuild(AnalyzerResultSet results) => results.Get<GCRootDomainResult>() is not null;
+    public bool CanHandle(AnalyzerDomainResult result) => result is GCRootDomainResult;
 
-    public AnalyzerDetailSection Build(AnalyzerResultSet results)
+    public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
-        GCRootDomainResult? roots = results.Get<GCRootDomainResult>();
+        var roots = (GCRootDomainResult)result;
+
+        var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>
         {
-            H("ROOT DISTRIBUTION"),
+            BuildConfidenceBand(0.55, ["Average retained bytes are heuristic estimates."]),
             T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."),
         };
 
-        if (roots is null)
+        var keyMetrics = new List<SectionKeyMetric>
         {
-            blocks.Add(T("No GC root result was available."));
-            return new AnalyzerDetailSection("GC Root Intelligence", DisplayTitle, SortOrder, blocks);
-        }
+            KM("Total Roots",           roots.TotalRoots.ToString("N0"),           roots.TotalRoots),
+            KM("Path Search Capped",    roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
+        };
 
-        blocks.Add(new TableBlock(
-            Caption: "GC root kinds",
-            Headers: ["Root Kind", "Count", "Estimated Retained", "% of Heap"],
-            Rows: BuildKindRows(roots.ByKind)));
+        tables.Add(ST(
+            "GC root kinds",
+            ["Root Kind", "Count", "Estimated Retained", "% of Heap"],
+            BuildKindRows(roots.ByKind)));
 
-        blocks.Add(Blank());
-        blocks.Add(H("ROOT SEVERITY RANKING"));
-        blocks.Add(new TableBlock(
-            Caption: "Top GC roots by severity",
-            Headers: ["Root Kind", "Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
-            Rows: BuildSeverityRows(roots.TopRootsBySeverity)));
+        tables.Add(ST(
+            "Top GC roots by severity",
+            ["Root Kind", "Root Addr", "Field", "Target Type", "Target Addr", "Est. Retained", "Severity"],
+            BuildSeverityRows(roots.TopRootsBySeverity)));
 
         var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToList();
         if (finalizerRoots.Count > 0)
         {
-            blocks.Add(Blank());
-            blocks.Add(H("FINALIZER ROOTS"));
-            blocks.Add(new TableBlock(
-                Caption: "Finalizer roots",
-                Headers: ["Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
-                Rows: finalizerRoots.Take(10).Select(root => Row(
+            tables.Add(ST(
+                "Finalizer roots",
+                ["Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
+                finalizerRoots.Take(10).Select(root => Row(
                     Cell(root.TargetTypeName),
                     Cell(root.FieldDescription ?? "—"),
                     Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
@@ -55,7 +54,6 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
                     Cell($"0x{root.RootAddress:X}"))).ToList()));
         }
 
-        blocks.Add(Blank());
         blocks.Add(H("ROOT PATHS BY TARGET TYPE"));
         blocks.Add(T("Root paths are grouped by target type and shown shortest-first within each group."));
 
@@ -85,7 +83,10 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
             blocks.Add(Blank());
         }
 
-        return new AnalyzerDetailSection("GC Root Intelligence", DisplayTitle, SortOrder, blocks);
+        return new AnalyzerDetailSection(
+            AnalyzerName, DisplayTitle, SortOrder, blocks,
+            KeyMetrics: keyMetrics,
+            Tables: tables.Count > 0 ? tables : null);
     }
 
     private static List<TableRow> BuildKindRows(IReadOnlyList<RootKindSummary> kinds)
@@ -112,11 +113,12 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IRe
             RootFinding root = roots[i];
             rows.Add(Row(
                 Cell(root.RootKind),
-                Cell(root.TargetTypeName),
+                Cell($"0x{root.RootAddress:X}"),
                 Cell(root.FieldDescription ?? "—"),
+                Cell(root.TargetTypeName),
+                Cell($"0x{root.TargetAddress:X}"),
                 Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
-                Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
-                Cell($"0x{root.RootAddress:X}")));
+                Cell(root.SeverityScore.ToString("N0"), root.SeverityScore)));
         }
 
         return rows;

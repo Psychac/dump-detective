@@ -391,6 +391,9 @@ internal sealed class ReportSerializer
         for (int i = 0; i < findings.Count; i++)
         {
             FindingRecord finding = findings[i];
+            if (ShouldSuppressInfoInsight(finding))
+                continue;
+
             if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase)))
                 continue;
 
@@ -461,6 +464,9 @@ internal sealed class ReportSerializer
         for (int i = 0; i < findings.Count; i++)
         {
             FindingRecord finding = findings[i];
+            if (ShouldSuppressInfoInsight(finding))
+                continue;
+
             if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase))
                 || string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase))
             {
@@ -1517,6 +1523,16 @@ internal sealed class ReportSerializer
     };
 
     private static string NormalizeSortKey(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static bool ShouldSuppressInfoInsight(FindingRecord finding)
+    {
+        if (!string.Equals(finding.Severity, nameof(FindingSeverity.Info), StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string category = NormalizeSortKey(finding.Category);
+        return string.Equals(category, "Confidence", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(category, "Diagnostics", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string SeverityFromOrdinal(int ordinal) => ordinal switch
     {

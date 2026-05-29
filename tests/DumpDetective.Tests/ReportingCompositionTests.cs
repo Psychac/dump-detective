@@ -479,6 +479,66 @@ public sealed class ReportingCompositionTests
     }
 
     [Fact]
+    public void Serialize_ShouldExcludeInfoConfidenceAndDiagnostics_FromDomainInsights()
+    {
+        InsightFinding analyzerSignal = new(
+            Analyzer: "Retention Analysis",
+            Category: "Retention",
+            Severity: FindingSeverity.Warning,
+            Title: "Retention hotspot",
+            Evidence: "Large retained graph detected",
+            Recommendation: "Inspect root paths",
+            Tags: ["retention"],
+            Fingerprint: "ret-main");
+
+        InsightFinding confidenceInfo = new(
+            Analyzer: "GC Root Analysis",
+            Category: "Confidence",
+            Severity: FindingSeverity.Info,
+            Title: "Root path search capped (10 paths truncated)",
+            Evidence: "Traversal budget capped some paths.",
+            Recommendation: "Treat as indicative only.",
+            Tags: ["confidence", "cap"],
+            Fingerprint: "conf-cap");
+
+        InsightFinding diagnosticsInfo = new(
+            Analyzer: "Retention Analysis",
+            Category: "Diagnostics",
+            Severity: FindingSeverity.Info,
+            Title: "Reference tracking was capped",
+            Evidence: "Tracking limit reached.",
+            Recommendation: "Increase tracking caps.",
+            Tags: ["analysis-quality"],
+            Fingerprint: "diag-cap");
+
+        AnalyzerRunResult run = CreateRun("RetentionAnalyzer", analyzerSignal);
+        AnalyzerRunResult gcRun = CreateRun("GCRootAnalyzer", confidenceInfo);
+        AnalyzerRunResult diagRun = CreateRun("RetentionAnalyzer", diagnosticsInfo);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/info-filter.dmp",
+            runs: [run, gcRun, diagRun],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders:
+            [
+                new StubAnalyzerSectionBuilder("RetentionAnalyzer", "Retention"),
+                new StubAnalyzerSectionBuilder("GCRootAnalyzer", "GC Roots")
+            ],
+            reportBuilders: []);
+
+        doc.Domains.Should().NotBeNull();
+        int insightCount = doc.Domains!
+            .SelectMany(d => d.DomainInsights)
+            .Count();
+
+        insightCount.Should().Be(1);
+        doc.Domains.SelectMany(d => d.DomainInsights)
+            .Should().ContainSingle(f => f.Title == "Retention hotspot");
+        doc.Domains.SelectMany(d => d.DomainInsights)
+            .Should().NotContain(f => f.Title.Contains("capped", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Serialize_ShouldEmitDeterministicTopActions_WithFactorBreakdown()
     {
         InsightFinding warningA = new(

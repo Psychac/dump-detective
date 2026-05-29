@@ -4,11 +4,69 @@
 import { el } from './report.dom.js';
 import { sortSectionsForRender, buildInsightStats, domainAnchorId, domainSevLabel, slugifyAnchor } from './report.renderers.shared.js';
 
+function normalizeAnalyzerKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function registerAnalyzerTarget(map, label, target) {
+  const key = normalizeAnalyzerKey(label);
+  if (!key || map.has(key)) return;
+  map.set(key, target);
+
+  if (key.endsWith('analyzer')) {
+    const analysisAlias = key.slice(0, -8) + 'analysis';
+    if (analysisAlias && !map.has(analysisAlias)) map.set(analysisAlias, target);
+    const baseAlias = key.slice(0, -8);
+    if (baseAlias && !map.has(baseAlias)) map.set(baseAlias, target);
+  } else if (key.endsWith('analysis')) {
+    const analyzerAlias = key.slice(0, -8) + 'analyzer';
+    if (analyzerAlias && !map.has(analyzerAlias)) map.set(analyzerAlias, target);
+    const baseAlias = key.slice(0, -8);
+    if (baseAlias && !map.has(baseAlias)) map.set(baseAlias, target);
+  }
+}
+
+function buildAnalyzerSectionTargetMap(doc) {
+  const map = new Map();
+  const domains = Array.isArray(doc && doc.domains) ? doc.domains : [];
+
+  for (let i = 0; i < domains.length; i++) {
+    const domain = domains[i] || {};
+    const domainId = domainAnchorId(domain, i);
+    const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
+    for (let j = 0; j < sections.length; j++) {
+      const section = sections[j] || {};
+      const stableId = (section.sectionId && section.sectionId.trim())
+        ? section.sectionId.trim()
+        : ('detail-' + slugifyAnchor(domainId, 'scope') + '-' + j);
+      const target = '#' + stableId;
+      registerAnalyzerTarget(map, section.analyzerName, target);
+      registerAnalyzerTarget(map, section.displayTitle, target);
+    }
+  }
+
+  return map;
+}
+
+function resolveFindingTarget(sectionTargetMap, finding) {
+  const analyzer = normalizeAnalyzerKey(finding && finding.analyzer);
+  if (!analyzer) return '';
+
+  if (sectionTargetMap.has(analyzer)) return sectionTargetMap.get(analyzer);
+
+  for (const [key, target] of sectionTargetMap.entries()) {
+    if (key.startsWith(analyzer) || analyzer.startsWith(key)) return target;
+  }
+
+  return '';
+}
+
 // ── Domain sections list ──────────────────────────────────────────────────────
 
 export function buildDomains(doc) {
   const domains = doc.domains;
   if (!Array.isArray(domains) || !domains.length) return null;
+  const sectionTargetMap = buildAnalyzerSectionTargetMap(doc);
 
   function buildDomainHistogram(domain) {
     const critical = Number(domain.criticalCount || 0);
@@ -79,7 +137,8 @@ export function buildDomains(doc) {
 
       const insightsList = el('div', 'domain-insights__list');
       for (let k = 0; k < insights.length; k++) {
-        insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`));
+        const promoteTarget = resolveFindingTarget(sectionTargetMap, insights[k]);
+        insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`, { promoteTarget: promoteTarget }));
       }
       insightsSec.appendChild(insightsList);
       details.appendChild(insightsSec);
@@ -155,6 +214,7 @@ export function buildDomains(doc) {
 export function buildCrossDomainInsights(doc) {
   const findings = Array.isArray(doc.crossDomainInsights) ? doc.crossDomainInsights : [];
   if (!findings.length) return null;
+  const sectionTargetMap = buildAnalyzerSectionTargetMap(doc);
 
   const sec = el('section', 'section-card cross-domain-insights');
   const hdr = el('div', 'cross-domain-insights__header');
@@ -169,7 +229,8 @@ export function buildCrossDomainInsights(doc) {
 
   const list = el('div', 'cross-domain-insights__list');
   for (let i = 0; i < findings.length; i++) {
-    list.appendChild(buildFindingCard(findings[i], 'cross-' + i));
+    const promoteTarget = resolveFindingTarget(sectionTargetMap, findings[i]);
+    list.appendChild(buildFindingCard(findings[i], 'cross-' + i, { promoteTarget: promoteTarget }));
   }
   sec.appendChild(list);
 

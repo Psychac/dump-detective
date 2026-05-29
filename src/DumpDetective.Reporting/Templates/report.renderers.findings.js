@@ -5,7 +5,7 @@ import { ensureUniqueDomId } from './report.renderers.shared.js';
 
 // ── Finding card ──────────────────────────────────────────────────────────────
 
-export function buildFindingCard(f, i) {
+export function buildFindingCard(f, i, options) {
   const severity = String((f && f.severity) || 'Info').toLowerCase();
 
   const evidenceItems = Array.isArray(f.evidenceItems) ? f.evidenceItems.filter(function (x) { return !!x; }) : [];
@@ -75,11 +75,27 @@ export function buildFindingCard(f, i) {
     linkifyAnchors(issueValue);
   }
 
+  const promoteTarget = options && options.promoteTarget ? String(options.promoteTarget) : '';
   const meta = el('div', 'finding-card__meta');
   if (f.analyzer) {
     const chip = el('span', 'finding-chip');
     chip.textContent = 'Analyzer: ' + f.analyzer;
     meta.appendChild(chip);
+  }
+  if (promoteTarget) {
+    const investigate = document.createElement('a');
+    investigate.className = 'finding-card__investigate finding-card__meta-action incident-promote-link';
+    investigate.href = promoteTarget;
+    investigate.setAttribute('data-promote-target', promoteTarget);
+    investigate.setAttribute('aria-label', 'Investigate this finding in forensics view');
+    const icon = el('span', 'finding-card__investigate-icon');
+    icon.textContent = '\u2197';
+    icon.setAttribute('aria-hidden', 'true');
+    const label = el('span', 'finding-card__investigate-label');
+    label.textContent = 'Investigate';
+    investigate.appendChild(label);
+    investigate.appendChild(icon);
+    meta.appendChild(investigate);
   }
   if (meta.childNodes.length) sec.appendChild(meta);
 

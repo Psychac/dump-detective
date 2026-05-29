@@ -20,141 +20,146 @@
 /* Finding cards nested inside domain insights or cross-domain list get tighter padding */
 .domain-insights__list .finding-card,
 .cross-domain-insights__list .finding-card {
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid #e5eaf1;
-  background: #ffffff;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fafbfc;
   box-shadow: none;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.12s, background 0.12s;
 }
 
 .domain-insights__list .finding-card:hover,
 .cross-domain-insights__list .finding-card:hover {
-  border-color: #d4dde8;
-  background: #fbfdff;
+  border-color: #cbd5e1;
+  background: #ffffff;
 }
 .finding-card--critical {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: #fafbfc;
+  border: 1px solid #e2e8f0;
   padding: 10px 12px;
 }
 .finding-card--warning {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: #fafbfc;
+  border: 1px solid #e2e8f0;
   padding: 10px 12px;
 }
 .finding-card--info {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: #fafbfc;
+  border: 1px solid #e2e8f0;
   padding: 10px 12px;
 }
 .finding-card::before {
   content: '';
   position: absolute;
   inset: 0 auto 0 0;
-  width: 4px;
+  width: 3px;
   background: var(--accent);
 }
-.finding-card[data-severity="critical"]::before { background: var(--sev-critical-text); }
-.finding-card[data-severity="warning"]::before { background: var(--sev-warning-bar); }
-.finding-card[data-severity="info"]::before { background: var(--accent); }
+.finding-card[data-severity="critical"]::before { background: #dc2626; }
+.finding-card[data-severity="warning"]::before { background: #ea580c; }
+.finding-card[data-severity="info"]::before { background: #0284c7; }
 .finding-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 7px;
+  gap: 8px;
+  margin-bottom: 5px;
 }
-.finding-card__eyebrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.finding-card__header-meta { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.finding-card__eyebrow { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; font-size: 11px; }
+.finding-card__header-meta { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .finding-card__confidence-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 10px;
+  gap: 3px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: .02em;
+  letter-spacing: .03em;
   border: 1px solid transparent;
   font-family: Consolas, "Cascadia Mono", monospace;
+  background: #f0f4f8;
+  color: #475569;
 }
-.finding-card__confidence-chip--high { background: #dcfce7; color: #166534; border-color: #86efac; }
-.finding-card__confidence-chip--medhigh { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
-.finding-card__confidence-chip--medium { background: #fff7ed; color: #9a3412; border-color: #fdba74; }
-.finding-card__confidence-chip--low { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+.finding-card__confidence-chip--high { background: #ecfdf5; color: #047857; }
+.finding-card__confidence-chip--medhigh { background: #eff6ff; color: #0c4a6e; }
+.finding-card__confidence-chip--medium { background: #fef3c7; color: #78350f; }
+.finding-card__confidence-chip--low { background: #fee2e2; color: #7f1d1d; }
 .finding-card__confidence-meter {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1.5px;
 }
 .finding-card__confidence-slot {
-  width: 8px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.45);
+  width: 6px;
+  height: 3px;
+  border-radius: 1px;
+  background: rgba(148, 163, 184, 0.3);
 }
 .finding-card__confidence-slot--on { background: currentColor; }
-.finding-card__confidence-score { font-variant-numeric: tabular-nums; }
+.finding-card__confidence-score { display: none; }
 .finding-card__title {
   margin: 0;
   padding-left: 0;
-  font-size: 1.02rem;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
+  font-size: 13px;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
   font-weight: 700;
-  color: var(--text);
+  color: #0f172a;
 }
 .finding-card__title::before { display: none; }
 .finding-card__brief {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 6px;
-  margin: 0 0 8px;
+  gap: 4px;
+  margin: 4px 0 0;
 }
 .finding-card__brief-row {
   display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 8px;
+  grid-template-columns: 16px 1fr;
+  gap: 6px;
   align-items: start;
-  padding: 3px 0;
+  padding: 2px 0;
 }
 .finding-card__brief-row + .finding-card__brief-row {
-  border-top: 1px solid #e8eef5;
-  padding-top: 6px;
+  border-top: none;
+  padding-top: 2px;
 }
 .finding-card__brief-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  font-size: 9px;
   font-weight: 700;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
   line-height: 1;
 }
-.finding-card__brief-label--issue { color: #b45309; background: #fff7ed; border-color: #fed7aa; }
-.finding-card__brief-label--recommendation { color: #0369a1; background: #eff6ff; border-color: #bfdbfe; }
+.finding-card__brief-label--issue { color: #92400e; }
+.finding-card__brief-label--recommendation { color: #0369a1; }
 .finding-card__brief-value {
-  color: #1f2937;
+  color: #334155;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 .finding-card__brief-row--issue .finding-card__brief-value {
-  color: #0f172a;
+  color: #1e293b;
   font-weight: 600;
 }
 .finding-card__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 6px;
+  gap: 4px;
+  margin: 3px 0 0;
+  font-size: 11px;
+  align-items: center;
+  color: #64748b;
 }
 .finding-chip {
   display: inline-flex;
@@ -167,6 +172,36 @@
   background: transparent;
   border: 0;
   letter-spacing: .01em;
+}
+
+.finding-card__investigate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  text-decoration: none;
+  letter-spacing: .01em;
+}
+
+.finding-card__meta-action {
+  margin-left: auto;
+}
+
+.finding-card__investigate:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.finding-card__investigate-icon {
+  font-size: 9px;
+  line-height: 1;
 }
 /* Recommendation now renders in the brief rows above. */
 

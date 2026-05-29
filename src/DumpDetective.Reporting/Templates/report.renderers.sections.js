@@ -1,7 +1,7 @@
 // Analyzer section and trend dump group rendering.
 // Calls across modules (renderBlocks, buildHealthScorecard, etc.) are resolved
 // by function hoisting in the inlined IIFE bundle.
-import { el } from './report.dom.js';
+import { el, sevCss } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
 
@@ -144,27 +144,82 @@ export function buildAnalyzerSection(section, i) {
       content.appendChild(caution);
     }
 
-    const lf = el('div', 'lead-finding lead-finding--' + sev);
+    const lf = el('div', 'lead-finding lead-finding--' + sev + ' finding-card finding-card--' + sev);
     lf.id = ensureUniqueDomId('finding-' + stableId);
     lf.setAttribute('role', 'group');
     lf.setAttribute('aria-label', 'Lead finding for section ' + stableId);
-    const lfHeader = el('div', 'lead-finding__header');
-    const lfSev = el('span', 'lead-finding__severity'); lfSev.textContent = lead.severity || 'Info';
+
+    const lfHeader = el('div', 'lead-finding__header finding-card__header');
+    const eyebrow = el('div', 'finding-card__eyebrow');
+    const lfSev = el('span', 'severity-badge ' + sevCss(lead.severity));
+    lfSev.textContent = lead.severity || 'Info';
     lfSev.setAttribute('aria-label', 'Severity: ' + (lead.severity || 'Info'));
-    const lfTitle = el('span', 'lead-finding__title'); lfTitle.textContent = lead.title || '';
-    const lfConf = el('span', 'lead-finding__confidence');
-    const confScore = lead.confidenceScore || 0;
-    const confBand = confScore >= 0.85 ? 'High' : confScore >= 0.65 ? 'Med-High' : confScore >= 0.45 ? 'Medium' : 'Low';
-    lfConf.textContent = (lead.confidenceSymbol || '') + '\u2002' + confBand;
-    lfConf.dataset.confidenceScore = String(confScore);
-    lfConf.setAttribute('aria-label', 'Confidence: ' + confBand);
-    lfHeader.appendChild(lfSev); lfHeader.appendChild(lfTitle); lfHeader.appendChild(lfConf);
+    const lfType = el('span', 'category');
+    lfType.textContent = 'Lead signal';
+    eyebrow.appendChild(lfSev);
+    eyebrow.appendChild(lfType);
+    lfHeader.appendChild(eyebrow);
+
+    const headerMeta = el('div', 'finding-card__header-meta');
+    if (lead.confidenceScore != null) {
+      const conf = Number(lead.confidenceScore);
+      const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
+      const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
+      const meter = el('span', 'finding-card__confidence-meter');
+      const slots = Math.max(1, Math.min(4, Math.round(conf * 4)));
+      for (let si = 0; si < 4; si++) {
+        const slot = el('span', 'finding-card__confidence-slot' + (si < slots ? ' finding-card__confidence-slot--on' : ''));
+        meter.appendChild(slot);
+      }
+      const score = el('span', 'finding-card__confidence-score');
+      score.textContent = conf.toFixed(2);
+      confChip.appendChild(meter);
+      confChip.appendChild(score);
+      headerMeta.appendChild(confChip);
+    }
+    if (headerMeta.childNodes.length) lfHeader.appendChild(headerMeta);
     lf.appendChild(lfHeader);
-    if (lead.evidence) { const lfEv = el('div', 'lead-finding__evidence'); lfEv.textContent = lead.evidence; lf.appendChild(lfEv); }
-    if (lead.recommendation) { const lfRec = el('div', 'lead-finding__recommendation'); lfRec.textContent = '\u2192 ' + lead.recommendation; lf.appendChild(lfRec); }
+
+    const lfTitle = el('div', 'lead-finding__title finding-card__title');
+    lfTitle.textContent = lead.title || '';
+    lf.appendChild(lfTitle);
+
+    const brief = el('div', 'finding-card__brief');
+    if (lead.evidence) {
+      const issueRow = el('div', 'finding-card__brief-row finding-card__brief-row--issue');
+      const issueLabel = el('span', 'finding-card__brief-label finding-card__brief-label--issue');
+      issueLabel.textContent = '!';
+      issueLabel.setAttribute('aria-label', 'Issue');
+      issueLabel.title = 'Issue';
+      const issueValue = el('span', 'finding-card__brief-value');
+      issueValue.textContent = lead.evidence;
+      issueRow.appendChild(issueLabel);
+      issueRow.appendChild(issueValue);
+      brief.appendChild(issueRow);
+    }
+
+    if (lead.recommendation) {
+      const recRow = el('div', 'finding-card__brief-row finding-card__brief-row--recommendation');
+      const recLabel = el('span', 'finding-card__brief-label finding-card__brief-label--recommendation');
+      recLabel.textContent = '\u2192';
+      recLabel.setAttribute('aria-label', 'Recommendation');
+      recLabel.title = 'Recommendation';
+      const recValue = el('span', 'finding-card__brief-value');
+      recValue.textContent = lead.recommendation;
+      recRow.appendChild(recLabel);
+      recRow.appendChild(recValue);
+      brief.appendChild(recRow);
+    }
+
+    if (brief.childNodes.length) lf.appendChild(brief);
+
     if (lead.caveats && lead.caveats.length) {
-      const lfCav = el('div', 'lead-finding__caveats');
-      for (let ci = 0; ci < lead.caveats.length; ci++) { const c = el('div', 'lead-finding__caveat'); c.textContent = '\u26A0 ' + lead.caveats[ci]; lfCav.appendChild(c); }
+      const lfCav = el('div', 'lead-finding__caveats finding-card__caveats');
+      for (let ci = 0; ci < lead.caveats.length; ci++) {
+        const c = el('div', 'lead-finding__caveat finding-card__caveat');
+        c.textContent = '\u26A0 ' + lead.caveats[ci];
+        lfCav.appendChild(c);
+      }
       lf.appendChild(lfCav);
     }
     content.appendChild(lf);

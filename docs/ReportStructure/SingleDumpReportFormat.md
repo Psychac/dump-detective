@@ -7,6 +7,9 @@ This document is the authoritative schema spec that all renderers (HTML, JSON, m
 It supersedes the section-by-section data audit in `ProfessionalTierReport.md`, which remains the
 data-availability reference. Trend mode composition lives in `TrendReportBlueprint.md`.
 
+Visual and presentation upgrades for this format are defined in `SingleDumpReportFormat.v2.md`.
+Use this v1 document for schema/data contract authority and v2 for UI/UX styling guidance.
+
 ---
 
 ## Design Goals

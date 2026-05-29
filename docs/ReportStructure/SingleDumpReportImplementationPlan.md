@@ -7,6 +7,8 @@ existing reporting infrastructure (`AnalysisReportDocument`, `AnalyzerDetailSect
 polymorphic model, `IAnalyzerSectionBuilder` / `IReportSectionBuilder`, `ReportSerializer`,
 `CanonicalReportDocumentFactory`, HTML/JSON/markdown renderers).
 
+For visual system and UX-focused rollout in style version v2, see `SingleDumpReportImplementationPlan.v2.md`.
+
 Changes are organized in dependency order. Each step lists the exact files and additions required.
 
 ---

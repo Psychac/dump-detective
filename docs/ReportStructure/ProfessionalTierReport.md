@@ -7,6 +7,10 @@
 - Every Critical/Warning finding must carry: source analyzer, metric key, evidence references, address list; trend mode adds snapshot index.
 - Status: `Implemented` = wired + validated; `Partial` = bounded/heuristic; `Planned` = not yet wired.
 
+The authoritative single-dump format, field inventory, and section ordering rules live in [SingleDumpReportFormat.md](SingleDumpReportFormat.md). Use this document for status tracking and gap notes only; do not treat it as the schema source of truth.
+
+Implementation status should distinguish between `Surfaced in report` and `In model only` when a field exists but is not rendered yet.
+
 ## Quality Rules
 - Emit schema/version near the top of every serialized document.
 - Normalize analyzer run statuses everywhere: `Completed`, `Failed`, `Skipped`, `TimedOut`.

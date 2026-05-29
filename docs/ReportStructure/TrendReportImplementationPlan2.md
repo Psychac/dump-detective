@@ -7,6 +7,8 @@ implementation (Steps 1–13 in `SingleDumpReportImplementationPlan.md`) which m
 first — this plan depends on `SectionId`, `Domain`, `HealthScorecard`, and `ConfidenceBandBlock`
 being available.
 
+For visual system, comparative UX, and style version v2 rollout, see `TrendReportImplementationPlan.v2.md`.
+
 Changes are organized by the T0–T7 section order and by dependency.
 
 ---

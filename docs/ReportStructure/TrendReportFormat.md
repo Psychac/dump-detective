@@ -10,6 +10,9 @@ per-snapshot detail block within this document.
 The narrative contract and design principles live in `TrendReportBlueprint.md`.
 The data availability audit lives in `ProfessionalTierReport.md` §14.
 
+Visual and comparative readability upgrades for trend mode are defined in `TrendReportFormat.v2.md`.
+Use this v1 document for schema/data contract authority and v2 for UI/UX and trend storytelling guidance.
+
 ---
 
 ## Core Principle
@@ -36,7 +39,7 @@ TrendReportDocument  (extends AnalysisReportDocument)
 │   ├── SeverityEscalations[]   Warning → Critical transitions
 │   ├── NewFindings[]           findings absent in baseline, present now
 │   └── NewLeakSignals[]        types newly appearing in leak candidates
-├── SnapshotStrip               one compact card per snapshot
+├── SnapshotStrip               one compact row per snapshot
 ├── PerAnalyzerTimelines[]      metric timelines, one per analyzer with history
 ├── SnapshotDetails[]           per-dump sections (from SingleDumpReportFormat.md)
 │   └── SnapshotDetailSection   collapsed by default in HTML
@@ -69,7 +72,7 @@ All data in `TrendReportDocument` fields:
 
 ### T0. Trend Header
 
-**Current implementation:** embedded in `TrendReportDocument` top-level fields.  
+**Implementation:** embedded in `TrendReportDocument` top-level fields.  
 **Rendered as:** a dedicated header block above all sections.
 
 | Field | Source |
@@ -156,9 +159,9 @@ Same columns as T2c. Shown below regressions; collapsed by default in HTML.
 
 ### T3. Regression Dashboard
 
-**Source:** `TrendReportComposer` output blocks — currently inline in the `"Trend Comparison"` `AnalyzerDetailSection`.
+**Source:** `TrendRegressionDashboardBuilder.Build(trendData, snapshots)`.
 
-This must be a **dedicated section** with `SectionId = "T3"`, separate from the timeline section.
+Implemented as a dedicated `AnalyzerDetailSection` with `SectionId = "T3"`.
 
 #### T3a. Severity Escalations
 
@@ -187,66 +190,107 @@ Sorted by CurrentBytes desc. Cap: top 10.
 
 ### T4. Metric Timeline Section
 
-**Source:** `trendData.Timeline` (`IReadOnlyList<AnalyzerMetricTimeline>`)  
-**Current implementation:** part of `BuildTrendComparisonSection` — must be extracted as a distinct `AnalyzerDetailSection` with `SectionId = "T4"`.
+**Source:** `trendData.Timeline` and `trendData.ScopedTimeline` (`IReadOnlyList<AnalyzerMetricTimeline>`)  
+**Implementation:** `TrendMetricTimelineSectionBuilder.Build(trendData, snapshots)` as a dedicated `AnalyzerDetailSection` with `SectionId = "T4"`.
 
-One sub-section per analyzer with at least one non-stable metric point.
+T4 is organized hierarchically to mirror single-dump structure:
+
+- Domain
+- Analyzer
+- Metric-specific tables
+
+Within each analyzer, T4 includes two table groups when data exists:
+
+- Headline metric timelines (unscoped metrics) in a single analyzer-level table.
+- Table comparisons (scoped/entity metrics), grouped per metric key.
+
+Only table comparisons are metric-specific (one metric key per table).
 
 Per-analyzer timeline table:
 
 | Column | Source |
 |---|---|
-| Metric | `MetricTimelinePoint.Key` |
+| Metric / Entity | Headline tables: `MetricTimelinePoint.Key`. Comparison tables: scope/entity label (`MetricTimelinePoint.Scope`) only; metric key is represented by the table caption |
 | Trend (sparkline) | `MetricTimelinePoint.Values` — rendered as inline sparkline in HTML, as `baseline → … → current` in markdown |
+| Dump 1..N | one column per snapshot value from `MetricTimelinePoint.Values`; rendered as compact directional chips (`↗/↘/→`) with the value text visible in each cell. `Dump 1` maps to snapshot index 0 and `Dump N` maps to the latest snapshot |
 | Δ (delta) | last value − first value, formatted in `MetricTimelinePoint.Unit` |
 | Δ% | `(last − first) / first * 100` |
+| Pattern | derived movement signature across snapshots: Stable / Single jump / Gradual drift / Oscillating / Volatile |
 | Status | Stable / Improvement / Regression / ⚠⚠ Severe |
 
-Ordering: analyzers with regressions first (by regression count desc).  
-Each analyzer sub-table is collapsed by default in HTML.
+Ordering:
+
+- Domains follow `SectionIdDomainMap.DomainsInOrder`.
+- Analyzers in each domain are ordered by regression count desc.
+- Comparison metric tables in each analyzer are ordered by metric key.
+
+T4 remains a single collapsible section but internally grouped by domain and analyzer headings.
+
+Scoped comparison tables are emitted for any analyzer that provides scoped metrics.
+Memory Analysis comparison tables are intentionally restricted to `type.bytes` and `type.count` (top-type comparisons).
+Other analyzers include all scoped comparison metric keys they emit.
+No artificial row cap is applied to comparison tables.
+Comparison table first-column headers are context-aware (for example: `Type`, `Category`, `Kind`, `Module`, `Source`, `Target`, `Edge`, `Name`, fallback `Entity`).
+
+Current scoped comparison coverage includes (non-exhaustive):
+
+- Memory Analysis (`type.bytes`, `type.count` only)
+- Crash Analysis (`crash.exception.type`)
+- Hang Analysis (`hang.wait.category`)
+- Thread Analysis (`thread.wait.category`)
+- GC Generation Analysis (`gc.loh.type.*`)
+- GC Handle Analysis (`gchandle.kind.*`, `gchandle.target.type.*`, `gchandle.pinned.type.*`)
+- Dependent Handle Analysis (`dephandle.source/target/edge.type.*`)
+- String Analysis (`string.duplicate.type.count`)
+- Async Task Analysis (`task.pending/faulted/continuation.type.count`)
+- Allocation Pattern Analysis (`alloc.transient/shortish/longlived.type.*`)
+- Object Shape Analysis (`shape.ref/value.heavy.type.ratio`)
+- GC Root Analysis (`gcroot.kind.count`, `gcroot.top.target.*`)
+- Finalizable Object Analysis (`finalizable.type.gen2.count`, `finalizable.queue.type.retained.bytes`)
+- Array Analysis (`array.type.bytes`, `array.type.count`)
+- AppDomain Analysis (`appdomain.module.*`)
+- Module Analysis (`modules.heap.*`)
+- Retention Analysis (`leak.retention.type.*`)
+- Static Root Leak Detection (`static.root.byname.bytes`)
+- Dominator Analysis (`dominator.type.bytes`)
+- Leak Candidate Analysis (`leak.candidate.type.*`)
+- DB Connection / WCF / HTTP / Timer analyzers (`*.type.*` scoped breakdowns)
 
 Metadata per metric row: `MetricTrendDirection` (`HigherIsWorse` / `LowerIsWorse` / `Neutral`).
+Metric cells use `TableCell.LinkTarget` with `detail-{snapshotIndex}` to jump to the most relevant snapshot section.
 
-The `__LINK__detail-{snapshotIndex}` token in the metric cell (currently embedded in the table cell display string) must become a proper `TableCell.LinkTarget` field — see Step 2 of implementation plan.
+**Step movement** (between adjacent snapshot pairs): source is `MetricTimelinePoint.Values` and represented visually in Dump 1..N cells (direction marker per step), with movement summarized in `Pattern`.  
+One step = one pair of adjacent snapshots. No separate Step-Delta table is required in HTML.
 
-**Step deltas** (between adjacent snapshot pairs): source is `trendData.Steps` (`IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>>`).  
-One step = one pair of adjacent snapshots. Steps are currently not rendered — they should appear as an expandable sub-table per analyzer showing per-step movement, not just overall baseline→current.
-
-Per-step table (collapsed):
-
-| Step | Baseline Dump | Current Dump | Δ | Δ% | Severity |
-|---|---|---|---|---|---|
-| 1→2 | path[0] | path[1] | value | % | Minor/Moderate/Severe |
-
-Source: `steps[stepIndex]` where each element is `IReadOnlyList<AnalyzerTrendResult>` for that step.
+T4 MUST preserve intermediate snapshot detail using explicit dump-wise columns (`Dump 1..N`). Baseline/current-only presentation is not allowed.
+T4 should prioritize visual readability over dense numeric text in HTML while still showing numeric values in each dump column.
 
 ---
 
 ### T5. Snapshot Strip
 
 **Source:** `trendData.Snapshots` (`IReadOnlyList<AnalysisSnapshot>`)  
-**Current implementation:** not explicitly rendered as a strip — snapshots appear only as full per-dump sections.
+**Implementation:** `TrendSnapshotStripBuilder.Build(snapshots)` renders a dedicated `AnalyzerDetailSection` with `SectionId = "T5"`.
 
-One compact card per snapshot rendered **before** the per-dump detail sections.
+One compact row per snapshot rendered **before** the per-dump detail sections.
 
-Per card:
+Per row:
 
 | Field | Source |
 |---|---|
 | Index | `snapshot.Index + 1` of `TrendDumpCount` |
 | Dump filename | `Path.GetFileName(snapshot.DumpPath)` |
 | Generated (UTC) | `snapshot.GeneratedAtUtc` |
-| Analyzer count | `snapshot.DomainResults.Count` |
+| Analyzer count | `snapshot.Runs.Count` |
 | Finding count | `snapshot.Findings.Count` |
 | Critical count | `snapshot.Findings.Count(f => f.Severity == Critical)` |
 | Warning count | `snapshot.Findings.Count(f => f.Severity == Warning)` |
-| Is baseline | `TrendSnapshotContext.IsBaseline` |
-| Is current | `TrendSnapshotContext.IsCurrent` |
+| Total bytes | `MemoryDomainResult.TotalBytes` when available |
+| Δ vs baseline | `%` change of total bytes vs snapshot 0 (when available) |
+| Role | `Baseline` / `Intermediate` / `Current` derived from index |
 | Anchor | `detail-{snapshot.Index}` (stable link target) |
 
-Rendered as a horizontal row of cards in HTML, as a compact table in markdown/JSON.
-
-In HTML: each card is a clickable link to `#detail-{index}`. Active card (current) has distinct styling.
+Rendered as a compact table in canonical output and HTML, with dump names linked to `#detail-{index}`.
 
 ---
 
@@ -267,12 +311,9 @@ Each snapshot section contains:
 
 Collapsed by default in HTML. Expanding a snapshot section shows the full single-dump domain sections for that snapshot.
 
-**Missing from current `TrendSnapshotSectionComposer`:**
-- `SectionId = "detail-{index}"` not set (currently no `SectionId` field on sections — added in single-dump implementation Step 1.2).
-- Per-snapshot health scorecard card (from T5) is not embedded in the snapshot section header.
-- Snapshot key metrics strip (TotalBytes, Gen2%, BlockedThreads etc.) is not emitted — only `incidentContext` fields are shown.
+Current `TrendSnapshotSectionComposer` includes `SectionId = "detail-{index}"` and emits a `Snapshot Key Metrics` table with `Δ vs Baseline` when snapshot data is available.
 
-Per-snapshot key metrics to add to snapshot header block:
+Target metric set for snapshot header block (partially implemented):
 
 | Metric | Source |
 |---|---|
@@ -285,7 +326,8 @@ Per-snapshot key metrics to add to snapshot header block:
 | Active exceptions | `CrashDomainResult.ActiveExceptions` |
 | Finalizer queue | `FinalizableObjectDomainResult.FinalizerQueueCount` |
 
-Each metric also shows a Δ vs baseline (computed by comparing snapshot[0] and snapshot[i] values).
+Currently emitted in `Snapshot Key Metrics`: Total managed bytes, Gen2 %, leak candidates, blocked threads, active exceptions, finalizer queue (each with Δ vs baseline when baseline exists).
+Not yet emitted here: GC pressure, deadlock cycles.
 
 ---
 
@@ -325,8 +367,8 @@ Same as single-dump Appendix Z1 — current dump's `AnalyzerRunResult[]`.
 | Score deltas require at least 2 snapshots with successful ExecutiveSummary builds | T2b |
 | New type detection is capped to top-N memory types per snapshot | T3c |
 | Severity escalations only track Warning → Critical; Info → Warning not flagged | T3a |
-| Metric timelines only cover headline (unscoped) metrics; per-type trends not tracked | T4 |
-| Step deltas reflect adjacent-pair movement only; non-monotonic trends are visible only in the full timeline | T4 |
+| Table-comparison rows are capped per analyzer to keep T4 readable; remaining rows are summarized as hidden count | T4 |
+| Step movement is summarized visually in timeline cells and Pattern labels; exact adjacent deltas are not printed as a separate table in HTML | T4 |
 | Snapshot detail sections reuse current-dump section builders; no cross-snapshot diff within section tables | T6 |
 
 ---
@@ -338,8 +380,8 @@ T0  Trend Header                     (always first)
 T1  Trend Health Scorecard           (always second)
 T2  Trend Executive Summary          (always third)
 T3  Regression Dashboard             (before timelines; omitted if no regressions)
-T4  Metric Timeline                  (collapsed analyzers; omitted if no history)
-T5  Snapshot Strip                   (compact cards; always present)
+T4  Metric Timeline                  (single collapsible section; omitted if no history)
+T5  Snapshot Strip                   (compact table; always present)
 T6  Per-Dump Details [0..N]          (collapsed by default)
 T7  Trend Appendix                   (always last)
 ```
@@ -353,17 +395,17 @@ Sections T3 and T4 are omitted entirely (not rendered as empty sections) when th
 ### HTML
 - T0–T2 are always visible on load.
 - T3 (Regression Dashboard) is visible when any regressions exist; collapsed when no regressions.
-- T4 (Metric Timeline) tables are collapsed per-analyzer.
-- T5 (Snapshot Strip) cards are always visible; clicking a card scrolls to `#detail-{index}`.
+- T4 (Metric Timeline) is a single collapsible section containing per-analyzer tables.
+- T5 (Snapshot Strip) is always visible; dump links scroll to `#detail-{index}`.
 - T6 (Per-Dump Details) are fully collapsed; each dump section has "Expand" toggle.
 - `IsTrendReport = true` must gate any rendering logic that differs from single-dump mode.
-- Sparklines in T4: rendered client-side from `__SPARK__{json}` token in `TableCell.Display`, or from a dedicated `SparklineBlock` (see implementation plan Step 3).
+- Sparklines in T4: rendered client-side from `__SPARK__{json}` token in `TableCell.Display`.
 
 ### Markdown
 - T5 Snapshot Strip: compact table (no cards).
 - T4 sparklines: replaced by `baseline → [mid] → current` text.
 - T6 per-dump sections: rendered as level-3 headings with collapsing not available; top-N findings only.
-- Step deltas in T4: flat table, one row per step.
+- T4 step movement in markdown: summarize via Pattern and dump-wise columns; avoid per-step flat tables by default.
 
 ### JSON
 - Section ordering in `AnalyzerSections` follows the T0–T7 order.

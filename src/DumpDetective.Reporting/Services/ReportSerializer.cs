@@ -413,26 +413,10 @@ internal sealed class ReportSerializer
         foreach (var pair in groupedSections)
         {
             string domain = pair.Key;
-            var leadKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int s = 0; s < pair.Value.Count; s++)
-            {
-                string? leadKey = BuildLeadDedupKey(pair.Value[s]);
-                if (!string.IsNullOrWhiteSpace(leadKey))
-                    leadKeys.Add(leadKey);
-            }
-
             List<FindingRecord> sortedInsights = [];
             if (domainInsights.TryGetValue(domain, out List<FindingRecord>? insights) && insights is not null)
             {
-                sortedInsights = [];
-                for (int i = 0; i < insights.Count; i++)
-                {
-                    FindingRecord candidate = insights[i];
-                    if (leadKeys.Contains(BuildLeadDedupKey(candidate)))
-                        continue;
-
-                    sortedInsights.Add(candidate);
-                }
+                sortedInsights = [.. insights];
 
                 sortedInsights.Sort(static (a, b) =>
                 {

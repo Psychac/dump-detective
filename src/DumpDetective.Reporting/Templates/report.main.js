@@ -102,6 +102,16 @@ async function bootstrap() {
     }
   }
 
+  const forensicsRail = R.buildForensicsRailPanel(doc);
+  if (forensicsRail) {
+    if (isV2 && rightRail) {
+      rightRail.appendChild(forensicsRail);
+      if (rightRailHost) rightRailHost.hidden = false;
+    } else {
+      main.appendChild(forensicsRail);
+    }
+  }
+
   const globalSearch = R.buildGlobalSearchBar(doc);
   if (globalSearch) main.appendChild(globalSearch);
 
@@ -161,6 +171,15 @@ async function bootstrap() {
         } else {
           window.setTimeout(renderChunk, 0);
         }
+      } else {
+        try {
+          document.dispatchEvent(new CustomEvent('dumpdetective:sections-rendered', {
+            detail: {
+              totalSections: sections.length,
+              mode: isTrend ? 'trend' : 'single'
+            }
+          }));
+        } catch (e) { }
       }
     };
 

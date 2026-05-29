@@ -100,6 +100,22 @@
 .header-hero__btn:hover { background: rgba(255,255,255,0.17); border-color: rgba(255,255,255,0.38); color: #fff; }
 .header-hero__btn:focus-visible { outline: 3px solid #60a5fa; outline-offset: 2px; }
 
+@media (max-width: 540px) {
+  .header-hero__actions {
+    width: 100%;
+    padding-top: 8px;
+  }
+
+  .header-hero__btn {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+    min-height: 36px;
+    padding: 7px 9px;
+  }
+}
+
 /* ΓöÇΓöÇ Header body (padded area below hero) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .header-body { padding: 14px 20px 16px; }
 
@@ -176,6 +192,101 @@
 }
 
 .section-card { padding: 16px 18px; margin-bottom: 0; }
+
+/* Reading mode visual identity */
+body.reading-mode-incident .header-hero {
+  background: linear-gradient(120deg, #1f2937 0%, #7c2d12 56%, #b45309 100%);
+}
+
+body.reading-mode-incident .header-hero__badge-dot {
+  background: #fbbf24;
+}
+
+body.reading-mode-incident #reading-mode-toggle {
+  background: rgba(146, 64, 14, 0.42);
+  border-color: rgba(251, 191, 36, 0.42);
+  color: #fff7ed;
+}
+
+body.reading-mode-forensics .header-hero {
+  background: linear-gradient(120deg, #0f172a 0%, #1e3a8a 52%, #1e40af 100%);
+}
+
+body.reading-mode-forensics .header-hero__badge-dot {
+  background: #93c5fd;
+}
+
+body.reading-mode-forensics #reading-mode-toggle {
+  background: rgba(30, 64, 175, 0.38);
+  border-color: rgba(147, 197, 253, 0.4);
+  color: #dbeafe;
+}
+
+.incident-ribbon {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, #fff7ed 0%, #fefce8 45%, #f8fafc 100%);
+}
+
+.incident-ribbon__title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #7c2d12;
+  margin-right: 4px;
+}
+
+.incident-ribbon__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.incident-ribbon__chip--now {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.incident-ribbon__chip--next {
+  background: #fef3c7;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.incident-ribbon__chip--watch {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.incident-ribbon__hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+body.reading-mode-forensics .incident-ribbon {
+  background: linear-gradient(90deg, #dbeafe 0%, #eff6ff 100%);
+}
+
+@media (max-width: 760px) {
+  .incident-ribbon__hint {
+    margin-left: 0;
+    width: 100%;
+  }
+}
 
 /* ΓöÇΓöÇ Health Scorecard ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .health-scorecard, .executive-summary, .report-appendix, .cross-domain-insights { padding: 0; overflow: hidden; }
@@ -477,45 +588,6 @@
 .health-domain-row[data-domain-target]:hover,
 .health-domain-card[data-domain-target]:hover {
   filter: brightness(0.98);
-}
-
-.critical-sticky-bar {
-  position: sticky;
-  top: 0;
-  z-index: 9;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--sev-critical-border-mid);
-  border-bottom: 1px solid var(--sev-critical-border-mid);
-  background: var(--sev-critical-bg-strong);
-}
-
-.critical-sticky-bar__text {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--sev-critical-text);
-}
-
-.critical-sticky-bar__jump {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 700;
-  color: #991b1b;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.critical-sticky-bar__dismiss {
-  border: 1px solid var(--sev-critical-border-mid);
-  background: #fff;
-  color: #7f1d1d;
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 999px;
-  padding: 3px 9px;
-  cursor: pointer;
 }
 
 .section-card h2,

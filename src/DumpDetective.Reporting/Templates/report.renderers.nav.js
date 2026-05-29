@@ -2,7 +2,7 @@
 // buildDomains and buildCrossDomainInsights call buildFindingCard (findings.js)
 // and buildAnalyzerSection (sections.js) — resolved via hoisting in the IIFE bundle.
 import { el } from './report.dom.js';
-import { sortSectionsForRender, buildInsightStats, domainAnchorId, domainSevLabel } from './report.renderers.shared.js';
+import { sortSectionsForRender, buildInsightStats, domainAnchorId, domainSevLabel, slugifyAnchor } from './report.renderers.shared.js';
 
 // ── Domain sections list ──────────────────────────────────────────────────────
 
@@ -110,6 +110,15 @@ export function buildDomains(doc) {
         loadMore.textContent = 'Load more sections (' + (sections.length - rendered) + ' remaining)';
         loadMore.addEventListener('click', function () {
           renderNextBatch();
+          try {
+            document.dispatchEvent(new CustomEvent('dumpdetective:domain-sections-appended', {
+              detail: {
+                domainId: domainId,
+                renderedCount: rendered,
+                totalCount: sections.length
+              }
+            }));
+          } catch (e) { }
           const remaining = sections.length - rendered;
           if (remaining > 0) {
             loadMore.textContent = 'Load more sections (' + remaining + ' remaining)';
@@ -181,6 +190,19 @@ export function buildTOC(doc, perDumpDocs) {
   nav.setAttribute('aria-label', 'Report sections');
   const existingTitle = nav.querySelector('.toc-title');
   if (existingTitle) existingTitle.remove();
+
+  const sectionAnchorOccurrences = new Map();
+  function resolveSectionHref(sec, domainId, sectionIndex) {
+    const stableId = (sec && sec.sectionId && sec.sectionId.trim())
+      ? sec.sectionId.trim()
+      : ('detail-' + slugifyAnchor(domainId, 'scope') + '-' + sectionIndex);
+
+    const seen = sectionAnchorOccurrences.get(stableId) || 0;
+    sectionAnchorOccurrences.set(stableId, seen + 1);
+
+    if (seen === 0) return '#' + stableId;
+    return '#' + stableId + '-' + (seen + 1);
+  }
 
   function attachScrollToggle(det) {
     det.addEventListener('toggle', function () {
@@ -276,7 +298,7 @@ export function buildTOC(doc, perDumpDocs) {
       for (let j = 0; j < domainSections.length; j++) {
         const li = document.createElement('li');
         const sec = domainSections[j];
-        const secHref = (sec.sectionId && sec.sectionId.trim()) ? ('#' + sec.sectionId.trim()) : ('#detail-' + (i * 1000 + j));
+        const secHref = resolveSectionHref(sec, domainId, j);
         const a = document.createElement('a');
         a.href = secHref;
         a.textContent = sec.displayTitle || sec.analyzerName || ('Section ' + j);

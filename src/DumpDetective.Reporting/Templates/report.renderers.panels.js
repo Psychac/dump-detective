@@ -141,6 +141,7 @@ export function buildAppendix(doc) {
 
 function buildSimpleTable(headers, rows) {
   const table = el('table');
+  table.dataset.responsiveStack = '1';
   const thead = el('thead');
   const htr = el('tr');
   for (const h of headers) {
@@ -155,16 +156,19 @@ function buildSimpleTable(headers, rows) {
   const tbody = el('tbody');
   for (const row of rows) {
     const tr = el('tr');
-    for (const cell of row) tr.appendChild(tdText(String(cell ?? '')));
+    for (let ci = 0; ci < row.length; ci++) {
+      tr.appendChild(tdText(String(row[ci] ?? ''), headers[ci] || ('Column ' + (ci + 1))));
+    }
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
   return table;
 }
 
-function tdText(text) {
+function tdText(text, colLabel) {
   const td = document.createElement('td');
   td.textContent = text;
+  td.dataset.colLabel = String(colLabel || '');
   return td;
 }
 
@@ -370,6 +374,140 @@ export function buildDevActionPlan(doc) {
 export function buildActionQueuePanel(doc) {
   const summary = doc && doc.executiveSummary ? doc.executiveSummary : null;
   const topActions = summary && Array.isArray(summary.topActions) ? summary.topActions : [];
+  const findings = Array.isArray(doc.findings) ? doc.findings : [];
+  let ticketMenuIdAssigned = false;
+
+  function buildTicketPayload(provider, actionLike, priority) {
+    const incidentTitle = String((doc && doc.dumpPath) || 'DumpDetective incident').replace(/\\/g, '/').split('/').pop();
+    const header = provider === 'ado'
+      ? 'Azure DevOps Work Item Draft'
+      : provider === 'jira'
+        ? 'Jira Issue Draft'
+        : 'GitHub Issue Draft';
+    const title = String((actionLike && actionLike.title) || ('Finding ' + priority));
+    const whyNow = String((actionLike && actionLike.whyNow) || (actionLike && actionLike.evidence) || 'Risk requires follow-up.');
+    const validation = String((actionLike && actionLike.validation) || (actionLike && actionLike.validationStep) || 'Re-run dump and verify the signal drops.');
+    const owner = String((actionLike && actionLike.owner) || (actionLike && actionLike.suggestedOwner) || 'Investigation Owner');
+    const limitationList = (doc && doc.appendix && Array.isArray(doc.appendix.knownLimitations)) ? doc.appendix.knownLimitations : [];
+    const limitations = limitationList.slice(0, 3).join(' | ');
+    const anchor = resolveFindingAnchor(actionLike, 'queue-ticket-' + priority);
+    const href = (location.href || '').split('#')[0] + anchor;
+
+    return [
+      header,
+      '',
+      'Incident: ' + (incidentTitle || 'Unknown dump'),
+      'Priority: ' + priority,
+      'Action: ' + title,
+      'Owner: ' + owner,
+      '',
+      'Why now:',
+      whyNow,
+      '',
+      'Validation:',
+      validation,
+      '',
+      'Evidence:',
+      href,
+      '',
+      'Known limitations:',
+      limitations || 'None recorded'
+    ].join('\n');
+  }
+
+  function buildTicketMenu(actionLike, priority) {
+    const wrap = el('div', 'action-queue-card__ticket-menu');
+    if (!ticketMenuIdAssigned) {
+      wrap.id = 'ticket-template-menu';
+      ticketMenuIdAssigned = true;
+    }
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Ticket templates');
+
+    function iconSvg(provider) {
+      if (provider === 'ado') {
+        return '<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path fill="#0078D4" d="M2 8.25l6.3-2.2v11.9L2 15.75v-7.5zm7.7-2.63L22 2v20l-12.3-3.62V5.62zm1.8 2.57v7.62l7.8 2.28V5.91l-7.8 2.28z"/></svg>';
+      }
+      if (provider === 'jira') {
+        return '<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path fill="#0052CC" d="M11.96 2L6.1 7.83l2.93 2.92 2.93-2.92L14.9 10.75 6.1 19.5 9.03 22.4 17.83 13.65l2.93 2.93 2.94-2.93L11.96 2z"/></svg>';
+      }
+      return '<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path fill="currentColor" d="M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.92c.58.1.79-.25.79-.56v-2.02c-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.75 2.7 1.25 3.36.95.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.14 1.18a10.9 10.9 0 015.72 0c2.18-1.49 3.14-1.18 3.14-1.18.62 1.58.23 2.74.11 3.03.73.8 1.18 1.83 1.18 3.08 0 4.42-2.7 5.38-5.27 5.66.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z"/></svg>';
+    }
+
+    function ticketBtn(label, provider, iconText) {
+      const btn = el('button', 'action-btn ticket-copy-btn ticket-copy-btn--icon ticket-copy-btn--' + provider);
+      btn.type = 'button';
+      btn.dataset.payload = buildTicketPayload(provider, actionLike, priority);
+      btn.dataset.provider = provider;
+      btn.setAttribute('aria-label', 'Copy ' + label + ' ticket template');
+      btn.title = label;
+      const icon = el('span', 'ticket-copy-btn__icon');
+      icon.innerHTML = iconSvg(provider);
+      btn.appendChild(icon);
+
+      const sr = el('span', 'sr-only');
+      sr.textContent = iconText;
+      btn.appendChild(sr);
+      return btn;
+    }
+
+    wrap.appendChild(ticketBtn('Copy ADO', 'ado', 'A'));
+    wrap.appendChild(ticketBtn('Copy Jira', 'jira', 'J'));
+    wrap.appendChild(ticketBtn('Copy GitHub', 'github', 'GH'));
+    return wrap;
+  }
+
+  function parseCompositeScore(actionLike) {
+    const candidates = [
+      actionLike && actionLike.impact,
+      actionLike && actionLike.whyNow,
+      actionLike && actionLike.action
+    ];
+
+    for (let i = 0; i < candidates.length; i++) {
+      const text = String(candidates[i] || '').trim();
+      if (!text) continue;
+
+      const m = text.match(/composite\s+score\s+(\d+)(?:\s*\(([^)]*)\))?/i);
+      if (!m) continue;
+
+      const score = Number(m[1]);
+      if (!Number.isFinite(score)) continue;
+
+      return {
+        score,
+        source: text,
+        breakdown: m[2] || ''
+      };
+    }
+
+    return null;
+  }
+
+  function resolveFindingAnchor(actionLike, fallbackKey) {
+    const fingerprint = String((actionLike && (actionLike.findingFingerprint || actionLike.fingerprint)) || '').trim();
+    const analyzer = String((actionLike && actionLike.analyzer) || '').trim().toLowerCase();
+    const title = String((actionLike && actionLike.title) || '').trim().toLowerCase();
+
+    let match = null;
+    if (fingerprint) {
+      match = findings.find(function (f) {
+        return String((f && f.fingerprint) || '').trim() === fingerprint;
+      }) || null;
+    }
+
+    if (!match && title) {
+      match = findings.find(function (f) {
+        const fTitle = String((f && f.title) || '').trim().toLowerCase();
+        if (fTitle !== title) return false;
+        if (!analyzer) return true;
+        return String((f && f.analyzer) || '').trim().toLowerCase() === analyzer;
+      }) || null;
+    }
+
+    if (match) return '#' + findingAnchorId(match, fallbackKey);
+    return '#' + findingAnchorId(actionLike, fallbackKey);
+  }
 
   function formatSignalLabel(signalKey) {
     const raw = String(signalKey || '');
@@ -407,81 +545,153 @@ export function buildActionQueuePanel(doc) {
     subtitle.textContent = 'Deterministic ranked actions (model ' + modelVersion + ').';
     sec.appendChild(subtitle);
 
-    const tbl = el('table');
-    const thead = el('thead');
-    const htr = el('tr');
-    ['Priority', 'Finding', 'Owner', 'Effort', 'Status', 'Validation'].forEach(function (col) {
-      const th = document.createElement('th');
-      th.scope = 'col';
-      th.textContent = col;
-      htr.appendChild(th);
-    });
-    thead.appendChild(htr);
-    tbl.appendChild(thead);
+    const escalation = el('section', 'escalation-packet');
+    escalation.id = 'escalation-packet';
+    const escalationTitle = el('h3', 'escalation-packet__title');
+    escalationTitle.textContent = 'Escalation Packet';
+    escalation.appendChild(escalationTitle);
+    const escalationBody = el('div', 'escalation-packet__body');
+    const escalationSummary = el('p', 'escalation-packet__summary');
+    escalationSummary.textContent = 'Top suspects, immediate mitigations, and owner routing for execution.';
+    escalationBody.appendChild(escalationSummary);
+    const escalationList = el('ul', 'escalation-packet__list');
+    const topEscalations = topActions.slice(0, 3);
+    for (let ei = 0; ei < topEscalations.length; ei++) {
+      const action = topEscalations[ei] || {};
+      const li = document.createElement('li');
+      li.textContent = 'P' + String(action.priority || (ei + 1)) + ' | '
+        + String(action.title || 'Unlabeled finding')
+        + ' | Owner: ' + String(action.owner || 'Unassigned')
+        + ' | Mitigation: ' + String(action.action || action.whyNow || 'Investigate in forensics mode.');
+      escalationList.appendChild(li);
+    }
+    if (!escalationList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'No ranked escalation candidates available.';
+      escalationList.appendChild(li);
+    }
+    escalationBody.appendChild(escalationList);
+    const escalationCopy = document.createElement('button');
+    escalationCopy.type = 'button';
+    escalationCopy.id = 'btn-copy-escalation';
+    escalationCopy.className = 'action-btn copy-btn escalation-packet__copy';
+    escalationCopy.textContent = 'Copy Escalation Packet';
+    const escalationLines = [];
+    escalationLines.push('Escalation Packet');
+    escalationLines.push('Model: ' + modelVersion);
+    for (let ei = 0; ei < topEscalations.length; ei++) {
+      const action = topEscalations[ei] || {};
+      escalationLines.push(
+        String(ei + 1) + '. '
+        + String(action.title || 'Unlabeled finding')
+        + ' | Owner: ' + String(action.owner || 'Unassigned')
+        + ' | Effort: ' + String(action.effort || 'TBD')
+        + ' | Mitigation: ' + String(action.action || action.whyNow || 'Investigate in forensics mode.')
+      );
+    }
+    escalationCopy.setAttribute('data-copy', escalationLines.join('\n'));
+    escalationBody.appendChild(escalationCopy);
+    escalation.appendChild(escalationBody);
+    sec.appendChild(escalation);
 
-    const tbody = el('tbody');
-    const maxRows = 20;
-    for (let i = 0; i < topActions.length && i < maxRows; i++) {
+    const lanesHost = el('div', 'action-triage-lanes');
+    const laneDefs = [
+      { key: 'now', label: 'Now', maxPriority: 3 },
+      { key: 'next', label: 'Next', maxPriority: 7 },
+      { key: 'watch', label: 'Watch', maxPriority: Number.MAX_SAFE_INTEGER }
+    ];
+    const laneBodies = {};
+    for (let li = 0; li < laneDefs.length; li++) {
+      const lane = laneDefs[li];
+      const laneEl = el('section', 'action-triage-lane action-triage-lane--' + lane.key);
+      const laneTitle = el('h3', 'action-triage-lane__title');
+      laneTitle.textContent = lane.label;
+      laneEl.appendChild(laneTitle);
+      const laneBody = el('div', 'action-triage-lane__body');
+      laneEl.appendChild(laneBody);
+      lanesHost.appendChild(laneEl);
+      laneBodies[lane.key] = laneBody;
+    }
+
+    function laneKeyForPriority(priority) {
+      if (priority <= 3) return 'now';
+      if (priority <= 7) return 'next';
+      return 'watch';
+    }
+
+    const laneRows = Math.min(topActions.length, 20);
+    for (let i = 0; i < laneRows; i++) {
       const action = topActions[i] || {};
-      const tr = el('tr');
+      const priority = Number(action.priority || (i + 1));
+      const laneKey = laneKeyForPriority(priority);
+      const body = laneBodies[laneKey];
+      if (!body) continue;
 
-      const tdPri = document.createElement('td');
-      tdPri.textContent = String(action.priority || (i + 1));
-      tr.appendChild(tdPri);
+      const card = el('article', 'action-triage-card action-triage-card--' + laneKey);
+      const header = el('div', 'action-triage-card__header');
+      const priorityBadge = el('span', 'action-triage-card__priority');
+      priorityBadge.textContent = 'P' + priority;
+      priorityBadge.setAttribute('aria-label', 'Priority ' + priority);
+      header.appendChild(priorityBadge);
 
-      const tdFinding = document.createElement('td');
-      const anchor = document.createElement('a');
-      anchor.href = '#' + findingAnchorId({
+      const composite = parseCompositeScore(action);
+      if (composite) {
+        const scoreBadge = el('span', 'action-triage-card__score-badge');
+        scoreBadge.textContent = 'Score ' + composite.score;
+        const tooltip = composite.breakdown
+          ? 'Composite score breakdown: ' + composite.breakdown
+          : 'Composite score: ' + composite.score;
+        scoreBadge.title = tooltip;
+        scoreBadge.setAttribute('aria-label', tooltip);
+        header.appendChild(scoreBadge);
+      }
+      card.appendChild(header);
+
+      const titleLink = document.createElement('a');
+      const targetAnchor = resolveFindingAnchor({
         fingerprint: action.findingFingerprint,
         analyzer: action.analyzer,
         title: action.title,
         severity: 'Warning'
-      }, 'queue-' + i);
-      anchor.textContent = action.title || ('Finding ' + (i + 1));
-      tdFinding.appendChild(anchor);
+      }, 'lane-' + i);
+      titleLink.className = 'action-triage-card__title incident-promote-link';
+      titleLink.href = targetAnchor;
+      titleLink.setAttribute('data-promote-target', targetAnchor);
+      titleLink.textContent = String(action.title || ('Finding ' + priority));
+      card.appendChild(titleLink);
 
-      if (action.action) {
-        const note = el('div', 'action-queue-card__note');
-        note.textContent = String(action.action);
-        tdFinding.appendChild(note);
-      }
+      const owner = el('div', 'action-triage-card__owner');
+      owner.textContent = 'Owner: ' + String(action.owner || 'Unassigned');
+      card.appendChild(owner);
 
-      if (action.whyNow) {
-        const why = el('div', 'action-queue-card__note');
-        why.textContent = String(action.whyNow);
-        tdFinding.appendChild(why);
-      }
+      const stats = el('div', 'action-triage-card__stats');
+      const effort = el('div', 'action-triage-card__kv');
+      const effortLabel = el('span', 'action-triage-card__kv-label');
+      effortLabel.textContent = 'Effort';
+      effort.appendChild(effortLabel);
+      const effortValue = el('span', 'action-triage-card__kv-value');
+      effortValue.textContent = String(action.effort || '-');
+      effort.appendChild(effortValue);
+      stats.appendChild(effort);
 
-      if (action.confidence && Array.isArray(action.confidence.caveats) && action.confidence.caveats.length) {
-        const caveat = el('div', 'action-queue-card__note');
-        caveat.textContent = 'Confidence caveats: ' + action.confidence.caveats.join('; ');
-        tdFinding.appendChild(caveat);
-      }
+      const status = el('div', 'action-triage-card__kv');
+      const statusLabel = el('span', 'action-triage-card__kv-label');
+      statusLabel.textContent = 'Status';
+      status.appendChild(statusLabel);
+      const statusValue = el('span', 'action-triage-card__kv-value');
+      statusValue.textContent = String(action.status || 'Open');
+      status.appendChild(statusValue);
+      stats.appendChild(status);
+      card.appendChild(stats);
 
-      tr.appendChild(tdFinding);
+      const actions = el('div', 'action-triage-card__actions');
+      actions.appendChild(buildTicketMenu(action, priority));
+      card.appendChild(actions);
 
-      const tdOwner = document.createElement('td');
-      tdOwner.textContent = action.owner || '-';
-      tr.appendChild(tdOwner);
-
-      const tdEffort = document.createElement('td');
-      tdEffort.textContent = action.effort || '-';
-      tr.appendChild(tdEffort);
-
-      const tdStatus = document.createElement('td');
-      tdStatus.textContent = action.status || 'Open';
-      tr.appendChild(tdStatus);
-
-      const tdValidation = document.createElement('td');
-      tdValidation.textContent = action.validation || '-';
-      tdValidation.className = 'wrap';
-      tr.appendChild(tdValidation);
-
-      tbody.appendChild(tr);
+      body.appendChild(card);
     }
 
-    tbl.appendChild(tbody);
-    sec.appendChild(tbl);
+    sec.appendChild(lanesHost);
 
     if (Array.isArray(doc.correlationEvents) && doc.correlationEvents.length) {
       const sub = document.createElement('h3');
@@ -534,7 +744,6 @@ export function buildActionQueuePanel(doc) {
     return sec;
   }
 
-  const findings = Array.isArray(doc.findings) ? doc.findings : [];
   if (!findings.length) return null;
 
   function sevWeight(sev) {
@@ -574,6 +783,7 @@ export function buildActionQueuePanel(doc) {
   sec.appendChild(subtitle);
 
   const tbl = el('table');
+  tbl.dataset.responsiveStack = '1';
   const thead = el('thead');
   const htr = el('tr');
   ['Priority', 'Finding', 'Owner', 'Effort', 'Status', 'Validation'].forEach(function (col) {
@@ -597,7 +807,7 @@ export function buildActionQueuePanel(doc) {
 
     const tdFinding = document.createElement('td');
     const anchor = document.createElement('a');
-    anchor.href = '#' + findingAnchorId(finding, 'queue-' + i);
+    anchor.href = resolveFindingAnchor(finding, 'queue-' + i);
     anchor.textContent = finding.title || ('Finding ' + (i + 1));
     tdFinding.appendChild(anchor);
     const recText = finding.fix || finding.recommendation || ((Array.isArray(finding.recommendationItems) && finding.recommendationItems.length) ? finding.recommendationItems[0] : '');
@@ -606,6 +816,7 @@ export function buildActionQueuePanel(doc) {
       note.textContent = recText;
       tdFinding.appendChild(note);
     }
+    tdFinding.appendChild(buildTicketMenu(finding, i + 1));
     tr.appendChild(tdFinding);
 
     const tdOwner = document.createElement('td');
@@ -630,6 +841,112 @@ export function buildActionQueuePanel(doc) {
 
   tbl.appendChild(tbody);
   sec.appendChild(tbl);
+  return sec;
+}
+
+// ── Forensics rail (metadata + deep-dive controls) ─────────────────────────
+
+export function buildForensicsRailPanel(doc) {
+  const ctx = doc && doc.incidentContext ? doc.incidentContext : {};
+  const domains = Array.isArray(doc && doc.domains) ? doc.domains : [];
+
+  const sec = el('section', 'section-card forensics-rail-card');
+  sec.id = 'forensics-rail';
+  sec.setAttribute('data-component-id', 'forensics-rail');
+
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Forensics Workbench';
+  sec.appendChild(h2);
+
+  const subtitle = el('p', 'forensics-rail-card__subtitle');
+  subtitle.textContent = 'Runtime context, provenance controls, and evidence filters for root-cause analysis.';
+  sec.appendChild(subtitle);
+
+  const meta = el('div', 'forensics-rail-meta');
+  function metaRow(label, value) {
+    const row = el('div', 'forensics-rail-meta__row');
+    const l = el('span', 'forensics-rail-meta__label');
+    l.textContent = label;
+    const v = el('span', 'forensics-rail-meta__value');
+    v.textContent = value;
+    row.appendChild(l);
+    row.appendChild(v);
+    return row;
+  }
+
+  meta.appendChild(metaRow('Runtime', String(ctx.runtimeVersion || 'n/a')));
+  meta.appendChild(metaRow('GC Mode', String(ctx.gcMode || 'n/a')));
+  meta.appendChild(metaRow('Flavor', String(ctx.runtimeFlavor || 'n/a')));
+  meta.appendChild(metaRow('Active Analyzers', String(ctx.activeAnalyzerCount || 0)));
+  sec.appendChild(meta);
+
+  const controls = el('div', 'forensics-rail-controls');
+
+  const lockBtn = document.createElement('button');
+  lockBtn.type = 'button';
+  lockBtn.id = 'forensics-lock-open-toggle';
+  lockBtn.className = 'action-btn';
+  lockBtn.textContent = 'Lock Open';
+  lockBtn.setAttribute('aria-pressed', 'false');
+  controls.appendChild(lockBtn);
+
+  const scopeLabel = el('label', 'forensics-rail-controls__label');
+  scopeLabel.setAttribute('for', 'forensics-domain-scope');
+  scopeLabel.textContent = 'Domain';
+  controls.appendChild(scopeLabel);
+
+  const scope = document.createElement('select');
+  scope.id = 'forensics-domain-scope';
+  scope.className = 'forensics-rail-controls__select';
+  const optAll = document.createElement('option');
+  optAll.value = 'all';
+  optAll.textContent = 'All domains';
+  scope.appendChild(optAll);
+  for (let i = 0; i < domains.length; i++) {
+    const d = domains[i] || {};
+    const opt = document.createElement('option');
+    opt.value = 'domain-' + String((d.domain || 'domain-' + i)).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    opt.textContent = String(d.domain || ('Domain ' + (i + 1)));
+    scope.appendChild(opt);
+  }
+  controls.appendChild(scope);
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.id = 'forensics-domain-search';
+  search.className = 'forensics-rail-controls__search';
+  search.placeholder = 'Filter evidence in selected domain...';
+  controls.appendChild(search);
+
+  const sortLabel = el('label', 'forensics-rail-controls__label');
+  sortLabel.setAttribute('for', 'forensics-sort-mode');
+  sortLabel.textContent = 'Sort';
+  controls.appendChild(sortLabel);
+
+  const sort = document.createElement('select');
+  sort.id = 'forensics-sort-mode';
+  sort.className = 'forensics-rail-controls__select';
+  const sortDefault = document.createElement('option');
+  sortDefault.value = 'default';
+  sortDefault.textContent = 'Default order';
+  sort.appendChild(sortDefault);
+  const sortProv = document.createElement('option');
+  sortProv.value = 'provenance';
+  sortProv.textContent = 'Provenance-first';
+  sort.appendChild(sortProv);
+  controls.appendChild(sort);
+
+  const lowConfWrap = el('label', 'forensics-rail-controls__check');
+  const lowConf = document.createElement('input');
+  lowConf.type = 'checkbox';
+  lowConf.id = 'forensics-low-confidence-only';
+  lowConfWrap.appendChild(lowConf);
+  const lowConfText = document.createElement('span');
+  lowConfText.textContent = 'Show low-confidence only';
+  lowConfWrap.appendChild(lowConfText);
+  controls.appendChild(lowConfWrap);
+
+  sec.appendChild(controls);
   return sec;
 }
 

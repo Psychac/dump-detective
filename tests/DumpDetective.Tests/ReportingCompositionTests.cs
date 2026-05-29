@@ -56,6 +56,56 @@ public sealed class ReportingCompositionTests
     }
 
     [Fact]
+    public void Serialize_ShouldClusterNearDuplicateTopActions()
+    {
+        InsightFinding leakA = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Critical,
+            Title: "Event handler retention pressure",
+            Evidence: "Subscribers retain roots.",
+            Recommendation: "Detach leaked handlers and re-check retention.",
+            Tags: ["leak", "event"],
+            Fingerprint: "cluster-a");
+
+        InsightFinding leakB = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Event handler retention pressure",
+            Evidence: "Duplicate retention pattern in related type.",
+            Recommendation: "Detach leaked handlers and re-check retention.",
+            Tags: ["leak", "event"],
+            Fingerprint: "cluster-b");
+
+        InsightFinding threadFinding = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Thread",
+            Severity: FindingSeverity.Warning,
+            Title: "Blocked worker thread hotspot",
+            Evidence: "Multiple workers blocked on lock.",
+            Recommendation: "Inspect lock ownership and reduce contention.",
+            Tags: ["thread", "lock"],
+            Fingerprint: "cluster-c");
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/cluster.dmp",
+            runs: [
+                CreateRun("RetentionAnalyzer", leakA),
+                CreateRun("RetentionAnalyzer", leakB),
+                CreateRun("ThreadAnalyzer", threadFinding)
+            ],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.ExecutiveSummary.Should().NotBeNull();
+        doc.ExecutiveSummary!.TopActions.Should().NotBeNull();
+        doc.ExecutiveSummary.TopActions!.Count.Should().Be(2);
+        doc.ExecutiveSummary.TopActions[0].Title.Should().Contain("related");
+    }
+
+    [Fact]
     public void TableWrapHelper_ShouldWrapWithoutTruncatingLongValues()
     {
         const string longValue = "ThisIsAnExtremelyLongTokenWithoutSpaces_0123456789ABCDEFGHIJ";
@@ -859,9 +909,6 @@ public sealed class ReportingCompositionTests
         output.Should().Contain("Caveats: partial evidence");
         output.Should().Contain("### Cross-Domain Correlation Signals");
         output.Should().Contain("runtime-coupling");
-        output.Should().Contain("### Incident Handoff");
-        output.Should().Contain("#### Top Actions");
-        output.Should().Contain("#### Known Limitations");
     }
 
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)

@@ -297,8 +297,6 @@ public sealed class HtmlRendererCssTests
             html.Should().Contain("findingAnchorId(");
             html.Should().Contain("wrapper.id = sectionAnchorId");
             html.Should().Contain("section-anchor-legacy");
-            html.Should().Contain("Incident Handoff");
-            html.Should().Contain("exec-handoff__copy-btn");
         }
         finally
         {

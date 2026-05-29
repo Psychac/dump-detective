@@ -108,6 +108,24 @@ export function findingAnchorId(finding, fallbackId) {
   return 'finding-' + stableHash(key || fallbackId || 'finding');
 }
 
+// ── DOM id uniqueness ───────────────────────────────────────────────────────
+export function ensureUniqueDomId(baseId) {
+  const root = document;
+  const seed = String(baseId || '').trim() || 'node';
+  const key = '__dumpdetective_used_dom_ids__';
+  if (!root[key]) root[key] = new Set();
+  const used = root[key];
+
+  let candidate = seed;
+  let suffix = 2;
+  while (used.has(candidate) || !!document.getElementById(candidate)) {
+    candidate = seed + '-' + suffix;
+    suffix++;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
 export function domainSevLabel(sev) {
   if (sev == null) return 'Info';
   const s = String(sev).toLowerCase();

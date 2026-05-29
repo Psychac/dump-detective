@@ -52,9 +52,45 @@ export function buildHeader(doc) {
   heroActions.appendChild(heroBtn('btn-download-json', 'Download report as JSON', '\u2B07\u202FJSON'));
   heroActions.appendChild(heroBtn('btn-export-csv', 'Export findings as CSV', '\u2B07\u202FCSV'));
   heroActions.appendChild(heroBtn('btn-print', 'Print this report', '\u2399\u202FPrint'));
+  heroActions.appendChild(heroBtn('reading-mode-toggle', 'Switch reading mode', '\u25CC\u202FMode: Incident'));
   heroActions.appendChild(heroBtn('btn-toggle-contrast', 'Toggle high contrast mode', '\u25D1\u202FContrast'));
   hero.appendChild(heroActions);
   sec.appendChild(hero);
+
+  const topActions = Array.isArray(execSum.topActions) ? execSum.topActions : [];
+  if (topActions.length) {
+    const triageRibbon = el('div', 'incident-ribbon');
+    triageRibbon.id = 'incident-triage-ribbon';
+
+    const titleLabel = el('span', 'incident-ribbon__title');
+    titleLabel.textContent = 'Incident Triage';
+    triageRibbon.appendChild(titleLabel);
+
+    let nowCount = 0;
+    let nextCount = 0;
+    let watchCount = 0;
+    for (let i = 0; i < topActions.length; i++) {
+      const priority = Number(topActions[i] && topActions[i].priority || (i + 1));
+      if (priority <= 3) nowCount++;
+      else if (priority <= 7) nextCount++;
+      else watchCount++;
+    }
+
+    function ribbonChip(label, value, mod) {
+      const chip = el('span', 'incident-ribbon__chip incident-ribbon__chip--' + mod);
+      chip.textContent = label + ': ' + String(value);
+      return chip;
+    }
+    triageRibbon.appendChild(ribbonChip('Now', nowCount, 'now'));
+    triageRibbon.appendChild(ribbonChip('Next', nextCount, 'next'));
+    triageRibbon.appendChild(ribbonChip('Watch', watchCount, 'watch'));
+
+    const hint = el('span', 'incident-ribbon__hint');
+    hint.textContent = 'Use Promote to Forensics for deep evidence.';
+    triageRibbon.appendChild(hint);
+
+    sec.appendChild(triageRibbon);
+  }
 
   // ── Body (meta-stat rows) ────────────────────────────────────────────────
   const body = el('div', 'header-body');
@@ -325,29 +361,6 @@ export function buildHealthScorecard(doc) {
     banner.appendChild(bannerRight);
   }
   sec.appendChild(banner);
-
-  if (totalCrit > 0) {
-    const sticky = el('div', 'critical-sticky-bar');
-    sticky.id = 'critical-sticky-bar';
-    const txt = el('span', 'critical-sticky-bar__text');
-    txt.textContent = totalCrit + ' Critical finding' + (totalCrit !== 1 ? 's' : '') + ' require immediate attention';
-    sticky.appendChild(txt);
-
-    const jump = document.createElement('a');
-    jump.className = 'critical-sticky-bar__jump';
-    jump.href = '#sec-action-queue';
-    jump.textContent = 'Review now';
-    sticky.appendChild(jump);
-
-    const dismiss = document.createElement('button');
-    dismiss.type = 'button';
-    dismiss.className = 'critical-sticky-bar__dismiss';
-    dismiss.id = 'critical-sticky-dismiss';
-    dismiss.setAttribute('aria-label', 'Dismiss critical banner');
-    dismiss.textContent = 'Dismiss';
-    sticky.appendChild(dismiss);
-    sec.appendChild(sticky);
-  }
 
   // ── Domain grid ──────────────────────────────────────────────────────────
   const grid = el('div', 'health-scorecard__grid');
@@ -1014,281 +1027,6 @@ export function buildExecutiveSummary(doc) {
     sec.appendChild(corrWrap);
   }
 
-  // ── Findings (single dump only) ──────────────────────────────────────────
-  if (!isTrendExecSection) {
-    const critFindings = summary.criticalFindings || [];
-    const warnFindings = summary.warningFindings || [];
-    if (critFindings.length || warnFindings.length) {
-      const findingsWrap = el('div', 'exec-triage');
-      const heading = el('div', 'exec-recommendations__heading');
-      heading.textContent = 'Triage';
-      findingsWrap.appendChild(heading);
-
-      const grid = el('div', 'exec-triage__grid');
-      const combined = critFindings.concat(warnFindings).slice(0, 10);
-      for (let fi = 0; fi < combined.length; fi++) {
-        const finding = combined[fi];
-        const sev = String(finding.severity || 'Info').toLowerCase();
-        const row = el('article', 'exec-triage-card exec-triage-card--' + sev);
-
-        const title = el('div', 'exec-triage-card__title');
-        title.textContent = finding.title || '';
-        row.appendChild(title);
-
-        if (finding.evidence) {
-          const ev = el('div', 'exec-triage-card__evidence');
-          ev.textContent = finding.evidence;
-          row.appendChild(ev);
-        }
-
-        if (finding.recommendation) {
-          const rec = el('div', 'exec-triage-card__rec');
-          rec.textContent = '-> ' + finding.recommendation;
-          row.appendChild(rec);
-        }
-
-        const meta = el('div', 'exec-triage-card__meta');
-        if (finding.analyzer) {
-          const analyzer = el('span', 'exec-triage-card__analyzer');
-          analyzer.textContent = finding.analyzer;
-          meta.appendChild(analyzer);
-        }
-
-        if (finding.confidenceScore != null) {
-          const confidenceScore = Number(finding.confidenceScore);
-          const meter = el('span', 'exec-confidence-meter');
-          const slots = Math.max(1, Math.min(4, Math.round(confidenceScore * 4)));
-          meter.setAttribute('aria-label', 'Confidence ' + confidenceScore.toFixed(2));
-          for (let si = 0; si < 4; si++) {
-            const slot = el('span', 'exec-confidence-meter__slot' + (si < slots ? ' exec-confidence-meter__slot--on' : ''));
-            meter.appendChild(slot);
-          }
-          meta.appendChild(meter);
-        }
-
-        if (meta.childNodes.length) row.appendChild(meta);
-        grid.appendChild(row);
-      }
-
-      findingsWrap.appendChild(grid);
-      sec.appendChild(findingsWrap);
-    }
-  }
-
-  // ── Recommendations ───────────────────────────────────────────────────────
-  const recs = summary.topRecommendations || [];
-  if (recs.length && !isTrendExecSection) {
-    const recWrap = el('div', 'exec-recommendations');
-    const heading = el('div', 'exec-recommendations__heading'); heading.textContent = 'Top 3 Actions'; recWrap.appendChild(heading);
-    const ol = el('ol', 'exec-rec-list');
-    const analyzerSectionMap = new Map();
-    if (Array.isArray(doc.domains)) {
-      for (let di = 0; di < doc.domains.length; di++) {
-        const domain = doc.domains[di];
-        const domainId = domainAnchorId(domain, di);
-        const sections = Array.isArray(domain.sections) ? domain.sections : [];
-        for (let si = 0; si < sections.length; si++) {
-          const section = sections[si];
-          const analyzerName = String(section.analyzerName || '').toLowerCase();
-          if (!analyzerName || analyzerSectionMap.has(analyzerName)) continue;
-          analyzerSectionMap.set(analyzerName, (section.sectionId && section.sectionId.trim()) ? section.sectionId.trim() : domainId);
-        }
-      }
-    }
-
-    for (const finding of recs.slice(0, 3)) {
-      const li = el('li', 'exec-rec-item');
-      const num = el('span', 'exec-rec-num'); num.textContent = String(ol.children.length + 1); li.appendChild(num);
-      const body = el('div', 'exec-rec-body');
-      if (finding.title) {
-        const targetAnchor = analyzerSectionMap.get(String(finding.analyzer || '').toLowerCase()) || 'sec-action-queue';
-        const titleLink = document.createElement('a');
-        titleLink.className = 'exec-rec-link';
-        titleLink.href = '#' + targetAnchor;
-        titleLink.textContent = finding.title;
-        const title = el('div', 'exec-rec-title');
-        title.appendChild(titleLink);
-        body.appendChild(title);
-      }
-      if (finding.recommendation) { const text = el('div', 'exec-rec-text'); text.textContent = finding.recommendation; body.appendChild(text); }
-      li.appendChild(body);
-      ol.appendChild(li);
-    }
-    recWrap.appendChild(ol);
-    sec.appendChild(recWrap);
-  }
-
-  // ── Incident handoff (single dump) ───────────────────────────────────────
-  if (!isTrendExecSection) {
-    const topActions = Array.isArray(summary.topActions) ? summary.topActions : [];
-    const criticalFindings = Array.isArray(summary.criticalFindings) ? summary.criticalFindings : [];
-    const warningFindings = Array.isArray(summary.warningFindings) ? summary.warningFindings : [];
-    const knownLimitations = doc && doc.appendix && Array.isArray(doc.appendix.knownLimitations)
-      ? doc.appendix.knownLimitations
-      : [];
-
-    const handoff = el('div', 'exec-handoff');
-    const heading = el('div', 'exec-recommendations__heading');
-    heading.textContent = 'Incident Handoff';
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'action-btn copy-btn exec-handoff__copy-btn';
-    copyBtn.textContent = 'Copy';
-    copyBtn.setAttribute('aria-label', 'Copy incident handoff summary');
-    handoff.appendChild(heading);
-    handoff.appendChild(copyBtn);
-
-    const summaryList = el('ul', 'exec-handoff__list');
-    const incidentLine = document.createElement('li');
-    incidentLine.textContent = criticalFindings.length + ' critical and ' + warningFindings.length + ' warning findings require follow-up.';
-    summaryList.appendChild(incidentLine);
-
-    const focusLine = document.createElement('li');
-    if (topActions.length && topActions[0].title) {
-      focusLine.textContent = 'Primary focus: ' + topActions[0].title;
-    } else if (recs.length && recs[0].title) {
-      focusLine.textContent = 'Primary focus: ' + recs[0].title;
-    } else {
-      focusLine.textContent = 'Primary focus: validate top warning and runtime stability signals.';
-    }
-    summaryList.appendChild(focusLine);
-    handoff.appendChild(summaryList);
-
-    const topActionsTitle = el('div', 'exec-handoff__subheading');
-    topActionsTitle.textContent = 'Top Actions';
-    handoff.appendChild(topActionsTitle);
-
-    const actionsList = el('ol', 'exec-handoff__list');
-    const actionsSource = topActions.length ? topActions.slice(0, 3) : recs.slice(0, 3);
-    for (let i = 0; i < actionsSource.length; i++) {
-      const action = actionsSource[i] || {};
-      const li = document.createElement('li');
-      const label = action.title || action.recommendation || action.action || 'Action ' + (i + 1);
-      const a = document.createElement('a');
-      if (action.findingFingerprint || action.analyzer || action.title) {
-        a.href = '#' + findingAnchorId({
-          fingerprint: action.findingFingerprint,
-          analyzer: action.analyzer,
-          title: action.title,
-          severity: 'Warning'
-        }, 'handoff-action-' + i);
-      } else {
-        a.href = '#sec-action-queue';
-      }
-      a.textContent = label;
-      li.appendChild(a);
-      actionsList.appendChild(li);
-    }
-    if (!actionsList.children.length) {
-      const li = document.createElement('li');
-      li.textContent = 'No ranked actions were produced.';
-      actionsList.appendChild(li);
-    }
-    handoff.appendChild(actionsList);
-
-    const riskTitle = el('div', 'exec-handoff__subheading');
-    riskTitle.textContent = 'Risks If Unaddressed';
-    handoff.appendChild(riskTitle);
-    const riskList = el('ul', 'exec-handoff__list');
-    const risks = criticalFindings.concat(warningFindings).slice(0, 3);
-    for (let i = 0; i < risks.length; i++) {
-      const finding = risks[i] || {};
-      const li = document.createElement('li');
-      li.textContent = finding.title || 'Unspecified risk signal';
-      riskList.appendChild(li);
-    }
-    if (!riskList.children.length) {
-      const li = document.createElement('li');
-      li.textContent = 'Risk level is currently low-confidence; verify with section evidence.';
-      riskList.appendChild(li);
-    }
-    handoff.appendChild(riskList);
-
-    const evidenceTitle = el('div', 'exec-handoff__subheading');
-    evidenceTitle.textContent = 'Evidence References';
-    handoff.appendChild(evidenceTitle);
-    const evidenceList = el('ul', 'exec-handoff__list');
-    for (let i = 0; i < topActions.length && i < 3; i++) {
-      const action = topActions[i] || {};
-      const li = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = '#' + findingAnchorId({
-        fingerprint: action.findingFingerprint,
-        analyzer: action.analyzer,
-        title: action.title,
-        severity: 'Warning'
-      }, 'handoff-evidence-' + i);
-      a.textContent = 'F' + (i + 1) + ': ' + (action.title || 'finding');
-      li.appendChild(a);
-      evidenceList.appendChild(li);
-    }
-    if (!evidenceList.children.length) {
-      const li = document.createElement('li');
-      li.textContent = 'No direct evidence links available.';
-      evidenceList.appendChild(li);
-    }
-    handoff.appendChild(evidenceList);
-
-    const limitTitle = el('div', 'exec-handoff__subheading');
-    limitTitle.textContent = 'Known Limitations';
-    handoff.appendChild(limitTitle);
-    const limitList = el('ul', 'exec-handoff__list');
-    for (let i = 0; i < knownLimitations.length && i < 3; i++) {
-      const li = document.createElement('li');
-      li.textContent = String(knownLimitations[i] || '');
-      limitList.appendChild(li);
-    }
-    if (!limitList.children.length) {
-      const li = document.createElement('li');
-      li.textContent = 'No explicit limitations were reported.';
-      limitList.appendChild(li);
-    }
-    handoff.appendChild(limitList);
-
-    const copyLines = [];
-    copyLines.push('Incident summary: ' + incidentLine.textContent);
-    if (focusLine.textContent) copyLines.push(focusLine.textContent);
-    copyLines.push('Top actions:');
-    Array.from(actionsList.querySelectorAll('li')).forEach(function (li, idx) {
-      copyLines.push(String(idx + 1) + '. ' + (li.textContent || '').trim());
-    });
-    copyLines.push('Risks if unaddressed:');
-    Array.from(riskList.querySelectorAll('li')).forEach(function (li) {
-      copyLines.push('- ' + (li.textContent || '').trim());
-    });
-    copyLines.push('Evidence references:');
-    Array.from(evidenceList.querySelectorAll('li')).forEach(function (li) {
-      copyLines.push('- ' + (li.textContent || '').trim());
-    });
-    copyLines.push('Known limitations:');
-    Array.from(limitList.querySelectorAll('li')).forEach(function (li) {
-      copyLines.push('- ' + (li.textContent || '').trim());
-    });
-    copyBtn.setAttribute('data-copy', copyLines.join('\n'));
-
-    sec.appendChild(handoff);
-  }
-
   return sec;
 }
 
-// Private helper — only used within this module
-function appendExecFindingGroup(parent, sev, findings) {
-  if (!findings || !findings.length) return;
-  const block = el('div', 'exec-findings-block');
-  const header = el('div', 'exec-findings-block__header');
-  const badge = el('span', 'exec-findings-block__badge exec-findings-block__badge--' + sev);
-  badge.textContent = sev === 'critical' ? 'Critical' : 'Warning'; header.appendChild(badge);
-  const count = el('span', 'exec-findings-block__count');
-  count.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : ''); header.appendChild(count);
-  block.appendChild(header);
-  for (const f of findings.slice(0, 5)) {
-    const row = el('div', 'exec-finding-row exec-finding-row--' + sev);
-    const title = el('div', 'exec-finding-row__title'); title.textContent = f.title || ''; row.appendChild(title);
-    if (f.evidence) { const ev = el('div', 'exec-finding-row__evidence'); ev.textContent = f.evidence; row.appendChild(ev); }
-    if (f.recommendation) { const rec = el('div', 'exec-finding-row__rec'); rec.textContent = '\u2192\u2002' + f.recommendation; row.appendChild(rec); }
-    if (f.analyzer) { const meta = el('div', 'exec-finding-row__meta'); meta.textContent = f.analyzer + (f.confidenceScore != null ? '\u2002\u00B7\u2002confidence\u00A0' + Number(f.confidenceScore).toFixed(2) : ''); row.appendChild(meta); }
-    block.appendChild(row);
-  }
-  parent.appendChild(block);
-}

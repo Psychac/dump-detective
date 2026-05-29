@@ -1,5 +1,6 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
+using System.Text.RegularExpressions;
 
 namespace DumpDetective.Reporting.Services;
 
@@ -16,21 +17,32 @@ internal static class ActionPriorityService
 
         var ranked = new List<RankedActionRecord>(Math.Min(findings.Count, maxActions));
 
-        for (int i = 0; i < findings.Count; i++)
+        IReadOnlyList<IReadOnlyList<FindingRecord>> clusters = BuildClusters(findings);
+        for (int i = 0; i < clusters.Count; i++)
         {
-            FindingRecord finding = findings[i];
-            if (!IsActionable(finding))
+            IReadOnlyList<FindingRecord> cluster = clusters[i];
+            if (cluster.Count == 0)
                 continue;
+
+            FindingRecord finding = SelectClusterRepresentative(cluster);
 
             ActionPriorityFactors factors = ComputeFactors(finding);
             ActionConfidenceRecord confidence = ComputeConfidence(finding);
             string action = ResolveActionText(finding);
             string impact = ResolveImpactLabel(finding, factors);
-            string whyNow = ResolveWhyNow(finding, factors, confidence);
+            int relatedCount = cluster.Count - 1;
+            int distinctAnalyzers = CountDistinctAnalyzers(cluster);
+            string whyNow = ResolveWhyNow(finding, factors, confidence, relatedCount, distinctAnalyzers);
+
+            string title = finding.Title;
+            if (relatedCount > 0)
+            {
+                title = finding.Title + " (+" + relatedCount + " related)";
+            }
 
             ranked.Add(new RankedActionRecord(
                 Priority: 0,
-                Title: finding.Title,
+                Title: title,
                 Action: action,
                 Impact: impact,
                 WhyNow: whyNow,
@@ -70,6 +82,85 @@ internal static class ActionPriorityService
         }
 
         return top;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<FindingRecord>> BuildClusters(IReadOnlyList<FindingRecord> findings)
+    {
+        Dictionary<string, List<FindingRecord>> groups = new(StringComparer.Ordinal);
+
+        for (int i = 0; i < findings.Count; i++)
+        {
+            FindingRecord finding = findings[i];
+            if (!IsActionable(finding))
+                continue;
+
+            string key = BuildClusterKey(finding);
+            if (!groups.TryGetValue(key, out List<FindingRecord>? bucket))
+            {
+                bucket = [];
+                groups[key] = bucket;
+            }
+
+            bucket.Add(finding);
+        }
+
+        List<IReadOnlyList<FindingRecord>> clusters = [];
+        foreach (List<FindingRecord> bucket in groups.Values)
+        {
+            bucket.Sort(static (a, b) =>
+            {
+                int sevCmp = SeverityWeight(b.Severity).CompareTo(SeverityWeight(a.Severity));
+                if (sevCmp != 0) return sevCmp;
+
+                int confCmp = (b.ConfidenceScore ?? 0).CompareTo(a.ConfidenceScore ?? 0);
+                if (confCmp != 0) return confCmp;
+
+                int titleCmp = StringComparer.Ordinal.Compare(NormalizeSortKey(a.Title), NormalizeSortKey(b.Title));
+                if (titleCmp != 0) return titleCmp;
+
+                return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Fingerprint), NormalizeSortKey(b.Fingerprint));
+            });
+
+            clusters.Add(bucket);
+        }
+
+        return clusters;
+    }
+
+    private static FindingRecord SelectClusterRepresentative(IReadOnlyList<FindingRecord> cluster)
+        => cluster[0];
+
+    private static int CountDistinctAnalyzers(IReadOnlyList<FindingRecord> cluster)
+    {
+        HashSet<string> analyzers = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < cluster.Count; i++)
+        {
+            analyzers.Add(cluster[i].Analyzer);
+        }
+
+        return analyzers.Count;
+    }
+
+    private static string BuildClusterKey(FindingRecord finding)
+    {
+        string action = ResolveActionText(finding);
+        return NormalizeClusterToken(finding.Category)
+            + "|" + NormalizeClusterToken(finding.Title)
+            + "|" + NormalizeClusterToken(action);
+    }
+
+    private static string NormalizeClusterToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        string normalized = value.Trim().ToLowerInvariant();
+        normalized = Regex.Replace(normalized, "0x[0-9a-f]+", "#");
+        normalized = Regex.Replace(normalized, "\\d+", "#");
+        normalized = Regex.Replace(normalized, "\\s+", " ");
+        if (normalized.Length > 140)
+            normalized = normalized[..140];
+        return normalized;
     }
 
     private static bool IsActionable(FindingRecord finding)
@@ -252,7 +343,12 @@ internal static class ActionPriorityService
         return "Contained risk";
     }
 
-    private static string ResolveWhyNow(FindingRecord finding, ActionPriorityFactors factors, ActionConfidenceRecord confidence)
+    private static string ResolveWhyNow(
+        FindingRecord finding,
+        ActionPriorityFactors factors,
+        ActionConfidenceRecord confidence,
+        int relatedCount,
+        int distinctAnalyzers)
     {
         string severity = string.IsNullOrWhiteSpace(finding.Severity) ? "Unknown" : finding.Severity;
         string text = severity + " signal with composite score " + factors.TotalScore +
@@ -260,6 +356,12 @@ internal static class ActionPriorityService
                ", blast radius " + factors.BlastRadiusWeight +
                ", dependency risk " + factors.DependencyRiskWeight +
                ", confidence " + confidence.Composite.ToString("0.00") + ").";
+
+        if (relatedCount > 0)
+        {
+            text += " Consolidates " + relatedCount + " related finding" + (relatedCount == 1 ? "" : "s") +
+                " across " + distinctAnalyzers + " analyzer" + (distinctAnalyzers == 1 ? "" : "s") + ".";
+        }
 
         if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
             text += " Confidence is low; verify root-cause evidence before broad remediation.";
@@ -269,13 +371,28 @@ internal static class ActionPriorityService
 
     private static string? ResolveValidationStep(FindingRecord finding, ActionConfidenceRecord confidence)
     {
+        string expectedDirection = ResolveExpectedDirection(finding);
+
         if (!string.IsNullOrWhiteSpace(finding.ValidationStep))
-            return finding.ValidationStep;
+            return finding.ValidationStep + " Expected trend: " + expectedDirection;
 
         if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
-            return "Re-check evidence path and confirm with a second analyzer signal before rollout.";
+            return "Re-check evidence path and confirm with a second analyzer signal before rollout. Expected trend: " + expectedDirection;
 
-        return null;
+        return "Re-run analysis and confirm improvement. Expected trend: " + expectedDirection;
+    }
+
+    private static string ResolveExpectedDirection(FindingRecord finding)
+    {
+        string text = string.Concat(finding.Category, " ", finding.Title, " ", finding.Evidence, " ", finding.Analyzer);
+        if (ContainsAny(text, "leak", "retention", "fragmentation", "loh", "gen2", "handle"))
+            return "Retained bytes and leak pressure indicators decrease.";
+        if (ContainsAny(text, "thread", "hang", "deadlock", "blocked", "lock"))
+            return "Blocked/hung thread indicators decrease and execution responsiveness improves.";
+        if (ContainsAny(text, "crash", "exception", "fault"))
+            return "Active exception and fatal signal counts decrease.";
+
+        return "Composite risk score decreases with fewer caveats.";
     }
 
     private static bool ContainsAny(string text, params string[] needles)

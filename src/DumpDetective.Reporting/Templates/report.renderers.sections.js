@@ -3,6 +3,7 @@
 // by function hoisting in the inlined IIFE bundle.
 import { el } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
+import { ensureUniqueDomId } from './report.renderers.shared.js';
 
 function extractCellDisplay(cellData) {
   if (cellData && cellData.display != null) return String(cellData.display);
@@ -71,20 +72,27 @@ export function buildAnalyzerSection(section, i) {
   const anchorScope = arguments.length > 2 ? arguments[2] : '';
   const scopedFallback = anchorScope ? ('detail-' + slugifyAnchor(anchorScope, 'scope') + '-' + i) : ('detail-' + i);
   const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : scopedFallback;
-  const sectionAnchorId = 'section-' + stableId;
+  const sectionAnchorId = ensureUniqueDomId('section-' + stableId);
   const sectionIndexKey = anchorScope ? (slugifyAnchor(anchorScope, 'scope') + '-' + i) : String(i);
   const wrapper = el('section', 'section-card analyzer-section detail-color-' + (i % 6));
   wrapper.id = sectionAnchorId;
   wrapper.dataset.sectionCardId = sectionAnchorId;
   wrapper.dataset.legacySectionId = stableId;
   wrapper.dataset.detailIndex = sectionIndexKey;
+  wrapper.dataset.analyzerName = String(section.analyzerName || section.displayTitle || '');
+  wrapper.dataset.leadSeverity = String((section.leadFinding && section.leadFinding.severity) || 'info').toLowerCase();
+  wrapper.dataset.leadConfidence = String((section.leadFinding && section.leadFinding.confidenceScore != null)
+    ? Number(section.leadFinding.confidenceScore)
+    : 1);
 
   // Keep legacy section IDs addressable (e.g., #A1) while moving canonical
   // section anchors to section-{id} for v2 contract compliance.
   if (stableId !== sectionAnchorId) {
     const legacyAnchor = el('span', 'section-anchor-legacy');
-    legacyAnchor.id = stableId;
+    legacyAnchor.id = ensureUniqueDomId(stableId);
     legacyAnchor.setAttribute('aria-hidden', 'true');
+    legacyAnchor.dataset.anchorAlias = stableId;
+    legacyAnchor.setAttribute('data-anchoralias', stableId);
     wrapper.appendChild(legacyAnchor);
   }
 
@@ -137,7 +145,7 @@ export function buildAnalyzerSection(section, i) {
     }
 
     const lf = el('div', 'lead-finding lead-finding--' + sev);
-    lf.id = 'finding-' + stableId;
+    lf.id = ensureUniqueDomId('finding-' + stableId);
     lf.setAttribute('role', 'group');
     lf.setAttribute('aria-label', 'Lead finding for section ' + stableId);
     const lfHeader = el('div', 'lead-finding__header');
@@ -193,6 +201,7 @@ export function buildAnalyzerSection(section, i) {
       tblDetails.appendChild(tblSummary);
       if (tbl.headers && tbl.headers.length) {
         const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
+        const shouldLazyHydrate = rowCount > 180;
         const tools = el('div', 'table-tools');
         const search = document.createElement('input');
         search.type = 'search';
@@ -228,8 +237,11 @@ export function buildAnalyzerSection(section, i) {
         const tableEl = document.createElement('table');
         tableEl.id = tableId;
         tableEl.classList.add('detail-filterable-table');
+        tableEl.dataset.responsiveStack = '1';
         tableEl.dataset.limit = String(limit > 0 ? limit : 0);
         tableEl.dataset.showAll = '0';
+        tableEl.dataset.hydrated = '0';
+        tableEl.dataset.lazyHydrate = shouldLazyHydrate ? '1' : '0';
         const thead = document.createElement('thead');
         const hrow = document.createElement('tr');
         for (let hi = 0; hi < tbl.headers.length; hi++) {
@@ -237,24 +249,51 @@ export function buildAnalyzerSection(section, i) {
         }
         thead.appendChild(hrow); tableEl.appendChild(thead);
         const tbody = document.createElement('tbody');
+        tbody.dataset.lazyBody = shouldLazyHydrate ? '1' : '0';
         const allRows = tbl.rows || [];
-        for (let ri = 0; ri < allRows.length; ri++) {
-          const dataRow = allRows[ri]; const tr = document.createElement('tr');
-          tr.dataset.rowIndex = String(ri);
-          const cells = Array.isArray(dataRow)
-            ? dataRow
-            : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
-          for (let ci = 0; ci < cells.length; ci++) {
-            const td = document.createElement('td');
-            const cellData = cells[ci];
-            td.textContent = extractCellDisplay(cellData);
-            tr.appendChild(td);
+
+        function hydrateRows() {
+          if (tableEl.dataset.hydrated === '1') return;
+          for (let ri = 0; ri < allRows.length; ri++) {
+            const dataRow = allRows[ri]; const tr = document.createElement('tr');
+            tr.dataset.rowIndex = String(ri);
+            const cells = Array.isArray(dataRow)
+              ? dataRow
+              : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
+            for (let ci = 0; ci < cells.length; ci++) {
+              const td = document.createElement('td');
+              const cellData = cells[ci];
+              td.textContent = extractCellDisplay(cellData);
+              td.dataset.colLabel = String(tbl.headers[ci] || ('Column ' + (ci + 1)));
+              tr.appendChild(td);
+            }
+            if (limit > 0 && rowCount > limit && ri >= limit) {
+              tr.hidden = true;
+            }
+            tbody.appendChild(tr);
           }
-          if (limit > 0 && rowCount > limit && ri >= limit) {
-            tr.hidden = true;
+
+          tableEl.dataset.hydrated = '1';
+          if (typeof tableEl.__applyManagedState === 'function') {
+            tableEl.__applyManagedState();
           }
-          tbody.appendChild(tr);
         }
+
+        if (shouldLazyHydrate && !tblDetails.open) {
+          const hint = el('div', 'table-lazy-hint');
+          hint.textContent = 'Rows render on expand to keep initial view responsive.';
+          tblDetails.appendChild(hint);
+          const onToggle = function () {
+            if (!tblDetails.open) return;
+            hydrateRows();
+            hint.remove();
+            tblDetails.removeEventListener('toggle', onToggle);
+          };
+          tblDetails.addEventListener('toggle', onToggle);
+        } else {
+          hydrateRows();
+        }
+
         tableEl.appendChild(tbody);
         tblWrap.appendChild(tableEl); tblDetails.appendChild(tblWrap);
       }
@@ -267,31 +306,39 @@ export function buildAnalyzerSection(section, i) {
   // ── Provenance footer ─────────────────────────────────────────────────────
   const prov = section.provenance;
   if (prov) {
+    wrapper.dataset.provenanceDurationMs = String(Number(prov.durationMs || 0));
     const provDetails = el('details', 'provenance');
-    provDetails.id = 'provenance-' + stableId;
+    provDetails.id = ensureUniqueDomId('provenance-' + stableId);
     provDetails.setAttribute('data-collapsible', 'provenance');
     const provSummary = el('summary', 'provenance__summary');
-    provSummary.textContent = 'Provenance \u2014 ' + (prov.analyzer || '') + ' \u00b7 ' + (prov.status || '') + ' \u00b7 ' + (prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014');
+    const summaryStatus = (prov.status || '\u2014');
+    const summaryDuration = (prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014');
+    provSummary.textContent = 'Provenance \u2014 ' + summaryStatus + ' \u00b7 ' + summaryDuration;
     provDetails.appendChild(provSummary);
     const provContent = el('div', 'provenance__content');
     const rows = [
-      ['Analyzer', prov.analyzer],
-      ['Status', prov.status],
-      ['Duration', prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014'],
-      ['Objects scanned', prov.objectScanCount != null ? Number(prov.objectScanCount).toLocaleString() : '\u2014'],
-      ['Cache hits', prov.cacheHits != null ? Number(prov.cacheHits).toLocaleString() : '\u2014'],
-      ['Cache misses', prov.cacheMisses != null ? Number(prov.cacheMisses).toLocaleString() : '\u2014'],
+      ['Objects scanned', prov.objectScanCount != null ? Number(prov.objectScanCount).toLocaleString() : null],
+      ['Cache hits', prov.cacheHits != null ? Number(prov.cacheHits).toLocaleString() : null],
+      ['Cache misses', prov.cacheMisses != null ? Number(prov.cacheMisses).toLocaleString() : null],
     ];
+    let detailRowCount = 0;
     for (let ri = 0; ri < rows.length; ri++) {
       const r = rows[ri];
+      if (r[1] == null) continue;
       const lbl = el('span', 'provenance__label'); lbl.textContent = r[0];
-      const val = el('span', 'provenance__value'); val.textContent = r[1] || '\u2014';
+      const val = el('span', 'provenance__value'); val.textContent = r[1];
       provContent.appendChild(lbl); provContent.appendChild(val);
+      detailRowCount++;
     }
     if (prov.cappingNotes && prov.cappingNotes.length) {
       for (let ni = 0; ni < prov.cappingNotes.length; ni++) {
         const note = el('div', 'provenance__note'); note.textContent = '\u26A0 ' + prov.cappingNotes[ni]; provContent.appendChild(note);
       }
+    }
+    if (detailRowCount === 0 && (!prov.cappingNotes || prov.cappingNotes.length === 0)) {
+      const note = el('div', 'provenance__note');
+      note.textContent = 'No additional provenance diagnostics.';
+      provContent.appendChild(note);
     }
     provDetails.appendChild(provContent); wrapper.appendChild(provDetails);
   }

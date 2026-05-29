@@ -291,21 +291,24 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("Critical findings:");
             foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
         {
             sb.AppendLine("Warning findings:");
             foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
         }
 
-        if (summary.TopRecommendations is { Count: > 0 })
+        if (summary.TopActions is { Count: > 0 })
         {
-            sb.AppendLine("Top recommendations:");
-            foreach (FindingRecord finding in summary.TopRecommendations)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+            sb.AppendLine("Action queue:");
+            for (int i = 0; i < summary.TopActions.Count && i < 10; i++)
+            {
+                RankedActionRecord action = summary.TopActions[i];
+                sb.AppendLine($"  {i + 1}. {action.Title}: {action.Action}");
+            }
         }
 
         sb.AppendLine();
@@ -384,7 +387,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             RenderExecutiveSummaryMarkdown(
                 executiveSummary,
                 doc.CorrelationEvents,
-                doc.Appendix?.KnownLimitations,
                 sb);
         }
 
@@ -501,7 +503,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
     private static void RenderExecutiveSummaryMarkdown(
         ExecutiveSummaryRecord summary,
         IReadOnlyList<CorrelationEventRecord>? correlationEvents,
-        IReadOnlyList<string>? knownLimitations,
         StringBuilder sb)
     {
         sb.AppendLine("## Executive Summary");
@@ -516,7 +517,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
             sb.AppendLine("### Critical Findings");
             foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Evidence)} | {Esc(finding.Recommendation)}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
@@ -524,15 +525,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
             sb.AppendLine("### Warning Findings");
             foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
-        }
-
-        if (summary.TopRecommendations is { Count: > 0 })
-        {
-            sb.AppendLine();
-            sb.AppendLine("### Top Recommendations");
-            foreach (FindingRecord finding in summary.TopRecommendations)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Evidence)} | {Esc(finding.Recommendation)}");
         }
 
         if (summary.TopActions is { Count: > 0 })
@@ -577,91 +570,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         }
 
         sb.AppendLine();
-        sb.AppendLine("### Incident Handoff");
-
-        int criticalCount = summary.CriticalFindings?.Count ?? 0;
-        int warningCount = summary.WarningFindings?.Count ?? 0;
-        sb.AppendLine($"- Incident summary: {criticalCount} critical and {warningCount} warning findings require follow-up.");
-
-        if (summary.TopActions is { Count: > 0 })
-            sb.AppendLine($"- Primary focus: {Esc(summary.TopActions[0].Title)}.");
-        else if (summary.TopRecommendations is { Count: > 0 })
-            sb.AppendLine($"- Primary focus: {Esc(summary.TopRecommendations[0].Title)}.");
-        else
-            sb.AppendLine("- Primary focus: validate warning findings and runtime stability signals.");
-
-        sb.AppendLine();
-        sb.AppendLine("#### Top Actions");
-        if (summary.TopActions is { Count: > 0 })
-        {
-            for (int i = 0; i < summary.TopActions.Count && i < 3; i++)
-            {
-                RankedActionRecord action = summary.TopActions[i];
-                sb.AppendLine($"{i + 1}. **{Esc(action.Title)}** — {Esc(action.Action)}");
-            }
-        }
-        else if (summary.TopRecommendations is { Count: > 0 })
-        {
-            for (int i = 0; i < summary.TopRecommendations.Count && i < 3; i++)
-            {
-                FindingRecord finding = summary.TopRecommendations[i];
-                sb.AppendLine($"{i + 1}. **{Esc(finding.Title)}** — {Esc(finding.Recommendation)}");
-            }
-        }
-        else
-        {
-            sb.AppendLine("1. No ranked actions were produced.");
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("#### Risks If Unaddressed");
-        List<FindingRecord> riskFindings = [];
-        if (summary.CriticalFindings is { Count: > 0 })
-            riskFindings.AddRange(summary.CriticalFindings);
-        if (summary.WarningFindings is { Count: > 0 })
-            riskFindings.AddRange(summary.WarningFindings);
-
-        if (riskFindings.Count > 0)
-        {
-            for (int i = 0; i < riskFindings.Count && i < 3; i++)
-                sb.AppendLine($"- {Esc(riskFindings[i].Title)}");
-        }
-        else
-        {
-            sb.AppendLine("- Risk level is currently low-confidence; verify with section evidence.");
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("#### Evidence References");
-        if (summary.TopActions is { Count: > 0 })
-        {
-            for (int i = 0; i < summary.TopActions.Count && i < 3; i++)
-            {
-                RankedActionRecord action = summary.TopActions[i];
-                string reference = string.IsNullOrWhiteSpace(action.FindingFingerprint)
-                    ? Esc(action.Analyzer)
-                    : Esc(action.FindingFingerprint);
-                sb.AppendLine($"- F{i + 1}: {Esc(action.Title)} (`{reference}`)");
-            }
-        }
-        else
-        {
-            sb.AppendLine("- No direct evidence references available.");
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("#### Known Limitations");
-        if (knownLimitations is { Count: > 0 })
-        {
-            for (int i = 0; i < knownLimitations.Count && i < 3; i++)
-                sb.AppendLine($"- {Esc(knownLimitations[i])}");
-        }
-        else
-        {
-            sb.AppendLine("- No explicit limitations were reported.");
-        }
-
-        sb.AppendLine();
     }
 
     private static void RenderExecutiveSummaryText(ExecutiveSummaryRecord summary, StringBuilder sb)
@@ -677,21 +585,24 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("Critical findings:");
             foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
         {
             sb.AppendLine("Warning findings:");
             foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
         }
 
-        if (summary.TopRecommendations is { Count: > 0 })
+        if (summary.TopActions is { Count: > 0 })
         {
-            sb.AppendLine("Top recommendations:");
-            foreach (FindingRecord finding in summary.TopRecommendations)
-                sb.AppendLine($"  - {finding.Title}: {finding.Recommendation}");
+            sb.AppendLine("Action queue:");
+            for (int i = 0; i < summary.TopActions.Count && i < 10; i++)
+            {
+                RankedActionRecord action = summary.TopActions[i];
+                sb.AppendLine($"  {i + 1}. {action.Title}: {action.Action}");
+            }
         }
 
         sb.AppendLine();

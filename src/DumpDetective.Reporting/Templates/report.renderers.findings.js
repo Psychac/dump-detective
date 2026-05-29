@@ -1,6 +1,7 @@
 // Findings UI: finding cards, confidence notes, and paged findings list.
 import { el, t, sevCss, linkifyAnchors } from './report.dom.js';
 import { findingAnchorId } from './report.renderers.shared.js';
+import { ensureUniqueDomId } from './report.renderers.shared.js';
 
 // ── Finding card ──────────────────────────────────────────────────────────────
 
@@ -22,9 +23,12 @@ export function buildFindingCard(f, i) {
     return normalize(a) && normalize(a) === normalize(b);
   };
 
-  const findingId = findingAnchorId(f, i);
+  const canonicalFindingId = findingAnchorId(f, i);
+  const findingId = ensureUniqueDomId(canonicalFindingId);
   const sec = el('section', 'finding-card finding-card--' + severity);
   sec.id = findingId;
+  sec.setAttribute('data-anchor-alias', canonicalFindingId);
+  sec.setAttribute('data-anchoralias', canonicalFindingId);
   sec.dataset.severity = severity;
   sec.dataset.title = f.title || '';
   sec.dataset.summary = evidenceSummary.substring(0, 200);

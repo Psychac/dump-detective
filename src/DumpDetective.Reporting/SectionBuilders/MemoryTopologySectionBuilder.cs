@@ -24,12 +24,21 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
 
         var keyMetrics = new List<SectionKeyMetric>
         {
+            KM("Memory pressure", d.MemoryPressureScore.ToString("F1"), d.MemoryPressureScore),
             KM("Total bytes",    FormatHelper.FormatBytes(d.TotalBytes),   (double)d.TotalBytes),
             KM("Total objects",  d.TotalObjects.ToString("N0"),             d.TotalObjects),
             KM("Unique types",   d.UniqueTypes.ToString("N0"),              d.UniqueTypes),
             KM("LOH bytes",      FormatHelper.FormatBytes(d.LohBytes),     (double)d.LohBytes),
             KM("LOH %",          $"{d.LohPercent:F1}%",                    d.LohPercent),
+            KM("Top 5 share",    $"{d.Top5BytesPercent:F1}%",              d.Top5BytesPercent),
+            KM("<256 B objects", $"{d.SmallObjectCountPercent:F1}%",       d.SmallObjectCountPercent),
+            KM("Objects / MB",   d.ObjectsPerMb.ToString("F1"),            d.ObjectsPerMb),
         };
+
+        string pressureBand = d.MemoryPressureScore >= 75 ? "High"
+            : d.MemoryPressureScore >= 50 ? "Medium"
+            : "Low";
+        blocks.Add(T($"Memory pressure score: {d.MemoryPressureScore:F1}/100 ({pressureBand})."));
 
         if (d.TopTypes.Count > 0)
         {
@@ -105,16 +114,30 @@ internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyz
         if (d.SizeBucketHistogram is { Count: > 0 })
         {
             var rows = new List<TableRow>(d.SizeBucketHistogram.Count);
+            long totalBucketObjects = 0;
+            for (int i = 0; i < d.SizeBucketHistogram.Count; i++)
+                totalBucketObjects += d.SizeBucketHistogram[i].ObjectCount;
+
+            long runningObjectCount = 0;
             for (int i = 0; i < d.SizeBucketHistogram.Count; i++)
             {
                 SizeBucketEntry b = d.SizeBucketHistogram[i];
+                runningObjectCount += b.ObjectCount;
+                double pctObjects = totalBucketObjects == 0 ? 0 : b.ObjectCount * 100.0 / totalBucketObjects;
+                double cumulativePct = totalBucketObjects == 0 ? 0 : runningObjectCount * 100.0 / totalBucketObjects;
                 rows.Add(Row(
                     Cell(b.RangeLabel),
                     Cell(b.ObjectCount.ToString("N0"), b.ObjectCount),
+                    Cell($"{pctObjects:F1}%"),
+                    Cell($"{cumulativePct:F1}%"),
                     Cell(FormatHelper.FormatBytes(b.TotalBytes), (long)Math.Min(b.TotalBytes, long.MaxValue))));
             }
-            tables.Add(ST("Object size histogram", ["Range", "Objects", "Total Bytes"], rows));
+            tables.Add(ST("Object size histogram", ["Range", "Objects", "% Objects", "Cumulative %", "Total Bytes"], rows));
         }
+
+
+
+
 
         return new AnalyzerDetailSection(
             AnalyzerName: "Memory Analysis",

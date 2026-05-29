@@ -545,73 +545,12 @@ export function buildActionQueuePanel(doc) {
     subtitle.textContent = 'Deterministic ranked actions (model ' + modelVersion + ').';
     sec.appendChild(subtitle);
 
-    const escalation = el('section', 'escalation-packet');
-    escalation.id = 'escalation-packet';
-    const escalationTitle = el('h3', 'escalation-packet__title');
-    escalationTitle.textContent = 'Escalation Packet';
-    escalation.appendChild(escalationTitle);
-    const escalationBody = el('div', 'escalation-packet__body');
-    const escalationSummary = el('p', 'escalation-packet__summary');
-    escalationSummary.textContent = 'Top suspects, immediate mitigations, and owner routing for execution.';
-    escalationBody.appendChild(escalationSummary);
-    const escalationList = el('ul', 'escalation-packet__list');
-    const topEscalations = topActions.slice(0, 3);
-    for (let ei = 0; ei < topEscalations.length; ei++) {
-      const action = topEscalations[ei] || {};
-      const li = document.createElement('li');
-      li.textContent = 'P' + String(action.priority || (ei + 1)) + ' | '
-        + String(action.title || 'Unlabeled finding')
-        + ' | Owner: ' + String(action.owner || 'Unassigned')
-        + ' | Mitigation: ' + String(action.action || action.whyNow || 'Investigate in forensics mode.');
-      escalationList.appendChild(li);
-    }
-    if (!escalationList.children.length) {
-      const li = document.createElement('li');
-      li.textContent = 'No ranked escalation candidates available.';
-      escalationList.appendChild(li);
-    }
-    escalationBody.appendChild(escalationList);
-    const escalationCopy = document.createElement('button');
-    escalationCopy.type = 'button';
-    escalationCopy.id = 'btn-copy-escalation';
-    escalationCopy.className = 'action-btn copy-btn escalation-packet__copy';
-    escalationCopy.textContent = 'Copy Escalation Packet';
-    const escalationLines = [];
-    escalationLines.push('Escalation Packet');
-    escalationLines.push('Model: ' + modelVersion);
-    for (let ei = 0; ei < topEscalations.length; ei++) {
-      const action = topEscalations[ei] || {};
-      escalationLines.push(
-        String(ei + 1) + '. '
-        + String(action.title || 'Unlabeled finding')
-        + ' | Owner: ' + String(action.owner || 'Unassigned')
-        + ' | Effort: ' + String(action.effort || 'TBD')
-        + ' | Mitigation: ' + String(action.action || action.whyNow || 'Investigate in forensics mode.')
-      );
-    }
-    escalationCopy.setAttribute('data-copy', escalationLines.join('\n'));
-    escalationBody.appendChild(escalationCopy);
-    escalation.appendChild(escalationBody);
-    sec.appendChild(escalation);
-
     const lanesHost = el('div', 'action-triage-lanes');
     const laneDefs = [
       { key: 'now', label: 'Now', maxPriority: 3 },
       { key: 'next', label: 'Next', maxPriority: 7 },
       { key: 'watch', label: 'Watch', maxPriority: Number.MAX_SAFE_INTEGER }
     ];
-    const laneBodies = {};
-    for (let li = 0; li < laneDefs.length; li++) {
-      const lane = laneDefs[li];
-      const laneEl = el('section', 'action-triage-lane action-triage-lane--' + lane.key);
-      const laneTitle = el('h3', 'action-triage-lane__title');
-      laneTitle.textContent = lane.label;
-      laneEl.appendChild(laneTitle);
-      const laneBody = el('div', 'action-triage-lane__body');
-      laneEl.appendChild(laneBody);
-      lanesHost.appendChild(laneEl);
-      laneBodies[lane.key] = laneBody;
-    }
 
     function laneKeyForPriority(priority) {
       if (priority <= 3) return 'now';
@@ -619,7 +558,38 @@ export function buildActionQueuePanel(doc) {
       return 'watch';
     }
 
+    // Pre-count items per lane so the collapsed Watch title shows the count.
+    const laneCounts = { now: 0, next: 0, watch: 0 };
     const laneRows = Math.min(topActions.length, 20);
+    for (let i = 0; i < laneRows; i++) {
+      const p = Number((topActions[i] || {}).priority || (i + 1));
+      laneCounts[laneKeyForPriority(p)]++;
+    }
+
+    const laneBodies = {};
+    for (let li = 0; li < laneDefs.length; li++) {
+      const lane = laneDefs[li];
+      const count = laneCounts[lane.key] || 0;
+      const laneEl = document.createElement('details');
+      laneEl.className = 'action-triage-lane action-triage-lane--' + lane.key;
+      laneEl.open = lane.key !== 'watch';
+
+      const laneTitle = el('summary', 'action-triage-lane__title');
+      const labelSpan = el('span', 'action-triage-lane__label');
+      labelSpan.textContent = lane.label;
+      const countChip = el('span', 'action-triage-lane__count action-triage-lane__count--' + lane.key);
+      countChip.textContent = String(count);
+      countChip.setAttribute('aria-label', count + ' items');
+      laneTitle.appendChild(labelSpan);
+      laneTitle.appendChild(countChip);
+      laneEl.appendChild(laneTitle);
+
+      const laneBody = el('div', 'action-triage-lane__body');
+      laneEl.appendChild(laneBody);
+      lanesHost.appendChild(laneEl);
+      laneBodies[lane.key] = laneBody;
+    }
+
     for (let i = 0; i < laneRows; i++) {
       const action = topActions[i] || {};
       const priority = Number(action.priority || (i + 1));

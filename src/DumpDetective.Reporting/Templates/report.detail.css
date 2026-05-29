@@ -750,8 +750,8 @@ body.report-density-comfortable .detail-block tbody td {
 }
 
 .action-triage-lanes {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   margin: 0 0 14px;
 }
@@ -761,7 +761,6 @@ body.report-density-comfortable .detail-block tbody td {
   border-radius: 10px;
   background: #f8fafc;
   padding: 10px;
-  min-width: 0;
   overflow: visible;
 }
 
@@ -786,12 +785,87 @@ body.report-density-comfortable .detail-block tbody td {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #334155;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-triage-lane__label {
+  flex: 1 1 auto;
+}
+
+.action-triage-lane__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  background: #e2e8f0;
+  color: #475569;
+  flex-shrink: 0;
+}
+
+.action-triage-lane__count--now {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.action-triage-lane__count--next {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.action-triage-lane__count--watch {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.action-triage-lane__title::-webkit-details-marker {
+  display: none;
+}
+
+.action-triage-lane__title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  display: inline-block;
+  border-right: 2px solid #94a3b8;
+  border-bottom: 2px solid #94a3b8;
+  transform: rotate(-45deg);
+  transition: transform 0.18s;
+}
+
+.action-triage-lane[open] .action-triage-lane__title::before {
+  transform: rotate(45deg) translate(-2px, -2px);
+  border-color: #475569;
 }
 
 .action-triage-lane__body {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .action-triage-lane__body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .action-triage-lane__body {
+    grid-template-columns: 1fr;
+  }
 }
 
 .action-triage-card {
@@ -1019,11 +1093,7 @@ body.report-density-comfortable .detail-block tbody td {
   color: #ffffff;
 }
 
-@media (max-width: 900px) {
-  .action-triage-lanes {
-    grid-template-columns: 1fr;
-  }
-}
+
 
 /* ΓöÇΓöÇ Sortable columns ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 thead th.sortable {

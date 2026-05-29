@@ -589,7 +589,7 @@ export function buildExecutiveSummary(doc) {
     const gcPressureScore = toNumber(summary.gcPressureScore);
     const activeExceptions = toNumber(summary.activeExceptions);
 
-    function buildKpiTile(label, value, context, status, thresholdText) {
+    function buildKpiTile(label, value, context, status) {
       if (value == null || value === '') return null;
       const tile = el('section', 'exec-kpi-tile exec-kpi-tile--' + statusClass(status));
       const head = el('div', 'exec-kpi-tile__head');
@@ -604,11 +604,6 @@ export function buildExecutiveSummary(doc) {
         const ctx = el('div', 'exec-kpi-tile__context');
         ctx.textContent = context;
         tile.appendChild(ctx);
-      }
-      if (thresholdText) {
-        const hint = el('div', 'exec-kpi-tile__threshold');
-        hint.textContent = thresholdText;
-        tile.appendChild(hint);
       }
       return tile;
     }
@@ -652,29 +647,25 @@ export function buildExecutiveSummary(doc) {
         'Managed Heap',
         totalManagedBytes != null ? formatBytes(totalManagedBytes) : null,
         heapContext,
-        heapStatus,
-        'Warn: LOH >= 15% or Gen2 >= 60% | Crit: LOH >= 25% or Gen2 >= 75%'
+        heapStatus
       ),
       buildKpiTile(
         'Leak Signals',
         leakCandidateCount != null ? Math.round(leakCandidateCount).toLocaleString('en-US') : null,
         leakContext,
-        leakStatus,
-        'Warn: suspects > 0 or finalizer queue > 1,000 | Crit: suspects >= 10 or finalizer queue > 5,000'
+        leakStatus
       ),
       buildKpiTile(
         'Threading Risk',
         blockedThreads != null ? Math.round(blockedThreads).toLocaleString('en-US') : null,
         threadContext,
-        threadStatus,
-        'Warn: blocked > 0 or hang < 50 | Crit: deadlocks > 0, blocked >= 20, or hang < 25'
+        threadStatus
       ),
       buildKpiTile(
         'Runtime Pressure',
         gcPressureLabel,
         runtimeContext,
-        runtimeStatus,
-        'Warn: GC pressure >= 66 | Crit: GC pressure >= 85 or active exceptions > 0'
+        runtimeStatus
       )
     ];
 

@@ -284,24 +284,6 @@ export function buildTOC(doc, perDumpDocs) {
     return li;
   }
 
-
-  let criticalJumpTarget = null;
-  if (Array.isArray(domains)) {
-    for (let i = 0; i < domains.length; i++) {
-      const d = domains[i];
-      if (String(d && d.leadSeverity || '').toLowerCase() === 'critical') {
-        criticalJumpTarget = '#' + domainAnchorId(d, i);
-        break;
-      }
-    }
-  }
-  if (!criticalJumpTarget && Array.isArray(doc.findings)) {
-    const hasCritical = doc.findings.some(function (f) {
-      return String((f && f.severity) || '').toLowerCase() === 'critical';
-    });
-    if (hasCritical) criticalJumpTarget = '#sec-action-queue';
-  }
-
   const fragment = document.createDocumentFragment();
 
   // ── 1. Pinned quick-nav ──────────────────────────────────────────────────
@@ -311,9 +293,12 @@ export function buildTOC(doc, perDumpDocs) {
   quickList.appendChild(quickLink('#sec-header',  'Overview',          '\u25CE'));
   if (doc.healthScorecard) quickList.appendChild(quickLink('#sec-health', 'Health Summary', '\u271A'));
   if (doc.executiveSummary) quickList.appendChild(quickLink('#sec-exec',  'Executive Summary', '\u00A7'));
-  if (criticalJumpTarget) quickList.appendChild(quickLink(criticalJumpTarget, 'Jump to Critical', '!'));
   if (Array.isArray(doc.findings) && doc.findings.length) quickList.appendChild(quickLink('#sec-action-queue', 'Action Queue', '!'));
-  if (doc.appendix) quickList.appendChild(quickLink('#sec-appendix', 'Appendix', '\u00B6'));
+  if (doc.appendix) {
+    const appendixLi = quickLink('#sec-appendix', 'Appendix', '\u00B6');
+    appendixLi.classList.add('toc-forensics-only');
+    quickList.appendChild(appendixLi);
+  }
   quickSection.appendChild(quickList);
   fragment.appendChild(quickSection);
 
@@ -374,7 +359,10 @@ export function buildTOC(doc, perDumpDocs) {
         li.appendChild(a);
         list.appendChild(li);
       }
-      if (list.children.length) det.appendChild(list);
+      if (list.children.length) {
+        list.className = 'toc-forensics-only';
+        det.appendChild(list);
+      }
       container.appendChild(det);
     }
   } else {

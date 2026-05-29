@@ -684,16 +684,6 @@ export function setupInteractivity(doc, announce) {
       return;
     }
 
-    // Shift+C: copy escalation packet content.
-    if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && String(ev.key || '').toLowerCase() === 'c') {
-      const copyBtn = document.getElementById('btn-copy-escalation');
-      if (copyBtn) {
-        copyBtn.click();
-        ev.preventDefault();
-        return;
-      }
-    }
-
     // Shift+A: jump to action queue.
     if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && String(ev.key || '').toLowerCase() === 'a') {
       const queue = document.getElementById('sec-action-queue');

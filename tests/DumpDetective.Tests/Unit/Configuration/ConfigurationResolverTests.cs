@@ -42,6 +42,69 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
+    public void Resolve_ShouldHonorReportStyleVersion_FromConfig()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "ReportStyleVersion": "v2"
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with
+            {
+                DumpPath = null,
+                OutputFormat = ReportFormat.Html,
+                ReportStyleVersion = ReportStyleVersion.V1
+            };
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ShouldUseCliReportStyle_WhenConfigMissingStyle()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp"
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with
+            {
+                DumpPath = null,
+                OutputFormat = ReportFormat.Html,
+                ReportStyleVersion = ReportStyleVersion.V2
+            };
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Resolve_ShouldUseProfileBaseline_WhenConfigMissingThatField()
     {
         string tempDirectory = CreateTempDirectory();

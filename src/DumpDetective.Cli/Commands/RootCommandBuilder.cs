@@ -52,6 +52,10 @@ internal sealed class RootCommandBuilder
     {
         Description = "Audience tier: all, executive, developer, or deep."
     };
+    private readonly Option<string?> _reportStyleOption = new("--report-style")
+    {
+        Description = "Report style version: v1 or v2."
+    };
     private readonly Option<string?> _indexModeOption = new("--index-mode")
     {
         Description = "Indexing mode: auto, memory, or disk."
@@ -82,6 +86,7 @@ internal sealed class RootCommandBuilder
             _excludeAnalyzersOption,
             _reportFormatOption,
             _reportAudienceOption,
+            _reportStyleOption,
             _preRenderOption,
             _separateJsonOption,
             _indexModeOption,
@@ -113,6 +118,7 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportAudience(parseResult.GetValue(_reportAudienceOption)),
+            ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
             ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)),
             parseResult.GetValue(_preRenderOption),
             parseResult.GetValue(_separateJsonOption));
@@ -190,6 +196,21 @@ internal sealed class RootCommandBuilder
             "memory" or "mem" => HeapIndexPrebuildMode.Memory,
             "disk" => HeapIndexPrebuildMode.Disk,
             _ => throw new ArgumentException($"Invalid index mode '{value}'. Expected auto, memory, or disk.")
+        };
+    }
+
+    private static ReportStyleVersion? ParseReportStyle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "v1" or "1" => ReportStyleVersion.V1,
+            "v2" or "2" => ReportStyleVersion.V2,
+            _ => throw new ArgumentException($"Invalid report style '{value}'. Expected v1 or v2.")
         };
     }
 }

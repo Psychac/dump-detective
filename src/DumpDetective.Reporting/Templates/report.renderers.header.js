@@ -1,7 +1,7 @@
 // Header, health scorecard, and executive summary renderers.
 // Covers both single-dump and trend modes; the isTrend flag selects the appropriate layout.
 import { el, t, formatBytes } from './report.dom.js';
-import { domainAnchorId } from './report.renderers.shared.js';
+import { domainAnchorId, findingAnchorId } from './report.renderers.shared.js';
 
 // ── Report header (hero + meta-stat rows) ────────────────────────────────────
 
@@ -22,8 +22,13 @@ export function buildHeader(doc) {
         : []));
   const trendDumpCount = doc.trendDumpCount || paths.length || snapshots.length;
 
-  const sec = el('section', 'header-card');
-  sec.id = 'sec-header';
+  const sec = el('section', 'section-card header-card report-header');
+  sec.id = 'report-header';
+  sec.setAttribute('data-component-id', 'report-header');
+  const headerLegacyAnchor = el('span', 'section-anchor-legacy');
+  headerLegacyAnchor.id = 'sec-header';
+  headerLegacyAnchor.setAttribute('aria-hidden', 'true');
+  sec.appendChild(headerLegacyAnchor);
 
   // ── Hero band ────────────────────────────────────────────────────────────
   const hero = el('div', 'header-hero');
@@ -178,6 +183,8 @@ export function buildHeader(doc) {
   if (genStr) runItems.push(['Analyzed at (local)', genStr]);
   runItems.push(['Elapsed', ((doc.elapsedSeconds) || 0).toFixed(1) + 's']);
   if (doc.schemaVersion) runItems.push(['Schema', doc.schemaVersion]);
+  const scoringModelVersion = (doc.scoringModelVersion || execSum.actionScoringModelVersion || '').toString().trim();
+  if (scoringModelVersion) runItems.push(['Scoring model', scoringModelVersion]);
   if (doc.analyzerVersion) runItems.push(['Version', doc.analyzerVersion]);
   const runRow = statRow('Analysis run', runItems); if (runRow) body.appendChild(runRow);
 
@@ -283,7 +290,12 @@ export function buildHealthScorecard(doc) {
   }
 
   const sec = el('section', 'section-card health-scorecard');
-  sec.id = 'sec-health';
+  sec.id = 'health-scorecard';
+  sec.setAttribute('data-component-id', 'health-scorecard');
+  const healthLegacyAnchor = el('span', 'section-anchor-legacy');
+  healthLegacyAnchor.id = 'sec-health';
+  healthLegacyAnchor.setAttribute('aria-hidden', 'true');
+  sec.appendChild(healthLegacyAnchor);
 
   // ── Overall banner ───────────────────────────────────────────────────────
   const overall = sevInfo(scorecard.overallSeverity);
@@ -473,7 +485,12 @@ export function buildExecutiveSummary(doc) {
   if (!summary) return null;
 
   const sec = el('section', 'section-card executive-summary');
-  sec.id = 'sec-exec';
+  sec.id = 'executive-summary';
+  sec.setAttribute('data-component-id', 'executive-summary');
+  const execLegacyAnchor = el('span', 'section-anchor-legacy');
+  execLegacyAnchor.id = 'sec-exec';
+  execLegacyAnchor.setAttribute('aria-hidden', 'true');
+  sec.appendChild(execLegacyAnchor);
 
   // T2a — Lifecycle Summary strip (trend mode only)
   const isTrendExecSection = !!(doc['$kind'] === 'trend' || doc.isTrendReport);
@@ -820,6 +837,183 @@ export function buildExecutiveSummary(doc) {
     buildTrendTable('Top Improvements', pickRows(improvementSource, 3));
   }
 
+  // ── Correlation highlights (single + trend) ─────────────────────────────
+  const correlationEvents = Array.isArray(doc.correlationEvents) ? doc.correlationEvents : [];
+  if (correlationEvents.length) {
+    const findings = Array.isArray(doc.findings) ? doc.findings : [];
+    const findingByFingerprint = new Map();
+    for (let fi = 0; fi < findings.length; fi++) {
+      const f = findings[fi] || {};
+      const fp = String(f.fingerprint || '').toLowerCase();
+      if (!fp || findingByFingerprint.has(fp)) continue;
+      findingByFingerprint.set(fp, f);
+    }
+
+    function normalizeFingerprint(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function resolveFindingByFingerprint(value) {
+      const normalized = normalizeFingerprint(value);
+      if (!normalized) return null;
+
+      if (findingByFingerprint.has(normalized))
+        return findingByFingerprint.get(normalized);
+
+      const tail = normalized.includes('::') ? normalized.split('::').pop() : normalized;
+      if (tail && findingByFingerprint.has(tail))
+        return findingByFingerprint.get(tail);
+
+      for (const [key, finding] of findingByFingerprint.entries()) {
+        if (key.includes(normalized) || normalized.includes(key))
+          return finding;
+      }
+
+      return null;
+    }
+
+    function formatSignalLabel(signalKey) {
+      const raw = String(signalKey || '');
+      const idx = raw.indexOf(':');
+      const token = (idx >= 0 ? raw.slice(idx + 1) : raw).trim().toLowerCase();
+      if (!token) return '';
+
+      const pretty = token
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (pretty === 'thread pool') return 'thread pool pressure';
+      if (pretty === 'gc handle') return 'GC handle retention';
+      if (pretty === 'connection pool') return 'connection pool pressure';
+      return pretty;
+    }
+
+    const sectionByAnalyzer = new Map();
+    if (Array.isArray(doc.domains)) {
+      for (let di = 0; di < doc.domains.length; di++) {
+        const domain = doc.domains[di] || {};
+        const sections = Array.isArray(domain.sections) ? domain.sections : [];
+        for (let si = 0; si < sections.length; si++) {
+          const section = sections[si] || {};
+          const analyzer = String(section.analyzerName || '').toLowerCase();
+          const sectionId = String(section.sectionId || '').trim();
+          if (!analyzer || !sectionId || sectionByAnalyzer.has(analyzer)) continue;
+          sectionByAnalyzer.set(analyzer, sectionId);
+        }
+      }
+    }
+
+    const domainAnchorMap = new Map();
+    if (Array.isArray(doc.domains)) {
+      for (let di = 0; di < doc.domains.length; di++) {
+        const domain = doc.domains[di] || {};
+        const key = String(domain.domain || '').toLowerCase();
+        if (!key || domainAnchorMap.has(key)) continue;
+        domainAnchorMap.set(key, '#' + domainAnchorId(domain, di));
+      }
+    }
+
+    function resolveFallbackAnchor(evt) {
+      if (Array.isArray(evt.domains)) {
+        for (let d = 0; d < evt.domains.length; d++) {
+          const domKey = String(evt.domains[d] || '').toLowerCase();
+          const anchor = domainAnchorMap.get(domKey);
+          if (anchor) return anchor;
+        }
+      }
+      return '#sec-action-queue';
+    }
+
+    function resolvePrimaryAnchor(evt) {
+      const sourceFingerprints = Array.isArray(evt.sourceFingerprints) ? evt.sourceFingerprints : [];
+      for (let p = 0; p < sourceFingerprints.length; p++) {
+        const finding = resolveFindingByFingerprint(sourceFingerprints[p]);
+        if (!finding) continue;
+        return '#' + findingAnchorId(finding, 'corr-title-' + p);
+      }
+      return resolveFallbackAnchor(evt);
+    }
+
+    const corrWrap = el('div', 'exec-correlation');
+    const heading = el('div', 'exec-recommendations__heading');
+    heading.textContent = 'Correlation Signals';
+    corrWrap.appendChild(heading);
+
+    const list = el('div', 'exec-correlation__list');
+    for (let i = 0; i < correlationEvents.length && i < 3; i++) {
+      const evt = correlationEvents[i] || {};
+      const kind = String(evt.eventType || 'co-move').toLowerCase();
+      const item = el('article', 'exec-correlation__item exec-correlation__item--' + kind);
+
+      const title = el('div', 'exec-correlation__title');
+      const titleLink = document.createElement('a');
+      titleLink.className = 'exec-correlation__item-link';
+      titleLink.href = resolvePrimaryAnchor(evt);
+      titleLink.textContent = evt.title || 'Correlation signal';
+      title.appendChild(titleLink);
+      item.appendChild(title);
+
+      if (evt.rationale) {
+        const rationale = el('div', 'exec-correlation__signals');
+        rationale.textContent = evt.rationale;
+        item.appendChild(rationale);
+      }
+
+      const meta = el('div', 'exec-correlation__meta');
+      const confidence = evt.confidence || 'Unknown';
+      const domains = Array.isArray(evt.domains) ? evt.domains.join(', ') : 'Unknown';
+      meta.textContent = confidence + ' confidence | ' + domains;
+      item.appendChild(meta);
+
+      if (Array.isArray(evt.signalKeys) && evt.signalKeys.length) {
+        const labels = [];
+        const seen = new Set();
+        for (let s = 0; s < evt.signalKeys.length && labels.length < 2; s++) {
+          const label = formatSignalLabel(evt.signalKeys[s]);
+          if (label && !seen.has(label)) {
+            seen.add(label);
+            labels.push(label);
+          }
+        }
+        const signals = el('div', 'exec-correlation__signals');
+        signals.textContent = labels.length ? ('Shared signals: ' + labels.join(' | ')) : '';
+        item.appendChild(signals);
+      }
+
+      if (Array.isArray(evt.sourceFingerprints) && evt.sourceFingerprints.length) {
+        const provenance = el('div', 'exec-correlation__provenance');
+        const label = el('span', 'exec-correlation__provenance-label');
+        label.textContent = 'Sources:';
+        provenance.appendChild(label);
+
+        for (let p = 0; p < evt.sourceFingerprints.length && p < 3; p++) {
+          const fp = String(evt.sourceFingerprints[p] || '');
+          const finding = resolveFindingByFingerprint(fp);
+          const link = document.createElement('a');
+          link.className = 'exec-correlation__provenance-link';
+          if (finding) {
+            link.href = '#' + findingAnchorId(finding, 'corr-' + i + '-' + p);
+          } else {
+            const analyzerHint = fp.split('::')[0];
+            const sectionId = analyzerHint ? sectionByAnalyzer.get(String(analyzerHint).toLowerCase()) : null;
+            link.href = sectionId ? ('#' + sectionId) : resolveFallbackAnchor(evt);
+          }
+          link.textContent = 'F' + (p + 1);
+          if (finding && finding.title) link.title = finding.title;
+          provenance.appendChild(link);
+        }
+
+        item.appendChild(provenance);
+      }
+
+      list.appendChild(item);
+    }
+
+    corrWrap.appendChild(list);
+    sec.appendChild(corrWrap);
+  }
+
   // ── Findings (single dump only) ──────────────────────────────────────────
   if (!isTrendExecSection) {
     const critFindings = summary.criticalFindings || [];
@@ -922,6 +1116,157 @@ export function buildExecutiveSummary(doc) {
     }
     recWrap.appendChild(ol);
     sec.appendChild(recWrap);
+  }
+
+  // ── Incident handoff (single dump) ───────────────────────────────────────
+  if (!isTrendExecSection) {
+    const topActions = Array.isArray(summary.topActions) ? summary.topActions : [];
+    const criticalFindings = Array.isArray(summary.criticalFindings) ? summary.criticalFindings : [];
+    const warningFindings = Array.isArray(summary.warningFindings) ? summary.warningFindings : [];
+    const knownLimitations = doc && doc.appendix && Array.isArray(doc.appendix.knownLimitations)
+      ? doc.appendix.knownLimitations
+      : [];
+
+    const handoff = el('div', 'exec-handoff');
+    const heading = el('div', 'exec-recommendations__heading');
+    heading.textContent = 'Incident Handoff';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'action-btn copy-btn exec-handoff__copy-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.setAttribute('aria-label', 'Copy incident handoff summary');
+    handoff.appendChild(heading);
+    handoff.appendChild(copyBtn);
+
+    const summaryList = el('ul', 'exec-handoff__list');
+    const incidentLine = document.createElement('li');
+    incidentLine.textContent = criticalFindings.length + ' critical and ' + warningFindings.length + ' warning findings require follow-up.';
+    summaryList.appendChild(incidentLine);
+
+    const focusLine = document.createElement('li');
+    if (topActions.length && topActions[0].title) {
+      focusLine.textContent = 'Primary focus: ' + topActions[0].title;
+    } else if (recs.length && recs[0].title) {
+      focusLine.textContent = 'Primary focus: ' + recs[0].title;
+    } else {
+      focusLine.textContent = 'Primary focus: validate top warning and runtime stability signals.';
+    }
+    summaryList.appendChild(focusLine);
+    handoff.appendChild(summaryList);
+
+    const topActionsTitle = el('div', 'exec-handoff__subheading');
+    topActionsTitle.textContent = 'Top Actions';
+    handoff.appendChild(topActionsTitle);
+
+    const actionsList = el('ol', 'exec-handoff__list');
+    const actionsSource = topActions.length ? topActions.slice(0, 3) : recs.slice(0, 3);
+    for (let i = 0; i < actionsSource.length; i++) {
+      const action = actionsSource[i] || {};
+      const li = document.createElement('li');
+      const label = action.title || action.recommendation || action.action || 'Action ' + (i + 1);
+      const a = document.createElement('a');
+      if (action.findingFingerprint || action.analyzer || action.title) {
+        a.href = '#' + findingAnchorId({
+          fingerprint: action.findingFingerprint,
+          analyzer: action.analyzer,
+          title: action.title,
+          severity: 'Warning'
+        }, 'handoff-action-' + i);
+      } else {
+        a.href = '#sec-action-queue';
+      }
+      a.textContent = label;
+      li.appendChild(a);
+      actionsList.appendChild(li);
+    }
+    if (!actionsList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'No ranked actions were produced.';
+      actionsList.appendChild(li);
+    }
+    handoff.appendChild(actionsList);
+
+    const riskTitle = el('div', 'exec-handoff__subheading');
+    riskTitle.textContent = 'Risks If Unaddressed';
+    handoff.appendChild(riskTitle);
+    const riskList = el('ul', 'exec-handoff__list');
+    const risks = criticalFindings.concat(warningFindings).slice(0, 3);
+    for (let i = 0; i < risks.length; i++) {
+      const finding = risks[i] || {};
+      const li = document.createElement('li');
+      li.textContent = finding.title || 'Unspecified risk signal';
+      riskList.appendChild(li);
+    }
+    if (!riskList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'Risk level is currently low-confidence; verify with section evidence.';
+      riskList.appendChild(li);
+    }
+    handoff.appendChild(riskList);
+
+    const evidenceTitle = el('div', 'exec-handoff__subheading');
+    evidenceTitle.textContent = 'Evidence References';
+    handoff.appendChild(evidenceTitle);
+    const evidenceList = el('ul', 'exec-handoff__list');
+    for (let i = 0; i < topActions.length && i < 3; i++) {
+      const action = topActions[i] || {};
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + findingAnchorId({
+        fingerprint: action.findingFingerprint,
+        analyzer: action.analyzer,
+        title: action.title,
+        severity: 'Warning'
+      }, 'handoff-evidence-' + i);
+      a.textContent = 'F' + (i + 1) + ': ' + (action.title || 'finding');
+      li.appendChild(a);
+      evidenceList.appendChild(li);
+    }
+    if (!evidenceList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'No direct evidence links available.';
+      evidenceList.appendChild(li);
+    }
+    handoff.appendChild(evidenceList);
+
+    const limitTitle = el('div', 'exec-handoff__subheading');
+    limitTitle.textContent = 'Known Limitations';
+    handoff.appendChild(limitTitle);
+    const limitList = el('ul', 'exec-handoff__list');
+    for (let i = 0; i < knownLimitations.length && i < 3; i++) {
+      const li = document.createElement('li');
+      li.textContent = String(knownLimitations[i] || '');
+      limitList.appendChild(li);
+    }
+    if (!limitList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'No explicit limitations were reported.';
+      limitList.appendChild(li);
+    }
+    handoff.appendChild(limitList);
+
+    const copyLines = [];
+    copyLines.push('Incident summary: ' + incidentLine.textContent);
+    if (focusLine.textContent) copyLines.push(focusLine.textContent);
+    copyLines.push('Top actions:');
+    Array.from(actionsList.querySelectorAll('li')).forEach(function (li, idx) {
+      copyLines.push(String(idx + 1) + '. ' + (li.textContent || '').trim());
+    });
+    copyLines.push('Risks if unaddressed:');
+    Array.from(riskList.querySelectorAll('li')).forEach(function (li) {
+      copyLines.push('- ' + (li.textContent || '').trim());
+    });
+    copyLines.push('Evidence references:');
+    Array.from(evidenceList.querySelectorAll('li')).forEach(function (li) {
+      copyLines.push('- ' + (li.textContent || '').trim());
+    });
+    copyLines.push('Known limitations:');
+    Array.from(limitList.querySelectorAll('li')).forEach(function (li) {
+      copyLines.push('- ' + (li.textContent || '').trim());
+    });
+    copyBtn.setAttribute('data-copy', copyLines.join('\n'));
+
+    sec.appendChild(handoff);
   }
 
   return sec;

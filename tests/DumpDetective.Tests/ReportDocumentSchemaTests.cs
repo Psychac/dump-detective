@@ -23,6 +23,7 @@ public sealed class ReportDocumentSchemaTests
         SingleDumpReportDocument original = new()
         {
             DumpPath = "C:/dumps/test.dmp",
+            ScoringModelVersion = "v1",
             GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
             ElapsedSeconds = 42.5,
             HealthScorecard = new HealthScorecard(
@@ -63,6 +64,7 @@ public sealed class ReportDocumentSchemaTests
 
         restored.Should().NotBeNull();
         restored!.SchemaVersion.Should().Be("2.1");
+        restored.ScoringModelVersion.Should().Be("v1");
         restored.ElapsedSeconds.Should().BeApproximately(42.5, 0.001);
         restored.Should().BeOfType<SingleDumpReportDocument>();
         ((SingleDumpReportDocument)restored).DumpPath.Should().Be("C:/dumps/test.dmp");
@@ -134,6 +136,7 @@ public sealed class ReportDocumentSchemaTests
         TrendReportDocument original = new()
         {
             DumpPath = "C:/trend.dmp",
+            ScoringModelVersion = "v1",
             GeneratedAtUtc = DateTime.UtcNow,
             TrendDumpCount = 3,
             TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"]
@@ -145,6 +148,7 @@ public sealed class ReportDocumentSchemaTests
         restored.Should().BeOfType<TrendReportDocument>();
         TrendReportDocument trend = (TrendReportDocument)restored!;
         trend.DumpPath.Should().Be("C:/trend.dmp");
+        trend.ScoringModelVersion.Should().Be("v1");
         trend.TrendDumpCount.Should().Be(3);
         trend.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");
     }

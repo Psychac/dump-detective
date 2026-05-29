@@ -128,7 +128,18 @@ internal sealed class TrendOrchestrationService(
             totalStopwatch.Elapsed,
             trendExecutions[^1].IncidentContext,
             trendData);
-        string renderedReport = _reportBuilderFacade.RenderDocument(trendDoc, resolved.Report.Format);
+        string renderedReport;
+        try
+        {
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = resolved.Report.PreRender;
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = resolved.Report.StyleVersion;
+            renderedReport = _reportBuilderFacade.RenderDocument(trendDoc, resolved.Report.Format);
+        }
+        finally
+        {
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = false;
+            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
+        }
 
         if (resolved.Diagnostics.EnableMemoryDiagnostics && buildReportMemoryBefore is not null)
         {

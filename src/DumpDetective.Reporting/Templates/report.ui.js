@@ -72,6 +72,56 @@ function filterTocList(list, query) {
 }
 
 export function setupInteractivity(doc, announce) {
+  const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
+  const isV2 = styleVersion === 'v2';
+
+  function syncCollapsibleAria(container) {
+    const root = container || document;
+    root.querySelectorAll('details').forEach(function (d) {
+      const s = d.querySelector(':scope > summary');
+      if (!s) return;
+      s.setAttribute('aria-expanded', String(!!d.open));
+      if (!s.getAttribute('aria-label')) {
+        const txt = String((s.textContent || '').trim() || 'section');
+        s.setAttribute('aria-label', 'Toggle ' + txt);
+      }
+      if (!s.dataset.ariaBound) {
+        s.dataset.ariaBound = '1';
+        d.addEventListener('toggle', function () {
+          s.setAttribute('aria-expanded', String(!!d.open));
+        });
+      }
+    });
+  }
+
+  if (isV2) {
+    const staggerTargets = Array.from(document.querySelectorAll('#sec-header, #sec-health, #sec-exec, #sec-action-queue'));
+    for (let i = 0; i < staggerTargets.length; i++) {
+      const node = staggerTargets[i];
+      node.classList.add('summary-stagger');
+      node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
+    }
+  }
+
+  (function setScreenReaderSummary() {
+    const sr = document.getElementById('report-sr-summary');
+    if (!sr) return;
+    const hs = doc && doc.healthScorecard;
+    const domains = hs && Array.isArray(hs.domains) ? hs.domains : [];
+    let critical = 0;
+    let warning = 0;
+    for (let i = 0; i < domains.length; i++) {
+      const d = domains[i] || {};
+      critical += Number(d.criticalCount || 0);
+      warning += Number(d.warningCount || 0);
+    }
+    const actionsNode = document.getElementById('sec-action-queue');
+    const actionCount = actionsNode ? actionsNode.querySelectorAll('tbody tr').length : 0;
+    sr.textContent = 'Report summary. Critical findings: ' + critical + '. Warning findings: ' + warning + '. Top actions: ' + actionCount + '.';
+  })();
+
+  syncCollapsibleAria(document);
+
   function revealTargetForHash(id) {
     if (!id) return null;
     const target = document.getElementById(id);
@@ -219,6 +269,11 @@ export function setupInteractivity(doc, announce) {
     const target = revealTargetForHash(id);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (isV2) {
+        target.classList.remove('anchor-flash');
+        void target.offsetWidth;
+        target.classList.add('anchor-flash');
+      }
       try { if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); } catch (ex) { }
       try { history.replaceState(null, '', '#' + id); } catch (ex) { }
     }

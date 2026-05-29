@@ -54,15 +54,35 @@ async function bootstrap() {
     doc.perDumpDocs = payload.perDumpDocs;
   }
   const { announce } = Dom.createAriaLive();
+  const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
+  const isV2 = styleVersion === 'v2';
+  document.body.dataset.reportStyleVersion = isV2 ? 'v2' : 'v1';
+  document.body.classList.toggle('report-style-v2', isV2);
+  const printFooter = document.getElementById('report-print-footer');
+  if (printFooter) {
+    const gen = doc && doc.generatedAtUtc ? new Date(doc.generatedAtUtc).toLocaleString() : 'n/a';
+    const version = doc && doc.analyzerVersion ? String(doc.analyzerVersion) : 'n/a';
+    const limitationCount = doc && doc.appendix && Array.isArray(doc.appendix.knownLimitations)
+      ? doc.appendix.knownLimitations.length
+      : 0;
+    printFooter.textContent = 'Generated: ' + gen + ' | Analyzer version: ' + version + ' | Known limitations: ' + limitationCount;
+  }
 
   const main = document.getElementById('main');
   if (!main) return;
+  const rightRail = document.getElementById('report-right-rail-content');
+  const rightRailHost = document.getElementById('report-right-rail');
+  if (rightRailHost) rightRailHost.hidden = true;
   const renderMode = String((doc && doc.renderMode) || '').toLowerCase();
   const reportContent = document.getElementById('report-content');
   const hasPreRenderedContent = renderMode === 'prerendered'
     || !!(reportContent && reportContent.children && reportContent.children.length > 0);
 
-  main.appendChild(R.buildHeader(doc));
+  const headerNode = R.buildHeader(doc);
+  if (headerNode) {
+    if (main.firstChild) main.insertBefore(headerNode, main.firstChild);
+    else main.appendChild(headerNode);
+  }
 
   if (!hasPreRenderedContent) {
     const scorecard = R.buildHealthScorecard(doc);
@@ -73,7 +93,14 @@ async function bootstrap() {
   if (executive) main.appendChild(executive);
 
   const actionQueue = R.buildActionQueuePanel(doc);
-  if (actionQueue) main.appendChild(actionQueue);
+  if (actionQueue) {
+    if (isV2 && rightRail) {
+      rightRail.appendChild(actionQueue);
+      if (rightRailHost) rightRailHost.hidden = false;
+    } else {
+      main.appendChild(actionQueue);
+    }
+  }
 
   const globalSearch = R.buildGlobalSearchBar(doc);
   if (globalSearch) main.appendChild(globalSearch);

@@ -1,0 +1,292 @@
+using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Models;
+
+namespace DumpDetective.Reporting.Services;
+
+internal static class ActionPriorityService
+{
+    public const string ScoringModelVersion = "v1";
+
+    public static IReadOnlyList<RankedActionRecord> BuildTopActions(
+        IReadOnlyList<FindingRecord> findings,
+        int maxActions = 20)
+    {
+        if (findings.Count == 0 || maxActions <= 0)
+            return [];
+
+        var ranked = new List<RankedActionRecord>(Math.Min(findings.Count, maxActions));
+
+        for (int i = 0; i < findings.Count; i++)
+        {
+            FindingRecord finding = findings[i];
+            if (!IsActionable(finding))
+                continue;
+
+            ActionPriorityFactors factors = ComputeFactors(finding);
+            ActionConfidenceRecord confidence = ComputeConfidence(finding);
+            string action = ResolveActionText(finding);
+            string impact = ResolveImpactLabel(finding, factors);
+            string whyNow = ResolveWhyNow(finding, factors, confidence);
+
+            ranked.Add(new RankedActionRecord(
+                Priority: 0,
+                Title: finding.Title,
+                Action: action,
+                Impact: impact,
+                WhyNow: whyNow,
+                FindingFingerprint: finding.Fingerprint,
+                Analyzer: finding.Analyzer,
+                Owner: finding.SuggestedOwner,
+                Effort: finding.Effort,
+                Status: finding.TrackingStatus,
+                Validation: ResolveValidationStep(finding, confidence),
+                Confidence: confidence,
+                Factors: factors));
+        }
+
+        ranked.Sort(static (a, b) =>
+        {
+            int scoreCmp = (b.Factors?.TotalScore ?? 0).CompareTo(a.Factors?.TotalScore ?? 0);
+            if (scoreCmp != 0) return scoreCmp;
+
+            int sevCmp = (b.Factors?.SeverityWeight ?? 0).CompareTo(a.Factors?.SeverityWeight ?? 0);
+            if (sevCmp != 0) return sevCmp;
+
+            int fpCmp = StringComparer.Ordinal.Compare(NormalizeSortKey(a.FindingFingerprint), NormalizeSortKey(b.FindingFingerprint));
+            if (fpCmp != 0) return fpCmp;
+
+            int analyzerCmp = StringComparer.Ordinal.Compare(NormalizeSortKey(a.Analyzer), NormalizeSortKey(b.Analyzer));
+            if (analyzerCmp != 0) return analyzerCmp;
+
+            return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Title), NormalizeSortKey(b.Title));
+        });
+
+        int count = Math.Min(maxActions, ranked.Count);
+        var top = new List<RankedActionRecord>(count);
+        for (int i = 0; i < count; i++)
+        {
+            RankedActionRecord action = ranked[i] with { Priority = i + 1 };
+            top.Add(action);
+        }
+
+        return top;
+    }
+
+    private static bool IsActionable(FindingRecord finding)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.Fix)) return true;
+        if (!string.IsNullOrWhiteSpace(finding.Recommendation)) return true;
+        if (finding.RecommendationItems is { Count: > 0 }) return true;
+        return false;
+    }
+
+    private static ActionPriorityFactors ComputeFactors(FindingRecord finding)
+    {
+        int severity = SeverityWeight(finding.Severity);
+        int blastRadius = BlastRadiusWeight(finding);
+        int impact = ImpactLikelihoodWeight(finding);
+        int timeToMitigate = TimeToMitigateWeight(finding);
+        ActionConfidenceRecord confidenceRecord = ComputeConfidence(finding);
+        int confidence = ConfidenceWeight(confidenceRecord);
+        int dependencyRisk = DependencyRiskWeight(finding);
+
+        return new ActionPriorityFactors(
+            SeverityWeight: severity,
+            BlastRadiusWeight: blastRadius,
+            ImpactLikelihoodWeight: impact,
+            TimeToMitigateWeight: timeToMitigate,
+            ConfidenceWeight: confidence,
+            DependencyRiskWeight: dependencyRisk,
+            TotalScore: severity + blastRadius + impact + timeToMitigate + confidence + dependencyRisk);
+    }
+
+    private static int SeverityWeight(string severity) => severity switch
+    {
+        nameof(FindingSeverity.Critical) => 50,
+        nameof(FindingSeverity.Warning) => 30,
+        nameof(FindingSeverity.Info) => 10,
+        _ => 6
+    };
+
+    private static int BlastRadiusWeight(FindingRecord finding)
+    {
+        int score = 8;
+        string category = string.IsNullOrWhiteSpace(finding.Category) ? string.Empty : finding.Category;
+
+        if (category.Contains("CrossDomain", StringComparison.OrdinalIgnoreCase)) score += 16;
+        if (category.Contains("Thread", StringComparison.OrdinalIgnoreCase)) score += 6;
+        if (category.Contains("Leak", StringComparison.OrdinalIgnoreCase)) score += 8;
+        if (category.Contains("GC", StringComparison.OrdinalIgnoreCase)) score += 8;
+        if (category.Contains("Crash", StringComparison.OrdinalIgnoreCase)) score += 10;
+
+        if (finding.Tags is { Count: > 3 }) score += 4;
+        return score;
+    }
+
+    private static int ImpactLikelihoodWeight(FindingRecord finding)
+    {
+        int score = 10;
+        string text = string.Concat(finding.Title, " ", finding.Evidence, " ", finding.Effect);
+
+        if (ContainsAny(text, "deadlock", "hang", "outofmemory", "oom", "crash", "fault")) score += 20;
+        else if (ContainsAny(text, "blocked", "latency", "retention", "fragmentation", "thread pool")) score += 12;
+
+        return score;
+    }
+
+    private static int TimeToMitigateWeight(FindingRecord finding)
+    {
+        string effort = string.IsNullOrWhiteSpace(finding.Effort) ? string.Empty : finding.Effort;
+        if (effort.Equals("low", StringComparison.OrdinalIgnoreCase)) return 14;
+        if (effort.Equals("medium", StringComparison.OrdinalIgnoreCase)) return 10;
+        if (effort.Equals("high", StringComparison.OrdinalIgnoreCase)) return 6;
+        return 9;
+    }
+
+    private static int ConfidenceWeight(ActionConfidenceRecord confidence)
+    {
+        double clamped = Math.Max(0.0, Math.Min(1.0, confidence.Composite));
+        return (int)Math.Round(clamped * 12.0);
+    }
+
+    private static ActionConfidenceRecord ComputeConfidence(FindingRecord finding)
+    {
+        double baseConfidence = finding.ConfidenceScore ?? 0.70;
+
+        int evidenceSignals = 0;
+        if (!string.IsNullOrWhiteSpace(finding.Evidence)) evidenceSignals++;
+        if (!string.IsNullOrWhiteSpace(finding.Recommendation) || !string.IsNullOrWhiteSpace(finding.Fix)) evidenceSignals++;
+        if (finding.EvidenceItems is { Count: > 0 }) evidenceSignals++;
+        if (finding.EvidenceRefs is { Count: > 0 }) evidenceSignals++;
+        double evidenceCompleteness = evidenceSignals / 4.0;
+
+        double consistency = 0.55;
+        if (string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase)) consistency += 0.25;
+        if (string.Equals(finding.Category, "CrossDomain", StringComparison.OrdinalIgnoreCase)) consistency += 0.15;
+        if (finding.Tags is { Count: > 2 }) consistency += 0.05;
+        consistency = Math.Min(1.0, consistency);
+
+        double heuristicPenalty = 0.0;
+        var caveats = new List<string>();
+        if (finding.CaveatItems is { Count: > 0 })
+        {
+            for (int i = 0; i < finding.CaveatItems.Count; i++)
+            {
+                string c = finding.CaveatItems[i];
+                if (ContainsAny(c, "heuristic", "approximate", "estimated", "partial"))
+                    heuristicPenalty += 0.08;
+                caveats.Add(c);
+            }
+        }
+        heuristicPenalty = Math.Min(0.35, heuristicPenalty);
+
+        double coverageFreshness = 0.65;
+        if (finding.EvidenceRefs is { Count: > 0 })
+        {
+            bool hasSnapshot = false;
+            for (int i = 0; i < finding.EvidenceRefs.Count; i++)
+            {
+                if (finding.EvidenceRefs[i].SnapshotIndex.HasValue)
+                {
+                    hasSnapshot = true;
+                    break;
+                }
+            }
+            coverageFreshness = hasSnapshot ? 0.85 : 0.75;
+        }
+
+        double composite = (baseConfidence * 0.45)
+                         + (evidenceCompleteness * 0.20)
+                         + (consistency * 0.20)
+                         + (coverageFreshness * 0.15)
+                         - heuristicPenalty;
+        composite = Math.Min(composite, baseConfidence + 0.12);
+        composite = Math.Max(0.0, Math.Min(1.0, composite));
+
+        return new ActionConfidenceRecord(
+            EvidenceCompleteness: Math.Round(evidenceCompleteness, 2),
+            CrossAnalyzerConsistency: Math.Round(consistency, 2),
+            HeuristicPenalty: Math.Round(heuristicPenalty, 2),
+            CoverageFreshness: Math.Round(coverageFreshness, 2),
+            Composite: Math.Round(composite, 2),
+            Caveats: caveats.Count == 0 ? null : caveats);
+    }
+
+    private static int DependencyRiskWeight(FindingRecord finding)
+    {
+        int score = 6;
+
+        if (finding.Tags is { Count: > 0 })
+        {
+            bool hasRuntime = false;
+            bool hasMemory = false;
+            bool hasThreading = false;
+            for (int i = 0; i < finding.Tags.Count; i++)
+            {
+                string tag = finding.Tags[i];
+                if (tag.Contains("runtime", StringComparison.OrdinalIgnoreCase)) hasRuntime = true;
+                if (tag.Contains("memory", StringComparison.OrdinalIgnoreCase) || tag.Contains("gc", StringComparison.OrdinalIgnoreCase)) hasMemory = true;
+                if (tag.Contains("thread", StringComparison.OrdinalIgnoreCase) || tag.Contains("async", StringComparison.OrdinalIgnoreCase)) hasThreading = true;
+            }
+
+            if ((hasRuntime && hasMemory) || (hasRuntime && hasThreading) || (hasMemory && hasThreading))
+                score += 10;
+        }
+
+        return score;
+    }
+
+    private static string ResolveActionText(FindingRecord finding)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.Fix)) return finding.Fix;
+        if (!string.IsNullOrWhiteSpace(finding.Recommendation)) return finding.Recommendation;
+        if (finding.RecommendationItems is { Count: > 0 }) return finding.RecommendationItems[0];
+        return "Investigate and mitigate the finding path.";
+    }
+
+    private static string ResolveImpactLabel(FindingRecord finding, ActionPriorityFactors factors)
+    {
+        if (factors.SeverityWeight >= 50) return "Immediate operational risk";
+        if (factors.TotalScore >= 80) return "High near-term risk";
+        if (factors.TotalScore >= 60) return "Moderate risk";
+        return "Contained risk";
+    }
+
+    private static string ResolveWhyNow(FindingRecord finding, ActionPriorityFactors factors, ActionConfidenceRecord confidence)
+    {
+        string severity = string.IsNullOrWhiteSpace(finding.Severity) ? "Unknown" : finding.Severity;
+        string text = severity + " signal with composite score " + factors.TotalScore +
+               " (impact " + factors.ImpactLikelihoodWeight +
+               ", blast radius " + factors.BlastRadiusWeight +
+               ", dependency risk " + factors.DependencyRiskWeight +
+               ", confidence " + confidence.Composite.ToString("0.00") + ").";
+
+        if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
+            text += " Confidence is low; verify root-cause evidence before broad remediation.";
+
+        return text;
+    }
+
+    private static string? ResolveValidationStep(FindingRecord finding, ActionConfidenceRecord confidence)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.ValidationStep))
+            return finding.ValidationStep;
+
+        if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
+            return "Re-check evidence path and confirm with a second analyzer signal before rollout.";
+
+        return null;
+    }
+
+    private static bool ContainsAny(string text, params string[] needles)
+    {
+        for (int i = 0; i < needles.Length; i++)
+        {
+            if (text.Contains(needles[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static string NormalizeSortKey(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+}

@@ -381,7 +381,11 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
 
         if (doc.ExecutiveSummary is { } executiveSummary)
         {
-            RenderExecutiveSummaryMarkdown(executiveSummary, sb);
+            RenderExecutiveSummaryMarkdown(
+                executiveSummary,
+                doc.CorrelationEvents,
+                doc.Appendix?.KnownLimitations,
+                sb);
         }
 
         if (doc.IncidentContext is { } ctx)
@@ -494,7 +498,11 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine();
     }
 
-    private static void RenderExecutiveSummaryMarkdown(ExecutiveSummaryRecord summary, StringBuilder sb)
+    private static void RenderExecutiveSummaryMarkdown(
+        ExecutiveSummaryRecord summary,
+        IReadOnlyList<CorrelationEventRecord>? correlationEvents,
+        IReadOnlyList<string>? knownLimitations,
+        StringBuilder sb)
     {
         sb.AppendLine("## Executive Summary");
         sb.AppendLine();
@@ -525,6 +533,132 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine("### Top Recommendations");
             foreach (FindingRecord finding in summary.TopRecommendations)
                 sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Recommendation)}");
+        }
+
+        if (summary.TopActions is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Action Queue");
+            if (!string.IsNullOrWhiteSpace(summary.ActionScoringModelVersion))
+                sb.AppendLine($"> Scoring model: `{Esc(summary.ActionScoringModelVersion!)}`");
+
+            for (int i = 0; i < summary.TopActions.Count && i < 10; i++)
+            {
+                RankedActionRecord action = summary.TopActions[i];
+                sb.AppendLine($"{i + 1}. **{Esc(action.Title)}**");
+                sb.AppendLine($"   - Action: {Esc(action.Action)}");
+                sb.AppendLine($"   - Why now: {Esc(action.WhyNow)}");
+
+                if (action.Confidence is { } confidence)
+                {
+                    sb.AppendLine($"   - Confidence: {confidence.Composite:0.00} (evidence {confidence.EvidenceCompleteness:0.00}, consistency {confidence.CrossAnalyzerConsistency:0.00}, penalty {confidence.HeuristicPenalty:0.00})");
+                    if (confidence.Caveats is { Count: > 0 })
+                        sb.AppendLine($"   - Caveats: {Esc(string.Join("; ", confidence.Caveats))}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(action.Validation))
+                    sb.AppendLine($"   - Validation: {Esc(action.Validation!)}");
+            }
+        }
+
+        if (correlationEvents is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Cross-Domain Correlation Signals");
+
+            for (int i = 0; i < correlationEvents.Count && i < 6; i++)
+            {
+                CorrelationEventRecord evt = correlationEvents[i];
+                sb.AppendLine($"- **{Esc(evt.Title)}** ({Esc(evt.EventType)}, {Esc(evt.Confidence)})");
+                sb.AppendLine($"  - Rationale: {Esc(evt.Rationale)}");
+                sb.AppendLine($"  - Domains: {Esc(string.Join(", ", evt.Domains))}");
+                sb.AppendLine($"  - Signals: {Esc(string.Join(", ", evt.SignalKeys))}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("### Incident Handoff");
+
+        int criticalCount = summary.CriticalFindings?.Count ?? 0;
+        int warningCount = summary.WarningFindings?.Count ?? 0;
+        sb.AppendLine($"- Incident summary: {criticalCount} critical and {warningCount} warning findings require follow-up.");
+
+        if (summary.TopActions is { Count: > 0 })
+            sb.AppendLine($"- Primary focus: {Esc(summary.TopActions[0].Title)}.");
+        else if (summary.TopRecommendations is { Count: > 0 })
+            sb.AppendLine($"- Primary focus: {Esc(summary.TopRecommendations[0].Title)}.");
+        else
+            sb.AppendLine("- Primary focus: validate warning findings and runtime stability signals.");
+
+        sb.AppendLine();
+        sb.AppendLine("#### Top Actions");
+        if (summary.TopActions is { Count: > 0 })
+        {
+            for (int i = 0; i < summary.TopActions.Count && i < 3; i++)
+            {
+                RankedActionRecord action = summary.TopActions[i];
+                sb.AppendLine($"{i + 1}. **{Esc(action.Title)}** — {Esc(action.Action)}");
+            }
+        }
+        else if (summary.TopRecommendations is { Count: > 0 })
+        {
+            for (int i = 0; i < summary.TopRecommendations.Count && i < 3; i++)
+            {
+                FindingRecord finding = summary.TopRecommendations[i];
+                sb.AppendLine($"{i + 1}. **{Esc(finding.Title)}** — {Esc(finding.Recommendation)}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("1. No ranked actions were produced.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("#### Risks If Unaddressed");
+        List<FindingRecord> riskFindings = [];
+        if (summary.CriticalFindings is { Count: > 0 })
+            riskFindings.AddRange(summary.CriticalFindings);
+        if (summary.WarningFindings is { Count: > 0 })
+            riskFindings.AddRange(summary.WarningFindings);
+
+        if (riskFindings.Count > 0)
+        {
+            for (int i = 0; i < riskFindings.Count && i < 3; i++)
+                sb.AppendLine($"- {Esc(riskFindings[i].Title)}");
+        }
+        else
+        {
+            sb.AppendLine("- Risk level is currently low-confidence; verify with section evidence.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("#### Evidence References");
+        if (summary.TopActions is { Count: > 0 })
+        {
+            for (int i = 0; i < summary.TopActions.Count && i < 3; i++)
+            {
+                RankedActionRecord action = summary.TopActions[i];
+                string reference = string.IsNullOrWhiteSpace(action.FindingFingerprint)
+                    ? Esc(action.Analyzer)
+                    : Esc(action.FindingFingerprint);
+                sb.AppendLine($"- F{i + 1}: {Esc(action.Title)} (`{reference}`)");
+            }
+        }
+        else
+        {
+            sb.AppendLine("- No direct evidence references available.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("#### Known Limitations");
+        if (knownLimitations is { Count: > 0 })
+        {
+            for (int i = 0; i < knownLimitations.Count && i < 3; i++)
+                sb.AppendLine($"- {Esc(knownLimitations[i])}");
+        }
+        else
+        {
+            sb.AppendLine("- No explicit limitations were reported.");
         }
 
         sb.AppendLine();

@@ -39,6 +39,7 @@ export function buildDomains(doc) {
   }
 
   const wrap = el('div', 'report-domains');
+  wrap.id = 'report-domains';
   for (let i = 0; i < domains.length; i++) {
     const domain = domains[i] || {};
     const domainSev = String(domain.leadSeverity || 'Info').toLowerCase();

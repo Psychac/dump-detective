@@ -34,8 +34,12 @@ internal sealed record HealthScorecard(
 internal abstract record AnalysisReportDocument
 {
     public string SchemaVersion { get; init; } = "2.1";
+    // Version for deterministic scoring/ranking semantics used by this report.
+    public string? ScoringModelVersion { get; init; } = null;
     // Rendering contract: "client" for full client render, "prerendered" when server pre-rendered heavy sections.
     public string RenderMode { get; init; } = "client";
+    // Presentation contract: "v1" (default) or "v2" for visual-system renderer behavior.
+    public string ReportStyleVersion { get; init; } = "v1";
     public DateTime GeneratedAtUtc { get; init; }
     public double ElapsedSeconds { get; init; }
     public string? AnalyzerVersion { get; init; }
@@ -43,6 +47,7 @@ internal abstract record AnalysisReportDocument
     public HealthScorecard? HealthScorecard { get; init; }
     public IReadOnlyList<ReportDomainSection>? Domains { get; init; } = null;
     public IReadOnlyList<FindingRecord>? CrossDomainInsights { get; init; } = null;
+    public IReadOnlyList<CorrelationEventRecord>? CorrelationEvents { get; init; } = null;
     public ReportAppendix? Appendix { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
 
@@ -169,7 +174,52 @@ internal partial record ExecutiveSummaryRecord
     public int? TotalObjects { get; init; } = null;
     public int? UniqueTypes { get; init; } = null;
     public string? GcPressureLevel { get; init; } = null;
+
+    // B1: deterministic, explainable top actions for action-queue rendering.
+    public IReadOnlyList<RankedActionRecord>? TopActions { get; init; } = null;
+    public string? ActionScoringModelVersion { get; init; } = null;
 }
+
+internal sealed record ActionPriorityFactors(
+    int SeverityWeight,
+    int BlastRadiusWeight,
+    int ImpactLikelihoodWeight,
+    int TimeToMitigateWeight,
+    int ConfidenceWeight,
+    int DependencyRiskWeight,
+    int TotalScore);
+
+internal sealed record RankedActionRecord(
+    int Priority,
+    string Title,
+    string Action,
+    string Impact,
+    string WhyNow,
+    string FindingFingerprint,
+    string Analyzer,
+    string? Owner = null,
+    string? Effort = null,
+    string? Status = null,
+    string? Validation = null,
+    ActionConfidenceRecord? Confidence = null,
+    ActionPriorityFactors? Factors = null);
+
+internal sealed record ActionConfidenceRecord(
+    double EvidenceCompleteness,
+    double CrossAnalyzerConsistency,
+    double HeuristicPenalty,
+    double CoverageFreshness,
+    double Composite,
+    IReadOnlyList<string>? Caveats = null);
+
+internal sealed record CorrelationEventRecord(
+    string EventType,
+    string Title,
+    string Rationale,
+    string Confidence,
+    IReadOnlyList<string> Domains,
+    IReadOnlyList<string> SignalKeys,
+    IReadOnlyList<string> SourceFingerprints);
 
 // P1.2: Scoring models
 internal sealed record ScoreContributor(

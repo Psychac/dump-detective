@@ -95,6 +95,7 @@ internal sealed class TrendReportComposer(
         return new TrendReportDocument
         {
             SchemaVersion = baseDoc.SchemaVersion,
+            ScoringModelVersion = baseDoc.ScoringModelVersion,
             DumpPath = dumpPath,
             GeneratedAtUtc = baseDoc.GeneratedAtUtc,
             ElapsedSeconds = baseDoc.ElapsedSeconds,

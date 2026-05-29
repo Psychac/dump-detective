@@ -18,6 +18,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
     private static readonly string _css = BuildInlinedCss();
     private static readonly string _js = BuildInlinedBundle();
     public static bool ForcePreRender { get; set; } = false;
+    public static ReportStyleVersion ForceReportStyleVersion { get; set; } = ReportStyleVersion.V1;
 
     public ReportFormat Format => ReportFormat.Html;
 
@@ -27,8 +28,9 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         string preFindings = string.Empty;
         string preHealthScorecard = string.Empty;
         string preAnalyzers = string.Empty;
+        bool isV2Style = ForceReportStyleVersion == ReportStyleVersion.V2;
         bool shouldPreRender = ForcePreRender;
-        if (!shouldPreRender && (reportJson.Length > 2_000_000 || doc.Findings?.Count >= 1000)) shouldPreRender = true;
+        if (!shouldPreRender && !isV2Style && (reportJson.Length > 2_000_000 || doc.Findings?.Count >= 1000)) shouldPreRender = true;
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_HEALTH_SCORECARD}}"))
             preHealthScorecard = ReportHtmlShared.RenderHealthScorecard(doc.HealthScorecard);
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_FINDINGS}}"))
@@ -38,7 +40,8 @@ internal sealed class HtmlReportRenderer : IReportFormatter
 
         AnalysisReportDocument docForClient = doc with
         {
-            RenderMode = shouldPreRender ? "prerendered" : "client"
+            RenderMode = shouldPreRender ? "prerendered" : "client",
+            ReportStyleVersion = ForceReportStyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
         };
         reportJson = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
         reportJson = CompactReportJson(docForClient, reportJson);

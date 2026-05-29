@@ -428,6 +428,442 @@ public sealed class ReportingCompositionTests
         threadsDomain.DomainInsights.Should().ContainSingle(f => f.Analyzer == "Thread Analysis");
     }
 
+    [Fact]
+    public void Serialize_ShouldEmitDeterministicTopActions_WithFactorBreakdown()
+    {
+        InsightFinding warningA = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Retention risk alpha",
+            Evidence: "Growing retained graph",
+            Recommendation: "Break retention chain",
+            Tags: ["memory", "runtime"],
+            Fingerprint: "same-priority-a");
+
+        InsightFinding warningB = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Retention risk beta",
+            Evidence: "Growing retained graph",
+            Recommendation: "Break retention chain",
+            Tags: ["memory", "runtime"],
+            Fingerprint: "same-priority-b");
+
+        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", warningA);
+        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", warningB);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/top-actions.dmp",
+            runs: [runA, runB],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.ExecutiveSummary.Should().NotBeNull();
+        doc.ExecutiveSummary!.TopActions.Should().NotBeNull();
+        doc.ExecutiveSummary.TopActions!.Should().HaveCount(2);
+        doc.ExecutiveSummary.ActionScoringModelVersion.Should().Be("v1");
+
+        RankedActionRecord first = doc.ExecutiveSummary.TopActions[0];
+        RankedActionRecord second = doc.ExecutiveSummary.TopActions[1];
+
+        first.Priority.Should().Be(1);
+        second.Priority.Should().Be(2);
+        first.Factors.Should().NotBeNull();
+        first.Factors!.TotalScore.Should().BeGreaterThan(0);
+        first.WhyNow.Should().NotBeNullOrWhiteSpace();
+
+        // Tie-break should be deterministic on fingerprint for same-score candidates.
+        first.FindingFingerprint.Should().Be("same-priority-a");
+        second.FindingFingerprint.Should().Be("same-priority-b");
+    }
+
+    [Fact]
+    public void Serialize_ShouldEmitTopLevelScoringModelVersionMetadata()
+    {
+        InsightFinding warning = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Retention risk",
+            Evidence: "Growing retained graph",
+            Recommendation: "Break retention chain",
+            Tags: ["memory", "runtime"],
+            Fingerprint: "score-meta");
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/score-meta.dmp",
+            runs: [CreateRun("RetentionAnalyzer", warning)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.ScoringModelVersion.Should().Be("v1");
+        doc.ExecutiveSummary.Should().NotBeNull();
+        doc.ExecutiveSummary!.ActionScoringModelVersion.Should().Be("v1");
+    }
+
+    [Fact]
+    public void Serialize_ShouldKeepDeterministicRankedOrdering_AcrossRepeatedRuns()
+    {
+        InsightFinding f1 = new(
+            Analyzer: "MemoryAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Retention trend alpha",
+            Evidence: "retained objects increasing",
+            Recommendation: "inspect retention roots",
+            Tags: ["pipeline-correlation", "latency-bridge"],
+            Fingerprint: "det-a");
+
+        InsightFinding f2 = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Threads",
+            Severity: FindingSeverity.Warning,
+            Title: "Worker saturation beta",
+            Evidence: "queue latency increasing",
+            Recommendation: "inspect scheduler pressure",
+            Tags: ["pipeline-correlation", "latency-bridge"],
+            Fingerprint: "det-b");
+
+        InsightFinding f3 = new(
+            Analyzer: "RuntimeAnalyzer",
+            Category: "Runtime",
+            Severity: FindingSeverity.Warning,
+            Title: "Timeout pressure gamma",
+            Evidence: "timeouts align with queue pressure",
+            Recommendation: "inspect timeout source",
+            Tags: ["pipeline-correlation"],
+            Fingerprint: "det-c");
+
+        ReportSerializer serializer = new();
+
+        AnalysisReportDocument first = serializer.Serialize(
+            dumpPath: "C:/dumps/determinism.dmp",
+            runs: [CreateRun("MemoryAnalyzer", f1), CreateRun("ThreadAnalyzer", f2), CreateRun("RuntimeAnalyzer", f3)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        AnalysisReportDocument second = serializer.Serialize(
+            dumpPath: "C:/dumps/determinism.dmp",
+            runs: [CreateRun("MemoryAnalyzer", f1), CreateRun("ThreadAnalyzer", f2), CreateRun("RuntimeAnalyzer", f3)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        IReadOnlyList<string> firstActionOrder = first.ExecutiveSummary!.TopActions!
+            .Select(a => a.FindingFingerprint)
+            .ToList();
+        IReadOnlyList<string> secondActionOrder = second.ExecutiveSummary!.TopActions!
+            .Select(a => a.FindingFingerprint)
+            .ToList();
+
+        firstActionOrder.Should().Equal(secondActionOrder);
+
+        IReadOnlyList<string> firstCorrelationOrder = first.CorrelationEvents!
+            .Select(c => c.EventType + "|" + c.Title)
+            .ToList();
+        IReadOnlyList<string> secondCorrelationOrder = second.CorrelationEvents!
+            .Select(c => c.EventType + "|" + c.Title)
+            .ToList();
+
+        firstCorrelationOrder.Should().Equal(secondCorrelationOrder);
+    }
+
+    [Fact]
+    public void Serialize_ShouldRequireVerification_ForLowConfidenceCriticalTopAction()
+    {
+        InsightFinding critical = new(
+            Analyzer: "CrashAnalyzer",
+            Category: "Crash",
+            Severity: FindingSeverity.Critical,
+            Title: "Intermittent crash signature",
+            Evidence: "Partial dump evidence",
+            Recommendation: "Guard failing call path",
+            Tags: ["runtime"],
+            Fingerprint: "crit-low-conf",
+            ConfidenceScore: 0.30);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/crit-low-conf.dmp",
+            runs: [CreateRun("CrashAnalyzer", critical)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.ExecutiveSummary.Should().NotBeNull();
+        doc.ExecutiveSummary!.TopActions.Should().NotBeNullOrEmpty();
+
+        RankedActionRecord top = doc.ExecutiveSummary.TopActions![0];
+        top.Validation.Should().NotBeNullOrWhiteSpace();
+        top.WhyNow.Should().Contain("Confidence is low");
+        top.Confidence.Should().NotBeNull();
+        top.Confidence!.Composite.Should().BeLessThan(0.45);
+    }
+
+    [Fact]
+    public void Serialize_ShouldPropagateConfidenceCaveats_InTopActions()
+    {
+        InsightFinding warning = new(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Leak",
+            Severity: FindingSeverity.Warning,
+            Title: "Heuristic retention signature",
+            Evidence: "Approximate object growth estimate",
+            Recommendation: "Verify retained roots before cleanup",
+            Tags: ["memory", "retention"],
+            Fingerprint: "warn-caveat",
+            ConfidenceScore: 0.42,
+            Caveats: ["heuristic estimate", "partial evidence"]);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/warn-caveat.dmp",
+            runs: [CreateRun("RetentionAnalyzer", warning)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        RankedActionRecord top = doc.ExecutiveSummary!.TopActions![0];
+        top.Confidence.Should().NotBeNull();
+        top.Confidence!.Caveats.Should().NotBeNullOrEmpty();
+        top.Confidence.HeuristicPenalty.Should().BeGreaterThan(0.0);
+    }
+
+    [Fact]
+    public void Serialize_ShouldGenerateCorrelationEvents_ForSharedCrossDomainTags()
+    {
+        InsightFinding memory = new(
+            Analyzer: "MemoryAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Pinned object increase",
+            Evidence: "Pinned segment occupancy rising",
+            Recommendation: "Review pinning usage",
+            Tags: ["runtime-coupling", "memory"],
+            Fingerprint: "corr-memory");
+
+        InsightFinding threads = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Threads",
+            Severity: FindingSeverity.Warning,
+            Title: "Worker starvation pattern",
+            Evidence: "Thread pool starvation observed",
+            Recommendation: "Tune worker scheduling",
+            Tags: ["runtime-coupling", "threads"],
+            Fingerprint: "corr-threads");
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/correlation.dmp",
+            runs: [CreateRun("MemoryAnalyzer", memory), CreateRun("ThreadAnalyzer", threads)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.CorrelationEvents.Should().NotBeNullOrEmpty();
+        CorrelationEventRecord evt = doc.CorrelationEvents![0];
+        evt.EventType.Should().Be("co-move");
+        evt.SignalKeys.Should().Contain("tag:runtime-coupling");
+        evt.Domains.Should().Contain("Memory");
+        evt.Domains.Should().Contain("Threads");
+    }
+
+    [Fact]
+    public void Serialize_ShouldDeterministicallyMergeSignalKeys_ForDuplicateCorrelationCandidates()
+    {
+        InsightFinding memory = new(
+            Analyzer: "MemoryAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Request latency and retention increase",
+            Evidence: "Latency increase observed with shared metric key",
+            Recommendation: "Correlate with thread pressure",
+            Tags: ["pipeline-correlation", "latency-bridge"],
+            Fingerprint: "merge-memory");
+
+        InsightFinding threads = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Threads",
+            Severity: FindingSeverity.Warning,
+            Title: "Request latency and thread pool saturation",
+            Evidence: "Latency increase observed with shared metric key",
+            Recommendation: "Correlate with retention pressure",
+            Tags: ["pipeline-correlation", "latency-bridge"],
+            Fingerprint: "merge-threads");
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/correlation-merge.dmp",
+            runs: [CreateRun("MemoryAnalyzer", memory), CreateRun("ThreadAnalyzer", threads)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.CorrelationEvents.Should().NotBeNullOrEmpty();
+        CorrelationEventRecord evt = doc.CorrelationEvents![0];
+
+        evt.SignalKeys.Should().Contain("tag:pipeline-correlation");
+        evt.SignalKeys.Should().Contain("tag:latency-bridge");
+
+        List<string> ordered = evt.SignalKeys.ToList();
+        List<string> expected = ordered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        ordered.Should().Equal(expected);
+    }
+
+    [Fact]
+    public void Serialize_ShouldClusterOverlappingCorrelationCandidates_BeyondExactSourceMatch()
+    {
+        InsightFinding memory = new(
+            Analyzer: "MemoryAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Latency bridge signal in memory path",
+            Evidence: "Retention pressure aligns with latency increase",
+            Recommendation: "Inspect retention path",
+            Tags: ["alpha-bridge"],
+            Fingerprint: "cluster-mem");
+
+        InsightFinding threads = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Threads",
+            Severity: FindingSeverity.Warning,
+            Title: "Latency bridge signal in thread pool",
+            Evidence: "Scheduling pressure aligns with latency increase",
+            Recommendation: "Inspect pool saturation",
+            Tags: ["alpha-bridge", "beta-bridge"],
+            Fingerprint: "cluster-thr");
+
+        InsightFinding runtime = new(
+            Analyzer: "RuntimeAnalyzer",
+            Category: "Runtime",
+            Severity: FindingSeverity.Warning,
+            Title: "Timeout bridge signal in runtime",
+            Evidence: "Connection timeout pattern aligns with pressure",
+            Recommendation: "Inspect timeout root cause",
+            Tags: ["beta-bridge"],
+            Fingerprint: "cluster-run");
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/correlation-cluster.dmp",
+            runs: [CreateRun("MemoryAnalyzer", memory), CreateRun("ThreadAnalyzer", threads), CreateRun("RuntimeAnalyzer", runtime)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.CorrelationEvents.Should().NotBeNullOrEmpty();
+
+        CorrelationEventRecord? cluster = doc.CorrelationEvents!
+            .FirstOrDefault(e => e.SignalKeys.Contains("tag:alpha-bridge") && e.SignalKeys.Contains("tag:beta-bridge"));
+
+        cluster.Should().NotBeNull();
+        cluster!.SourceFingerprints.Should().Contain("cluster-mem");
+        cluster.SourceFingerprints.Should().Contain("cluster-thr");
+        cluster.SourceFingerprints.Should().Contain("cluster-run");
+        cluster.Domains.Should().Contain("Memory");
+        cluster.Domains.Should().Contain("Threads");
+        cluster.Domains.Should().Contain("Runtime");
+    }
+
+    [Fact]
+    public void Serialize_ShouldEmitConflictCorrelationEvent_WhenSeverityDisagreesAcrossDomains()
+    {
+        InsightFinding critical = new(
+            Analyzer: "MemoryAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Critical,
+            Title: "Pinned object surge",
+            Evidence: "Pinned segment pressure rising",
+            Recommendation: "Review pinning behavior",
+            Tags: ["pipeline-correlation"],
+            Fingerprint: "corr-critical",
+            ConfidenceScore: 0.91);
+
+        InsightFinding info = new(
+            Analyzer: "ThreadAnalyzer",
+            Category: "Threads",
+            Severity: FindingSeverity.Info,
+            Title: "Scheduler stall hint",
+            Evidence: "Intermittent scheduling delays",
+            Recommendation: "Validate worker distribution",
+            Tags: ["pipeline-correlation"],
+            Fingerprint: "corr-info",
+            ConfidenceScore: 0.22);
+
+        AnalysisReportDocument doc = new ReportSerializer().Serialize(
+            dumpPath: "C:/dumps/correlation-conflict.dmp",
+            runs: [CreateRun("MemoryAnalyzer", critical), CreateRun("ThreadAnalyzer", info)],
+            elapsed: TimeSpan.FromSeconds(1),
+            analyzerBuilders: [],
+            reportBuilders: []);
+
+        doc.CorrelationEvents.Should().NotBeNullOrEmpty();
+        CorrelationEventRecord evt = doc.CorrelationEvents![0];
+        evt.EventType.Should().Be("conflict");
+        evt.Rationale.Should().Contain("require verification");
+    }
+
+    [Fact]
+    public void MarkdownFormatter_ShouldRenderActionConfidenceAndCorrelationSignals()
+    {
+        SingleDumpReportDocument doc = new()
+        {
+            DumpPath = "C:/dumps/markdown-parity.dmp",
+            GeneratedAtUtc = DateTime.UtcNow,
+            ElapsedSeconds = 1,
+            ExecutiveSummary = new ExecutiveSummaryRecord(
+                TotalManagedBytes: 123,
+                LeakLikelihoodScore: 22,
+                GcPressureScore: 31,
+                ThreadContentionScore: 15,
+                TopRecommendations: [])
+            {
+                TopActions =
+                [
+                    new RankedActionRecord(
+                        Priority: 1,
+                        Title: "Thread pool starvation",
+                        Action: "Tune worker limits",
+                        Impact: "High near-term risk",
+                        WhyNow: "Warning signal with elevated risk.",
+                        FindingFingerprint: "md-top-action",
+                        Analyzer: "ThreadAnalyzer",
+                        Validation: "Confirm with runtime counters.",
+                        Confidence: new ActionConfidenceRecord(
+                            EvidenceCompleteness: 0.75,
+                            CrossAnalyzerConsistency: 0.60,
+                            HeuristicPenalty: 0.08,
+                            CoverageFreshness: 0.85,
+                            Composite: 0.58,
+                            Caveats: ["partial evidence"]))
+                ],
+                ActionScoringModelVersion = "v1"
+            },
+            CorrelationEvents =
+            [
+                new CorrelationEventRecord(
+                    EventType: "co-move",
+                    Title: "Potential cross-domain coupling on tag 'runtime-coupling'",
+                    Rationale: "Signal appears across 2 domains from 2 findings.",
+                    Confidence: "Medium",
+                    Domains: ["Memory", "Threads"],
+                    SignalKeys: ["runtime-coupling"],
+                    SourceFingerprints: ["a", "b"])
+            ]
+        };
+
+        string output = new MarkdownCanonicalReportFormatter().Render(doc);
+
+        output.Should().Contain("### Action Queue");
+        output.Should().Contain("Confidence: 0.58");
+        output.Should().Contain("Caveats: partial evidence");
+        output.Should().Contain("### Cross-Domain Correlation Signals");
+        output.Should().Contain("runtime-coupling");
+        output.Should().Contain("### Incident Handoff");
+        output.Should().Contain("#### Top Actions");
+        output.Should().Contain("#### Known Limitations");
+    }
+
     private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
     {
         GenericAnalyzerDomainResult result = new()

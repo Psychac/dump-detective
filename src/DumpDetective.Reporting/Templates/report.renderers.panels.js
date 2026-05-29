@@ -11,6 +11,7 @@ export function buildAppendix(doc) {
 
   const sec = el('section', 'section-card report-appendix');
   sec.id = 'sec-appendix';
+  sec.setAttribute('data-component-id', 'appendix');
 
   // ── Z1. Analyzer Run Summary ─────────────────────────────────────────────
   const runs = appendix.analyzerRunSummary || [];
@@ -367,6 +368,172 @@ export function buildDevActionPlan(doc) {
 // ── Action Queue (prioritized actionable findings table) ─────────────────────
 
 export function buildActionQueuePanel(doc) {
+  const summary = doc && doc.executiveSummary ? doc.executiveSummary : null;
+  const topActions = summary && Array.isArray(summary.topActions) ? summary.topActions : [];
+
+  function formatSignalLabel(signalKey) {
+    const raw = String(signalKey || '');
+    const idx = raw.indexOf(':');
+    const token = (idx >= 0 ? raw.slice(idx + 1) : raw).trim().toLowerCase();
+    if (!token) return '';
+
+    const pretty = token
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (pretty === 'thread pool') return 'thread pool pressure';
+    if (pretty === 'gc handle') return 'GC handle retention';
+    if (pretty === 'connection pool') return 'connection pool pressure';
+    return pretty;
+  }
+
+  if (topActions.length) {
+    const sec = el('section', 'section-card action-queue-card');
+    sec.id = 'top-actions';
+    sec.setAttribute('data-component-id', 'top-actions');
+    sec.setAttribute('aria-label', 'Top actions');
+    const queueLegacyAnchor = el('span', 'section-anchor-legacy');
+    queueLegacyAnchor.id = 'sec-action-queue';
+    queueLegacyAnchor.setAttribute('aria-hidden', 'true');
+    sec.appendChild(queueLegacyAnchor);
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Action Queue';
+    sec.appendChild(h2);
+
+    const subtitle = el('p', 'action-queue-card__subtitle');
+    const modelVersion = summary.actionScoringModelVersion ? String(summary.actionScoringModelVersion) : 'n/a';
+    subtitle.textContent = 'Deterministic ranked actions (model ' + modelVersion + ').';
+    sec.appendChild(subtitle);
+
+    const tbl = el('table');
+    const thead = el('thead');
+    const htr = el('tr');
+    ['Priority', 'Finding', 'Owner', 'Effort', 'Status', 'Validation'].forEach(function (col) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = col;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    tbl.appendChild(thead);
+
+    const tbody = el('tbody');
+    const maxRows = 20;
+    for (let i = 0; i < topActions.length && i < maxRows; i++) {
+      const action = topActions[i] || {};
+      const tr = el('tr');
+
+      const tdPri = document.createElement('td');
+      tdPri.textContent = String(action.priority || (i + 1));
+      tr.appendChild(tdPri);
+
+      const tdFinding = document.createElement('td');
+      const anchor = document.createElement('a');
+      anchor.href = '#' + findingAnchorId({
+        fingerprint: action.findingFingerprint,
+        analyzer: action.analyzer,
+        title: action.title,
+        severity: 'Warning'
+      }, 'queue-' + i);
+      anchor.textContent = action.title || ('Finding ' + (i + 1));
+      tdFinding.appendChild(anchor);
+
+      if (action.action) {
+        const note = el('div', 'action-queue-card__note');
+        note.textContent = String(action.action);
+        tdFinding.appendChild(note);
+      }
+
+      if (action.whyNow) {
+        const why = el('div', 'action-queue-card__note');
+        why.textContent = String(action.whyNow);
+        tdFinding.appendChild(why);
+      }
+
+      if (action.confidence && Array.isArray(action.confidence.caveats) && action.confidence.caveats.length) {
+        const caveat = el('div', 'action-queue-card__note');
+        caveat.textContent = 'Confidence caveats: ' + action.confidence.caveats.join('; ');
+        tdFinding.appendChild(caveat);
+      }
+
+      tr.appendChild(tdFinding);
+
+      const tdOwner = document.createElement('td');
+      tdOwner.textContent = action.owner || '-';
+      tr.appendChild(tdOwner);
+
+      const tdEffort = document.createElement('td');
+      tdEffort.textContent = action.effort || '-';
+      tr.appendChild(tdEffort);
+
+      const tdStatus = document.createElement('td');
+      tdStatus.textContent = action.status || 'Open';
+      tr.appendChild(tdStatus);
+
+      const tdValidation = document.createElement('td');
+      tdValidation.textContent = action.validation || '-';
+      tdValidation.className = 'wrap';
+      tr.appendChild(tdValidation);
+
+      tbody.appendChild(tr);
+    }
+
+    tbl.appendChild(tbody);
+    sec.appendChild(tbl);
+
+    if (Array.isArray(doc.correlationEvents) && doc.correlationEvents.length) {
+      const sub = document.createElement('h3');
+      sub.className = 'section-subtitle';
+      sub.textContent = 'Cross-Domain Correlation Signals';
+      sec.appendChild(sub);
+
+      const list = el('div', 'correlation-event-list');
+      for (let i = 0; i < doc.correlationEvents.length && i < 4; i++) {
+        const eventRecord = doc.correlationEvents[i] || {};
+        const item = el('article', 'correlation-event-item');
+
+        const title = el('h4', 'correlation-event-title');
+        title.textContent = eventRecord.title || 'Correlation signal';
+        item.appendChild(title);
+
+        const rationale = el('p', 'correlation-event-rationale');
+        rationale.textContent = eventRecord.rationale || '';
+        item.appendChild(rationale);
+
+        const meta = el('p', 'correlation-event-meta');
+        const confidence = eventRecord.confidence || 'Unknown';
+        const domains = Array.isArray(eventRecord.domains) ? eventRecord.domains.join(', ') : 'Unknown';
+        meta.textContent = 'Confidence: ' + confidence + ' | Domains: ' + domains;
+        item.appendChild(meta);
+
+        if (Array.isArray(eventRecord.signalKeys) && eventRecord.signalKeys.length) {
+          const labels = [];
+          const seen = new Set();
+          for (let s = 0; s < eventRecord.signalKeys.length && labels.length < 3; s++) {
+            const label = formatSignalLabel(eventRecord.signalKeys[s]);
+            if (label && !seen.has(label)) {
+              seen.add(label);
+              labels.push(label);
+            }
+          }
+
+          if (labels.length) {
+            const signals = el('p', 'correlation-event-meta');
+            signals.textContent = 'Signals: ' + labels.join(' | ');
+            item.appendChild(signals);
+          }
+        }
+
+        list.appendChild(item);
+      }
+      sec.appendChild(list);
+    }
+
+    return sec;
+  }
+
   const findings = Array.isArray(doc.findings) ? doc.findings : [];
   if (!findings.length) return null;
 
@@ -391,7 +558,13 @@ export function buildActionQueuePanel(doc) {
   if (!actionable.length) return null;
 
   const sec = el('section', 'section-card action-queue-card');
-  sec.id = 'sec-action-queue';
+  sec.id = 'top-actions';
+  sec.setAttribute('data-component-id', 'top-actions');
+  sec.setAttribute('aria-label', 'Top actions');
+  const queueLegacyAnchor = el('span', 'section-anchor-legacy');
+  queueLegacyAnchor.id = 'sec-action-queue';
+  queueLegacyAnchor.setAttribute('aria-hidden', 'true');
+  sec.appendChild(queueLegacyAnchor);
   const h2 = document.createElement('h2');
   h2.textContent = 'Action Queue';
   sec.appendChild(h2);

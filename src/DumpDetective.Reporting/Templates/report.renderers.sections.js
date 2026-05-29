@@ -71,13 +71,27 @@ export function buildAnalyzerSection(section, i) {
   const anchorScope = arguments.length > 2 ? arguments[2] : '';
   const scopedFallback = anchorScope ? ('detail-' + slugifyAnchor(anchorScope, 'scope') + '-' + i) : ('detail-' + i);
   const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : scopedFallback;
+  const sectionAnchorId = 'section-' + stableId;
   const sectionIndexKey = anchorScope ? (slugifyAnchor(anchorScope, 'scope') + '-' + i) : String(i);
-  const wrapper = el('section', 'analyzer-section detail-color-' + (i % 6));
-  wrapper.id = stableId;
+  const wrapper = el('section', 'section-card analyzer-section detail-color-' + (i % 6));
+  wrapper.id = sectionAnchorId;
+  wrapper.dataset.sectionCardId = sectionAnchorId;
+  wrapper.dataset.legacySectionId = stableId;
   wrapper.dataset.detailIndex = sectionIndexKey;
 
+  // Keep legacy section IDs addressable (e.g., #A1) while moving canonical
+  // section anchors to section-{id} for v2 contract compliance.
+  if (stableId !== sectionAnchorId) {
+    const legacyAnchor = el('span', 'section-anchor-legacy');
+    legacyAnchor.id = stableId;
+    legacyAnchor.setAttribute('aria-hidden', 'true');
+    wrapper.appendChild(legacyAnchor);
+  }
+
   // ── Collapsible section shell ─────────────────────────────────────────────
-  const details = el('details'); const summaryEl = el('summary'); summaryEl.id = 'detail-' + sectionIndexKey + '-summary';
+  const details = el('details');
+  details.setAttribute('data-collapsible', 'section');
+  const summaryEl = el('summary'); summaryEl.id = 'detail-' + sectionIndexKey + '-summary';
   if (section.sectionId && section.sectionId.trim()) {
     const idBadge = el('span', 'detail-summary__section-id'); idBadge.textContent = section.sectionId.trim(); summaryEl.appendChild(idBadge);
   }
@@ -123,13 +137,19 @@ export function buildAnalyzerSection(section, i) {
     }
 
     const lf = el('div', 'lead-finding lead-finding--' + sev);
+    lf.id = 'finding-' + stableId;
+    lf.setAttribute('role', 'group');
+    lf.setAttribute('aria-label', 'Lead finding for section ' + stableId);
     const lfHeader = el('div', 'lead-finding__header');
     const lfSev = el('span', 'lead-finding__severity'); lfSev.textContent = lead.severity || 'Info';
+    lfSev.setAttribute('aria-label', 'Severity: ' + (lead.severity || 'Info'));
     const lfTitle = el('span', 'lead-finding__title'); lfTitle.textContent = lead.title || '';
     const lfConf = el('span', 'lead-finding__confidence');
     const confScore = lead.confidenceScore || 0;
     const confBand = confScore >= 0.85 ? 'High' : confScore >= 0.65 ? 'Med-High' : confScore >= 0.45 ? 'Medium' : 'Low';
     lfConf.textContent = (lead.confidenceSymbol || '') + '\u2002' + confBand;
+    lfConf.dataset.confidenceScore = String(confScore);
+    lfConf.setAttribute('aria-label', 'Confidence: ' + confBand);
     lfHeader.appendChild(lfSev); lfHeader.appendChild(lfTitle); lfHeader.appendChild(lfConf);
     lf.appendChild(lfHeader);
     if (lead.evidence) { const lfEv = el('div', 'lead-finding__evidence'); lfEv.textContent = lead.evidence; lf.appendChild(lfEv); }
@@ -166,6 +186,7 @@ export function buildAnalyzerSection(section, i) {
       const rowCount = tbl.rows ? tbl.rows.length : 0;
       if (rowCount === 0) continue;
       const tblDetails = el('details', 'table-collapse');
+      tblDetails.setAttribute('data-collapsible', 'table');
       const tblSummary = el('summary', 'table-collapse__summary');
       const limit = tbl.rowLimit || 20;
       tblSummary.textContent = (tbl.title || 'Table') + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
@@ -193,6 +214,10 @@ export function buildAnalyzerSection(section, i) {
           showAll.setAttribute('data-target-table', tableId);
           showAll.textContent = 'Show all ' + rowCount + ' rows';
           tools.appendChild(showAll);
+
+          const printNote = el('div', 'table-print-note');
+          printNote.textContent = 'Print/export summary: table body omitted. Showing summary only for ' + rowCount + ' rows.';
+          tblDetails.appendChild(printNote);
         }
         tblDetails.appendChild(tools);
 
@@ -243,6 +268,8 @@ export function buildAnalyzerSection(section, i) {
   const prov = section.provenance;
   if (prov) {
     const provDetails = el('details', 'provenance');
+    provDetails.id = 'provenance-' + stableId;
+    provDetails.setAttribute('data-collapsible', 'provenance');
     const provSummary = el('summary', 'provenance__summary');
     provSummary.textContent = 'Provenance \u2014 ' + (prov.analyzer || '') + ' \u00b7 ' + (prov.status || '') + ' \u00b7 ' + (prov.durationMs != null ? prov.durationMs.toFixed(0) + ' ms' : '\u2014');
     provDetails.appendChild(provSummary);

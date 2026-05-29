@@ -55,6 +55,21 @@ internal static class ConfigurationParseHelpers
         };
     }
 
+    public static ReportStyleVersion? ParseReportStyle(string? style)
+    {
+        if (string.IsNullOrWhiteSpace(style))
+        {
+            return null;
+        }
+
+        return style.Trim().ToLowerInvariant() switch
+        {
+            "v1" or "1" => ReportStyleVersion.V1,
+            "v2" or "2" => ReportStyleVersion.V2,
+            _ => throw new ArgumentException($"Invalid ReportStyleVersion value '{style}' in config.")
+        };
+    }
+
     public static int? PositiveOrNull(int? value) => value is > 0 ? value : null;
 
     public static int? NonNegativeOrNull(int? value) => value is >= 0 ? value : null;

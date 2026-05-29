@@ -2,365 +2,302 @@
 
 ## Purpose
 
-Define the v2 contract for a professional single-dump report that is:
+Define a compact, testable contract for a professional single-dump report that is:
 
-1. Actionable in incident triage.
-2. Trustworthy in technical evidence.
-3. Readable across executive and engineer audiences.
-4. Consistent across HTML, JSON, and markdown outputs.
+1. Action-first in incident triage.
+2. Evidence-grounded and auditable.
+3. Readable on desktop and mobile.
+4. Semantically consistent across HTML, JSON, and markdown.
 
-This document extends the structural contract in [SingleDumpReportFormat.md](SingleDumpReportFormat.md).
-
-v1 remains authoritative for baseline field availability. v2 introduces both presentation and functional behavior expectations.
+This extends SingleDumpReportFormat.md. v1 field availability remains authoritative.
 
 ---
 
-## Design Intent (v2)
+## What Is Already Implemented (Minified)
 
-1. Answer in 90 seconds: what is wrong, how severe, what should happen next.
-2. Make risk explicit and ranked, not just listed.
-3. Preserve deep technical detail without overwhelming first-screen triage.
-4. Present confidence and caveats clearly so decisions are calibrated.
-5. Keep narrative and conclusions consistent across HTML, JSON, markdown.
+The current v2 baseline already delivers:
+
+1. Version-gated style path and tokenized visual system.
+2. Severity semantics, confidence display, and section cards.
+3. First-screen triage composition and action queue panel.
+4. Confidence-aware deterministic action ranking and model version metadata.
+5. Correlation extraction, dedupe, conflict signaling, and provenance breadcrumbs.
+6. Incident handoff block and markdown parity.
+7. Deterministic ordering tests and schema/component contract tests.
+
+This document defines the required hardening and polish layer on top of that baseline.
 
 ---
 
-## Functional Contract
+## Core Functional Contract
 
-### F1. Action Prioritization Engine
+### F0. Reading Modes (Primary Framing)
 
-Top actions must be generated from findings using explicit ranking dimensions:
+Report framing is mode-based, not audience-labeled.
 
-1. Severity weight.
-2. Estimated blast radius.
-3. User-facing impact likelihood.
-4. Time-to-mitigate estimate.
-5. Confidence score.
-6. Dependency risk (cross-domain coupling).
+Required modes:
 
-Each action card must include:
+1. Incident mode (default): concise, action-driven, root-cause grouped.
+2. Forensics mode: full analyzer depth, raw tables, and provenance-first detail.
 
-1. One-line action statement.
-2. Why now (risk rationale).
-3. Supporting evidence pointer(s).
-4. Suggested owner role (for example, runtime, memory, service team).
-5. Expected validation step.
+Required behavior:
 
-Ranking output requirements:
+1. A visible mode toggle must be present in the report shell.
+2. Switching modes must not change semantic data, only presentation density and default expansion.
+3. Current mode must persist across in-page navigation and deep links.
+4. JSON remains full-fidelity regardless of active mode.
 
-1. Top actions list must be stable for identical input.
-2. Ties must be resolved deterministically (fingerprint then analyzer name).
-3. JSON must expose ranking factors for auditability.
+### F1. Incident Brief First
 
-### F2. Confidence and Trust Model
+Above the fold must start with an Incident Brief block before deep detail.
 
-Every lead finding must carry a confidence band and optional caveats.
+Required fields:
 
-Confidence signals should combine:
+1. Primary incident hypothesis.
+2. Severity and blast radius summary.
+3. Top 3 immediate actions with owner role.
+4. Evidence strength summary with confidence caveat signal.
+5. Time-boxed response lane (Now, Next, Watch).
 
-1. Evidence completeness.
-2. Signal consistency across analyzers.
-3. Heuristic versus deterministic detection path.
-4. Data freshness and coverage (for trend-aware sections, if present).
+No large data tables may appear before the Incident Brief and Top Actions.
 
-Rules:
+### F2. Action Prioritization and Root-Cause Clustering
 
-1. Confidence must never be implied only by color.
-2. Low-confidence critical findings must include an explicit verification recommendation.
-3. Confidence downgrades must propagate to action priority.
+Top actions must be clustered by root cause before ranking to avoid duplicate siblings.
 
-### F3. Cross-Analyzer Correlation
+Required behavior:
 
-The report must synthesize relationships between domains.
+1. Collapse near-duplicate findings into one parent action cluster.
+2. Keep child findings accessible as supporting evidence.
+3. Rank parent actions with deterministic tie-breaks.
+4. Preserve full raw findings in JSON.
 
-Required correlation outcomes:
+Ranking dimensions:
 
-1. Duplicate finding suppression via fingerprint clustering.
-2. Correlated incident hypotheses (for example, thread pool starvation plus retention growth).
-3. Conflict flags when analyzers disagree materially.
+1. Severity.
+2. Blast radius.
+3. Impact likelihood.
+4. Time to mitigate.
+5. Confidence composition.
+6. Dependency and cross-domain risk.
+
+### F3. Confidence and Verification
+
+Confidence must be explicit, numeric, and textual.
+
+Required behavior:
+
+1. Confidence is never color-only.
+2. Low-confidence critical actions must show mandatory verification guidance.
+3. Confidence caveats must be visible in summary cards, not only deep detail.
+4. Confidence must influence ranking and appear in JSON factors.
+
+### F4. Correlation and Conflict Narrative
+
+Correlation output must reduce noise and explain linkage.
 
 Each correlation entry must include:
 
-1. Source findings.
-2. Why they are linked.
+1. Source finding references.
+2. Link rationale.
 3. Net confidence.
-4. Impacted subsystem/domain labels.
+4. Impacted domains or subsystems.
+5. Conflict flag when severity or confidence disagreement is material.
 
-### F4. Noise Suppression and Focus
+### F5. Investigation Workflow and Handoff
 
-The report must minimize cognitive noise while preserving drill-down access.
+HTML navigation must support fast analyst flow:
 
-Rules:
+1. Top action to finding.
+2. Finding to evidence.
+3. Evidence to provenance.
 
-1. Hide empty sections and empty tables.
-2. Collapse low-value detail blocks by default.
-3. De-duplicate repeated recommendations.
-4. Preserve raw evidence in JSON even when HTML is summarized.
+Maximum interaction target: 2 interactions from top action to provenance.
 
-### F5. Investigation Workflow
+Handoff block must include:
 
-The report must support a practical analyst workflow:
-
-1. Triage: first-screen health, critical findings, top actions.
-2. Validate: open section evidence and provenance.
-3. Decide: view confidence, caveats, blast radius.
-4. Handoff: copy/share concise action-ready summary.
-
-HTML must provide fast jump paths between:
-
-1. Top action -> supporting finding.
-2. Finding -> section evidence.
-3. Finding -> provenance.
-
-### F6. Incident Handoff Output
-
-The report must include a concise handoff block suitable for tickets/channels:
-
-1. Incident summary (2-4 lines).
-2. Top actions (ranked).
+1. Incident summary.
+2. Ranked top actions.
 3. Risks if unaddressed.
 4. Evidence references.
 5. Known limitations.
 
-Markdown must preserve this handoff narrative in deterministic order.
+Markdown must preserve this order deterministically.
 
-### F7. Determinism and Reproducibility
+### F6. Ticket Payload Templates
 
-For identical input and configuration:
+Each top action must provide copy-ready ticket payload templates.
 
-1. Ordering must be deterministic.
-2. Scores must be deterministic.
-3. Component IDs and anchors must be deterministic.
+Required templates:
 
-All ranking/scoring formulas used in rendering must be versioned.
+1. Azure DevOps work item body.
+2. Jira issue body.
+3. GitHub issue body.
 
----
+Template payload must include:
 
-## Visual Language Contract
-
-### V2.1 Design Tokens (Required)
-
-All HTML renderers must expose CSS variables (or equivalent token map):
-
-- Color tokens:
-  - `--bg-canvas`, `--bg-surface`, `--bg-elevated`
-  - `--text-primary`, `--text-secondary`, `--text-muted`
-  - `--severity-critical`, `--severity-warning`, `--severity-info`, `--severity-unknown`
-  - `--border-subtle`, `--border-strong`
-  - `--accent-memory`, `--accent-gc`, `--accent-threads`, `--accent-async`, `--accent-runtime`
-- Typography tokens:
-  - `--font-ui`: report UI font family
-  - `--font-mono`: evidence/table raw values
-  - `--fs-12`, `--fs-14`, `--fs-16`, `--fs-20`, `--fs-28`
-  - `--lh-tight`, `--lh-normal`, `--lh-relaxed`
-- Spacing/radius/shadow tokens:
-  - `--space-4`, `--space-8`, `--space-12`, `--space-16`, `--space-24`, `--space-32`
-  - `--radius-sm`, `--radius-md`, `--radius-lg`
-  - `--shadow-1`, `--shadow-2`
-
-Renderer may choose exact values but token names must be stable.
-
-### V2.2 Severity Semantics
-
-Severity must be encoded with both color and shape or icon (never color alone):
-
-- Critical: filled badge plus high-contrast border plus icon
-- Warning: outlined badge plus icon
-- Info: neutral badge
-- Unknown: muted badge
-
-Confidence symbols remain inline (`●●●●`, `●●●○`, `●●○○`, `●○○○`) and must appear near the finding title.
-
-### V2.3 Typography Hierarchy
-
-- H1: report title and incident identity
-- H2: domain headers
-- H3: section headers
-- Body: finding evidence and recommendation
-- Mono: addresses, metric keys, stack frames, IDs
-
-Line length target for prose: 70-95 characters.
+1. Incident summary.
+2. Ranked action statement.
+3. Why-now rationale.
+4. Validation step.
+5. Evidence references and known limitations.
 
 ---
 
-## Layout Contract
+## Reliability Contract (New Mandatory)
 
-### V2.4 Shell Layout (HTML)
+### R1. Anchor and ID Integrity
 
-Use a three-zone layout for large screens:
+1. All in-page links must resolve to existing targets.
+2. All IDs must be unique in the rendered document.
+3. Legacy anchor compatibility remains supported.
+4. Broken anchor count must be zero.
 
-1. Left rail: section navigation, severity chips, progress.
-2. Main column: findings and evidence.
-3. Right rail: sticky top actions and quick metrics.
+### R2. Data Consistency
 
-Responsive behavior:
-
-- >= 1280 px: three-zone layout.
-- 900-1279 px: left rail plus main, right rail collapsible drawer.
-- < 900 px: single-column stack, sticky summary bar replaces side rails.
-
-### V2.5 First-Screen Composition
-
-Above the fold must include, in order:
-
-1. Header
-2. HealthScorecard
-3. ExecutiveSummary critical/warning slices
-4. Top actions panel
-5. Key metrics strip
-
-No large tables above the fold.
+1. Summary counters must match detailed sections.
+2. Top action counts must be consistent across all surfaces.
+3. Number formatting must be locale-consistent within one report.
 
 ---
 
-## Section Anatomy (Visual + Data)
+## Layout and Visual Contract
 
-Each `ReportSection` uses a consistent card anatomy:
+### V1. Responsive Shell
 
-1. Section header (title, severity, confidence, provenance status)
-2. Lead finding block (always visible)
-3. Key metrics strip (always visible)
-4. Evidence tables (collapsed by default)
-5. Caveats
-6. Provenance (collapsed)
+Viewport behavior:
 
-Lead finding visual template:
+1. 1280 px and above: left rail, main column, right rail.
+2. 900-1279 px: left rail plus main, right rail collapsible.
+3. Below 900 px: single column with sticky compact incident bar.
 
-```
-[Severity Badge] Section title                       Confidence ●●●○
-Finding: one-sentence actionable statement
-Evidence: metric-grounded sentence
-Recommendation: one concrete next action
-Caveats: heuristic or coverage notes
-```
+Horizontal overflow must not occur at page level.
+
+### V2. Table Behavior
+
+1. No uncontrolled table overflow on mobile.
+2. Dense tables must switch to card or stacked row mode below 900 px.
+3. Long cells must clamp with expand affordance.
+4. Large evidence tables should be lazy-rendered when collapsed.
+
+### V3. Typographic Readability
+
+1. Minimum body size target: readable mobile baseline.
+2. Reduce micro-label density and repeated badges.
+3. Keep prose line length approximately 70-95 characters on desktop.
+4. Prioritize title, evidence, action hierarchy over decorative chips.
+
+### V4. Severity Semantics
+
+Severity encoding requires both color and shape or icon:
+
+1. Critical: filled badge with strong border and icon.
+2. Warning: outlined badge with icon.
+3. Info: neutral badge.
+4. Unknown: muted badge.
+
+Confidence symbols remain inline near finding title.
+
+### V5. Design Tokens (Required Names)
+
+Renderer must expose stable token names for:
+
+1. Canvas, surface, elevated backgrounds.
+2. Primary, secondary, muted text.
+3. Severity and border colors.
+4. Domain accents.
+5. UI and mono typography scales.
+6. Spacing, radius, and shadow levels.
+
+Token names remain stable even if values change.
 
 ---
 
-## Information Density Rules
+## Single-Dump Mode Contract (New Mandatory)
 
-1. Default to summary view; details on demand.
-2. Avoid duplicate metrics across adjacent blocks.
-3. Hard-limit summary lists (`top N`) in HTML and markdown; JSON remains full.
-4. Prefer ranked tables over long prose.
-5. Hide empty tables and empty sub-panels.
+When report contains one dump:
 
----
-
-## Data Visualization Rules
-
-Use compact, decision-oriented visuals:
-
-- Memory composition: stacked bars with absolute bytes and percent labels.
-- Severity movement in-domain: mini trend chips if historical context exists.
-- Distribution metrics: histogram and sparkline pairs.
-- Thread and wait profiles: horizontal bars and heat strips.
-
-Do not render decorative charts without action value.
+1. Hide trend-only scaffolding and timeline-only language.
+2. Reallocate space to single-dump root evidence.
+3. Prioritize retained roots, hotspot types, suspicious threads, and handle pressure.
+4. Preserve trend-capable schema but suppress trend-first visuals.
 
 ---
 
-## Motion and Interaction (HTML)
+## Performance Contract (New Mandatory)
 
-Motion is functional, minimal, optional:
+Set report-render performance budgets and enforce them in tests.
 
-- On-load stagger for summary cards (100-200 ms step).
-- Expand and collapse transitions <= 180 ms.
-- Scroll-to-anchor highlight pulse <= 1 cycle.
+Minimum requirements:
 
-Respect `prefers-reduced-motion`: disable non-essential animation.
+1. Controlled DOM growth by default-collapsing heavy sections.
+2. Lazy hydration or deferred render for deep tables and heavy charts.
+3. Avoid unnecessary duplicated markup for repeated finding cards.
+4. Keep interaction responsiveness stable during expand and scroll.
 
 ---
 
 ## Accessibility Contract
 
-1. WCAG AA contrast minimum for all text and badges.
-2. Keyboard navigation for all toggles, tables, and anchors.
-3. ARIA labels for severity badges, confidence symbols, and collapsible controls.
-4. Screen-reader summary at top with critical counts and top actions.
-5. No critical workflow blocked behind pointer-only interaction.
+1. WCAG AA contrast for text and badges.
+2. Keyboard navigation for toggles, links, and tables.
+3. ARIA labels for severity, confidence, and collapsibles.
+4. Screen-reader summary at top with critical count and top actions.
+5. No critical workflow behind pointer-only interactions.
 
 ---
 
-## Domain and Section Ordering (inherits v1)
+## Required HTML IDs and Anchors
 
-Ordering rules from v1 remain unchanged:
+Required IDs:
 
-1. `HealthScorecard` first.
-2. Domains sorted by max severity.
-3. Sections in domain sorted by lead severity.
-4. Unknown or skipped domains last.
+1. report-header
+2. health-scorecard
+3. executive-summary
+4. top-actions
+5. domain-{letter}
+6. section-{id}
+7. finding-{id}
+8. provenance-{id}
+9. reading-mode-toggle
+10. ticket-template-menu
 
-v2 adds emphasis and decision support only; no schema-order divergence.
+Mandatory legacy anchors:
 
----
-
-## HTML-Specific Component Catalog (Required IDs)
-
-Renderer must provide stable component classes and IDs for testability:
-
-- `report-header`
-- `health-scorecard`
-- `executive-summary`
-- `top-actions`
-- `domain-{letter}`
-- `section-{id}` (for example `section-A1`)
-- `finding-{id}`
-- `provenance-{id}`
-
-Section anchor IDs from v1 (`A1`, `B4`, and others) remain mandatory.
+1. Section IDs such as A1, B4, and others from v1 contracts.
 
 ---
 
 ## JSON and Markdown Parity
 
-- JSON preserves full data and ordering.
-- Markdown preserves narrative order with concise top-N tables.
-- Visual-only metadata (color, motion) must not alter semantic payload.
-- Functional scoring fields (priority factors, confidence factors) must be present in JSON for auditability.
+1. JSON remains full-fidelity and preserves deterministic ordering.
+2. Markdown preserves the same incident story and ranked order.
+3. Visual-only metadata must not alter semantic payload.
+4. Ranking and confidence factors remain present in JSON for auditability.
 
 ---
 
-## Print / Export Mode
+## Quality Gates
 
-When print or export mode is enabled:
+A v2 renderer passes only if all checks below are true:
 
-1. Expand only lead findings and key metrics by default.
-2. Keep long tables truncated with continuation note.
-3. Repeat section header metadata on page breaks.
-4. Include generation timestamp, analyzer version, and known limitations footer.
-
----
-
-## Quality Gates (v2)
-
-A v2 renderer is acceptable only if:
-
-1. First-screen shows actionable triage without scrolling into tables.
-2. Critical finding is identifiable within 3 seconds by visual scan.
-3. Any finding can be traced to evidence and provenance in <= 2 interactions.
-4. Mobile layout remains readable and fully navigable.
-5. Markdown and JSON still tell the same incident story.
-6. Top action ordering is deterministic and explainable.
-7. Confidence caveats are visible before deep drill-down.
-
----
-
-## Test and Validation Matrix
-
-Minimum validation expectations:
-
-1. Snapshot tests for first-screen ordering and required component IDs.
-2. CSS token presence checks for required token names.
-3. Accessibility smoke tests for keyboard flow and ARIA labels.
-4. JSON parity tests for v1 versus v2 payload semantics.
-5. Ranking determinism tests for top actions and tie-breaks.
-6. Correlation tests for duplicate suppression and conflict flags.
+1. Actionable triage is visible before any large table.
+2. Critical issue is discoverable within 3 seconds by scan.
+3. Action to provenance path is no more than 2 interactions.
+4. Broken anchor count is zero.
+5. Duplicate ID count is zero.
+6. Mobile has no page-level horizontal overflow.
+7. Summary counters are internally consistent.
+8. Top action ordering is deterministic and explainable.
+9. Confidence caveats are visible in summary.
+10. HTML, JSON, markdown remain semantically aligned.
+11. Incident and Forensics mode switch works without data loss.
+12. Ticket payload templates are available from each top action.
 
 ---
 
 ## Backward Compatibility
 
-- v1 field map remains valid.
-- v2 introduces presentation and decision-support behavior.
-- Existing pipelines may opt in via `ReportStyleVersion = "v2"`.
-- If any functional field is unavailable, renderer must degrade gracefully and emit explicit caveat text.
+1. v1 fields remain valid.
+2. v2 remains opt-in via report style version.
+3. If optional functional fields are unavailable, renderer must degrade gracefully and emit explicit caveat text.

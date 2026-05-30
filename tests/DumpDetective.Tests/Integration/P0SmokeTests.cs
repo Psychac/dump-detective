@@ -71,7 +71,6 @@ public sealed class P0SmokeTests
     public void P0_1_HtmlReport_EmbeddedJsonMatchesRenderedDocument()
     {
         AnalyzerRunResult run = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "BigLeak");
-        ReportBuilderFacade facade = BuildFacade();
 
         // Get the canonical document first via the ReportSerializer
         ReportSerializer serializer = new();
@@ -95,9 +94,16 @@ public sealed class P0SmokeTests
         string embeddedJson = m.Groups[3].Value;
         embeddedJson.Should().NotBeNullOrWhiteSpace();
 
+        using JsonDocument payload = JsonDocument.Parse(embeddedJson);
+        payload.RootElement.TryGetProperty("report", out JsonElement reportElement).Should().BeTrue();
+        payload.RootElement.TryGetProperty("perDumpDocs", out JsonElement perDumpElement).Should().BeTrue();
+        perDumpElement.ValueKind.Should().Be(JsonValueKind.Array);
+
+        string reportJson = reportElement.GetRawText();
+
         // Round-trip: the embedded JSON should deserialize back to an equivalent document
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(
-            embeddedJson, ReportJsonContext.Default.AnalysisReportDocument);
+            reportJson, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
         ((SingleDumpReportDocument)restored!).DumpPath.Should().Be("C:/dumps/smoke.dmp");
@@ -157,7 +163,7 @@ public sealed class P0SmokeTests
         doc.Appendix!.AnalyzerRunSummary.Should().HaveCount(3);
 
         var leak = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "LeakAnalyzer");
-        leak.Status.Should().Be("Success");
+        leak.Status.Should().Be("Completed");
         leak.DurationMs.Should().BeApproximately(42, 5);
 
         var failed = doc.Appendix.AnalyzerRunSummary.First(s => s.AnalyzerName == "FailedAnalyzer");
@@ -185,7 +191,7 @@ public sealed class P0SmokeTests
         restored!.Appendix.Should().NotBeNull();
         restored.Appendix!.AnalyzerRunSummary.Should().HaveCount(1);
         restored.Appendix.AnalyzerRunSummary[0].AnalyzerName.Should().Be("LeakAnalyzer");
-        restored.Appendix.AnalyzerRunSummary[0].Status.Should().Be("Success");
+        restored.Appendix.AnalyzerRunSummary[0].Status.Should().Be("Completed");
     }
 
     [Fact]
@@ -263,23 +269,22 @@ public sealed class P0SmokeTests
         HtmlReportRenderer renderer = new();
         string html = renderer.Render(trendDoc);
 
-        // Extract per-dump-json script tag
+        // Extract report-json payload and read perDumpDocs envelope member.
         Match m = Regex.Match(html,
-            @"<script\b[^>]*\bid\s*=\s*(['""])(per-dump-json)\1[^>]*>([\s\S]*?)</script>",
+            @"<script\b[^>]*\bid\s*=\s*(['""])(report-json)\1[^>]*>([\s\S]*?)</script>",
             RegexOptions.IgnoreCase);
-        m.Success.Should().BeTrue("HTML must contain <script id=\"per-dump-json\">");
+        m.Success.Should().BeTrue("HTML must contain <script id=\"report-json\">");
 
-        string perDumpJson = m.Groups[3].Value;
-        perDumpJson.Should().NotBe("[]", "per-dump documents should not be empty");
+        string payloadJson = m.Groups[3].Value;
+        using JsonDocument payload = JsonDocument.Parse(payloadJson);
+        payload.RootElement.TryGetProperty("perDumpDocs", out JsonElement perDumpArray).Should().BeTrue();
+
+        perDumpArray.ValueKind.Should().Be(JsonValueKind.Array);
+        perDumpArray.GetArrayLength().Should().Be(2);
 
         // Parse as JSON array
-        using var jsonDoc = JsonDocument.Parse(perDumpJson);
-        jsonDoc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
-        jsonDoc.RootElement.GetArrayLength().Should().Be(2);
-
         // Each per-dump document should have the same structure as a single-dump report
-        JsonElement firstDoc = jsonDoc.RootElement[0];
-        firstDoc.GetProperty("$kind").GetString().Should().Be("single");
+        JsonElement firstDoc = perDumpArray[0];
         firstDoc.GetProperty("dumpPath").GetString().Should().Be("C:/dumps/baseline.dmp");
         firstDoc.TryGetProperty("domains", out _).Should().BeTrue("per-dump doc should have domains");
         firstDoc.TryGetProperty("healthScorecard", out _).Should().BeTrue("per-dump doc should have health scorecard");

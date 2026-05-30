@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Services.Capabilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -32,6 +33,35 @@ internal sealed class DumpAnalysisService(
         catch (Exception ex) when (ex is ArgumentException or FileNotFoundException) { throw new ConfigurationException(ex.Message, ex); }
         IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
         _startupValidator.ValidateRegistrations(analyzers, _findingGenerators, _trendComparers, _sectionBuilderFactory);
+
+        IReadOnlyList<IFindingGenerator> findingGeneratorList = _findingGenerators.ToList();
+        IReadOnlyList<IAnalyzerTrendComparer> trendComparerList = _trendComparers.ToList();
+        IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders = _sectionBuilderFactory.CreateAnalyzerBuilders();
+
+        IReadOnlyList<AnalyzerFeatureModule> resolvedModules = AnalyzerFeatureModuleAdapter.CreateResolvedModules(
+            analyzers,
+            findingGeneratorList,
+            trendComparerList,
+            analyzerSectionBuilders);
+
+        AnalyzerFeatureModuleCoverage resolvedCoverage = AnalyzerFeatureModuleAdapter.ComputeCoverage(
+            resolvedModules,
+            analyzers,
+            findingGeneratorList,
+            trendComparerList,
+            analyzerSectionBuilders);
+
+        _startupValidator.ValidateFeatureModuleCoverage(resolvedCoverage, requireFullCoverage: true, "resolved capability modules");
+
+        AnalyzerFeatureModuleCoverage spikeCoverage = AnalyzerFeatureModuleAdapter.ComputeCoverage(
+            AnalyzerFeatureModuleSpikeCatalog.CreateSpikeModules(),
+            analyzers,
+            findingGeneratorList,
+            trendComparerList,
+            analyzerSectionBuilders);
+
+        _startupValidator.ValidateFeatureModuleCoverage(spikeCoverage, requireFullCoverage: false, "spike capability modules");
+
         AnalyzerFilterService.Validate(resolved, analyzers);
         IReadOnlyList<IAnalyzer> activeAnalyzers = AnalyzerFilterService.Order(AnalyzerFilterService.Apply(resolved, analyzers));
         if (TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths))

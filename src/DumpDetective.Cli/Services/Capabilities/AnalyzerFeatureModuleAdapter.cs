@@ -49,6 +49,7 @@ internal static class AnalyzerFeatureModuleAdapter
                 FindingGeneratorType: generator.GetType(),
                 TrendComparerType: comparer.GetType(),
                 AnalyzerSectionBuilderType: sectionBuilder.GetType(),
+                ReportSectionContributionTypes: [],
                 Order: i,
                 Tags: ["resolved", "phase2-adapter"]));
         }

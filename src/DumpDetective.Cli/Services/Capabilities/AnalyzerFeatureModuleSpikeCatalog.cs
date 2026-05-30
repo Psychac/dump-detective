@@ -18,6 +18,7 @@ internal static class AnalyzerFeatureModuleSpikeCatalog
                 FindingGeneratorType: typeof(MemoryFindingGenerator),
                 TrendComparerType: typeof(MemoryAnalyzerTrendComparer),
                 AnalyzerSectionBuilderType: typeof(MemoryAnalysisSectionBuilder),
+                ReportSectionContributionTypes: [],
                 Order: 100,
                 Tags: ["memory", "baseline", "phase2-spike"]),
 
@@ -28,6 +29,7 @@ internal static class AnalyzerFeatureModuleSpikeCatalog
                 FindingGeneratorType: typeof(ThreadFindingGenerator),
                 TrendComparerType: typeof(ThreadTrendComparer),
                 AnalyzerSectionBuilderType: typeof(ThreadSectionBuilder),
+                ReportSectionContributionTypes: [],
                 Order: 200,
                 Tags: ["thread", "concurrency", "phase2-spike"]),
 
@@ -38,6 +40,7 @@ internal static class AnalyzerFeatureModuleSpikeCatalog
                 FindingGeneratorType: typeof(DominatorFindingGenerator),
                 TrendComparerType: typeof(DominatorTrendComparer),
                 AnalyzerSectionBuilderType: typeof(DominatorSectionBuilder),
+                ReportSectionContributionTypes: [],
                 Order: 300,
                 Tags: ["retention", "dominator", "phase2-spike"])
         ];

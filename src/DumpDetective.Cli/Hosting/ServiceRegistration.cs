@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Services.Capabilities;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -31,6 +32,9 @@ internal static class ServiceRegistration
 
         services.AddSingleton<RootCommandBuilder>();
 
+        DefaultAnalyzerFeatureModuleCatalog moduleCatalog = new();
+        services.AddSingleton<IAnalyzerFeatureModuleCatalog>(moduleCatalog);
+
         services.AddSingleton<ConfigurationResolver>();
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<IDumpLoader, DumpLoader>();
@@ -43,86 +47,19 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
         services.AddSingleton<ISectionBuilderFactory, DefaultSectionBuilderFactory>();
 
-        // Finding generators — one per analyzer, registered as IFindingGenerator
-        services.AddSingleton<IFindingGenerator, MemoryFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, RetentionFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, StringFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, GCGenerationFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, CrashFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, EventLeakFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, GCHandleFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, LohFragmentationFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, HangFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, AsyncTaskFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, LockGraphFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, StaticRootFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ReferenceChainFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, CollectionFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ThreadFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ThreadStackClusterFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ModuleFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, DependentHandleFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, HeapTopologyFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, AllocationPatternFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ObjectShapeFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, GCRootFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, FinalizableObjectFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, AsyncStateMachineFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, ArrayFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, AppDomainFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, SegmentReservationFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, WeakReferenceFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, BoxingFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, JitFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, LeakCandidateFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, DominatorFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, DbConnectionFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, WcfChannelFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, HttpObjectFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, TimerLeakFindingGenerator>();
+        foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
+        {
+            services.AddSingleton(typeof(IFindingGenerator), sp => ActivatorUtilities.CreateInstance(sp, module.FindingGeneratorType));
+        }
 
         services.AddSingleton<FindingGenerationPipeline>();
         services.AddSingleton<CanonicalReportDocumentFactory>();
 
-        // Trend comparers — one per analyzer, registered as IAnalyzerTrendComparer.
-        // TrendAnalyzer consumes IEnumerable<IAnalyzerTrendComparer> via DI.
-        // Keep this list in sync with DefaultAnalyzerFactory and the finding generators above.
-        services.AddSingleton<IAnalyzerTrendComparer, MemoryAnalyzerTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, RetentionTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, GCGenerationTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, CrashTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, EventLeakTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, GCHandleTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, LohFragmentationTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, HangTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, AsyncTaskTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, LockGraphTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, StaticRootTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ReferenceChainTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, CollectionTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ThreadTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ThreadStackClusterTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ModuleTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, DependentHandleTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, HeapTopologyTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, StringTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, AllocationPatternTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ObjectShapeTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, GCRootTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, FinalizableObjectTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, AsyncStateMachineTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, ArrayTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, AppDomainTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, SegmentReservationTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, WeakReferenceTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, BoxingTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, JitTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, LeakCandidateTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, DominatorTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, DbConnectionTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, WcfChannelTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, HttpObjectTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, TimerLeakTrendComparer>();
+        foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
+        {
+            services.AddSingleton(typeof(IAnalyzerTrendComparer), sp => ActivatorUtilities.CreateInstance(sp, module.TrendComparerType));
+        }
+
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();

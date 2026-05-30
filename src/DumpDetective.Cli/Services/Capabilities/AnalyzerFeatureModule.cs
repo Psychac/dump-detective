@@ -11,6 +11,7 @@ internal sealed record AnalyzerFeatureModule(
     Type FindingGeneratorType,
     Type TrendComparerType,
     Type AnalyzerSectionBuilderType,
+    IReadOnlyList<Type> ReportSectionContributionTypes,
     int Order,
     IReadOnlyCollection<string> Tags)
 {
@@ -22,6 +23,7 @@ internal sealed record AnalyzerFeatureModule(
             && typeof(IFindingGenerator).IsAssignableFrom(FindingGeneratorType)
             && typeof(IAnalyzerTrendComparer).IsAssignableFrom(TrendComparerType)
             && typeof(IAnalyzerSectionBuilder).IsAssignableFrom(AnalyzerSectionBuilderType)
+            && ReportSectionContributionTypes.All(t => typeof(IReportSectionBuilder).IsAssignableFrom(t))
             && Order >= 0;
     }
 }

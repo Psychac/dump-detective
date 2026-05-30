@@ -6,7 +6,13 @@ Proposed consolidated program.
 Execution status update (2026-05-30):
 - Phase 0: Complete (baseline script, snapshots, and smoke/guardrail tests green)
 - Phase 1: Complete (legacy top-level project removed, active layout clarified)
-- Phase 2: In progress (capability-module spike scaffold started)
+- Phase 2: Complete (module-driven registration and completeness validation in place)
+- Phase 3: Complete (finding-generator ownership moved to Reporting; Analysis source-link removed)
+
+Re-validation notes (2026-05-30):
+- Focused architecture/integration guardrail suite: 17/17 passed
+- Official baseline harness `tools/Phase0/Invoke-Phase0Baseline.ps1`: passed
+- Baseline artifacts under `artifacts/reports/phase0`: all `status = pass`
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -300,7 +306,7 @@ Medium
 - no more manual parallel lists that must stay in sync
 
 Current status:
-- In progress (module scaffold and initial tests started)
+- Complete
 
 ## Phase 3: Realign the Reporting/Analysis Boundary
 
@@ -333,6 +339,9 @@ Medium
 ### Exit criteria
 - `Analysis` no longer compiles Reporting-owned source files
 - report outputs remain functionally equivalent on the golden set
+
+Current status:
+- Complete
 
 ## Phase 4: Thin the CLI into a Host Shell
 

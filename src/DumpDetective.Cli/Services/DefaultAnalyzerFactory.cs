@@ -1,59 +1,40 @@
-using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Cli.Services.Capabilities;
 using DumpDetective.Core.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Cli.Services;
 
 internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
 {
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly IAnalyzerFeatureModuleCatalog _moduleCatalog;
 
-    public DefaultAnalyzerFactory(ILoggerFactory loggerFactory)
+    public DefaultAnalyzerFactory()
+        : this(BuildCompatibilityServiceProvider(NullLoggerFactory.Instance), new DefaultAnalyzerFeatureModuleCatalog())
     {
-        _loggerFactory = loggerFactory;
+    }
+
+    public DefaultAnalyzerFactory(IServiceProvider serviceProvider, IAnalyzerFeatureModuleCatalog moduleCatalog)
+    {
+        _serviceProvider = serviceProvider;
+        _moduleCatalog = moduleCatalog;
     }
 
     public IReadOnlyList<IAnalyzer> CreateAnalyzers()
     {
-        return
-        [
-            new MemoryAnalyzer(),
-            new GCGenerationAnalyzer(),
-            new AllocationPatternAnalyzer(),
-            new ObjectShapeAnalyzer(),
-            new GCRootAnalyzer(),
-            new HeapTopologyAnalyzer(),
-            new ModuleAnalyzer(),
-            new CrashAnalyzer(),
-            new HangAnalyzer(),
-            new AsyncTaskAnalyzer(),
-            new RetentionAnalyzer(),
-            new LeakCandidateAnalyzer(),
-            new DominatorAnalyzer(),
-            new StringAnalyzer(),
-            new CollectionAnalyzer(_loggerFactory.CreateLogger<CollectionAnalyzer>()),
-            new StaticRootLeakDetector(),
-            new ReferenceChainAnalyzer(),
-            new GCHandleAnalyzer(),
-            new DependentHandleAnalyzer(),
-            new LohFragmentationAnalyzer(),
-            new ThreadStackClusterAnalyzer(),
-            new ThreadAnalyzer(),
-            new LockGraphAnalyzer(),
-            new EventLeakAnalyzer(),
-            new FinalizableObjectAnalyzer(),
-            new AsyncStateMachineAnalyzer(),
-            new ArrayAnalyzer(),
-            new AppDomainAnalyzer(),
-            new SegmentReservationAnalyzer(),
-            new WeakReferenceAnalyzer(),
-            new BoxingAnalyzer(),
-            new JitAnalyzer(),
-            // Domain H — Infrastructure / Network
-            new DbConnectionAnalyzer(),
-            new WcfChannelAnalyzer(),
-            new HttpObjectAnalyzer(),
-            new TimerLeakAnalyzer(),
-        ];
+        return _moduleCatalog.Modules
+            .OrderBy(m => m.Order)
+            .Select(m => (IAnalyzer)ActivatorUtilities.CreateInstance(_serviceProvider, m.AnalyzerType))
+            .ToList();
+    }
+
+    private static IServiceProvider BuildCompatibilityServiceProvider(ILoggerFactory loggerFactory)
+    {
+        ServiceCollection services = new();
+        services.AddSingleton(loggerFactory);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+        return services.BuildServiceProvider();
     }
 }

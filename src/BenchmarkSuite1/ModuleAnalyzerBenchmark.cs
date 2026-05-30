@@ -7,7 +7,6 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Options;
 using Microsoft.Diagnostics.Runtime;
 using System;
-using System.Collections.Generic;
 
 namespace BenchmarkSuite1
 {
@@ -39,23 +38,6 @@ namespace BenchmarkSuite1
         {
             // base.Setup() has already run; Runtime, Heap, Cache and AnalysisContext are populated.
             _runtimeNoCacheRef = Runtime;
-
-            // Register ModuleAnalysisOptions so the analyzer uses the options-path rather than defaults.
-            if (AnalysisContext is not null)
-            {
-                var opts = new Dictionary<Type, object?>(AnalysisContext.Options)
-                {
-                    [typeof(ModuleAnalysisOptions)] = ModuleAnalysisOptions.Default
-                };
-                AnalysisContext = new AnalysisContext
-                {
-                    Runtime = AnalysisContext.Runtime,
-                    Cache = AnalysisContext.Cache,
-                    Diagnostics = AnalysisContext.Diagnostics,
-                    DiagnosticsSink = AnalysisContext.DiagnosticsSink,
-                    Options = opts
-                };
-            }
         }
 
         /// <summary>

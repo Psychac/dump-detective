@@ -2,7 +2,6 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Query;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Pipeline;
 
@@ -16,11 +15,6 @@ internal sealed class RuntimeAnalysisContext : DumpDetective.Core.Abstractions.A
     /// without a real <see cref="Microsoft.Diagnostics.Runtime.ClrRuntime"/>.
     /// </summary>
     public RuntimeFacade? RuntimeFacade { get; init; }
-
-    /// <summary>
-    /// Centralized execution policy resolved from config and CLI.
-    /// </summary>
-    public ExecutionPolicy ExecutionPolicy { get; init; } = DumpDetective.Core.Options.ExecutionPolicy.Default;
 
     /// <summary>
     /// Convenience accessor that exposes the build-time interface for the heap cache.

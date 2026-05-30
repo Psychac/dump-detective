@@ -65,20 +65,22 @@ public class FullPipelineBenchmark
 
         // Stage 3: wire up context — identical to RunAnalyzersPipelineStage.BuildContext
         var diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
+        AnalysisOptions analysisOptions = new()
+        {
+            MemoryLeak = new RetentionOptions(),
+            ReferenceChain = new ReferenceChainOptions(),
+            EventLeak = new EventLeakOptions(),
+            Diagnostics = diagnostics,
+            Collection = CollectionAnalysisOptions.Default,
+        };
+
         _context = new RuntimeAnalysisContext
         {
             Runtime = _runtime,
             Cache = _cache,
+            AnalysisOptions = analysisOptions,
             Diagnostics = diagnostics,
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
-            Options = new Dictionary<Type, object?>
-            {
-                [typeof(RetentionOptions)] = new RetentionOptions(),
-                [typeof(ReferenceChainOptions)] = new ReferenceChainOptions(),
-                [typeof(EventLeakOptions)] = new EventLeakOptions(),
-                [typeof(DiagnosticsOptions)] = diagnostics,
-                [typeof(CollectionAnalysisOptions)] = CollectionAnalysisOptions.Default,
-            }
         };
 
         // Stage 4: build pipeline with all real analyzers — same list as DefaultAnalyzerFactory

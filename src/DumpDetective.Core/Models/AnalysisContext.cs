@@ -7,6 +7,8 @@ namespace DumpDetective.Core.Abstractions;
 
 public class AnalysisContext
 {
+    // Intentional boundary decision (Phase 7): Core remains dump-runtime-aware.
+    // AnalysisContext carries ClrRuntime/ClrHeap as shared execution substrate.
     public required ClrRuntime Runtime { get; init; }
     public ClrHeap Heap => Runtime.Heap;
     public required IHeapAnalysisCache Cache { get; init; }
@@ -15,12 +17,6 @@ public class AnalysisContext
     /// </summary>
     public AnalysisOptions AnalysisOptions { get; init; } = new();
     public DiagnosticsOptions Diagnostics { get; init; } = new();
-    /// <summary>
-    /// Per-analyzer options, keyed by the option type itself.
-    /// Use <c>context.GetOption&lt;T&gt;()</c> (Analysis project extension) to read safely with default fallback.
-    /// Populated by the CLI pipeline from <see cref="DumpDetective.Cli.Services.ResolvedExecutionOptions"/>.
-    /// </summary>
-    public IReadOnlyDictionary<Type, object?> Options { get; init; } = new Dictionary<Type, object?>();
     public IAnalysisDiagnosticsSink DiagnosticsSink { get; init; } = NullAnalysisDiagnosticsSink.Instance;
 
     /// <summary>

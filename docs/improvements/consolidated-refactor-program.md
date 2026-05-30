@@ -11,6 +11,7 @@ Execution status update (2026-05-30):
 - Phase 4: Complete (CLI composition ownership reduced; factories/facade/capability catalog now Reporting-owned)
 - Phase 5: Complete (serializer/trend decomposition delivered, renderer policy explicit, UI modules split with targeted coverage)
 - Phase 6: Complete (pipeline collaborators extracted, insight rules grouped, shared traversal adopted in analyzer path)
+- Phase 7: Complete (Core boundary tightened: legacy option bag removed, policy inference moved to Analysis, context surface narrowed)
 
 Re-validation notes (2026-05-30):
 - Focused architecture/integration guardrail suite: 17/17 passed
@@ -19,6 +20,7 @@ Re-validation notes (2026-05-30):
 - Phase 4 follow-up: baseline harness updated for Reporting-owned capability catalog path
 - Phase 5 milestone: HTML renderer now uses explicit render settings (no mutable static override flags)
 - Phase 6 milestone: pipeline/infrastructure/insight decomposition validated with focused tests and baseline harness
+- Phase 7 milestone: Core contracts slimmed; runtime-aware boundary decision documented; focused tests and baseline harness revalidated
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -544,6 +546,16 @@ Low to Medium
 
 ### Exit criteria
 - Core remains small and no longer looks like a stealth policy layer
+
+Current status:
+- Complete
+- Completed in this iteration:
+  - runtime-boundary decision documented: Core is intentionally dump-runtime-aware at `AnalysisContext`
+  - removed legacy `AnalysisContext.Options` type-keyed map in favor of typed `AnalysisOptions`
+  - removed policy inference helpers from `DiagnosticsOptions` and moved evaluation to Analysis (`AnalyzerCollectionPolicyEvaluator`)
+  - narrowed ambient runtime context by removing duplicate `RuntimeAnalysisContext.ExecutionPolicy`
+  - audited `InternalsVisibleTo`: retained single Analysis-to-tests entry only (no Core internals exposure)
+  - updated affected benchmarks/tests to typed options path and validated behavior
 
 ## Phase 8: Hardening and Fitness Enforcement
 

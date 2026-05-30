@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Options;
 
 using FluentAssertions;
@@ -13,8 +14,8 @@ public sealed class DiagnosticsOptionsTests
     {
         DiagnosticsOptions options = new();
 
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 150).Should().BeFalse();
-        options.HasAnalyzerCollectionPolicy().Should().BeFalse();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 150).Should().BeFalse();
+        AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(options).Should().BeFalse();
     }
 
     [Fact]
@@ -22,8 +23,8 @@ public sealed class DiagnosticsOptionsTests
     {
         DiagnosticsOptions options = new() { CollectAfterAnalyzerRun = true };
 
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 150).Should().BeTrue();
-        options.HasAnalyzerCollectionPolicy().Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 150).Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(options).Should().BeTrue();
     }
 
     [Fact]
@@ -31,9 +32,9 @@ public sealed class DiagnosticsOptionsTests
     {
         DiagnosticsOptions options = new() { CollectAfterAnalyzerRunEveryKAnalyzers = 3 };
 
-        options.ShouldCollectAfterAnalyzerRun(2, 100, 150).Should().BeFalse();
-        options.ShouldCollectAfterAnalyzerRun(3, 100, 150).Should().BeTrue();
-        options.HasAnalyzerCollectionPolicy().Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 2, 100, 150).Should().BeFalse();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 3, 100, 150).Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(options).Should().BeTrue();
     }
 
     [Fact]
@@ -41,10 +42,10 @@ public sealed class DiagnosticsOptionsTests
     {
         DiagnosticsOptions options = new() { CollectAfterAnalyzerRunWorkingSetThresholdBytes = 256 };
 
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 200).Should().BeFalse();
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 400).Should().BeTrue();
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 200).Should().BeFalse();
-        options.ShouldCollectAfterAnalyzerRun(1, 100, 300).Should().BeTrue();
-        options.HasAnalyzerCollectionPolicy().Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 200).Should().BeFalse();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 400).Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 200).Should().BeFalse();
+        AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(options, 1, 100, 300).Should().BeTrue();
+        AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(options).Should().BeTrue();
     }
 }

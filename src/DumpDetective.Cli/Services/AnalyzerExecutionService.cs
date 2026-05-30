@@ -85,7 +85,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 MemoryAnalysis = resolved.MemoryAnalysis,
             },
             Diagnostics = resolved.Diagnostics,
-            ExecutionPolicy = resolved.ExecutionPolicy,
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };
     }

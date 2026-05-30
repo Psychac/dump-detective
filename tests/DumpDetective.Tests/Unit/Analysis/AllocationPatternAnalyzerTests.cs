@@ -51,7 +51,7 @@ public sealed class AllocationPatternAnalyzerTests
         {
             Runtime = null!,
             Cache = cache,
-            Options = new Dictionary<System.Type, object?> { [typeof(AllocationPatternAnalysisOptions)] = options }
+            AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options }
         };
 
         var analyzer = new AllocationPatternAnalyzer();
@@ -131,7 +131,7 @@ public sealed class AllocationPatternAnalyzerTests
         {
             Runtime = null!,
             Cache = cache,
-            Options = new Dictionary<System.Type, object?> { [typeof(AllocationPatternAnalysisOptions)] = options }
+            AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options }
         };
 
         var analyzer = new AllocationPatternAnalyzer();
@@ -181,7 +181,7 @@ public sealed class AllocationPatternAnalyzerTests
         {
             Runtime = null!,
             Cache = cache,
-            Options = new Dictionary<System.Type, object?> { [typeof(AllocationPatternAnalysisOptions)] = options }
+            AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options }
         };
 
         var analyzer = new AllocationPatternAnalyzer();
@@ -214,7 +214,7 @@ public sealed class AllocationPatternAnalyzerTests
             EmitShortish = false
         };
 
-        var context = new AnalysisContext { Runtime = null!, Cache = cache, Options = new Dictionary<System.Type, object?> { [typeof(AllocationPatternAnalysisOptions)] = options } };
+        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options } };
         var analyzer = new AllocationPatternAnalyzer();
         var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
 
@@ -248,7 +248,7 @@ public sealed class AllocationPatternAnalyzerTests
             Priority = AllocationPatternAnalysisOptions.SelectionPriority.Mixed
         };
 
-        var context = new AnalysisContext { Runtime = null!, Cache = cache, Options = new Dictionary<System.Type, object?> { [typeof(AllocationPatternAnalysisOptions)] = options } };
+        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options } };
         var analyzer = new AllocationPatternAnalyzer();
         var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
 

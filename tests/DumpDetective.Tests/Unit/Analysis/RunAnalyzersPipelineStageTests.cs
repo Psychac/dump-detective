@@ -5,6 +5,7 @@ using DumpDetective.Cli.Services;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Core.Models;
 using FluentAssertions;
 using Xunit;
 
@@ -32,7 +33,7 @@ public class RunAnalyzersPipelineStageTests
 
         // Act
         var ctx = InvokeBuildContext(state);
-        var opt = (ThreadAnalysisOptions)ctx.Options[typeof(ThreadAnalysisOptions)];
+        var opt = ctx.AnalysisOptions.ThreadAnalysis;
 
         // Assert
         opt.SamplingSeed.Should().NotBe(0);
@@ -48,7 +49,7 @@ public class RunAnalyzersPipelineStageTests
         };
 
         var ctx2 = InvokeBuildContext(state2);
-        var opt2 = (ThreadAnalysisOptions)ctx2.Options[typeof(ThreadAnalysisOptions)];
+        var opt2 = ctx2.AnalysisOptions.ThreadAnalysis;
 
         opt2.SamplingSeed.Should().Be(opt.SamplingSeed);
     }
@@ -81,18 +82,20 @@ public class RunAnalyzersPipelineStageTests
         var c1 = InvokeBuildContext(s1);
         var c2 = InvokeBuildContext(s2);
 
-        var o1 = (ThreadAnalysisOptions)c1.Options[typeof(ThreadAnalysisOptions)];
-        var o2 = (ThreadAnalysisOptions)c2.Options[typeof(ThreadAnalysisOptions)];
+        var o1 = c1.AnalysisOptions.ThreadAnalysis;
+        var o2 = c2.AnalysisOptions.ThreadAnalysis;
 
         o1.SamplingSeed.Should().NotBe(o2.SamplingSeed);
     }
 
     private static RuntimeAnalysisContext InvokeBuildContext(SingleDumpPipelineState state)
     {
-        var t = typeof(RunAnalyzersPipelineStage);
-        var mi = t.GetMethod("BuildContext", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = mi.Invoke(null, new object[] { state });
-        return (RuntimeAnalysisContext)result!;
+        AnalyzerExecutionService service = new(new FindingGenerationPipeline([]));
+        return service.BuildContext(
+            state.Resolved,
+            state.LoadContext!,
+            state.HeapCache!,
+            Array.Empty<IAnalyzer>());
     }
 
     private static DumpDetective.Analysis.Dump.DumpLoadContext CreateDumpLoadContext(string path)

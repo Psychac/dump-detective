@@ -2,7 +2,6 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using Microsoft.Diagnostics.Runtime;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
@@ -16,7 +15,7 @@ namespace BenchmarkSuite1
     /// Base class for analyzer benchmarks. Handles dump loading, runtime/heap setup, and cache creation.
     /// Job configuration is centralized here: 0 warmup iterations, 3 measurement iterations.
     /// Setup mirrors DumpAnalysisService: loads dump, builds heap index, and constructs a fully
-    /// populated AnalysisContext (including Options) so analyzers take the index-driven path.
+    /// populated AnalysisContext so analyzers take the index-driven path.
     /// </summary>
     /// <remarks>
     /// [Config(AnalyzerBenchmarkIterationConfig)] is the authoritative source for WarmupCount/IterationCount.
@@ -83,26 +82,22 @@ namespace BenchmarkSuite1
                     mode: HeapIndexPrebuildMode.Auto);
             }
 
-            // Build context once — matches the Options dictionary DumpAnalysisService populates
-            // so analyzers resolve their typed options rather than falling back to defaults.
-            var memoryLeakOptions = new RetentionOptions();
-            var referenceChainOptions = new ReferenceChainOptions();
-            var eventLeakOptions = new EventLeakOptions();
             var diagnosticsOptions = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
+            AnalysisOptions analysisOptions = new()
+            {
+                MemoryLeak = new RetentionOptions(),
+                ReferenceChain = new ReferenceChainOptions(),
+                EventLeak = new EventLeakOptions(),
+                Diagnostics = diagnosticsOptions,
+            };
 
             AnalysisContext = new AnalysisContext
             {
                 Runtime = Runtime,
                 Cache = Cache,
+                AnalysisOptions = analysisOptions,
                 Diagnostics = diagnosticsOptions,
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
-                Options = new Dictionary<Type, object?>
-                {
-                    [typeof(RetentionOptions)] = memoryLeakOptions,
-                    [typeof(ReferenceChainOptions)] = referenceChainOptions,
-                    [typeof(EventLeakOptions)] = eventLeakOptions,
-                    [typeof(DiagnosticsOptions)] = diagnosticsOptions,
-                }
             };
 
             OnSetup();

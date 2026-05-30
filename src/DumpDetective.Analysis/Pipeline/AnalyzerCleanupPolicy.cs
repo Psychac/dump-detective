@@ -35,7 +35,7 @@ internal sealed class AnalyzerCleanupPolicy
                 return;
 
             long workingSetAfter = trackWorkingSet ? GetWorkingSet() : 0;
-            if (!context.Diagnostics.ShouldCollectAfterAnalyzerRun(completedAnalyzerCount, workingSetBefore, workingSetAfter))
+            if (!AnalyzerCollectionPolicyEvaluator.ShouldCollectAfterAnalyzerRun(context.Diagnostics, completedAnalyzerCount, workingSetBefore, workingSetAfter))
                 return;
 
             try

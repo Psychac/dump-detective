@@ -92,7 +92,7 @@ internal sealed class AnalysisPipeline(
 
             AnalyzerMemoryStats? memoryStats = null;
             long wsBefore = 0, managedBefore = 0;
-            bool trackWorkingSet = context.Diagnostics.EnableMemoryDiagnostics || context.Diagnostics.HasAnalyzerCollectionPolicy();
+            bool trackWorkingSet = context.Diagnostics.EnableMemoryDiagnostics || AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(context.Diagnostics);
             if (trackWorkingSet)
             {
                 _currentProcess.Refresh();

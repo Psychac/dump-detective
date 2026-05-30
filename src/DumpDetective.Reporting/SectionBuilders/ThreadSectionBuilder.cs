@@ -47,13 +47,14 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             keyMetrics.Add(KM("Sampling Seed", $"0x{d.SamplingSeed:X8}"));
         }
 
-        // Finalizer frames — meaningful narrative
+        // Finalizer frames — small bounded stack, show inline for immediate visibility
         var finFrames = d.FinalizerFrames ?? [];
         if (finFrames.Count > 0)
         {
-            blocks.Add(H("FINALIZER FRAMES"));
+            string blockedSuffix = d.FinalizerThreadBlocked ? " — BLOCKED" : string.Empty;
+            blocks.Add(H($"Finalizer Thread Stack{blockedSuffix}"));
             for (int i = 0; i < finFrames.Count; i++)
-                blocks.Add(T(finFrames[i], 1));
+                blocks.Add(SF(finFrames[i], 0, IsFrameworkFrame(finFrames[i])));
         }
 
         if (d.WaitPatternBreakdown.Count > 0)
@@ -156,28 +157,40 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var sampled = d.SampledThreads ?? [];
         if (sampled.Count > 0)
         {
-            blocks.Add(H("SAMPLED THREAD SNAPSHOTS"));
+            var lockedSet  = d.TopLockedThreads     ?? (IReadOnlyList<ThreadStateSnapshot>)[];
+            var blockedSet = d.TopBlockedThreads    ?? (IReadOnlyList<ThreadStateSnapshot>)[];
+            var exSet      = d.ThreadsWithActiveExceptions ?? (IReadOnlyList<ThreadExceptionSnapshot>)[];
+
+            blocks.Add(H("Sampled Thread Snapshots"));
             for (int i = 0; i < sampled.Count; i++)
             {
                 var s = sampled[i];
                 bool isCaptured = false;
-                var locked = d.TopLockedThreads ?? new List<ThreadStateSnapshot>();
-                var blocked = d.TopBlockedThreads ?? new List<ThreadStateSnapshot>();
-                var exceptions = d.ThreadsWithActiveExceptions ?? new List<ThreadExceptionSnapshot>();
-                if (locked.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
-                if (blocked.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
-                if (exceptions.Any(t => t.ThreadId == s.ThreadId && t.OSThreadId == s.OSThreadId)) isCaptured = true;
-                blocks.Add(H($"Thread {s.ThreadId} (OS {s.OSThreadId})", 2));
-                blocks.Add(M("Snapshot Type", isCaptured ? "Captured" : "Sampled"));
-                blocks.Add(M("State", s.ThreadState));
+                for (int j = 0; j < lockedSet.Count;  j++) if (lockedSet[j].ThreadId  == s.ThreadId && lockedSet[j].OSThreadId  == s.OSThreadId)  { isCaptured = true; break; }
+                for (int j = 0; j < blockedSet.Count; j++) if (blockedSet[j].ThreadId == s.ThreadId && blockedSet[j].OSThreadId == s.OSThreadId) { isCaptured = true; break; }
+                for (int j = 0; j < exSet.Count;      j++) if (exSet[j].ThreadId      == s.ThreadId && exSet[j].OSThreadId      == s.OSThreadId)      { isCaptured = true; break; }
+
+                // Build a concise collapsible title that shows the most actionable info upfront.
+                string snapshotTag = isCaptured ? "Captured" : "Sampled";
+                string waitTag = !string.IsNullOrEmpty(s.WaitCategory) ? $" | {s.WaitCategory}" : string.Empty;
+                string lockTag = s.LockCount > 0 ? $" | {s.LockCount} lock{(s.LockCount == 1 ? "" : "s")}" : string.Empty;
+                string collapseTitle = $"[{i + 1}] Thread {s.ThreadId} (OS {s.OSThreadId}) — {snapshotTag}{waitTag}{lockTag}";
+
+                blocks.Add(CollapseBegin(collapseTitle));
+                blocks.Add(M("State",           s.ThreadState));
+                blocks.Add(M("GC Mode",         s.GcMode));
+                blocks.Add(M("Lock Count",      $"{s.LockCount:N0}",      s.LockCount));
+                blocks.Add(M("Stack Roots",     $"{s.StackRootCount:N0}", s.StackRootCount));
+                if (s.StackSizeBytes > 0)
+                    blocks.Add(M("Stack Size",  FormatBytes(s.StackSizeBytes)));
                 if (!string.IsNullOrEmpty(s.WaitCategory))
-                    blocks.Add(M("Wait", s.WaitCategory ?? ""));
+                    blocks.Add(M("Wait Category", s.WaitCategory!));
                 if (!string.IsNullOrEmpty(s.WaitReason))
-                    blocks.Add(M("Wait Reason", s.WaitReason ?? ""));
-                blocks.Add(M("Stack Root Count", $"{s.StackRootCount:N0}", s.StackRootCount));
-                blocks.Add(M("Stack Size", s.StackSizeBytes > 0 ? $"{s.StackSizeBytes:N0}" : "—", s.StackSizeBytes));
+                    blocks.Add(M("Wait Reason",   s.WaitReason!));
                 for (int f = 0; f < s.TopFrames.Count; f++)
-                    blocks.Add(T(s.TopFrames[f], 2));
+                    blocks.Add(SF(s.TopFrames[f], 0, IsFrameworkFrame(s.TopFrames[f])));
+                blocks.Add(CollapseEnd());
+                if (i + 1 < sampled.Count) blocks.Add(Blank());
             }
         }
 
@@ -194,4 +207,9 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
+
+    private static bool IsFrameworkFrame(string frame) =>
+        frame.StartsWith("System.",    StringComparison.Ordinal) ||
+        frame.StartsWith("Microsoft.", StringComparison.Ordinal) ||
+        frame.StartsWith("mscorlib",   StringComparison.Ordinal);
 }

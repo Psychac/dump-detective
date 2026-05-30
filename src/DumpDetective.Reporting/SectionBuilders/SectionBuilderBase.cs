@@ -10,6 +10,7 @@ internal abstract class SectionBuilderBase
     /// Top-level section KPIs should use <see cref="KM"/> instead.</summary>
     protected static MetricBlock M(string label, string value, double? raw = null, int indent = 0) => new(label, value, raw, indent);
     protected static TextBlock T(string text, int indent = 0) => new(text, indent);
+    protected static StackFrameBlock SF(string frame, int indent = 0, bool isFramework = false) => new(frame, indent, isFramework);
     protected static ConfidenceBandBlock BuildConfidenceBand(double? score, IReadOnlyList<string>? caveats)
     {
         double resolvedScore = score ?? 0.5;

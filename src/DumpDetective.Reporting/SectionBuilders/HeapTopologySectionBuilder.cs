@@ -6,18 +6,18 @@ using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-/// <summary>B3 — Heap Topology. Source: <see cref="SegmentAnalysisDomainResult"/>.</summary>
-internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+/// <summary>B3 — Heap Topology. Source: <see cref="HeapTopologyDomainResult"/>.</summary>
+internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string AnalyzerName => "Segment Analysis";
+    public string AnalyzerName => "Heap Topology";
     public string DisplayTitle => "Heap Topology";
     public int SortOrder => 300;
 
-    public bool CanHandle(AnalyzerDomainResult result) => result is SegmentAnalysisDomainResult;
+    public bool CanHandle(AnalyzerDomainResult result) => result is HeapTopologyDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
-        var d = (SegmentAnalysisDomainResult)result;
+        var d = (HeapTopologyDomainResult)result;
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
@@ -132,7 +132,7 @@ internal sealed class HeapSegmentDiagnosticsSectionBuilder : SectionBuilderBase,
         }
 
         return new AnalyzerDetailSection(
-            AnalyzerName: "Segment Analysis",
+            AnalyzerName: "Heap Topology",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
             Blocks: blocks,

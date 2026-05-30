@@ -1,34 +1,10 @@
-﻿/* ΓöÇΓöÇ Executive Summary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
+﻿/* ── Executive Summary ──────────────────────────────────────────────────── */
 .executive-summary {
   position: relative;
   background: #ffffff;
 }
 
-/* KPI strip */
-.exec-kpi-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  gap: 0;
-}
-.exec-kpi-group {
-  display: flex;
-  align-items: stretch;
-  flex-wrap: wrap;
-}
-.exec-kpi-group + .exec-kpi-group {
-  border-left: 1px solid var(--border-strong);
-  margin-left: 4px;
-}
-.exec-kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 4px 16px;
-  min-width: 80px;
-}
+/* exec-kpi__label / exec-kpi__value — used in the trend snapshot window row */
 .exec-kpi__value {
   font-size: 17px;
   font-weight: 700;
@@ -40,7 +16,7 @@
 .exec-kpi__value--warning  { color: var(--sev-warning-text); }
 .exec-kpi__value--ok       { color: var(--sev-ok-text); }
 
-/* KPI dashboard (Phase 1.1) */
+/* KPI dashboard tiles (single-dump exec summary) */
 .exec-kpi-dashboard {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -77,6 +53,12 @@
   border-color: var(--sev-ok-border);
   border-left-color: var(--sev-ok-bar);
   background: var(--sev-ok-bg);
+}
+
+.exec-kpi-tile--info {
+  border-color: var(--sev-info-border);
+  border-left-color: var(--sev-info-bar);
+  background: var(--sev-info-bg);
 }
 
 .exec-kpi-tile__head {
@@ -121,6 +103,12 @@
   color: var(--sev-ok-text);
   background: var(--sev-ok-bg-strong);
   border-color: var(--sev-ok-border-mid);
+}
+
+.exec-kpi-tile__state--info {
+  color: var(--sev-info-text);
+  background: var(--sev-info-bg-strong);
+  border-color: var(--sev-info-border-mid);
 }
 
 .exec-kpi-tile__value {
@@ -662,18 +650,7 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 }
 .appendix-panel > summary:hover { background: #f1f5f9; }
 .appendix-panel[open] > summary { background: #f8fafc; }
-.appendix-panel > summary::before {
-  content: '';
-  flex-shrink: 0;
-  display: inline-block;
-  width: 7px; height: 7px;
-  border-right: 2px solid #94a3b8;
-  border-bottom: 2px solid #94a3b8;
-  transform: rotate(-45deg);
-  transition: transform 0.18s;
-  margin-bottom: 1px;
-}
-.appendix-panel[open] > summary::before { transform: rotate(45deg) translate(-2px,-2px); border-color: var(--accent); }
+/* Chevron geometry handled by shared rule in report.base.css. */
 .appendix-panel__title { flex: 1 1 0; }
 .appendix-panel__meta { font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; }
 .appendix-panel__body { padding: 14px 20px 18px; }
@@ -697,7 +674,7 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 }
 .appendix-tally__chip--completed { background: var(--sev-ok-bg);       color: var(--sev-ok-text);       border-color: var(--sev-ok-border-mid); }
 .appendix-tally__chip--failed    { background: var(--sev-critical-bg); color: var(--sev-critical-text); border-color: var(--sev-critical-border-mid); }
-.appendix-tally__chip--skipped   { background: #f8fafc; color: #475569; border-color: #cbd5e1; }
+.appendix-tally__chip--skipped   { background: var(--sev-neutral-bg); color: var(--sev-neutral-text); border-color: var(--sev-neutral-border-mid); }
 .appendix-tally__chip--timedout  { background: var(--sev-warning-bg);  color: var(--sev-warning-text);  border-color: var(--sev-warning-border-mid); }
 
 /* Per-analyzer run row */
@@ -715,7 +692,7 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 }
 .appendix-run-row--completed { border-left-color: var(--sev-ok-bar); }
 .appendix-run-row--failed    { border-left-color: var(--sev-critical-bar); background: var(--sev-critical-bg); }
-.appendix-run-row--skipped   { border-left-color: #cbd5e1; opacity: 0.75; }
+.appendix-run-row--skipped   { border-left-color: var(--sev-neutral-bar); opacity: 0.75; }
 .appendix-run-row--timedout  { border-left-color: var(--sev-warning-bar); background: var(--sev-warning-bg); }
 .appendix-run-row__name  { font-size: 12px; font-weight: 700; color: #111827; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .appendix-run-row__stats { font-size: 11px; color: var(--muted); white-space: nowrap; }
@@ -727,7 +704,7 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 }
 .appendix-run-row__pill--completed { background: var(--sev-ok-bg-strong);       color: var(--sev-ok-text); }
 .appendix-run-row__pill--failed    { background: var(--sev-critical-bg-strong); color: var(--sev-critical-text); }
-.appendix-run-row__pill--skipped   { background: #f1f5f9; color: #475569; }
+.appendix-run-row__pill--skipped   { background: var(--sev-neutral-bg-strong); color: var(--sev-neutral-text); }
 .appendix-run-row__pill--timedout  { background: var(--sev-warning-bg-strong);  color: var(--sev-warning-text); }
 .appendix-run-row__note { grid-column: 1 / -1; font-size: 11px; color: var(--sev-critical-text); overflow-wrap: anywhere; padding-top: 2px; }
 
@@ -805,24 +782,10 @@ body.reading-mode-forensics .toc-incident-only {
   cursor: pointer;
 }
 .report-domain__details > summary::-webkit-details-marker { display: none; }
-.report-domain__details > summary::before {
-  content: '';
-  flex-shrink: 0;
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid #94a3b8;
-  border-bottom: 2px solid #94a3b8;
-  transform: rotate(-45deg);
-  transition: transform 0.18s;
-}
-.report-domain__details[open] > summary::before {
-  transform: rotate(45deg) translate(-2px, -2px);
-  border-color: var(--accent);
-}
+/* Chevron geometry handled by shared rule in report.base.css. */
 .domain-header--critical { border-left: 4px solid var(--sev-critical-bar); background: var(--sev-critical-bg); }
 .domain-header--warning  { border-left: 4px solid var(--sev-warning-bar);  background: var(--sev-warning-bg); }
-.domain-header--info     { border-left: 4px solid var(--sev-info-bar);     background: #f0f6ff; }
+.domain-header--info     { border-left: 4px solid var(--sev-info-bar);     background: var(--sev-info-bg); }
 .domain-header--ok       { border-left: 4px solid var(--sev-ok-bar);       background: var(--sev-ok-bg); }
 .domain-header__name {
   flex: 1 1 0;

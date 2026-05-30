@@ -518,7 +518,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             or nameof(DumpDetective.Analysis.Analyzers.AllocationPatternAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.ObjectShapeAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.GCRootAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.SegmentAnalyzer)
+            or nameof(DumpDetective.Analysis.Analyzers.HeapTopologyAnalyzer)
             or nameof(DumpDetective.Analysis.Analyzers.ModuleAnalyzer)
                 => "Profiling heap and GC",
 

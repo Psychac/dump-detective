@@ -9,20 +9,20 @@ namespace DumpDetective.Analysis.Analyzers;
 
 /// <summary>
 /// Classifies all managed heap segments (SOH, LOH, POH, Frozen) and produces a
-/// <see cref="SegmentAnalysisDomainResult"/> with per-kind size and object count totals.
+/// <see cref="HeapTopologyDomainResult"/> with per-kind size and object count totals.
 /// Operates directly on <see cref="ClrHeap.Segments"/>.
-/// Per-object counting is skipped for SOH by default (see <see cref="SegmentAnalysisOptions.CountSohObjects"/>)
+/// Per-object counting is skipped for SOH by default (see <see cref="HeapTopologyAnalysisOptions.CountSohObjects"/>)
 /// since SOH dominates object count (87 M+ objects on large dumps) and is the main cost driver.
 /// </summary>
-public sealed class SegmentAnalyzer : IAnalyzer
+public sealed class HeapTopologyAnalyzer : IAnalyzer
 {
-    public string Name => "Segment Analysis";
+    public string Name => "Heap Topology";
     public string Category => "Memory";
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var opts = context.AnalysisOptions.SegmentAnalysis;
+        var opts = context.AnalysisOptions.HeapTopology;
         return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects).Stamp(this));
     }
 
@@ -193,18 +193,18 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
         var topBySize = snapshots
             .OrderByDescending(s => s.CommittedBytes)
-            .Take(SegmentAnalyzerOptions.TopSegmentsCount)
+            .Take(HeapTopologyAnalyzerOptions.TopSegmentsCount)
             .ToList();
 
-        var topPohTypes = BuildTopTypeSnapshots(pohTypes, SegmentAnalyzerOptions.TopSegmentsCount);
-        var topFrozenTypes = BuildTopTypeSnapshots(frozenTypes, SegmentAnalyzerOptions.TopSegmentsCount);
+        var topPohTypes = BuildTopTypeSnapshots(pohTypes, HeapTopologyAnalyzerOptions.TopSegmentsCount);
+        var topFrozenTypes = BuildTopTypeSnapshots(frozenTypes, HeapTopologyAnalyzerOptions.TopSegmentsCount);
 
         progress?.Report(new(
             ScannedCount: totalObjectsScanned,
             Phase: "aggregating results",
             Detail: $"{snapshots.Count} segments, {totalObjectsScanned:N0} objects total"));
 
-        return new SegmentAnalysisDomainResult(
+        return new HeapTopologyDomainResult(
             TotalSegments: snapshots.Count,
             TotalCommittedBytes: totalCommitted,
             TotalUsedBytes: totalUsed,
@@ -285,7 +285,7 @@ public sealed class SegmentAnalyzer : IAnalyzer
 
             localScanned++;
 
-            if (reportInner && (localScanned & (SegmentAnalyzerOptions.ReportObjectScanInterval - 1)) == 0)
+            if (reportInner && (localScanned & (HeapTopologyAnalyzerOptions.ReportObjectScanInterval - 1)) == 0)
             {
                 totalObjectsScanned += localScanned;
                 localScanned = 0;

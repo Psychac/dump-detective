@@ -78,6 +78,8 @@ export function buildChartBlock(block) {
 // ── SVG chart builders ────────────────────────────────────────────────────────
 
 function buildChartSvg(kind, payload) {
+  if (kind === 'rankedbar') return buildRankedBarChart(payload);
+  if (kind === 'histogram') return buildHistogramChart(payload);
   if (kind === 'treemap') return buildTreemapChart(payload);
   if (kind === 'heatmap') return buildHeatmapChart(payload);
   if (kind === 'waterfall') return buildWaterfallChart(payload);
@@ -299,6 +301,180 @@ function buildWaterfallChart(payload) {
   return wrap;
 }
 
+function buildHistogramChart(payload) {
+  const wrap = buildBaseChart(payload.title || 'Histogram');
+  const items = normalizeItems(payload).filter(item => item.value >= 0);
+  const svg = svgEl('svg', 'detail-chart__svg detail-chart__svg--histogram');
+  svg.setAttribute('viewBox', '0 0 900 260');
+  svg.setAttribute('role', 'img');
+
+  if (!items.length) {
+    renderSvgText(svg, 450, 130, 'No histogram data', 'detail-chart__center-subtitle');
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
+  const margin = { top: 20, right: 24, bottom: 86, left: 72 };
+  const chartW = 900 - margin.left - margin.right;
+  const chartH = 260 - margin.top - margin.bottom;
+  const maxVal = Math.max(1, ...items.map(item => item.value));
+  const nonZero = items.map(item => item.value).filter(v => v > 0).sort((a, b) => b - a);
+  const secondMax = nonZero.length > 1 ? nonZero[1] : 0;
+  const useLogScale = secondMax > 0 && (maxVal / secondMax) >= 8;
+  const gridLines = 4;
+
+  const scaleValue = (value) => {
+    const n = Math.max(0, Number(value) || 0);
+    if (!useLogScale) return n;
+    return Math.log10(n + 1);
+  };
+
+  const scaledMax = Math.max(1, scaleValue(maxVal));
+
+  for (let g = 0; g <= gridLines; g++) {
+    const ratio = g / gridLines;
+    const y = margin.top + chartH - ratio * chartH;
+    const line = svgEl('line');
+    line.setAttribute('x1', String(margin.left));
+    line.setAttribute('x2', String(margin.left + chartW));
+    line.setAttribute('y1', String(y));
+    line.setAttribute('y2', String(y));
+    line.setAttribute('stroke', '#e2e8f0');
+    line.setAttribute('stroke-width', '1');
+    svg.appendChild(line);
+    const axisVal = useLogScale
+      ? Math.round(Math.pow(10, scaledMax * ratio) - 1)
+      : Math.round(maxVal * ratio);
+    renderSvgText(svg, margin.left - 8, y + 4, formatIntChart(axisVal), 'detail-chart__axis-value');
+  }
+
+  const step = chartW / Math.max(1, items.length);
+  const barW = Math.max(8, step * 0.72);
+  const xOffset = (step - barW) / 2;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const scaled = scaleValue(item.value);
+    const barH = scaledMax <= 0 ? 0 : (scaled / scaledMax) * chartH;
+    const x = margin.left + i * step + xOffset;
+    const y = margin.top + (chartH - barH);
+
+    const bar = svgEl('rect');
+    bar.setAttribute('x', String(x));
+    bar.setAttribute('y', String(y));
+    bar.setAttribute('width', String(barW));
+    bar.setAttribute('height', String(Math.max(0, barH)));
+    bar.setAttribute('rx', '2');
+    bar.setAttribute('fill', '#2563eb');
+    bar.setAttribute('opacity', '0.9');
+    const tip = svgEl('title');
+    tip.textContent = `${item.label}: ${formatIntChart(item.value)} object(s)`;
+    bar.appendChild(tip);
+    svg.appendChild(bar);
+
+    const valueY = barH > 16 ? y + 12 : Math.max(12, y - 4);
+    renderSvgText(svg, x + barW / 2, valueY, formatIntChart(item.value), 'detail-chart__hist-value');
+
+    const label = renderSvgText(svg, x + barW / 2, margin.top + chartH + 14, truncateLabel(item.label, 28), 'detail-chart__axis-label');
+    label.setAttribute('text-anchor', 'end');
+    label.setAttribute('transform', `rotate(-28 ${x + barW / 2} ${margin.top + chartH + 14})`);
+  }
+
+  const yAxis = svgEl('line');
+  yAxis.setAttribute('x1', String(margin.left));
+  yAxis.setAttribute('x2', String(margin.left));
+  yAxis.setAttribute('y1', String(margin.top));
+  yAxis.setAttribute('y2', String(margin.top + chartH));
+  yAxis.setAttribute('stroke', '#94a3b8');
+  yAxis.setAttribute('stroke-width', '1');
+  svg.appendChild(yAxis);
+
+  const xAxis = svgEl('line');
+  xAxis.setAttribute('x1', String(margin.left));
+  xAxis.setAttribute('x2', String(margin.left + chartW));
+  xAxis.setAttribute('y1', String(margin.top + chartH));
+  xAxis.setAttribute('y2', String(margin.top + chartH));
+  xAxis.setAttribute('stroke', '#94a3b8');
+  xAxis.setAttribute('stroke-width', '1');
+  svg.appendChild(xAxis);
+
+  renderSvgText(svg, 14, 16, useLogScale ? 'Object count (log scale)' : 'Object count', 'detail-chart__axis-title');
+  wrap.appendChild(svg);
+  return wrap;
+}
+
+function buildRankedBarChart(payload) {
+  const wrap = buildBaseChart(payload.title || 'Top types');
+  const items = normalizeItems(payload)
+    .filter(item => item.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+
+  const rowH = 30;
+  const topPad = 18;
+  const bottomPad = 20;
+  const svgH = Math.max(210, topPad + bottomPad + items.length * rowH);
+  const svg = svgEl('svg', 'detail-chart__svg detail-chart__svg--rankedbar');
+  svg.setAttribute('viewBox', `0 0 920 ${svgH}`);
+  svg.setAttribute('role', 'img');
+
+  if (!items.length) {
+    renderSvgText(svg, 460, svgH / 2, 'No chart data', 'detail-chart__center-subtitle');
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
+  const maxVal = Math.max(...items.map(item => item.value));
+  const total = items.reduce((sum, item) => sum + item.value, 0) || 1;
+  const labelW = 260;
+  const valueW = 160;
+  const chartX = labelW + 10;
+  const chartW = 920 - chartX - valueW - 20;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const y = topPad + i * rowH;
+    const cy = y + 16;
+    const barW = maxVal <= 0 ? 0 : Math.max(3, (item.value / maxVal) * chartW);
+
+    const rank = renderSvgText(svg, 18, cy, `${i + 1}.`, 'detail-chart__bar-rank');
+    rank.setAttribute('text-anchor', 'start');
+
+    const label = renderSvgText(svg, 48, cy, truncateMiddle(item.label, 40), 'detail-chart__bar-label');
+    label.setAttribute('text-anchor', 'start');
+
+    const bg = svgEl('rect');
+    bg.setAttribute('x', String(chartX));
+    bg.setAttribute('y', String(y + 6));
+    bg.setAttribute('width', String(chartW));
+    bg.setAttribute('height', '18');
+    bg.setAttribute('rx', '6');
+    bg.setAttribute('fill', '#e2e8f0');
+    bg.setAttribute('opacity', '0.7');
+    svg.appendChild(bg);
+
+    const bar = svgEl('rect');
+    bar.setAttribute('x', String(chartX));
+    bar.setAttribute('y', String(y + 6));
+    bar.setAttribute('width', String(barW));
+    bar.setAttribute('height', '18');
+    bar.setAttribute('rx', '6');
+    bar.setAttribute('fill', palette(i));
+    bar.setAttribute('opacity', '0.96');
+    const tip = svgEl('title');
+    tip.textContent = `${item.label}: ${formatBytesChart(item.value)}`;
+    bar.appendChild(tip);
+    svg.appendChild(bar);
+
+    const pct = total > 0 ? (item.value * 100 / total).toFixed(1) : '0.0';
+    const value = renderSvgText(svg, chartX + chartW + 10, cy, `${formatBytesChart(item.value)}  ${pct}%`, 'detail-chart__bar-value');
+    value.setAttribute('text-anchor', 'start');
+  }
+
+  wrap.appendChild(svg);
+  return wrap;
+}
+
 function heatColor(strength) {
   const clamped = Math.max(0, Math.min(1, strength));
   const r = Math.round(244 - clamped * 120);
@@ -330,7 +506,20 @@ function formatCountChart(value) {
   return `${num >= 0 ? '+' : '-'}${Math.abs(Math.round(num)).toLocaleString('en-US')}`;
 }
 
+function formatIntChart(value) {
+  const num = Number(value) || 0;
+  return `${Math.round(num).toLocaleString('en-US')}`;
+}
+
 function truncateLabel(value, maxLength) {
   const text = String(value || '');
-  return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 1)) + 'â€¦' : text;
+  return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 3)) + '...' : text;
+}
+
+function truncateMiddle(value, maxLength) {
+  const text = String(value || '');
+  if (text.length <= maxLength) return text;
+  const keepLeft = Math.max(6, Math.floor((maxLength - 3) * 0.62));
+  const keepRight = Math.max(5, maxLength - 3 - keepLeft);
+  return `${text.slice(0, keepLeft)}...${text.slice(text.length - keepRight)}`;
 }

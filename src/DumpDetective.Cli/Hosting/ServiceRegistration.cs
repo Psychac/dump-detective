@@ -62,7 +62,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IFindingGenerator, ThreadStackClusterFindingGenerator>();
         services.AddSingleton<IFindingGenerator, ModuleFindingGenerator>();
         services.AddSingleton<IFindingGenerator, DependentHandleFindingGenerator>();
-        services.AddSingleton<IFindingGenerator, SegmentFindingGenerator>();
+        services.AddSingleton<IFindingGenerator, HeapTopologyFindingGenerator>();
         services.AddSingleton<IFindingGenerator, AllocationPatternFindingGenerator>();
         services.AddSingleton<IFindingGenerator, ObjectShapeFindingGenerator>();
         services.AddSingleton<IFindingGenerator, GCRootFindingGenerator>();
@@ -104,7 +104,7 @@ internal static class ServiceRegistration
         services.AddSingleton<IAnalyzerTrendComparer, ThreadStackClusterTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, ModuleTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, DependentHandleTrendComparer>();
-        services.AddSingleton<IAnalyzerTrendComparer, SegmentTrendComparer>();
+        services.AddSingleton<IAnalyzerTrendComparer, HeapTopologyTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, StringTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, AllocationPatternTrendComparer>();
         services.AddSingleton<IAnalyzerTrendComparer, ObjectShapeTrendComparer>();

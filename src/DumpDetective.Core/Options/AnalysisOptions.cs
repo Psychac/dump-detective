@@ -14,7 +14,7 @@ public sealed record AnalysisOptions
     public BoxingAnalysisOptions BoxingAnalysis { get; init; } = new();
     public CollectionAnalysisOptions Collection { get; init; } = new();
     public StringAnalysisOptions StringAnalysis { get; init; } = new();
-    public SegmentAnalysisOptions SegmentAnalysis { get; init; } = new();
+    public HeapTopologyAnalysisOptions HeapTopology { get; init; } = new();
     public AppDomainAnalysisOptions AppDomainAnalysis { get; init; } = new();
     public AllocationPatternAnalysisOptions AllocationPatternAnalysis { get; init; } = new();
     public ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis { get; init; } = new();

@@ -63,7 +63,21 @@
   --sev-info-text: #1d4ed8;
   --sev-info-bg: #eff6ff;
   --sev-info-bg-strong: #dbeafe;
+  --sev-info-border: #bfdbfe;
+  --sev-info-border-mid: #93c5fd;
   --sev-info-bar: #3b82f6;
+  /* Neutral / unknown severity (skipped, framework, unknown states) */
+  --sev-neutral-text: #475569;
+  --sev-neutral-bg: #f8fafc;
+  --sev-neutral-bg-strong: #f1f5f9;
+  --sev-neutral-border: #e2e8f0;
+  --sev-neutral-border-mid: #cbd5e1;
+  --sev-neutral-bar: #94a3b8;
+  /* Detail block semantic color tokens */
+  --detail-key-color: #0f766e;
+  --detail-path-color: #b45309;
+  --detail-frame-color: #1f2937;
+  --detail-frame-fw-color: #6b7280;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -74,11 +88,50 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 18px;
-  --space-8: 8px;
-  --space-12: 12px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
   --space-24: 24px;
   --space-32: 32px;
   --section-gap: 22px;
+  /* Shared chevron dimensions (used by all collapsible summaries) */
+  --chevron-size: 7px;
+  --chevron-weight: 2px;
+  --chevron-color-closed: #94a3b8;
+  --chevron-color-open: var(--accent);
+}
+
+/* ── Shared collapsible chevron ─────────────────────────────────────────────
+   Apply to any <summary>::before that needs the rotate-chevron idiom.
+   Each component only needs to override --chevron-color-open for its accent.
+   ────────────────────────────────────────────────────────────────────────── */
+.chevron-summary::before,
+details[data-collapsible] > summary::before,
+.analyzer-section > details:not(.provenance) > summary::before,
+.detail-nested > summary::before,
+.table-collapse > summary::before,
+.appendix-panel > summary::before,
+.report-domain__details > summary::before {
+  content: '';
+  flex-shrink: 0;
+  display: inline-block;
+  width: var(--chevron-size);
+  height: var(--chevron-size);
+  border-right: var(--chevron-weight) solid var(--chevron-color-closed);
+  border-bottom: var(--chevron-weight) solid var(--chevron-color-closed);
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease, border-color 0.15s;
+  margin-bottom: 1px;
+}
+
+details[data-collapsible][open] > summary::before,
+.analyzer-section > details:not(.provenance)[open] > summary::before,
+.detail-nested[open] > summary::before,
+.table-collapse[open] > summary::before,
+.appendix-panel[open] > summary::before,
+.report-domain__details[open] > summary::before {
+  transform: rotate(45deg) translate(-2px, -2px);
+  border-color: var(--chevron-color-open);
 }
 
 body {

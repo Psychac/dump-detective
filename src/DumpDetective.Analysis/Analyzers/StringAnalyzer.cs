@@ -820,7 +820,7 @@ internal sealed class StringAnalyzer : IAnalyzer
     /// <summary>
     /// Build the list of FOH segment ranges (Start, End) from heap segments.
     /// Uses <c>ClrSegment.Kind</c> via reflection to detect Frozen segments
-    /// (same approach as <see cref="SegmentAnalyzer"/>).
+    /// (same approach as <see cref="HeapTopologyAnalyzer"/>).
     /// Only FOH segments are returned, so per-string range checks are O(foh_segments)
     /// instead of O(total_segments).
     /// </summary>

@@ -31,8 +31,8 @@ internal static class SectionIdDomainMap
         ["GC Generation Analysis"]     = ("GC",         "B1"),
         ["AllocationPatternAnalyzer"]  = ("GC",         "B2"),
         ["Allocation Pattern Analysis"] = ("GC",        "B2"),
-        ["SegmentAnalyzer"]            = ("GC",         "B3"),
-        ["Segment Analysis"]           = ("GC",         "B3"),
+        ["HeapTopologyAnalyzer"]        = ("GC",         "B3"),
+        ["Heap Topology"]              = ("GC",         "B3"),
         ["LohFragmentationAnalyzer"]   = ("GC",         "B4"),
         ["LOH Fragmentation Analysis"]  = ("GC",         "B4"),
         ["SegmentReservationAnalyzer"] = ("GC",         "B5"),
@@ -91,9 +91,9 @@ internal static class SectionIdDomainMap
 
         // IReportSectionBuilder display-title aliases (for sections where DisplayTitle is used as AnalyzerName in the AnalyzerDetailSection)
         ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title
-        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryTopologySectionBuilder display title
+        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryAnalysisSectionBuilder display title
         ["Generation Pressure"]        = ("GC",         "B1"),   // GCPressureSectionBuilder display title
-        ["Heap Topology"]              = ("GC",         "B3"),   // HeapSegmentDiagnosticsSectionBuilder display title
+        ["Heap Topology"]              = ("GC",         "B3"),   // HeapTopologySectionBuilder display title
         ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
 
         // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder
@@ -120,9 +120,6 @@ internal static class SectionIdDomainMap
         ["HTTP Object Analysis"]       = ("Infrastructure", "H3"),
         ["TimerLeakAnalyzer"]         = ("Infrastructure", "H4"),
         ["Timer Leak Analysis"]       = ("Infrastructure", "H4"),
-
-        // Report-level chapter aliases
-        ["Heap Overview"]             = ("Memory", "A2x"),
 
         // C1 (TypeTable) is built by TypeSystemSectionBuilder as an IReportSectionBuilder — no analyzerName entry needed.
     };

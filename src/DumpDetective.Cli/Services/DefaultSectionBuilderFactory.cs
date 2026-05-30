@@ -9,7 +9,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     [
         // Domain A — Memory & Leaks
         new LeakAnalysisSectionBuilder(),          // A1
-        new MemoryTopologySectionBuilder(),        // A2
+        new MemoryAnalysisSectionBuilder(),        // A2
         new DominatorSectionBuilder(),             // A3
         new RetentionSectionBuilder(),             // A4
         new GCRootIntelligenceSectionBuilder(),    // A5
@@ -18,7 +18,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         // Domain B — GC Health
         new GCPressureSectionBuilder(),            // B1
         new AllocationPatternSectionBuilder(),     // B2
-        new HeapSegmentDiagnosticsSectionBuilder(), // B3
+        new HeapTopologySectionBuilder(), // B3
         new LohFragmentationSectionBuilder(),      // B4
         new SegmentReservationSectionBuilder(),    // B5
         new FinalizableObjectSectionBuilder(),     // B6
@@ -55,7 +55,6 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
     [
-        new HeapOverviewSectionBuilder(),
         new ExecutiveSummarySectionBuilder(),
         new TypeSystemSectionBuilder(),            // C1
         new InsightsSectionBuilder(),              // X1 — Cross-Domain Insights

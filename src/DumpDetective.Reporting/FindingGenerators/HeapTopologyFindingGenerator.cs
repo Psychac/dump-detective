@@ -4,14 +4,14 @@ using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.FindingGenerators;
 
-internal sealed class SegmentFindingGenerator : IFindingGenerator
+internal sealed class HeapTopologyFindingGenerator : IFindingGenerator
 {
-    public string AnalyzerName => "Segment Analysis";
-    public bool CanGenerate(AnalyzerDomainResult result) => result is SegmentAnalysisDomainResult;
+    public string AnalyzerName => "Heap Topology";
+    public bool CanGenerate(AnalyzerDomainResult result) => result is HeapTopologyDomainResult;
 
     public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result)
     {
-        if (result is not SegmentAnalysisDomainResult r) return [];
+        if (result is not HeapTopologyDomainResult r) return [];
 
         var findings = new List<InsightFinding>();
 

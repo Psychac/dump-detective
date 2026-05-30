@@ -14,6 +14,13 @@ namespace DumpDetective.Analysis.Insight;
 /// </remarks>
 internal sealed class InsightEngine
 {
+    private static readonly IReadOnlyList<IInsightRuleGroup> RuleGroups =
+    [
+        new BaselineRuleGroup(),
+        new MemoryAndRuntimeRuleGroup(),
+        new CorrelationRuleGroup(),
+    ];
+
     // ── Thresholds ────────────────────────────────────────────────────────────
 
     private const double LohPressureWarningPct = 25.0;
@@ -91,47 +98,127 @@ internal sealed class InsightEngine
         WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
 
-        // Existing detection rules
-        DetectLohPressure(findings, memory, gcGen, segments);
-        DetectLohFragmentation(findings, lohFrag, segments);
-        DetectPohGrowth(findings, segments);
-        DetectThreadContention(findings, threads, hang);
-        DetectFinalizerQueueBacklog(findings, threads, leak, finalizable);
-        DetectPinnedHandlePressure(findings, handles, lohFrag);
-        DetectActiveCrash(findings, crash);
-        DetectLeakSuspicion(findings, leak, strings);
-        DetectWastefulCollections(findings, collections);
-        DetectOrphanedTaskAccumulation(findings, asyncTasks, threads);
-        DetectAnalyzerFailures(findings, runs);
+        var ruleContext = new InsightRuleContext(
+            Runs: runs,
+            Memory: memory,
+            GcGen: gcGen,
+            LohFrag: lohFrag,
+            Segments: segments,
+            Threads: threads,
+            Hang: hang,
+            AsyncTasks: asyncTasks,
+            Leak: leak,
+            Handles: handles,
+            Crash: crash,
+            Collections: collections,
+            Strings: strings,
+            Finalizable: finalizable,
+            GcRoot: gcRoot,
+            AllocPattern: allocPattern,
+            Arrays: arrays,
+            StateMachines: stateMachines,
+            WeakRef: weakRef,
+            SegReservation: segReservation,
+            AppDomains: appDomains,
+            Jit: jit,
+            Boxing: boxing,
+            EventLeaks: eventLeaks,
+            DbConn: dbConn,
+            Wcf: wcf,
+            Http: http);
 
-        // Part 4 — new cross-cutting detection rules
-        DetectGCRootLargeRetention(findings, gcRoot);
-        DetectAllocationPressureCrossCorrelation(findings, allocPattern, threads);
-        DetectStringDuplicationRatio(findings, strings);
-        DetectLohArrayPressure(findings, arrays, lohFrag);
-        DetectAsyncStateMachineFireAndForget(findings, stateMachines, memory);
-        DetectStaleWeakReferenceAccumulation(findings, weakRef);
-        DetectAddressSpacePressure(findings, segReservation, segments);
-        DetectDynamicAssemblyAccumulation(findings, appDomains);
-        DetectJitHeapBloat(findings, jit, threads);
-        DetectBoxingGCCorrelation(findings, boxing, gcGen);
-
-        // Part 5 — fatal exception + cross-domain correlation rules
-        DetectFatalExceptionOnHeap(findings, crash);
-        DetectEventLeakPattern(findings, eventLeaks, gcGen, finalizable);
-        DetectDataTableLifecyclePattern(findings, finalizable, memory);
-        DetectKnownLeakPatterns(findings, memory);
-        DetectKnownFinalizerQueuePatterns(findings, finalizable);
-        DetectRecurringTimeoutPattern(findings, crash);
-
-        // Part 6 — Infrastructure cross-correlations
-        DetectDbConnectionLeak(findings, dbConn, crash);
-        DetectWcfChannelFault(findings, wcf, crash);
-        DetectHttpClientAccumulation(findings, http);
+        for (int i = 0; i < RuleGroups.Count; i++)
+            RuleGroups[i].Apply(findings, in ruleContext);
 
         // Sort by severity descending: Critical(2) > Warning(1) > Info(0)
         findings.Sort(static (a, b) => b.Severity.CompareTo(a.Severity));
         return findings;
+    }
+
+    private interface IInsightRuleGroup
+    {
+        void Apply(List<InsightFinding> findings, in InsightRuleContext context);
+    }
+
+    private readonly record struct InsightRuleContext(
+        IReadOnlyList<AnalyzerRunResult> Runs,
+        MemoryDomainResult? Memory,
+        GCGenerationDomainResult? GcGen,
+        LohFragmentationDomainResult? LohFrag,
+        HeapTopologyDomainResult? Segments,
+        ThreadDomainResult? Threads,
+        HangDomainResult? Hang,
+        AsyncTaskDomainResult? AsyncTasks,
+        RetentionDomainResult? Leak,
+        GCHandleDomainResult? Handles,
+        CrashDomainResult? Crash,
+        CollectionDomainResult? Collections,
+        StringDomainResult? Strings,
+        FinalizableObjectDomainResult? Finalizable,
+        GCRootDomainResult? GcRoot,
+        AllocationPatternDomainResult? AllocPattern,
+        ArrayDomainResult? Arrays,
+        AsyncStateMachineDomainResult? StateMachines,
+        WeakReferenceDomainResult? WeakRef,
+        SegmentReservationDomainResult? SegReservation,
+        AppDomainDomainResult? AppDomains,
+        JitDomainResult? Jit,
+        BoxingDomainResult? Boxing,
+        EventLeakDomainResult? EventLeaks,
+        DbConnectionDomainResult? DbConn,
+        WcfChannelDomainResult? Wcf,
+        HttpObjectDomainResult? Http);
+
+    private sealed class BaselineRuleGroup : IInsightRuleGroup
+    {
+        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
+        {
+            DetectLohPressure(findings, context.Memory, context.GcGen, context.Segments);
+            DetectLohFragmentation(findings, context.LohFrag, context.Segments);
+            DetectPohGrowth(findings, context.Segments);
+            DetectThreadContention(findings, context.Threads, context.Hang);
+            DetectFinalizerQueueBacklog(findings, context.Threads, context.Leak, context.Finalizable);
+            DetectPinnedHandlePressure(findings, context.Handles, context.LohFrag);
+            DetectActiveCrash(findings, context.Crash);
+            DetectLeakSuspicion(findings, context.Leak, context.Strings);
+            DetectWastefulCollections(findings, context.Collections);
+            DetectOrphanedTaskAccumulation(findings, context.AsyncTasks, context.Threads);
+            DetectAnalyzerFailures(findings, context.Runs);
+        }
+    }
+
+    private sealed class MemoryAndRuntimeRuleGroup : IInsightRuleGroup
+    {
+        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
+        {
+            DetectGCRootLargeRetention(findings, context.GcRoot);
+            DetectAllocationPressureCrossCorrelation(findings, context.AllocPattern, context.Threads);
+            DetectStringDuplicationRatio(findings, context.Strings);
+            DetectLohArrayPressure(findings, context.Arrays, context.LohFrag);
+            DetectAsyncStateMachineFireAndForget(findings, context.StateMachines, context.Memory);
+            DetectStaleWeakReferenceAccumulation(findings, context.WeakRef);
+            DetectAddressSpacePressure(findings, context.SegReservation, context.Segments);
+            DetectDynamicAssemblyAccumulation(findings, context.AppDomains);
+            DetectJitHeapBloat(findings, context.Jit, context.Threads);
+            DetectBoxingGCCorrelation(findings, context.Boxing, context.GcGen);
+        }
+    }
+
+    private sealed class CorrelationRuleGroup : IInsightRuleGroup
+    {
+        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
+        {
+            DetectFatalExceptionOnHeap(findings, context.Crash);
+            DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
+            DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
+            DetectKnownLeakPatterns(findings, context.Memory);
+            DetectKnownFinalizerQueuePatterns(findings, context.Finalizable);
+            DetectRecurringTimeoutPattern(findings, context.Crash);
+
+            DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
+            DetectWcfChannelFault(findings, context.Wcf, context.Crash);
+            DetectHttpClientAccumulation(findings, context.Http);
+        }
     }
 
     // ── Detection rules ───────────────────────────────────────────────────────

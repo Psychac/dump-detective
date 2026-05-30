@@ -1,18 +1,23 @@
 ﻿using DumpDetective.Core.Models;
 using System.Diagnostics;
 using DumpDetective.Core.Abstractions;
-using System.Runtime;
 using DumpDetective.Analysis.Cache;
-using System.Diagnostics.CodeAnalysis;
 
 namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class AnalysisPipeline(
     IEnumerable<IAnalyzer> analyzers,
-    FindingGenerationPipeline findingGenerationPipeline)
+    FindingGenerationPipeline findingGenerationPipeline,
+    AnalyzerCleanupPolicy? cleanupPolicy = null,
+    AnalyzerExecutionRunner? executionRunner = null,
+    AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
+    AnalyzerResultPostProcessor? resultPostProcessor = null)
 {
     private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
-    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
+    private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
+    private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
+    private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
+    private readonly AnalyzerExecutionRunner _executionRunner = executionRunner ?? new AnalyzerExecutionRunner(diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher());
     // Cached once per pipeline instance to avoid repeated OS round-trips per analyzer.
     private static readonly Process _currentProcess = Process.GetCurrentProcess();
 
@@ -22,7 +27,7 @@ internal sealed class AnalysisPipeline(
         Stopwatch runStopwatch = Stopwatch.StartNew();
         List<AnalyzerRunResult> runResults = new(_analyzers.Count);
 
-        PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
             EventType: AnalysisDiagnosticsEventType.RunStarted,
             TimestampUtc: DateTime.UtcNow,
@@ -51,7 +56,7 @@ internal sealed class AnalysisPipeline(
 
                 runResults.Add(skipped);
 
-                PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                     RunId: runId,
                     EventType: AnalysisDiagnosticsEventType.AnalyzerCanceled,
                     TimestampUtc: DateTime.UtcNow,
@@ -68,7 +73,7 @@ internal sealed class AnalysisPipeline(
             }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+            _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                 RunId: runId,
                 EventType: AnalysisDiagnosticsEventType.AnalyzerStarted,
                 TimestampUtc: DateTime.UtcNow,
@@ -98,7 +103,7 @@ internal sealed class AnalysisPipeline(
 
             try
             {
-                AnalyzerDomainResult analyzerResult = await ExecuteAnalyzerWithProgressAsync(
+                AnalyzerDomainResult analyzerResult = await _executionRunner.ExecuteAsync(
                     runId,
                     analyzer,
                     context,
@@ -147,7 +152,7 @@ internal sealed class AnalysisPipeline(
 
                 runResults.Add(success);
 
-                PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                     RunId: runId,
                     EventType: AnalysisDiagnosticsEventType.AnalyzerCompleted,
                     TimestampUtc: DateTime.UtcNow,
@@ -180,7 +185,7 @@ internal sealed class AnalysisPipeline(
 
                 runResults.Add(canceled);
 
-                PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                     RunId: runId,
                     EventType: AnalysisDiagnosticsEventType.AnalyzerCanceled,
                     TimestampUtc: DateTime.UtcNow,
@@ -217,7 +222,7 @@ internal sealed class AnalysisPipeline(
 
                 runResults.Add(failed);
 
-                PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
                     RunId: runId,
                     EventType: AnalysisDiagnosticsEventType.AnalyzerFailed,
                     TimestampUtc: DateTime.UtcNow,
@@ -244,52 +249,14 @@ internal sealed class AnalysisPipeline(
                 context.Progress = null;
             }
 
-            // After each analyzer, attempt to dispose it (if it holds resources) and optionally trigger GC.
-            try
-            {
-                if (analyzer is IDisposable disposable)
-                {
-                    try { disposable.Dispose(); } catch { }
-                }
-
-                if (context.Diagnostics is not null
-                    && context.Diagnostics.ShouldCollectAfterAnalyzerRun(runResults.Count, wsBefore, trackWorkingSet ? _currentProcess.WorkingSet64 : 0))
-                {
-                    try
-                    {
-                        if (context.Diagnostics.CompactLargeObjectHeapAfterAnalyzerCollection)
-                        {
-                            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                        }
-
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
-                        GC.Collect();
-                    }
-                    catch
-                    {
-                        // best-effort only
-                    }
-                }
-            }
-            catch
-            {
-                // swallow errors from cleanup attempts
-            }
+            _cleanupPolicy.CleanupAfterAnalyzer(context, analyzer, runResults.Count, wsBefore, trackWorkingSet);
         }
 
         runStopwatch.Stop();
 
-        try
-        {
-            runResults = _findingGenerationPipeline.Generate(runResults, cancellationToken).ToList();
-        }
-        catch
-        {
-            // Best effort only. Analyzer findings are additive and report generation still proceeds.
-        }
+        runResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToList();
 
-        PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
             EventType: AnalysisDiagnosticsEventType.RunCompleted,
             TimestampUtc: DateTime.UtcNow,
@@ -305,111 +272,6 @@ internal sealed class AnalysisPipeline(
 
         return runResults;
     }
-
-    private static async Task<AnalyzerDomainResult> ExecuteAnalyzerWithProgressAsync(
-        Guid runId,
-        IAnalyzer analyzer,
-        RuntimeAnalysisContext context,
-        Stopwatch stopwatch,
-        CancellationToken cancellationToken)
-    {
-        const int progressTickMs = 300;
-
-        // Track the most recent progress reported by the analyzer so the 300ms heartbeat
-        // poll can fall back to it instead of always showing stale cache counts.
-        long latestScannedCount = 0;
-        string latestPhase = "scanning";
-        string? latestDetail = null;
-        long lastHeartbeatScannedCount = -1;
-        string? lastHeartbeatPhase = null;
-        string? lastHeartbeatDetail = null;
-
-        var analyzerProgress = new Progress<AnalyzerProgressReport>(report =>
-        {
-            Interlocked.Exchange(ref latestScannedCount, report.ScannedCount);
-            latestPhase = report.Phase;
-            latestDetail = report.Detail;
-
-            PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-                RunId: runId,
-                EventType: AnalysisDiagnosticsEventType.AnalyzerProgress,
-                TimestampUtc: DateTime.UtcNow,
-                AnalyzerName: analyzer.Name,
-                Category: analyzer.Category,
-                DurationMs: stopwatch.Elapsed.TotalMilliseconds,
-                ObjectScanCount: report.ScannedCount,
-                CacheHits: context.Cache.CacheHits,
-                CacheMisses: context.Cache.CacheMisses,
-                Message: string.IsNullOrEmpty(report.Detail) ? report.Phase : $"{report.Phase} • {report.Detail}",
-                ExceptionType: null,
-                ExceptionMessage: null));
-        });
-
-        // Rate-gate context.Progress so every analyzer can call Report freely without
-        // flooding ConsoleDiagnosticsSink. Applied here (per analyzer run), NOT at the
-        // outer pipeline stage — phase-transition markers in the indexing path must not
-        // be dropped, and they don't flow through context.Progress.
-        context.Progress = new ThrottledProgress<AnalyzerProgressReport>(analyzerProgress, 150);
-
-        Task<AnalyzerDomainResult> analyzeTask = Task.Run(
-            async () => await analyzer.AnalyzeAsync(context, cancellationToken),
-            cancellationToken);
-
-        while (true)
-        {
-            Task completedTask = await Task.WhenAny(analyzeTask, Task.Delay(progressTickMs, cancellationToken));
-            if (completedTask == analyzeTask)
-                break;
-
-            // Heartbeat poll: only fires if the analyzer hasn't reported directly via Progress.
-            // Uses the latest known scan count and phase so display stays accurate.
-            long heartbeatScanCount = Interlocked.Read(ref latestScannedCount);
-            if (heartbeatScanCount == 0)
-            {
-                // Analyzer hasn't called Progress yet — fall back to cache counter (legacy path)
-                heartbeatScanCount = context.Cache.ObjectScanCount;
-            }
-
-            if (heartbeatScanCount == lastHeartbeatScannedCount
-                && string.Equals(latestPhase, lastHeartbeatPhase, StringComparison.Ordinal)
-                && string.Equals(latestDetail, lastHeartbeatDetail, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            lastHeartbeatScannedCount = heartbeatScanCount;
-            lastHeartbeatPhase = latestPhase;
-            lastHeartbeatDetail = latestDetail;
-
-            PublishSafe(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-                RunId: runId,
-                EventType: AnalysisDiagnosticsEventType.AnalyzerProgress,
-                TimestampUtc: DateTime.UtcNow,
-                AnalyzerName: analyzer.Name,
-                Category: analyzer.Category,
-                DurationMs: stopwatch.Elapsed.TotalMilliseconds,
-                ObjectScanCount: heartbeatScanCount,
-                CacheHits: context.Cache.CacheHits,
-                CacheMisses: context.Cache.CacheMisses,
-                Message: string.IsNullOrEmpty(latestDetail) ? latestPhase : $"{latestPhase} • {latestDetail}",
-                ExceptionType: null,
-                ExceptionMessage: null));
-        }
-
-        return await analyzeTask;
-    }
-
-    private static void PublishSafe(IAnalysisDiagnosticsSink diagnosticsSink, AnalysisDiagnosticsEvent diagnosticsEvent)
-    {
-        try
-        {
-            diagnosticsSink.Publish(diagnosticsEvent);
-        }
-        catch
-        {
-        }
-    }
-
 }
 
 

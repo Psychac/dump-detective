@@ -4,6 +4,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -27,6 +28,17 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
 
     // Sentinel continuation type — no-op callback; indicates orphan
     private const string NoOpContinuationType = "System.Threading.Tasks.Task+<>c";
+    private static readonly string[] ExceptionRelatedFields =
+    [
+        "m_exceptionsHolder",
+        "_exceptionsHolder",
+        "m_contingentProperties",
+        "_contingentProperties",
+        "m_faultExceptions",
+        "_faultExceptions",
+        "_exception",
+        "m_exception",
+    ];
 
     public string Name => "Async Task Analysis";
     public string Category => "Async";
@@ -494,43 +506,22 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
 
     private static bool TryFindExceptionLikeObject(ClrObject source, HashSet<ulong> visited, int depth, out ClrObject exceptionObj)
     {
-        exceptionObj = default;
-        if (!source.IsValid || source.Address == 0 || depth > 4 || !visited.Add(source.Address))
-            return false;
-
-        string? typeName = source.Type?.Name;
-        if (!string.IsNullOrWhiteSpace(typeName)
-            && typeName.Contains("Exception", StringComparison.Ordinal)
-            && !typeName.Contains("ExceptionDispatchInfo", StringComparison.Ordinal)
-            && TryReadExceptionSummary(source, out _, out _))
-        {
-            exceptionObj = source;
-            return true;
-        }
-
-        if (source.Type is null)
-            return false;
-
-        foreach (string fieldName in new[] { "m_exceptionsHolder", "_exceptionsHolder", "m_contingentProperties", "_contingentProperties", "m_faultExceptions", "_faultExceptions", "_exception", "m_exception" })
-        {
-            ClrObject child = ReadObjectField(source, fieldName);
-            if (!child.IsValid)
-                continue;
-
-            if (TryFindExceptionLikeObject(child, visited, depth + 1, out exceptionObj))
-                return true;
-        }
-
-        foreach (ClrObject child in source.EnumerateReferences(carefully: true))
-        {
-            if (!child.IsValid || child.Address == 0)
-                continue;
-
-            if (TryFindExceptionLikeObject(child, visited, depth + 1, out exceptionObj))
-                return true;
-        }
-
-        return false;
+        return ObjectGraphTraversal.TryFindByPredicate(
+            source,
+            visited,
+            depth,
+            maxDepth: 4,
+            prioritizedFieldNames: ExceptionRelatedFields,
+            isMatch: candidate =>
+            {
+                string? typeName = candidate.Type?.Name;
+                return !string.IsNullOrWhiteSpace(typeName)
+                    && typeName.Contains("Exception", StringComparison.Ordinal)
+                    && !typeName.Contains("ExceptionDispatchInfo", StringComparison.Ordinal)
+                    && TryReadExceptionSummary(candidate, out _, out _);
+            },
+            readObjectField: ReadObjectField,
+            out exceptionObj);
     }
 
     private static bool TryReadExceptionSummary(ClrObject exceptionObj, out string? exceptionType, out string? message)

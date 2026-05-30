@@ -10,6 +10,7 @@ Execution status update (2026-05-30):
 - Phase 3: Complete (finding-generator ownership moved to Reporting; Analysis source-link removed)
 - Phase 4: Complete (CLI composition ownership reduced; factories/facade/capability catalog now Reporting-owned)
 - Phase 5: Complete (serializer/trend decomposition delivered, renderer policy explicit, UI modules split with targeted coverage)
+- Phase 6: Complete (pipeline collaborators extracted, insight rules grouped, shared traversal adopted in analyzer path)
 
 Re-validation notes (2026-05-30):
 - Focused architecture/integration guardrail suite: 17/17 passed
@@ -17,6 +18,7 @@ Re-validation notes (2026-05-30):
 - Baseline artifacts under `artifacts/reports/phase0`: all `status = pass`
 - Phase 4 follow-up: baseline harness updated for Reporting-owned capability catalog path
 - Phase 5 milestone: HTML renderer now uses explicit render settings (no mutable static override flags)
+- Phase 6 milestone: pipeline/infrastructure/insight decomposition validated with focused tests and baseline harness
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -501,6 +503,15 @@ Medium
 ### Exit criteria
 - heavyweight analyzers become thinner coordinators over shared services
 - pipeline mechanics are cleaner without performance regression
+
+Current status:
+- Complete
+- Completed in this iteration:
+  - extracted pipeline collaborators: `AnalyzerExecutionRunner`, `AnalysisDiagnosticsPublisher`, `AnalyzerResultPostProcessor`, `AnalyzerCleanupPolicy`
+  - reduced `AnalysisPipeline` to orchestration over explicit collaborators
+  - reorganized `InsightEngine` into grouped rule-set orchestration while preserving rule behavior
+  - introduced shared traversal helper `ObjectGraphTraversal` and adopted it in `AsyncTaskAnalyzer` exception graph search path
+  - validated with focused suites (`AnalysisPipelineTests`, `AsyncTaskFindingGeneratorTests`, `ReportingCompositionTests`) and baseline harness pass
 
 ## Phase 7: Tighten Core Boundaries
 

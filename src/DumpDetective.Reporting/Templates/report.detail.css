@@ -78,8 +78,8 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
   background: #eef5ff;
   border-bottom: 1px solid #dde7f2;
 }
-.analyzer-section > details:not(.provenance) > summary::before { content: ''; flex-shrink: 0; display: inline-block; width: 8px; height: 8px; border-right: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8; transform: rotate(-45deg); transition: transform 0.2s; margin-bottom: 1px; }
-.analyzer-section > details:not(.provenance)[open] > summary::before { transform: rotate(45deg) translate(-2px,-2px); border-color: #3b82f6; }
+/* Chevron geometry handled by shared rule in report.base.css.
+   Only the open-state accent color is set here (inherits --chevron-color-open). */
 .detail-summary__title { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; }
 /* Section-ID badge (A1, B4, etc.) shown before the title */
 .detail-summary__section-id {
@@ -106,7 +106,7 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 }
 .detail-summary__sev--warning  { background: var(--sev-warning-bg-strong); color: var(--sev-warning-text); border: 1px solid var(--sev-warning-border); }
 .detail-summary__sev--critical { background: var(--sev-critical-bg-strong); color: var(--sev-critical-text); border: 1px solid var(--sev-critical-border); }
-.detail-summary__sev--info     { background: var(--sev-info-bg-strong); color: var(--sev-info-text); border: 1px solid #dbeafe; }
+.detail-summary__sev--info     { background: var(--sev-info-bg-strong); color: var(--sev-info-text); border: 1px solid var(--sev-info-border); }
 .detail-summary__meta {
   flex: 0 0 auto;
   padding: 4px 10px;
@@ -145,6 +145,8 @@ caption { color: #6b7280; font-size: 13px; font-weight: 600; text-align: left; p
 .analyzer-section > details.provenance > .provenance__content {
   background: #f8fbff;
 }
+/* Per-color accent for the open chevron */
+.detail-color-0 > details:not(.provenance)[open] > summary::before { border-color: #3b82f6; }
 .detail-color-1 > details:not(.provenance)[open] > summary::before { border-color: #7c3aed; }
 .detail-color-2 > details:not(.provenance)[open] > summary::before { border-color: #0891b2; }
 .detail-color-3 > details:not(.provenance)[open] > summary::before { border-color: #059669; }
@@ -190,7 +192,7 @@ body.reading-mode-forensics .detail-value {
   padding: 18px 20px 20px;
   overflow-y: auto;
   overflow-x: hidden;
-  font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.6;
   text-rendering: optimizeLegibility;
@@ -213,11 +215,11 @@ body.reading-mode-forensics .detail-value {
 .detail-divider { height: 1px; background: var(--border); margin: 8px 0; }
 .detail-line { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 3px 0; }
 .detail-line + .detail-line { border-top: 1px dashed #eef3f8; }
-.detail-key   { color: #0f766e; font-weight: 600; min-width: 132px; }
+.detail-key   { color: var(--detail-key-color); font-weight: 600; min-width: 132px; }
 .detail-value { color: #0f172a; font-family: inherit; font-variant-numeric: tabular-nums; }
-.detail-path  { color: #b45309; font-weight: 600; font-family: Consolas, "Cascadia Mono", monospace; }
-.detail-frame { color: #1f2937; font-family: Consolas, "Cascadia Mono", monospace; }
-.detail-frame.framework { color: #6b7280; opacity: 0.95; }
+.detail-path  { color: var(--detail-path-color); font-weight: 600; font-family: var(--font-mono); }
+.detail-frame { color: var(--detail-frame-color); font-family: var(--font-mono); }
+.detail-frame.framework { color: var(--detail-frame-fw-color); opacity: 0.95; }
 .detail-gap { height: 8px; }
 .detail-indent-1 { padding-left: 12px; }
 .detail-indent-2 { padding-left: 24px; }
@@ -554,23 +556,7 @@ body.reading-mode-forensics .detail-value {
   border-bottom: 1px solid #dbe1ea;
 }
 
-.detail-nested > summary::before {
-  content: '';
-  flex-shrink: 0;
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid #64748b;
-  border-bottom: 2px solid #64748b;
-  transform: rotate(-45deg);
-  transition: transform 0.2s;
-  margin-bottom: 1px;
-}
-
-.detail-nested[open] > summary::before {
-  transform: rotate(45deg) translate(-1px, -1px);
-  border-color: #2563eb;
-}
+/* Chevron geometry handled by shared rule in report.base.css. */
 
 .detail-nested-content {
   padding: 13px 15px 15px;

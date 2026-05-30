@@ -11,36 +11,48 @@
 .findings-paged__header h2 { margin: 0; font-size: 1rem; letter-spacing: -0.02em; font-weight: 650; color: var(--muted); text-transform: uppercase; }
 .section-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .severity-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
-.severity-critical { background: var(--sev-critical-bg); color: var(--sev-critical-text); }
-.severity-warning  { background: var(--sev-warning-bg);  color: var(--sev-warning-text); }
-.severity-info     { background: var(--sev-info-bg);     color: var(--sev-info-text); }
+.severity-critical { background: var(--sev-critical-bg); color: var(--sev-critical-text); border: 1px solid var(--sev-critical-border); }
+.severity-warning  { background: var(--sev-warning-bg);  color: var(--sev-warning-text); border: 1px solid var(--sev-warning-border); }
+.severity-info     { background: var(--sev-info-bg);     color: var(--sev-info-text); border: 1px solid var(--sev-info-border); }
 .category { font-size: 12px; color: var(--muted); }
 .summary { margin: 8px 0 10px 0; }
 .finding-card { position: relative; overflow: hidden; border-radius: 8px; }
-/* Finding cards nested inside domain insights or cross-domain list get tighter padding */
+/* Finding cards nested inside domain insights or cross-domain list get tighter padding
+   and no box-shadow; they still inherit the severity background tint. */
 .domain-insights__list .finding-card,
 .cross-domain-insights__list .finding-card {
   padding: 10px 12px;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #fafbfc;
   box-shadow: none;
   transition: border-color 0.12s, background 0.12s;
 }
 
+.domain-insights__list .finding-card--critical,
+.cross-domain-insights__list .finding-card--critical {
+  border-color: var(--sev-critical-border-mid);
+}
+.domain-insights__list .finding-card--warning,
+.cross-domain-insights__list .finding-card--warning {
+  border-color: var(--sev-warning-border-mid);
+}
+.domain-insights__list .finding-card--info,
+.cross-domain-insights__list .finding-card--info {
+  border: 1px solid #e2e8f0;
+  background: #fafbfc;
+}
+
 .domain-insights__list .finding-card:hover,
 .cross-domain-insights__list .finding-card:hover {
-  border-color: #cbd5e1;
-  background: #ffffff;
+  filter: brightness(0.97);
 }
 .finding-card--critical {
-  background: #fafbfc;
-  border: 1px solid #e2e8f0;
+  background: var(--sev-critical-bg);
+  border: 1px solid var(--sev-critical-border);
   padding: 10px 12px;
 }
 .finding-card--warning {
-  background: #fafbfc;
-  border: 1px solid #e2e8f0;
+  background: var(--sev-warning-bg);
+  border: 1px solid var(--sev-warning-border);
   padding: 10px 12px;
 }
 .finding-card--info {
@@ -52,12 +64,13 @@
   content: '';
   position: absolute;
   inset: 0 auto 0 0;
-  width: 3px;
+  width: 4px;
   background: var(--accent);
+  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
 }
-.finding-card[data-severity="critical"]::before { background: #dc2626; }
-.finding-card[data-severity="warning"]::before { background: #ea580c; }
-.finding-card[data-severity="info"]::before { background: #0284c7; }
+.finding-card[data-severity="critical"]::before { background: var(--sev-critical-bar); }
+.finding-card[data-severity="warning"]::before  { background: var(--sev-warning-bar); }
+.finding-card[data-severity="info"]::before     { background: var(--sev-info-bar); }
 .finding-card__header {
   display: flex;
   align-items: center;

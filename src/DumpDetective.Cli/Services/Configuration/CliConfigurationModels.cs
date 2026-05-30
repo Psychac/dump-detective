@@ -27,7 +27,7 @@ internal sealed class CliConfigurationFileModel
     public BoxingAnalysisOptions? BoxingAnalysis { get; init; }
     public CollectionAnalysisOptionsModel? Collection { get; init; }
     public StringAnalysisOptions? StringAnalysis { get; init; }
-    public SegmentAnalysisOptions? SegmentAnalysis { get; init; }
+    public HeapTopologyAnalysisOptions? HeapTopology { get; init; }
     public AppDomainAnalysisOptions? AppDomainAnalysis { get; init; }
     public AllocationPatternAnalysisOptions? AllocationPatternAnalysis { get; init; }
     public ThreadStackClusterAnalysisOptions? ThreadStackClusterAnalysis { get; init; }
@@ -105,7 +105,7 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(CollectionAnalysisOptions))]
 [JsonSerializable(typeof(CollectionAnalysisOptionsModel))]
 [JsonSerializable(typeof(StringAnalysisOptions))]
-[JsonSerializable(typeof(SegmentAnalysisOptions))]
+[JsonSerializable(typeof(HeapTopologyAnalysisOptions))]
 [JsonSerializable(typeof(AppDomainAnalysisOptions))]
 [JsonSerializable(typeof(AllocationPatternAnalysisOptions))]
 [JsonSerializable(typeof(ThreadStackClusterAnalysisOptions))]

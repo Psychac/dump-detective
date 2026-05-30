@@ -63,7 +63,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 BoxingAnalysis = resolved.BoxingAnalysis,
                 Collection = resolved.Collection,
                 StringAnalysis = resolved.StringAnalysis,
-                SegmentAnalysis = resolved.SegmentAnalysis,
+                HeapTopology = resolved.HeapTopology,
                 AppDomainAnalysis = resolved.AppDomainAnalysis,
                 AllocationPatternAnalysis = resolved.AllocationPatternAnalysis,
                 ThreadStackClusterAnalysis = resolved.ThreadStackClusterAnalysis,

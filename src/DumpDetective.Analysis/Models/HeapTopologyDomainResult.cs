@@ -31,7 +31,7 @@ internal sealed record PerLogicalHeapSummary(
     int ObjectCount,
     int SegmentCount);
 
-internal sealed record SegmentAnalysisDomainResult(
+internal sealed record HeapTopologyDomainResult(
     int TotalSegments,
     ulong TotalCommittedBytes,
     ulong TotalUsedBytes,

@@ -22,7 +22,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
             new AllocationPatternAnalyzer(),
             new ObjectShapeAnalyzer(),
             new GCRootAnalyzer(),
-            new SegmentAnalyzer(),
+            new HeapTopologyAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
             new HangAnalyzer(),

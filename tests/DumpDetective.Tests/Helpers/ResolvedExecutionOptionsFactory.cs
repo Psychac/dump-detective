@@ -24,7 +24,7 @@ internal static class ResolvedExecutionOptionsFactory
             BoxingAnalysis: new DumpDetective.Core.Options.BoxingAnalysisOptions(),
             Collection: new DumpDetective.Core.Options.CollectionAnalysisOptions(),
             StringAnalysis: new DumpDetective.Core.Options.StringAnalysisOptions(),
-            SegmentAnalysis: new DumpDetective.Core.Options.SegmentAnalysisOptions(),
+            HeapTopology: new DumpDetective.Core.Options.HeapTopologyAnalysisOptions(),
             AppDomainAnalysis: new DumpDetective.Core.Options.AppDomainAnalysisOptions(),
             AllocationPatternAnalysis: new DumpDetective.Core.Options.AllocationPatternAnalysisOptions(),
             ThreadStackClusterAnalysis: new DumpDetective.Core.Options.ThreadStackClusterAnalysisOptions(),

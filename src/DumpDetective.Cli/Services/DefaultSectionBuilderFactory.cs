@@ -18,7 +18,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         // Domain B — GC Health
         new GCPressureSectionBuilder(),            // B1
         new AllocationPatternSectionBuilder(),     // B2
-        new HeapSegmentDiagnosticsSectionBuilder(), // B3
+        new HeapTopologySectionBuilder(), // B3
         new LohFragmentationSectionBuilder(),      // B4
         new SegmentReservationSectionBuilder(),    // B5
         new FinalizableObjectSectionBuilder(),     // B6

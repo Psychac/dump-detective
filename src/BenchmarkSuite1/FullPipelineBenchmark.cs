@@ -86,7 +86,7 @@ public class FullPipelineBenchmark
         {
             new MemoryAnalyzer(),
             new GCGenerationAnalyzer(),
-            new SegmentAnalyzer(),
+            new HeapTopologyAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
             new HangAnalyzer(),

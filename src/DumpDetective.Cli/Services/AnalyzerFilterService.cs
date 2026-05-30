@@ -107,7 +107,7 @@ internal static class AnalyzerFilterService
             or nameof(Analysis.Analyzers.AllocationPatternAnalyzer)
             or nameof(Analysis.Analyzers.ObjectShapeAnalyzer)
             or nameof(Analysis.Analyzers.GCRootAnalyzer)
-            or nameof(Analysis.Analyzers.SegmentAnalyzer)
+            or nameof(Analysis.Analyzers.HeapTopologyAnalyzer)
             or nameof(Analysis.Analyzers.ModuleAnalyzer)
                 => 0,
 

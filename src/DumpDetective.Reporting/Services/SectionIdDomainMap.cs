@@ -31,8 +31,8 @@ internal static class SectionIdDomainMap
         ["GC Generation Analysis"]     = ("GC",         "B1"),
         ["AllocationPatternAnalyzer"]  = ("GC",         "B2"),
         ["Allocation Pattern Analysis"] = ("GC",        "B2"),
-        ["SegmentAnalyzer"]            = ("GC",         "B3"),
-        ["Segment Analysis"]           = ("GC",         "B3"),
+        ["HeapTopologyAnalyzer"]        = ("GC",         "B3"),
+        ["Heap Topology"]              = ("GC",         "B3"),
         ["LohFragmentationAnalyzer"]   = ("GC",         "B4"),
         ["LOH Fragmentation Analysis"]  = ("GC",         "B4"),
         ["SegmentReservationAnalyzer"] = ("GC",         "B5"),
@@ -93,7 +93,7 @@ internal static class SectionIdDomainMap
         ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title
         ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryAnalysisSectionBuilder display title
         ["Generation Pressure"]        = ("GC",         "B1"),   // GCPressureSectionBuilder display title
-        ["Heap Topology"]              = ("GC",         "B3"),   // HeapSegmentDiagnosticsSectionBuilder display title
+        ["Heap Topology"]              = ("GC",         "B3"),   // HeapTopologySectionBuilder display title
         ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
 
         // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder

@@ -3,7 +3,7 @@ namespace DumpDetective.Core.Options;
 /// <summary>
 /// Holds configurable constants for segment analysis and reporting.
 /// </summary>
-public static class SegmentAnalyzerOptions
+public static class HeapTopologyAnalyzerOptions
 {
     // How many top segments to include in the "top by size" summary.
     public const int TopSegmentsCount = 10;

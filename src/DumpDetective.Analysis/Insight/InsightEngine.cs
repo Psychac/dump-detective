@@ -63,7 +63,7 @@ internal sealed class InsightEngine
         MemoryDomainResult? memory = FindResult<MemoryDomainResult>(runs);
         GCGenerationDomainResult? gcGen = FindResult<GCGenerationDomainResult>(runs);
         LohFragmentationDomainResult? lohFrag = FindResult<LohFragmentationDomainResult>(runs);
-        SegmentAnalysisDomainResult? segments = FindResult<SegmentAnalysisDomainResult>(runs);
+        HeapTopologyDomainResult? segments = FindResult<HeapTopologyDomainResult>(runs);
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
         AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
@@ -140,7 +140,7 @@ internal sealed class InsightEngine
         List<InsightFinding> findings,
         MemoryDomainResult? memory,
         GCGenerationDomainResult? gcGen,
-        SegmentAnalysisDomainResult? segments)
+        HeapTopologyDomainResult? segments)
     {
         double lohPct = memory?.LohPercent
             ?? gcGen?.LohPercent
@@ -171,7 +171,7 @@ internal sealed class InsightEngine
     private static void DetectLohFragmentation(
         List<InsightFinding> findings,
         LohFragmentationDomainResult? lohFrag,
-        SegmentAnalysisDomainResult? segments)
+        HeapTopologyDomainResult? segments)
     {
         if (lohFrag is null)
             return;
@@ -198,7 +198,7 @@ internal sealed class InsightEngine
 
     private static void DetectPohGrowth(
         List<InsightFinding> findings,
-        SegmentAnalysisDomainResult? segments)
+        HeapTopologyDomainResult? segments)
     {
         if (segments is null || segments.PohPercent < PohPressureWarningPct)
             return;
@@ -808,7 +808,7 @@ internal sealed class InsightEngine
     private static void DetectAddressSpacePressure(
         List<InsightFinding> findings,
         SegmentReservationDomainResult? segReservation,
-        SegmentAnalysisDomainResult? segments)
+        HeapTopologyDomainResult? segments)
     {
         if (segReservation is null)
             return;

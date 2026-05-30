@@ -579,13 +579,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
         }
     }
 
-    internal sealed class SegmentTrendComparer : IAnalyzerTrendComparer
+    internal sealed class HeapTopologyTrendComparer : IAnalyzerTrendComparer
     {
-        public string AnalyzerName => "Segment Analysis";
+        public string AnalyzerName => "Heap Topology";
 
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
-            if (result is not SegmentAnalysisDomainResult r) return [];
+            if (result is not HeapTopologyDomainResult r) return [];
             return
             [
                 new("segment.total", null, r.TotalSegments, "segments", MetricTrendDirection.Neutral),
@@ -599,7 +599,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
-            if (baseline is not SegmentAnalysisDomainResult b || current is not SegmentAnalysisDomainResult c) return [];
+            if (baseline is not HeapTopologyDomainResult b || current is not HeapTopologyDomainResult c) return [];
             return
             [
                 MetricDeltaHelper.Compute("segment.total", null, b.TotalSegments, c.TotalSegments, "segments", MetricTrendDirection.Neutral),

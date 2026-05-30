@@ -1,9 +1,9 @@
-using System.Buffers;
-using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Readers;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -23,12 +23,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class GCRootAnalyzer : IAnalyzer
     {
-        // RootIndex.bin binary layout constants
-        private const int RootRecordSize = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
-        private const int RootHeaderMagic = 0x58495452; // "RTIX"
-        private const int RootHeaderVersion = 1;
-        private const long RootHeaderSize = 24; // see IndexHeader
-
         public string Name => "GC Root Analysis";
         public string Category => "Memory";
 
@@ -69,7 +63,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             foreach (var root in roots)
             {
-                string kind = KindToString(root.Kind);
+                string kind = RootIndexReader.KindToString(root.Kind);
                 kindCounts[kind] = (kindCounts.TryGetValue(kind, out int c) ? c : 0) + 1;
 
                 // Estimate retained bytes for this root: avg size of target's type
@@ -97,7 +91,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (estimate == 0)
                     continue;
 
-                string kind = KindToString(root.Kind);
+                string kind = RootIndexReader.KindToString(root.Kind);
                 string targetType = ResolveTypeName(root.TargetAddr, heap, aggregates);
                 int severity = ComputeSeverity(estimate, kind);
 
@@ -128,7 +122,7 @@ namespace DumpDetective.Analysis.Analyzers
                 var f = findings[i];
 
                 bool wasCapped = false;
-                var pathTypes = BfsForwardPath(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out wasCapped);
+                var pathTypes = HeapTypePathTraversal.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out wasCapped);
 
                 if (wasCapped)
                     pathCappedCount++;
@@ -157,127 +151,7 @@ namespace DumpDetective.Analysis.Analyzers
             HeapIndexBuildResult idx,
             CancellationToken cancellationToken)
         {
-            // Memory mode — use pre-built in-memory candidates
-            if (idx.StorageKind == HeapIndexStorageKind.Memory && idx.InMemoryRootCandidates is { } candidates)
-            {
-                var result = new List<(ulong, ulong, byte)>(candidates.Length);
-                foreach (var item in candidates)
-                    result.Add(item);
-                return result;
-            }
-
-            // Disk mode — read RootIndex.bin
-            string rootPath = DumpIndexPaths.RootIndex(idx.IndexPath);
-            if (!File.Exists(rootPath))
-                return new List<(ulong, ulong, byte)>();
-
-            return ReadRootIndexBin(rootPath, cancellationToken);
-        }
-
-        private static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootIndexBin(
-            string filePath,
-            CancellationToken cancellationToken)
-        {
-            var roots = new List<(ulong, ulong, byte)>(capacity: 16_384);
-
-            using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
-            // Validate header
-            Span<byte> headerBuf = stackalloc byte[24];
-            if (fs.Read(headerBuf) < 24)
-                return roots;
-
-            int magic = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
-            int version = BinaryPrimitives.ReadInt32LittleEndian(headerBuf[4..]);
-            if (magic != RootHeaderMagic || version != RootHeaderVersion)
-                return roots;
-
-            long recordCount = BinaryPrimitives.ReadInt64LittleEndian(headerBuf[8..]);
-            if (recordCount <= 0)
-                return roots;
-
-            byte[] buf = ArrayPool<byte>.Shared.Rent(RootRecordSize * 4096);
-            try
-            {
-                int bytesRead;
-                while ((bytesRead = fs.Read(buf, 0, buf.Length)) > 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    int records = bytesRead / RootRecordSize;
-                    for (int i = 0; i < records; i++)
-                    {
-                        int off = i * RootRecordSize;
-                        ulong target = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                        ulong rootA = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 8));
-                        byte kind = buf[off + 16];
-                        roots.Add((target, rootA, kind));
-                    }
-                }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buf);
-            }
-
-            return roots;
-        }
-
-        // ── BFS path tracing ──────────────────────────────────────────────────
-
-        /// <summary>
-        /// Forward BFS from <paramref name="startAddr"/>. Returns the distinct type names
-        /// encountered in BFS order (excluding the start object itself), bounded by
-        /// <paramref name="maxNodes"/> and <paramref name="maxDepth"/>.
-        /// </summary>
-        private static IReadOnlyList<string> BfsForwardPath(
-            ClrHeap heap,
-            ulong startAddr,
-            int maxNodes,
-            int maxDepth,
-            out bool wasCapped)
-        {
-            wasCapped = false;
-            if (startAddr == 0)
-                return [];
-
-            var visited = new HashSet<ulong>(capacity: 64) { startAddr };
-            var queue = new Queue<(ulong Addr, int Depth)>(capacity: 64);
-            var typeNames = new List<string>(capacity: 16);
-
-            queue.Enqueue((startAddr, 0));
-            int nodesVisited = 0;
-
-            while (queue.Count > 0)
-            {
-                var (addr, depth) = queue.Dequeue();
-                nodesVisited++;
-
-                if (nodesVisited > maxNodes || depth >= maxDepth)
-                {
-                    wasCapped = true;
-                    break;
-                }
-
-                ClrObject obj = heap.GetObject(addr);
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                if (depth > 0 && obj.Type.Name is string name)
-                {
-                    // Deduplicate type names in path — skip already seen types.
-                    if (typeNames.Count == 0 || typeNames[typeNames.Count - 1] != name)
-                        typeNames.Add(name);
-                }
-
-                foreach (ClrObject child in obj.EnumerateReferences(carefully: true))
-                {
-                    if (child.IsValid && child.Address != 0 && visited.Add(child.Address))
-                        queue.Enqueue((child.Address, depth + 1));
-                }
-            }
-
-            return typeNames;
+            return RootIndexReader.ReadRootCandidates(idx, cancellationToken);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -349,23 +223,6 @@ namespace DumpDetective.Analysis.Analyzers
             };
 
             return Math.Min(baseScore * multiplier, 300);
-        }
-
-        private static string KindToString(byte kind)
-        {
-            // ClrRootKind enum byte values
-            return kind switch
-            {
-                0 => "None",
-                1 => "FinalizerQueue",
-                2 => "StrongHandle",
-                3 => "PinnedHandle",
-                4 => "Stack",
-                5 => "RefCountedHandle",
-                6 => "AsyncPinnedHandle",
-                7 => "SizedRefHandle",
-                _ => $"Unknown({kind})"
-            };
         }
 
         private static GCRootDomainResult EmptyResult() =>

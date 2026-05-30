@@ -3,6 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Readers;
 
 namespace DumpDetective.Analysis.Cache
 {
@@ -486,7 +487,7 @@ namespace DumpDetective.Analysis.Cache
                     string rootIndexPath = DumpDetective.Analysis.Indexing.DumpIndexPaths.RootIndex(_heapIndex.IndexPath);
                     if (File.Exists(rootIndexPath))
                     {
-                        var roots = ReadRootsFromIndex(rootIndexPath);
+                        var roots = RootIndexReader.ReadRootTargets(rootIndexPath, CancellationToken.None);
                         _validRoots = roots;
                         // Populate static-root set based on kind names containing "Static" (same heuristic as EnsureRootCaches)
                         _staticRootedAddresses ??= new HashSet<ulong>(capacity: Math.Max(256, roots.Count));
@@ -509,65 +510,6 @@ namespace DumpDetective.Analysis.Cache
             // Fall back to building via ClrMD enumeration (legacy behavior)
             EnsureRootCaches(heap);
             return _validRoots ?? Array.Empty<(string RootKind, ulong Address)>();
-        }
-
-        private static List<(string RootKind, ulong Address)> ReadRootsFromIndex(string rootIndexPath)
-        {
-            const int RootRecordSize = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
-            const int RootHeaderMagic = 0x58495452;
-            const int RootHeaderVersion = 1;
-
-            var roots = new List<(string, ulong)>();
-            using FileStream fs = new(rootIndexPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
-            Span<byte> headerBuf = stackalloc byte[24];
-            if (fs.Read(headerBuf) < 24)
-                return roots;
-
-            int magic = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
-            int version = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(headerBuf[4..]);
-            if (magic != RootHeaderMagic || version != RootHeaderVersion)
-                return roots;
-
-            long recordCount = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(headerBuf[8..]);
-            if (recordCount <= 0)
-                return roots;
-
-            byte[] buf = System.Buffers.ArrayPool<byte>.Shared.Rent(RootRecordSize * 4096);
-            try
-            {
-                int bytesRead;
-                while ((bytesRead = fs.Read(buf, 0, buf.Length)) > 0)
-                {
-                    int records = bytesRead / RootRecordSize;
-                    for (int i = 0; i < records; i++)
-                    {
-                        int off = i * RootRecordSize;
-                        ulong target = System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                        // ulong rootA  = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 8));
-                        byte kind = buf[off + 16];
-                        string kindStr = kind switch
-                        {
-                            0 => "None",
-                            1 => "FinalizerQueue",
-                            2 => "StrongHandle",
-                            3 => "PinnedHandle",
-                            4 => "Stack",
-                            5 => "RefCountedHandle",
-                            6 => "AsyncPinnedHandle",
-                            7 => "SizedRefHandle",
-                            _ => $"Unknown({kind})"
-                        };
-                        roots.Add((kindStr, target));
-                    }
-                }
-            }
-            finally
-            {
-                System.Buffers.ArrayPool<byte>.Shared.Return(buf);
-            }
-
-            return roots;
         }
 
         private void EnsureRootCaches(ClrHeap heap)

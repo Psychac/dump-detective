@@ -3,7 +3,7 @@ using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Trend.Comparers;
 using DumpDetective.Reporting.SectionBuilders;
 
-namespace DumpDetective.Cli.Services.Capabilities;
+namespace DumpDetective.Reporting.Capabilities;
 
 internal interface IAnalyzerFeatureModuleCatalog
 {

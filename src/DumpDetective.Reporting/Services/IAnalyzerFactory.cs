@@ -1,6 +1,6 @@
 using DumpDetective.Core.Abstractions;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Reporting.Services;
 
 internal interface IAnalyzerFactory
 {

@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Trend.Comparers;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.SectionBuilders;
 
 namespace DumpDetective.Cli.Services.Capabilities;

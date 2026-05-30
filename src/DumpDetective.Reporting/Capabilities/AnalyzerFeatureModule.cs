@@ -2,7 +2,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 
-namespace DumpDetective.Cli.Services.Capabilities;
+namespace DumpDetective.Reporting.Capabilities;
 
 internal sealed record AnalyzerFeatureModule(
     string Key,

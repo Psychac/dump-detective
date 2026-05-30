@@ -1,9 +1,10 @@
 using DumpDetective.Cli.Services.Capabilities;
 using DumpDetective.Cli.Hosting;
-using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Abstractions;
+using DumpDetective.Reporting.Services;
 
 using FluentAssertions;
 

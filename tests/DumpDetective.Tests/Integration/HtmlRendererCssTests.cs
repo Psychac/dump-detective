@@ -43,8 +43,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         // Act
         var renderer = new HtmlReportRenderer();
@@ -73,8 +73,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
@@ -120,8 +120,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
@@ -159,8 +159,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
@@ -205,8 +205,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         string html = renderer.Render(doc);
@@ -236,8 +236,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         string html = renderer.Render(doc);
@@ -272,8 +272,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
         HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
@@ -331,8 +331,8 @@ public sealed class HtmlRendererCssTests
             "dump.dmp",
             new[] { fakeRun },
             TimeSpan.FromSeconds(0.5),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DumpDetective.Cli.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
 

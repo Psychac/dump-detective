@@ -3,9 +3,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
-using DumpDetective.Reporting.Services;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Reporting.Services;
 
 internal sealed class ReportBuilderFacade(
     IEnumerable<IReportFormatter> formatters,
@@ -34,7 +33,7 @@ internal sealed class ReportBuilderFacade(
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        AnalysisIncidentContext? incidentContext,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +60,7 @@ internal sealed class ReportBuilderFacade(
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        AnalysisIncidentContext? incidentContext,
         TrendReportData trendData,
         CancellationToken cancellationToken)
     {
@@ -85,7 +84,7 @@ internal sealed class ReportBuilderFacade(
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext,
+        AnalysisIncidentContext? incidentContext,
         TrendReportData trendData)
         => _trendComposer.ComposeCanonicalTrendReport(
             dumpPath, currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData, audience);
@@ -95,7 +94,7 @@ internal sealed class ReportBuilderFacade(
         ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
-        DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
+        AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
         return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext, additionalFindings);

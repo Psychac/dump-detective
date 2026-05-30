@@ -1,10 +1,10 @@
-using DumpDetective.Cli.Services.Capabilities;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Reporting.Services;
 
 internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
 {

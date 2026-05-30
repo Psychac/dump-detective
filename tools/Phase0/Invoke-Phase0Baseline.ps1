@@ -73,22 +73,18 @@ function Write-JsonFile {
     [System.IO.File]::WriteAllText($Path, $json, [System.Text.UTF8Encoding]::new($false))
 }
 
-$analyzerFactoryPath = Join-Path $repoRoot "src/DumpDetective.Cli/Services/DefaultAnalyzerFactory.cs"
+$moduleCatalogPath = Join-Path $repoRoot "src/DumpDetective.Reporting/Capabilities/DefaultAnalyzerFeatureModuleCatalog.cs"
 $serviceRegistrationPath = Join-Path $repoRoot "src/DumpDetective.Cli/Hosting/ServiceRegistration.cs"
-$sectionBuilderFactoryPath = Join-Path $repoRoot "src/DumpDetective.Cli/Services/DefaultSectionBuilderFactory.cs"
 
-$analyzers = @(Get-Matches -Path $analyzerFactoryPath -Pattern "new\s+([A-Za-z0-9_]+Analyzer)\s*(?:\(|,)" | Select-Object -Unique)
-$findingGenerators = @(Get-Matches -Path $serviceRegistrationPath -Pattern "AddSingleton<IFindingGenerator,\s*([A-Za-z0-9_]+)>" | Select-Object -Unique)
-$trendComparers = @(Get-Matches -Path $serviceRegistrationPath -Pattern "AddSingleton<IAnalyzerTrendComparer,\s*([A-Za-z0-9_]+)>" | Select-Object -Unique)
-$analyzerSectionBuilders = @(Get-BlockMatches `
-    -Path $sectionBuilderFactoryPath `
-    -BlockStartPattern "CreateAnalyzerBuilders\(\)\s*=>\s*\[(.*?)\];" `
-    -ItemPattern "new\s+([A-Za-z0-9_]+SectionBuilder)\s*\(" | Select-Object -Unique)
+$analyzers = @(Get-Matches -Path $moduleCatalogPath -Pattern "typeof\(([A-Za-z0-9_]+Analyzer)\)" | Select-Object -Unique)
+$findingGenerators = @(Get-Matches -Path $moduleCatalogPath -Pattern "typeof\(([A-Za-z0-9_]+FindingGenerator)\)" | Select-Object -Unique)
+$trendComparers = @(Get-Matches -Path $moduleCatalogPath -Pattern "typeof\(([A-Za-z0-9_]+TrendComparer)\)" | Select-Object -Unique)
+$analyzerSectionBuilders = @(Get-Matches -Path $moduleCatalogPath -Pattern "typeof\(([A-Za-z0-9_]+SectionBuilder)\),\s*\d+" | Select-Object -Unique)
 
 $reportSectionBuilders = @(Get-BlockMatches `
-    -Path $sectionBuilderFactoryPath `
-    -BlockStartPattern "CreateReportBuilders\(\)\s*=>\s*\[(.*?)\];" `
-    -ItemPattern "new\s+([A-Za-z0-9_]+SectionBuilder)\s*\(" | Select-Object -Unique)
+    -Path $moduleCatalogPath `
+    -BlockStartPattern "GlobalReportSectionBuilderTypes\s*\{\s*get;\s*\}\s*=\s*\[(.*?)\];" `
+    -ItemPattern "typeof\(([A-Za-z0-9_]+SectionBuilder)\)" | Select-Object -Unique)
 
 $registrationSnapshot = [ordered]@{
     generatedAtUtc = $utcNow

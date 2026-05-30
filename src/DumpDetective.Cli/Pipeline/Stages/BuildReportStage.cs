@@ -1,4 +1,4 @@
-using DumpDetective.Cli.Services;
+using DumpDetective.Reporting.Services;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 

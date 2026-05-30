@@ -1,6 +1,6 @@
 using DumpDetective.Reporting.Abstractions;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Reporting.Services;
 
 internal interface ISectionBuilderFactory
 {

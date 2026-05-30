@@ -8,11 +8,13 @@ Execution status update (2026-05-30):
 - Phase 1: Complete (legacy top-level project removed, active layout clarified)
 - Phase 2: Complete (module-driven registration and completeness validation in place)
 - Phase 3: Complete (finding-generator ownership moved to Reporting; Analysis source-link removed)
+- Phase 4: Complete (CLI composition ownership reduced; factories/facade/capability catalog now Reporting-owned)
 
 Re-validation notes (2026-05-30):
 - Focused architecture/integration guardrail suite: 17/17 passed
 - Official baseline harness `tools/Phase0/Invoke-Phase0Baseline.ps1`: passed
 - Baseline artifacts under `artifacts/reports/phase0`: all `status = pass`
+- Phase 4 follow-up: baseline harness updated for Reporting-owned capability catalog path
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -382,6 +384,9 @@ Medium
 
 ### Exit criteria
 - `Cli` reads like a shell over application services rather than a system owner
+
+Current status:
+- Complete
 
 ## Phase 5: Decompose Reporting Internals
 

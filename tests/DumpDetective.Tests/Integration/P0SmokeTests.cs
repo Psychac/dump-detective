@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;

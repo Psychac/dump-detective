@@ -1,8 +1,8 @@
-using DumpDetective.Cli.Services.Capabilities;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Reporting.Services;
 
 internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
 {

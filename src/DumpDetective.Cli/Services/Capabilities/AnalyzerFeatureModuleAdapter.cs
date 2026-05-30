@@ -1,5 +1,6 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Abstractions;
 
 namespace DumpDetective.Cli.Services.Capabilities;

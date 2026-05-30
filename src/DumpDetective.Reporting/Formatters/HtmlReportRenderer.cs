@@ -8,6 +8,15 @@ using DumpDetective.Reporting.Serialization;
 
 namespace DumpDetective.Reporting.Formatters;
 
+internal sealed record HtmlRenderSettings(
+    bool PreRender,
+    ReportStyleVersion StyleVersion)
+{
+    public static readonly HtmlRenderSettings Default = new(
+        PreRender: false,
+        StyleVersion: ReportStyleVersion.V1);
+}
+
 /// <summary>
 /// Template-based HTML renderer. Bundles the report assets into a single inline script
 /// so the report works when opened as a local file (file://) without any HTTP server.
@@ -17,19 +26,20 @@ internal sealed class HtmlReportRenderer : IReportFormatter
     private static readonly string _template = EmbeddedResourceLoader.LoadText("report.html");
     private static readonly string _css = BuildInlinedCss();
     private static readonly string _js = BuildInlinedBundle();
-    public static bool ForcePreRender { get; set; } = false;
-    public static ReportStyleVersion ForceReportStyleVersion { get; set; } = ReportStyleVersion.V1;
 
     public ReportFormat Format => ReportFormat.Html;
 
     public string Render(AnalysisReportDocument doc)
+        => Render(doc, HtmlRenderSettings.Default);
+
+    public string Render(AnalysisReportDocument doc, HtmlRenderSettings settings)
     {
         string reportJson = JsonSerializer.Serialize(doc, ReportJsonContext.Default.AnalysisReportDocument);
         string preFindings = string.Empty;
         string preHealthScorecard = string.Empty;
         string preAnalyzers = string.Empty;
-        bool isV2Style = ForceReportStyleVersion == ReportStyleVersion.V2;
-        bool shouldPreRender = ForcePreRender;
+        bool isV2Style = settings.StyleVersion == ReportStyleVersion.V2;
+        bool shouldPreRender = settings.PreRender;
         if (!shouldPreRender && !isV2Style && (reportJson.Length > 2_000_000 || doc.Findings?.Count >= 1000)) shouldPreRender = true;
         if (shouldPreRender && _template.Contains("{{PRE_RENDERED_HEALTH_SCORECARD}}"))
             preHealthScorecard = ReportHtmlShared.RenderHealthScorecard(doc.HealthScorecard);
@@ -41,7 +51,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         AnalysisReportDocument docForClient = doc with
         {
             RenderMode = shouldPreRender ? "prerendered" : "client",
-            ReportStyleVersion = ForceReportStyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
+            ReportStyleVersion = settings.StyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
         };
         reportJson = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
         reportJson = CompactReportJson(docForClient, reportJson);
@@ -171,6 +181,8 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.panels.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.findings.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.sections.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.toc.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.integrity.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.js")));
 
             string main = StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.main.js"));

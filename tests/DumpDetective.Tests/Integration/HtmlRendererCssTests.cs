@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
+using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;
@@ -77,20 +78,12 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
-        try
-        {
-            string html = renderer.Render(doc);
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
 
-            html.Should().Contain("\"reportStyleVersion\":\"v2\"");
-            html.Should().Contain("id=\"report-right-rail\"");
-            html.Should().Contain("id=\"report-right-rail-content\"");
-            html.Should().Contain("--bg-canvas");
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        html.Should().Contain("\"reportStyleVersion\":\"v2\"");
+        html.Should().Contain("id=\"report-right-rail\"");
+        html.Should().Contain("id=\"report-right-rail-content\"");
+        html.Should().Contain("--bg-canvas");
     }
 
     [Fact]
@@ -124,22 +117,14 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
-        try
-        {
-            string html = renderer.Render(doc);
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
 
-            html.Should().Contain("id=\"report-sr-summary\"");
-            html.Should().Contain("href=\"#report-domains\"");
-            html.Should().Contain("id=\"report-print-footer\"");
-            html.Should().Contain("table-print-note");
-            html.Should().Contain("@media print");
-            html.Should().Contain("aria-expanded");
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        html.Should().Contain("id=\"report-sr-summary\"");
+        html.Should().Contain("href=\"#report-domains\"");
+        html.Should().Contain("id=\"report-print-footer\"");
+        html.Should().Contain("table-print-note");
+        html.Should().Contain("@media print");
+        html.Should().Contain("aria-expanded");
     }
 
     [Fact]
@@ -163,29 +148,21 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
-        try
-        {
-            string html = renderer.Render(doc);
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
 
-            int headerPos = html.IndexOf("buildHeader(doc)", StringComparison.Ordinal);
-            int scorecardPos = html.IndexOf("buildHealthScorecard(doc)", StringComparison.Ordinal);
-            int executivePos = html.IndexOf("buildExecutiveSummary(doc)", StringComparison.Ordinal);
-            int actionQueuePos = html.IndexOf("buildActionQueuePanel(doc)", StringComparison.Ordinal);
+        int headerPos = html.IndexOf("buildHeader(doc)", StringComparison.Ordinal);
+        int scorecardPos = html.IndexOf("buildHealthScorecard(doc)", StringComparison.Ordinal);
+        int executivePos = html.IndexOf("buildExecutiveSummary(doc)", StringComparison.Ordinal);
+        int actionQueuePos = html.IndexOf("buildActionQueuePanel(doc)", StringComparison.Ordinal);
 
-            headerPos.Should().BeGreaterThan(-1);
-            scorecardPos.Should().BeGreaterThan(-1);
-            executivePos.Should().BeGreaterThan(-1);
-            actionQueuePos.Should().BeGreaterThan(-1);
+        headerPos.Should().BeGreaterThan(-1);
+        scorecardPos.Should().BeGreaterThan(-1);
+        executivePos.Should().BeGreaterThan(-1);
+        actionQueuePos.Should().BeGreaterThan(-1);
 
-            headerPos.Should().BeLessThan(scorecardPos);
-            scorecardPos.Should().BeLessThan(executivePos);
-            executivePos.Should().BeLessThan(actionQueuePos);
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        headerPos.Should().BeLessThan(scorecardPos);
+        scorecardPos.Should().BeLessThan(executivePos);
+        executivePos.Should().BeLessThan(actionQueuePos);
     }
 
     [Fact]
@@ -209,7 +186,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc);
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("function syncCollapsibleAria");
         html.Should().Contain("setAttribute('aria-expanded'");
@@ -245,7 +222,7 @@ public sealed class HtmlRendererCssTests
         html.Should().Contain("--border-subtle:");
         html.Should().Contain("--border-strong:");
         html.Should().Contain("--space-8:");
-        html.Should().Contain("--space-12:");
+        html.Should().Contain("--space-3:");
         html.Should().Contain("--space-24:");
         html.Should().Contain("--space-32:");
         html.Should().Contain("--radius-sm:");
@@ -276,32 +253,24 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
-        try
-        {
-            string html = renderer.Render(doc);
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
 
-            html.Should().Contain("'data-component-id', 'report-header'");
-            html.Should().Contain("'data-component-id', 'health-scorecard'");
-            html.Should().Contain("'data-component-id', 'executive-summary'");
-            html.Should().Contain("'data-component-id', 'top-actions'");
-            html.Should().Contain("'data-component-id', 'appendix'");
-            html.Should().Contain("sec.id = 'report-header'");
-            html.Should().Contain("sec.id = 'health-scorecard'");
-            html.Should().Contain("sec.id = 'executive-summary'");
-            html.Should().Contain("sec.id = 'top-actions'");
-            html.Should().Contain("['Scoring model', scoringModelVersion]");
-            html.Should().Contain("exec-correlation__item");
-            html.Should().Contain("Correlation Signals");
-            html.Should().Contain("exec-correlation__provenance-link");
-            html.Should().Contain("findingAnchorId(");
-            html.Should().Contain("wrapper.id = sectionAnchorId");
-            html.Should().Contain("section-anchor-legacy");
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        html.Should().Contain("'data-component-id', 'report-header'");
+        html.Should().Contain("'data-component-id', 'health-scorecard'");
+        html.Should().Contain("'data-component-id', 'executive-summary'");
+        html.Should().Contain("'data-component-id', 'top-actions'");
+        html.Should().Contain("'data-component-id', 'appendix'");
+        html.Should().Contain("sec.id = 'report-header'");
+        html.Should().Contain("sec.id = 'health-scorecard'");
+        html.Should().Contain("sec.id = 'executive-summary'");
+        html.Should().Contain("sec.id = 'top-actions'");
+        html.Should().Contain("['Scoring model', scoringModelVersion]");
+        html.Should().Contain("exec-correlation__item");
+        html.Should().Contain("Correlation Signals");
+        html.Should().Contain("exec-correlation__provenance-link");
+        html.Should().Contain("findingAnchorId(");
+        html.Should().Contain("wrapper.id = sectionAnchorId");
+        html.Should().Contain("section-anchor-legacy");
     }
 
     [Fact]
@@ -336,27 +305,9 @@ public sealed class HtmlRendererCssTests
 
         var renderer = new HtmlReportRenderer();
 
-        JsonObject reportV1;
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        try
-        {
-            reportV1 = ExtractEmbeddedReportPayload(renderer.Render(doc));
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        JsonObject reportV1 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V1)));
 
-        JsonObject reportV2;
-        HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V2;
-        try
-        {
-            reportV2 = ExtractEmbeddedReportPayload(renderer.Render(doc));
-        }
-        finally
-        {
-            HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        JsonObject reportV2 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2)));
 
         reportV1.Remove("reportStyleVersion");
         reportV2.Remove("reportStyleVersion");

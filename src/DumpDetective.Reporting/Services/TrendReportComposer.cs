@@ -8,9 +8,11 @@ using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
 internal sealed class TrendReportComposer(
-    CanonicalReportDocumentFactory documentFactory)
+    CanonicalReportDocumentFactory documentFactory,
+    ExecutiveSummaryProjector? executiveSummaryProjector = null)
 {
     private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;
+    private readonly ExecutiveSummaryProjector _executiveSummaryProjector = executiveSummaryProjector ?? new ExecutiveSummaryProjector();
 
     public AnalysisReportDocument ComposeCanonicalTrendReport(
         string dumpPath,
@@ -248,13 +250,22 @@ internal sealed class TrendReportComposer(
         if (snapshots.Count < 2)
             return summary;
 
-        AnalysisReportDocument firstDoc = _documentFactory.BuildSnapshotDocument(
-            snapshots[0].DumpPath, snapshots[0].Runs, [], audience, snapshots[0].IncidentContext);
-        AnalysisReportDocument lastDoc = _documentFactory.BuildSnapshotDocument(
-            snapshots[^1].DumpPath, snapshots[^1].Runs, [], audience, snapshots[^1].IncidentContext);
+        HealthScorecard firstScorecard = HealthScorecardBuilder.Build(snapshots[0].Runs);
+        HealthScorecard lastScorecard = HealthScorecardBuilder.Build(snapshots[^1].Runs);
+        var regressionLookup = new Dictionary<string, MetricDelta>(StringComparer.Ordinal);
 
-        if (firstDoc.ExecutiveSummary is not { } first || lastDoc.ExecutiveSummary is not { } last)
-            return summary;
+        IReadOnlyList<FindingRecord> firstFindings = snapshots[0].Findings
+            .Select(f => MapTrendFinding(f, snapshots[0].Index, regressionLookup))
+            .ToList();
+        firstFindings = SortFindings(firstFindings);
+
+        IReadOnlyList<FindingRecord> lastFindings = snapshots[^1].Findings
+            .Select(f => MapTrendFinding(f, snapshots[^1].Index, regressionLookup))
+            .ToList();
+        lastFindings = SortFindings(lastFindings);
+
+        ExecutiveSummaryRecord first = _executiveSummaryProjector.Build(firstFindings, firstScorecard, snapshots[0].Runs);
+        ExecutiveSummaryRecord last = _executiveSummaryProjector.Build(lastFindings, lastScorecard, snapshots[^1].Runs);
 
         return summary with
         {
@@ -263,6 +274,35 @@ internal sealed class TrendReportComposer(
             ThreadContentionScoreDelta = last.ThreadContentionScore - first.ThreadContentionScore,
         };
     }
+
+    private static IReadOnlyList<FindingRecord> SortFindings(IReadOnlyList<FindingRecord> findings)
+    {
+        List<FindingRecord> sorted = findings.ToList();
+        sorted.Sort(static (a, b) =>
+        {
+            int severityCompare = SeverityOrdinal(b.Severity).CompareTo(SeverityOrdinal(a.Severity));
+            if (severityCompare != 0)
+                return severityCompare;
+
+            int catCompare = StringComparer.Ordinal.Compare(NormalizeSortKey(a.Category), NormalizeSortKey(b.Category));
+            if (catCompare != 0)
+                return catCompare;
+
+            return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Title), NormalizeSortKey(b.Title));
+        });
+
+        return sorted;
+    }
+
+    private static int SeverityOrdinal(string severity) => severity switch
+    {
+        nameof(FindingSeverity.Critical) => 2,
+        nameof(FindingSeverity.Warning) => 1,
+        _ => 0
+    };
+
+    private static string NormalizeSortKey(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
 
     // ── Per-dump sections (canonical text/markdown/JSON output) ──────────────
 

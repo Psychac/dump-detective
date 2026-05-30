@@ -63,6 +63,7 @@ internal static class ServiceRegistration
         services.AddSingleton<TrendAnalyzer>();
 
         services.AddSingleton<TrendReportComposer>();
+        services.AddSingleton<ExecutiveSummaryProjector>();
         services.AddSingleton<ReportSerializer>();
         services.AddSingleton<ReportBuilderFacade>();
         services.AddSingleton<IReportFormatter, TextCanonicalReportFormatter>();

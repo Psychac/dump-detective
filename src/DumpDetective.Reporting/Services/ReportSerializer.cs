@@ -10,8 +10,10 @@ namespace DumpDetective.Reporting.Services;
 /// Maps <see cref="AnalyzerRunResult"/> list → <see cref="AnalysisReportDocument"/>.
 /// Pure function — no text formatting, no side effects, no I/O.
 /// </summary>
-internal sealed class ReportSerializer
+internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSummaryProjector = null)
 {
+    private readonly ExecutiveSummaryProjector _executiveSummaryProjector = executiveSummaryProjector ?? new ExecutiveSummaryProjector();
+
     public AnalysisReportDocument Serialize(
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> runs,
@@ -109,43 +111,13 @@ internal sealed class ReportSerializer
         // dedup diagnostics removed
 
         // ── 4. Audience-specific projections ─────────────────────────────────
-        // Compute total managed bytes from available analyzer domain results (Memory, GC generation, AppDomain)
-        long totalManagedBytes = 0;
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem)
-            {
-                totalManagedBytes = (long)mem.TotalBytes;
-                break;
-            }
-            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc)
-            {
-                try
-                {
-                    ulong sum = gc.Gen0Bytes + gc.Gen1Bytes + gc.Gen2Bytes + gc.LohBytes;
-                    totalManagedBytes = (long)Math.Min((ulong)long.MaxValue, sum);
-                    break;
-                }
-                catch { /* ignore overflow, continue */ }
-            }
-            if (run.Result is DumpDetective.Analysis.Models.AppDomainDomainResult app)
-            {
-                try
-                {
-                    ulong sum = 0;
-                    foreach (var d in app.Domains) sum += d.EstimatedManagedBytes;
-                    totalManagedBytes = (long)Math.Min((ulong)long.MaxValue, sum);
-                    break;
-                }
-                catch { }
-            }
-        }
+        long totalManagedBytes = _executiveSummaryProjector.ComputeTotalManagedBytes(runs);
 
         // Include Executive summary for explicit Executive audience or when Audience==All
         HealthScorecard scorecard = HealthScorecardBuilder.Build(runs);
 
         ExecutiveSummaryRecord? executiveSummary = (audience == ReportAudience.Executive || audience == ReportAudience.All)
-            ? BuildExecutiveSummary(deduped, totalManagedBytes, scorecard, runs)
+            ? _executiveSummaryProjector.Build(deduped, scorecard, runs, totalManagedBytes)
             : null;
 
         string? analyzerVersion = typeof(ReportSerializer).Assembly.GetName().Version?.ToString(3);
@@ -1338,179 +1310,6 @@ internal sealed class ReportSerializer
         if (string.IsNullOrWhiteSpace(a))
             return b;
         return $"{a}{Environment.NewLine}{b}";
-    }
-
-    // ── Executive summary ─────────────────────────────────────────────────────
-
-    private static ExecutiveSummaryRecord BuildExecutiveSummary(IReadOnlyList<FindingRecord> findings, long totalManagedBytes, HealthScorecard scorecard, IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        // P1.2: Use ExplainableScoringEngine for reproducible, contributor-backed scores.
-        var (leak, gcPressure, thread) = ExplainableScoringEngine.ComputeScores(findings);
-
-        // Top Critical/Warning findings
-        var criticalFindings = new List<FindingRecord>(5);
-        var warningFindings = new List<FindingRecord>(5);
-        var top3 = new List<FindingRecord>(3);
-        for (int i = 0; i < findings.Count && top3.Count < 3; i++)
-        {
-            int ord = SeverityOrdinal(findings[i].Severity);
-            if (ord >= 1)
-                top3.Add(findings[i]);
-        }
-
-        for (int i = 0; i < findings.Count; i++)
-        {
-            FindingRecord finding = findings[i];
-            int ord = SeverityOrdinal(finding.Severity);
-            if (ord == 2 && criticalFindings.Count < 5)
-                criticalFindings.Add(finding);
-            else if (ord == 1 && warningFindings.Count < 5)
-                warningFindings.Add(finding);
-
-            if (criticalFindings.Count == 5 && warningFindings.Count == 5)
-                break;
-        }
-
-        IReadOnlyList<RankedActionRecord> topActions = ActionPriorityService.BuildTopActions(findings);
-
-        return new ExecutiveSummaryRecord(
-            TotalManagedBytes: totalManagedBytes,
-            LeakLikelihoodScore: leak.Score,
-            GcPressureScore: gcPressure.Score,
-            ThreadContentionScore: thread.Score,
-            TopRecommendations: top3)
-        {
-            HealthScorecard = scorecard,
-            CriticalFindings = criticalFindings,
-            WarningFindings = warningFindings,
-            ScoreBreakdowns = [leak, gcPressure, thread],
-            LohBytes = ExtractLohBytes(runs),
-            LohPercent = ExtractLohPercent(runs),
-            Gen2Percent = ExtractGen2Percent(runs),
-            LeakCandidateCount = ExtractLeakCandidateCount(runs),
-            HangScore = ExtractHangScore(runs),
-            BlockedThreads = ExtractBlockedThreads(runs),
-            DeadlockCycles = ExtractDeadlockCycles(runs),
-            ActiveExceptions = ExtractActiveExceptions(runs),
-            FinalizerQueueCount = ExtractFinalizerQueueCount(runs),
-            TotalObjects = ExtractTotalObjects(runs),
-            UniqueTypes = ExtractUniqueTypes(runs),
-            GcPressureLevel = ExtractGcPressureLevel(runs),
-            TopActions = topActions,
-            ActionScoringModelVersion = ActionPriorityService.ScoringModelVersion,
-        };
-    }
-
-    private static long? ExtractLohBytes(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return (long)mem.LohBytes;
-            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return (long)gc.LohBytes;
-        }
-        return null;
-    }
-
-    private static double? ExtractLohPercent(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.LohPercent;
-            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.LohPercent;
-        }
-        return null;
-    }
-
-    private static double? ExtractGen2Percent(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.Gen2Pct;
-        }
-        return null;
-    }
-
-    private static int? ExtractLeakCandidateCount(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.LeakCandidateDomainResult leak) return leak.TotalCandidates;
-        }
-        return null;
-    }
-
-    private static int? ExtractHangScore(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.HangDomainResult hang) return hang.HealthScore;
-        }
-        return null;
-    }
-
-    private static int? ExtractBlockedThreads(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.ThreadDomainResult thread) return thread.BlockedThreadCount;
-        }
-        return null;
-    }
-
-    private static int? ExtractDeadlockCycles(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.LockGraphDomainResult lockGraph) return lockGraph.DeadlockCandidateCount;
-        }
-        return null;
-    }
-
-    private static int? ExtractActiveExceptions(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.CrashDomainResult crash) return crash.ActiveExceptions;
-        }
-        return null;
-    }
-
-    private static int? ExtractFinalizerQueueCount(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.FinalizableObjectDomainResult fin) return fin.FinalizerQueueCount;
-        }
-        return null;
-    }
-
-    private static int? ExtractTotalObjects(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.TotalObjects;
-            if (run.Result is DumpDetective.Analysis.Models.GCGenerationDomainResult gc) return gc.TotalObjects;
-        }
-        return null;
-    }
-
-    private static int? ExtractUniqueTypes(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.MemoryDomainResult mem) return mem.UniqueTypes;
-        }
-        return null;
-    }
-
-    private static string? ExtractGcPressureLevel(IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        foreach (AnalyzerRunResult run in runs)
-        {
-            if (run.Result is DumpDetective.Analysis.Models.AllocationPatternDomainResult alloc)
-                return alloc.GCPressure.ToString();
-        }
-        return null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

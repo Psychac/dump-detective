@@ -100,10 +100,14 @@ internal sealed class ReportBuilderFacade(
         return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext, additionalFindings);
     }
 
-    public string RenderDocument(AnalysisReportDocument doc, ReportFormat format)
+    public string RenderDocument(AnalysisReportDocument doc, ReportFormat format, HtmlRenderSettings? htmlRenderSettings = null)
     {
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
+
+        if (formatter is HtmlReportRenderer htmlFormatter)
+            return htmlFormatter.Render(doc, htmlRenderSettings ?? HtmlRenderSettings.Default);
+
         return formatter.Render(doc);
     }
 }

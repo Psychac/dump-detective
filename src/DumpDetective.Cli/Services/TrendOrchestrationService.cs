@@ -8,6 +8,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Trend;
+using DumpDetective.Reporting.Formatters;
 
 using System.Diagnostics;
 
@@ -128,18 +129,10 @@ internal sealed class TrendOrchestrationService(
             totalStopwatch.Elapsed,
             trendExecutions[^1].IncidentContext,
             trendData);
-        string renderedReport;
-        try
-        {
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = resolved.Report.PreRender;
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = resolved.Report.StyleVersion;
-            renderedReport = _reportBuilderFacade.RenderDocument(trendDoc, resolved.Report.Format);
-        }
-        finally
-        {
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = false;
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        string renderedReport = _reportBuilderFacade.RenderDocument(
+            trendDoc,
+            resolved.Report.Format,
+            new HtmlRenderSettings(resolved.Report.PreRender, resolved.Report.StyleVersion));
 
         if (resolved.Diagnostics.EnableMemoryDiagnostics && buildReportMemoryBefore is not null)
         {

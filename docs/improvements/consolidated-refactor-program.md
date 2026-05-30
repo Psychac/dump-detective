@@ -9,12 +9,14 @@ Execution status update (2026-05-30):
 - Phase 2: Complete (module-driven registration and completeness validation in place)
 - Phase 3: Complete (finding-generator ownership moved to Reporting; Analysis source-link removed)
 - Phase 4: Complete (CLI composition ownership reduced; factories/facade/capability catalog now Reporting-owned)
+- Phase 5: Complete (serializer/trend decomposition delivered, renderer policy explicit, UI modules split with targeted coverage)
 
 Re-validation notes (2026-05-30):
 - Focused architecture/integration guardrail suite: 17/17 passed
 - Official baseline harness `tools/Phase0/Invoke-Phase0Baseline.ps1`: passed
 - Baseline artifacts under `artifacts/reports/phase0`: all `status = pass`
 - Phase 4 follow-up: baseline harness updated for Reporting-owned capability catalog path
+- Phase 5 milestone: HTML renderer now uses explicit render settings (no mutable static override flags)
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -433,6 +435,15 @@ Medium
 
 ### Exit criteria
 - report composition and report UI behavior are independently understandable and testable
+
+Current status:
+- Complete
+- Completed in this iteration:
+  - renderer policy cleanup with explicit `HtmlRenderSettings`
+  - executive-summary projection extracted into `ExecutiveSummaryProjector`
+  - trend summary deltas composed via shared executive-summary projection
+  - browser UI split into focused modules (`report.ui.toc.js`, `report.ui.integrity.js`)
+  - targeted visuals/renderer tests and baseline harness revalidated
 
 ## Phase 6: Decompose Analysis Internals Without Touching the Performance Spine
 

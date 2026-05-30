@@ -65,18 +65,41 @@ namespace DumpDetective.Tests
         }
 
         [Fact]
-        public void UiRenderer_ShouldExposeIntegrityAuditMarkers()
+        public void UiRenderer_ShouldExposeReadingModeAndDynamicSectionMarkers()
         {
             var baseDir = AppContext.BaseDirectory;
             var path = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates", "report.ui.js"));
             Assert.True(File.Exists(path), $"Expected UI renderer at {path}");
             var content = File.ReadAllText(path);
-            Assert.Contains("render-integrity-report", content);
-            Assert.Contains("duplicateIdCount", content);
-            Assert.Contains("brokenAnchorCount", content);
             Assert.Contains("dumpdetective:reading-mode", content);
             Assert.Contains(".report-domain__details", content);
             Assert.Contains(".analyzer-section > details:not(.provenance)", content);
+            Assert.Contains("dumpdetective:sections-rendered", content);
+            Assert.Contains("dumpdetective:domain-sections-appended", content);
+        }
+
+        [Fact]
+        public void UiIntegrityModule_ShouldExposeAnchorIntegrityContract()
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var path = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates", "report.ui.integrity.js"));
+            Assert.True(File.Exists(path), $"Expected UI integrity module at {path}");
+            var content = File.ReadAllText(path);
+            Assert.Contains("render-integrity-report", content);
+            Assert.Contains("duplicateIdCount", content);
+            Assert.Contains("brokenAnchorCount", content);
+            Assert.Contains("data-broken-anchor", content);
+        }
+
+        [Fact]
+        public void UiTocModule_ShouldExposeFocusedFilterContract()
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var path = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates", "report.ui.toc.js"));
+            Assert.True(File.Exists(path), $"Expected UI TOC module at {path}");
+            var content = File.ReadAllText(path);
+            Assert.Contains("export function filterTocList", content);
+            Assert.Contains("item.hidden", content);
         }
     }
 }

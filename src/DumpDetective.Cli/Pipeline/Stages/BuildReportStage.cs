@@ -1,4 +1,5 @@
 using DumpDetective.Reporting.Services;
+using DumpDetective.Reporting.Formatters;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
@@ -25,19 +26,11 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
             state.Insights);
         state.ReportDocument = doc;
 
-        // Render the report string for the chosen output format.
-        // Honor explicit pre-render request for template-driven renderer.
-        try
-        {
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = state.Resolved.Report.PreRender;
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = state.Resolved.Report.StyleVersion;
-            state.RenderedReport = reportBuilderFacade.RenderDocument(doc, state.Resolved.Report.Format);
-        }
-        finally
-        {
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForcePreRender = false;
-            DumpDetective.Reporting.Formatters.HtmlReportRenderer.ForceReportStyleVersion = DumpDetective.Core.Configuration.ReportStyleVersion.V1;
-        }
+        // Render using explicit settings rather than mutable static renderer flags.
+        state.RenderedReport = reportBuilderFacade.RenderDocument(
+            doc,
+            state.Resolved.Report.Format,
+            new HtmlRenderSettings(state.Resolved.Report.PreRender, state.Resolved.Report.StyleVersion));
 
         return Task.CompletedTask;
     }

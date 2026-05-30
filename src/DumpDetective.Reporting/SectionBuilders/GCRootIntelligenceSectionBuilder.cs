@@ -54,34 +54,80 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                     Cell($"0x{root.RootAddress:X}"))).ToList()));
         }
 
-        blocks.Add(H("ROOT PATHS BY TARGET TYPE"));
-        blocks.Add(T("Root paths are grouped by target type and shown shortest-first within each group."));
+        // ── Root paths: outer collapsible wrapper ─────────────────────────
+        const int ChainInitial = 5;
 
-        foreach (var group in roots.RootPaths
+        var pathGroups = roots.RootPaths
             .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
             .OrderByDescending(g => g.Count())
-            .ThenBy(g => g.Key))
-        {
-            int limit = Math.Min(group.Count(), 3);
-            blocks.Add(CollapseBegin($"{group.Key} ({group.Count()} path(s))"));
+            .ThenBy(g => g.Key)
+            .ToList();
 
-            var rows = new List<TableRow>(limit);
-            foreach (var path in group.OrderBy(p => p.PathLength).Take(limit))
+        string outerTitle = roots.PathSearchCapped
+            ? $"Root paths by target type ({pathGroups.Count} type(s)) ⚠ some paths truncated"
+            : $"Root paths by target type ({pathGroups.Count} type(s))";
+
+        blocks.Add(CollapseBegin(outerTitle));
+        blocks.Add(T($"Grouped by target type, shortest path first. Reference chains longer than {ChainInitial} hops are collapsed — expand inline to see the full chain."));
+
+        foreach (var group in pathGroups)
+        {
+            var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToList();
+            bool anyGroupCapped = pathsInGroup.Any(p => p.WasCapped);
+            string shortName = TrimTypeName(group.Key);
+            string groupTitle = anyGroupCapped
+                ? $"{shortName} ({group.Count()} path(s)) ⚠ truncated"
+                : $"{shortName} ({group.Count()} path(s))";
+
+            blocks.Add(CollapseBegin(groupTitle));
+            blocks.Add(T(group.Key)); // full qualified name
+
+            for (int pi = 0; pi < pathsInGroup.Count; pi++)
             {
-                rows.Add(Row(
-                    Cell(path.RootKind),
-                    Cell(path.PathLength.ToString("N0"), path.PathLength),
-                    Cell(path.WasCapped ? "yes" : "no"),
-                    Cell(FormatPath(path))));
+                var path = pathsInGroup[pi];
+                if (pi > 0)
+                    blocks.Add(Divider());
+
+                blocks.Add(M("Root Kind",   path.RootKind));
+                blocks.Add(M("Target Addr", $"0x{path.TargetAddress:X}"));
+                blocks.Add(M("Path Length", path.WasCapped
+                    ? $"{path.PathLength}+ (truncated)"
+                    : path.PathLength.ToString("N0")));
+
+                if (path.PathTypeNames.Count > 0)
+                {
+                    blocks.Add(H("Reference chain:"));
+                    blocks.Add(Li($"[{path.RootKind}] (root)"));
+
+                    int shown = Math.Min(path.PathTypeNames.Count, ChainInitial);
+                    for (int hi = 0; hi < shown; hi++)
+                        blocks.Add(Li($"→ {path.PathTypeNames[hi]}"));
+
+                    int remaining = path.PathTypeNames.Count - shown;
+                    if (remaining > 0 || path.WasCapped)
+                    {
+                        string overflowTitle = remaining > 0
+                            ? $"… show {remaining} more hop(s){(path.WasCapped ? " (truncated)" : string.Empty)}"
+                            : "… (truncated — further references may exist)";
+                        blocks.Add(CollapseBegin(overflowTitle));
+                        for (int hi = shown; hi < path.PathTypeNames.Count; hi++)
+                            blocks.Add(Li($"→ {path.PathTypeNames[hi]}"));
+                        if (path.WasCapped)
+                            blocks.Add(Li("→ … (truncated — further references may exist)"));
+                        blocks.Add(CollapseEnd());
+                    }
+                }
+                else
+                {
+                    blocks.Add(T("No intermediate references recorded."));
+                }
             }
 
-            blocks.Add(new TableBlock(
-                Caption: null,
-                Headers: ["Root Kind", "Path Length", "Capped", "Path"],
-                Rows: rows));
-            blocks.Add(CollapseEnd());
+            blocks.Add(CollapseEnd()); // end type group
             blocks.Add(Blank());
         }
+
+        blocks.Add(CollapseEnd()); // end outer root-paths section
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
@@ -122,36 +168,6 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         }
 
         return rows;
-    }
-
-    private static string FormatPath(RootPathFinding path)
-    {
-        var builder = new System.Text.StringBuilder();
-        bool isIndirect = false;
-        builder.Append('[').Append(path.RootKind).Append("] ");
-
-        for (int i = 0; i < path.PathTypeNames.Count; i++)
-        {
-            if (i > 0)
-                builder.Append(" → ");
-
-            string typeName = path.PathTypeNames[i];
-            if (typeName.Contains("object[]", StringComparison.OrdinalIgnoreCase)
-                || typeName.Contains("List`1", StringComparison.OrdinalIgnoreCase))
-            {
-                isIndirect = true;
-            }
-
-            builder.Append(TrimTypeName(typeName));
-        }
-
-        if (path.WasCapped)
-            builder.Append(" [TRUNCATED]");
-
-        if (isIndirect)
-            builder.Append(" (indirect)");
-
-        return builder.ToString();
     }
 
     private static string TrimTypeName(string typeName)

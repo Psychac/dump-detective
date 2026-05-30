@@ -9,7 +9,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     [
         // Domain A — Memory & Leaks
         new LeakAnalysisSectionBuilder(),          // A1
-        new MemoryTopologySectionBuilder(),        // A2
+        new MemoryAnalysisSectionBuilder(),        // A2
         new DominatorSectionBuilder(),             // A3
         new RetentionSectionBuilder(),             // A4
         new GCRootIntelligenceSectionBuilder(),    // A5

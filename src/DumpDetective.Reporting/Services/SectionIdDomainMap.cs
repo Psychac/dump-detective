@@ -91,7 +91,7 @@ internal static class SectionIdDomainMap
 
         // IReportSectionBuilder display-title aliases (for sections where DisplayTitle is used as AnalyzerName in the AnalyzerDetailSection)
         ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title
-        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryTopologySectionBuilder display title
+        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryAnalysisSectionBuilder display title
         ["Generation Pressure"]        = ("GC",         "B1"),   // GCPressureSectionBuilder display title
         ["Heap Topology"]              = ("GC",         "B3"),   // HeapSegmentDiagnosticsSectionBuilder display title
         ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title

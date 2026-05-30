@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace DumpDetective.Reporting.SectionBuilders;
 
 /// <summary>A2 — Memory Overview. Source: <see cref="MemoryDomainResult"/>.</summary>
-internal sealed class MemoryTopologySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Memory Analysis";
     public string DisplayTitle => "Memory Overview";

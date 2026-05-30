@@ -12,6 +12,7 @@ Execution status update (2026-05-30):
 - Phase 5: Complete (serializer/trend decomposition delivered, renderer policy explicit, UI modules split with targeted coverage)
 - Phase 6: Complete (pipeline collaborators extracted, insight rules grouped, shared traversal adopted in analyzer path)
 - Phase 7: Complete (Core boundary tightened: legacy option bag removed, policy inference moved to Analysis, context surface narrowed)
+- Phase 8: Complete (fitness enforcement wired into CI with architecture/no-source-link/hotspot/perf guardrails)
 
 Re-validation notes (2026-05-30):
 - Focused architecture/integration guardrail suite: 17/17 passed
@@ -21,6 +22,7 @@ Re-validation notes (2026-05-30):
 - Phase 5 milestone: HTML renderer now uses explicit render settings (no mutable static override flags)
 - Phase 6 milestone: pipeline/infrastructure/insight decomposition validated with focused tests and baseline harness
 - Phase 7 milestone: Core contracts slimmed; runtime-aware boundary decision documented; focused tests and baseline harness revalidated
+- Phase 8 milestone: CI fitness gates added for architecture direction, no-source-link boundaries, hotspot guardrail coverage, benchmark compile, and baseline harness
 
 Validated against:
 - `architecture-refactor-roadmap.md`
@@ -574,6 +576,14 @@ Some of this begins in Phase 2 and Phase 0, but this phase is where enforcement 
 
 ### Exit criteria
 - structural regressions fail fast in CI
+
+Current status:
+- Complete
+- Completed in this iteration:
+  - added architecture fitness tests enforcing no-source-link namespace boundaries for Analysis/Core
+  - added hotspot guardrail presence checks for orchestration and report UI test surfaces
+  - added CI workflow `.github/workflows/phase8-fitness.yml` to run architecture/hotspot tests, benchmark compile guardrail, and `tools/Phase0/Invoke-Phase0Baseline.ps1`
+  - revalidated focused tests, benchmark project build, and Phase0 baseline harness locally
 
 ## Program Ordering Summary
 

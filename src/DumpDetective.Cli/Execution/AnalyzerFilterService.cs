@@ -52,10 +52,28 @@ internal static class AnalyzerFilterService
 
     public static IReadOnlyList<IAnalyzer> Order(IReadOnlyList<IAnalyzer> analyzers)
         => analyzers
-            .OrderBy(GetStageRank)
+            .OrderBy(a => GetDomainRank(a))
+            .ThenBy(GetStageRank)
             .ThenBy(a => a.Order)
             .ThenBy(a => a.Name, StringComparer.Ordinal)
             .ToList();
+
+    private static int GetDomainRank(IAnalyzer analyzer)
+    {
+        // Prefer the canonical report domain mapping; fall back to analyzer.Category.
+        string domain = DumpDetective.Reporting.Services.SectionIdDomainMap.GetDomain(analyzer.Name);
+        if (string.IsNullOrWhiteSpace(domain))
+            domain = analyzer.Category ?? string.Empty;
+
+        // DomainsInOrder defines preferred ordering; use index if present.
+        var domains = DumpDetective.Reporting.Services.SectionIdDomainMap.DomainsInOrder;
+        for (int i = 0; i < domains.Count; i++)
+        {
+            if (string.Equals(domains[i], domain, StringComparison.Ordinal))
+                return i;
+        }
+        return int.MaxValue;
+    }
 
     public static IReadOnlyList<AnalyzerRunResult> BuildSkippedByFilterResults(
         IReadOnlyList<IAnalyzer> allAnalyzers,
@@ -90,7 +108,7 @@ internal static class AnalyzerFilterService
         return skipped;
     }
 
-    private static int GetStageRank(IAnalyzer analyzer)
+    internal static int GetStageRank(IAnalyzer analyzer)
     {
         string typeName = analyzer.GetType().Name;
         return typeName switch

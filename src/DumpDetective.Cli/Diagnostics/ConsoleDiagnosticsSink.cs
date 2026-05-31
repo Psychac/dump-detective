@@ -1,7 +1,9 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
+using DumpDetective.Reporting.Services;
 using System.Diagnostics;
+using DumpDetective.Cli.Execution;
 
 namespace DumpDetective.Cli.Diagnostics;
 
@@ -75,9 +77,10 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                 break;
 
             case AnalysisDiagnosticsEventType.AnalyzerCompleted:
-                if (!string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
+                    if (!string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
                 {
-                    (long cacheHits, long cacheMisses) = GetAnalyzerCacheDelta(diagnosticsEvent);
+                    long cacheHits = diagnosticsEvent.CacheHits - _currentAnalyzerStartCacheHits;
+                    long cacheMisses = diagnosticsEvent.CacheMisses - _currentAnalyzerStartCacheMisses;
                     long cacheTotal = cacheHits + cacheMisses;
                     double cacheHitRatio = cacheTotal == 0 ? 0 : cacheHits * 100.0 / cacheTotal;
                     TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
@@ -398,14 +401,78 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         }
     }
 
-    // Minimal helper implementations to satisfy compilation after refactor.
-    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string,int> analyzerStageByName)
+    // Build logical analyzer groups (stages) based on analyzer type names.
+    // Mirrors the rank mapping used by AnalyzerFilterService so the console groups
+    // match the order analyzers are executed in the pipeline.
+    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string, int> analyzerStageByName)
     {
+        // Group analyzers by report domain (SectionIdDomainMap). Order groups
+        // using the canonical DomainsInOrder, then any remaining domains by
+        // lowest pipeline rank so display matches both reporting and execution.
+        var domainBuckets = new Dictionary<string, (int MinRank, List<string> Names)>(StringComparer.Ordinal);
+
+        foreach (IAnalyzer a in analyzers)
+        {
+            string domain = SectionIdDomainMap.GetDomain(a.Name);
+            if (string.IsNullOrWhiteSpace(domain))
+                domain = a.Category ?? "Other";
+
+            int rank = AnalyzerFilterService.GetStageRank(a);
+            if (!domainBuckets.TryGetValue(domain, out var entry))
+            {
+                entry = (rank, new List<string>());
+                domainBuckets[domain] = entry;
+            }
+
+            entry.Names.Add(a.Name);
+            if (rank < entry.MinRank)
+                entry.MinRank = rank;
+
+            domainBuckets[domain] = entry;
+        }
+
+        var ordered = new List<KeyValuePair<string, (int MinRank, List<string> Names)>>();
+
+        // First, include domains in the canonical reporting order
+        foreach (string d in SectionIdDomainMap.DomainsInOrder)
+        {
+            if (domainBuckets.TryGetValue(d, out var entry))
+            {
+                ordered.Add(new KeyValuePair<string, (int, List<string>)>(d, entry));
+                domainBuckets.Remove(d);
+            }
+        }
+
+        // Then include any remaining domains ordered by MinRank then name
+        var remaining = domainBuckets.OrderBy(kv => kv.Value.MinRank).ThenBy(kv => kv.Key, StringComparer.Ordinal);
+        ordered.AddRange(remaining);
+
         var stages = new List<AnalyzerStage>();
-        stages.Add(new AnalyzerStage(Name: "Analyzers", AnalyzerCount: analyzers.Count));
-        analyzerStageByName = analyzers.Select((a, i) => (a.Name, i)).ToDictionary(t => t.Name, t => 0, StringComparer.Ordinal);
+        analyzerStageByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        int stageIndex = 0;
+
+        foreach (var kv in ordered)
+        {
+            string domain = kv.Key;
+            List<string> names = kv.Value.Names;
+            string stageName = string.IsNullOrWhiteSpace(domain) ? "Other" : domain;
+            stages.Add(new AnalyzerStage(Name: stageName, AnalyzerCount: names.Count));
+
+            foreach (string name in names)
+                analyzerStageByName[name] = stageIndex;
+
+            stageIndex++;
+        }
+
+        if (stages.Count == 0)
+        {
+            stages.Add(new AnalyzerStage(Name: "Analyzers", AnalyzerCount: analyzers.Count));
+            analyzerStageByName = analyzers.Select((a, i) => (a.Name, 0)).ToDictionary(t => t.Name, t => 0, StringComparer.Ordinal);
+        }
+
         return stages;
     }
+
 
     private void StartAnalyzerTracking(AnalysisDiagnosticsEvent ev)
     {
@@ -435,8 +502,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         _currentSubmodule = null;
     }
 
-    private static (long cacheHits, long cacheMisses) GetAnalyzerCacheDelta(AnalysisDiagnosticsEvent ev)
-        => (ev.CacheHits - ev.CacheHits, ev.CacheMisses - ev.CacheMisses);
+    
 
     private static long GetAnalyzerScanCount(string analyzerName, long reportedScanCount)
         => reportedScanCount;

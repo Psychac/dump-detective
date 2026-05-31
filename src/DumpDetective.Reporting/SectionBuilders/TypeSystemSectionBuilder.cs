@@ -281,7 +281,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         ulong EstimatedGen2Bytes,
         string ModuleName);
 
-    private static List<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape, GCRootDomainResult? roots)
+    private static IReadOnlyList<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape, GCRootDomainResult? roots)
     {
         var candidates = new List<DominatorCandidate>();
         ulong heapTotal = memory.TotalBytes == 0 ? 1 : memory.TotalBytes;
@@ -330,7 +330,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 rooted));
         }
 
-        return candidates.OrderByDescending(c => c.ShallowBytes).Take(TopRows).ToList();
+        return candidates.OrderByDescending(c => c.ShallowBytes).Take(TopRows).ToArray();
     }
 
     private static double GenRatioValue(TypeGenerationProfile profile)

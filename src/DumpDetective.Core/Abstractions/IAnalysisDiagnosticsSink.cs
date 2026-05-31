@@ -25,7 +25,7 @@ public sealed class InMemoryAnalysisDiagnosticsSink : IAnalysisDiagnosticsSink
         {
             lock (_gate)
             {
-                return _events.ToList();
+                return _events.ToArray();
             }
         }
     }

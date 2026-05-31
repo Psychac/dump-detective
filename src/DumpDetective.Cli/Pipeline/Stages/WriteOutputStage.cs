@@ -10,7 +10,7 @@ internal sealed class WriteOutputStage(ReportOutputWriter outputWriter) : IAnaly
 
     public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
-        IReadOnlyList<ReportArtifact> artifacts = state.Runs.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToList();
+        IReadOnlyList<ReportArtifact> artifacts = state.Runs.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToArray();
         await _outputWriter.WriteAsync(state.Resolved, state.ReportDocument, state.RenderedReport, artifacts, cancellationToken);
     }
 }

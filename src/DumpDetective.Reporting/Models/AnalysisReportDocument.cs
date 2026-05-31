@@ -52,10 +52,10 @@ internal abstract record AnalysisReportDocument
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
 
     [JsonIgnore]
-    public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
+    public IReadOnlyList<FindingRecord> Findings { get; init; } = Array.Empty<FindingRecord>();
 
     [JsonIgnore]
-    public IReadOnlyList<AnalyzerDetailSection> AnalyzerSections { get; init; } = [];
+    public IReadOnlyList<AnalyzerDetailSection> AnalyzerSections { get; init; } = Array.Empty<AnalyzerDetailSection>();
 }
 
 internal sealed record SingleDumpReportDocument : AnalysisReportDocument
@@ -67,7 +67,7 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
 {
     public string DumpPath { get; init; } = "";
     public int TrendDumpCount { get; init; }
-    public IReadOnlyList<string> TrendDumpPaths { get; init; } = [];
+    public IReadOnlyList<string> TrendDumpPaths { get; init; } = Array.Empty<string>();
     public int TrendNewFindingCount { get; init; }
     public int TrendPersistentFindingCount { get; init; }
     public int TrendResolvedFindingCount { get; init; }
@@ -76,14 +76,14 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     /// These mirror <see cref="AnalysisReportDocument.AnalyzerSections"/> but are NOT [JsonIgnore],
     /// so they are available in the embedded JSON that the JS reads.
     /// </summary>
-    public IReadOnlyList<AnalyzerDetailSection> TrendAnalyzerSections { get; init; } = [];
+    public IReadOnlyList<AnalyzerDetailSection> TrendAnalyzerSections { get; init; } = Array.Empty<AnalyzerDetailSection>();
 
     /// <summary>
     /// Full per-dump documents — [JsonIgnore] because they are serialized separately
     /// in the HTML renderer using the proven AnalysisReportDocument serializer path.
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyList<AnalysisReportDocument> PerDumpDocuments { get; init; } = [];
+    public IReadOnlyList<AnalysisReportDocument> PerDumpDocuments { get; init; } = Array.Empty<AnalysisReportDocument>();
 }
 
 internal sealed record AnalyzerRunStatusRecord(

@@ -966,7 +966,7 @@ internal sealed class StringAnalyzer : IAnalyzer
             .OrderByDescending(static d => d.WastedBytes)
             .ThenByDescending(static d => d.Count)
             .ThenByDescending(static d => d.TotalSize)
-            .ToList();
+            .ToArray();
     }
 
     /// <summary>Create a compact fingerprint for a string value.</summary>

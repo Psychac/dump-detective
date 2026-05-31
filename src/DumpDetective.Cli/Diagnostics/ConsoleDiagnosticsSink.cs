@@ -88,7 +88,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         : TimeSpan.Zero;
                     long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
 
-                    List<string> details = [];
+                    var details = new List<string>();
                     if (analyzerScanCount == 0)
                     {
                         details.Add("no heap walk");

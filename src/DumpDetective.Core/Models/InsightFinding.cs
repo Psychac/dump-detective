@@ -21,7 +21,7 @@ IReadOnlyList<string>? Caveats = null)
         _ => 0.5
     };
 
-    public IReadOnlyList<string> EffectiveCaveats { get; init; } = Caveats ?? [];
+    public IReadOnlyList<string> EffectiveCaveats { get; init; } = Caveats ?? Array.Empty<string>();
 
     public double EffectiveConfidenceScore => ConfidenceScore ?? Severity switch
     {

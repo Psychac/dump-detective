@@ -51,7 +51,7 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(o.TypeName),
                     Cell(FormatBytes(o.Size), (long)Math.Min(o.Size, long.MaxValue)),
                     Cell(o.IncomingReferences.ToString("N0"), o.IncomingReferences),
-                    Cell(o.EstimatedRetainedBytes > 0 ? FormatBytes(o.EstimatedRetainedBytes) : "—", (long)Math.Min(o.EstimatedRetainedBytes, long.MaxValue)))).ToList()));
+                    Cell(o.EstimatedRetainedBytes > 0 ? FormatBytes(o.EstimatedRetainedBytes) : "—", (long)Math.Min(o.EstimatedRetainedBytes, long.MaxValue)))).ToArray()));
         }
 
         if (d.TopRetentionTypes is { Count: > 0 })
@@ -66,7 +66,7 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(t.TotalIncomingReferences.ToString("N0"), t.TotalIncomingReferences),
                     Cell(t.MaxIncomingReferences.ToString("N0"), (long)t.MaxIncomingReferences),
                     Cell(t.EstimatedRetainedBytes > 0 ? FormatBytes(t.EstimatedRetainedBytes) : "—", (long)Math.Min(t.EstimatedRetainedBytes, long.MaxValue)),
-                    Cell(FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes), (long)Math.Round(Ratio(t.EstimatedRetainedBytes, t.TotalBytes) * 1000)))).ToList()));
+                    Cell(FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes), (long)Math.Round(Ratio(t.EstimatedRetainedBytes, t.TotalBytes) * 1000)))).ToArray()));
         }
 
         if (caveats.Count > 0)

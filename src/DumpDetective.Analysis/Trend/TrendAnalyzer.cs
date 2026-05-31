@@ -60,14 +60,14 @@ namespace DumpDetective.Analysis.Trend
                 TryGetRetentionResult(current, out RetentionDomainResult cLeak))
             {
                 var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (HighlyReferencedObjectSnapshot obj in bLeak.TopHighlyReferencedObjects ?? [])
+                foreach (HighlyReferencedObjectSnapshot obj in bLeak.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
                 {
                     baselineByType.TryGetValue(obj.TypeName, out double prev);
                     baselineByType[obj.TypeName] = prev + obj.Size;
                 }
 
                 var currentByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (HighlyReferencedObjectSnapshot obj in cLeak.TopHighlyReferencedObjects ?? [])
+                foreach (HighlyReferencedObjectSnapshot obj in cLeak.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
                 {
                     currentByType.TryGetValue(obj.TypeName, out double prev);
                     currentByType[obj.TypeName] = prev + obj.Size;
@@ -91,11 +91,11 @@ namespace DumpDetective.Analysis.Trend
                 bStaticRaw is StaticRootDomainResult bStatic && cStaticRaw is StaticRootDomainResult cStatic)
             {
                 var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes ?? [])
+                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
                     baselineByName[entry.Name] = entry.Bytes;
 
                 var signals = new List<NewLeakSignal>();
-                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes ?? [])
+                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
                 {
                     double currentBytes = entry.Bytes;
                     baselineByName.TryGetValue(entry.Name, out double baseBytes);
@@ -156,7 +156,7 @@ namespace DumpDetective.Analysis.Trend
         public IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> CompareSeries(IReadOnlyList<AnalysisSnapshot> snapshots)
         {
             if (snapshots.Count < 2)
-                return [];
+                return Array.Empty<IReadOnlyList<AnalyzerTrendResult>>();
 
             var steps = new List<IReadOnlyList<AnalyzerTrendResult>>(snapshots.Count - 1);
             for (int i = 1; i < snapshots.Count; i++)
@@ -223,7 +223,7 @@ namespace DumpDetective.Analysis.Trend
                 {
                     var values = snapshotLookups
                         .Select(d => d.TryGetValue(timelineKey, out double v) ? v : double.NaN)
-                        .ToList();
+                        .ToArray();
 
                     points.Add(new MetricTimelinePoint(
                         Key: metricIdentity.Key,

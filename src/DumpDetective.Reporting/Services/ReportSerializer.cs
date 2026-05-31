@@ -538,15 +538,15 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
             string eventType = isConflict ? "conflict" : "co-move";
 
-            var orderedDomains = domains.OrderBy(static d => d, StringComparer.OrdinalIgnoreCase).ToList();
-            var orderedFingerprints = fingerprints.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).Take(6).ToList();
+            var orderedDomains = domains.OrderBy(static d => d, StringComparer.OrdinalIgnoreCase).ToArray();
+            var orderedFingerprints = fingerprints.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).Take(6).ToArray();
 
             string title = BuildCorrelationTitle(eventType, [tag], orderedDomains);
             string rationale = BuildCorrelationRationale(
                 eventType,
                 [tag],
                 orderedDomains,
-                orderedFingerprints.Count,
+                orderedFingerprints.Length,
                 isConflict);
 
             string dedupeKey = eventType + "|" + string.Join("|", orderedDomains) + "|" + string.Join("|", orderedFingerprints);
@@ -558,7 +558,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
                 deduped[dedupeKey] = existing with
                 {
-                    SignalKeys = mergedKeys.OrderBy(static s => s, StringComparer.OrdinalIgnoreCase).ToList()
+                    SignalKeys = mergedKeys.OrderBy(static s => s, StringComparer.OrdinalIgnoreCase).ToArray()
                 };
                 continue;
             }
@@ -707,11 +707,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         var mergedFingerprints = new HashSet<string>(a.SourceFingerprints, StringComparer.OrdinalIgnoreCase);
         mergedFingerprints.UnionWith(b.SourceFingerprints);
 
-        List<string> orderedDomains = mergedDomains.OrderBy(static d => d, StringComparer.OrdinalIgnoreCase).ToList();
-        List<string> orderedSignals = mergedSignals.OrderBy(static s => s, StringComparer.OrdinalIgnoreCase).ToList();
-        List<string> orderedFingerprints = mergedFingerprints.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).Take(8).ToList();
+        string[] orderedDomains = mergedDomains.OrderBy(static d => d, StringComparer.OrdinalIgnoreCase).ToArray();
+        string[] orderedSignals = mergedSignals.OrderBy(static s => s, StringComparer.OrdinalIgnoreCase).ToArray();
+        string[] orderedFingerprints = mergedFingerprints.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
 
-        string confidence = orderedDomains.Count >= 3 ? "High" : "Medium";
+        string confidence = orderedDomains.Length >= 3 ? "High" : "Medium";
         if (a.EventType.Equals("conflict", StringComparison.OrdinalIgnoreCase))
             confidence = "Medium";
 
@@ -721,7 +721,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             a.EventType,
             orderedSignals,
             orderedDomains,
-            orderedFingerprints.Count,
+            orderedFingerprints.Length,
             isConflict);
 
         return new CorrelationEventRecord(
@@ -1262,11 +1262,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         int? snapshotIndex)
     {
         string? metricKey = BuildMetricKey(finding);
-        List<ReportArtifact>? matchingArtifacts = artifacts?
+        ReportArtifact[]? matchingArtifacts = artifacts?
             .Where(a => string.Equals(a.Analyzer, finding.Analyzer, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            .ToArray();
 
-        if (matchingArtifacts is { Count: > 0 })
+        if (matchingArtifacts is { Length: > 0 })
         {
             return matchingArtifacts
                 .Select(a => new EvidenceRef(
@@ -1275,18 +1275,18 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                     Addresses: null,
                     ArtifactPath: a.FilePath ?? a.FileName,
                     SnapshotIndex: snapshotIndex))
-                .ToList();
+                .ToArray();
         }
 
-        return
-        [
+        return new[]
+        {
             new EvidenceRef(
                 Analyzer: finding.Analyzer,
                 MetricKey: metricKey,
                 Addresses: null,
                 ArtifactPath: null,
                 SnapshotIndex: snapshotIndex)
-        ];
+        };
     }
 
     private static string? BuildMetricKey(InsightFinding finding)

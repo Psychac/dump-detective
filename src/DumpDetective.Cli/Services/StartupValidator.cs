@@ -14,7 +14,7 @@ internal sealed class StartupValidator
 {
     public void ValidateFeatureModuleCoverage(AnalyzerFeatureModuleCoverage coverage, bool requireFullCoverage, string label)
     {
-        List<string> errors = [];
+        var errors = new List<string>();
 
         if (coverage.InvalidShapeModules.Count > 0)
             errors.Add($"Invalid module shape in {label}: {string.Join(", ", coverage.InvalidShapeModules)}");
@@ -44,7 +44,7 @@ internal sealed class StartupValidator
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory)
     {
-        List<string> errors = [];
+        var errors = new List<string>();
 
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders = sectionBuilderFactory.CreateAnalyzerBuilders();
         IReadOnlyList<IReportSectionBuilder> reportSectionBuilders = sectionBuilderFactory.CreateReportBuilders();
@@ -121,10 +121,8 @@ internal sealed class StartupValidator
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
         ValidateEventLeakOptions(options.EventLeak, errors);
 
-        var overlap = options.IncludeAnalyzers
-            .Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (overlap.Count > 0)
+        var overlap = options.IncludeAnalyzers.Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase);
+        if (overlap.Any())
         {
             errors.Add($"IncludeAnalyzers and ExcludeAnalyzers overlap: {string.Join(", ", overlap)}");
         }
@@ -145,14 +143,14 @@ internal sealed class StartupValidator
         HashSet<string> expected = new(expectedNames, StringComparer.Ordinal);
         HashSet<string> registered = new(registeredNames, StringComparer.Ordinal);
 
-        List<string> missing = expected.Where(name => !registered.Contains(name)).OrderBy(name => name, StringComparer.Ordinal).ToList();
-        List<string> extra = registered.Where(name => !expected.Contains(name)).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var missingOrdered = expected.Where(name => !registered.Contains(name)).OrderBy(name => name, StringComparer.Ordinal);
+        var extraOrdered = registered.Where(name => !expected.Contains(name)).OrderBy(name => name, StringComparer.Ordinal);
 
-        if (requireEveryAnalyzer && missing.Count > 0)
-            errors.Add($"Missing {label} for analyzers: {string.Join(", ", missing)}");
+        if (requireEveryAnalyzer && missingOrdered.Any())
+            errors.Add($"Missing {label} for analyzers: {string.Join(", ", missingOrdered)}");
 
-        if (extra.Count > 0)
-            errors.Add($"Registered {label} without matching analyzer: {string.Join(", ", extra)}");
+        if (extraOrdered.Any())
+            errors.Add($"Registered {label} without matching analyzer: {string.Join(", ", extraOrdered)}");
     }
 
     private static void ValidateRetentionOptions(RetentionOptions options, List<string> errors)

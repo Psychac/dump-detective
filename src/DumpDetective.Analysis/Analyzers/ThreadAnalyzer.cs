@@ -209,7 +209,7 @@ namespace DumpDetective.Analysis.Analyzers
                 source.TopFrames
                     .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
                     .Take(maxFramesForThreadScan)
-                    .ToList(),
+                    .ToArray(),
                 source.StackRootCount,
                 stackSizeBytes);
         }
@@ -227,12 +227,12 @@ namespace DumpDetective.Analysis.Analyzers
                 source.TopFrames
                     .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
                     .Take(maxFramesForThreadScan)
-                    .ToList(),
+                    .ToArray(),
                 source.StackRootCount);
         }
         private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
         {
-            var threadList = threads as IList<ClrThread> ?? threads.ToList();
+            IList<ClrThread> threadList = threads as IList<ClrThread> ?? threads.ToArray();
 
             var result = new ThreadCategorization();
             var threadsWithLocks = new List<ThreadWithStackTrace>();

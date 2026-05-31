@@ -44,8 +44,8 @@ internal sealed record AnalyzerRunResult(
     AnalyzerExecutionDiagnostics? Diagnostics = null)
 {
     /// <summary>Generated findings for this run. Populated by <see cref="DumpDetective.Analysis.FindingGenerators"/> after the analyzer completes.</summary>
-    public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? [];
-    public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = Artifacts ?? [];
+    public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? Array.Empty<InsightFinding>();
+    public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = Artifacts ?? Array.Empty<ReportArtifact>();
 
     /// <summary>
     /// Set when the <see cref="IFindingGenerator"/> for this analyzer threw during

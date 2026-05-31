@@ -50,7 +50,7 @@ internal sealed class TrendOrchestrationService(
         TimeSpan analyzeDumpsElapsed = TimeSpan.Zero;
         TimeSpan buildReportElapsed = TimeSpan.Zero;
         TimeSpan writeOutputElapsed = TimeSpan.Zero;
-        List<(string StageName, AnalyzerMemoryStats Stats)> trendStageMemoryStats = [];
+        var trendStageMemoryStats = new List<(string StageName, AnalyzerMemoryStats Stats)>();
         AnalyzerMemoryStats? writeOutputMemoryStats = null;
 
         ConsoleUx.Header("DumpDetective Trend Analysis");
@@ -103,9 +103,9 @@ internal sealed class TrendOrchestrationService(
                 ManagedHeapAfter: GC.GetTotalMemory(false));
         }
 
-        IReadOnlyList<AnalysisSnapshot> snapshots = trendExecutions
+        AnalysisSnapshot[] snapshots = trendExecutions
             .Select((execution, index) => BuildSnapshot(index, execution))
-            .ToList();
+            .ToArray();
 
         AnalysisSnapshot baseline = snapshots[0];
         AnalysisSnapshot current = snapshots[^1];
@@ -168,10 +168,9 @@ internal sealed class TrendOrchestrationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IReadOnlyList<ReportArtifact> artifacts = trendExecutions.SelectMany(e => e.Runs.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>())).ToList();
+            AnalyzerRunResult[] allRuns = trendExecutions.SelectMany(e => e.Runs).ToArray();
+            ReportArtifact[] artifacts = allRuns.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToArray();
             await _outputWriter.WriteAsync(resolved, trendDoc, renderedReport, artifacts, cancellationToken);
-
-            IReadOnlyList<AnalyzerRunResult> allRuns = trendExecutions.SelectMany(e => e.Runs).ToList();
 
             if (resolved.DiagnosticMode)
             {
@@ -196,7 +195,7 @@ internal sealed class TrendOrchestrationService(
             }
 
             if (resolved.Diagnostics.EnableMemoryDiagnostics)
-                PrintMemorySummary(trendExecutions, trendStageMemoryStats);
+                PrintMemorySummary(trendExecutions, trendStageMemoryStats, allRuns);
 
             stageStopwatch.Stop();
             writeOutputElapsed = stageStopwatch.Elapsed;
@@ -331,7 +330,7 @@ internal sealed class TrendOrchestrationService(
     private static AnalysisSnapshot BuildSnapshot(int index, TrendDumpExecution execution)
     {
         Dictionary<string, AnalyzerDomainResult> domains = new(StringComparer.Ordinal);
-        List<InsightFinding> findings = [];
+        var findings = new List<InsightFinding>();
 
         foreach (AnalyzerRunResult run in execution.Runs)
         {
@@ -371,11 +370,7 @@ internal sealed class TrendOrchestrationService(
 
         ConsoleUx.Success($"[{dumpIndex}/{totalDumps}] Completed {Path.GetFileName(execution.DumpPath)} in {execution.Elapsed.TotalSeconds:F1}s (cumulative dumps: {cumulativeDumpElapsed.TotalSeconds:F1}s) · success={success}, failed={failed}, skipped_filter={skippedByFilter}, skipped_cancelled={skippedByCancellation}, findings={findings}");
 
-        IReadOnlyList<AnalyzerRunResult> failedRuns = execution.Runs
-            .Where(r => r.Status == AnalyzerExecutionStatus.Failed)
-            .ToList();
-
-        foreach (AnalyzerRunResult run in failedRuns)
+        foreach (AnalyzerRunResult run in execution.Runs.Where(r => r.Status == AnalyzerExecutionStatus.Failed))
         {
             string status = run.Status.ToString().ToLowerInvariant();
             ConsoleUx.Warning($"   - {run.AnalyzerName}: {status}, {run.Duration.TotalMilliseconds:F0} ms, findings={run.FindingCount}, warnings={run.WarningCount}");
@@ -384,12 +379,12 @@ internal sealed class TrendOrchestrationService(
         if (!diagnosticMode)
             return;
 
-        IReadOnlyList<AnalyzerRunResult> topSlow = execution.Runs
+        AnalyzerRunResult[] topSlow = execution.Runs
             .OrderByDescending(r => r.Duration)
             .Take(8)
-            .ToList();
+            .ToArray();
 
-        ConsoleUx.Info($"   Top {topSlow.Count} slow analyzers:");
+        ConsoleUx.Info($"   Top {topSlow.Length} slow analyzers:");
         foreach (AnalyzerRunResult run in topSlow)
         {
             string status = run.Status.ToString().ToLowerInvariant();
@@ -406,17 +401,16 @@ internal sealed class TrendOrchestrationService(
         ConsoleUx.Info($"   Dumps={trendData.Snapshots.Count}, New={trendData.NewFindings.Count}, Persistent={trendData.PersistentFindings.Count}, Resolved={trendData.ResolvedFindings.Count}");
         ConsoleUx.Info($"   Metric changes: regressions={totalRegressions}, improvements={totalImprovements}");
 
-        IReadOnlyList<AnalyzerTrendResult> ordered = trendData.Overall
+        var orderedEnum = trendData.Overall
             .OrderByDescending(r => r.Regressions.Count)
             .ThenByDescending(r => r.Improvements.Count)
-            .ThenBy(r => r.AnalyzerName, StringComparer.Ordinal)
-            .ToList();
+            .ThenBy(r => r.AnalyzerName, StringComparer.Ordinal);
 
-        IReadOnlyList<AnalyzerTrendResult> visible = diagnosticMode
-            ? ordered
-            : ordered.Where(a => a.Regressions.Count > 0 || a.Improvements.Count > 0).Take(8).ToList();
+        AnalyzerTrendResult[] visible = diagnosticMode
+            ? orderedEnum.ToArray()
+            : orderedEnum.Where(a => a.Regressions.Count > 0 || a.Improvements.Count > 0).Take(8).ToArray();
 
-        if (visible.Count == 0)
+        if (visible.Length == 0)
         {
             ConsoleUx.Info("   No significant analyzer-level trend deltas to display.");
             return;
@@ -449,10 +443,10 @@ internal sealed class TrendOrchestrationService(
 
         ConsoleUx.Info($"Scan summary: object-scans={totalScans:N0}, cache-hits={totalCacheHits:N0}, cache-misses={totalCacheMisses:N0}, hit-ratio={cacheHitRatio:F1}%");
 
-        IReadOnlyList<AnalyzerRunResult> topSlow = runs
+        AnalyzerRunResult[] topSlow = runs
             .OrderByDescending(r => r.Duration)
             .Take(5)
-            .ToList();
+            .ToArray();
 
         ConsoleUx.Info("Top slow analyzers:");
         foreach (AnalyzerRunResult run in topSlow)
@@ -461,9 +455,10 @@ internal sealed class TrendOrchestrationService(
 
     private static void PrintMemorySummary(
         IReadOnlyList<TrendDumpExecution> executions,
-        IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> trendStageMemoryStats)
+        IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> trendStageMemoryStats,
+        IReadOnlyList<AnalyzerRunResult>? allRuns = null)
     {
-        List<(string StageName, AnalyzerMemoryStats Stats)> allStageRows = [];
+        var allStageRows = new List<(string StageName, AnalyzerMemoryStats Stats)>();
         foreach (TrendDumpExecution execution in executions)
         {
             foreach ((string stageName, AnalyzerMemoryStats stats) in execution.StageMemoryStats)
@@ -476,7 +471,7 @@ internal sealed class TrendOrchestrationService(
         bool printedStageTable = false;
         foreach (TrendDumpExecution execution in executions)
         {
-            List<(string StageName, AnalyzerMemoryStats Stats)> dumpStageRows = execution.StageMemoryStats.ToList();
+            var dumpStageRows = execution.StageMemoryStats;
             if (dumpStageRows.Count == 0)
                 continue;
 
@@ -505,11 +500,9 @@ internal sealed class TrendOrchestrationService(
 
         foreach (TrendDumpExecution execution in executions)
         {
-            List<AnalyzerRunResult> dumpRuns = execution.Runs
-                .Where(r => r.MemoryStats is not null)
-                .ToList();
+            var dumpRuns = execution.Runs.Where(r => r.MemoryStats is not null);
 
-            if (dumpRuns.Count == 0)
+            if (!dumpRuns.Any())
                 continue;
 
             ConsoleUx.Info($"Memory diagnostics for dump: {Path.GetFileName(execution.DumpPath)}");
@@ -525,13 +518,23 @@ internal sealed class TrendOrchestrationService(
             ? allStageRows[0].Stats.WorkingSetBefore
             : executions.SelectMany(e => e.Runs).FirstOrDefault(r => r.MemoryStats is not null)?.MemoryStats?.WorkingSetBefore ?? 0;
         long peakFromStages = allStageRows.Count > 0 ? allStageRows.Max(e => e.Stats.WorkingSetAfter) : 0;
-        IReadOnlyList<AnalyzerRunResult> analyzerRunsWithStats = executions
-            .SelectMany(e => e.Runs)
-            .Where(r => r.MemoryStats is not null)
-            .ToList();
-        long peakFromAnalyzers = analyzerRunsWithStats.Count > 0
-            ? analyzerRunsWithStats.Max(r => r.MemoryStats!.WorkingSetAfter)
-            : 0;
+        long peakFromAnalyzers = 0;
+        if (allRuns is not null)
+        {
+            foreach (var r in allRuns)
+            {
+                if (r.MemoryStats is null) continue;
+                if (r.MemoryStats.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = r.MemoryStats.WorkingSetAfter;
+            }
+        }
+        else
+        {
+            foreach (var r in executions.SelectMany(e => e.Runs))
+            {
+                if (r.MemoryStats is null) continue;
+                if (r.MemoryStats.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = r.MemoryStats.WorkingSetAfter;
+            }
+        }
         long peak = Math.Max(peakFromStages, peakFromAnalyzers);
 
         if (peak > 0)

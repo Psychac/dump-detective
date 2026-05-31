@@ -51,8 +51,8 @@ public sealed class AnalyzerFeatureModuleSpikeTests
 
         IAnalyzerFactory analyzerFactory = host.Services.GetRequiredService<IAnalyzerFactory>();
         ISectionBuilderFactory sectionBuilderFactory = host.Services.GetRequiredService<ISectionBuilderFactory>();
-        IReadOnlyList<IFindingGenerator> findingGenerators = host.Services.GetServices<IFindingGenerator>().ToList();
-        IReadOnlyList<IAnalyzerTrendComparer> trendComparers = host.Services.GetServices<IAnalyzerTrendComparer>().ToList();
+        IEnumerable<IFindingGenerator> findingGenerators = host.Services.GetServices<IFindingGenerator>();
+        IEnumerable<IAnalyzerTrendComparer> trendComparers = host.Services.GetServices<IAnalyzerTrendComparer>();
         IReadOnlyList<IAnalyzer> analyzers = analyzerFactory.CreateAnalyzers();
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders = sectionBuilderFactory.CreateAnalyzerBuilders();
 

@@ -24,6 +24,8 @@ internal sealed class ConfigurationResolver
 
     public ResolvedExecutionOptions Resolve(AnalysisCommandRequest request)
     {
+        try
+        {
         string? configPath = ResolveConfigPath(request.ConfigPath);
         CliConfigurationFileModel? fileModel = configPath is null ? null : LoadConfigurationFile(configPath);
 
@@ -144,6 +146,11 @@ internal sealed class ConfigurationResolver
         {
             ExecutionPolicy = executionPolicy
         };
+        }
+        catch (Exception ex) when (ex is ArgumentException or FileNotFoundException)
+        {
+            throw new DumpDetective.Cli.Diagnostics.ConfigurationException(ex.Message, ex);
+        }
     }
 
     private static string? ResolveConfigPath(string? cliConfigPath)

@@ -30,15 +30,15 @@ internal static class TrendMetricTimelineSectionBuilder
         var analyzers = headlineByAnalyzer.Keys
             .Union(scopedByAnalyzer.Keys, StringComparer.Ordinal)
             .OrderByDescending(a => regressionsByAnalyzer.GetValueOrDefault(a))
-            .ToList();
+            .ToArray();
 
-        if (analyzers.Count == 0)
+        if (analyzers.Length == 0)
         {
             return new AnalyzerDetailSection(
                 AnalyzerName: "TrendMetricTimeline",
                 DisplayTitle: "Metric Timeline",
                 SortOrder: 40,
-                Blocks: [],
+            Blocks: Array.Empty<SectionBlock>(),
                 SectionId: "T4",
                 Domain: "Trend");
         }
@@ -52,14 +52,14 @@ internal static class TrendMetricTimelineSectionBuilder
 
             if (!domainBuckets.TryGetValue(domain, out List<string>? list))
             {
-                list = [];
+                list = new List<string>();
                 domainBuckets[domain] = list;
             }
 
             list.Add(analyzerName);
         }
 
-        List<string> orderedDomains = [];
+        List<string> orderedDomains = new();
         foreach (string d in SectionIdDomainMap.DomainsInOrder)
         {
             if (domainBuckets.ContainsKey(d))
@@ -75,11 +75,11 @@ internal static class TrendMetricTimelineSectionBuilder
         bool firstDomain = true;
         foreach (string domain in orderedDomains)
         {
-            List<string> domainAnalyzers = domainBuckets[domain]
+            string[] domainAnalyzers = domainBuckets[domain]
                 .OrderByDescending(a => regressionsByAnalyzer.GetValueOrDefault(a))
-                .ToList();
+                .ToArray();
 
-            if (domainAnalyzers.Count == 0)
+            if (domainAnalyzers.Length == 0)
                 continue;
 
             if (!firstDomain)
@@ -123,13 +123,13 @@ internal static class TrendMetricTimelineSectionBuilder
                         .Where(p => ShouldIncludeScopedMetric(analyzerName, p.Key))
                         .GroupBy(p => p.Key, StringComparer.Ordinal)
                         .OrderBy(g => g.Key, StringComparer.Ordinal)
-                        .ToList();
+                        .ToArray();
 
                     foreach (var metricGroup in scopedMetricGroups)
                     {
                         List<TableRow> rows = BuildRows(
                             analyzerName,
-                            metricGroup.ToList(),
+                            metricGroup.ToArray(),
                             snapshots,
                             includeScopeLabel: true,
                             scopedMode: true);
@@ -430,9 +430,9 @@ internal static class TrendMetricTimelineSectionBuilder
         string unit,
         string direction)
     {
-        List<double?> safeValues = values
+        double?[] safeValues = values
             .Select(static v => double.IsFinite(v) ? (double?)v : null)
-            .ToList();
+            .ToArray();
 
         return System.Text.Json.JsonSerializer.Serialize(new
         {

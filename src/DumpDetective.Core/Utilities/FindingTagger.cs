@@ -15,7 +15,7 @@ internal static class FindingTagger
             .DistinctBy(f => f.EffectiveFingerprint)
             .OrderByDescending(f => f.Severity)
             .ThenBy(f => f.Analyzer, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
         findings.Clear();
         findings.AddRange(normalized);

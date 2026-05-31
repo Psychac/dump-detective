@@ -134,7 +134,7 @@ internal sealed class RootCommandBuilder
         return value
             .Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .ToArray();
     }
 
     private static IReadOnlyCollection<string> ParseNameList(string? value)

@@ -76,7 +76,7 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.DynamicModules,
                 analysis.ModulesByName.Count,
                 analysis.VersionConflicts.Count,
-                analysis.VersionConflicts.Keys.ToList(),
+                analysis.VersionConflicts.Keys.ToArray(),
                 topModules,
                 conflictDetails,
                 heapStats?.TopByMemory,

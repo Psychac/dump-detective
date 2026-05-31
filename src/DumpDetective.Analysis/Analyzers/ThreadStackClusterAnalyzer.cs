@@ -29,8 +29,8 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress, ThreadStackClusterAnalysisOptions options)
         {
-            var threads = runtime.Threads.ToList();
-            var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Count);
+            var threads = runtime.Threads.ToArray();
+            var osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Length);
             foreach (ClrThread thread in threads)
             {
                 if (thread.Address != 0)
@@ -72,21 +72,21 @@ namespace DumpDetective.Analysis.Analyzers
             var topClusters = clusters.Values
                 .OrderByDescending(c => c.Count)
                 .ThenBy(c => c.Signature, StringComparer.Ordinal)
-                .ToList();
+                .ToArray();
 
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             int singletonSignatures = topClusters.Count(c => c.Count == 1);
-            var topSignatures = topClusters.Take(options.TopSignaturesToShow).Select(c => c.Signature).ToList();
+            var topSignatures = topClusters.Take(options.TopSignaturesToShow).Select(c => c.Signature).ToArray();
 
             // Apply MinClusterSize and MaxClusters before snapshot/export
-            var filteredClusters = topClusters.Where(c => c.Count >= Math.Max(1, options.MinClusterSize)).ToList();
-            if (filteredClusters.Count > options.MaxClusters)
-                filteredClusters = filteredClusters.Take(options.MaxClusters).ToList();
+            var filteredClusters = topClusters.Where(c => c.Count >= Math.Max(1, options.MinClusterSize)).ToArray();
+            if (filteredClusters.Length > options.MaxClusters)
+                filteredClusters = filteredClusters.Take(options.MaxClusters).ToArray();
 
             var topClusterSnapshots = filteredClusters
                 .Take(options.TopClustersToShow)
                 .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
-                .ToList();
+                .ToArray();
 
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
             if (options.ProduceClusterExports)
@@ -102,7 +102,7 @@ namespace DumpDetective.Analysis.Analyzers
                             count = c.Count,
                             signature = c.Signature,
                             sampleOsThreadIds = ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress)
-                        }).ToList();
+                        }).ToArray();
 
                         var prettyJsonOpts = new JsonSerializerOptions { WriteIndented = true };
                         string prettyJson = JsonSerializer.Serialize(summary, prettyJsonOpts);

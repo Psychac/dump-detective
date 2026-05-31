@@ -45,7 +45,7 @@ internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.Anal
 
         state.Runs = AnalyzerFilterService.BuildSkippedByFilterResults(state.AllAnalyzers, state.ActiveAnalyzers)
             .Concat(runs)
-            .ToList();
+            .ToArray();
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
 
         state.IncidentContext = IncidentContextFactory.Create(

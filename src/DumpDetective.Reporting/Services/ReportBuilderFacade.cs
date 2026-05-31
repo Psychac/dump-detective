@@ -12,7 +12,7 @@ internal sealed class ReportBuilderFacade(
     CanonicalReportDocumentFactory documentFactory,
     TrendReportComposer trendReportComposer)
 {
-    private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToList();
+    private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToArray();
     private readonly IReadOnlyList<IAnalyzerSectionBuilder> _analyzerBuilders = builderFactory.CreateAnalyzerBuilders();
     private readonly IReadOnlyList<IReportSectionBuilder> _reportBuilders = builderFactory.CreateReportBuilders();
     private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;

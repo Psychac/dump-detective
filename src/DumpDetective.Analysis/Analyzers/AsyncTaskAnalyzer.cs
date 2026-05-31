@@ -264,7 +264,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             TopFaultedTaskTypes: BuildTopN(faultedTypeCount, options.TopTypesToShow),
             TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
             TopOrphanedTasks: orphanedSnapshots,
-            TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToList());
+            TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToArray());
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────

@@ -23,8 +23,8 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(leak.HeuristicOnly ? 0.55 : 0.70, leak.HeuristicOnly
-                ? ["Heuristic-only leak analysis; no full retention scan."]
-                : ["Leak analysis is heuristic-guided; confirm with root-path review."]),
+                ? new[] { "Heuristic-only leak analysis; no full retention scan." }
+                : new[] { "Leak analysis is heuristic-guided; confirm with root-path review." }),
         };
 
         SectionLeadFinding? leadFinding = null;
@@ -40,7 +40,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
                     ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
                     ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,
-                    Caveats: leak.HeuristicOnly ? ["Heuristic-only analysis; confirm with root-path review."] : []);
+                    Caveats: leak.HeuristicOnly ? new[] { "Heuristic-only analysis; confirm with root-path review." } : Array.Empty<string>());
             }
         }
 
@@ -61,15 +61,15 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             var classRows = new List<TableRow>(leak.CandidatesByClass.Count);
             foreach ((LeakClass leakClass, int count) in leak.CandidatesByClass.OrderByDescending(kvp => kvp.Value))
             {
-                IReadOnlyList<LeakCandidateRecord> classCandidates = leak.TopCandidates
+                LeakCandidateRecord[] classCandidates = leak.TopCandidates
                     .Where(candidate => candidate.Classification == leakClass)
                     .OrderByDescending(candidate => candidate.TotalSize)
                     .ThenByDescending(candidate => candidate.SuspicionScore)
-                    .ToList();
+                    .ToArray();
 
                 string topTypes = string.Join(", ", classCandidates.Take(3).Select(candidate => candidate.TypeName));
                 ulong classSize = 0;
-                for (int i = 0; i < classCandidates.Count; i++)
+                for (int i = 0; i < classCandidates.Length; i++)
                     classSize += classCandidates[i].TotalSize;
 
                 classRows.Add(Row(
@@ -80,16 +80,16 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             }
             tables.Add(ST(
                 "Candidate groups by leak class",
-                ["Class", "Count", "Total Size", "Top Types"],
+                new[] { "Class", "Count", "Total Size", "Top Types" },
                 classRows));
         }
 
         if (leak.TopCandidates.Count > 0)
         {
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
-            tables.Add(ST(
+                tables.Add(ST(
                 "Top leak candidates by suspicion score",
-                ["Type", "Score", "Severity", "Class", "Total Size", "Instances", "Gen2%", "Root Kind", "Finalizable", "Container", "Ref Ratio"],
+                new[] { "Type", "Score", "Severity", "Class", "Total Size", "Instances", "Gen2%", "Root Kind", "Finalizable", "Container", "Ref Ratio" },
                 leak.TopCandidates.Take(TopCandidateCount).Select(candidate => Row(
                     Cell(candidate.TypeName),
                     Cell(candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore),
@@ -102,23 +102,23 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(candidate.IsFinalizable ? "Yes" : "No"),
                     Cell(candidate.IsContainer ? "Yes" : "No"),
                     Cell(candidate.ReferenceFieldRatio.ToString("F2"))
-                )).ToList()));
+                )).ToArray()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
         }
 
-        IReadOnlyList<LeakCandidateRecord> explanationCandidates = leak.TopCandidates
+        LeakCandidateRecord[] explanationCandidates = leak.TopCandidates
             .Where(candidate => candidate.Severity != FindingSeverity.Info)
             .OrderByDescending(candidate => candidate.SuspicionScore)
             .ThenByDescending(candidate => candidate.TotalSize)
-            .ToList();
+            .ToArray();
 
-        if (explanationCandidates.Count > 0)
+        if (explanationCandidates.Length > 0)
         {
             blocks.Add(H("LEAK EXPLANATIONS"));
             blocks.Add(T("These explanations are generated for the highest-signal candidates in the list."));
 
-            for (int i = 0; i < explanationCandidates.Count; i++)
+            for (int i = 0; i < explanationCandidates.Length; i++)
             {
                 LeakCandidateRecord candidate = explanationCandidates[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {candidate.TypeName} — {candidate.Severity} / {candidate.Classification} ({candidate.SuspicionScore:N0})"));
@@ -134,7 +134,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                 blocks.Add(M("Reference field ratio", candidate.ReferenceFieldRatio.ToString("F2"), candidate.ReferenceFieldRatio));
                 blocks.Add(T(LeakExplainer.Explain(candidate)));
                 blocks.Add(CollapseEnd());
-                if (i + 1 < explanationCandidates.Count) blocks.Add(Blank());
+                if (i + 1 < explanationCandidates.Length) blocks.Add(Blank());
             }
         }
 

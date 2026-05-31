@@ -27,7 +27,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
         return _moduleCatalog.Modules
             .OrderBy(m => m.Order)
             .Select(m => (IAnalyzer)ActivatorUtilities.CreateInstance(_serviceProvider, m.AnalyzerType))
-            .ToList();
+            .ToArray();
     }
 
     private static IServiceProvider BuildCompatibilityServiceProvider(ILoggerFactory loggerFactory)

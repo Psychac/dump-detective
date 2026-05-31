@@ -2,6 +2,7 @@ namespace DumpDetective.Reporting.Services;
 
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
+using System.Linq;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -29,14 +30,15 @@ internal sealed class TrendReportComposer(
             trendData.PersistentFindings,
             trendData.ResolvedFindings);
 
-        List<InsightFinding> trendFindings =
-        [
-            .. BuildTrendFindings(trendData.Overall, lifecycle),
-            .. BuildTopRegressionFindings(trendData.Overall),
-            .. BuildTopImprovementFindings(trendData.Overall)
-        ];
+        var trendFindings = new List<InsightFinding>();
+        foreach (var f in BuildTrendFindings(trendData.Overall, lifecycle))
+            trendFindings.Add(f);
+        foreach (var f in BuildTopRegressionFindings(trendData.Overall))
+            trendFindings.Add(f);
+        foreach (var f in BuildTopImprovementFindings(trendData.Overall))
+            trendFindings.Add(f);
 
-        AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, [], reportBuilders, audience, currentIncidentContext);
+        AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, Array.Empty<IAnalyzerSectionBuilder>(), reportBuilders, audience, currentIncidentContext);
 
         // T1.3: Build trend scorecard using all snapshots (not just baseline vs current)
         HealthScorecard? trendScorecard = trendData.Snapshots.Count >= 2
@@ -75,13 +77,13 @@ internal sealed class TrendReportComposer(
         // TrendAnalyzerSections: T2–T7 without per-dump entries — the JS renderer uses perDumpDocs directly
         var trendHtmlSections = analyzerSections
             .Where(static s => !s.SectionId.StartsWith("detail-", StringComparison.Ordinal))
-            .ToList();
+            .ToArray();
 
         // T9: Map trend findings with MetricBaseline/MetricCurrent populated
         var trendDeltaLookup = BuildTrendDeltaLookup(trendData.Overall);
-        List<FindingRecord> mappedFindings = trendFindings
+        FindingRecord[] mappedFindings = trendFindings
             .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, trendDeltaLookup))
-            .ToList();
+            .ToArray();
 
         if (trendSummary is not null)
         {
@@ -102,7 +104,7 @@ internal sealed class TrendReportComposer(
             GeneratedAtUtc = baseDoc.GeneratedAtUtc,
             ElapsedSeconds = baseDoc.ElapsedSeconds,
             TrendDumpCount = trendData.Snapshots.Count,
-            TrendDumpPaths = trendData.Snapshots.Select(s => s.DumpPath).ToList(),
+            TrendDumpPaths = trendData.Snapshots.Select(s => s.DumpPath).ToArray(),
             TrendNewFindingCount = trendData.NewFindings.Count,
             TrendPersistentFindingCount = trendData.PersistentFindings.Count,
             TrendResolvedFindingCount = trendData.ResolvedFindings.Count,
@@ -121,7 +123,7 @@ internal sealed class TrendReportComposer(
                         s.Index == 0,
                         s.Index == trendData.Snapshots.Count - 1,
                         s.IncidentContext?.DumpFileSizeBytes,
-                        s.IncidentContext?.DumpCapturedAtUtc)).ToList()
+                        s.IncidentContext?.DumpCapturedAtUtc)).ToArray()
                 },
             ExecutiveSummary = trendSummary,
             Findings = mappedFindings,
@@ -135,13 +137,19 @@ internal sealed class TrendReportComposer(
 
     private static IReadOnlyList<InsightFinding> BuildTopRegressionFindings(IReadOnlyList<AnalyzerTrendResult> overall)
     {
-        var topRegressions = overall
-            .SelectMany(r => r.Regressions.Select(d => (Analyzer: r.AnalyzerName, Delta: d)))
+        var collected = new List<(string Analyzer, MetricDelta Delta)>();
+        foreach (var r in overall)
+        {
+            foreach (var d in r.Regressions)
+                collected.Add((r.AnalyzerName, d));
+        }
+
+        var topRegressions = collected
             .OrderByDescending(x => Math.Abs(x.Delta.DeltaPercent ?? x.Delta.Delta))
             .Take(8)
-            .ToList();
+            .ToArray();
 
-        List<InsightFinding> findings = new(topRegressions.Count);
+        List<InsightFinding> findings = new(topRegressions.Length);
         foreach (var (analyzerName, delta) in topRegressions)
         {
             string scopeSuffix = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" ({delta.Scope})";
@@ -161,7 +169,7 @@ internal sealed class TrendReportComposer(
                 Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Prioritize this regression in the trend timeline and correlate with dump-to-dump finding lifecycle changes.",
-                Tags: ["trend", "regression", analyzerName, BuildMetricIdentityToken(delta)],
+                Tags: new[] { "trend", "regression", analyzerName, BuildMetricIdentityToken(delta) },
                 MetricValue: delta.DeltaPercent ?? delta.Delta,
                 MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
@@ -171,13 +179,19 @@ internal sealed class TrendReportComposer(
 
     private static IReadOnlyList<InsightFinding> BuildTopImprovementFindings(IReadOnlyList<AnalyzerTrendResult> overall)
     {
-        var topImprovements = overall
-            .SelectMany(r => r.Improvements.Select(d => (Analyzer: r.AnalyzerName, Delta: d)))
+        var collectedImprovements = new List<(string Analyzer, MetricDelta Delta)>();
+        foreach (var r in overall)
+        {
+            foreach (var d in r.Improvements)
+                collectedImprovements.Add((r.AnalyzerName, d));
+        }
+
+        var topImprovements = collectedImprovements
             .OrderByDescending(x => Math.Abs(x.Delta.DeltaPercent ?? x.Delta.Delta))
             .Take(5)
-            .ToList();
+            .ToArray();
 
-        List<InsightFinding> findings = new(topImprovements.Count);
+        List<InsightFinding> findings = new(topImprovements.Length);
         foreach (var (analyzerName, delta) in topImprovements)
         {
             string scopeSuffix = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" ({delta.Scope})";
@@ -192,7 +206,7 @@ internal sealed class TrendReportComposer(
                 Title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
-                Tags: ["trend", "improvement", analyzerName, BuildMetricIdentityToken(delta)],
+                Tags: new[] { "trend", "improvement", analyzerName, BuildMetricIdentityToken(delta) },
                 MetricValue: delta.DeltaPercent ?? delta.Delta,
                 MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
@@ -211,8 +225,8 @@ internal sealed class TrendReportComposer(
             ? FindingSeverity.Info
             : lifecycle.NewFindings.Select(f => f.Severity).OrderByDescending(s => s).First();
 
-        return
-        [
+        return new List<InsightFinding>
+        {
             new(
                 Analyzer: "TrendAnalyzer",
                 Category: "Comparison",
@@ -220,7 +234,7 @@ internal sealed class TrendReportComposer(
                 Title: "Trend finding lifecycle summary",
                 Evidence: $"New {lifecycle.NewFindings.Count}, Persistent {lifecycle.PersistentFindings.Count}, Resolved {lifecycle.ResolvedFindings.Count}",
                 Recommendation: "Focus first on new and persistent high-severity findings.",
-                Tags: ["trend", "lifecycle", "comparison"],
+                Tags: new[] { "trend", "lifecycle", "comparison" },
                 MetricValue: lifecycle.NewFindings.Count - lifecycle.ResolvedFindings.Count,
                 MetricUnit: "net-findings"),
             new(
@@ -232,8 +246,8 @@ internal sealed class TrendReportComposer(
                 Recommendation: topRegressions > 0
                     ? "Review per-analyzer metric regressions in the trend comparison section."
                     : "No metric regressions detected across compared analyzers.",
-                Tags: ["trend", "metrics", "comparison"])
-        ];
+                Tags: new[] { "trend", "metrics", "comparison" })
+        };
     }
 
     // ── P1.2: Trend executive summary with score deltas ───────────────────────
@@ -254,15 +268,15 @@ internal sealed class TrendReportComposer(
         HealthScorecard lastScorecard = HealthScorecardBuilder.Build(snapshots[^1].Runs);
         var regressionLookup = new Dictionary<string, MetricDelta>(StringComparer.Ordinal);
 
-        IReadOnlyList<FindingRecord> firstFindings = snapshots[0].Findings
+        var firstFindings = snapshots[0].Findings
             .Select(f => MapTrendFinding(f, snapshots[0].Index, regressionLookup))
-            .ToList();
-        firstFindings = SortFindings(firstFindings);
+            .ToArray();
+        firstFindings = SortFindings(firstFindings).ToArray();
 
-        IReadOnlyList<FindingRecord> lastFindings = snapshots[^1].Findings
+        var lastFindings = snapshots[^1].Findings
             .Select(f => MapTrendFinding(f, snapshots[^1].Index, regressionLookup))
-            .ToList();
-        lastFindings = SortFindings(lastFindings);
+            .ToArray();
+        lastFindings = SortFindings(lastFindings).ToArray();
 
         ExecutiveSummaryRecord first = _executiveSummaryProjector.Build(firstFindings, firstScorecard, snapshots[0].Runs);
         ExecutiveSummaryRecord last = _executiveSummaryProjector.Build(lastFindings, lastScorecard, snapshots[^1].Runs);
@@ -277,8 +291,8 @@ internal sealed class TrendReportComposer(
 
     private static IReadOnlyList<FindingRecord> SortFindings(IReadOnlyList<FindingRecord> findings)
     {
-        List<FindingRecord> sorted = findings.ToList();
-        sorted.Sort(static (a, b) =>
+        var arr = findings.ToArray();
+        Array.Sort(arr, static (a, b) =>
         {
             int severityCompare = SeverityOrdinal(b.Severity).CompareTo(SeverityOrdinal(a.Severity));
             if (severityCompare != 0)
@@ -291,7 +305,7 @@ internal sealed class TrendReportComposer(
             return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Title), NormalizeSortKey(b.Title));
         });
 
-        return sorted;
+        return arr;
     }
 
     private static int SeverityOrdinal(string severity) => severity switch
@@ -319,7 +333,7 @@ internal sealed class TrendReportComposer(
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
                 .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, reportBuilders, audience, snapshot.IncidentContext);
-            IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(f => MapFinding(f, snapshot.Index)).ToList();
+            IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(f => MapFinding(f, snapshot.Index)).ToArray();
 
             sections.Add(TrendSnapshotSectionComposer.Build(
                 snapshot.DumpPath,
@@ -407,7 +421,7 @@ internal sealed class TrendReportComposer(
 
             var orderedTimeline = timeline
                 .OrderByDescending(t => regressionsByAnalyzer.GetValueOrDefault(t.AnalyzerName))
-                .ToList();
+                .ToArray();
 
             foreach (AnalyzerMetricTimeline analyzerTimeline in orderedTimeline)
             {
@@ -485,21 +499,21 @@ internal sealed class TrendReportComposer(
                     catch { }
 
                     // Embed sparkline payload as JSON in a special display token; link token appended to metric cell via ||__LINK__detail-{index}
-                    List<double?> safeValues = point.Values
+                    double?[] safeValues = point.Values
                         .Select(static v => double.IsFinite(v) ? (double?)v : null)
-                        .ToList();
+                        .ToArray();
                     string sparkPayload = System.Text.Json.JsonSerializer.Serialize(new { values = safeValues, unit = point.Unit });
                     string sparkToken = "__SPARK__" + sparkPayload;
                     // Use zero-based snapshot index to match `detail-{i}` IDs generated in the report
                     string metricDisplay = point.Key + "||__LINK__detail-" + linkSnapshot;
 
-                    rows.Add(new TableRow(
-                    [
+                    rows.Add(new TableRow(new[]
+                    {
                         new TableCell(metricDisplay),
                         new TableCell(sparkToken),
                         new TableCell(deltaDisplay, delta == 0 ? 0L : (long)Math.Round(Math.Abs(delta))),
                         new TableCell(status)
-                    ]));
+                    }));
                 }
 
                 if (rows.Count > 0)
@@ -508,7 +522,7 @@ internal sealed class TrendReportComposer(
                     blocks.Add(new HeadingBlock($"[{analyzerTimeline.AnalyzerName}]", 1));
                     blocks.Add(new TableBlock(
                         Caption: $"{analyzerTimeline.AnalyzerName} metric timeline",
-                        Headers: ["Metric", $"Trend ({snapshots.Count} snapshots)", "\u0394", "Status"],
+                        Headers: new[] { "Metric", $"Trend ({snapshots.Count} snapshots)", "\u0394", "Status" },
                         Rows: rows));
                 }
             }
@@ -561,9 +575,9 @@ internal sealed class TrendReportComposer(
             .SelectMany(kvp => kvp.Value.Select(s => (AnalyzerName: kvp.Key, Signal: s)))
             .OrderByDescending(x => x.Signal.CurrentBytes)
             .Take(10)
-            .ToList();
+            .ToArray();
 
-        if (allLeakSignals.Count > 0)
+        if (allLeakSignals.Length > 0)
         {
             blocks.Add(new BlankBlock());
             blocks.Add(new HeadingBlock("NEW LEAK SIGNALS:"));
@@ -641,7 +655,7 @@ internal sealed class TrendReportComposer(
             .OrderByDescending(f => SeverityRank(f.Severity))
             .ThenByDescending(f => Math.Abs(f.MetricCurrent.GetValueOrDefault() - f.MetricBaseline.GetValueOrDefault()))
             .Take(take)
-            .ToList();
+            .ToArray();
     }
 
     private static int SeverityRank(string severity)
@@ -679,15 +693,15 @@ internal sealed class TrendReportComposer(
             RecommendationItems = SplitLines(finding.Recommendation),
             CaveatItems = finding.EffectiveCaveats.Count > 0 ? finding.EffectiveCaveats : null,
             ConfidenceScore = finding.ConfidenceScore,
-            EvidenceRefs =
-            [
+            EvidenceRefs = new[]
+            {
                 new EvidenceRef(
                     Analyzer: finding.Analyzer,
                     MetricKey: finding.Tags.FirstOrDefault(t => t.Contains('.', StringComparison.Ordinal) || t.Contains('_', StringComparison.Ordinal)),
                     Addresses: null,
                     ArtifactPath: null,
                     SnapshotIndex: snapshotIndex)
-            ],
+            },
         };
     }
 
@@ -697,8 +711,8 @@ internal sealed class TrendReportComposer(
             return null;
 
         return value
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToArray();
     }
 
     private static TrendClassification ClassifyTrend(MetricTrendDirection direction, double delta, RegressionSeverity severity)
@@ -724,11 +738,11 @@ internal sealed class TrendReportComposer(
     private static IReadOnlyList<NewTypeEntry> BuildNewTypes(IReadOnlyList<AnalysisSnapshot> snapshots)
     {
         if (snapshots.Count < 2)
-            return [];
+            return Array.Empty<NewTypeEntry>();
 
         if (!TryGetMemorySnapshot(snapshots[0], out MemoryDomainResult baseline) ||
             !TryGetMemorySnapshot(snapshots[^1], out MemoryDomainResult current))
-            return [];
+            return Array.Empty<NewTypeEntry>();
 
         var baselineTypes = new HashSet<string>(StringComparer.Ordinal);
         foreach (TypeSnapshot type in baseline.TopTypes)
@@ -751,7 +765,7 @@ internal sealed class TrendReportComposer(
     private static IReadOnlyList<SeverityEscalationEntry> BuildSeverityEscalations(IReadOnlyList<AnalysisSnapshot> snapshots)
     {
         if (snapshots.Count < 2)
-            return [];
+            return Array.Empty<SeverityEscalationEntry>();
 
         var baselineByFingerprint = snapshots[0].Findings
             .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)

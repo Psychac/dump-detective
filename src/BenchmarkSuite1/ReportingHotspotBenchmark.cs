@@ -29,7 +29,7 @@ public class ReportingHotspotBenchmark
     public void Setup()
     {
         _runs = BuildRuns(250);
-        _builders = [];
+        _builders = Array.Empty<IAnalyzerSectionBuilder>();
         _serializer = new ReportSerializer();
         _markdown = new MarkdownCanonicalReportFormatter();
         _html = new HtmlCanonicalReportFormatter();
@@ -41,20 +41,20 @@ public class ReportingHotspotBenchmark
     [Benchmark(Description = "ReportSerializer - serialize (duplicate heavy)")]
     public object SerializeCanonical_DuplicateHeavy()
     {
-        return _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
+        return _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, Array.Empty<IReportSectionBuilder>());
     }
 
     [Benchmark(Description = "Formatter - markdown render large sections")]
     public string RenderMarkdown_LargeSections()
     {
-        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, Array.Empty<IReportSectionBuilder>());
         return _markdown.Render(doc);
     }
 
     [Benchmark(Description = "Formatter - html render long values")]
     public string RenderHtml_LongValues()
     {
-        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, []);
+        var doc = _serializer.Serialize("C:/benchmarks/duplicate-heavy.dmp", _runs, TimeSpan.FromSeconds(3), _builders, Array.Empty<IReportSectionBuilder>());
         return _html.Render(doc);
     }
 
@@ -67,7 +67,7 @@ public class ReportingHotspotBenchmark
             TimeSpan.FromSeconds(9),
             currentIncidentContext: null,
             builders: _builders,
-            reportBuilders: [],
+            reportBuilders: Array.Empty<IReportSectionBuilder>(),
             trendData: _trendData);
 
         return doc.AnalyzerSections.Count + doc.Findings.Count;
@@ -88,7 +88,7 @@ public class ReportingHotspotBenchmark
                 Title: "Duplicate candidate finding",
                 Evidence: $"Evidence {i} {longValue}",
                 Recommendation: "Review ownership and remove stale references.",
-                Tags: ["benchmark", "duplicate"],
+                    Tags: new[] { "benchmark", "duplicate" },
                 Fingerprint: fingerprint);
 
             GenericAnalyzerDomainResult result = new()
@@ -104,7 +104,7 @@ public class ReportingHotspotBenchmark
                 Result: result,
                 ErrorMessage: null,
                 ErrorType: null,
-                Findings: [finding],
+                Findings: new[] { finding },
                 FindingCount: 1,
                 WarningCount: result.Warnings.Count,
                 Diagnostics: new AnalyzerExecutionDiagnostics(
@@ -131,26 +131,28 @@ public class ReportingHotspotBenchmark
         for (int analyzerIndex = 0; analyzerIndex < 10; analyzerIndex++)
         {
             string analyzerName = $"Analyzer-{analyzerIndex:00}";
-            List<MetricDelta> deltas =
-            [
+            List<MetricDelta> deltas = new()
+            {
                 new MetricDelta("objectScans", null, 1_000 + analyzerIndex, 1_020 + analyzerIndex, 20, 2.0, "objects", MetricTrendDirection.HigherIsWorse),
                 new MetricDelta("cacheHits", null, 700 + analyzerIndex, 715 + analyzerIndex, 15, 2.1, "hits", MetricTrendDirection.HigherIsWorse)
-            ];
+            };
 
             overall.Add(new AnalyzerTrendResult(analyzerName, deltas));
             leakSignalsByAnalyzer[analyzerName] = Array.Empty<NewLeakSignal>();
-            timeline.Add(new AnalyzerMetricTimeline(
+                timeline.Add(new AnalyzerMetricTimeline(
                 analyzerName,
-                [
-                    new MetricTimelinePoint("objectScans", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(1_000 + analyzerIndex + i * 3)).ToList()),
-                    new MetricTimelinePoint("cacheHits", "hits", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(700 + analyzerIndex + i * 2)).ToList())
-                ]));
+                new[]
+                {
+                    new MetricTimelinePoint("objectScans", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(1_000 + analyzerIndex + i * 3)).ToArray()),
+                    new MetricTimelinePoint("cacheHits", "hits", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(700 + analyzerIndex + i * 2)).ToArray())
+                }));
             scopedTimeline.Add(new AnalyzerMetricTimeline(
                 analyzerName,
-                [
-                    new MetricTimelinePoint("type.bytes", "bytes", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(120_000 + analyzerIndex * 1_000 + i * 2_500)).ToList(), Scope: "System.String"),
-                    new MetricTimelinePoint("type.count", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(2_000 + analyzerIndex + i * 30)).ToList(), Scope: "System.String")
-                ]));
+                new[]
+                {
+                    new MetricTimelinePoint("type.bytes", "bytes", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(120_000 + analyzerIndex * 1_000 + i * 2_500)).ToArray(), Scope: "System.String"),
+                    new MetricTimelinePoint("type.count", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(2_000 + analyzerIndex + i * 30)).ToArray(), Scope: "System.String")
+                }));
 
             newFindings.Add(new InsightFinding(
                 Analyzer: analyzerName,
@@ -192,7 +194,7 @@ public class ReportingHotspotBenchmark
                     Result: result,
                     ErrorMessage: null,
                     ErrorType: null,
-                    Findings: [],
+                    Findings: Array.Empty<InsightFinding>(),
                     FindingCount: 0,
                     WarningCount: 0,
                     Diagnostics: new AnalyzerExecutionDiagnostics(

@@ -16,22 +16,22 @@ internal static class AnalyzerFilterService
     {
         HashSet<string> known = analyzers.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        List<string> unknownIncludes = resolved.IncludeAnalyzers.Where(name => !known.Contains(name)).ToList();
-        List<string> unknownExcludes = resolved.ExcludeAnalyzers.Where(name => !known.Contains(name)).ToList();
+        var unknownIncludesEnum = resolved.IncludeAnalyzers.Where(name => !known.Contains(name));
+        var unknownExcludesEnum = resolved.ExcludeAnalyzers.Where(name => !known.Contains(name));
 
-        if (unknownIncludes.Count > 0 || unknownExcludes.Count > 0)
+        if (unknownIncludesEnum.Any() || unknownExcludesEnum.Any())
         {
-            List<string> messages = [];
-            if (unknownIncludes.Count > 0)
-                messages.Add($"Unknown include analyzers: {string.Join(", ", unknownIncludes)}");
-            if (unknownExcludes.Count > 0)
-                messages.Add($"Unknown exclude analyzers: {string.Join(", ", unknownExcludes)}");
+            var messages = new List<string>();
+            if (unknownIncludesEnum.Any())
+                messages.Add($"Unknown include analyzers: {string.Join(", ", unknownIncludesEnum)}");
+            if (unknownExcludesEnum.Any())
+                messages.Add($"Unknown exclude analyzers: {string.Join(", ", unknownExcludesEnum)}");
 
             throw new ConfigurationException(string.Join(Environment.NewLine, messages));
         }
     }
 
-    public static IReadOnlyList<IAnalyzer> Apply(ResolvedExecutionOptions resolved, IReadOnlyList<IAnalyzer> analyzers)
+    public static IEnumerable<IAnalyzer> Apply(ResolvedExecutionOptions resolved, IReadOnlyList<IAnalyzer> analyzers)
     {
         IEnumerable<IAnalyzer> filtered = analyzers;
 
@@ -47,16 +47,19 @@ internal static class AnalyzerFilterService
             filtered = filtered.Where(a => !exclude.Contains(a.Name));
         }
 
-        return filtered.ToList();
+        return filtered;
     }
 
-    public static IReadOnlyList<IAnalyzer> Order(IReadOnlyList<IAnalyzer> analyzers)
-        => analyzers
+    public static IReadOnlyList<IAnalyzer> Order(IEnumerable<IAnalyzer> analyzers)
+    {
+        // materialize once after ordering to avoid multiple enumerations
+        return analyzers
             .OrderBy(a => GetDomainRank(a))
             .ThenBy(GetStageRank)
             .ThenBy(a => a.Order)
             .ThenBy(a => a.Name, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
+    }
 
     private static int GetDomainRank(IAnalyzer analyzer)
     {
@@ -80,7 +83,7 @@ internal static class AnalyzerFilterService
         IReadOnlyList<IAnalyzer> activeAnalyzers)
     {
         HashSet<string> activeNames = activeAnalyzers.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        List<AnalyzerRunResult> skipped = [];
+        var skipped = new List<AnalyzerRunResult>();
 
         foreach (IAnalyzer analyzer in allAnalyzers)
         {
@@ -95,10 +98,10 @@ internal static class AnalyzerFilterService
                 "Excluded by --include-analyzers / --exclude-analyzers filter.",
                 null,
                 SkipReason: "Excluded by analyzer filter.",
-                Findings: [],
+                Findings: Array.Empty<InsightFinding>(),
                 FindingCount: 0,
                 WarningCount: 0,
-                Artifacts: [],
+                Artifacts: Array.Empty<ReportArtifact>(),
                 Diagnostics: new AnalyzerExecutionDiagnostics(
                     ObjectScanCount: 0,
                     CacheHits: 0,

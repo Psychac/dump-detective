@@ -9,9 +9,9 @@ internal static class AnalyzerFeatureModuleAdapter
 {
     public static IReadOnlyList<AnalyzerFeatureModule> CreateResolvedModules(
         IReadOnlyList<IAnalyzer> analyzers,
-        IReadOnlyList<IFindingGenerator> findingGenerators,
-        IReadOnlyList<IAnalyzerTrendComparer> trendComparers,
-        IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders)
+        IEnumerable<IFindingGenerator> findingGenerators,
+        IEnumerable<IAnalyzerTrendComparer> trendComparers,
+        IEnumerable<IAnalyzerSectionBuilder> analyzerSectionBuilders)
     {
         Dictionary<string, IFindingGenerator> generatorByAnalyzer = findingGenerators
             .GroupBy(g => g.AnalyzerName, StringComparer.Ordinal)
@@ -25,7 +25,7 @@ internal static class AnalyzerFeatureModuleAdapter
             .GroupBy(b => b.AnalyzerName, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-        List<AnalyzerFeatureModule> modules = [];
+        var modules = new List<AnalyzerFeatureModule>();
         HashSet<string> usedKeys = new(StringComparer.Ordinal);
 
         for (int i = 0; i < analyzers.Count; i++)
@@ -50,64 +50,66 @@ internal static class AnalyzerFeatureModuleAdapter
                 FindingGeneratorType: generator.GetType(),
                 TrendComparerType: comparer.GetType(),
                 AnalyzerSectionBuilderType: sectionBuilder.GetType(),
-                ReportSectionContributionTypes: [],
+                ReportSectionContributionTypes: Array.Empty<Type>(),
                 Order: i,
-                Tags: ["resolved", "phase2-adapter"]));
+                Tags: new[] { "resolved", "phase2-adapter" }));
         }
 
         return modules;
     }
 
     public static AnalyzerFeatureModuleCoverage ComputeCoverage(
-        IReadOnlyList<AnalyzerFeatureModule> modules,
+        IEnumerable<AnalyzerFeatureModule> modules,
         IReadOnlyList<IAnalyzer> analyzers,
-        IReadOnlyList<IFindingGenerator> findingGenerators,
-        IReadOnlyList<IAnalyzerTrendComparer> trendComparers,
-        IReadOnlyList<IAnalyzerSectionBuilder> analyzerSectionBuilders)
+        IEnumerable<IFindingGenerator> findingGenerators,
+        IEnumerable<IAnalyzerTrendComparer> trendComparers,
+        IEnumerable<IAnalyzerSectionBuilder> analyzerSectionBuilders)
     {
         HashSet<Type> analyzerTypes = analyzers.Select(a => a.GetType()).ToHashSet();
         HashSet<Type> generatorTypes = findingGenerators.Select(g => g.GetType()).ToHashSet();
         HashSet<Type> comparerTypes = trendComparers.Select(c => c.GetType()).ToHashSet();
         HashSet<Type> sectionBuilderTypes = analyzerSectionBuilders.Select(b => b.GetType()).ToHashSet();
 
-        List<string> invalidShape = modules
+        var modulesList = modules as IReadOnlyList<AnalyzerFeatureModule> ?? modules.ToArray();
+
+        string[] invalidShape = modulesList
             .Where(m => !m.IsShapeValid())
             .Select(m => m.Key)
             .OrderBy(k => k, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
-        List<string> missingAnalyzerModules = analyzers
-            .Where(a => !modules.Any(m => m.AnalyzerType == a.GetType()))
+        string[] missingAnalyzerModules = analyzers
+            .Where(a => !modulesList.Any(m => m.AnalyzerType == a.GetType()))
             .Select(a => a.Name)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
-        List<string> missingFindingGenerators = modules
+        string[] missingFindingGenerators = modulesList
             .Where(m => !generatorTypes.Contains(m.FindingGeneratorType))
             .Select(m => m.Key)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
-        List<string> missingTrendComparers = modules
+        string[] missingTrendComparers = modulesList
             .Where(m => !comparerTypes.Contains(m.TrendComparerType))
             .Select(m => m.Key)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
-        List<string> missingAnalyzerSectionBuilders = modules
+        string[] missingAnalyzerSectionBuilders = modulesList
             .Where(m => !sectionBuilderTypes.Contains(m.AnalyzerSectionBuilderType))
             .Select(m => m.Key)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
-        List<string> extraAnalyzerTypes = modules
+        string[] extraAnalyzerTypes = modulesList
             .Where(m => !analyzerTypes.Contains(m.AnalyzerType))
             .Select(m => m.Key)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
+            .ToArray();
 
         return new AnalyzerFeatureModuleCoverage(
-            ModuleCount: modules.Count,
+            ModuleCount: modulesList.Count,
             AnalyzerCount: analyzers.Count,
             MissingAnalyzerModules: missingAnalyzerModules,
             MissingFindingGenerators: missingFindingGenerators,

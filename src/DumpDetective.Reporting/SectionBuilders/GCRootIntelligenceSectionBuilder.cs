@@ -40,8 +40,8 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             ["Root Kind", "Root Addr", "Field", "Target Type", "Target Addr", "Est. Retained", "Severity"],
             BuildSeverityRows(roots.TopRootsBySeverity)));
 
-        var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToList();
-        if (finalizerRoots.Count > 0)
+        var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToArray();
+        if (finalizerRoots.Length > 0)
         {
             tables.Add(ST(
                 "Finalizer roots",
@@ -51,7 +51,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                     Cell(root.FieldDescription ?? "—"),
                     Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
                     Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
-                    Cell($"0x{root.RootAddress:X}"))).ToList()));
+                    Cell($"0x{root.RootAddress:X}"))).ToArray()));
         }
 
         // ── Root paths: outer collapsible wrapper ─────────────────────────
@@ -61,18 +61,18 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
             .OrderByDescending(g => g.Count())
             .ThenBy(g => g.Key)
-            .ToList();
+            .ToArray();
 
         string outerTitle = roots.PathSearchCapped
-            ? $"Root paths by target type ({pathGroups.Count} type(s)) ⚠ some paths truncated"
-            : $"Root paths by target type ({pathGroups.Count} type(s))";
+            ? $"Root paths by target type ({pathGroups.Length} type(s)) ⚠ some paths truncated"
+            : $"Root paths by target type ({pathGroups.Length} type(s))";
 
         blocks.Add(CollapseBegin(outerTitle));
         blocks.Add(T($"Grouped by target type, shortest path first. Reference chains longer than {ChainInitial} hops are collapsed — expand inline to see the full chain."));
 
         foreach (var group in pathGroups)
         {
-            var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToList();
+            var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToArray();
             bool anyGroupCapped = pathsInGroup.Any(p => p.WasCapped);
             string shortName = TrimTypeName(group.Key);
             string groupTitle = anyGroupCapped
@@ -82,7 +82,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             blocks.Add(CollapseBegin(groupTitle));
             blocks.Add(T(group.Key)); // full qualified name
 
-            for (int pi = 0; pi < pathsInGroup.Count; pi++)
+            for (int pi = 0; pi < pathsInGroup.Length; pi++)
             {
                 var path = pathsInGroup[pi];
                 if (pi > 0)

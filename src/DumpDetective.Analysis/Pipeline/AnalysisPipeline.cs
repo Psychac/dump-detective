@@ -13,7 +13,7 @@ internal sealed class AnalysisPipeline(
     AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
     AnalyzerResultPostProcessor? resultPostProcessor = null)
 {
-    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToList();
+    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToArray();
     private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
     private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
     private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
@@ -254,7 +254,7 @@ internal sealed class AnalysisPipeline(
 
         runStopwatch.Stop();
 
-        runResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToList();
+        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
 
         _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
@@ -263,14 +263,14 @@ internal sealed class AnalysisPipeline(
             AnalyzerName: null,
             Category: "Run",
             DurationMs: runStopwatch.Elapsed.TotalMilliseconds,
-            ObjectScanCount: runResults.Sum(r => r.ObjectScanCount),
-            CacheHits: runResults.Sum(r => r.CacheHits),
-            CacheMisses: runResults.Sum(r => r.CacheMisses),
-            Message: $"Run completed. Success={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={runResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={runResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={runResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
+            ObjectScanCount: finalResults.Sum(r => r.ObjectScanCount),
+            CacheHits: finalResults.Sum(r => r.CacheHits),
+            CacheMisses: finalResults.Sum(r => r.CacheMisses),
+            Message: $"Run completed. Success={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
             ExceptionType: null,
             ExceptionMessage: null));
 
-        return runResults;
+        return finalResults;
     }
 }
 

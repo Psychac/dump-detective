@@ -24,10 +24,10 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
         _moduleCatalog.Modules
             .OrderBy(m => m.Order)
             .Select(m => (IAnalyzerSectionBuilder)ActivatorUtilities.CreateInstance(_serviceProvider, m.AnalyzerSectionBuilderType))
-            .ToList();
+            .ToArray();
 
     public IReadOnlyList<IReportSectionBuilder> CreateReportBuilders() =>
         _moduleCatalog.GlobalReportSectionBuilderTypes
             .Select(t => (IReportSectionBuilder)ActivatorUtilities.CreateInstance(_serviceProvider, t))
-            .ToList();
+            .ToArray();
 }

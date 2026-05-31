@@ -55,7 +55,7 @@ internal static class IncidentContextFactory
             DiagnosticMode: resolved.DiagnosticMode,
             IndexPrebuildMode: resolved.IndexPrebuildMode.ToString(),
             ActiveAnalyzerCount: activeAnalyzers.Count,
-            ActiveAnalyzers: activeAnalyzers.Select(a => a.Name).ToList(),
+            ActiveAnalyzers: activeAnalyzers.Select(a => a.Name).ToArray(),
             RuntimeVersion: runtimeVersion,
             RuntimeFlavor: runtimeFlavor,
             GcMode: gcMode,

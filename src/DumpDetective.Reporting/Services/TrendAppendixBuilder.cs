@@ -27,7 +27,7 @@ internal static class TrendAppendixBuilder
                     new TableCell(f.Category),
                     new TableCell(f.Title)
                 ]))
-                .ToList();
+                .ToArray();
 
             blocks.Add(new TableBlock(
                 Caption: null,
@@ -113,7 +113,7 @@ internal static class TrendAppendixBuilder
                     new TableCell(r.WarningCount.ToString()),
                     new TableCell(r.ErrorMessage ?? "—")
                 ]))
-                .ToList();
+                .ToArray();
 
             blocks.Add(new TableBlock(
                 Caption: null,

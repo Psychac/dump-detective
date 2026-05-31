@@ -78,7 +78,7 @@ internal sealed class PerDumpExecutionService(
 
         runs = AnalyzerFilterService.BuildSkippedByFilterResults(allAnalyzers, activeAnalyzers)
             .Concat(runs)
-            .ToList();
+            .ToArray();
 
         AnalysisIncidentContext incidentContext = IncidentContextFactory.Create(
             mode: mode,

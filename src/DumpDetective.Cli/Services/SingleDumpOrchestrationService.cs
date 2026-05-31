@@ -113,27 +113,33 @@ internal sealed class SingleDumpOrchestrationService(
         }
 
         // ── Analyzer table ───────────────────────────────────────────────────
-        var withStats = runs
-            .Where(r => r.MemoryStats is not null)
-            .ToList();
+        bool printedAnyAnalyzerRow = false;
+        long firstRunWorkingSetBefore = 0;
+        long peakFromAnalyzers = 0;
 
-        if (withStats.Count > 0)
+        foreach (AnalyzerRunResult run in runs)
         {
-            ConsoleUx.MemoryTableHeader();
-            foreach (AnalyzerRunResult run in withStats)
+            if (run.MemoryStats is null)
+                continue;
+
+            if (!printedAnyAnalyzerRow)
             {
-                AnalyzerMemoryStats s = run.MemoryStats!;
-                ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+                ConsoleUx.MemoryTableHeader();
+                printedAnyAnalyzerRow = true;
+                firstRunWorkingSetBefore = run.MemoryStats.WorkingSetBefore;
             }
+
+            AnalyzerMemoryStats s = run.MemoryStats;
+            ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+            if (s.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = s.WorkingSetAfter;
         }
 
         // ── Process peak across all measured scopes ──────────────────────────
         long baseline = stageStats.Count > 0
             ? stageStats[0].Stats.WorkingSetBefore
-            : withStats.Count > 0 ? withStats[0].MemoryStats!.WorkingSetBefore : 0;
+            : (printedAnyAnalyzerRow ? firstRunWorkingSetBefore : 0);
 
         long peakFromStages = stageStats.Count > 0 ? stageStats.Max(s => s.Stats.WorkingSetAfter) : 0;
-        long peakFromAnalyzers = withStats.Count > 0 ? withStats.Max(r => r.MemoryStats!.WorkingSetAfter) : 0;
         long peak = Math.Max(peakFromStages, peakFromAnalyzers);
 
         if (peak > 0)
@@ -145,10 +151,10 @@ internal sealed class SingleDumpOrchestrationService(
         if (runs.Count == 0)
             return;
 
-        IReadOnlyList<AnalyzerRunResult> topSlow = runs
+        AnalyzerRunResult[] topSlow = runs
             .OrderByDescending(r => r.Duration)
             .Take(5)
-            .ToList();
+            .ToArray();
 
         ConsoleUx.TopSlowAnalyzers(topSlow);
     }

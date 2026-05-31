@@ -194,7 +194,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         var topBySize = snapshots
             .OrderByDescending(s => s.CommittedBytes)
             .Take(HeapTopologyAnalyzerOptions.TopSegmentsCount)
-            .ToList();
+            .ToArray();
 
         var topPohTypes = BuildTopTypeSnapshots(pohTypes, HeapTopologyAnalyzerOptions.TopSegmentsCount);
         var topFrozenTypes = BuildTopTypeSnapshots(frozenTypes, HeapTopologyAnalyzerOptions.TopSegmentsCount);

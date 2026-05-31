@@ -31,15 +31,15 @@ namespace DumpDetective.Analysis.Analyzers
             var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, options, progress);
             var significantStaticRoots = allStaticRootAnalysis
                 .Where(a => IsSignificant(a, options))
-                .ToList();
+                .ToArray();
 
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
                 .Take(options.MaxRootsToReport)
                 .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
-                .ToList();
+                .ToArray();
 
-            if (significantStaticRoots.Count == 0)
+            if (significantStaticRoots.Length == 0)
             {
                 return new StaticRootDomainResult(0, 0, topRoots);
             }
@@ -48,7 +48,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (var item in significantStaticRoots)
                 totalImpact += item.TotalMemoryImpact;
 
-            return new StaticRootDomainResult(significantStaticRoots.Count, totalImpact, topRoots);
+            return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)

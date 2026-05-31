@@ -7,10 +7,10 @@ internal static class TableWrapHelper
         string text = value ?? string.Empty;
         if (width <= 0)
         {
-            return [text];
+            return new[] { text };
         }
 
-        List<string> lines = [];
+        List<string> lines = new();
         foreach (string rawLine in text.Replace("\r\n", "\n").Split('\n'))
         {
             if (rawLine.Length == 0)
@@ -44,6 +44,6 @@ internal static class TableWrapHelper
             }
         }
 
-        return lines.Count == 0 ? [string.Empty] : lines;
+        return lines.Count == 0 ? new[] { string.Empty } : lines;
     }
 }

@@ -47,14 +47,14 @@ namespace DumpDetective.Analysis.Analyzers
             var topTypes = typeStats
                 .OrderByDescending(kvp => kvp.Value.TotalSize)
                 .Take(topCount)
-                .ToList();
+                .ToArray();
 
             int retainedSamples = 0;
             int analyzedSamples = 0;
             int traversalLimitedSamples = 0;
             var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
-            var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Count);
+            var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Length);
             progress?.Report(new(0, "loading root list"));
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
             // Sort retaining roots by likelihood of early hit (Stack first) and drop weak/dependent roots
@@ -67,7 +67,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (var typeKvp in topTypes)
             {
                 typeIndex++;
-                progress?.Report(new(analyzedSamples, "tracing reference chains", $"{typeIndex}/{topTypes.Count} types"));
+                progress?.Report(new(analyzedSamples, "tracing reference chains", $"{typeIndex}/{topTypes.Length} types"));
                 string typeName = typeKvp.Key;
                 var stats = typeKvp.Value;
 
@@ -125,7 +125,7 @@ namespace DumpDetective.Analysis.Analyzers
                 .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
                 .Take(10)
                 .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
-                .ToList();
+                .ToArray();
 
             return new ReferenceChainDomainResult(
                 analyzedSamples,

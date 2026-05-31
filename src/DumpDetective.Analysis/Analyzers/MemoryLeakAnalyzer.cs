@@ -266,12 +266,12 @@ namespace DumpDetective.Analysis.Analyzers
                     .Where(kvp => kvp.Value > threshold)
                     .OrderByDescending(kvp => kvp.Value)
                     .Take(options.TopHighlyReferencedObjectsToShow)
-                    .ToList();
+                    .ToArray();
 
-                if (topAddresses.Count == 0)
+                if (topAddresses.Length == 0)
                     return Array.Empty<HighlyReferencedObjectSnapshot>();
 
-                var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Count);
+                var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Length);
                 foreach (var top in topAddresses)
                 {
                     HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, top.Key, top.Value);
@@ -405,7 +405,7 @@ namespace DumpDetective.Analysis.Analyzers
                 .OrderByDescending(static t => t.EstimatedRetainedBytes)
                 .ThenByDescending(static t => t.TotalBytes)
                 .ThenByDescending(static t => t.TotalIncomingReferences)
-                .ToList();
+                .ToArray();
         }
 
         private static bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable, Dictionary<ulong, bool> cache)

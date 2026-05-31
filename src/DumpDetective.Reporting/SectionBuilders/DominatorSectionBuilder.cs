@@ -52,7 +52,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
                     Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)),
                     Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—"),
-                    Cell($"0x{type.SampleAddress:X}"))).ToList()));
+                    Cell($"0x{type.SampleAddress:X}"))).ToArray()));
 
             if (d.TotalEstimatedRetainedBytes > 0)
             {
@@ -62,7 +62,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     d.TopDominatorTypes.Take(20).Select(type => Row(
                         Cell(type.TypeName),
                         Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
-                        Cell(type.EstimatedRetainedBytes == 0 ? "—" : $"{(double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes:F1}‰"))).ToList()));
+                        Cell(type.EstimatedRetainedBytes == 0 ? "—" : $"{(double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes:F1}‰"))).ToArray()));
             }
         }
 

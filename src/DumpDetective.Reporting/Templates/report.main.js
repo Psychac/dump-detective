@@ -55,8 +55,8 @@ async function bootstrap() {
   }
   const { announce } = Dom.createAriaLive();
   const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
-  const isV2 = styleVersion === 'v2';
-  document.body.dataset.reportStyleVersion = isV2 ? 'v2' : 'v1';
+  const isV2 = styleVersion.startsWith('v2');
+  document.body.dataset.reportStyleVersion = isV2 ? styleVersion : 'v1';
   document.body.classList.toggle('report-style-v2', isV2);
   const printFooter = document.getElementById('report-print-footer');
   if (printFooter) {

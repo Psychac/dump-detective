@@ -57,7 +57,7 @@ export function buildSidebar(tocNode, doc) {
 
 export function setupInteractivity(doc, announce) {
   const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
-  const isV2 = styleVersion === 'v2';
+  const isV2 = styleVersion.startsWith('v2');
   const READING_MODE_KEY = 'dumpdetective:reading-mode';
   let activeReadingMode = 'incident';
   let forensicsLockOpen = false;

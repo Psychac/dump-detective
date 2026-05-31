@@ -41,6 +41,11 @@ internal sealed class ReportBuilderFacade(
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
+        if (formatter is HtmlReportRenderer htmlFormatter)
+        {
+            // Trend reports respect the v2 visual style per TV2-1 plan (use v2 token)
+            return htmlFormatter.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        }
         return formatter.Render(doc);
     }
 

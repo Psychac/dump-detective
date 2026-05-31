@@ -398,6 +398,26 @@ body.reading-mode-forensics .incident-ribbon {
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+
+/* Delta chips for trend-mode per-domain deltas */
+.delta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #0f172a;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+.delta-chip--crit { color: var(--sev-critical-text); background: var(--sev-critical-bg-strong); border-color: var(--sev-critical-border-mid); }
+.delta-chip--warn { color: var(--sev-warning-text); background: var(--sev-warning-bg-strong); border-color: var(--sev-warning-border-mid); }
+.delta-chip--up { box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+.delta-chip--down { opacity: 0.92; }
+.health-domain-deltas { margin-left: 8px; display: inline-flex; gap: 6px; align-items: center; }
 .health-domain-row__pill--critical { background: var(--sev-critical-bg-strong); color: var(--sev-critical-text); }
 .health-domain-row__pill--warning  { background: var(--sev-warning-bg-strong);  color: var(--sev-warning-text); }
 .health-domain-row__pill--ok       { background: var(--sev-ok-bg-strong);       color: var(--sev-ok-text); }

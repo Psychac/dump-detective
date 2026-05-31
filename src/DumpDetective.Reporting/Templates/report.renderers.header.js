@@ -342,23 +342,54 @@ export function buildHealthScorecard(doc) {
   const verdict = el('span', 'health-scorecard__banner-verdict'); verdict.textContent = overall.dot + '\u2002' + overall.label; bannerLeft.appendChild(verdict);
   banner.appendChild(bannerLeft);
 
-  const totalCrit = scorecard.domains.reduce((s, d) => s + (d.criticalCount || 0), 0);
-  const totalWarn = scorecard.domains.reduce((s, d) => s + (d.warningCount || 0), 0);
-  if (totalCrit > 0 || totalWarn > 0) {
+  // Prefer trend-oriented aggregates when available
+  const trend = scorecard.trend || null;
+  if (trend) {
     const bannerRight = el('div', 'health-scorecard__banner-right');
-    if (totalCrit > 0) {
+    if (Number(trend.domainsRegressed) > 0) {
+      const rs = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--regressed');
+      const rl = el('span', 'health-scorecard__banner-stat-label'); rl.textContent = 'Regressed'; rs.appendChild(rl);
+      const rv = el('span', 'health-scorecard__banner-stat-value'); rv.textContent = String(trend.domainsRegressed); rs.appendChild(rv);
+      bannerRight.appendChild(rs);
+    }
+    if (Number(trend.domainsImproved) > 0) {
+      const is_ = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--improved');
+      const il = el('span', 'health-scorecard__banner-stat-label'); il.textContent = 'Improved'; is_.appendChild(il);
+      const iv = el('span', 'health-scorecard__banner-stat-value'); iv.textContent = String(trend.domainsImproved); is_.appendChild(iv);
+      bannerRight.appendChild(is_);
+    }
+    if (Number(trend.netCriticalChange) !== 0) {
       const cs = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--critical');
-      const cl = el('span', 'health-scorecard__banner-stat-label'); cl.textContent = 'Critical'; cs.appendChild(cl);
-      const cv = el('span', 'health-scorecard__banner-stat-value'); cv.textContent = String(totalCrit); cs.appendChild(cv);
+      const cl = el('span', 'health-scorecard__banner-stat-label'); cl.textContent = 'Critical Δ'; cs.appendChild(cl);
+      const cv = el('span', 'health-scorecard__banner-stat-value'); cv.textContent = (trend.netCriticalChange > 0 ? '+' : '') + String(trend.netCriticalChange); cs.appendChild(cv);
       bannerRight.appendChild(cs);
     }
-    if (totalWarn > 0) {
+    if (Number(trend.netWarningChange) !== 0) {
       const ws = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--warning');
-      const wl = el('span', 'health-scorecard__banner-stat-label'); wl.textContent = 'Warning'; ws.appendChild(wl);
-      const wv = el('span', 'health-scorecard__banner-stat-value'); wv.textContent = String(totalWarn); ws.appendChild(wv);
+      const wl = el('span', 'health-scorecard__banner-stat-label'); wl.textContent = 'Warning Δ'; ws.appendChild(wl);
+      const wv = el('span', 'health-scorecard__banner-stat-value'); wv.textContent = (trend.netWarningChange > 0 ? '+' : '') + String(trend.netWarningChange); ws.appendChild(wv);
       bannerRight.appendChild(ws);
     }
-    banner.appendChild(bannerRight);
+    if (bannerRight.childNodes.length > 0) banner.appendChild(bannerRight);
+  } else {
+    const totalCrit = scorecard.domains.reduce((s, d) => s + (d.criticalCount || 0), 0);
+    const totalWarn = scorecard.domains.reduce((s, d) => s + (d.warningCount || 0), 0);
+    if (totalCrit > 0 || totalWarn > 0) {
+      const bannerRight = el('div', 'health-scorecard__banner-right');
+      if (totalCrit > 0) {
+        const cs = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--critical');
+        const cl = el('span', 'health-scorecard__banner-stat-label'); cl.textContent = 'Critical'; cs.appendChild(cl);
+        const cv = el('span', 'health-scorecard__banner-stat-value'); cv.textContent = String(totalCrit); cs.appendChild(cv);
+        bannerRight.appendChild(cs);
+      }
+      if (totalWarn > 0) {
+        const ws = el('div', 'health-scorecard__banner-stat health-scorecard__banner-stat--warning');
+        const wl = el('span', 'health-scorecard__banner-stat-label'); wl.textContent = 'Warning'; ws.appendChild(wl);
+        const wv = el('span', 'health-scorecard__banner-stat-value'); wv.textContent = String(totalWarn); ws.appendChild(wv);
+        bannerRight.appendChild(ws);
+      }
+      banner.appendChild(bannerRight);
+    }
   }
   sec.appendChild(banner);
 
@@ -456,13 +487,33 @@ export function buildHealthScorecard(doc) {
       const foot = el('div', 'health-domain-card__foot');
       const curPill = el('span', 'health-domain-card__sev health-domain-card__sev--' + si.css);
       curPill.textContent = si.dot + '\u2002' + si.label; foot.appendChild(curPill);
-      const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
-      if (crit > 0 || warn > 0) {
-        const counts = el('span', 'health-domain-card__counts');
-        if (crit > 0) { const c = el('span', 'health-domain-card__count-chip health-domain-card__count-chip--crit'); c.textContent = crit + '\u00A0crit'; counts.appendChild(c); }
-        if (warn > 0) { const w = el('span', 'health-domain-card__count-chip health-domain-card__count-chip--warn'); w.textContent = warn + '\u00A0warn'; counts.appendChild(w); }
-        foot.appendChild(counts);
+      // In trend mode we omit raw per-domain absolute counts here; show delta chips when available.
+      const deltaWrap = el('span', 'health-domain-deltas');
+      if (typeof entry.deltaCritical === 'number' && entry.deltaCritical !== 0) {
+        const d = Number(entry.deltaCritical);
+        const chip = el('span', 'delta-chip delta-chip--crit ' + (d > 0 ? 'delta-chip--up' : 'delta-chip--down'));
+        chip.textContent = (d > 0 ? '+' : '') + String(d) + '\u00A0crit';
+        let title = 'Criticals: ' + (entry.baselineCriticalCount ?? 0) + ' → ' + (entry.criticalCount ?? 0) + ' (' + (d > 0 ? '+' : '') + d + ')';
+        if (entry.peakCriticalCount != null && entry.peakCriticalSnapshotIndex != null && entry.peakCriticalCount > Math.max(entry.baselineCriticalCount || 0, entry.criticalCount || 0)) {
+          title += ' — peak ' + entry.peakCriticalCount + ' at D' + (entry.peakCriticalSnapshotIndex + 1);
+        }
+        chip.title = title;
+        chip.setAttribute('aria-label', (d > 0 ? 'Criticals increased by ' : 'Criticals decreased by ') + Math.abs(d));
+        deltaWrap.appendChild(chip);
       }
+      if (typeof entry.deltaWarning === 'number' && entry.deltaWarning !== 0) {
+        const w = Number(entry.deltaWarning);
+        const chip = el('span', 'delta-chip delta-chip--warn ' + (w > 0 ? 'delta-chip--up' : 'delta-chip--down'));
+        chip.textContent = (w > 0 ? '+' : '') + String(w) + '\u00A0warn';
+        let title = 'Warnings: ' + (entry.baselineWarningCount ?? 0) + ' → ' + (entry.warningCount ?? 0) + ' (' + (w > 0 ? '+' : '') + w + ')';
+        if (entry.peakWarningCount != null && entry.peakWarningSnapshotIndex != null && entry.peakWarningCount > Math.max(entry.baselineWarningCount || 0, entry.warningCount || 0)) {
+          title += ' — peak ' + entry.peakWarningCount + ' at D' + (entry.peakWarningSnapshotIndex + 1);
+        }
+        chip.title = title;
+        chip.setAttribute('aria-label', (w > 0 ? 'Warnings increased by ' : 'Warnings decreased by ') + Math.abs(w));
+        deltaWrap.appendChild(chip);
+      }
+      if (deltaWrap.childNodes.length > 0) foot.appendChild(deltaWrap);
       card.appendChild(foot);
       grid.appendChild(card);
 

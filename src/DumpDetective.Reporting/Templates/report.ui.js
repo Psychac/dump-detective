@@ -262,17 +262,28 @@ export function setupInteractivity(doc, announce) {
     const sr = document.getElementById('report-sr-summary');
     if (!sr) return;
     const hs = doc && doc.healthScorecard;
-    const domains = hs && Array.isArray(hs.domains) ? hs.domains : [];
+    const trend = hs && hs.trend ? hs.trend : null;
     let critical = 0;
     let warning = 0;
-    for (let i = 0; i < domains.length; i++) {
-      const d = domains[i] || {};
-      critical += Number(d.criticalCount || 0);
-      warning += Number(d.warningCount || 0);
+    if (trend) {
+      // reflect net change in speech-friendly form
+      critical = Number(trend.netCriticalChange || 0);
+      warning = Number(trend.netWarningChange || 0);
+    } else {
+      const domains = hs && Array.isArray(hs.domains) ? hs.domains : [];
+      for (let i = 0; i < domains.length; i++) {
+        const d = domains[i] || {};
+        critical += Number(d.criticalCount || 0);
+        warning += Number(d.warningCount || 0);
+      }
     }
     const actionsNode = document.getElementById('sec-action-queue');
     const actionCount = actionsNode ? actionsNode.querySelectorAll('tbody tr').length : 0;
-    sr.textContent = 'Report summary. Critical findings: ' + critical + '. Warning findings: ' + warning + '. Top actions: ' + actionCount + '.';
+    if (trend) {
+      sr.textContent = 'Report summary. Domains regressed: ' + (trend.domainsRegressed || 0) + '. Domains improved: ' + (trend.domainsImproved || 0) + '. Net critical change: ' + (critical >= 0 ? '+' + critical : String(critical)) + '. Top actions: ' + actionCount + '.';
+    } else {
+      sr.textContent = 'Report summary. Critical findings: ' + critical + '. Warning findings: ' + warning + '. Top actions: ' + actionCount + '.';
+    }
   })();
 
   syncCollapsibleAria(document);

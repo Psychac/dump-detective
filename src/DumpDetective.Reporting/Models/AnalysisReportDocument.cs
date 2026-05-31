@@ -16,15 +16,36 @@ internal sealed record DomainHealthEntry(
     int CriticalCount,
     int WarningCount,
     // Trend-mode additions (null in single-dump mode):
+    int? BaselineCriticalCount = null,
+    int? DeltaCritical = null,
+    int? BaselineWarningCount = null,
+    int? DeltaWarning = null,
+    int? PeakCriticalCount = null,
+    int? PeakCriticalSnapshotIndex = null,
+    int? PeakWarningCount = null,
+    int? PeakWarningSnapshotIndex = null,
     DomainSeverity? BaselineSeverity = null,
     DomainSeverityChange? Change = null,
     // Per-snapshot severity across all dumps (index 0 = baseline, last = current).
     // Null in single-dump mode or when only 2 snapshots (baseline/current already cover it).
     IReadOnlyList<DomainSeverity>? SeverityHistory = null);
 
+internal sealed record TrendSummary(
+    int DomainsRegressed,
+    int DomainsImproved,
+    int DomainsNew,
+    int DomainsRemoved,
+    int NewCriticals,
+    int ResolvedCriticals,
+    int NetCriticalChange,
+    int NewWarnings,
+    int ResolvedWarnings,
+    int NetWarningChange);
+
 internal sealed record HealthScorecard(
     IReadOnlyList<DomainHealthEntry> Domains,
-    DomainSeverity OverallSeverity);
+    DomainSeverity OverallSeverity,
+    TrendSummary? Trend = null);
 
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,4 @@
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
 
 namespace DumpDetective.Cli.Output;

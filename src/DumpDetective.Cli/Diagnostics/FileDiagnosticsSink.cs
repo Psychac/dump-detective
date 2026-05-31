@@ -1,7 +1,7 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Diagnostics;
 
 internal sealed class FileDiagnosticsSink(string filePath) : IAnalysisDiagnosticsSink
 {

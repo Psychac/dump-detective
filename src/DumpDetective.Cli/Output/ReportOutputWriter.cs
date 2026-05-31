@@ -6,7 +6,7 @@ using DumpDetective.Cli.Diagnostics;
 
 using System.Text.Json;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Output;
 
 internal sealed class ReportOutputWriter
 {
@@ -28,7 +28,7 @@ internal sealed class ReportOutputWriter
             if (resolved.Report.SeparateJson && resolved.Report.Format == Core.Configuration.ReportFormat.Html)
             {
                 string html = renderedReport ?? string.Empty;
-                string pattern = "<script[^>]*\\bid\\s*=\\s*(['\"])(report-json)\\1[^>]*>([\\s\\S]*?)</script>";
+                string pattern = "<script[^>]*\\bid\\s*=\\s*(['\"]) (report-json)\\1[^>]*>([\\s\\S]*?)</script>";
                 var match = System.Text.RegularExpressions.Regex.Match(html, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 string json = match.Success ? match.Groups[3].Value : string.Empty;
                 string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
@@ -38,7 +38,7 @@ internal sealed class ReportOutputWriter
                     await File.WriteAllTextAsync(jsonPath, json, cancellationToken);
                     ConsoleUx.ReportWritten(jsonPath);
 
-                    string replacement = "<script id=\"report-json\" type=\"application/json\">{\"_external\": \"" + Path.GetFileName(jsonPath) + "\"}</script>";
+                    string replacement = "<script id=\"report-json\" type=\"application/json\">{" + "\"_external\": \"" + Path.GetFileName(jsonPath) + "\"}</script>";
                     if (match.Success)
                         html = html.Substring(0, match.Index) + replacement + html.Substring(match.Index + match.Length);
 

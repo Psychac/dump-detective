@@ -9,10 +9,10 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 
 using System.Diagnostics;
-using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Models;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Execution;
 
 internal sealed class PerDumpExecutionService(
     IDumpLoader dumpLoader,

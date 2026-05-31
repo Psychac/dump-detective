@@ -9,7 +9,7 @@ using DumpDetective.Cli.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
 
 internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
 {

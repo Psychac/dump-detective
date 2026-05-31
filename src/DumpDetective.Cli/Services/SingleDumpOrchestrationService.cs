@@ -7,6 +7,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Output;
 
 using System.Diagnostics;
 using DumpDetective.Cli.Execution;

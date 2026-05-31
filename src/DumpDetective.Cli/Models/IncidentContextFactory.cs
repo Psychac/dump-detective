@@ -4,9 +4,8 @@ using DumpDetective.Analysis.Dump;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
-using DumpDetective.Cli.Models;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Models;
 
 internal static class IncidentContextFactory
 {
@@ -88,10 +87,6 @@ internal static class IncidentContextFactory
             IsBaseline: isBaseline,
             IsCurrent: isCurrent);
 
-    /// <summary>
-    /// Reads the TimeDateStamp field from a Windows minidump header (MINIDUMP_HEADER offset 20).
-    /// Returns null if the file is not a valid minidump or the timestamp is zero/invalid.
-    /// </summary>
     private static DateTime? TryReadMinidumpTimestamp(string path)
     {
         try
@@ -99,7 +94,6 @@ internal static class IncidentContextFactory
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 32);
             Span<byte> buf = stackalloc byte[24];
             if (fs.Read(buf) < 24) return null;
-            // Signature: "MDMP" = 0x504D444D
             if (buf[0] != 0x4D || buf[1] != 0x44 || buf[2] != 0x4D || buf[3] != 0x50) return null;
             uint unixTs = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(buf.Slice(20, 4));
             if (unixTs == 0) return null;
@@ -113,7 +107,7 @@ internal static class IncidentContextFactory
         if (instance is null)
             return null;
 
-        PropertyInfo? property = instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+        var property = instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
         return property?.GetValue(instance);
     }
 

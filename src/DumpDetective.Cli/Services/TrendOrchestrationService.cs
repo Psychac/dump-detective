@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Console;
+    using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
@@ -11,6 +12,7 @@ using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Trend;
 using DumpDetective.Reporting.Formatters;
+using DumpDetective.Cli.Output;
 
 using System.Diagnostics;
 

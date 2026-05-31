@@ -1,27 +1,9 @@
-﻿{
-  "schemaVersion": "2.1",
+{
+  "$kind": "single",
   "dumpPath": "C:/fixtures/RichEvidence.dmp",
+  "schemaVersion": "2.1",
+  "renderMode": "client",
+  "reportStyleVersion": "v1",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
-  "elapsedSeconds": 9.8,
-  "isTrendReport": false,
-  "trendDumpCount": 0,
-  "findings": [
-    {
-      "analyzer": "CrashAnalyzer",
-      "category": "Crash",
-      "severity": "Warning",
-      "title": "Rich evidence sample",
-      "evidence": "Includes multiple evidence and remediation records.\n- Thread: 42\n- Exception: System.NullReferenceException\n- StackTop: Service.ProcessRequest",
-      "recommendation": "Guard null dereferences. Add targeted telemetry around request processing.",
-      "tags": [
-        "rich-evidence"
-      ],
-      "fingerprint": "rich-evidence"
-    }
-  ],
-  "developerActionPlan": [],
-  "confidence": [],
-  "analyzerSections": [],
-  "analyzerRunStatuses": [],
-  "artifacts": []
+  "elapsedSeconds": 9.8
 }

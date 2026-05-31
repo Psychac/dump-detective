@@ -1,45 +1,7 @@
-﻿# DumpDetective Analysis Report
+# DumpDetective Analysis Report
 
 > Dump: `C:/fixtures/MixedSeverity.dmp`  
 > Generated (UTC): `2026-01-01 12:00:00`  
 > Elapsed: `6.6s`
 > Schema: `2.1`
-
- 
-## Table of Contents
-
-### Findings
-
-- [Critical leak](#finding-0)
-- [Warning leak](#finding-1)
-- [Info signal](#finding-2)
-
-## Findings
-
-<a id="finding-0"></a>
-## [Critical] Critical leak
-
-Critical item
-
-**Remediation**
-
-- Handle now
-
-<a id="finding-1"></a>
-## [Warning] Warning leak
-
-Warning item
-
-**Remediation**
-
-- Plan remediation
-
-<a id="finding-2"></a>
-## [Info] Info signal
-
-Informational item
-
-**Remediation**
-
-- Observe
 

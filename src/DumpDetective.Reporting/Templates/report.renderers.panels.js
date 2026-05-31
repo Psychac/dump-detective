@@ -378,7 +378,7 @@ export function buildActionQueuePanel(doc) {
   let ticketMenuIdAssigned = false;
 
   function buildTicketPayload(provider, actionLike, priority) {
-    const incidentTitle = String((doc && doc.dumpPath) || 'DumpDetective incident').replace(/\\/g, '/').split('/').pop();
+    const incidentTitle = String((paths && paths.length ? paths[paths.length - 1] : (doc && doc.dumpPath)) || 'DumpDetective incident').replace(/\\/g, '/').split('/').pop();
     const header = provider === 'ado'
       ? 'Azure DevOps Work Item Draft'
       : provider === 'jira'

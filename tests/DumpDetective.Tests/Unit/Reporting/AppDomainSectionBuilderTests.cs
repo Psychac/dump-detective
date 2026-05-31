@@ -51,9 +51,11 @@ public sealed class AppDomainSectionBuilderTests
 
         AnalyzerDetailSection section = new AppDomainAssemblySectionBuilder().Build(resultSet);
 
-        // Current builder renders the inventory summary for AppDomains.
-        section.Blocks.OfType<HeadingBlock>().Any(h => h.Text.Contains("APPDOMAIN INVENTORY")).Should().BeTrue();
-        section.Blocks.OfType<MetricBlock>().Any(m => m.Label == "Total domains" && (int)m.RawValue == 1).Should().BeTrue();
-        section.Blocks.OfType<TableBlock>().Should().ContainSingle();
+        // Current builder renders the inventory summary for AppDomains as a table.
+        section.Tables.Should().NotBeNull();
+        section.Tables!.Any(t => t.Title != null && t.Title.Contains("AppDomain", StringComparison.OrdinalIgnoreCase)).Should().BeTrue();
+        section.KeyMetrics.Should().NotBeNull();
+        section.KeyMetrics!.Any(m => m.Label == "Total domains" && (int)m.RawValue == 1).Should().BeTrue();
+        section.Tables.Should().ContainSingle();
     }
 }

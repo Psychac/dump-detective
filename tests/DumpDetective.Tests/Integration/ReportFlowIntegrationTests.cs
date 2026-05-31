@@ -165,7 +165,6 @@ public sealed class ReportFlowIntegrationTests
         new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
 
         string output = facade.BuildRenderedTrendReport(
-            dumpPath: "C:/dumps/current.dmp",
             format: ReportFormat.Text,
             audience: ReportAudience.All,
             currentRuns: [currentRun],
@@ -193,7 +192,6 @@ public sealed class ReportFlowIntegrationTests
 
         // Verify HTML format contains perDumpDocuments in the embedded JSON
         string htmlOutput = facade.BuildRenderedTrendReport(
-            dumpPath: "C:/dumps/current.dmp",
             format: ReportFormat.Html,
             audience: ReportAudience.All,
             currentRuns: [currentRun],

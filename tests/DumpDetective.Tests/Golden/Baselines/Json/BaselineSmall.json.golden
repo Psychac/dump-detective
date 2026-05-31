@@ -1,27 +1,9 @@
 {
-  "schemaVersion": "2.1",
+  "$kind": "single",
   "dumpPath": "C:/fixtures/BaselineSmall.dmp",
+  "schemaVersion": "2.1",
+  "renderMode": "client",
+  "reportStyleVersion": "v1",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
-  "elapsedSeconds": 12.3,
-  "isTrendReport": false,
-  "trendDumpCount": 0,
-  "findings": [
-    {
-      "analyzer": "RetentionAnalyzer",
-      "category": "Leak",
-      "severity": "Warning",
-      "title": "Leak pressure",
-      "evidence": "Detected duplicate strings.\n- Analyzer: RetentionAnalyzer\n- Value: System.String duplicated",
-      "recommendation": "Pool repeated string payloads.",
-      "tags": [
-        "baseline-small"
-      ],
-      "fingerprint": "baseline-small"
-    }
-  ],
-  "developerActionPlan": [],
-  "confidence": [],
-  "analyzerSections": [],
-  "analyzerRunStatuses": [],
-  "artifacts": []
+  "elapsedSeconds": 12.3
 }

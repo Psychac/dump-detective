@@ -5,23 +5,3 @@
 > Elapsed: `12.3s`
 > Schema: `2.1`
 
- 
-## Table of Contents
-
-### Findings
-
-- [Leak pressure](#finding-0)
-
-## Findings
-
-<a id="finding-0"></a>
-## [Warning] Leak pressure
-
-Detected duplicate strings.
-- Analyzer: RetentionAnalyzer
-- Value: System.String duplicated
-
-**Remediation**
-
-- Pool repeated string payloads.
-

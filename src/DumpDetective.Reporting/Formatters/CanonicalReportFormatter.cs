@@ -14,6 +14,32 @@ internal interface IReportFormatter
     string Render(AnalysisReportDocument doc);
 }
 
+internal static class ReportFormatterHelpers
+{
+    public static string GetCanonicalDumpPath(AnalysisReportDocument doc)
+    {
+        if (doc is SingleDumpReportDocument single)
+            return single.DumpPath ?? string.Empty;
+
+        if (doc is TrendReportDocument trend)
+        {
+            if (trend.TrendDumpPaths is { Count: > 0 })
+                return trend.TrendDumpPaths[^1] ?? string.Empty;
+            if (trend.PerDumpDocuments is { Count: > 0 })
+            {
+                var last = trend.PerDumpDocuments[^1];
+                if (last is SingleDumpReportDocument sd)
+                    return sd.DumpPath ?? string.Empty;
+            }
+            if (trend.IncidentContext is { } ctx && !string.IsNullOrEmpty(ctx.DumpPath))
+                return ctx.DumpPath;
+            return string.Empty;
+        }
+
+        return string.Empty;
+    }
+}
+
 // ── Text ──────────────────────────────────────────────────────────────────────
 
 internal sealed class TextCanonicalReportFormatter : IReportFormatter
@@ -25,12 +51,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         bool isTrend = doc is TrendReportDocument;
         string title = isTrend ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
         string dumpLabel = isTrend ? "Latest dump" : "Dump";
-        string dumpPath = doc switch
-        {
-            TrendReportDocument trend => trend.DumpPath,
-            SingleDumpReportDocument single => single.DumpPath,
-            _ => string.Empty
-        };
+        string dumpPath = ReportFormatterHelpers.GetCanonicalDumpPath(doc);
 
         var sb = new StringBuilder();
         sb.AppendLine(title);
@@ -315,6 +336,8 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
     }
 
     private static string Indent(int level) => level switch { 1 => "  ", 2 => "    ", >= 3 => "      ", _ => string.Empty };
+
+    
 }
 
 // ── Markdown ──────────────────────────────────────────────────────────────────
@@ -328,12 +351,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         bool isTrend = doc is TrendReportDocument;
         string title = isTrend ? "# DumpDetective Trend Analysis Report" : "# DumpDetective Analysis Report";
         string dumpLabel = isTrend ? "Latest dump" : "Dump";
-        string dumpPath = doc switch
-        {
-            TrendReportDocument trend => trend.DumpPath,
-            SingleDumpReportDocument single => single.DumpPath,
-            _ => string.Empty
-        };
+        string dumpPath = ReportFormatterHelpers.GetCanonicalDumpPath(doc);
 
         var sb = new StringBuilder();
         sb.AppendLine(title);
@@ -752,12 +770,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         bool isTrend = doc is TrendReportDocument;
         string title = isTrend ? "DumpDetective Trend Analysis Report" : "DumpDetective Analysis Report";
         string dumpLabel = isTrend ? "Latest dump" : "Dump";
-        string dumpPath = doc switch
-        {
-            TrendReportDocument trend => trend.DumpPath,
-            SingleDumpReportDocument single => single.DumpPath,
-            _ => string.Empty
-        };
+        string dumpPath = ReportFormatterHelpers.GetCanonicalDumpPath(doc);
         string exportFn = Enc(System.IO.Path.GetFileNameWithoutExtension(dumpPath));
 
         var sb = new StringBuilder();

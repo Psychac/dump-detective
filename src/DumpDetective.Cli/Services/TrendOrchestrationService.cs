@@ -1,18 +1,15 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Dump;
-using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Console;
-    using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Diagnostics;
+using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Output;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Services;
-using DumpDetective.Cli.Models;
-using DumpDetective.Cli.Diagnostics;
-using DumpDetective.Reporting.Models;
-using DumpDetective.Reporting.Trend;
 using DumpDetective.Reporting.Formatters;
-using DumpDetective.Cli.Output;
+using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
+using DumpDetective.Reporting.Trend;
 
 using System.Diagnostics;
 
@@ -127,7 +124,6 @@ internal sealed class TrendOrchestrationService(
 
         IReadOnlyList<AnalyzerRunResult> currentRuns = trendExecutions[^1].Runs;
         AnalysisReportDocument trendDoc = _reportBuilderFacade.BuildTrendReportDocument(
-            trendDumpPaths[^1],
             resolved.Report.Audience,
             currentRuns,
             totalStopwatch.Elapsed,

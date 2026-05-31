@@ -135,7 +135,6 @@ public sealed class ReportDocumentSchemaTests
     {
         TrendReportDocument original = new()
         {
-            DumpPath = "C:/trend.dmp",
             ScoringModelVersion = "v1",
             GeneratedAtUtc = DateTime.UtcNow,
             TrendDumpCount = 3,
@@ -147,7 +146,6 @@ public sealed class ReportDocumentSchemaTests
 
         restored.Should().BeOfType<TrendReportDocument>();
         TrendReportDocument trend = (TrendReportDocument)restored!;
-        trend.DumpPath.Should().Be("C:/trend.dmp");
         trend.ScoringModelVersion.Should().Be("v1");
         trend.TrendDumpCount.Should().Be(3);
         trend.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");

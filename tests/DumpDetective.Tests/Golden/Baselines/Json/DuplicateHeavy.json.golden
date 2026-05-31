@@ -1,27 +1,9 @@
 {
-  "schemaVersion": "2.1",
+  "$kind": "single",
   "dumpPath": "C:/fixtures/DuplicateHeavy.dmp",
+  "schemaVersion": "2.1",
+  "renderMode": "client",
+  "reportStyleVersion": "v1",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
-  "elapsedSeconds": 8.1,
-  "isTrendReport": false,
-  "trendDumpCount": 0,
-  "findings": [
-    {
-      "analyzer": "RetentionAnalyzer",
-      "category": "Leak",
-      "severity": "Critical",
-      "title": "Duplicate-heavy merged section",
-      "evidence": "Merged duplicate leak evidence from multiple analyzers.\n- EvidenceA: A repeated payload instance\n- EvidenceB: Another repeated payload instance",
-      "recommendation": "Deduplicate payload cache keys. Review object retention roots.",
-      "tags": [
-        "dup-heavy"
-      ],
-      "fingerprint": "dup-heavy"
-    }
-  ],
-  "developerActionPlan": [],
-  "confidence": [],
-  "analyzerSections": [],
-  "analyzerRunStatuses": [],
-  "artifacts": []
+  "elapsedSeconds": 8.1
 }

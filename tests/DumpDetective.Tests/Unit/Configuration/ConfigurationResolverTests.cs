@@ -1,5 +1,6 @@
 using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
 using DumpDetective.Core.Configuration;
@@ -179,7 +180,8 @@ public sealed class ConfigurationResolverTests
 
         Action act = () => resolver.Resolve(request);
 
-        act.Should().Throw<FileNotFoundException>()
+        act.Should().Throw<ConfigurationException>()
+            .Where(ex => ex.InnerException is FileNotFoundException)
             .WithMessage("*does-not-exist.json*");
     }
 

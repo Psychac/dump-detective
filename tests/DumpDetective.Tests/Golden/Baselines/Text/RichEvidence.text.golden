@@ -1,20 +1,7 @@
-﻿DumpDetective Analysis Report
+DumpDetective Analysis Report
 ====================================================================================================
 Dump: C:/fixtures/RichEvidence.dmp
 Generated (UTC): 2026-01-01 12:00:00
 Elapsed: 9.8s
 Schema: 2.1
-
-Dedup: merged 0/0 candidate duplicates
-
-FINDINGS
-====================================================================================================
-[Warning] Rich evidence sample (Crash)
-----------------------------------------------------------------------------------------------------
-Includes multiple evidence and remediation records.
-- Thread: 42
-- Exception: System.NullReferenceException
-- StackTop: Service.ProcessRequest
-Remediation:
-  - Guard null dereferences. Add targeted telemetry around request processing.
 

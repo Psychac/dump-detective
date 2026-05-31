@@ -86,7 +86,6 @@ internal sealed record SingleDumpReportDocument : AnalysisReportDocument
 
 internal sealed record TrendReportDocument : AnalysisReportDocument
 {
-    public string DumpPath { get; init; } = "";
     public int TrendDumpCount { get; init; }
     public IReadOnlyList<string> TrendDumpPaths { get; init; } = Array.Empty<string>();
     public int TrendNewFindingCount { get; init; }

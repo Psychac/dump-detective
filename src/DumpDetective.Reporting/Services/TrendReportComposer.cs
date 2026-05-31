@@ -16,7 +16,6 @@ internal sealed class TrendReportComposer(
     private readonly ExecutiveSummaryProjector _executiveSummaryProjector = executiveSummaryProjector ?? new ExecutiveSummaryProjector();
 
     public AnalysisReportDocument ComposeCanonicalTrendReport(
-        string dumpPath,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
         DumpDetective.Core.Models.AnalysisIncidentContext? currentIncidentContext,
@@ -25,6 +24,7 @@ internal sealed class TrendReportComposer(
         TrendReportData trendData,
         ReportAudience audience = ReportAudience.All)
     {
+        string dumpPath = trendData.Snapshots.Count > 0 ? trendData.Snapshots[^1].DumpPath : string.Empty;
         FindingLifecycleResult lifecycle = new(
             trendData.NewFindings,
             trendData.PersistentFindings,
@@ -100,7 +100,6 @@ internal sealed class TrendReportComposer(
         {
             SchemaVersion = baseDoc.SchemaVersion,
             ScoringModelVersion = baseDoc.ScoringModelVersion,
-            DumpPath = dumpPath,
             GeneratedAtUtc = baseDoc.GeneratedAtUtc,
             ElapsedSeconds = baseDoc.ElapsedSeconds,
             TrendDumpCount = trendData.Snapshots.Count,

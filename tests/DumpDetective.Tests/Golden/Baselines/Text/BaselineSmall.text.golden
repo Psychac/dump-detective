@@ -5,15 +5,3 @@ Generated (UTC): 2026-01-01 12:00:00
 Elapsed: 12.3s
 Schema: 2.1
 
-Dedup: merged 0/0 candidate duplicates
-
-FINDINGS
-====================================================================================================
-[Warning] Leak pressure (Leak)
-----------------------------------------------------------------------------------------------------
-Detected duplicate strings.
-- Analyzer: RetentionAnalyzer
-- Value: System.String duplicated
-Remediation:
-  - Pool repeated string payloads.
-

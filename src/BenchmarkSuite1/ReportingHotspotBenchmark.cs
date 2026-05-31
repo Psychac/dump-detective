@@ -62,7 +62,6 @@ public class ReportingHotspotBenchmark
     public int ComposeTrend_ComparisonHeavy()
     {
         AnalysisReportDocument doc = _trendComposer.ComposeCanonicalTrendReport(
-            "C:/benchmarks/trend-heavy.dmp",
             _trendCurrentRuns,
             TimeSpan.FromSeconds(9),
             currentIncidentContext: null,

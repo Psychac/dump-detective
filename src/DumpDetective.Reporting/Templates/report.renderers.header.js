@@ -8,8 +8,6 @@ import { domainAnchorId, findingAnchorId } from './report.renderers.shared.js';
 export function buildHeader(doc) {
   const isTrend = !!(doc.isTrendReport || doc['$kind'] === 'trend');
   const title = isTrend ? 'Trend Analysis' : 'Analysis Report';
-  const rawName = (doc.dumpPath || 'report').replace(/\\/g, '/').split('/').pop() || 'report';
-  const exportName = rawName.replace(/\.[^.]+$/, '') || 'report';
   const ctx = doc.incidentContext || {};
   const execSum = doc.executiveSummary || {};
   const snapshots = Array.isArray(ctx.trendSnapshots) ? ctx.trendSnapshots : [];
@@ -20,6 +18,8 @@ export function buildHeader(doc) {
       : (Array.isArray(doc.perDumpDocs)
         ? doc.perDumpDocs.map(function (d) { return d && d.dumpPath ? d.dumpPath : ''; }).filter(function (p) { return !!p; })
         : []));
+  const rawName = (paths.length ? (paths[paths.length - 1]) : (doc.dumpPath || 'report')).replace(/\\/g, '/').split('/').pop() || 'report';
+  const exportName = rawName.replace(/\.[^.]+$/, '') || 'report';
   const trendDumpCount = doc.trendDumpCount || paths.length || snapshots.length;
 
   const sec = el('section', 'section-card header-card report-header');

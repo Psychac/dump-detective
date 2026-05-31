@@ -261,7 +261,7 @@ public sealed class P0SmokeTests
 
         TrendReportComposer composer = new(new CanonicalReportDocumentFactory(new ReportSerializer()));
         AnalysisReportDocument trendDoc = composer.ComposeCanonicalTrendReport(
-            "C:/dumps/current.dmp", [run], TimeSpan.FromSeconds(2),
+            [run], TimeSpan.FromSeconds(2),
             null, new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
             new DefaultSectionBuilderFactory().CreateReportBuilders(), trendData);
 

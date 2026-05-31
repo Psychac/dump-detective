@@ -1,27 +1,9 @@
-﻿{
-  "schemaVersion": "2.1",
+{
+  "$kind": "single",
   "dumpPath": "C:/fixtures/LongNames.dmp",
+  "schemaVersion": "2.1",
+  "renderMode": "client",
+  "reportStyleVersion": "v1",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
-  "elapsedSeconds": 4.2,
-  "isTrendReport": false,
-  "trendDumpCount": 0,
-  "findings": [
-    {
-      "analyzer": "MemoryAnalyzer",
-      "category": "Memory",
-      "severity": "Warning",
-      "title": "Long member/type names",
-      "evidence": "Long identifiers are preserved end-to-end.\n- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP\n- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN",
-      "recommendation": "Keep full value visibility; do not truncate.",
-      "tags": [
-        "long-names"
-      ],
-      "fingerprint": "long-names"
-    }
-  ],
-  "developerActionPlan": [],
-  "confidence": [],
-  "analyzerSections": [],
-  "analyzerRunStatuses": [],
-  "artifacts": []
+  "elapsedSeconds": 4.2
 }

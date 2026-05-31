@@ -14,85 +14,93 @@ It is designed to:
 
 ---
 
-# 2. 🎯 Design Goals
+## DumpDetective — Architecture (concise)
 
-## Primary Goals
-- Low memory footprint (sub-linear to dump size)
-- High throughput heap scanning
-- On-demand deep analysis
-- Extensible analyzer framework
+Purpose
+- Provide a concise, operational architecture for a high-performance dump analyzer.
 
-## Non-Goals
-- Full in-memory object graph representation
-- Real-time dump analysis
-- GUI-first design (CLI-first)
+Design goals (summary)
+- Scale to very large dumps (1GB–25GB+)
+- Keep runtime memory bounded via disk-backed indices and streaming
+- Keep analyzer contracts small and stable to minimize ripples across projects
+- Make reporting depend on Analysis via stable models (avoid polluting Core)
 
----
+High-level layers
+- CLI: entrypoint, pipeline orchestration, DI registration
+- Analysis: dump loading, heap indexing, analyzers, traversal, cache
+- Reporting: finding generators, printers, report composition
+- Core: small, stable contracts and base domain primitives
 
-# 3. 🧱 System Architecture
+Dependency graph
+Cli -> Analysis, Reporting, Core
+Analysis -> Core
+Reporting -> Analysis, Core
+Core -> ClrMD (runtime dependency)
 
-The system follows a **two-phase architecture**:
+Two-phase execution
+- Phase 1 — Index build: single-pass heap scan; write compact on-disk index (Address|MethodTable|Size)
+- Phase 2 — On-demand analysis: run analyzers against `IHeapAnalysisCache` and `RuntimeFacade`; expensive operations are lazy and bounded
 
+- Key contracts
+- `IDumpLoader` — load dump, resolve DAC, produce `DumpLoadContext`
+- `RuntimeFacade` — safe, cached ClrMD access with `MethodTable->ClrType` cache
+- `IHeapAnalysisCache` (Core) — read-only queries for analyzers (type stats, indexed entries, roots)
+- `IHeapIndexBuilder` (Analysis) — build-time contract: `PrebuildHeapIndex`, progress callbacks
+- `IAnalyzer` (Core) — `Name`, `Category`, `Order`, `IsThreadSafe`, `AnalyzeAsync(context)`
+- `IFindingGenerator` (Reporting) — convert domain results to `InsightFinding`
 
-Phase 1: Streaming Index Build
-↓
-Phase 2: On-Demand Analysis
+- Performance and safety rules (enforced)
+- Stream enumerations; avoid `.ToList()` on heap
+- Avoid LINQ allocations in hot paths; prefer loops and `yield return`
+- Use `ArrayPool` and small readonly structs for hot-paths
+- Cache `ClrType` metadata; prefer `GetTypeByMethodTable` before `GetObject`
 
+Graph and traversal
+- Forward refs computed lazily from object fields
+- Reverse indexes built selectively and disk-backed when needed
+- Root-path BFS: depth limits, visited set, and time budget
 
----
+Reporting and fault handling
+- Finding generator failures are captured on `AnalyzerRunResult.FindingGeneratorError` and surfaced as warnings in console and report
 
-# 4. 🔄 Data Flow
+Extensibility and testing
+- Add analyzers and their models to `DumpDetective.Analysis.Models`; register analyzer, comparer, and generator in DI
+- Keep orchestration small and testable (`AnalyzerFilterService`, `SingleDumpOrchestrationService`)
 
+Operational recommendations
+- Make resource bounds and index-mode selection configurable via `ResolvedExecutionOptions`
+- Prefer `internal` test-only APIs; avoid exposing production surface as public
 
-[Dump File]
-↓
-[DumpLoader]
-↓
-[RuntimeFacade]
-↓
-[HeapStreamer] ───────────────┐
-↓ │
-[TypeIndexBuilder] │
-[ObjectIndexWriter] │
-[SegmentAnalyzer] │
-↓
-[Disk-backed Storage]
+ExecutionPolicy (example)
+The runtime reads an `ExecutionPolicy` / `Indexing` block from config (see `config.sample.json`) to centralize resource bounds and tuning. Current `config.sample.json` exposes keys the CLI reads; example settings:
 
-[Query / Analysis Request]
-↓
-[QueryEngine]
-↓
-[GraphEngine / RootAnalyzer / LeakDetector]
-↓
-[InsightEngine]
-↓
-[Output Layer]
+```json
+"ExecutionPolicy": {
+  "MaxLeakScanObjects": 2000000,
+  "MaxReferenceAddresses": 1000000,
+  "ReferenceChainMaxPathDepth": 25,
+  "ReferenceChainFastModeMaxDepth": 25,
+  "ReferenceChainMaxPathSearchObjects": 5000,
+  "IndexPrebuildMode": "auto"
+}
+```
 
+Place defaults in `config.sample.json` and document any CLI overrides in the CLI help text.
 
----
+Where to look next
+- See `docs/binary-format.md` and `docs/performance-checklist.md` for low-level constraints and tuning guidance.
 
-# 5. 📦 Core Components
-
-## 5.1 Dump Layer
-
-### DumpLoader
-Responsible for:
-- Loading dump files
-- Resolving DAC
-- Initializing ClrMD runtime
-
-### RuntimeFacade
-Wrapper over ClrMD APIs:
-- Abstracts ClrHeap, ClrRuntime, ClrType
-- Provides safe, cached access
-
----
-
-## 5.2 Heap Layer
+## 5.1 Heap Layer
 
 ### HeapStreamer
 - Streams heap objects using `yield return`
 - Produces minimal `HeapEntry` structs
+
+Implementation notes:
+- Phase 1 scanning is parallelized across heap segments (controlled by dump size tier) with per-segment buffers rented from `ArrayPool<T>` to avoid large allocations.
+- Each segment builds a small per-thread `TypeIndexBuilder` which is merged into a global `TypeIndexBuilder` after the parallel loop.
+- Serialization to `ObjectIndex.bin` happens in fixed-size chunks; segment threads serialize into pooled byte buffers and flush under a short write lock to the shared stream.
+- During the scan the indexer also collects satellite candidates (task addresses, event/delegate candidates, LOH free-block candidates, large objects) and a `StringDedup` table via XxHash64 sampling to avoid additional heap passes.
 
 ### HeapEntry
 Minimal representation of an object:
@@ -102,7 +110,7 @@ internal readonly struct HeapEntry
 {
     public readonly ulong Address;
     public readonly ulong MethodTable;
-    public readonly ulong Size;   // 8 bytes — object size can exceed int.MaxValue on large heaps
+    public readonly ulong Size;   // 8 bytes — object size in bytes (uses 64-bit to preserve full size fidelity)
 
     public HeapEntry(ulong address, ulong methodTable, ulong size) { ... }
 }
@@ -124,7 +132,7 @@ internal readonly struct HeapEntry
 
 ---
 
-## 5.3 Storage Layer
+## 5.2 Storage Layer
 
 ### ObjectIndexWriter
 - Writes object metadata to disk
@@ -132,22 +140,51 @@ internal readonly struct HeapEntry
 
 ### ObjectIndexReader
 - Reads object metadata efficiently
-- Supports memory-mapped access
+- Supports sequential `FileStream + ArrayPool<byte>` reads with bounded batches
 
 ### Storage Format
 
-Binary layout per object:
+Binary layout per object (on-disk record):
 
 | Address (8 bytes) | MethodTable (8 bytes) | Size (8 bytes) |
+
+Record size: 24 bytes (no per-record padding required).
+
+Header: ObjectIndex.bin uses a 24-byte header: `Magic(4) | Version(4) | Ticks(8) | RecordCount(8)`.
 
 Characteristics:
 - Append-only
 - Sequential writes
 - Cache-friendly
 
+### Phase 1 — Satellite index files and metadata
+
+During the Phase 1 heap scan the system writes a set of satellite index files into a
+per-dump <dump>.dumpindex/ folder to accelerate Phase 2 analyzers and to avoid
+re-scanning the heap on subsequent runs. These files are produced in disk-backed mode
+and mirrored by in-memory structures when the prebuild mode selects `Memory`.
+
+Canonical files (see `DumpDetective.Analysis.Indexing.DumpIndexPaths`):
+- `ObjectIndex.bin` — main fixed-size object records (Address, MethodTable, Size).
+- `TypeAggregateIndex.bin` — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
+- `StringDedupIndex.bin` (+ `.meta.json`) — XxHash64 -> preview/count/total-size table for string deduplication and sampling.
+- `HandleSnapshot.bin` — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.
+- `RootIndex.bin` — pre-enumerated GC roots (TargetAddr, RootAddr, Kind) consumed by `GCRootAnalyzer`, `FinalizableObjectAnalyzer`, and `StaticRootLeakDetector`.
+- `TaskIndex.bin` — Task / ValueTask candidate addresses used by `AsyncTaskAnalyzer`.
+- `EventCandidateIndex.bin` — delegate/event candidates for `EventLeakAnalyzer`.
+- `LohFreeBlockIndex.bin` — LOH/POH free-block candidates used by `LohFragmentationAnalyzer`.
+- `LargeObjectIndex.bin` — top-large-object list (LOH) used by LOH and array analyzers.
+- `PartialRefEdgeIndex.bin` — optional Phase-1.5 partial reference-edge snapshot (Source, Target) written only when dominated by certain analyzers (e.g. `DominatorAnalyzer`) to bound expensive edge collection.
+
+Consumers and notes:
+- Many analyzers prefer satellite files when present and will fall back to an in-memory scan otherwise (see `HeapIndexBuildResult` fields: `InMemoryEntries`, `InMemoryTaskCandidates`, `InMemoryEventCandidates`, `InMemoryRootCandidates`, etc.).
+- `TypeAggregateIndex.bin` is written last during the build; its presence indicates a successful completed Phase 1 and is used as a cache hit to skip re-scans.
+- Satellite writes are non-fatal: partial failures are surfaced as `SatelliteWarnings` on the `HeapIndexBuildResult` so downstream stages can either degrade gracefully or warn the user.
+
+
 ---
 
-## 5.4 Graph Layer
+## 5.3 Graph Layer
 
 ### ReferenceGraph
 - Provides lazy forward traversal
@@ -166,11 +203,11 @@ Characteristics:
 
 ---
 
-## 5.5 Analysis Layer
+## 5.4 Analysis Layer
 
 ### RetentionAnalyzer (+ StaticRootLeakDetector)
 Together implement the `LeakDetector` role described in guidelines:
-- `RetentionAnalyzer` — finalizer queue, duplicate strings, highly-referenced objects
+- `RetentionAnalyzer` — retained-reference / highly-referenced object analysis
 - `StaticRootLeakDetector` — identifies large object graphs retained by static roots
 - Uses heuristic scoring: retained size, root type, object lifetime
 
@@ -179,8 +216,20 @@ Together implement the `LeakDetector` role described in guidelines:
 - Groups stack traces, detects blocking/wait patterns
 - Reports finalizer thread state
 
+### AllocationPatternAnalyzer
+- Classifies allocation pressure and churn using generation mix and size buckets
+
+### ObjectShapeAnalyzer
+- Profiles field shapes and reference density from Phase 1 type shape data
+
+### GCRootAnalyzer
+- Builds bounded GC root paths and retention summaries from indexed roots
+
 ### GCHandleAnalyzer
 - Analyzes GC handles: Strong, Weak, Pinned, Dependent
+
+### DependentHandleAnalyzer
+- Analyzes ConditionalWeakTable / dependent handle edges
 
 ### CollectionAnalyzer
 - Detects wasteful List/Dictionary/Queue/Stack allocations
@@ -189,20 +238,14 @@ Together implement the `LeakDetector` role described in guidelines:
 ### EventLeakAnalyzer
 - Detects unsubscribed event handler leaks
 
-### LockGraphAnalyzer
-- Identifies potential deadlocks via lock-graph analysis
-
 ### CrashAnalyzer
 - Reports active exceptions and crash-thread candidates
 
+### LockGraphAnalyzer
+- Identifies potential deadlocks via lock-graph analysis
+
 ### HangAnalyzer
 - Detects blocked threads, waiting tasks, and async-over-sync patterns
-
-### ThreadStackClusterAnalyzer
-- Groups threads by stack signature to identify contention hotspots
-
-### DependentHandleAnalyzer
-- Analyzes ConditionalWeakTable / dependent handle edges
 
 ### ModuleAnalyzer
 - Reports loaded modules, version conflicts, and per-module heap footprint
@@ -220,9 +263,39 @@ Together implement the `LeakDetector` role described in guidelines:
 - Classifies all heap segments (SOH / LOH / POH / Frozen)
 - Tracks committed bytes and object count per segment kind
 
+### ThreadStackClusterAnalyzer
+- Groups threads by stack signature to identify contention hotspots
+
+### AsyncTaskAnalyzer
+- Summarizes task states, orphaned continuations, and async chain depth
+
+### AsyncStateMachineAnalyzer
+- Profiles compiler-generated async state machines and captured closures
+
+### BoxingAnalyzer
+- Detects boxed value types and oversized value-type pressure
+
+### FinalizableObjectAnalyzer
+- Profiles finalizable objects, finalizer queue backlog, and thread health
+
+### ArrayAnalyzer
+- Reports array sizes, element distributions, and large-array hotspots
+
+### WeakReferenceAnalyzer
+- Analyzes weak-reference population and stale wrappers
+
+### AppDomainAnalyzer
+- Summarizes appdomains, module distribution, and cross-domain loading
+
+### JitAnalyzer
+- Reports JIT heap usage and active method/native code hotspots
+
+### SegmentReservationAnalyzer
+- Tracks committed vs reserved memory and address-space pressure
+
 ---
 
-## 5.6 Query Layer
+## 5.5 Query Layer
 
 ### QueryEngine
 - Provides structured querying capabilities
@@ -235,7 +308,7 @@ Examples:
 
 ---
 
-## 5.7 Insight Layer
+## 5.6 Insight Layer
 
 ### InsightEngine
 Generates high-level diagnostics:
@@ -245,7 +318,7 @@ Generates high-level diagnostics:
 
 ---
 
-## 5.8 Output Layer
+## 5.7 Output Layer
 
 Supports:
 - CLI output
@@ -261,6 +334,13 @@ Supports:
 - Streaming processing
 - Disk-backed persistence
 - No large allocations
+
+Index storage modes:
+- `HeapIndexPrebuildMode` can be `Auto`, `Memory`, or `Disk` (config/CLI). In `Auto` mode the `HeapAnalysisCache` selects `Disk` for large dumps and `Memory` for small dumps based on dump size tiers.
+- `HeapIndexStorageKind` indicates the actual storage used: `Memory` (in-memory arrays and candidate snapshots) or `Disk` (writes `.dumpindex/` satellite files). Many analyzers switch behavior based on `StorageKind` to prefer fast in-memory access when available.
+
+Sizing notes:
+- The in-repo threshold for choosing disk-backed mode is currently tuned around several GB (see `HeapAnalysisCache`), but the exact value is configurable via CLI/config and may be adjusted by profiling.
 
 ## Phase 2: Analysis
 - Triggered by queries
@@ -398,7 +478,11 @@ One `IPrinter` per analyzer:
 
 ## ReportBuilder / CanonicalReportFormatter
 - Assembles per-analyzer sections into a full structured report
-- Supports both console (rich) and JSON export modes
+- Supports JSON, markdown, and HTML renderers from the same `AnalysisReportDocument` payload
+
+## Trend Report Composer
+- Compares snapshot results across multiple dumps
+- Produces lifecycle/regression summaries and snapshot-aware deltas
 
 ---
 
@@ -434,6 +518,44 @@ After the pipeline, `InsightEngine` runs cross-cutting analysis on the completed
 ## TrendReportComposer (`DumpDetective.Reporting.Services`)
 - Assembles per-finding lifecycle (new / worsened / stable / resolved)
   across trend snapshots into a ranked trend report
+
+---
+
+# 17. 📋 Analyzer Coverage Snapshot
+
+Current analyzer set in the CLI factory:
+- MemoryAnalyzer
+- AllocationPatternAnalyzer
+- GCGenerationAnalyzer
+- ObjectShapeAnalyzer
+- SegmentAnalyzer
+- GCRootAnalyzer
+- RetentionAnalyzer
+- StringAnalyzer
+- StaticRootLeakDetector
+- LohFragmentationAnalyzer
+- ThreadAnalyzer
+- LockGraphAnalyzer
+- HangAnalyzer
+- AsyncTaskAnalyzer
+- ThreadStackClusterAnalyzer
+- GCHandleAnalyzer
+- DependentHandleAnalyzer
+- EventLeakAnalyzer
+- CollectionAnalyzer
+- CrashAnalyzer
+- ModuleAnalyzer
+- ReferenceChainAnalyzer
+- InsightEngine
+- TrendAnalyzer
+- AppDomainAnalyzer
+- JitAnalyzer
+- BoxingAnalyzer
+- FinalizableObjectAnalyzer
+- ArrayAnalyzer
+- AsyncStateMachineAnalyzer
+- WeakReferenceAnalyzer
+- SegmentReservationAnalyzer
 
 ---
 

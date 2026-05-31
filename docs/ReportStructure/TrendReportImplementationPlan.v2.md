@@ -30,6 +30,8 @@ Acceptance:
 - Trend v1 remains unchanged under style v1.
 - Trend v2 can be enabled without changing trend data assembly.
 
+- Status: Completed — trend HTML rendering now emits `ReportStyleVersion = "v2"` and `IsTrendReport` remains the mode switch.
+
 ---
 
 ## Step TV2-2: Add T0b Change Story

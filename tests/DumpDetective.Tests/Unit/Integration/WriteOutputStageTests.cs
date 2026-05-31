@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Cli.Pipeline;
-using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Output;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
 using FluentAssertions;

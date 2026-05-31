@@ -1,4 +1,4 @@
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Diagnostics;
 
 internal sealed class ConfigurationException(string message, Exception? innerException = null) : Exception(message, innerException);
 

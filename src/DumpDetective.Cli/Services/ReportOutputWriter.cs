@@ -1,6 +1,8 @@
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Diagnostics;
 
 using System.Text.Json;
 

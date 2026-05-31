@@ -5,6 +5,10 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Diagnostics;
+using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Models;
 
 namespace DumpDetective.Cli.Services;
 

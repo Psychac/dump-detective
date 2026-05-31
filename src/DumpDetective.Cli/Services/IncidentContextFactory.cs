@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Dump;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
+using DumpDetective.Cli.Models;
 
 namespace DumpDetective.Cli.Services;
 

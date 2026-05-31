@@ -2,6 +2,10 @@ using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Output;
+using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -35,10 +39,10 @@ internal static class ServiceRegistration
         DefaultAnalyzerFeatureModuleCatalog moduleCatalog = new();
         services.AddSingleton<IAnalyzerFeatureModuleCatalog>(moduleCatalog);
 
-        services.AddSingleton<ConfigurationResolver>();
+        services.AddSingleton<DumpDetective.Cli.Configuration.ConfigurationResolver>();
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<IDumpLoader, DumpLoader>();
-        services.AddSingleton<AnalyzerExecutionService>();
+        services.AddSingleton<DumpDetective.Cli.Execution.AnalyzerExecutionService>();
         services.AddSingleton<PerDumpExecutionService>();
         services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();

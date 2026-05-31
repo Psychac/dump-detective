@@ -1,3 +1,4 @@
+using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Services;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;

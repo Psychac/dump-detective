@@ -1,17 +1,20 @@
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Cli.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-internal sealed class RunAnalyzersPipelineStage(AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
+using DumpDetective.Cli.Services;
+
+internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
 {
     public string Name => "Run analyzers";
-    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
+    private readonly DumpDetective.Cli.Execution.AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {

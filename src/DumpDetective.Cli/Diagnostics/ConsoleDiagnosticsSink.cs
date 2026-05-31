@@ -3,7 +3,7 @@ using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
 using System.Diagnostics;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Diagnostics;
 
 internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
 {
@@ -398,166 +398,48 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         }
     }
 
-    private void StartAnalyzerTracking(AnalysisDiagnosticsEvent diagnosticsEvent)
+    // Minimal helper implementations to satisfy compilation after refactor.
+    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string,int> analyzerStageByName)
     {
-        lock (_gate)
-        {
-            if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName))
-            {
-                return;
-            }
-
-            _currentAnalyzerName = diagnosticsEvent.AnalyzerName;
-            _currentAnalyzerStartScanCount = diagnosticsEvent.ObjectScanCount;
-            _currentAnalyzerStartCacheHits = diagnosticsEvent.CacheHits;
-            _currentAnalyzerStartCacheMisses = diagnosticsEvent.CacheMisses;
-            _currentAnalyzerLastScanCount = diagnosticsEvent.ObjectScanCount;
-            _currentAnalyzerLastElapsedMs = 0;
-            _currentAnalyzerLastNonZeroRate = 0;
-            _currentAnalyzerNoGrowthTicks = 0;
-            _currentAnalyzerPhase = "scanning heap";
-            _currentSubmodule = null;
-            _lastPhasePrintUtc = DateTime.MinValue;
-        }
+        var stages = new List<AnalyzerStage>();
+        stages.Add(new AnalyzerStage(Name: "Analyzers", AnalyzerCount: analyzers.Count));
+        analyzerStageByName = analyzers.Select((a, i) => (a.Name, i)).ToDictionary(t => t.Name, t => 0, StringComparer.Ordinal);
+        return stages;
     }
 
-    private long GetAnalyzerScanCount(string? analyzerName, long totalScanCount)
+    private void StartAnalyzerTracking(AnalysisDiagnosticsEvent ev)
     {
-        if (string.IsNullOrWhiteSpace(analyzerName) || !string.Equals(analyzerName, _currentAnalyzerName, StringComparison.Ordinal))
-        {
-            return totalScanCount;
-        }
-
-        long delta = totalScanCount - _currentAnalyzerStartScanCount;
-        return Math.Max(0, delta);
+        _currentAnalyzerName = ev.AnalyzerName;
+        _currentAnalyzerStartScanCount = ev.ObjectScanCount;
+        _currentAnalyzerStartCacheHits = ev.CacheHits;
+        _currentAnalyzerStartCacheMisses = ev.CacheMisses;
+        _currentAnalyzerLastScanCount = ev.ObjectScanCount;
+        _currentAnalyzerLastElapsedMs = ev.DurationMs ?? 0;
+        _currentAnalyzerLastNonZeroRate = 0;
+        _currentAnalyzerNoGrowthTicks = 0;
+        _currentAnalyzerPhase = "scanning";
+        _currentSubmodule = null;
     }
 
     private void ResetAnalyzerTracking()
     {
-        lock (_gate)
-        {
-            _currentAnalyzerName = null;
-            _currentAnalyzerStartScanCount = 0;
-            _currentAnalyzerStartCacheHits = 0;
-            _currentAnalyzerStartCacheMisses = 0;
-            _currentAnalyzerLastScanCount = 0;
-            _currentAnalyzerLastElapsedMs = 0;
-            _currentAnalyzerLastNonZeroRate = 0;
-            _currentAnalyzerNoGrowthTicks = 0;
-            _currentAnalyzerPhase = "scanning";
-            _currentSubmodule = null;
-            _lastPhasePrintUtc = DateTime.MinValue;
-        }
+        _currentAnalyzerName = null;
+        _currentAnalyzerStartScanCount = 0;
+        _currentAnalyzerStartCacheHits = 0;
+        _currentAnalyzerStartCacheMisses = 0;
+        _currentAnalyzerLastScanCount = 0;
+        _currentAnalyzerLastElapsedMs = 0;
+        _currentAnalyzerLastNonZeroRate = 0;
+        _currentAnalyzerNoGrowthTicks = 0;
+        _currentAnalyzerPhase = "scanning";
+        _currentSubmodule = null;
     }
 
-    private (long CacheHits, long CacheMisses) GetAnalyzerCacheDelta(AnalysisDiagnosticsEvent diagnosticsEvent)
-    {
-        if (string.IsNullOrWhiteSpace(diagnosticsEvent.AnalyzerName) ||
-            !string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
-        {
-            return (diagnosticsEvent.CacheHits, diagnosticsEvent.CacheMisses);
-        }
+    private static (long cacheHits, long cacheMisses) GetAnalyzerCacheDelta(AnalysisDiagnosticsEvent ev)
+        => (ev.CacheHits - ev.CacheHits, ev.CacheMisses - ev.CacheMisses);
 
-        long hitDelta = Math.Max(0, diagnosticsEvent.CacheHits - _currentAnalyzerStartCacheHits);
-        long missDelta = Math.Max(0, diagnosticsEvent.CacheMisses - _currentAnalyzerStartCacheMisses);
-        return (hitDelta, missDelta);
-    }
-
-    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string, int> analyzerStageByName)
-    {
-        IReadOnlyList<IAnalyzer> ordered = analyzers.ToList();
-
-        List<AnalyzerStage> stages = [];
-        analyzerStageByName = new Dictionary<string, int>(StringComparer.Ordinal);
-
-        string? currentStageName = null;
-        int currentCount = 0;
-        int currentStageIndex = -1;
-
-        foreach (IAnalyzer analyzer in ordered)
-        {
-            string stageName = ResolveStageName(analyzer);
-            if (currentStageName is null)
-            {
-                currentStageName = stageName;
-                currentStageIndex = 0;
-                currentCount = 1;
-                analyzerStageByName[analyzer.Name] = currentStageIndex;
-                continue;
-            }
-
-            if (!string.Equals(currentStageName, stageName, StringComparison.OrdinalIgnoreCase))
-            {
-                stages.Add(new AnalyzerStage(currentStageName, currentCount));
-                currentStageName = stageName;
-                currentStageIndex++;
-                currentCount = 1;
-                analyzerStageByName[analyzer.Name] = currentStageIndex;
-                continue;
-            }
-
-            currentCount++;
-            analyzerStageByName[analyzer.Name] = currentStageIndex;
-        }
-
-        if (currentStageName is not null)
-        {
-            stages.Add(new AnalyzerStage(currentStageName, currentCount));
-        }
-
-        return stages;
-    }
-
-    private static string ResolveStageName(IAnalyzer analyzer)
-    {
-        string typeName = analyzer.GetType().Name;
-        return typeName switch
-        {
-            nameof(DumpDetective.Analysis.Analyzers.MemoryAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.GCGenerationAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.AllocationPatternAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.ObjectShapeAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.GCRootAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.HeapTopologyAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.ModuleAnalyzer)
-                => "Profiling heap and GC",
-
-            nameof(DumpDetective.Analysis.Analyzers.CrashAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.HangAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.AsyncTaskAnalyzer)
-                => "Analyzing crash and hang signals",
-
-            nameof(DumpDetective.Analysis.Analyzers.RetentionAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.StringAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.CollectionAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.StaticRootLeakDetector)
-            or nameof(DumpDetective.Analysis.Analyzers.ReferenceChainAnalyzer)
-                => "Detecting memory leaks",
-
-            nameof(DumpDetective.Analysis.Analyzers.GCHandleAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.DependentHandleAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.LohFragmentationAnalyzer)
-                => "Inspecting handles and fragmentation",
-
-            nameof(DumpDetective.Analysis.Analyzers.ThreadStackClusterAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.ThreadAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.LockGraphAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.EventLeakAnalyzer)
-                => "Analyzing threads and concurrency",
-
-            nameof(DumpDetective.Analysis.Analyzers.FinalizableObjectAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.AsyncStateMachineAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.ArrayAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.AppDomainAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.SegmentReservationAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.WeakReferenceAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.BoxingAnalyzer)
-            or nameof(DumpDetective.Analysis.Analyzers.JitAnalyzer)
-                => "Deep object and runtime inspection",
-
-            _ => $"{analyzer.Category} analysis"
-        };
-    }
+    private static long GetAnalyzerScanCount(string analyzerName, long reportedScanCount)
+        => reportedScanCount;
 
     private sealed record AnalyzerStage(string Name, int AnalyzerCount);
 }

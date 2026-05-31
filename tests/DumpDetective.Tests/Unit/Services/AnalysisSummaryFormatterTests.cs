@@ -1,4 +1,5 @@
 using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 

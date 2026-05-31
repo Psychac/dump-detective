@@ -1,7 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Cli.Console;
-using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
 using System.Diagnostics;
 

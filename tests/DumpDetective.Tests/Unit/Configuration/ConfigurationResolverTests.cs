@@ -1,5 +1,7 @@
 using DumpDetective.Cli.Commands;
+using DumpDetective.Cli.Configuration;
 using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 

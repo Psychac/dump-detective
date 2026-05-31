@@ -3,6 +3,7 @@ using DumpDetective.Cli.Commands;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Hosting;
 using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Diagnostics;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

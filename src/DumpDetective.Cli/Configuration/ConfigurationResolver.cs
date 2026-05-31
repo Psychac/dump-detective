@@ -2,13 +2,16 @@ using DumpDetective.Cli.Commands;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
+using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Services.Configuration;
 using static DumpDetective.Cli.Services.Configuration.ConfigurationParseHelpers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Configuration;
 
 internal sealed class ConfigurationResolver
 {

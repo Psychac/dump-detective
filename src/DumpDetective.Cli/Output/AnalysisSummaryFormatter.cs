@@ -1,7 +1,8 @@
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Output;
 
 internal static class AnalysisSummaryFormatter
 {

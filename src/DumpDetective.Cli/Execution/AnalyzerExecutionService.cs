@@ -8,8 +8,11 @@ using DumpDetective.Core.Options;
 
 using System.Security.Cryptography;
 using System.Text;
+using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Diagnostics;
+using DumpDetective.Cli.Models;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Execution;
 
 internal sealed class AnalyzerExecutionService(FindingGenerationPipeline findingGenerationPipeline)
 {

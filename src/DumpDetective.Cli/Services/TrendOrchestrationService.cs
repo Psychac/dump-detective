@@ -6,6 +6,8 @@ using DumpDetective.Cli.Console;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Trend;
 using DumpDetective.Reporting.Formatters;

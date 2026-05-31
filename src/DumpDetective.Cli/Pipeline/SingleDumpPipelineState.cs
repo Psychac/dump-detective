@@ -4,11 +4,12 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using System.Diagnostics;
+using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
 
 namespace DumpDetective.Cli.Pipeline;
 
-using DumpDetective.Cli.Services;
-
+ 
 /// <summary>
 /// Mutable state bag that carries data between pipeline stages for a single dump analysis run.
 /// Owns the <see cref="DumpLoadContext"/> and disposes it when the pipeline completes.

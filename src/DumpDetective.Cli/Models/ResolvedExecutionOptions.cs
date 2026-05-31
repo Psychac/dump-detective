@@ -1,7 +1,7 @@
 using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Indexing;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Models;
 
 internal sealed record ResolvedExecutionOptions(
     string DumpPath,

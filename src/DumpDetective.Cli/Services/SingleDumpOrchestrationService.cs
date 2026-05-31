@@ -6,8 +6,10 @@ using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Cli.Models;
 
 using System.Diagnostics;
+using DumpDetective.Cli.Execution;
 
 namespace DumpDetective.Cli.Services;
 
@@ -18,12 +20,12 @@ internal sealed class SingleDumpOrchestrationService(
     ReportBuilderFacade reportBuilderFacade,
     ReportOutputWriter outputWriter,
     IDumpLoader dumpLoader,
-    AnalyzerExecutionService analyzerExecutionService)
+    DumpDetective.Cli.Execution.AnalyzerExecutionService analyzerExecutionService)
 {
     private readonly ReportBuilderFacade _reportBuilderFacade = reportBuilderFacade;
     private readonly ReportOutputWriter _outputWriter = outputWriter;
     private readonly IDumpLoader _dumpLoader = dumpLoader;
-    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
+    private readonly DumpDetective.Cli.Execution.AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";

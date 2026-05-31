@@ -1,7 +1,10 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Cli.Services;
+using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Diagnostics;
 
-namespace DumpDetective.Cli.Services;
+namespace DumpDetective.Cli.Execution;
 
 /// <summary>
 /// Pure static service: validates, filters, and orders the analyzer list.
@@ -9,9 +12,6 @@ namespace DumpDetective.Cli.Services;
 /// </summary>
 internal static class AnalyzerFilterService
 {
-    /// <summary>
-    /// Throws <see cref="ConfigurationException"/> if any include/exclude name does not match a known analyzer.
-    /// </summary>
     public static void Validate(ResolvedExecutionOptions resolved, IReadOnlyList<IAnalyzer> analyzers)
     {
         HashSet<string> known = analyzers.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -31,9 +31,6 @@ internal static class AnalyzerFilterService
         }
     }
 
-    /// <summary>
-    /// Applies include/exclude name filters and returns the surviving analyzers.
-    /// </summary>
     public static IReadOnlyList<IAnalyzer> Apply(ResolvedExecutionOptions resolved, IReadOnlyList<IAnalyzer> analyzers)
     {
         IEnumerable<IAnalyzer> filtered = analyzers;
@@ -53,9 +50,6 @@ internal static class AnalyzerFilterService
         return filtered.ToList();
     }
 
-    /// <summary>
-    /// Orders analyzers by pipeline stage rank, then by <see cref="IAnalyzer.Order"/>, then by name.
-    /// </summary>
     public static IReadOnlyList<IAnalyzer> Order(IReadOnlyList<IAnalyzer> analyzers)
         => analyzers
             .OrderBy(GetStageRank)
@@ -101,7 +95,6 @@ internal static class AnalyzerFilterService
         string typeName = analyzer.GetType().Name;
         return typeName switch
         {
-            // Stage 0 — Profiling heap and GC
             nameof(Analysis.Analyzers.MemoryAnalyzer)
             or nameof(Analysis.Analyzers.GCGenerationAnalyzer)
             or nameof(Analysis.Analyzers.AllocationPatternAnalyzer)
@@ -111,13 +104,11 @@ internal static class AnalyzerFilterService
             or nameof(Analysis.Analyzers.ModuleAnalyzer)
                 => 0,
 
-            // Stage 1 — Analyzing crash and hang signals
             nameof(Analysis.Analyzers.CrashAnalyzer)
             or nameof(Analysis.Analyzers.HangAnalyzer)
             or nameof(Analysis.Analyzers.AsyncTaskAnalyzer)
                 => 1,
 
-            // Stage 2+3 — Detecting memory leaks (both map to the same console stage name so they stay consecutive)
             nameof(Analysis.Analyzers.RetentionAnalyzer)
             or nameof(Analysis.Analyzers.LeakCandidateAnalyzer)
             or nameof(Analysis.Analyzers.CollectionAnalyzer)
@@ -128,21 +119,17 @@ internal static class AnalyzerFilterService
             or nameof(Analysis.Analyzers.ReferenceChainAnalyzer)
                 => 3,
 
-            // Stage 4 — Inspecting handles and fragmentation (ThreadStackClusterAnalyzer runs last in this
-            //            rank but maps to the next console stage, causing a clean break)
             nameof(Analysis.Analyzers.GCHandleAnalyzer)
             or nameof(Analysis.Analyzers.DependentHandleAnalyzer)
             or nameof(Analysis.Analyzers.LohFragmentationAnalyzer)
             or nameof(Analysis.Analyzers.ThreadStackClusterAnalyzer)
                 => 4,
 
-            // Stage 5 — Analyzing threads and concurrency (continues from ThreadStackClusterAnalyzer)
             nameof(Analysis.Analyzers.ThreadAnalyzer)
             or nameof(Analysis.Analyzers.LockGraphAnalyzer)
             or nameof(Analysis.Analyzers.EventLeakAnalyzer)
                 => 5,
 
-            // Stage 6 — Deep object and runtime inspection
             nameof(Analysis.Analyzers.FinalizableObjectAnalyzer)
             or nameof(Analysis.Analyzers.AsyncStateMachineAnalyzer)
             or nameof(Analysis.Analyzers.ArrayAnalyzer)

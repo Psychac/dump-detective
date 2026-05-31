@@ -439,7 +439,8 @@ export function renderTrendDumpGroups(main, sections, perDumpDocs) {
 
     const details = el('details');
     const summaryEl = el('summary');
-    const rawPath = subDoc.dumpPath || '';
+    // Prefer explicit per-doc dumpPath when available; otherwise fall back to a generic label.
+    const rawPath = subDoc && subDoc.dumpPath ? subDoc.dumpPath : '';
     summaryEl.textContent = rawPath ? rawPath.replace(/^.*[\\/]/, '') : ('Dump ' + (dumpIndex + 1));
     details.appendChild(summaryEl);
 

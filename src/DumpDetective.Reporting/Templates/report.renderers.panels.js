@@ -376,6 +376,12 @@ export function buildActionQueuePanel(doc) {
   const topActions = summary && Array.isArray(summary.topActions) ? summary.topActions : [];
   const findings = Array.isArray(doc.findings) ? doc.findings : [];
   let ticketMenuIdAssigned = false;
+  // Derive canonical dump paths for trend reports or per-dump docs.
+  const paths = Array.isArray(doc.trendDumpPaths) && doc.trendDumpPaths.length
+    ? doc.trendDumpPaths
+    : (Array.isArray(doc.perDumpDocs) && doc.perDumpDocs.length
+      ? doc.perDumpDocs.map(d => d && d.dumpPath ? d.dumpPath : '').filter(p => !!p)
+      : []);
 
   function buildTicketPayload(provider, actionLike, priority) {
     const incidentTitle = String((paths && paths.length ? paths[paths.length - 1] : (doc && doc.dumpPath)) || 'DumpDetective incident').replace(/\\/g, '/').split('/').pop();

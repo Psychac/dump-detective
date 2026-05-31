@@ -386,7 +386,10 @@ export function buildTOC(doc, perDumpDocs) {
         const subDoc = perDumpDocs[dumpIndex];
         if (!subDoc) continue;
 
-        const rawPath = subDoc.dumpPath || '';
+        // Derive the display name from explicit per-doc dumpPath when present,
+        // otherwise fall back to a generic label.
+        const rawPath = (Array.isArray(doc.trendDumpPaths) && doc.trendDumpPaths.length && doc.trendDumpPaths[dumpIndex])
+          || subDoc.dumpPath || '';
         const dumpName = rawPath ? rawPath.replace(/^.*[\\/]/, '') : ('Dump ' + (dumpIndex + 1));
         const targetHref = '#dump-detail-' + dumpIndex;
         const det = document.createElement('details');

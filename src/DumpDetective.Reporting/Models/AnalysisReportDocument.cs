@@ -9,6 +9,8 @@ internal enum DomainSeverity { Unknown, OK, Warning, Critical }
 
 internal enum DomainSeverityChange { Stable, Improved, Regressed, NewDomain, Removed }
 
+internal enum DomainConfidenceTrend { Low, Medium, High }
+
 internal sealed record DomainHealthEntry(
     string Domain,
     DomainSeverity Severity,
@@ -28,7 +30,10 @@ internal sealed record DomainHealthEntry(
     DomainSeverityChange? Change = null,
     // Per-snapshot severity across all dumps (index 0 = baseline, last = current).
     // Null in single-dump mode or when only 2 snapshots (baseline/current already cover it).
-    IReadOnlyList<DomainSeverity>? SeverityHistory = null);
+    IReadOnlyList<DomainSeverity>? SeverityHistory = null,
+    double? VelocityScore = null,
+    double? VolatilityScore = null,
+    string? ConfidenceTrend = null);
 
 internal sealed record TrendSummary(
     int DomainsRegressed,

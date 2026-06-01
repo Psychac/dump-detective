@@ -113,18 +113,47 @@ internal static class TrendHealthScorecardBuilder
             int? peakWarnVal = peakWarn == int.MinValue ? null : peakWarn;
             int? peakWarnSnapshot = peakWarnIdx >= 0 ? peakWarnIdx : (int?)null;
 
-            // Build per-snapshot severity history when there are 3+ snapshots
+            // Build per-snapshot severity history; compute velocity/volatility for 2+ snapshots
             IReadOnlyList<DomainSeverity>? history = null;
-            if (hasIntermediates)
+            double? velocityScore = null;
+            double? volatilityScore = null;
+            string? confidenceTrend = null;
+            if (snapshots.Count >= 2)
             {
-                var hist = new DomainSeverity[snapshots.Count];
+                var valsList = new List<double>(snapshots.Count);
                 for (int i = 0; i < snapshots.Count; i++)
                 {
-                    hist[i] = snapshotSeverities[i].TryGetValue(domain, out DomainSeverity s)
-                        ? s
-                        : DomainSeverity.Unknown;
+                    var sev = snapshotSeverities[i].TryGetValue(domain, out DomainSeverity s) ? s : DomainSeverity.Unknown;
+                    if (hasIntermediates)
+                    {
+                        // Only expose full history when there are intermediates
+                        // (3+ snapshots)
+                        // We'll still compute numeric stats for 2 snapshots.
+                        if (history is null) history = new DomainSeverity[snapshots.Count];
+                        ((DomainSeverity[])history)[i] = sev;
+                    }
+                    valsList.Add(sev switch { DomainSeverity.Critical => 2.0, DomainSeverity.Warning => 1.0, _ => 0.0 });
                 }
-                history = hist;
+
+                var vals = valsList.ToArray();
+                if (vals.Length >= 2)
+                {
+                    int len = vals.Length;
+                    double slopeRaw = (vals[^1] - vals[0]) / (len - 1);
+                    velocityScore = Math.Max(-1.0, Math.Min(1.0, slopeRaw / 2.0));
+
+                    double mean = vals.Average();
+                    double sumsq = vals.Select(v => (v - mean) * (v - mean)).Sum();
+                    double stddev = Math.Sqrt(sumsq / vals.Length);
+                    volatilityScore = Math.Min(1.0, stddev / 2.0);
+
+                    if (snapshots.Count >= 5 && volatilityScore < 0.15)
+                        confidenceTrend = "High";
+                    else if (snapshots.Count >= 3 && volatilityScore < 0.35)
+                        confidenceTrend = "Medium";
+                    else
+                        confidenceTrend = "Low";
+                }
             }
 
             var entry = new DomainHealthEntry(
@@ -143,7 +172,10 @@ internal static class TrendHealthScorecardBuilder
                 PeakWarningSnapshotIndex: peakWarnSnapshot,
                 BaselineSeverity: hasBaseline ? baseSev : null,
                 Change:           change,
-                SeverityHistory:  history);
+                SeverityHistory:  history,
+                VelocityScore:    velocityScore,
+                VolatilityScore:  volatilityScore,
+                ConfidenceTrend:  confidenceTrend);
 
             entries.Add(entry);
 

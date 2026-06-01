@@ -118,9 +118,9 @@ internal static class ReportHtmlShared
         if (hasTrendData)
         {
             if (hasHistory)
-                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
             else
-                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
+                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
             foreach (DomainHealthEntry entry in scorecard.Domains)
             {
                 string cur = entry.Severity.ToString();
@@ -141,14 +141,27 @@ internal static class ReportHtmlShared
                 };
                 string sevCss = $"health-severity health-severity-{cur.ToLowerInvariant()}";
 
+                string movementHtml = "";
+                if (entry.VelocityScore is double v)
+                {
+                    string state;
+                    string cls;
+                    if (v > 0.1) { state = "\u25b2\u00a0accel."; cls = "health-domain-move--accelerating"; }
+                    else if (v < -0.1) { state = "\u25bc\u00a0recov."; cls = "health-domain-move--recovering"; }
+                    else { state = "\u2192\u00a0stable"; cls = "health-domain-move--stable"; }
+                    string vol = entry.VolatilityScore is double volv ? volv.ToString("F2") : "\u2014";
+                    string conf = entry.ConfidenceTrend is not null ? $" \u00b7 conf: {entry.ConfidenceTrend}" : "";
+                    movementHtml = $"<span class=\"health-domain-move {cls}\" role=\"status\" aria-label=\"Momentum\" title=\"\u0394v={v:F2} \u00b7 \u03c3={vol}{conf}\">{Enc(state)}</span>";
+                }
+
                 if (hasHistory)
                 {
                     string progression = RenderSeverityProgressionHtml(entry.SeverityHistory);
-                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"health-progression\">{progression}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"health-progression\">{progression}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{movementHtml}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
                 }
                 else
                 {
-                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
+                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{movementHtml}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
                 }
             }
         }

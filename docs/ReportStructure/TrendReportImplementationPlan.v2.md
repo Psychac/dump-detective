@@ -80,6 +80,9 @@ Acceptance:
 
 - Domain rows display both current severity and movement direction.
 
+- Status: In Progress — implementing `VelocityScore`, `VolatilityScore`, and `ConfidenceTrend` and rendering movement chips.
+ - Status: Completed — `VelocityScore`, `VolatilityScore`, and `ConfidenceTrend` implemented; movement chips rendered in T1.
+
 ---
 
 ## Step TV2-4: Regression Classification

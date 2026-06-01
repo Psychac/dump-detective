@@ -440,6 +440,21 @@ body.reading-mode-forensics .incident-ribbon {
 .health-domain-row__change--new,       .health-domain-card__change--new       { background: #dbeafe; color: #1d4ed8; }
 .health-domain-row__change--resolved,  .health-domain-card__change--resolved  { background: #f3f4f6; color: #4b5563; }
 
+/* Movement / velocity pills — match change chip sizing, subtle secondary style */
+.health-domain-move {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+  letter-spacing: 0.01em;
+}
+.health-domain-move--stable       { background: #f3f4f6; color: #6b7280; }
+.health-domain-move--accelerating { background: #fef9c3; color: #854d0e; }
+.health-domain-move--recovering   { background: #eff6ff; color: #1d4ed8; }
+
 /* ΓöÇΓöÇ Trend domain cards ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .health-domain-card {
   display: flex;

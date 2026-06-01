@@ -496,6 +496,21 @@ export function buildHealthScorecard(doc) {
         const chg = el('span', 'health-domain-card__change health-domain-card__change--' + ci.css);
         chg.textContent = ci.label; head.appendChild(chg);
       }
+      // Movement / velocity chip — compact pill matching change chip style
+      if (entry.velocityScore != null) {
+        const v = Number(entry.velocityScore);
+        let label = '\u2192\u00A0stable'; let mod = 'stable';
+        if (v > 0.1) { label = '\u25B2\u00A0accel.'; mod = 'accelerating'; }
+        else if (v < -0.1) { label = '\u25BC\u00A0recov.'; mod = 'recovering'; }
+        const vol = entry.volatilityScore != null ? Number(entry.volatilityScore).toFixed(2) : '\u2014';
+        const conf = entry.confidenceTrend ? (' \u00B7 conf: ' + entry.confidenceTrend) : '';
+        const mv = el('span', 'health-domain-move health-domain-move--' + mod);
+        mv.setAttribute('role', 'status');
+        mv.setAttribute('aria-label', 'Momentum: ' + mod);
+        mv.title = '\u0394v=' + v.toFixed(2) + ' \u00B7 \u03C3=' + vol + conf;
+        mv.textContent = label;
+        head.appendChild(mv);
+      }
       card.appendChild(head);
 
       const hasHistory = Array.isArray(entry.severityHistory) && entry.severityHistory.length > 2;

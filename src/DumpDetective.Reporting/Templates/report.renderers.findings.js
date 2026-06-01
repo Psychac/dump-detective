@@ -32,6 +32,9 @@ export function buildFindingCard(f, i, options) {
   sec.dataset.severity = severity;
   sec.dataset.title = f.title || '';
   sec.dataset.summary = evidenceSummary.substring(0, 200);
+  if (f && f.regressionClass) {
+    sec.dataset.regressionClass = String(f.regressionClass);
+  }
   const header = el('div', 'finding-card__header');
   const eyebrow = el('div', 'finding-card__eyebrow');
   const badge = el('span', 'severity-badge ' + sevCss(f.severity)); badge.textContent = f.severity || 'Info'; eyebrow.appendChild(badge);
@@ -81,6 +84,11 @@ export function buildFindingCard(f, i, options) {
     const chip = el('span', 'finding-chip');
     chip.textContent = 'Analyzer: ' + f.analyzer;
     meta.appendChild(chip);
+  }
+  if (f.regressionClass) {
+    const rc = el('span', 'finding-chip finding-chip--regression');
+    rc.textContent = String(f.regressionClass);
+    meta.appendChild(rc);
   }
   if (promoteTarget) {
     const investigate = document.createElement('a');

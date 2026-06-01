@@ -11,6 +11,32 @@ export function renderBlocks(blocks, container, announce) {
   // Pre-build sparkline registry so __SPARKREF__ table cells can look up inline data
   const sparkRegistry = new Map();
   for (const b of blocks) { if (b && b.type === 'sparkline' && b.metricKey) sparkRegistry.set(b.metricKey, b); }
+
+  // Inject Regression Dashboard filter toolbar for section T3 (if present)
+  try {
+    const sectionEl = container && container.closest ? container.closest('section') : null;
+    if (sectionEl && sectionEl.dataset && sectionEl.dataset.legacySectionId === 'T3' && !sectionEl.querySelector('.t3-regression-filter')) {
+      const bar = el('div', 't3-regression-filter');
+      bar.id = 't3-regression-filter';
+      const btns = [
+        { key: '', label: 'All' },
+        { key: 'NewRisk', label: 'New' },
+        { key: 'AmplifiedRisk', label: 'Amplified' },
+        { key: 'VolatileRisk', label: 'Volatile' }
+      ];
+      for (const b of btns) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn t3-filter-btn';
+        btn.dataset.filter = b.key;
+        btn.textContent = b.label;
+        bar.appendChild(btn);
+      }
+      // Insert toolbar at top of content
+      if (container.firstChild) container.insertBefore(bar, container.firstChild);
+      else container.appendChild(bar);
+    }
+  } catch (e) { /* non-fatal */ }
   for (const block of blocks) {
     const top = stack[stack.length - 1];
     switch (block.type) {

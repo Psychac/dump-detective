@@ -1,5 +1,7 @@
 # Trend Report Implementation Plan v2
 
+Last updated: 2026-06-01 — regression classification and interactive T3 filters implemented; tests pending.
+
 ## Overview
 
 This plan implements the comparative UX and visual upgrades defined in [TrendReportFormat.v2.md](TrendReportFormat.v2.md), while preserving the structural/data contract in [TrendReportFormat.md](TrendReportFormat.md).
@@ -55,6 +57,7 @@ Files to touch:
 Acceptance:
 
 - Reader can identify top change narrative in first screen.
+
 Status: Completed — T0b Change Story implemented and rendered in header.
 
 ---
@@ -80,7 +83,6 @@ Acceptance:
 
 - Domain rows display both current severity and movement direction.
 
-- Status: In Progress — implementing `VelocityScore`, `VolatilityScore`, and `ConfidenceTrend` and rendering movement chips.
  - Status: Completed — `VelocityScore`, `VolatilityScore`, and `ConfidenceTrend` implemented; movement chips rendered in T1.
 
 ---
@@ -103,6 +105,7 @@ Files to touch:
 - regression dashboard UI
 
 Acceptance:
+- Status: Completed — classification persisted to report JSON (`regressionClass`), finding cards render a regression chip, and the T3 dashboard now exposes interactive single-select filters with counts. Unit tests for classification and JSON parity remain to be added.
 
 - Dashboard can isolate each class and counts match source findings.
 

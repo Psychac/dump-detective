@@ -120,6 +120,13 @@ internal sealed record TrendStoryRecord(
     string[] LikelyCouplingHints,
     string[] MetricReferences);
 
+internal enum RegressionClass
+{
+    NewRisk,
+    AmplifiedRisk,
+    VolatileRisk
+}
+
 internal sealed record AnalyzerRunStatusRecord(
     string AnalyzerName,
     string Status,
@@ -165,6 +172,8 @@ internal partial record FindingRecord
     public double? MetricBaseline { get; init; } = null;
     public double? MetricCurrent  { get; init; } = null;
     public string? MetricUnit     { get; init; } = null;
+    // TV2-4: Regression classification persisted on finding records (NewRisk/AmplifiedRisk/VolatileRisk)
+    public string? RegressionClass { get; init; } = null;
 }
 
 internal sealed record EvidenceRef(

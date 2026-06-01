@@ -50,13 +50,71 @@ internal sealed class TrendReportComposer(
 
         ExecutiveSummaryRecord? trendSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience);
 
+        // T9: Map trend findings with MetricBaseline/MetricCurrent populated
+        var trendDeltaLookup = BuildTrendDeltaLookup(trendData.Overall);
+        FindingRecord[] mappedFindings = trendFindings
+            .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, trendDeltaLookup))
+            .ToArray();
+
+        // TV2-4: Classify regression findings (persisted on FindingRecord.RegressionClass)
+        if (trendData.Snapshots.Count >= 1)
+        {
+            var baselineSeverityByFingerprint = trendData.Snapshots[0].Findings
+                .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Severity.ToString(), StringComparer.Ordinal);
+
+            var newFingerprints = new HashSet<string>(trendData.NewFindings.Select(f => f.EffectiveFingerprint), StringComparer.Ordinal);
+
+            for (int i = 0; i < mappedFindings.Length; i++)
+            {
+                FindingRecord rec = mappedFindings[i];
+
+                // Only classify regression-tagged findings
+                if (!rec.Tags.Contains("regression"))
+                    continue;
+
+                string? cls = null;
+
+                if (newFingerprints.Contains(rec.Fingerprint))
+                {
+                    cls = nameof(RegressionClass.NewRisk);
+                }
+                else
+                {
+                    // Amplified if severity increased relative to baseline
+                    if (baselineSeverityByFingerprint.TryGetValue(rec.Fingerprint, out string? baseSevStr))
+                    {
+                        if (SeverityOrdinal(rec.Severity) > SeverityOrdinal(baseSevStr))
+                        {
+                            cls = nameof(RegressionClass.AmplifiedRisk);
+                        }
+                    }
+
+                    // If not classified yet, check metric delta magnitude (20% default threshold)
+                    if (cls is null && rec.MetricBaseline.HasValue && rec.MetricBaseline.GetValueOrDefault() != 0.0)
+                    {
+                        double baseline = rec.MetricBaseline.GetValueOrDefault();
+                        double current = rec.MetricCurrent.GetValueOrDefault();
+                        double pct = Math.Abs((current - baseline) / baseline) * 100.0;
+                        if (pct >= 20.0)
+                            cls = nameof(RegressionClass.AmplifiedRisk);
+                    }
+                }
+
+                if (cls is null)
+                    cls = nameof(RegressionClass.VolatileRisk);
+
+                mappedFindings[i] = rec with { RegressionClass = cls };
+            }
+        }
+
         // T3 — Regression Dashboard (when there is anything to report)
         bool hasEscalations = trendData.Snapshots.Count >= 2 &&
             trendData.Snapshots[0].Findings.Any(f => trendData.Snapshots[^1].Findings
                 .Any(c => c.EffectiveFingerprint == f.EffectiveFingerprint &&
                           f.Severity == FindingSeverity.Warning && c.Severity == FindingSeverity.Critical));
         if (trendData.NewFindings.Count > 0 || hasEscalations || trendData.NewLeakSignalsByAnalyzer.Values.Any(v => v.Count > 0))
-            analyzerSections.Add(TrendRegressionDashboardBuilder.Build(trendData, trendData.Snapshots));
+            analyzerSections.Add(TrendRegressionDashboardBuilder.Build(trendData, trendData.Snapshots, mappedFindings));
 
         // T4 — Metric Timeline
         if (trendData.Timeline.Count > 0)
@@ -79,11 +137,7 @@ internal sealed class TrendReportComposer(
             .Where(static s => !s.SectionId.StartsWith("detail-", StringComparison.Ordinal))
             .ToArray();
 
-        // T9: Map trend findings with MetricBaseline/MetricCurrent populated
-        var trendDeltaLookup = BuildTrendDeltaLookup(trendData.Overall);
-        FindingRecord[] mappedFindings = trendFindings
-            .Select(f => MapTrendFinding(f, trendData.Snapshots.Count - 1, trendDeltaLookup))
-            .ToArray();
+        
 
         if (trendSummary is not null)
         {

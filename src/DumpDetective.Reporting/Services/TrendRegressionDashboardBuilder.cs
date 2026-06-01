@@ -15,12 +15,24 @@ internal static class TrendRegressionDashboardBuilder
 
     public static AnalyzerDetailSection Build(
         TrendReportData trendData,
-        IReadOnlyList<AnalysisSnapshot> snapshots)
+        IReadOnlyList<AnalysisSnapshot> snapshots,
+        IReadOnlyList<FindingRecord>? mappedFindings = null)
     {
         var escalations = BuildSeverityEscalations(snapshots);
         var blocks = new List<SectionBlock>();
 
         blocks.Add(new HeadingBlock("Regression Dashboard"));
+
+        // TV2-4: Show regression classification counts (if mapped findings provided)
+        if (mappedFindings is not null)
+        {
+            int newRisk = mappedFindings.Count(f => string.Equals(f.RegressionClass, nameof(Models.RegressionClass.NewRisk), StringComparison.Ordinal));
+            int amplified = mappedFindings.Count(f => string.Equals(f.RegressionClass, nameof(Models.RegressionClass.AmplifiedRisk), StringComparison.Ordinal));
+            int volatileCount = mappedFindings.Count(f => string.Equals(f.RegressionClass, nameof(Models.RegressionClass.VolatileRisk), StringComparison.Ordinal));
+
+            blocks.Add(new TextBlock($"Regression classes: NewRisk: {newRisk} • AmplifiedRisk: {amplified} • VolatileRisk: {volatileCount}"));
+            blocks.Add(new BlankBlock());
+        }
 
         // ── T3a: Severity Escalations ────────────────────────────────────────
         blocks.Add(new HeadingBlock("Severity Escalations", 1));

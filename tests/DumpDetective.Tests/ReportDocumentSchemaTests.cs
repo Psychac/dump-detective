@@ -138,7 +138,14 @@ public sealed class ReportDocumentSchemaTests
             ScoringModelVersion = "v1",
             GeneratedAtUtc = DateTime.UtcNow,
             TrendDumpCount = 3,
-            TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"]
+            TrendDumpPaths = ["C:/d1.dmp", "C:/d2.dmp", "C:/d3.dmp"],
+            TrendStory = new TrendStoryRecord(
+                Summary: "The first clear regression appears in Dump 2.",
+                FirstMajorRegression: "Dump 2: Memory Analysis · memory.total.bytes.",
+                LargestInflection: "Dump 3 is the largest inflection point.",
+                TopWorseningDomains: ["Memory: 3 regressions"],
+                LikelyCouplingHints: ["Memory and GC move together."],
+                MetricReferences: ["Memory Analysis · memory.total.bytes"])
         };
 
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);
@@ -149,6 +156,8 @@ public sealed class ReportDocumentSchemaTests
         trend.ScoringModelVersion.Should().Be("v1");
         trend.TrendDumpCount.Should().Be(3);
         trend.TrendDumpPaths.Should().HaveCount(3).And.Contain("C:/d2.dmp");
+        trend.TrendStory.Should().NotBeNull();
+        trend.TrendStory!.MetricReferences.Should().Contain("Memory Analysis · memory.total.bytes");
     }
 
     [Fact]

@@ -55,6 +55,7 @@ Files to touch:
 Acceptance:
 
 - Reader can identify top change narrative in first screen.
+Status: Completed — T0b Change Story implemented and rendered in header.
 
 ---
 

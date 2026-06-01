@@ -91,6 +91,7 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     public int TrendNewFindingCount { get; init; }
     public int TrendPersistentFindingCount { get; init; }
     public int TrendResolvedFindingCount { get; init; }
+    public TrendStoryRecord? TrendStory { get; init; } = null;
     /// <summary>
     /// Serialized trend sections (T2–T7) for the JavaScript renderer.
     /// These mirror <see cref="AnalysisReportDocument.AnalyzerSections"/> but are NOT [JsonIgnore],
@@ -105,6 +106,14 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     [JsonIgnore]
     public IReadOnlyList<AnalysisReportDocument> PerDumpDocuments { get; init; } = Array.Empty<AnalysisReportDocument>();
 }
+
+internal sealed record TrendStoryRecord(
+    string Summary,
+    string FirstMajorRegression,
+    string LargestInflection,
+    string[] TopWorseningDomains,
+    string[] LikelyCouplingHints,
+    string[] MetricReferences);
 
 internal sealed record AnalyzerRunStatusRecord(
     string AnalyzerName,

@@ -57,6 +57,47 @@ export function buildHeader(doc) {
   hero.appendChild(heroActions);
   sec.appendChild(hero);
 
+  const trendStory = isTrend ? (doc.trendStory || null) : null;
+  if (isTrend && trendStory) {
+    const storyCard = el('div', 'trend-story-card finding-card finding-card--info');
+    storyCard.setAttribute('data-component-id', 'trend-story');
+
+    const storyHeader = el('div', 'finding-card__header');
+    const storyEyebrow = el('div', 'finding-card__eyebrow');
+    const storyBadge = el('span', 'category');
+    storyBadge.textContent = 'Change story';
+    storyEyebrow.appendChild(storyBadge);
+    storyHeader.appendChild(storyEyebrow);
+
+    const storyTitle = el('div', 'finding-card__title');
+    storyTitle.textContent = 'What changed first';
+    storyHeader.appendChild(storyTitle);
+    storyCard.appendChild(storyHeader);
+
+    const storyBrief = el('div', 'finding-card__brief');
+    function addStoryRow(label, value) {
+      if (!value) return;
+      const row = el('div', 'finding-card__brief-row');
+      const rowLabel = el('span', 'finding-card__brief-label');
+      rowLabel.textContent = label;
+      const rowValue = el('span', 'finding-card__brief-value');
+      rowValue.textContent = value;
+      row.appendChild(rowLabel);
+      row.appendChild(rowValue);
+      storyBrief.appendChild(row);
+    }
+
+    addStoryRow('Summary', storyText(trendStory.summary));
+    addStoryRow('First major regression', trendStory.firstMajorRegression);
+    addStoryRow('Largest inflection', trendStory.largestInflection);
+    addStoryRow('Worsening domains', Array.isArray(trendStory.topWorseningDomains) ? trendStory.topWorseningDomains.join(' · ') : '');
+    addStoryRow('Coupling hints', Array.isArray(trendStory.likelyCouplingHints) ? trendStory.likelyCouplingHints.join(' · ') : '');
+    addStoryRow('Metric references', Array.isArray(trendStory.metricReferences) ? trendStory.metricReferences.join(' · ') : '');
+
+    if (storyBrief.childNodes.length) storyCard.appendChild(storyBrief);
+    sec.appendChild(storyCard);
+  }
+
   const topActions = Array.isArray(execSum.topActions) ? execSum.topActions : [];
   if (topActions.length) {
     const triageRibbon = el('div', 'incident-ribbon');
@@ -90,6 +131,10 @@ export function buildHeader(doc) {
     triageRibbon.appendChild(hint);
 
     sec.appendChild(triageRibbon);
+  }
+
+  function storyText(value) {
+    return value ? String(value) : '';
   }
 
   // ── Body (meta-stat rows) ────────────────────────────────────────────────

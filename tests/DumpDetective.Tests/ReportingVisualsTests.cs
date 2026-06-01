@@ -24,6 +24,9 @@ namespace DumpDetective.Tests
             Assert.True(File.Exists(path), $"Expected header renderer at {path}");
             var content = File.ReadAllText(path);
             Assert.Contains("reading-mode-toggle", content);
+            Assert.Contains("trend-story-card", content);
+            Assert.Contains("What changed first", content);
+            Assert.Contains("header-body", content);
         }
 
         [Fact]

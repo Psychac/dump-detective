@@ -6,6 +6,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(AnalysisReportDocument))]
 [JsonSerializable(typeof(SingleDumpReportDocument))]
 [JsonSerializable(typeof(TrendReportDocument))]
+[JsonSerializable(typeof(TrendStoryRecord))]
 [JsonSerializable(typeof(HealthScorecard))]
 [JsonSerializable(typeof(DomainHealthEntry))]
 [JsonSerializable(typeof(List<DomainHealthEntry>))]

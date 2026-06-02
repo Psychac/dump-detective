@@ -178,6 +178,22 @@ Acceptance:
 - Intermediate snapshots remain visible.
 - Direction and magnitude are both readable in one pass.
 
+Status: Completed — frontend timeline readability upgrades implemented. Changes include
+- delta chip (arrow + percent) rendering in timeline table cells,
+- combined severe-change classification and UI highlight (percent threshold, acceleration+persistence, backend confidence),
+- hidden duplicate small arrow when delta chip present,
+- neutral delta-chip styling with colored left-accent and responsive card sizing for timeline lane,
+- accessibility: keyboard-focusable timeline cards and aria labels.
+
+Files touched (frontend):
+- `src/DumpDetective.Reporting/Templates/report.renderers.blocks.js` (timeline cell rendering, delta chips)
+- `src/DumpDetective.Reporting/Templates/report.renderers.sections.js` (correlation timeline accessibility)
+- `src/DumpDetective.Reporting/Templates/report.detail.css` (delta chip styling, uniform cell visuals)
+- `src/DumpDetective.Reporting/Templates/report.base.css` (timeline card responsive width)
+- `tests/DumpDetective.Tests/ReportingVisualsTests.cs` (added CSS presence assertion)
+
+Notes: Implementation was done frontend-only (per decision). Threshold defaults documented in the session plan and implemented as tunable JS constants. Visual snapshot tests were deferred.
+
 ---
 
 ## Step TV2-8: T6 Snapshot Detail Framing

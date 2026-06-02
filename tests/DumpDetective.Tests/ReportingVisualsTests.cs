@@ -56,6 +56,16 @@ namespace DumpDetective.Tests
         }
 
         [Fact]
+        public void DetailCss_ShouldContainTimelineDeltaChip()
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var path = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates", "report.detail.css"));
+            Assert.True(File.Exists(path), $"Expected detail css at {path}");
+            var content = File.ReadAllText(path);
+            Assert.Contains("timeline-delta-chip", content);
+        }
+
+        [Fact]
         public void UtilitiesCss_ShouldExposeResponsiveStackAndClampStyles()
         {
             var baseDir = AppContext.BaseDirectory;

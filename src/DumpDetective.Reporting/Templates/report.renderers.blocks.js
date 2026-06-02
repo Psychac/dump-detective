@@ -411,7 +411,64 @@ function applyTimelineRowVisualEncoding(tr, totalCells) {
 
     const sig = el('span', `timeline-dump-signal ${signalCls}`);
     sig.textContent = signal;
+    sig.setAttribute('aria-hidden', 'true');
     inner.appendChild(sig);
+
+    // Percent delta chip (arrow + percent) — compute relative to lastValid
+    if (Number.isFinite(value) && lastValid && Number.isFinite(lastValid.value)) {
+      const prev = lastValid.value;
+      const diff = value - prev;
+      let percent = null;
+      const EPS = 1e-6;
+      let smallBaseline = false;
+      if (Math.abs(prev) < EPS) {
+        smallBaseline = true;
+      } else {
+        percent = (diff / Math.abs(prev)) * 100.0;
+      }
+
+      let isSevere = false;
+      // Percent threshold rule
+      if (percent != null && Math.abs(percent) >= 25) isSevere = true;
+
+      // Acceleration + persistence: check previous diff if available
+      if (!isSevere && lastValid.prevDiffPercent != null) {
+        const prevPercent = lastValid.prevDiffPercent;
+        const curPercent = percent != null ? percent : (diff > 0 ? 100 : -100);
+        const accel = Math.abs(curPercent) - Math.abs(prevPercent);
+        const sameDir = Math.sign(curPercent) === Math.sign(prevPercent) && Math.sign(curPercent) !== 0;
+        if (sameDir && accel >= 20) {
+          // require persistence of two consecutive worsening snapshots
+          if (Math.abs(prevPercent) > 0) {
+            isSevere = true;
+          }
+        }
+      }
+
+      // Small-baseline special-case: mark as severe for large absolute diff (show as large)
+      if (!isSevere && smallBaseline && Math.abs(diff) > 0) {
+        isSevere = true;
+      }
+
+      const deltaChip = el('span', 'timeline-delta-chip' + (isSevere ? ' timeline-delta--severe' : '') + (diff > 0 ? ' timeline-delta--up' : ' timeline-delta--down'));
+      if (smallBaseline) {
+        deltaChip.textContent = (diff > 0 ? '↗ ' : '↘ ') + 'large';
+        deltaChip.title = diff > 0 ? 'Large increase (baseline small)' : 'Large decrease (baseline small)';
+        deltaChip.setAttribute('aria-label', diff > 0 ? 'Large increase' : 'Large decrease');
+      } else if (percent != null) {
+        deltaChip.textContent = (diff > 0 ? '↗ ' : (diff < 0 ? '↘ ' : '→ ')) + Math.abs(percent).toFixed(0) + '%';
+        deltaChip.title = (diff > 0 ? 'Increase' : (diff < 0 ? 'Decrease' : 'No change')) + ' ' + Math.abs(percent).toFixed(0) + '% compared to previous dump';
+        deltaChip.setAttribute('aria-label', deltaChip.title);
+      }
+      deltaChip.tabIndex = 0;
+      inner.appendChild(deltaChip);
+
+      // hide the duplicate small arrow signal to keep a single visual marker
+      try { sig.classList.add('timeline-dump-signal--hidden'); } catch (e) { /* best-effort */ }
+
+      // store prevDiffPercent for next iteration
+      lastValid.prevDiffPercent = percent != null ? percent : (diff > 0 ? 100 : -100);
+    }
 
     const valueEl = el('span', isKeyValue ? 'timeline-dump-value timeline-dump-value--key' : 'timeline-dump-value timeline-dump-value--muted');
     valueEl.textContent = originalLabel;

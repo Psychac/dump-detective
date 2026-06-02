@@ -755,6 +755,11 @@ main#main > .trend-dump-group {
   main#main { margin-left: 0; }
 }
 
+/* Narrow screens: tighter timeline event cards */
+@media (max-width: 600px) {
+  .trend-correlation-timeline__lane .timeline-event { width: 150px; }
+}
+
 /* Clean link styles inside TOC */
 .toc { overflow-x: hidden; }
 .toc a { display: block; padding: 6px 8px; color: var(--text); text-decoration: none; border-radius: 6px; white-space: normal; word-break: break-word; }

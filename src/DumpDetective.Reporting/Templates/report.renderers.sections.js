@@ -453,6 +453,10 @@ export function buildCorrelationTimeline(doc) {
     card.setAttribute('role', 'listitem');
     card.dataset.correlationStrength = String(confNum.toFixed(2));
     if (snapshotIdx >= 0) card.dataset.snapshotIndex = String(snapshotIdx);
+    // Make card keyboard-focusable and expose summary for screen readers
+    card.tabIndex = 0;
+    const ariaTitle = (evt.title || 'Correlation') + (snapshotIdx >= 0 ? (' — snapshot ' + snapshotIdx) : '');
+    card.setAttribute('aria-label', ariaTitle);
 
     const titleEl = el('div', 'timeline-event__title');
     if (snapshotIdx >= 0) {

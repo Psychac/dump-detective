@@ -150,7 +150,7 @@ async function bootstrap() {
   const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
   if ((!domains || isTrend) && !hasPreRenderedContent) {
     if (isTrend) {
-      R.renderTrendDumpGroups(main, sections, perDumpDocs);
+      R.renderTrendDumpGroups(main, sections, perDumpDocs, doc);
     } else {
     const chunkSize = 12;
     let index = 0;

@@ -952,13 +952,16 @@ public sealed class ReportingCompositionTests
             CorrelationEvents =
             [
                 new CorrelationEventRecord(
+                    EventId: System.Guid.NewGuid().ToString("D"),
                     EventType: "co-move",
                     Title: "Potential cross-domain coupling on tag 'runtime-coupling'",
                     Rationale: "Signal appears across 2 domains from 2 findings.",
-                    Confidence: "Medium",
+                    Confidence: 0.5,
                     Domains: ["Memory", "Threads"],
+                    SnapshotIndices: System.Array.Empty<int>(),
                     SignalKeys: ["runtime-coupling"],
-                    SourceFingerprints: ["a", "b"])
+                    SourceFingerprints: ["a", "b"],
+                    PrimarySnapshotIndex: null)
             ]
         };
 

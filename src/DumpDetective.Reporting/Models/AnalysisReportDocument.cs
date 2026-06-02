@@ -256,13 +256,16 @@ internal sealed record ActionConfidenceRecord(
     IReadOnlyList<string>? Caveats = null);
 
 internal sealed record CorrelationEventRecord(
+    string EventId,
     string EventType,
     string Title,
     string Rationale,
-    string Confidence,
+    double Confidence,
     IReadOnlyList<string> Domains,
+    IReadOnlyList<int> SnapshotIndices,
     IReadOnlyList<string> SignalKeys,
-    IReadOnlyList<string> SourceFingerprints);
+    IReadOnlyList<string> SourceFingerprints,
+    int? PrimarySnapshotIndex = null);
 
 // P1.2: Scoring models
 internal sealed record ScoreContributor(

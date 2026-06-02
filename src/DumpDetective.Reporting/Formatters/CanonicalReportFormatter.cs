@@ -580,7 +580,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             for (int i = 0; i < correlationEvents.Count && i < 6; i++)
             {
                 CorrelationEventRecord evt = correlationEvents[i];
-                sb.AppendLine($"- **{Esc(evt.Title)}** ({Esc(evt.EventType)}, {Esc(evt.Confidence)})");
+                sb.AppendLine($"- **{Esc(evt.Title)}** ({Esc(evt.EventType)}, {evt.Confidence:0.00})");
                 sb.AppendLine($"  - Rationale: {Esc(evt.Rationale)}");
                 sb.AppendLine($"  - Domains: {Esc(string.Join(", ", evt.Domains))}");
                 sb.AppendLine($"  - Signals: {Esc(string.Join(", ", evt.SignalKeys))}");

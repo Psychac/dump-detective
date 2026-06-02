@@ -563,14 +563,19 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                 continue;
             }
 
+            // Map textual confidence to numeric score
+            double confScore = confidence.Equals("High", StringComparison.OrdinalIgnoreCase) ? 0.9 : 0.7;
             deduped[dedupeKey] = new CorrelationEventRecord(
+                EventId: Guid.NewGuid().ToString("D"),
                 EventType: eventType,
                 Title: title,
                 Rationale: rationale,
-                Confidence: confidence,
+                Confidence: confScore,
                 Domains: orderedDomains,
-                SignalKeys: [tag],
-                SourceFingerprints: orderedFingerprints);
+                SnapshotIndices: Array.Empty<int>(),
+                SignalKeys: new[] { tag },
+                SourceFingerprints: orderedFingerprints,
+                PrimarySnapshotIndex: null);
         }
 
         List<CorrelationEventRecord> events = MergeCorrelationClusters(deduped.Values.ToList());
@@ -582,8 +587,8 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             int typeCmp = typeB.CompareTo(typeA);
             if (typeCmp != 0) return typeCmp;
 
-            int confA = a.Confidence.Equals("High", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
-            int confB = b.Confidence.Equals("High", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+            int confA = a.Confidence >= 0.85 ? 2 : 1;
+            int confB = b.Confidence >= 0.85 ? 2 : 1;
             int confCmp = confB.CompareTo(confA);
             if (confCmp != 0) return confCmp;
 
@@ -724,14 +729,23 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             orderedFingerprints.Length,
             isConflict);
 
+        double confNum = orderedDomains.Length >= 3 ? 0.9 : 0.7;
+        if (a.EventType.Equals("conflict", StringComparison.OrdinalIgnoreCase))
+            confNum = 0.7;
+
+        int? primary = a.PrimarySnapshotIndex ?? b.PrimarySnapshotIndex;
+
         return new CorrelationEventRecord(
+            EventId: Guid.NewGuid().ToString("D"),
             EventType: a.EventType,
             Title: title,
             Rationale: rationale,
-            Confidence: confidence,
+            Confidence: confNum,
             Domains: orderedDomains,
+            SnapshotIndices: Array.Empty<int>(),
             SignalKeys: orderedSignals,
-            SourceFingerprints: orderedFingerprints);
+            SourceFingerprints: orderedFingerprints,
+            PrimarySnapshotIndex: primary);
     }
 
     private static string NormalizeCorrelationTag(string tag)

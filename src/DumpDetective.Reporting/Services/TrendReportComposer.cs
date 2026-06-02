@@ -150,6 +150,9 @@ internal sealed class TrendReportComposer(
             };
         }
 
+        // Build T3b correlation events (heuristic co-occurrence). Cap and ordering per plan.
+        var correlationEvents = CorrelationBuilder.BuildFrom(trendData, cap: 10);
+
         return new TrendReportDocument
         {
             SchemaVersion = baseDoc.SchemaVersion,
@@ -184,6 +187,7 @@ internal sealed class TrendReportComposer(
             AnalyzerSections = analyzerSections,
             TrendAnalyzerSections = trendHtmlSections,
             PerDumpDocuments = perDumpDocuments,
+            CorrelationEvents = correlationEvents,
         };
     }
 

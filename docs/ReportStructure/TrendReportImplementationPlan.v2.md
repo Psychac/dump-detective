@@ -154,6 +154,8 @@ Acceptance:
 
 - Cross-domain events visible without opening snapshot detail.
 
+Status: **Completed** — `CorrelationBuilder` extracts heuristic co-occurrence events from trend data; `TrendRegressionDashboardBuilder` renders T3b "Correlation Timeline" `TableBlock` with snapshot anchor links (`LinkTarget` → `#detail-{idx}`); `buildCorrelationTimeline()` in `report.renderers.sections.js` renders a compact horizontal lane with per-event cards (confidence band, domain chips, snapshot jump link); lane injected into trend mode by `report.main.js` before per-dump detail groups; `CorrelationEvents` emitted in trend JSON from `TrendReportComposer`; header shows top-3 events via existing exec-correlation widget. Unit tests cover heuristics (`CorrelationBuilderTests`, `CorrelationBuilderTimelineTests`).
+
 ---
 
 ## Step TV2-7: T4 Timeline Readability Upgrade

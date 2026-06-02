@@ -133,6 +133,10 @@ internal static class TrendRegressionDashboardBuilder
             blocks.Add(new TextBlock("No new leak signals detected."));
         }
 
+        // T3b Correlation Timeline: replaced by client-side compact timeline renderer
+        // Correlation events are emitted in the trend JSON by TrendReportComposer
+        // and rendered into T3 by the client timeline lane. Server-side table removed to avoid duplication.
+
         return new AnalyzerDetailSection(
             AnalyzerName:  "TrendRegressionDashboard",
             DisplayTitle:  "Regression Dashboard",

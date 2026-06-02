@@ -415,16 +415,118 @@ export function buildAnalyzerSection(section, i) {
   return wrapper;
 }
 
+// ── T3b Correlation Timeline lane ─────────────────────────────────────────────
+
+/**
+ * Builds a compact horizontal timeline lane from doc.correlationEvents.
+ * Each event card displays as a vertical marker positioned on the snapshot axis.
+ * Cards link directly to the primary snapshot detail (#detail-{idx}).
+ * Returns null when there are no events.
+ */
+export function buildCorrelationTimeline(doc) {
+  const events = Array.isArray(doc && doc.correlationEvents) ? doc.correlationEvents : [];
+  if (!events.length) return null;
+
+  const wrapper = el('div', 'trend-correlation-timeline');
+  wrapper.dataset.testid = 'correlation-timeline';
+
+  const heading = el('div', 'trend-correlation-timeline__heading');
+  heading.textContent = 'Correlation Timeline';
+  wrapper.appendChild(heading);
+
+  const desc = el('p', 'trend-correlation-timeline__desc');
+  desc.textContent = 'Cross-domain coupling events detected across snapshots. Cards link to primary snapshot detail.';
+  wrapper.appendChild(desc);
+
+  const lane = el('div', 'trend-correlation-timeline__lane');
+  lane.setAttribute('role', 'list');
+  lane.setAttribute('aria-label', 'Correlation events timeline');
+
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i] || {};
+    const snapshotIdx = evt.primarySnapshotIndex != null ? Number(evt.primarySnapshotIndex) : -1;
+    const domainList = Array.isArray(evt.domains) ? evt.domains : [];
+    const confNum = Number(evt.confidence) || 0;
+    const confBand = confNum >= 0.85 ? 'high' : confNum >= 0.65 ? 'med' : 'low';
+
+    const card = el('article', 'timeline-event timeline-event--' + confBand);
+    card.setAttribute('role', 'listitem');
+    card.dataset.correlationStrength = String(confNum.toFixed(2));
+    if (snapshotIdx >= 0) card.dataset.snapshotIndex = String(snapshotIdx);
+
+    const titleEl = el('div', 'timeline-event__title');
+    if (snapshotIdx >= 0) {
+      const link = document.createElement('a');
+      link.className = 'timeline-event__link';
+      link.href = '#detail-' + snapshotIdx;
+      link.textContent = evt.title || 'Correlation';
+      link.title = 'Jump to snapshot ' + snapshotIdx + ' detail';
+      titleEl.appendChild(link);
+    } else {
+      titleEl.textContent = evt.title || 'Correlation';
+    }
+    card.appendChild(titleEl);
+
+    if (domainList.length) {
+      const domains = el('div', 'timeline-event__domains');
+      for (let d = 0; d < domainList.length; d++) {
+        const chip = el('span', 'timeline-event__domain-chip');
+        chip.textContent = String(domainList[d] || '');
+        domains.appendChild(chip);
+      }
+      card.appendChild(domains);
+    }
+
+    const meta = el('div', 'timeline-event__meta');
+    const confSpan = el('span', 'timeline-event__conf timeline-event__conf--' + confBand);
+    confSpan.textContent = confNum.toFixed(2);
+    confSpan.setAttribute('aria-label', 'Confidence ' + confNum.toFixed(2));
+    meta.appendChild(confSpan);
+    if (snapshotIdx >= 0) {
+      const snapSpan = el('span', 'timeline-event__snap');
+      snapSpan.textContent = '\u00b7 Snap ' + snapshotIdx;
+      meta.appendChild(snapSpan);
+    }
+    card.appendChild(meta);
+
+    if (evt.rationale) {
+      const rationale = el('p', 'timeline-event__rationale');
+      rationale.textContent = evt.rationale;
+      card.appendChild(rationale);
+    }
+
+    lane.appendChild(card);
+  }
+
+  wrapper.appendChild(lane);
+  return wrapper;
+}
+
 // ── Trend per-dump groups ─────────────────────────────────────────────────────
 
-export function renderTrendDumpGroups(main, sections, perDumpDocs) {
+export function renderTrendDumpGroups(main, sections, perDumpDocs, doc) {
   if (!main) return;
   if (!Array.isArray(perDumpDocs)) perDumpDocs = [];
 
   // Render standalone trend sections (T2, T3, T4, T5, T7, etc.)
   if (Array.isArray(sections)) {
     for (let i = 0; i < sections.length; i++) {
-      main.appendChild(buildAnalyzerSection(sections[i], i));
+      const built = buildAnalyzerSection(sections[i], i);
+      main.appendChild(built);
+      // If this is the T3 Regression Dashboard, inject the compact correlation timeline inside it.
+      try {
+        const sec = sections[i] || {};
+        const sid = String(sec.sectionId || '').trim();
+        if ((sid === 'T3' || String((sec.analyzerName || '')).indexOf('TrendRegressionDashboard') >= 0) && typeof buildCorrelationTimeline === 'function') {
+          const lane = buildCorrelationTimeline(doc);
+          if (lane) {
+            // Place timeline inside the section's detail-block when possible.
+            const content = built.querySelector('.detail-block');
+            if (content) content.appendChild(lane);
+            else built.appendChild(lane);
+          }
+        }
+      } catch (e) { /* non-fatal; render without timeline */ }
     }
   }
 

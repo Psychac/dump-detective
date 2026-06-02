@@ -669,53 +669,7 @@ export function buildActionQueuePanel(doc) {
 
     sec.appendChild(lanesHost);
 
-    if (Array.isArray(doc.correlationEvents) && doc.correlationEvents.length) {
-      const sub = document.createElement('h3');
-      sub.className = 'section-subtitle';
-      sub.textContent = 'Cross-Domain Correlation Signals';
-      sec.appendChild(sub);
-
-      const list = el('div', 'correlation-event-list');
-      for (let i = 0; i < doc.correlationEvents.length && i < 4; i++) {
-        const eventRecord = doc.correlationEvents[i] || {};
-        const item = el('article', 'correlation-event-item');
-
-        const title = el('h4', 'correlation-event-title');
-        title.textContent = eventRecord.title || 'Correlation signal';
-        item.appendChild(title);
-
-        const rationale = el('p', 'correlation-event-rationale');
-        rationale.textContent = eventRecord.rationale || '';
-        item.appendChild(rationale);
-
-        const meta = el('p', 'correlation-event-meta');
-        const confidence = eventRecord.confidence || 'Unknown';
-        const domains = Array.isArray(eventRecord.domains) ? eventRecord.domains.join(', ') : 'Unknown';
-        meta.textContent = 'Confidence: ' + confidence + ' | Domains: ' + domains;
-        item.appendChild(meta);
-
-        if (Array.isArray(eventRecord.signalKeys) && eventRecord.signalKeys.length) {
-          const labels = [];
-          const seen = new Set();
-          for (let s = 0; s < eventRecord.signalKeys.length && labels.length < 3; s++) {
-            const label = formatSignalLabel(eventRecord.signalKeys[s]);
-            if (label && !seen.has(label)) {
-              seen.add(label);
-              labels.push(label);
-            }
-          }
-
-          if (labels.length) {
-            const signals = el('p', 'correlation-event-meta');
-            signals.textContent = 'Signals: ' + labels.join(' | ');
-            item.appendChild(signals);
-          }
-        }
-
-        list.appendChild(item);
-      }
-      sec.appendChild(list);
-    }
+    // Correlation events are rendered centrally in the T3 section via the compact timeline lane.
 
     return sec;
   }

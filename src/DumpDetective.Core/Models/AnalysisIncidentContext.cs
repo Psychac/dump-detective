@@ -23,7 +23,6 @@ internal sealed record AnalysisIncidentContext(
     bool IsTrendReport,
     double AnalysisElapsedSeconds,
     IReadOnlyList<TrendSnapshotContext>? TrendSnapshots = null,
-    string? DumpSizeTierLabel = null,
     long? DumpFileSizeBytes = null,
     DateTime? DumpCapturedAtUtc = null);
 

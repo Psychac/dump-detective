@@ -258,13 +258,13 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
     {
         sb.AppendLine("HEALTH SUMMARY");
         sb.AppendLine(StringConstants.Equals80);
-        bool hasTrend   = scorecard.Domains.Any(d => d.Change.HasValue);
-        bool hasHistory = hasTrend && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
+        bool hasTrend   = scorecard.Domains.Values.Any(d => d.Change.HasValue);
+        bool hasHistory = hasTrend && scorecard.Domains.Values.Any(d => d.SeverityHistory is { Count: > 2 });
         if (hasTrend)
         {
             sb.AppendLine("Domain                Baseline    Current     Change       Critical  Warning");
             sb.AppendLine("--------------------   --------    -------     ------       --------  -------");
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
             {
                 string bas = entry.BaselineSeverity?.ToString() ?? "—";
                 string cur = entry.Severity.ToString();
@@ -292,7 +292,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("Domain                Severity    Critical  Warning");
             sb.AppendLine("--------------------   --------    --------  -------");
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
                 sb.AppendLine($"{entry.Domain,-21} {entry.Severity,-10} {entry.CriticalCount,8} {entry.WarningCount,8}");
         }
         sb.AppendLine($"Overall severity: {scorecard.OverallSeverity}");
@@ -468,8 +468,8 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
     {
         sb.AppendLine("## Health Summary");
         sb.AppendLine();
-        bool hasTrend   = scorecard.Domains.Any(d => d.Change.HasValue);
-        bool hasHistory = hasTrend && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
+        bool hasTrend   = scorecard.Domains.Values.Any(d => d.Change.HasValue);
+        bool hasHistory = hasTrend && scorecard.Domains.Values.Any(d => d.SeverityHistory is { Count: > 2 });
         if (hasTrend)
         {
             if (hasHistory)
@@ -482,7 +482,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine("| Domain | Baseline | Current | Change | Critical | Warning |");
                 sb.AppendLine("|---|---|---|---|---|---|");
             }
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
             {
                 string cur = entry.Severity.ToString();
                 string bas = entry.BaselineSeverity?.ToString() ?? "—";
@@ -512,7 +512,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         {
             sb.AppendLine("| Domain | Severity | Critical | Warning |");
             sb.AppendLine("|---|---|---|---|");
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
                 sb.AppendLine($"| {Esc(entry.Domain)} | {entry.Severity} | {entry.CriticalCount} | {entry.WarningCount} |");
         }
         sb.AppendLine();

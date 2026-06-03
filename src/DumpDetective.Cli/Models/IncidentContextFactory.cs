@@ -23,7 +23,6 @@ internal static class IncidentContextFactory
         string? gcMode = GetGcMode(loadContext?.Runtime);
         int? heapCount = GetIntProperty(GetPropertyValue(loadContext?.Runtime, "Heap"), "HeapCount");
 
-        string? dumpSizeTierLabel = null;
         long? dumpFileSizeBytes = null;
         DateTime? dumpCapturedAtUtc = null;
         try
@@ -33,9 +32,6 @@ internal static class IncidentContextFactory
                 var fi = new FileInfo(dumpPath);
                 long bytes = fi.Length;
                 dumpFileSizeBytes = bytes;
-                dumpSizeTierLabel = bytes > 4L * 1024 * 1024 * 1024 ? "Large (> 4 GB)"
-                                  : bytes > 512L * 1024 * 1024     ? "Medium (512 MB \u2013 4 GB)"
-                                  : "Small (< 512 MB)";
                 // Try reading TimeDateStamp from minidump header (offset 20, 4-byte Unix epoch)
                 dumpCapturedAtUtc = TryReadMinidumpTimestamp(dumpPath)
                                  ?? DateTime.SpecifyKind(fi.LastWriteTimeUtc, DateTimeKind.Utc);
@@ -64,7 +60,6 @@ internal static class IncidentContextFactory
             IsTrendReport: string.Equals(mode, "Trend", StringComparison.OrdinalIgnoreCase),
             AnalysisElapsedSeconds: elapsed.TotalSeconds,
             TrendSnapshots: trendSnapshots,
-            DumpSizeTierLabel: dumpSizeTierLabel,
             DumpFileSizeBytes: dumpFileSizeBytes,
             DumpCapturedAtUtc: dumpCapturedAtUtc);
     }

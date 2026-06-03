@@ -10,6 +10,6 @@ internal sealed class JsonCanonicalReportFormatter : IReportFormatter
     public ReportFormat Format => ReportFormat.Json;
 
     public string Render(AnalysisReportDocument doc) =>
-        JsonSerializer.Serialize(doc,
-            new JsonSerializerOptions(ReportJsonContext.Default.Options) { WriteIndented = true });
+        // Rely on canonical model attributes for compact JSON naming.
+        JsonSerializer.Serialize(doc, new JsonSerializerOptions(ReportJsonContext.Default.Options) { WriteIndented = true });
 }

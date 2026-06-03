@@ -1,5 +1,5 @@
 // Chart and sparkline rendering — renderSparklines, renderCharts, SVG chart builders.
-import { el } from './report.dom.js';
+import { el, nvl } from './report.dom.js';
 
 // ── DOM-based sparkline rendering (post-render pass for pre-rendered tables) ──
 
@@ -110,9 +110,9 @@ function palette(i) {
 function normalizeItems(payload) {
   const items = Array.isArray(payload.items) ? payload.items : Array.isArray(payload.segments) ? payload.segments : Array.isArray(payload.steps) ? payload.steps : [];
   return items.map(function (item, index) {
-    const value = Number(item.value ?? item.bytes ?? item.current ?? item.amount ?? 0);
+    const value = Number(nvl(nvl(nvl(nvl(item.value, item.bytes), item.current), item.amount), 0));
     return {
-      label: String(item.label ?? item.name ?? item.title ?? `Item ${index + 1}`),
+      label: String(nvl(nvl(nvl(item.label, item.name), item.title), `Item ${index + 1}`)),
       value: isFinite(value) ? value : 0,
       color: item.color || palette(index)
     };

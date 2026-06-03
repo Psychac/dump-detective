@@ -55,7 +55,7 @@ internal static class HealthScorecardBuilder
         }
 
         // Build per-domain entries in priority order
-        var entries = new List<DomainHealthEntry>(SectionIdDomainMap.DomainsInOrder.Count);
+        var domains = new Dictionary<string, DomainHealthEntry>(StringComparer.Ordinal);
         DomainSeverity overallSeverity = DomainSeverity.Unknown;
 
         foreach (string domain in SectionIdDomainMap.DomainsInOrder)
@@ -67,18 +67,20 @@ internal static class HealthScorecardBuilder
                 ? FindingSeverityToDomain(acc.MaxSeverity, acc.FindingCount)
                 : DomainSeverity.Unknown;
 
-            entries.Add(new DomainHealthEntry(
+            var entry = new DomainHealthEntry(
                 Domain:        domain,
                 Severity:      sev,
                 FindingCount:  acc.FindingCount,
                 CriticalCount: acc.CriticalCount,
-                WarningCount:  acc.WarningCount));
+                WarningCount:  acc.WarningCount);
+
+            domains[domain] = entry;
 
             if (sev > overallSeverity)
                 overallSeverity = sev;
         }
 
-        return new HealthScorecard(entries, overallSeverity);
+        return new HealthScorecard(domains, overallSeverity);
     }
 
     private static DomainSeverity FindingSeverityToDomain(FindingSeverity maxSev, int findingCount)

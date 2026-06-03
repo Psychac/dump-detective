@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Collections.Generic;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Reporting.Models;
@@ -12,27 +13,46 @@ internal enum DomainSeverityChange { Stable, Improved, Regressed, NewDomain, Rem
 internal enum DomainConfidenceTrend { Low, Medium, High }
 
 internal sealed record DomainHealthEntry(
+    [property: System.Text.Json.Serialization.JsonIgnore]
     string Domain,
+    [property: System.Text.Json.Serialization.JsonPropertyName("sev")]
     DomainSeverity Severity,
+    [property: System.Text.Json.Serialization.JsonPropertyName("find")]
     int FindingCount,
+    [property: System.Text.Json.Serialization.JsonPropertyName("crit")]
     int CriticalCount,
+    [property: System.Text.Json.Serialization.JsonPropertyName("warn")]
     int WarningCount,
     // Trend-mode additions (null in single-dump mode):
+    [property: System.Text.Json.Serialization.JsonPropertyName("baseCrit")]
     int? BaselineCriticalCount = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("deltaCrit")]
     int? DeltaCritical = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("baseWarn")]
     int? BaselineWarningCount = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("deltaWarn")]
     int? DeltaWarning = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("peakCrit")]
     int? PeakCriticalCount = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("peakCritIdx")]
     int? PeakCriticalSnapshotIndex = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("peakWarn")]
     int? PeakWarningCount = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("peakWarnIdx")]
     int? PeakWarningSnapshotIndex = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("baseSev")]
     DomainSeverity? BaselineSeverity = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("change")]
     DomainSeverityChange? Change = null,
     // Per-snapshot severity across all dumps (index 0 = baseline, last = current).
     // Null in single-dump mode or when only 2 snapshots (baseline/current already cover it).
+    [property: System.Text.Json.Serialization.JsonPropertyName("hist")]
     IReadOnlyList<DomainSeverity>? SeverityHistory = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("vel")]
     double? VelocityScore = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("vol")]
     double? VolatilityScore = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("conf")]
     string? ConfidenceTrend = null);
 
 internal sealed record TrendSummary(
@@ -48,7 +68,7 @@ internal sealed record TrendSummary(
     int NetWarningChange);
 
 internal sealed record HealthScorecard(
-    IReadOnlyList<DomainHealthEntry> Domains,
+    IReadOnlyDictionary<string, DomainHealthEntry> Domains,
     DomainSeverity OverallSeverity,
     TrendSummary? Trend = null);
 

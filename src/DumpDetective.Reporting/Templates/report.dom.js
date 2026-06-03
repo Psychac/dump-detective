@@ -21,6 +21,8 @@ export function formatBytes(bytes) {
   return (Math.round(v * 100) / 100) + ' ' + units[u];
 }
 
+export function nvl(a, b) { return (a !== undefined && a !== null) ? a : b; }
+
 export function wrapAddresses(container) {
   const addrRe = /0x[0-9A-Fa-f]{6,}/g;
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);

@@ -1,4 +1,5 @@
 import { renderSparklines, renderCharts } from './report.renderers.js';
+import { nvl } from './report.dom.js';
 import { filterTocList } from './report.ui.toc.js';
 import { runRenderIntegrityAudit } from './report.ui.integrity.js';
 
@@ -391,11 +392,13 @@ export function setupInteractivity(doc, announce) {
       critical = Number(trend.netCriticalChange || 0);
       warning = Number(trend.netWarningChange || 0);
     } else {
-      const domains = hs && Array.isArray(hs.domains) ? hs.domains : [];
+      const domains = hs && Array.isArray(hs.domains)
+        ? hs.domains
+        : (hs && hs.domains ? Object.entries(hs.domains).map(function ([k, v]) { return Object.assign({ domain: k }, v || {}); }) : []);
       for (let i = 0; i < domains.length; i++) {
         const d = domains[i] || {};
-        critical += Number(d.criticalCount || 0);
-        warning += Number(d.warningCount || 0);
+        critical += Number(nvl(nvl(d.crit, d.criticalCount), 0));
+        warning += Number(nvl(nvl(d.warn, d.warningCount), 0));
       }
     }
     const actionsNode = document.getElementById('sec-action-queue');

@@ -27,7 +27,7 @@ public sealed class ReportDocumentSchemaTests
             GeneratedAtUtc = new DateTime(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc),
             ElapsedSeconds = 42.5,
             HealthScorecard = new HealthScorecard(
-                Domains: [new DomainHealthEntry("Memory", DomainSeverity.Critical, 1, 1, 0)],
+                Domains: new System.Collections.Generic.Dictionary<string, DomainHealthEntry> { ["Memory"] = new DomainHealthEntry("Memory", DomainSeverity.Critical, 1, 1, 0) },
                 OverallSeverity: DomainSeverity.Critical),
             Domains =
             [

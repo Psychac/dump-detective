@@ -27,7 +27,8 @@ public class TrendVelocityTests
         var scorecard = TrendHealthScorecardBuilder.Build(snapshots);
 
         scorecard.Should().NotBeNull();
-        var memoryEntry = scorecard.Domains.Should().ContainSingle(d => d.Domain == "Memory").Which;
+        scorecard.Domains.Should().ContainKey("Memory");
+        var memoryEntry = scorecard.Domains["Memory"];
         memoryEntry.VelocityScore.Should().HaveValue();
         memoryEntry.VelocityScore!.Value.Should().BeGreaterThan(0);
         memoryEntry.VolatilityScore.Should().HaveValue();
@@ -56,8 +57,8 @@ public class TrendVelocityTests
         var des = JsonSerializer.Deserialize<HealthScorecard>(json, opts);
 
         des.Should().NotBeNull();
-        des!.Domains.Should().ContainSingle(d => d.Domain == "Memory");
-        var mem = des.Domains.First(d => d.Domain == "Memory");
+        des!.Domains.Should().ContainKey("Memory");
+        var mem = des.Domains["Memory"];
         mem.VelocityScore.Should().HaveValue();
         mem.VolatilityScore.Should().HaveValue();
     }

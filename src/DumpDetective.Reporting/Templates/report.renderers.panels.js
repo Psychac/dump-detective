@@ -1,6 +1,6 @@
 // Panels and auxiliary sections: appendix, incident context, dev action plan,
 // action queue, global search bar, and filter bar.
-import { el, t, formatBytes } from './report.dom.js';
+import { el, t, formatBytes, nvl } from './report.dom.js';
 import { findingAnchorId } from './report.renderers.shared.js';
 
 // ── Appendix (analyzer run summary, memory diagnostics, known limitations) ───
@@ -157,7 +157,7 @@ function buildSimpleTable(headers, rows) {
   for (const row of rows) {
     const tr = el('tr');
     for (let ci = 0; ci < row.length; ci++) {
-      tr.appendChild(tdText(String(row[ci] ?? ''), headers[ci] || ('Column ' + (ci + 1))));
+      tr.appendChild(tdText(String(nvl(row[ci], '')), headers[ci] || ('Column ' + (ci + 1))));
     }
     tbody.appendChild(tr);
   }

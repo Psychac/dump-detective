@@ -1,7 +1,7 @@
 // Navigation: domain sections list, cross-domain insights, and table of contents.
 // buildDomains and buildCrossDomainInsights call buildFindingCard (findings.js)
 // and buildAnalyzerSection (sections.js) — resolved via hoisting in the IIFE bundle.
-import { el } from './report.dom.js';
+import { el, nvl } from './report.dom.js';
 import { sortSectionsForRender, buildInsightStats, domainAnchorId, domainSevLabel, slugifyAnchor } from './report.renderers.shared.js';
 
 function normalizeAnalyzerKey(value) {
@@ -69,9 +69,9 @@ export function buildDomains(doc) {
   const sectionTargetMap = buildAnalyzerSectionTargetMap(doc);
 
   function buildDomainHistogram(domain) {
-    const critical = Number(domain.criticalCount || 0);
-    const warning = Number(domain.warningCount || 0);
-    const totalFindings = Number(domain.findingCount || 0);
+    const critical = Number(nvl(nvl(domain.crit, domain.criticalCount), 0));
+    const warning = Number(nvl(nvl(domain.warn, domain.warningCount), 0));
+    const totalFindings = Number(nvl(nvl(domain.find, domain.findingCount), 0));
     const info = Math.max(0, totalFindings - critical - warning);
     const buckets = [
       { cls: 'critical', count: critical },

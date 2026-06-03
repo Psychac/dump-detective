@@ -54,7 +54,7 @@ internal static class TrendHealthScorecardBuilder
             baselineCounts[domain] = (cnt.FindingCount + 1, cnt.CriticalCount + critical, cnt.WarningCount + warning);
         }
 
-        var entries = new List<DomainHealthEntry>(allDomains.Count);
+        var domains = new Dictionary<string, DomainHealthEntry>(StringComparer.Ordinal);
         DomainSeverity overallSeverity = DomainSeverity.Unknown;
 
         // Emit in the canonical domain order, then any remainder
@@ -177,7 +177,7 @@ internal static class TrendHealthScorecardBuilder
                 VolatilityScore:  volatilityScore,
                 ConfidenceTrend:  confidenceTrend);
 
-            entries.Add(entry);
+            domains[domain] = entry;
 
             if (entry.Severity > overallSeverity)
                 overallSeverity = entry.Severity;
@@ -233,7 +233,7 @@ internal static class TrendHealthScorecardBuilder
             ResolvedWarnings: resolvedWarnings,
             NetWarningChange: netWarningChange);
 
-        return new HealthScorecard(entries, overallSeverity, trend);
+        return new HealthScorecard(domains, overallSeverity, trend);
     }
 
     private static Dictionary<string, DomainSeverity> ComputeDomainSeverities(IReadOnlyList<InsightFinding> findings)

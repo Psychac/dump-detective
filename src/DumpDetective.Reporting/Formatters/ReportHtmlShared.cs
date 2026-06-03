@@ -112,8 +112,8 @@ internal static class ReportHtmlShared
 
         var sb = new StringBuilder();
         sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
-        bool hasTrendData = scorecard.Domains.Any(d => d.Change.HasValue);
-        bool hasHistory   = hasTrendData && scorecard.Domains.Any(d => d.SeverityHistory is { Count: > 2 });
+        bool hasTrendData = scorecard.Domains.Values.Any(d => d.Change.HasValue);
+        bool hasHistory   = hasTrendData && scorecard.Domains.Values.Any(d => d.SeverityHistory is { Count: > 2 });
         sb.Append("<table>");
         if (hasTrendData)
         {
@@ -121,7 +121,7 @@ internal static class ReportHtmlShared
                 sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
             else
                 sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
             {
                 string cur = entry.Severity.ToString();
                 string bas = entry.BaselineSeverity?.ToString() ?? "—";
@@ -168,7 +168,7 @@ internal static class ReportHtmlShared
         else
         {
             sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-            foreach (DomainHealthEntry entry in scorecard.Domains)
+            foreach (var entry in scorecard.Domains.Values)
             {
                 string severity = entry.Severity.ToString();
                 string severityCss = $"health-severity health-severity-{severity.ToLowerInvariant()}";

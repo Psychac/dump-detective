@@ -9,7 +9,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(TrendStoryRecord))]
 [JsonSerializable(typeof(HealthScorecard))]
 [JsonSerializable(typeof(DomainHealthEntry))]
-[JsonSerializable(typeof(List<DomainHealthEntry>))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, DomainHealthEntry>))]
 [JsonSerializable(typeof(DomainSeverity))]
 [JsonSerializable(typeof(List<DomainSeverity>))]
 [JsonSerializable(typeof(DomainSeverityChange))]

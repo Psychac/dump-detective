@@ -1,6 +1,6 @@
 // Header, health scorecard, and executive summary renderers.
 // Covers both single-dump and trend modes; the isTrend flag selects the appropriate layout.
-import { el, t, formatBytes } from './report.dom.js';
+import { el, t, formatBytes, nvl } from './report.dom.js';
 import { domainAnchorId, findingAnchorId } from './report.renderers.shared.js';
 
 // ── Report header (hero + meta-stat rows) ────────────────────────────────────
@@ -244,7 +244,7 @@ export function buildHeader(doc) {
     const fsBytes = ctx.dumpFileSizeBytes != null ? Number(ctx.dumpFileSizeBytes) : null;
     if (fsBytes !== null && fsBytes > 0) {
       const sizeBadge = el('span', 'header-path__size');
-      sizeBadge.textContent = formatBytes(fsBytes) + (ctx.dumpSizeTierLabel ? '\u2002\u00B7\u2002' + ctx.dumpSizeTierLabel : '');
+      sizeBadge.textContent = formatBytes(fsBytes);
       meta.appendChild(sizeBadge);
     }
     const capturedAt = fmtDate(ctx.dumpCapturedAtUtc || ctx.generatedAtUtc || doc.generatedAtUtc);
@@ -350,7 +350,11 @@ export function buildHeader(doc) {
 
 export function buildHealthScorecard(doc) {
   const scorecard = doc.healthScorecard;
-  if (!scorecard || !Array.isArray(scorecard.domains) || !scorecard.domains.length) return null;
+  if (!scorecard) return null;
+  const domainsArr = Array.isArray(scorecard.domains)
+    ? scorecard.domains.map(function (d, i) { return d && d.domain ? d : Object.assign({ domain: String(i) }, d || {}); })
+    : (scorecard.domains ? Object.entries(scorecard.domains).map(function ([k, v]) { return Object.assign({ domain: k }, v || {}); }) : []);
+  if (!domainsArr.length) return null;
 
   const domainAnchorMap = new Map();
   if (Array.isArray(doc.domains)) {
@@ -417,8 +421,8 @@ export function buildHealthScorecard(doc) {
     }
     if (bannerRight.childNodes.length > 0) banner.appendChild(bannerRight);
   } else {
-    const totalCrit = scorecard.domains.reduce((s, d) => s + (d.criticalCount || 0), 0);
-    const totalWarn = scorecard.domains.reduce((s, d) => s + (d.warningCount || 0), 0);
+      const totalCrit = domainsArr.reduce((s, d) => s + (Number(nvl(nvl(d.crit, d.criticalCount), 0))), 0);
+      const totalWarn = domainsArr.reduce((s, d) => s + (Number(nvl(nvl(d.warn, d.warningCount), 0))), 0);
     if (totalCrit > 0 || totalWarn > 0) {
       const bannerRight = el('div', 'health-scorecard__banner-right');
       if (totalCrit > 0) {
@@ -443,13 +447,13 @@ export function buildHealthScorecard(doc) {
   grid.setAttribute('role', 'list');
   const domainOrder = ['Leaks', 'Memory', 'GC', 'TypeSystem', 'Threads', 'Async', 'Exceptions', 'Runtime'];
   const domainMap = new Map();
-  for (const entry of scorecard.domains) domainMap.set((entry.domain || '').toLowerCase(), entry);
+  for (const entry of domainsArr) domainMap.set((entry.domain || '').toLowerCase(), entry);
   const ordered = [];
   for (const d of domainOrder) { const e = domainMap.get(d.toLowerCase()); if (e) ordered.push(e); }
   for (const [, e] of domainMap) { if (!domainOrder.map(d => d.toLowerCase()).includes((e.domain || '').toLowerCase())) ordered.push(e); }
 
   // Detect trend mode: any entry has a non-null 'change' field
-  const isTrendScorecard = ordered.some(function (e) { return e.change != null; });
+  const isTrendScorecard = ordered.some(function (e) { return nvl(e.change, e.chg) != null; });
 
   // For trend mode: single legend above grid explaining the timeline bar
   if (isTrendScorecard) {
@@ -480,7 +484,7 @@ export function buildHealthScorecard(doc) {
   }
 
   for (const entry of ordered) {
-    const si = sevInfo(entry.severity);
+  const si = sevInfo(nvl(entry.sev, entry.severity));
 
     if (isTrendScorecard) {
       // ── Trend: vertical card with timeline bar ───────────────────────────
@@ -491,19 +495,19 @@ export function buildHealthScorecard(doc) {
 
       const head = el('div', 'health-domain-card__head');
       const nameEl = el('span', 'health-domain-card__name'); nameEl.textContent = entry.domain || ''; head.appendChild(nameEl);
-      if (entry.change != null) {
-        const ci = changeInfo(entry.change);
+      if (nvl(entry.change, entry.chg) != null) {
+        const ci = changeInfo(nvl(entry.change, entry.chg));
         const chg = el('span', 'health-domain-card__change health-domain-card__change--' + ci.css);
         chg.textContent = ci.label; head.appendChild(chg);
       }
       // Movement / velocity chip — compact pill matching change chip style
-      if (entry.velocityScore != null) {
-        const v = Number(entry.velocityScore);
+      if (nvl(entry.vel, entry.velocityScore) != null) {
+        const v = Number(nvl(entry.vel, entry.velocityScore));
         let label = '\u2192\u00A0stable'; let mod = 'stable';
         if (v > 0.1) { label = '\u25B2\u00A0accel.'; mod = 'accelerating'; }
         else if (v < -0.1) { label = '\u25BC\u00A0recov.'; mod = 'recovering'; }
-        const vol = entry.volatilityScore != null ? Number(entry.volatilityScore).toFixed(2) : '\u2014';
-        const conf = entry.confidenceTrend ? (' \u00B7 conf: ' + entry.confidenceTrend) : '';
+        const vol = nvl(entry.vol, entry.volatilityScore) != null ? Number(nvl(entry.vol, entry.volatilityScore)).toFixed(2) : '\u2014';
+        const conf = nvl(entry.conf, entry.confidenceTrend) ? (' \u00B7 conf: ' + nvl(entry.conf, entry.confidenceTrend)) : '';
         const mv = el('span', 'health-domain-move health-domain-move--' + mod);
         mv.setAttribute('role', 'status');
         mv.setAttribute('aria-label', 'Momentum: ' + mod);
@@ -513,28 +517,29 @@ export function buildHealthScorecard(doc) {
       }
       card.appendChild(head);
 
-      const hasHistory = Array.isArray(entry.severityHistory) && entry.severityHistory.length > 2;
+      const histArr = nvl(entry.hist, entry.severityHistory) || [];
+      const hasHistory = Array.isArray(histArr) && histArr.length > 2;
       if (hasHistory) {
         const wrap = el('div', 'health-domain-card__timeline-wrap');
         const bar = el('div', 'health-domain-card__timeline');
-        for (let i = 0; i < entry.severityHistory.length; i++) {
-          const hsi = sevInfo(entry.severityHistory[i]);
+        for (let i = 0; i < histArr.length; i++) {
+          const hsi = sevInfo(histArr[i]);
           const seg = el('span', 'health-timeline-seg health-timeline-seg--' + hsi.css);
-          const role = i === 0 ? 'Baseline' : i === entry.severityHistory.length - 1 ? 'Current' : 'Dump';
+          const role = i === 0 ? 'Baseline' : i === histArr.length - 1 ? 'Current' : 'Dump';
           seg.title = role + ' #' + (i + 1) + ' \u2014 ' + hsi.label;
           bar.appendChild(seg);
         }
         wrap.appendChild(bar);
         const indices = el('div', 'health-domain-card__timeline-indices');
-        for (let i = 0; i < entry.severityHistory.length; i++) {
+        for (let i = 0; i < histArr.length; i++) {
           const idx = el('span', 'health-timeline-idx' + (i === 0 ? ' health-timeline-idx--first' : ''));
           idx.textContent = i === 0 ? 'Base' : 'D' + (i + 1);
           indices.appendChild(idx);
         }
         wrap.appendChild(indices);
         card.appendChild(wrap);
-      } else if (entry.baselineSeverity != null) {
-        const baseSi = sevInfo(entry.baselineSeverity);
+      } else if (nvl(entry.baseSev, entry.baselineSeverity) != null) {
+        const baseSi = sevInfo(nvl(entry.baseSev, entry.baselineSeverity));
         const transition = el('div', 'health-domain-card__transition');
         const baseSpan = el('span', 'health-domain-card__trans-sev health-domain-card__trans-sev--' + baseSi.css);
         baseSpan.textContent = baseSi.label; baseSpan.title = 'Baseline'; transition.appendChild(baseSpan);
@@ -549,25 +554,25 @@ export function buildHealthScorecard(doc) {
       curPill.textContent = si.dot + '\u2002' + si.label; foot.appendChild(curPill);
       // In trend mode we omit raw per-domain absolute counts here; show delta chips when available.
       const deltaWrap = el('span', 'health-domain-deltas');
-      if (typeof entry.deltaCritical === 'number' && entry.deltaCritical !== 0) {
-        const d = Number(entry.deltaCritical);
+      if (typeof nvl(entry.deltaCrit, entry.deltaCritical) === 'number' && nvl(entry.deltaCrit, entry.deltaCritical) !== 0) {
+        const d = Number(nvl(entry.deltaCrit, entry.deltaCritical));
         const chip = el('span', 'delta-chip delta-chip--crit ' + (d > 0 ? 'delta-chip--up' : 'delta-chip--down'));
         chip.textContent = (d > 0 ? '+' : '') + String(d) + '\u00A0crit';
-        let title = 'Criticals: ' + (entry.baselineCriticalCount ?? 0) + ' → ' + (entry.criticalCount ?? 0) + ' (' + (d > 0 ? '+' : '') + d + ')';
-        if (entry.peakCriticalCount != null && entry.peakCriticalSnapshotIndex != null && entry.peakCriticalCount > Math.max(entry.baselineCriticalCount || 0, entry.criticalCount || 0)) {
-          title += ' — peak ' + entry.peakCriticalCount + ' at D' + (entry.peakCriticalSnapshotIndex + 1);
+        let title = 'Criticals: ' + nvl(nvl(entry.baseCrit, entry.baselineCriticalCount), 0) + ' → ' + nvl(nvl(entry.crit, entry.criticalCount), 0) + ' (' + (d > 0 ? '+' : '') + d + ')';
+        if (nvl(entry.peakCrit, entry.peakCriticalCount) != null && nvl(entry.peakCritIdx, entry.peakCriticalSnapshotIndex) != null && nvl(entry.peakCrit, entry.peakCriticalCount) > Math.max(nvl(entry.baseCrit, entry.baselineCriticalCount) || 0, nvl(entry.crit, entry.criticalCount) || 0)) {
+          title += ' — peak ' + nvl(entry.peakCrit, entry.peakCriticalCount) + ' at D' + ((nvl(entry.peakCritIdx, entry.peakCriticalSnapshotIndex) + 1));
         }
         chip.title = title;
         chip.setAttribute('aria-label', (d > 0 ? 'Criticals increased by ' : 'Criticals decreased by ') + Math.abs(d));
         deltaWrap.appendChild(chip);
       }
-      if (typeof entry.deltaWarning === 'number' && entry.deltaWarning !== 0) {
-        const w = Number(entry.deltaWarning);
+      if (typeof nvl(entry.deltaWarn, entry.deltaWarning) === 'number' && nvl(entry.deltaWarn, entry.deltaWarning) !== 0) {
+        const w = Number(nvl(entry.deltaWarn, entry.deltaWarning));
         const chip = el('span', 'delta-chip delta-chip--warn ' + (w > 0 ? 'delta-chip--up' : 'delta-chip--down'));
         chip.textContent = (w > 0 ? '+' : '') + String(w) + '\u00A0warn';
-        let title = 'Warnings: ' + (entry.baselineWarningCount ?? 0) + ' → ' + (entry.warningCount ?? 0) + ' (' + (w > 0 ? '+' : '') + w + ')';
-        if (entry.peakWarningCount != null && entry.peakWarningSnapshotIndex != null && entry.peakWarningCount > Math.max(entry.baselineWarningCount || 0, entry.warningCount || 0)) {
-          title += ' — peak ' + entry.peakWarningCount + ' at D' + (entry.peakWarningSnapshotIndex + 1);
+        let title = 'Warnings: ' + nvl(nvl(entry.baseWarn, entry.baselineWarningCount), 0) + ' → ' + nvl(nvl(entry.warn, entry.warningCount), 0) + ' (' + (w > 0 ? '+' : '') + w + ')';
+        if (nvl(entry.peakWarn, entry.peakWarningCount) != null && nvl(entry.peakWarnIdx, entry.peakWarningSnapshotIndex) != null && nvl(entry.peakWarn, entry.peakWarningCount) > Math.max(nvl(entry.baseWarn, entry.baselineWarningCount) || 0, nvl(entry.warn, entry.warningCount) || 0)) {
+          title += ' — peak ' + nvl(entry.peakWarn, entry.peakWarningCount) + ' at D' + ((nvl(entry.peakWarnIdx, entry.peakWarningSnapshotIndex) + 1));
         }
         chip.title = title;
         chip.setAttribute('aria-label', (w > 0 ? 'Warnings increased by ' : 'Warnings decreased by ') + Math.abs(w));
@@ -586,7 +591,7 @@ export function buildHealthScorecard(doc) {
       const name = el('span', 'health-domain-row__name'); name.textContent = entry.domain || ''; row.appendChild(name);
       const pill = el('span', 'health-domain-row__pill health-domain-row__pill--' + si.css);
       pill.textContent = si.dot + '\u2002' + si.label; row.appendChild(pill);
-      const crit = entry.criticalCount || 0; const warn = entry.warningCount || 0;
+      const crit = Number(nvl(nvl(entry.crit, entry.criticalCount), 0)); const warn = Number(nvl(nvl(entry.warn, entry.warningCount), 0));
       if (crit > 0 || warn > 0) {
         const counts = el('span', 'health-domain-row__counts');
         const parts = [];

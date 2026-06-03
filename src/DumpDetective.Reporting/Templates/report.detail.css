@@ -391,6 +391,19 @@ body.reading-mode-forensics .detail-value {
   border: 1px solid var(--border-subtle, #e6eef6);
 }
 
+/* Focus styles for keyboard users on timeline events and delta chips */
+.timeline-event:focus-visible {
+  outline: 2px solid var(--focus, #2563eb);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.detail-table--timeline .timeline-delta-chip:focus-visible {
+  outline: 2px solid var(--focus, #2563eb);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+}
+
 .detail-table--timeline .timeline-delta-chip::before {
   /* left accent bar for quick scan */
   content: '';

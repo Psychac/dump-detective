@@ -228,6 +228,8 @@ Acceptance:
 - Trend direction remains understandable in non-color mode.
 - Timeline navigation is keyboard accessible.
 
+Status: Completed — keyboard navigation for timeline/correlation events implemented; delta chips and confidence badges annotated with ARIA/roles; reduced-motion honored via `prefers-reduced-motion` and a small user toggle; focus styles added.
+
 ---
 
 ## Step TV2-10: Trend-Specific Test Pack

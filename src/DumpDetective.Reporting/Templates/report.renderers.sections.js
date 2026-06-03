@@ -502,6 +502,47 @@ export function buildCorrelationTimeline(doc) {
     lane.appendChild(card);
   }
 
+  // Add keyboard navigation for the lane: ArrowLeft/ArrowRight/Home/End and Enter/Space to activate
+  try {
+    lane.addEventListener('keydown', function (ev) {
+      const key = ev.key;
+      if (!key) return;
+      const cards = Array.from(lane.querySelectorAll('.timeline-event'));
+      if (!cards.length) return;
+      const active = document.activeElement;
+      const idx = cards.indexOf(active instanceof Element ? active : null);
+      if (key === 'ArrowRight') {
+        ev.preventDefault();
+        const next = (idx >= 0 && idx < cards.length - 1) ? cards[idx + 1] : cards[0];
+        try { next.focus(); } catch (e) { }
+        return;
+      }
+      if (key === 'ArrowLeft') {
+        ev.preventDefault();
+        const prev = (idx > 0) ? cards[idx - 1] : cards[cards.length - 1];
+        try { prev.focus(); } catch (e) { }
+        return;
+      }
+      if (key === 'Home') {
+        ev.preventDefault();
+        try { cards[0].focus(); } catch (e) { }
+        return;
+      }
+      if (key === 'End') {
+        ev.preventDefault();
+        try { cards[cards.length - 1].focus(); } catch (e) { }
+        return;
+      }
+      if (key === 'Enter' || key === ' ') {
+        // Activate link inside the focused event if present
+        if (active && active.classList && active.classList.contains('timeline-event')) {
+          const a = active.querySelector && active.querySelector('a');
+          if (a) { ev.preventDefault(); try { a.click(); } catch (e) { } }
+        }
+      }
+    });
+  } catch (e) { /* non-fatal */ }
+
   wrapper.appendChild(lane);
   return wrapper;
 }

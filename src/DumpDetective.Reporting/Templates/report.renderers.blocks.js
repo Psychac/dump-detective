@@ -461,6 +461,8 @@ function applyTimelineRowVisualEncoding(tr, totalCells) {
         deltaChip.setAttribute('aria-label', deltaChip.title);
       }
       deltaChip.tabIndex = 0;
+      // semantic role for assistive tech: present as an image/status
+      try { deltaChip.setAttribute('role', 'img'); } catch (e) { }
       inner.appendChild(deltaChip);
 
       // hide the duplicate small arrow signal to keep a single visual marker

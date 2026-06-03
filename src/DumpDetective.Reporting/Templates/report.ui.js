@@ -58,6 +58,19 @@ export function buildSidebar(tocNode, doc) {
 export function setupInteractivity(doc, announce) {
   const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
   const isV2 = styleVersion.startsWith('v2');
+  // Motion preference helper: combine system preference + optional user toggle
+  const _prefersReduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || false;
+  function _loadMotionPreference() {
+    try {
+      const stored = localStorage.getItem('dumpdetective:motion');
+      if (stored === 'on') return true;
+      if (stored === 'off') return false;
+    } catch (e) { }
+    return !_prefersReduced;
+  }
+  let __canMotion = _loadMotionPreference();
+  // expose for other modules to query at runtime
+  try { window.__DUMPDETECTIVE_CAN_MOTION__ = __canMotion; } catch (e) { }
   const READING_MODE_KEY = 'dumpdetective:reading-mode';
   let activeReadingMode = 'incident';
   let forensicsLockOpen = false;
@@ -315,11 +328,55 @@ export function setupInteractivity(doc, announce) {
 
   if (isV2) {
     const staggerTargets = Array.from(document.querySelectorAll('#sec-header, #sec-health, #sec-exec, #sec-action-queue'));
-    for (let i = 0; i < staggerTargets.length; i++) {
-      const node = staggerTargets[i];
-      node.classList.add('summary-stagger');
-      node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
+    if (__canMotion) {
+      for (let i = 0; i < staggerTargets.length; i++) {
+        const node = staggerTargets[i];
+        node.classList.add('summary-stagger');
+        node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
+      }
+    } else {
+      // ensure classes are absent when motion disabled
+      for (let i = 0; i < staggerTargets.length; i++) {
+        staggerTargets[i].classList.remove('summary-stagger');
+      }
     }
+
+    // Insert a small motion toggle control (non-intrusive) to allow user override
+    try {
+      const existing = document.getElementById('motion-toggle');
+      if (!existing) {
+        const hdr = document.getElementById('sec-header') || document.body;
+        const btn = document.createElement('button');
+        btn.id = 'motion-toggle';
+        btn.type = 'button';
+        btn.className = 'action-btn motion-toggle';
+        btn.setAttribute('aria-pressed', __canMotion ? 'true' : 'false');
+        btn.setAttribute('aria-label', 'Toggle motion animations');
+        btn.textContent = __canMotion ? 'Motion: On' : 'Motion: Off';
+        btn.addEventListener('click', function () {
+          __canMotion = !__canMotion;
+          try { localStorage.setItem('dumpdetective:motion', __canMotion ? 'on' : 'off'); } catch (e) { }
+          try { window.__DUMPDETECTIVE_CAN_MOTION__ = __canMotion; } catch (e) { }
+          btn.setAttribute('aria-pressed', __canMotion ? 'true' : 'false');
+          btn.textContent = __canMotion ? 'Motion: On' : 'Motion: Off';
+          // apply/remove animation classes immediately
+          if (__canMotion) {
+            for (let i = 0; i < staggerTargets.length; i++) {
+              const node = staggerTargets[i];
+              node.classList.add('summary-stagger');
+              node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
+            }
+          } else {
+            for (let i = 0; i < staggerTargets.length; i++) {
+              staggerTargets[i].classList.remove('summary-stagger');
+            }
+            // remove transient anchor flash
+            document.querySelectorAll('.anchor-flash').forEach(n => n.classList.remove('anchor-flash'));
+          }
+        });
+        try { hdr.insertBefore(btn, hdr.firstChild); } catch (e) { document.body.appendChild(btn); }
+      }
+    } catch (e) { /* non-fatal */ }
   }
 
   (function setScreenReaderSummary() {
@@ -679,9 +736,14 @@ export function setupInteractivity(doc, announce) {
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (isV2) {
-        target.classList.remove('anchor-flash');
-        void target.offsetWidth;
-        target.classList.add('anchor-flash');
+        try {
+          const canMotionNow = (window.__DUMPDETECTIVE_CAN_MOTION__ !== undefined) ? window.__DUMPDETECTIVE_CAN_MOTION__ : true;
+          if (canMotionNow) {
+            target.classList.remove('anchor-flash');
+            void target.offsetWidth;
+            target.classList.add('anchor-flash');
+          }
+        } catch (e) { /* ignore */ }
       }
       try { if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); } catch (ex) { }
       try { history.replaceState(null, '', '#' + id); } catch (ex) { }

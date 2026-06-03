@@ -10,10 +10,11 @@ namespace DumpDetective.Tests
         public void ReportTemplateExists()
         {
             var baseDir = AppContext.BaseDirectory;
-            var path = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates", "report-template.html"));
-            Assert.True(File.Exists(path), $"Expected report template at {path}");
-            var content = File.ReadAllText(path);
-            Assert.Contains("<main", content);
+            var basePath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "DumpDetective.Reporting", "Templates"));
+            var embeddedPath = Path.Combine(basePath, "report.html");
+            Assert.True(File.Exists(embeddedPath), $"Expected embedded report template at {embeddedPath}");
+            var content = File.ReadAllText(embeddedPath);
+            Assert.Contains("DumpDetective Analysis Report", content);
         }
 
         [Fact]

@@ -785,7 +785,7 @@ export function setupInteractivity(doc, announce) {
     try { history.replaceState(null, '', '#' + targetId); } catch (err) { }
   });
 
-  // Incident promote actions -> Forensics deep evidence
+  // Incident promote actions -> Forensics deep context
   document.addEventListener('click', function (e) {
     const btn = e.target.closest && e.target.closest('.incident-promote-link');
     if (!btn) return;
@@ -851,21 +851,15 @@ export function setupInteractivity(doc, announce) {
       if (!findings.length) { alert('No findings to export.'); return; }
       const headers = [
         'ID',
-        'Fingerprint',
+        'Id',
         'Severity',
         'Category',
         'Title',
-        'Evidence',
-        'EvidenceItems',
+        'Details',
         'Recommendation',
-        'RecommendationItems',
-        'Fix',
         'Analyzer',
         'Confidence',
-        'Owner',
-        'Effort',
-        'Status',
-        'Validation',
+        'Caveats',
         'Tags'
       ];
       function csvCell(v) { const s = String(v == null ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
@@ -876,21 +870,15 @@ export function setupInteractivity(doc, announce) {
       findings.forEach(function (f, i) {
         rows.push([
           i + 1,
-          f.fingerprint || '',
+          f.id || '',
           f.severity,
           f.category,
           f.title,
-          f.evidence,
-          joinItems(f.evidenceItems),
+          joinItems(f.details),
           f.recommendation,
-          joinItems(f.recommendationItems),
-          f.fix,
           f.analyzer,
-          f.confidenceScore != null ? Number(f.confidenceScore).toFixed(2) : '',
-          f.suggestedOwner,
-          f.effort,
-          f.trackingStatus,
-          f.validationStep,
+          f.confidence != null ? Number(f.confidence).toFixed(2) : '',
+          joinItems(f.caveats),
           joinItems(f.tags)
         ].map(csvCell).join(','));
       });

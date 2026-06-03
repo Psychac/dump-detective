@@ -109,7 +109,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
                 Title: $"Severe LOH fragmentation — {d.FragmentationPercent:F1}% of LOH is free space",
-                Evidence: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                    Summary: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
                 Recommendation: "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,
@@ -118,7 +118,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated LOH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
-                Evidence: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                    Summary: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
                 Recommendation: "Monitor LOH allocation patterns. Consider using ArrayPool<T> or MemoryPool<T> for large buffers to reduce fragmentation over time.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,

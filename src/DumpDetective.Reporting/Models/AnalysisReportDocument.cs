@@ -160,41 +160,43 @@ internal sealed record AnalyzerRunStatusRecord(
     string? FindingGeneratorError = null,
     string? SkipReason = null);
 
-// Serializable projection of InsightFinding — InsightFinding itself is unchanged
-internal sealed partial record FindingRecord(
-    string Analyzer,
-    string Category,
-    string Severity,          // FindingSeverity.ToString()
-    string Title,
-    string Evidence,
-    string Recommendation,
-    IReadOnlyList<string> Tags,
-    string Fingerprint);
-
-// Backwards-compatible list properties for richer evidence/recommendation handling.
-internal partial record FindingRecord
+// Compact serializable projection of InsightFinding used in generated JSON
+internal sealed record FindingRecord(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("analyzer")] string Analyzer,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("details")]
+    IReadOnlyList<string>? Details,
+    [property: JsonPropertyName("recommendation")] string Recommendation,
+    [property: JsonPropertyName("tags")] IReadOnlyList<string> Tags)
 {
-    public IReadOnlyList<string>? EvidenceItems { get; init; } = null;
-    public IReadOnlyList<string>? RecommendationItems { get; init; } = null;
-    public IReadOnlyList<string>? CaveatItems { get; init; } = null;
-    public string? Cause { get; init; } = null;
-    public string? Effect { get; init; } = null;
-    public string? Fix { get; init; } = null;
+    // Traceability & actionability extensions (optional)
+    [property: JsonPropertyName("confidence")]
+    public double? Confidence { get; init; } = null;
 
-    // P1.1: Traceability & actionability extensions
-    public double? ConfidenceScore { get; init; } = null;                // 0.0–1.0
-    public IReadOnlyList<EvidenceRef>? EvidenceRefs { get; init; } = null; // structured provenance
-    public string? SuggestedOwner { get; init; } = null;                // owner/team suggestion
-    public string? Effort { get; init; } = null;                       // e.g., "Low", "Medium", "High"
-    public string? ValidationStep { get; init; } = null;               // short validation/check step
-    public string? TrackingStatus { get; init; } = null;               // e.g., "Untracked", "InProgress", "Fixed"
-    // T9: Trend regression baseline/current values
+    [property: JsonPropertyName("refs")]
+    public IReadOnlyList<EvidenceRef>? Refs { get; init; } = null;
+
+    // Regression/metric context
+    [property: JsonPropertyName("metricBaseline")]
     public double? MetricBaseline { get; init; } = null;
-    public double? MetricCurrent  { get; init; } = null;
-    public string? MetricUnit     { get; init; } = null;
-    // TV2-4: Regression classification persisted on finding records (NewRisk/AmplifiedRisk/VolatileRisk)
+
+    [property: JsonPropertyName("metricCurrent")]
+    public double? MetricCurrent { get; init; } = null;
+
+    [property: JsonPropertyName("metricUnit")]
+    public string? MetricUnit { get; init; } = null;
+
+    [property: JsonPropertyName("regressionClass")]
     public string? RegressionClass { get; init; } = null;
+    
+    [property: JsonPropertyName("caveats")]
+    public IReadOnlyList<string>? Caveats { get; init; } = null;
 }
+
+// (compact contract implemented directly on FindingRecord above)
 
 internal sealed record EvidenceRef(
     string Analyzer,
@@ -260,9 +262,6 @@ internal sealed record RankedActionRecord(
     string WhyNow,
     string FindingFingerprint,
     string Analyzer,
-    string? Owner = null,
-    string? Effort = null,
-    string? Status = null,
     string? Validation = null,
     ActionConfidenceRecord? Confidence = null,
     ActionPriorityFactors? Factors = null);

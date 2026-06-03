@@ -96,14 +96,14 @@ export function domainAnchorId(domain, fallbackIndex) {
 }
 
 export function findingAnchorId(finding, fallbackId) {
-  if (finding && finding.fingerprint)
-    return 'finding-' + slugifyAnchor(finding.fingerprint, stableHash(finding.fingerprint));
+  if (finding && finding.id)
+    return 'finding-' + slugifyAnchor(finding.id, stableHash(finding.id));
 
   const key = [
     finding && finding.title,
     finding && finding.analyzer,
     finding && finding.category,
-    finding && finding.evidence
+    finding && finding.summary
   ].join('|');
   return 'finding-' + stableHash(key || fallbackId || 'finding');
 }

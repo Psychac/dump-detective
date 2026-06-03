@@ -9,7 +9,7 @@ namespace DumpDetective.Reporting.Models;
 internal sealed record SectionLeadFinding(
     string Severity,
     string Title,
-    string Evidence,
+    string Summary,
     string Recommendation,
     string ConfidenceSymbol,
     double ConfidenceScore,

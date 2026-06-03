@@ -311,15 +311,15 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         if (summary.CriticalFindings is { Count: > 0 })
         {
             sb.AppendLine("Critical findings:");
-            foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
+                foreach (FindingRecord finding in summary.CriticalFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
         {
             sb.AppendLine("Warning findings:");
-            foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
+                foreach (FindingRecord finding in summary.WarningFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
         }
 
         if (summary.TopActions is { Count: > 0 })
@@ -535,7 +535,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
             sb.AppendLine("### Critical Findings");
             foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Evidence)} | {Esc(finding.Recommendation)}");
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.GetSummaryText())} | {Esc(finding.Recommendation)}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
@@ -543,7 +543,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine();
             sb.AppendLine("### Warning Findings");
             foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.Evidence)} | {Esc(finding.Recommendation)}");
+                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.GetSummaryText())} | {Esc(finding.Recommendation)}");
         }
 
         if (summary.TopActions is { Count: > 0 })
@@ -602,15 +602,15 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         if (summary.CriticalFindings is { Count: > 0 })
         {
             sb.AppendLine("Critical findings:");
-            foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
+                foreach (FindingRecord finding in summary.CriticalFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
         }
 
         if (summary.WarningFindings is { Count: > 0 })
         {
             sb.AppendLine("Warning findings:");
-            foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.Evidence} | {finding.Recommendation}");
+                foreach (FindingRecord finding in summary.WarningFindings)
+                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
         }
 
         if (summary.TopActions is { Count: > 0 })
@@ -896,53 +896,31 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
         {
             FindingRecord f = doc.Findings[i];
             string sevCss = SevCss(f.Severity);
-            string evSummary = f.EvidenceItems is { Count: > 0 } ? f.EvidenceItems[0] : f.Evidence;
+            string evSummary = f.GetSummaryText();
             string summary = Enc(evSummary.Length > 200 ? evSummary[..200] : evSummary);
             sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity.ToLowerInvariant())}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
             sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)} <a class=\"permalink\" href=\"#finding-{i}\" aria-label=\"Permalink\">🔗</a></h2><span class=\"category\">{Enc(f.Category)}</span></div>");
 
-            if (f.EvidenceItems is { Count: > 1 })
+            if (f.Details is { Count: > 1 })
             {
-                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.EvidenceItems.Select(Enc)) + "</div>");
+                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.Details.Select(Enc)) + "</div>");
                 sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.EvidenceItems.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
+                sb.AppendLine($"<tr><td>Details</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.Details.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
             }
             else
             {
-                sb.AppendLine($"<p class=\"summary\">{Enc(f.Evidence)}</p>");
+                sb.AppendLine($"<p class=\"summary\">{Enc(evSummary)}</p>");
                 sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\">{WrapAddr(Enc(f.Evidence))}</td></tr>");
+                sb.AppendLine($"<tr><td>Details</td><td class=\"wrap\">{WrapAddr(Enc(evSummary))}</td></tr>");
             }
 
-            if (!string.IsNullOrWhiteSpace(f.Cause))
-                sb.AppendLine($"<tr><td>Cause</td><td class=\"wrap\">{WrapAddr(Enc(f.Cause))}</td></tr>");
+            if (f.Confidence is not null)
+                sb.AppendLine($"<tr><td>Confidence</td><td class=\"wrap\">{Enc(f.Confidence.Value.ToString("F2"))}</td></tr>");
 
-            if (!string.IsNullOrWhiteSpace(f.Effect))
-                sb.AppendLine($"<tr><td>Effect</td><td class=\"wrap\">{WrapAddr(Enc(f.Effect))}</td></tr>");
+            if (f.Caveats is { Count: > 0 })
+                sb.AppendLine($"<tr><td>Caveats</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.Caveats)))}</td></tr>");
 
-            if (f.ConfidenceScore is not null)
-                sb.AppendLine($"<tr><td>Confidence</td><td class=\"wrap\">{Enc(f.ConfidenceScore.Value.ToString("F2"))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.SuggestedOwner))
-                sb.AppendLine($"<tr><td>Owner</td><td class=\"wrap\">{WrapAddr(Enc(f.SuggestedOwner))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.Effort))
-                sb.AppendLine($"<tr><td>Effort</td><td class=\"wrap\">{WrapAddr(Enc(f.Effort))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.ValidationStep))
-                sb.AppendLine($"<tr><td>Validation</td><td class=\"wrap\">{WrapAddr(Enc(f.ValidationStep))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.TrackingStatus))
-                sb.AppendLine($"<tr><td>Status</td><td class=\"wrap\">{WrapAddr(Enc(f.TrackingStatus))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.Fix))
-                sb.AppendLine($"<tr><td>Fix</td><td class=\"wrap\">{WrapAddr(Enc(f.Fix))}</td></tr>");
-
-            if (f.RecommendationItems is { Count: > 0 })
-            {
-                sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.RecommendationItems)))}</td></tr>");
-            }
-            else if (!string.IsNullOrWhiteSpace(f.Recommendation))
+            if (!string.IsNullOrWhiteSpace(f.Recommendation))
             {
                 sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(f.Recommendation))}</td></tr>");
             }

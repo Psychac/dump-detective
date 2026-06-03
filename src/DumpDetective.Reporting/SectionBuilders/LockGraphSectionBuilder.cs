@@ -128,7 +128,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
                 Title: $"Deadlock detected \u2014 {d.DeadlockCandidateCount} cycle(s) identified",
-                Evidence: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
+                Summary: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
                 Recommendation: "Enforce a consistent lock acquisition order across all threads. Use lock timeouts or restructure code to eliminate nested locking.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.85,

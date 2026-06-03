@@ -50,9 +50,9 @@ public sealed class ReportDocumentSchemaTests
                                 ])
                         ])
                     ],
-                    DomainInsights: [new FindingRecord("RetentionAnalyzer", "Leak", "Critical", "Duplicate strings", "1 000 000 duplicate System.String instances.", "Pool repeated string payloads.", ["memory", "string"], "dup-strings-01")])
+                            DomainInsights: [new FindingRecord("dup-strings-01", "RetentionAnalyzer", "Leak", "Critical", "Duplicate strings", ["1 000 000 duplicate System.String instances."], "Pool repeated string payloads.", ["memory", "string"])] )
             ],
-            CrossDomainInsights = [new FindingRecord("InsightEngine", "CrossDomain", "Warning", "Cross-domain issue", "Evidence", "Recommendation", [], "cross-01")],
+                    CrossDomainInsights = [new FindingRecord("cross-01", "InsightEngine", "CrossDomain", "Warning", "Cross-domain issue", ["Evidence"], "Recommendation", [])],
             Appendix = new ReportAppendix(
                 AnalyzerRunSummary: [new AnalyzerRunStatusRecord("RetentionAnalyzer", "Success", 42.5, 1, 0, 123, 4, 5, null)],
                 MemoryDiagnostics: [new AnalyzerMemoryDiagnosticRecord("RetentionAnalyzer", 10, 12, 2, 3, 4, 1)],
@@ -180,7 +180,7 @@ public sealed class ReportDocumentSchemaTests
             DumpPath = "C:/t.dmp",
             GeneratedAtUtc = DateTime.UtcNow,
             ElapsedSeconds = 1.0,
-            Findings = [new FindingRecord("A", "B", "Info", "T", "E", "R", [], "fp")]
+            Findings = [new FindingRecord("fp", "A", "B", "Info", "T", ["E"], "R", [])]
         };
 
         string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);

@@ -237,15 +237,15 @@ public sealed class ExplainableScoringEngineTests
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static FindingRecord F(string analyzer, string category, string severity, string title) =>
-        new(Analyzer: analyzer,
+        new(Id: $"{analyzer}-{title}",
+            Analyzer: analyzer,
             Category: category,
             Severity: severity,
             Title: title,
-            Evidence: string.Empty,
+            Details: [],
             Recommendation: string.Empty,
-            Tags: [],
-            Fingerprint: $"{analyzer}-{title}");
+            Tags: []);
 
     private static FindingRecord FWithConfidence(string analyzer, string category, string severity, string title, double confidence) =>
-        F(analyzer, category, severity, title) with { ConfidenceScore = confidence };
+        F(analyzer, category, severity, title) with { Confidence = confidence };
 }

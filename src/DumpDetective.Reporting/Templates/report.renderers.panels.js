@@ -391,9 +391,8 @@ export function buildActionQueuePanel(doc) {
         ? 'Jira Issue Draft'
         : 'GitHub Issue Draft';
     const title = String((actionLike && actionLike.title) || ('Finding ' + priority));
-    const whyNow = String((actionLike && actionLike.whyNow) || (actionLike && actionLike.evidence) || 'Risk requires follow-up.');
-    const validation = String((actionLike && actionLike.validation) || (actionLike && actionLike.validationStep) || 'Re-run dump and verify the signal drops.');
-    const owner = String((actionLike && actionLike.owner) || (actionLike && actionLike.suggestedOwner) || 'Investigation Owner');
+    const whyNow = String((actionLike && actionLike.whyNow) || 'Risk requires follow-up.');
+    const validation = String((actionLike && actionLike.validation) || 'Re-run dump and verify the signal drops.');
     const limitationList = (doc && doc.appendix && Array.isArray(doc.appendix.knownLimitations)) ? doc.appendix.knownLimitations : [];
     const limitations = limitationList.slice(0, 3).join(' | ');
     const anchor = resolveFindingAnchor(actionLike, 'queue-ticket-' + priority);
@@ -405,7 +404,6 @@ export function buildActionQueuePanel(doc) {
       'Incident: ' + (incidentTitle || 'Unknown dump'),
       'Priority: ' + priority,
       'Action: ' + title,
-      'Owner: ' + owner,
       '',
       'Why now:',
       whyNow,
@@ -413,7 +411,7 @@ export function buildActionQueuePanel(doc) {
       'Validation:',
       validation,
       '',
-      'Evidence:',
+      'Details:',
       href,
       '',
       'Known limitations:',
@@ -491,14 +489,14 @@ export function buildActionQueuePanel(doc) {
   }
 
   function resolveFindingAnchor(actionLike, fallbackKey) {
-    const fingerprint = String((actionLike && (actionLike.findingFingerprint || actionLike.fingerprint)) || '').trim();
+    const fingerprint = String((actionLike && (actionLike.findingFingerprint || actionLike.id)) || '').trim();
     const analyzer = String((actionLike && actionLike.analyzer) || '').trim().toLowerCase();
     const title = String((actionLike && actionLike.title) || '').trim().toLowerCase();
 
     let match = null;
     if (fingerprint) {
       match = findings.find(function (f) {
-        return String((f && f.fingerprint) || '').trim() === fingerprint;
+        return String((f && f.id) || '').trim() === fingerprint;
       }) || null;
     }
 
@@ -625,7 +623,7 @@ export function buildActionQueuePanel(doc) {
 
       const titleLink = document.createElement('a');
       const targetAnchor = resolveFindingAnchor({
-        fingerprint: action.findingFingerprint,
+        id: action.findingFingerprint,
         analyzer: action.analyzer,
         title: action.title,
         severity: 'Warning'
@@ -635,30 +633,6 @@ export function buildActionQueuePanel(doc) {
       titleLink.setAttribute('data-promote-target', targetAnchor);
       titleLink.textContent = String(action.title || ('Finding ' + priority));
       card.appendChild(titleLink);
-
-      const owner = el('div', 'action-triage-card__owner');
-      owner.textContent = 'Owner: ' + String(action.owner || 'Unassigned');
-      card.appendChild(owner);
-
-      const stats = el('div', 'action-triage-card__stats');
-      const effort = el('div', 'action-triage-card__kv');
-      const effortLabel = el('span', 'action-triage-card__kv-label');
-      effortLabel.textContent = 'Effort';
-      effort.appendChild(effortLabel);
-      const effortValue = el('span', 'action-triage-card__kv-value');
-      effortValue.textContent = String(action.effort || '-');
-      effort.appendChild(effortValue);
-      stats.appendChild(effort);
-
-      const status = el('div', 'action-triage-card__kv');
-      const statusLabel = el('span', 'action-triage-card__kv-label');
-      statusLabel.textContent = 'Status';
-      status.appendChild(statusLabel);
-      const statusValue = el('span', 'action-triage-card__kv-value');
-      statusValue.textContent = String(action.status || 'Open');
-      status.appendChild(statusValue);
-      stats.appendChild(status);
-      card.appendChild(stats);
 
       const actions = el('div', 'action-triage-card__actions');
       actions.appendChild(buildTicketMenu(action, priority));
@@ -684,12 +658,12 @@ export function buildActionQueuePanel(doc) {
   }
 
   const actionable = findings.filter(function (f) {
-    return !!(f.recommendation || f.fix || (Array.isArray(f.recommendationItems) && f.recommendationItems.length));
+    return !!(f.recommendation || (Array.isArray(f.details) && f.details.length));
   }).sort(function (a, b) {
     const sevCmp = sevWeight(b.severity) - sevWeight(a.severity);
     if (sevCmp !== 0) return sevCmp;
-    const confA = Number(a.confidenceScore || 0);
-    const confB = Number(b.confidenceScore || 0);
+    const confA = Number(a.confidence || 0);
+    const confB = Number(b.confidence || 0);
     if (confB !== confA) return confB - confA;
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
@@ -716,7 +690,7 @@ export function buildActionQueuePanel(doc) {
   tbl.dataset.responsiveStack = '1';
   const thead = el('thead');
   const htr = el('tr');
-  ['Priority', 'Finding', 'Owner', 'Effort', 'Status', 'Validation'].forEach(function (col) {
+  ['Priority', 'Finding', 'Validation'].forEach(function (col) {
     const th = document.createElement('th');
     th.scope = 'col';
     th.textContent = col;
@@ -740,7 +714,7 @@ export function buildActionQueuePanel(doc) {
     anchor.href = resolveFindingAnchor(finding, 'queue-' + i);
     anchor.textContent = finding.title || ('Finding ' + (i + 1));
     tdFinding.appendChild(anchor);
-    const recText = finding.fix || finding.recommendation || ((Array.isArray(finding.recommendationItems) && finding.recommendationItems.length) ? finding.recommendationItems[0] : '');
+    const recText = finding.recommendation || '';
     if (recText) {
       const note = el('div', 'action-queue-card__note');
       note.textContent = recText;
@@ -749,20 +723,8 @@ export function buildActionQueuePanel(doc) {
     tdFinding.appendChild(buildTicketMenu(finding, i + 1));
     tr.appendChild(tdFinding);
 
-    const tdOwner = document.createElement('td');
-    tdOwner.textContent = finding.suggestedOwner || '-';
-    tr.appendChild(tdOwner);
-
-    const tdEffort = document.createElement('td');
-    tdEffort.textContent = finding.effort || '-';
-    tr.appendChild(tdEffort);
-
-    const tdStatus = document.createElement('td');
-    tdStatus.textContent = finding.trackingStatus || 'Open';
-    tr.appendChild(tdStatus);
-
     const tdValidation = document.createElement('td');
-    tdValidation.textContent = finding.validationStep || '-';
+    tdValidation.textContent = '-';
     tdValidation.className = 'wrap';
     tr.appendChild(tdValidation);
 
@@ -789,7 +751,7 @@ export function buildForensicsRailPanel(doc) {
   sec.appendChild(h2);
 
   const subtitle = el('p', 'forensics-rail-card__subtitle');
-  subtitle.textContent = 'Runtime context, provenance controls, and evidence filters for root-cause analysis.';
+  subtitle.textContent = 'Runtime context, provenance controls, and detail filters for root-cause analysis.';
   sec.appendChild(subtitle);
 
   const meta = el('div', 'forensics-rail-meta');
@@ -845,7 +807,7 @@ export function buildForensicsRailPanel(doc) {
   search.type = 'search';
   search.id = 'forensics-domain-search';
   search.className = 'forensics-rail-controls__search';
-  search.placeholder = 'Filter evidence in selected domain...';
+  search.placeholder = 'Filter details in selected domain...';
   controls.appendChild(search);
 
   const sortLabel = el('label', 'forensics-rail-controls__label');
@@ -956,7 +918,7 @@ export function buildFilterBar(doc) {
   bar.appendChild(group);
   const search = document.createElement('input'); search.type = 'search'; search.id = 'filter-search';
   search.className = 'filter-search'; search.placeholder = 'Search findings\u2026';
-  search.setAttribute('aria-label', 'Search findings by title or evidence');
+  search.setAttribute('aria-label', 'Search findings by title or details');
   bar.appendChild(search);
   const count = el('span', 'filter-count'); count.id = 'filter-count';
   count.setAttribute('aria-live', 'polite'); count.setAttribute('aria-atomic', 'true');

@@ -56,7 +56,7 @@ internal static class TrendSnapshotSectionComposer
             foreach (FindingRecord finding in findings)
             {
                 blocks.Add(new HeadingBlock($"[{finding.Severity}] {finding.Title}", 1));
-                blocks.Add(new TextBlock(finding.Evidence, 2));
+                blocks.Add(new TextBlock(finding.GetSummaryText(), 2));
             }
         }
         else if (snapshot != null)
@@ -88,8 +88,8 @@ internal static class TrendSnapshotSectionComposer
             blocks.Add(new HeadingBlock($"Lead Finding [{lead.Severity}]", 1));
             if (!string.IsNullOrWhiteSpace(lead.Title))
                 blocks.Add(new TextBlock(lead.Title, 2));
-            if (!string.IsNullOrWhiteSpace(lead.Evidence))
-                blocks.Add(new TextBlock(lead.Evidence, 2));
+            if (!string.IsNullOrWhiteSpace(lead.Summary))
+                blocks.Add(new TextBlock(lead.Summary, 2));
             if (!string.IsNullOrWhiteSpace(lead.Recommendation))
                 blocks.Add(new TextBlock($"Recommendation: {lead.Recommendation}", 2));
         }

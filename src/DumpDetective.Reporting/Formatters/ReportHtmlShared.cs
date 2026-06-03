@@ -241,53 +241,31 @@ internal static class ReportHtmlShared
                 "warning" => "severity-warning",
                 _ => "severity-info"
             };
-            string evSummary = f.EvidenceItems is { Count: > 0 } ? f.EvidenceItems[0] : f.Evidence ?? string.Empty;
+            string evSummary = f.GetSummaryText();
             string summary = Enc(evSummary.Length > 200 ? evSummary[..200] : evSummary);
             sb.AppendLine($"<section id=\"finding-{i}\" class=\"section-card\" data-severity=\"{Enc(f.Severity?.ToLowerInvariant() ?? "info")}\" data-title=\"{Enc(f.Title)}\" data-summary=\"{summary}\">");
             sb.AppendLine($"<div class=\"section-header\"><span class=\"severity-badge {sevCss}\">{Enc(f.Severity)}</span><h2>{Enc(f.Title)} <a class=\"permalink\" href=\"#finding-{i}\" aria-label=\"Permalink\">🔗</a></h2><span class=\"category\">{Enc(f.Category)}</span></div>");
 
-            if (f.EvidenceItems is { Count: > 1 })
+            if (f.Details is { Count: > 1 })
             {
-                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.EvidenceItems.Select(e => Enc(e))) + "</div>");
+                sb.AppendLine("<div class=\"summary\">" + string.Join("<br/>", f.Details.Select(e => Enc(e))) + "</div>");
                 sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.EvidenceItems.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
+                sb.AppendLine($"<tr><td>Details</td><td class=\"wrap\"><ul>" + string.Join(string.Empty, f.Details.Select(e => $"<li>{WrapAddr(Enc(e))}</li>")) + "</ul></td></tr>");
             }
             else
             {
-                sb.AppendLine($"<p class=\"summary\">{Enc(f.Evidence ?? string.Empty)}</p>");
+                sb.AppendLine($"<p class=\"summary\">{Enc(evSummary)}</p>");
                 sb.AppendLine("<table><thead><tr><th scope=\"col\">Label</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-                sb.AppendLine($"<tr><td>Evidence</td><td class=\"wrap\">{WrapAddr(Enc(f.Evidence ?? string.Empty))}</td></tr>");
+                sb.AppendLine($"<tr><td>Details</td><td class=\"wrap\">{WrapAddr(Enc(evSummary))}</td></tr>");
             }
 
-            if (!string.IsNullOrWhiteSpace(f.Cause))
-                sb.AppendLine($"<tr><td>Cause</td><td class=\"wrap\">{WrapAddr(Enc(f.Cause))}</td></tr>");
+            if (f.Confidence is not null)
+                sb.AppendLine($"<tr><td>Confidence</td><td class=\"wrap\">{Enc(f.Confidence.Value.ToString("F2"))}</td></tr>");
 
-            if (!string.IsNullOrWhiteSpace(f.Effect))
-                sb.AppendLine($"<tr><td>Effect</td><td class=\"wrap\">{WrapAddr(Enc(f.Effect))}</td></tr>");
+            if (f.Caveats is { Count: > 0 })
+                sb.AppendLine($"<tr><td>Caveats</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.Caveats)))}</td></tr>");
 
-            if (f.ConfidenceScore is not null)
-                sb.AppendLine($"<tr><td>Confidence</td><td class=\"wrap\">{Enc(f.ConfidenceScore.Value.ToString("F2"))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.SuggestedOwner))
-                sb.AppendLine($"<tr><td>Owner</td><td class=\"wrap\">{WrapAddr(Enc(f.SuggestedOwner))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.Effort))
-                sb.AppendLine($"<tr><td>Effort</td><td class=\"wrap\">{WrapAddr(Enc(f.Effort))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.ValidationStep))
-                sb.AppendLine($"<tr><td>Validation</td><td class=\"wrap\">{WrapAddr(Enc(f.ValidationStep))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.TrackingStatus))
-                sb.AppendLine($"<tr><td>Status</td><td class=\"wrap\">{WrapAddr(Enc(f.TrackingStatus))}</td></tr>");
-
-            if (!string.IsNullOrWhiteSpace(f.Fix))
-                sb.AppendLine($"<tr><td>Fix</td><td class=\"wrap\">{WrapAddr(Enc(f.Fix))}</td></tr>");
-
-            if (f.RecommendationItems is { Count: > 0 })
-            {
-                sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(string.Join("\n", f.RecommendationItems)))}</td></tr>");
-            }
-            else if (!string.IsNullOrWhiteSpace(f.Recommendation))
+            if (!string.IsNullOrWhiteSpace(f.Recommendation))
             {
                 sb.AppendLine($"<tr><td>Recommendation</td><td class=\"wrap\">{WrapAddr(Enc(f.Recommendation))}</td></tr>");
             }

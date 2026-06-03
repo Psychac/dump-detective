@@ -127,7 +127,7 @@ export function buildHeader(doc) {
     triageRibbon.appendChild(ribbonChip('Watch', watchCount, 'watch'));
 
     const hint = el('span', 'incident-ribbon__hint');
-    hint.textContent = 'Use Promote to Forensics for deep evidence.';
+    hint.textContent = 'Use Promote to Forensics for deep context.';
     triageRibbon.appendChild(hint);
 
     sec.appendChild(triageRibbon);
@@ -929,7 +929,7 @@ export function buildExecutiveSummary(doc) {
         })
         .slice(0, maxCount)
         .map(function (f) {
-          const ev0 = Array.isArray(f.evidenceRefs) && f.evidenceRefs.length ? f.evidenceRefs[0] : null;
+          const ev0 = Array.isArray(f.refs) && f.refs.length ? f.refs[0] : null;
           const metric = (ev0 && ev0.metricKey) || f.title || '\u2014';
           const baseline = f.metricBaseline;
           const current = f.metricCurrent;
@@ -964,7 +964,7 @@ export function buildExecutiveSummary(doc) {
     const findingByFingerprint = new Map();
     for (let fi = 0; fi < findings.length; fi++) {
       const f = findings[fi] || {};
-      const fp = String(f.fingerprint || '').toLowerCase();
+          const fp = String(f.id || '').toLowerCase();
       if (!fp || findingByFingerprint.has(fp)) continue;
       findingByFingerprint.set(fp, f);
     }

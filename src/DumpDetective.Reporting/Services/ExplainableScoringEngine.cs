@@ -69,11 +69,11 @@ internal static class ExplainableScoringEngine
             };
 
             // Confidence-weight the raw points.
-            double weight = f.ConfidenceScore ?? 1.0;
+            double weight = f.Confidence ?? 1.0;
             int points = (int)Math.Round(basePoints * weight);
 
-            string? detail = f.ConfidenceScore.HasValue
-                ? $"Confidence: {f.ConfidenceScore.Value:P0}"
+            string? detail = f.Confidence.HasValue
+                ? $"Confidence: {f.Confidence.Value:P0}"
                 : null;
 
             contributors.Add(new ScoreContributor(
@@ -84,9 +84,9 @@ internal static class ExplainableScoringEngine
 
             rawScore += points;
 
-            if (f.ConfidenceScore.HasValue)
+            if (f.Confidence.HasValue)
             {
-                confidenceSum += f.ConfidenceScore.Value;
+                confidenceSum += f.Confidence.Value;
                 confidenceCount++;
             }
         }

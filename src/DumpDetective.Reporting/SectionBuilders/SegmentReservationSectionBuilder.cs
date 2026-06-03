@@ -31,7 +31,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             leadFinding = new SectionLeadFinding(
                 Severity: critical ? "Critical" : "Warning",
                 Title: $"Address space pressure \u2014 reserved/committed ratio {d.ReservedToCommittedRatio:F1}\u00d7",
-                Evidence: reason,
+                Summary: reason,
                 Recommendation: "Review segment reservation settings. On Server GC, consider reducing MaxHeapSize or enabling DATAS. On Workstation GC, check for LOH fragmentation or large pinned regions.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.85,
@@ -45,7 +45,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated segment reservation \u2014 ratio {d.ReservedToCommittedRatio:F1}\u00d7",
-                Evidence: reason,
+                Summary: reason,
                 Recommendation: "Monitor heap reservation growth. Reduce MaxHeapSize or consolidate heap segments if address space is constrained.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.85,

@@ -28,7 +28,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                 Title: d.IsStarved
                     ? "Thread pool starvation detected — queue length exceeds max worker threads"
                     : $"Thread pool health degraded (score {d.HealthScore:N0})",
-                Evidence: d.IsStarved
+                Summary: d.IsStarved
                     ? $"Queued work items: {d.QueuedWorkItems:N0}, active workers at max ({d.RuntimeMaxThreads:N0})."
                     : $"Health score {d.HealthScore:N0} is below the healthy threshold of 50.",
                 Recommendation: "Increase thread pool min/max threads, reduce synchronous blocking on async paths, or profile CPU-bound work.",

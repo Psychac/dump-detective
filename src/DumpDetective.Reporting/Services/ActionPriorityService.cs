@@ -46,11 +46,8 @@ internal static class ActionPriorityService
                 Action: action,
                 Impact: impact,
                 WhyNow: whyNow,
-                FindingFingerprint: finding.Fingerprint,
+                FindingFingerprint: finding.Id,
                 Analyzer: finding.Analyzer,
-                Owner: finding.SuggestedOwner,
-                Effort: finding.Effort,
-                Status: finding.TrackingStatus,
                 Validation: ResolveValidationStep(finding, confidence),
                 Confidence: confidence,
                 Factors: factors));
@@ -112,13 +109,13 @@ internal static class ActionPriorityService
                 int sevCmp = SeverityWeight(b.Severity).CompareTo(SeverityWeight(a.Severity));
                 if (sevCmp != 0) return sevCmp;
 
-                int confCmp = (b.ConfidenceScore ?? 0).CompareTo(a.ConfidenceScore ?? 0);
+                int confCmp = (b.Confidence ?? 0).CompareTo(a.Confidence ?? 0);
                 if (confCmp != 0) return confCmp;
 
                 int titleCmp = StringComparer.Ordinal.Compare(NormalizeSortKey(a.Title), NormalizeSortKey(b.Title));
                 if (titleCmp != 0) return titleCmp;
 
-                return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Fingerprint), NormalizeSortKey(b.Fingerprint));
+                return StringComparer.Ordinal.Compare(NormalizeSortKey(a.Id), NormalizeSortKey(b.Id));
             });
 
             clusters.Add(bucket);
@@ -165,9 +162,9 @@ internal static class ActionPriorityService
 
     private static bool IsActionable(FindingRecord finding)
     {
-        if (!string.IsNullOrWhiteSpace(finding.Fix)) return true;
         if (!string.IsNullOrWhiteSpace(finding.Recommendation)) return true;
-        if (finding.RecommendationItems is { Count: > 0 }) return true;
+        if (finding.Caveats is { Count: > 0 }) return true;
+        if (finding.Details is { Count: > 0 }) return true;
         return false;
     }
 
@@ -217,7 +214,7 @@ internal static class ActionPriorityService
     private static int ImpactLikelihoodWeight(FindingRecord finding)
     {
         int score = 10;
-        string text = string.Concat(finding.Title, " ", finding.Evidence, " ", finding.Effect);
+        string text = string.Concat(finding.Title, " ", finding.GetSummaryText());
 
         if (ContainsAny(text, "deadlock", "hang", "outofmemory", "oom", "crash", "fault")) score += 20;
         else if (ContainsAny(text, "blocked", "latency", "retention", "fragmentation", "thread pool")) score += 12;
@@ -227,10 +224,9 @@ internal static class ActionPriorityService
 
     private static int TimeToMitigateWeight(FindingRecord finding)
     {
-        string effort = string.IsNullOrWhiteSpace(finding.Effort) ? string.Empty : finding.Effort;
-        if (effort.Equals("low", StringComparison.OrdinalIgnoreCase)) return 14;
-        if (effort.Equals("medium", StringComparison.OrdinalIgnoreCase)) return 10;
-        if (effort.Equals("high", StringComparison.OrdinalIgnoreCase)) return 6;
+        if (finding.Severity == nameof(FindingSeverity.Info)) return 14;
+        if (finding.Severity == nameof(FindingSeverity.Warning)) return 10;
+        if (finding.Severity == nameof(FindingSeverity.Critical)) return 6;
         return 9;
     }
 
@@ -242,13 +238,13 @@ internal static class ActionPriorityService
 
     private static ActionConfidenceRecord ComputeConfidence(FindingRecord finding)
     {
-        double baseConfidence = finding.ConfidenceScore ?? 0.70;
+        double baseConfidence = finding.Confidence ?? 0.70;
 
         int evidenceSignals = 0;
-        if (!string.IsNullOrWhiteSpace(finding.Evidence)) evidenceSignals++;
-        if (!string.IsNullOrWhiteSpace(finding.Recommendation) || !string.IsNullOrWhiteSpace(finding.Fix)) evidenceSignals++;
-        if (finding.EvidenceItems is { Count: > 0 }) evidenceSignals++;
-        if (finding.EvidenceRefs is { Count: > 0 }) evidenceSignals++;
+        if (!string.IsNullOrWhiteSpace(finding.GetSummaryText())) evidenceSignals++;
+        if (!string.IsNullOrWhiteSpace(finding.Recommendation)) evidenceSignals++;
+        if (finding.Details is { Count: > 0 }) evidenceSignals++;
+        if (finding.Refs is { Count: > 0 }) evidenceSignals++;
         double evidenceCompleteness = evidenceSignals / 4.0;
 
         double consistency = 0.55;
@@ -259,11 +255,11 @@ internal static class ActionPriorityService
 
         double heuristicPenalty = 0.0;
         var caveats = new List<string>();
-        if (finding.CaveatItems is { Count: > 0 })
+        if (finding.Caveats is { Count: > 0 })
         {
-            for (int i = 0; i < finding.CaveatItems.Count; i++)
+            for (int i = 0; i < finding.Caveats.Count; i++)
             {
-                string c = finding.CaveatItems[i];
+                string c = finding.Caveats[i];
                 if (ContainsAny(c, "heuristic", "approximate", "estimated", "partial"))
                     heuristicPenalty += 0.08;
                 caveats.Add(c);
@@ -272,12 +268,12 @@ internal static class ActionPriorityService
         heuristicPenalty = Math.Min(0.35, heuristicPenalty);
 
         double coverageFreshness = 0.65;
-        if (finding.EvidenceRefs is { Count: > 0 })
+        if (finding.Refs is { Count: > 0 })
         {
             bool hasSnapshot = false;
-            for (int i = 0; i < finding.EvidenceRefs.Count; i++)
+            for (int i = 0; i < finding.Refs.Count; i++)
             {
-                if (finding.EvidenceRefs[i].SnapshotIndex.HasValue)
+                if (finding.Refs[i].SnapshotIndex.HasValue)
                 {
                     hasSnapshot = true;
                     break;
@@ -329,9 +325,8 @@ internal static class ActionPriorityService
 
     private static string ResolveActionText(FindingRecord finding)
     {
-        if (!string.IsNullOrWhiteSpace(finding.Fix)) return finding.Fix;
         if (!string.IsNullOrWhiteSpace(finding.Recommendation)) return finding.Recommendation;
-        if (finding.RecommendationItems is { Count: > 0 }) return finding.RecommendationItems[0];
+        if (finding.Caveats is { Count: > 0 }) return finding.Caveats[0];
         return "Investigate and mitigate the finding path.";
     }
 
@@ -373,9 +368,6 @@ internal static class ActionPriorityService
     {
         string expectedDirection = ResolveExpectedDirection(finding);
 
-        if (!string.IsNullOrWhiteSpace(finding.ValidationStep))
-            return finding.ValidationStep + " Expected trend: " + expectedDirection;
-
         if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
             return "Re-check evidence path and confirm with a second analyzer signal before rollout. Expected trend: " + expectedDirection;
 
@@ -384,7 +376,7 @@ internal static class ActionPriorityService
 
     private static string ResolveExpectedDirection(FindingRecord finding)
     {
-        string text = string.Concat(finding.Category, " ", finding.Title, " ", finding.Evidence, " ", finding.Analyzer);
+        string text = string.Concat(finding.Category, " ", finding.Title, " ", finding.GetSummaryText(), " ", finding.Analyzer);
         if (ContainsAny(text, "leak", "retention", "fragmentation", "loh", "gen2", "handle"))
             return "Retained bytes and leak pressure indicators decrease.";
         if (ContainsAny(text, "thread", "hang", "deadlock", "blocked", "lock"))

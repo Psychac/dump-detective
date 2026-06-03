@@ -92,8 +92,8 @@ export function buildAnalyzerSection(section, i) {
   wrapper.dataset.detailIndex = sectionIndexKey;
   wrapper.dataset.analyzerName = String(section.analyzerName || section.displayTitle || '');
   wrapper.dataset.leadSeverity = String((section.leadFinding && section.leadFinding.severity) || 'info').toLowerCase();
-  wrapper.dataset.leadConfidence = String((section.leadFinding && section.leadFinding.confidenceScore != null)
-    ? Number(section.leadFinding.confidenceScore)
+  wrapper.dataset.leadConfidence = String((section.leadFinding && section.leadFinding.confidence != null)
+    ? Number(section.leadFinding.confidence)
     : 1);
 
   // Keep legacy section IDs addressable (e.g., #A1) while moving canonical
@@ -173,8 +173,8 @@ export function buildAnalyzerSection(section, i) {
     lfHeader.appendChild(eyebrow);
 
     const headerMeta = el('div', 'finding-card__header-meta');
-    if (lead.confidenceScore != null) {
-      const conf = Number(lead.confidenceScore);
+    if (lead.confidence != null) {
+      const conf = Number(lead.confidence);
       const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
       const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
       const meter = el('span', 'finding-card__confidence-meter');
@@ -197,14 +197,14 @@ export function buildAnalyzerSection(section, i) {
     lf.appendChild(lfTitle);
 
     const brief = el('div', 'finding-card__brief');
-    if (lead.evidence) {
+    if (lead.summary) {
       const issueRow = el('div', 'finding-card__brief-row finding-card__brief-row--issue');
       const issueLabel = el('span', 'finding-card__brief-label finding-card__brief-label--issue');
       issueLabel.textContent = '!';
       issueLabel.setAttribute('aria-label', 'Issue');
       issueLabel.title = 'Issue';
       const issueValue = el('span', 'finding-card__brief-value');
-      issueValue.textContent = lead.evidence;
+      issueValue.textContent = lead.summary;
       issueRow.appendChild(issueLabel);
       issueRow.appendChild(issueValue);
       brief.appendChild(issueRow);

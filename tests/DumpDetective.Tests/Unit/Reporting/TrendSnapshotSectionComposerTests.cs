@@ -34,7 +34,7 @@ public sealed class TrendSnapshotSectionComposerTests
             LeadFinding: new SectionLeadFinding(
                 Severity: "Warning",
                 Title: "Lead issue",
-                Evidence: "Evidence text",
+                Summary: "Evidence text",
                 Recommendation: "Fix it",
                 ConfidenceSymbol: "●●●○",
                 ConfidenceScore: 0.7,

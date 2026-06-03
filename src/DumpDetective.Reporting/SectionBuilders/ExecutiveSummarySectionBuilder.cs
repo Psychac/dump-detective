@@ -98,7 +98,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
                 blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Evidence: {finding.Evidence}"));
+                blocks.Add(T($"Details: {finding.Evidence}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
                 blocks.Add(CollapseEnd());
 
@@ -121,7 +121,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
                 blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Evidence: {finding.Evidence}"));
+                blocks.Add(T($"Details: {finding.Evidence}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
                 blocks.Add(CollapseEnd());
 
@@ -147,7 +147,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Severity}: {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
                 blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Evidence: {finding.Evidence}"));
+                blocks.Add(T($"Details: {finding.Evidence}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
                 if (finding.EffectiveCaveats.Count > 0)
                     blocks.Add(T($"Caveats: {string.Join(" ", finding.EffectiveCaveats)}"));

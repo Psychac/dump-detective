@@ -8,10 +8,10 @@ import { ensureUniqueDomId } from './report.renderers.shared.js';
 export function buildFindingCard(f, i, options) {
   const severity = String((f && f.severity) || 'Info').toLowerCase();
 
-  const evidenceItems = Array.isArray(f.evidenceItems) ? f.evidenceItems.filter(function (x) { return !!x; }) : [];
-  const recommendationItems = Array.isArray(f.recommendationItems) ? f.recommendationItems.filter(function (x) { return !!x; }) : [];
-  const evidenceSummary = evidenceItems.length > 0 ? evidenceItems[0] : (f.evidence || '');
-  const recommendationLine = recommendationItems.length > 0 ? recommendationItems[0] : (f.recommendation || f.fix || '');
+  const details = Array.isArray(f.details) ? f.details.filter(function (x) { return !!x; }) : [];
+  const caveats = Array.isArray(f.caveats) ? f.caveats.filter(function (x) { return !!x; }) : [];
+  const evidenceSummary = details.length > 0 ? details[0] : (f.summary || '');
+  const recommendationLine = String(f.recommendation || '');
 
   const normalize = function (text) {
     return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -41,8 +41,8 @@ export function buildFindingCard(f, i, options) {
   const cat = el('span', 'category'); cat.textContent = f.category || 'Finding'; eyebrow.appendChild(cat);
   header.appendChild(eyebrow);
   const headerMeta = el('div', 'finding-card__header-meta');
-  if (f.confidenceScore != null) {
-    const conf = Number(f.confidenceScore);
+  if (f.confidence != null) {
+    const conf = Number(f.confidence);
     const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
     const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
     const meter = el('span', 'finding-card__confidence-meter');
@@ -122,7 +122,6 @@ export function buildFindingCard(f, i, options) {
 
   if (brief.childNodes.length) sec.appendChild(brief);
 
-  const caveats = Array.isArray(f.caveatItems) ? f.caveatItems.filter(function (x) { return !!x; }) : [];
   if (caveats.length > 0) {
     const caveatWrap = el('div', 'finding-card__caveats');
     for (let ci = 0; ci < caveats.length; ci++) {

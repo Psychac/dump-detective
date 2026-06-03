@@ -31,11 +31,11 @@ internal sealed class TrendReportComposer(
             trendData.ResolvedFindings);
 
         var trendFindings = new List<InsightFinding>();
-        foreach (var f in BuildTrendFindings(trendData.Overall, lifecycle))
+        foreach (InsightFinding f in BuildTrendFindings(trendData.Overall, lifecycle))
             trendFindings.Add(f);
-        foreach (var f in BuildTopRegressionFindings(trendData.Overall))
+        foreach (InsightFinding f in BuildTopRegressionFindings(trendData.Overall))
             trendFindings.Add(f);
-        foreach (var f in BuildTopImprovementFindings(trendData.Overall))
+        foreach (InsightFinding f in BuildTopImprovementFindings(trendData.Overall))
             trendFindings.Add(f);
 
         AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, Array.Empty<IAnalyzerSectionBuilder>(), reportBuilders, audience, currentIncidentContext);
@@ -75,19 +75,17 @@ internal sealed class TrendReportComposer(
 
                 string? cls = null;
 
-                if (newFingerprints.Contains(rec.Fingerprint))
+                if (newFingerprints.Contains(rec.Id))
                 {
                     cls = nameof(RegressionClass.NewRisk);
                 }
                 else
                 {
                     // Amplified if severity increased relative to baseline
-                    if (baselineSeverityByFingerprint.TryGetValue(rec.Fingerprint, out string? baseSevStr))
+                    if (baselineSeverityByFingerprint.TryGetValue(rec.Id, out string? baseSevStr))
                     {
                         if (SeverityOrdinal(rec.Severity) > SeverityOrdinal(baseSevStr))
-                        {
                             cls = nameof(RegressionClass.AmplifiedRisk);
-                        }
                     }
 
                     // If not classified yet, check metric delta magnitude (20% default threshold)
@@ -136,8 +134,6 @@ internal sealed class TrendReportComposer(
         var trendHtmlSections = analyzerSections
             .Where(static s => !s.SectionId.StartsWith("detail-", StringComparison.Ordinal))
             .ToArray();
-
-        
 
         if (trendSummary is not null)
         {
@@ -959,21 +955,21 @@ internal sealed class TrendReportComposer(
 
     private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)
     {
+        IReadOnlyList<string>? details = SplitLines(finding.Evidence);
+
         return new FindingRecord(
+            Id: finding.EffectiveFingerprint,
             Analyzer: finding.Analyzer,
             Category: finding.Category,
             Severity: finding.Severity.ToString(),
             Title: finding.Title,
-            Evidence: finding.Evidence,
+            Details: details,
             Recommendation: finding.Recommendation,
-            Tags: finding.Tags,
-            Fingerprint: finding.EffectiveFingerprint)
+            Tags: finding.Tags)
         {
-            EvidenceItems = SplitLines(finding.Evidence),
-            RecommendationItems = SplitLines(finding.Recommendation),
-            CaveatItems = finding.EffectiveCaveats.Count > 0 ? finding.EffectiveCaveats : null,
-            ConfidenceScore = finding.ConfidenceScore,
-            EvidenceRefs = new[]
+            Confidence = finding.ConfidenceScore,
+            Caveats = finding.EffectiveCaveats.Count > 0 ? finding.EffectiveCaveats : null,
+            Refs = new[]
             {
                 new EvidenceRef(
                     Analyzer: finding.Analyzer,

@@ -51,8 +51,8 @@ public sealed class ReportingCompositionTests
         doc.ExecutiveSummary!.CriticalFindings.Should().HaveCount(1);
         doc.ExecutiveSummary.WarningFindings.Should().HaveCount(1);
         doc.ExecutiveSummary.TopRecommendations.Should().HaveCount(2);
-        doc.ExecutiveSummary.CriticalFindings![0].Evidence.Should().Be("Evidence B");
-        doc.ExecutiveSummary.WarningFindings![0].Evidence.Should().Be("Evidence A");
+        doc.ExecutiveSummary.CriticalFindings![0].Details![0].Should().Be("Evidence B");
+        doc.ExecutiveSummary.WarningFindings![0].Details![0].Should().Be("Evidence A");
     }
 
     [Fact]
@@ -129,23 +129,23 @@ public sealed class ReportingCompositionTests
             Findings =
             [
                 new FindingRecord(
+                    Id: "sec-1",
                     Analyzer: "CrashAnalyzer",
                     Category: "Crash",
                     Severity: FindingSeverity.Warning.ToString(),
                     Title: "Crash signature",
-                    Evidence: "Unhandled exception in worker",
+                    Details: ["Unhandled exception in worker"],
                     Recommendation: "Inspect stack and exception roots",
-                    Tags: ["crash"],
-                    Fingerprint: "sec-1"),
+                    Tags: ["crash"]),
                 new FindingRecord(
+                    Id: "sec-2",
                     Analyzer: "ThreadAnalyzer",
                     Category: "Threads",
                     Severity: FindingSeverity.Info.ToString(),
                     Title: "Thread pool pressure",
-                    Evidence: "LongValue_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+                    Details: ["LongValue_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"],
                     Recommendation: "Review queued work items",
-                    Tags: ["threads"],
-                    Fingerprint: "sec-2")
+                    Tags: ["threads"])
             ],
             AnalyzerSections =
             [
@@ -191,8 +191,7 @@ public sealed class ReportingCompositionTests
             Title: "Contract versioning",
             Evidence: "Version metadata should be stamped.",
             Recommendation: "Keep schema changes backward-compatible.",
-            Tags: ["contract"],
-            Fingerprint: "contract-ver");
+            Tags: ["contract"]);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/contract.dmp",

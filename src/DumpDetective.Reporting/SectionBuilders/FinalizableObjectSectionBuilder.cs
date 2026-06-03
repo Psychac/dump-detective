@@ -62,7 +62,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
                 Title: $"Critical finalizer queue backlog \u2014 {d.FinalizerQueueCount:N0} objects queued",
-                Evidence: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}. Finalizer thread may be blocked or unable to drain.",
+                Summary: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}. Finalizer thread may be blocked or unable to drain.",
                 Recommendation: "Implement IDisposable + GC.SuppressFinalize in Dispose() to prevent queuing. Check whether the finalizer thread is blocked (see \u00A7D1 Thread Overview).",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,
@@ -71,7 +71,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated finalizer queue \u2014 {d.FinalizerQueueCount:N0} objects pending finalization",
-                Evidence: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}.",
+                Summary: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}.",
                 Recommendation: "Review finalizable types for IDisposable compliance and call GC.SuppressFinalize after Dispose().",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,

@@ -36,7 +36,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                 leadFinding = new SectionLeadFinding(
                     Severity: top.Severity.ToString(),
                     Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
-                    Evidence: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
+                    Summary: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
                     Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
                     ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
                     ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,

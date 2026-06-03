@@ -26,14 +26,14 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
+                Id:             "baseline-small",
                 Analyzer:       "RetentionAnalyzer",
                 Category:       "Leak",
                 Severity:       "Warning",
                 Title:          "Leak pressure",
-                Evidence:       "Detected duplicate strings.\n- Analyzer: RetentionAnalyzer\n- Value: System.String duplicated",
+                Details:        ["Detected duplicate strings.", "- Analyzer: RetentionAnalyzer", "- Value: System.String duplicated"],
                 Recommendation: "Pool repeated string payloads.",
-                Tags:           ["baseline-small"],
-                Fingerprint:    "baseline-small")
+                Tags:           ["baseline-small"])
         ],
         
     };
@@ -46,14 +46,14 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
+                Id:             "dup-heavy",
                 Analyzer:       "RetentionAnalyzer",
                 Category:       "Leak",
                 Severity:       "Critical",
                 Title:          "Duplicate-heavy merged section",
-                Evidence:       "Merged duplicate leak evidence from multiple analyzers.\n- EvidenceA: A repeated payload instance\n- EvidenceB: Another repeated payload instance",
+                Details:        ["Merged duplicate leak evidence from multiple analyzers.", "- EvidenceA: A repeated payload instance", "- EvidenceB: Another repeated payload instance"],
                 Recommendation: "Deduplicate payload cache keys. Review object retention roots.",
-                Tags:           ["dup-heavy"],
-                Fingerprint:    "dup-heavy")
+                Tags:           ["dup-heavy"])
         ],
         
     };
@@ -66,14 +66,14 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
+                Id:             "long-names",
                 Analyzer:       "MemoryAnalyzer",
                 Category:       "Memory",
                 Severity:       "Warning",
                 Title:          "Long member/type names",
-                Evidence:       "Long identifiers are preserved end-to-end.\n- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP\n- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN",
+                Details:        ["Long identifiers are preserved end-to-end.", "- Type: VeryLongTypeName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP", "- Member: VeryLongMemberName_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN"],
                 Recommendation: "Keep full value visibility; do not truncate.",
-                Tags:           ["long-names"],
-                Fingerprint:    "long-names")
+                Tags:           ["long-names"])
         ],
         
     };
@@ -86,14 +86,14 @@ internal static class GoldenReportFixtures
         Findings =
         [
             new FindingRecord(
+                Id:             "rich-evidence",
                 Analyzer:       "CrashAnalyzer",
                 Category:       "Crash",
                 Severity:       "Warning",
                 Title:          "Rich evidence sample",
-                Evidence:       "Includes multiple evidence and remediation records.\n- Thread: 42\n- Exception: System.NullReferenceException\n- StackTop: Service.ProcessRequest",
+                Details:        ["Includes multiple evidence and remediation records.", "- Thread: 42", "- Exception: System.NullReferenceException", "- StackTop: Service.ProcessRequest"],
                 Recommendation: "Guard null dereferences. Add targeted telemetry around request processing.",
-                Tags:           ["rich-evidence"],
-                Fingerprint:    "rich-evidence")
+                Tags:           ["rich-evidence"])
         ],
         
     };
@@ -105,9 +105,9 @@ internal static class GoldenReportFixtures
         ElapsedSeconds = 6.6,
         Findings =
         [
-            new FindingRecord("LeakAnalyzer", "Leak", "Critical", "Critical leak",  "Critical item",     "Handle now",        ["sev-critical"], "sev-critical"),
-            new FindingRecord("LeakAnalyzer", "Leak", "Warning",  "Warning leak",   "Warning item",      "Plan remediation",  ["sev-warning"],  "sev-warning"),
-            new FindingRecord("LeakAnalyzer", "Info", "Info",     "Info signal",    "Informational item","Observe",           ["sev-info"],     "sev-info")
+            new FindingRecord("sev-critical", "LeakAnalyzer", "Leak", "Critical", "Critical leak", ["Critical item"], "Handle now", ["sev-critical"]),
+            new FindingRecord("sev-warning", "LeakAnalyzer", "Leak", "Warning",  "Warning leak",   ["Warning item"], "Plan remediation",  ["sev-warning"]),
+            new FindingRecord("sev-info", "LeakAnalyzer", "Info", "Info",     "Info signal",    ["Informational item"], "Observe",           ["sev-info"])
         ],
         
     };

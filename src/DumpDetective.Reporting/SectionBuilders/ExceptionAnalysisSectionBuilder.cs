@@ -37,7 +37,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
                 Title: $"Active exceptions detected ({crash.ActiveExceptions:N0} on thread stacks)",
-                Evidence: $"{crash.ActiveExceptions:N0} active exception(s) found on thread stacks. Primary type: {topType}.",
+                Summary: $"{crash.ActiveExceptions:N0} active exception(s) found on thread stacks. Primary type: {topType}.",
                 Recommendation: "Investigate the crash thread candidates below; correlate with the thread section for full context.",
                 ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,

@@ -57,30 +57,30 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
             if (run.Status == AnalyzerExecutionStatus.Failed)
             {
-                
+                string evidence = run.ErrorMessage ?? "Analyzer failed without error details.";
                 allFindings.Add(new FindingRecord(
+                    Id: $"analyzer-failure:{run.AnalyzerName}",
                     Analyzer: run.AnalyzerName,
                     Category: "Pipeline",
                     Severity: nameof(FindingSeverity.Warning),
                     Title: $"Analyzer failed: {run.AnalyzerName}",
-                    Evidence: run.ErrorMessage ?? "Analyzer failed without error details.",
+                    Details: [evidence],
                     Recommendation: "Inspect analyzer failure details and re-run analysis.",
-                    Tags: [],
-                    Fingerprint: $"analyzer-failure:{run.AnalyzerName}"));
+                    Tags: []));
             }
 
             if (!string.IsNullOrWhiteSpace(run.FindingGeneratorError))
             {
-                
+                string evidence = $"The finding generator for '{run.AnalyzerName}' threw an exception. Findings for this analyzer may be incomplete or missing.";
                 allFindings.Add(new FindingRecord(
+                    Id: $"finding-generator-error:{run.AnalyzerName}",
                     Analyzer: run.AnalyzerName,
                     Category: "Pipeline",
                     Severity: nameof(FindingSeverity.Warning),
                     Title: $"Finding generator failed: {run.AnalyzerName}",
-                    Evidence: $"The finding generator for '{run.AnalyzerName}' threw an exception. Findings for this analyzer may be incomplete or missing.",
+                    Details: [evidence],
                     Recommendation: "Re-run analysis. If the error persists, report it with the full error details.",
-                    Tags: [],
-                    Fingerprint: $"finding-generator-error:{run.AnalyzerName}"));
+                    Tags: []));
             }
         }
 
@@ -472,7 +472,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             if (string.IsNullOrWhiteSpace(domain))
                 continue;
 
-            domainByFingerprint[finding.Fingerprint] = domain;
+            domainByFingerprint[finding.Id] = domain;
 
             HashSet<string> signalKeys = ExtractCorrelationSignalKeys(finding);
             if (signalKeys.Count == 0)
@@ -512,15 +512,15 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             for (int i = 0; i < list.Count; i++)
             {
                 FindingRecord finding = list[i];
-                if (domainByFingerprint.TryGetValue(finding.Fingerprint, out string? domain) && !string.IsNullOrWhiteSpace(domain))
+                if (domainByFingerprint.TryGetValue(finding.Id, out string? domain) && !string.IsNullOrWhiteSpace(domain))
                     domains.Add(domain);
-                fingerprints.Add(finding.Fingerprint);
+                fingerprints.Add(finding.Id);
 
                 int sev = SeverityOrdinal(finding.Severity);
                 if (sev < minSeverity) minSeverity = sev;
                 if (sev > maxSeverity) maxSeverity = sev;
 
-                double conf = finding.ConfidenceScore ?? 0.70;
+                double conf = finding.Confidence ?? 0.70;
                 if (conf < minConfidence) minConfidence = conf;
                 if (conf > maxConfidence) maxConfidence = conf;
             }
@@ -772,11 +772,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             }
         }
 
-        if (finding.EvidenceRefs is { Count: > 0 })
+        if (finding.Refs is { Count: > 0 })
         {
-            for (int i = 0; i < finding.EvidenceRefs.Count; i++)
+            for (int i = 0; i < finding.Refs.Count; i++)
             {
-                EvidenceRef evidenceRef = finding.EvidenceRefs[i];
+                EvidenceRef evidenceRef = finding.Refs[i];
                 if (string.IsNullOrWhiteSpace(evidenceRef.MetricKey))
                     continue;
 
@@ -790,9 +790,8 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
         string text = string.Concat(
             finding.Title, " ",
-            finding.Evidence, " ",
-            finding.Recommendation, " ",
-            finding.Effect);
+            finding.GetSummaryText(), " ",
+            finding.Recommendation);
 
         AddBridgeKeyword(keys, text, "deadlock", "kw:deadlock");
         AddBridgeKeyword(keys, text, "thread pool", "kw:thread-pool");
@@ -999,12 +998,12 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         if (section.LeadFinding is not { } lead)
             return string.Empty;
 
-        return BuildLeadDedupKey(section.AnalyzerName, lead.Title, lead.Evidence, lead.Recommendation);
+        return BuildLeadDedupKey(section.AnalyzerName, lead.Title, lead.Summary, lead.Recommendation);
     }
 
     private static string BuildLeadDedupKey(FindingRecord finding)
     {
-        return BuildLeadDedupKey(finding.Analyzer, finding.Title, finding.Evidence, finding.Recommendation);
+        return BuildLeadDedupKey(finding.Analyzer, finding.Title, finding.GetSummaryText(), finding.Recommendation);
     }
 
     private static string BuildLeadDedupKey(string analyzer, string title, string evidence, string recommendation)
@@ -1114,7 +1113,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                     leadFinding = new SectionLeadFinding(
                         Severity:          top.Severity.ToString(),
                         Title:             top.Title,
-                        Evidence:          top.Evidence,
+                        Summary:           top.Evidence,
                         Recommendation:    top.Recommendation,
                         ConfidenceSymbol:  symbol,
                         ConfidenceScore:   score,
@@ -1245,30 +1244,25 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
     // ── Finding mapping ───────────────────────────────────────────────────────
 
-    private static FindingRecord MapFinding(InsightFinding f, IReadOnlyList<ReportArtifact>? artifacts = null, int? snapshotIndex = null) =>
-        new(
+    private static FindingRecord MapFinding(InsightFinding f, IReadOnlyList<ReportArtifact>? artifacts = null, int? snapshotIndex = null)
+    {
+        IReadOnlyList<string>? details = SplitLines(f.Evidence);
+
+        return new(
+            Id: f.EffectiveFingerprint,
             Analyzer: f.Analyzer,
             Category: f.Category,
             Severity: f.Severity.ToString(),
             Title: f.Title,
-            Evidence: f.Evidence,
+            Details: details,
             Recommendation: f.Recommendation,
-            Tags: f.Tags,
-            Fingerprint: f.EffectiveFingerprint)
+            Tags: f.Tags)
         {
-            EvidenceItems = SplitLines(f.Evidence),
-            RecommendationItems = SplitLines(f.Recommendation),
-            CaveatItems = f.EffectiveCaveats.Count > 0 ? f.EffectiveCaveats : null,
-            Cause = BuildCause(f),
-            Effect = BuildEffect(f),
-            Fix = BuildFix(f),
-            ConfidenceScore = BuildConfidenceScore(f),
-            EvidenceRefs = BuildEvidenceRefs(f, artifacts, snapshotIndex),
-            SuggestedOwner = BuildSuggestedOwner(f),
-            Effort = BuildEffort(f),
-            ValidationStep = BuildValidationStep(f),
-            TrackingStatus = BuildTrackingStatus(f)
+            Confidence = BuildConfidenceScore(f),
+            Refs = BuildEvidenceRefs(f, artifacts, snapshotIndex),
+            Caveats = f.EffectiveCaveats.Count > 0 ? f.EffectiveCaveats : null
         };
+    }
 
     private static IReadOnlyList<EvidenceRef> BuildEvidenceRefs(
         InsightFinding finding,
@@ -1402,38 +1396,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
     private static double BuildConfidenceScore(InsightFinding finding) => finding.EffectiveConfidenceScore;
 
-    private static string BuildSuggestedOwner(InsightFinding finding) => finding.Category switch
-    {
-        var c when c.Contains("Memory", StringComparison.OrdinalIgnoreCase) ||
-                   c.Contains("Leak", StringComparison.OrdinalIgnoreCase) ||
-                   c.Contains("Retention", StringComparison.OrdinalIgnoreCase) => "Platform / Service Owner",
-        var c when c.Contains("Thread", StringComparison.OrdinalIgnoreCase) ||
-                   c.Contains("Hang", StringComparison.OrdinalIgnoreCase) ||
-                   c.Contains("Concurrency", StringComparison.OrdinalIgnoreCase) => "Runtime / Service Owner",
-        var c when c.Contains("Crash", StringComparison.OrdinalIgnoreCase) ||
-                   c.Contains("Exception", StringComparison.OrdinalIgnoreCase) => "Application Owner",
-        _ => "Investigation Owner"
-    };
-
-    private static string BuildEffort(InsightFinding finding) => finding.Severity switch
-    {
-        FindingSeverity.Critical => "High",
-        FindingSeverity.Warning => "Medium",
-        _ => "Low"
-    };
-
     private static string BuildValidationStep(InsightFinding finding) => finding.Severity switch
     {
         FindingSeverity.Critical => "Re-run the dump after the fix and confirm the finding disappears or drops sharply.",
         FindingSeverity.Warning => "Verify the trend or cap value after the change and confirm the signal stops growing.",
         _ => "Confirm whether the signal is expected for this workload."
-    };
-
-    private static string BuildTrackingStatus(InsightFinding finding) => finding.Severity switch
-    {
-        FindingSeverity.Critical => "Untracked",
-        FindingSeverity.Warning => "InProgress",
-        _ => "Review"
     };
 
     private static string NormalizeStatus(AnalyzerExecutionStatus status) => status switch

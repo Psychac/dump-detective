@@ -44,12 +44,12 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                 Caveats: ["Active exception count is based on measured runtime objects and thread snapshots."]);
         }
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total exceptions",  crash.TotalExceptions.ToString("N0"),         crash.TotalExceptions),
-            KM("Active exceptions", crash.ActiveExceptions.ToString("N0"),        crash.ActiveExceptions),
-            KM("Unique types",      crash.ExceptionTypeCounts.Count.ToString("N0"), crash.ExceptionTypeCounts.Count),
-            KM("Inferred traces",   crash.InferredTraceCount.ToString("N0"),       crash.InferredTraceCount),
+            ["total_exceptions"] = new NumericMetricValue(crash.TotalExceptions, MetricUnit.Count),
+            ["active_exceptions"] = new NumericMetricValue(crash.ActiveExceptions, MetricUnit.Count),
+            ["unique_exception_types"] = new NumericMetricValue(crash.ExceptionTypeCounts.Count, MetricUnit.Count),
+            ["inferred_traces"] = new NumericMetricValue(crash.InferredTraceCount, MetricUnit.Count),
         };
 
         tables.Add(ST("Exception counts",

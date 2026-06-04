@@ -18,11 +18,11 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ReferenceChainDomainResult)result;
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Analyzed Samples", $"{d.AnalyzedSamples:N0}",    d.AnalyzedSamples),
-            KM("Retained Samples", $"{d.RetainedSamples:N0}",    d.RetainedSamples),
-            KM("Retained %",       $"{d.RetainedPercent:F1}%",   d.RetainedPercent),
+            ["analyzed_samples"] = new NumericMetricValue(d.AnalyzedSamples, MetricUnit.Count),
+            ["retained_samples"] = new NumericMetricValue(d.RetainedSamples, MetricUnit.Count),
+            ["retained_pct"] = new NumericMetricValue(d.RetainedPercent, MetricUnit.Percent, $"{d.RetainedPercent:F1}%"),
         };
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();

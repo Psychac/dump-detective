@@ -16,11 +16,12 @@ internal sealed class DependentHandleSectionBuilder : SectionBuilderBase, IAnaly
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DependentHandleDomainResult)result;
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Dependent Handles", $"{d.DependentHandleCount:N0}", d.DependentHandleCount),
-            KM("Resolved Edges", $"{d.ResolvedEdgeCount:N0}", d.ResolvedEdgeCount),
-            KM("Unresolved Targets", $"{d.UnresolvedTargetCount:N0}  ({d.UnresolvedPercent:F1}%)", d.UnresolvedTargetCount),
+            ["dependent_handles"] = new NumericMetricValue(d.DependentHandleCount, MetricUnit.Count),
+            ["resolved_edges"] = new NumericMetricValue(d.ResolvedEdgeCount, MetricUnit.Count),
+            ["unresolved_targets"] = new NumericMetricValue(d.UnresolvedTargetCount, MetricUnit.Count),
+            ["unresolved_targets_pct"] = new NumericMetricValue(d.UnresolvedPercent, MetricUnit.Percent),
         };
         var tables = new List<SectionTable>();
 
@@ -53,7 +54,7 @@ internal sealed class DependentHandleSectionBuilder : SectionBuilderBase, IAnaly
 
         return new AnalyzerDetailSection(
             AnalyzerName, AnalyzerName, SortOrder, [],
-            KeyMetrics: keyMetrics,
+                KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
 }

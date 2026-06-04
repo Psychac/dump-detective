@@ -24,10 +24,10 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."),
         };
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Roots",           roots.TotalRoots.ToString("N0"),           roots.TotalRoots),
-            KM("Path Search Capped",    roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
+            ["total_roots"] = new NumericMetricValue(roots.TotalRoots, MetricUnit.Count),
+            ["path_search_capped"] = new TextMetricValue(roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
         };
 
         tables.Add(ST(

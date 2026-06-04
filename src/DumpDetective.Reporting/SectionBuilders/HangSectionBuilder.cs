@@ -39,27 +39,29 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     : ["Runtime thread-pool data was unavailable; some metrics are estimated."]);
         }
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total alive threads",    d.TotalAliveThreads.ToString("N0"),            d.TotalAliveThreads),
-            KM("Waiting threads",        d.WaitingThreadCount.ToString("N0"),            d.WaitingThreadCount),
-            KM("Threads holding locks",  d.ThreadsHoldingLocks.ToString("N0"),           d.ThreadsHoldingLocks),
-            KM("Waiting %",              $"{d.WaitingPercent:F1}%",                      d.WaitingPercent),
-            KM("Health score",           d.HealthScore.ToString("N0"),                   d.HealthScore),
-            KM("Is starved",             d.IsStarved ? "Yes" : "No",                     d.IsStarved ? 1.0 : 0.0),
-            KM("Queued work items",      d.QueuedWorkItems.ToString("N0"),               d.QueuedWorkItems),
-            KM("Runtime TP data",        d.RuntimeThreadPoolDataAvailable ? "Available" : "Unavailable",
-                                         d.RuntimeThreadPoolDataAvailable ? 1.0 : 0.0),
+            ["total_alive_threads"] = new NumericMetricValue(d.TotalAliveThreads, MetricUnit.Count),
+            ["waiting_threads"] = new NumericMetricValue(d.WaitingThreadCount, MetricUnit.Count),
+            ["threads_holding_locks"] = new NumericMetricValue(d.ThreadsHoldingLocks, MetricUnit.Count),
+            ["waiting_pct"] = new NumericMetricValue(d.WaitingPercent, MetricUnit.Percent, $"{d.WaitingPercent:F1}%"),
+            ["health_score"] = new NumericMetricValue(d.HealthScore, MetricUnit.Count),
+            ["is_starved"] = new TextMetricValue(d.IsStarved ? "Yes" : "No"),
+            ["queued_work_items"] = new NumericMetricValue(d.QueuedWorkItems, MetricUnit.Count),
+            ["runtime_tp_data"] = new TextMetricValue(d.RuntimeThreadPoolDataAvailable ? "Available" : "Unavailable"),
         };
         if (d.RuntimeThreadPoolDataAvailable)
         {
-            keyMetrics.Add(KM("Min worker threads",      d.RuntimeMinThreads.ToString("N0"),              d.RuntimeMinThreads));
-            keyMetrics.Add(KM("Max worker threads",      d.RuntimeMaxThreads.ToString("N0"),              d.RuntimeMaxThreads));
-            keyMetrics.Add(KM("Active worker threads",   d.RuntimeActiveWorkerThreads.ToString("N0"),    d.RuntimeActiveWorkerThreads));
-            keyMetrics.Add(KM("Idle worker threads",     d.RuntimeIdleWorkerThreads.ToString("N0"),      d.RuntimeIdleWorkerThreads));
-            keyMetrics.Add(KM("Retired worker threads",  d.RuntimeRetiredWorkerThreads.ToString("N0"),   d.RuntimeRetiredWorkerThreads));
-            keyMetrics.Add(KM("Runtime queue length",    d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "N/A", d.RuntimeQueueLength ?? 0));
-            keyMetrics.Add(KM("CPU utilization",         $"{d.RuntimeCpuUtilization:N0}%",               d.RuntimeCpuUtilization));
+            keyMetrics["min_worker_threads"] = new NumericMetricValue(d.RuntimeMinThreads, MetricUnit.Count);
+            keyMetrics["max_worker_threads"] = new NumericMetricValue(d.RuntimeMaxThreads, MetricUnit.Count);
+            keyMetrics["active_worker_threads"] = new NumericMetricValue(d.RuntimeActiveWorkerThreads, MetricUnit.Count);
+            keyMetrics["idle_worker_threads"] = new NumericMetricValue(d.RuntimeIdleWorkerThreads, MetricUnit.Count);
+            keyMetrics["retired_worker_threads"] = new NumericMetricValue(d.RuntimeRetiredWorkerThreads, MetricUnit.Count);
+            if (d.RuntimeQueueLength.HasValue)
+                keyMetrics["runtime_queue_length"] = new NumericMetricValue(d.RuntimeQueueLength.Value, MetricUnit.Count);
+            else
+                keyMetrics["runtime_queue_length"] = new TextMetricValue("Unavailable");
+            keyMetrics["cpu_utilization"] = new NumericMetricValue(d.RuntimeCpuUtilization, MetricUnit.Percent, $"{d.RuntimeCpuUtilization:N0}%");
         }
 
         if (d.WaitCategoryBreakdown.Count > 0)
@@ -98,7 +100,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     Row(Cell("Active worker threads"), Cell(d.RuntimeActiveWorkerThreads.ToString("N0"),  d.RuntimeActiveWorkerThreads)),
                     Row(Cell("Idle worker threads"),   Cell(d.RuntimeIdleWorkerThreads.ToString("N0"),    d.RuntimeIdleWorkerThreads)),
                     Row(Cell("Retired worker threads"),Cell(d.RuntimeRetiredWorkerThreads.ToString("N0"), d.RuntimeRetiredWorkerThreads)),
-                    Row(Cell("Runtime queue length"),  Cell(d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "Unavailable", d.RuntimeQueueLength)),
+                    Row(Cell("Runtime queue length"),  Cell(d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "Unavailable", d.RuntimeQueueLength.HasValue ? (long?)d.RuntimeQueueLength.Value : null)),
                     Row(Cell("CPU utilization"),       Cell($"{d.RuntimeCpuUtilization:N0}%",             d.RuntimeCpuUtilization)),
                     Row(Cell("Starvation flag"),       Cell(d.IsStarved ? "Yes" : "No",                   d.IsStarved ? 1L : 0L)),
                 ]));

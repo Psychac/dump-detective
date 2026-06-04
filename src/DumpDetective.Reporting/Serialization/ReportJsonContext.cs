@@ -41,9 +41,13 @@ namespace DumpDetective.Reporting.Serialization;
 // Section contract-slot types
 [JsonSerializable(typeof(SectionLeadFinding))]
 [JsonSerializable(typeof(SectionKeyMetric))]
+[JsonSerializable(typeof(MetricValue))]
+[JsonSerializable(typeof(NumericMetricValue))]
+[JsonSerializable(typeof(TextMetricValue))]
+[JsonSerializable(typeof(EnumMetricValue))]
 [JsonSerializable(typeof(SectionTable))]
 [JsonSerializable(typeof(SectionProvenance))]
-[JsonSerializable(typeof(List<SectionKeyMetric>))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, MetricValue>))]
 [JsonSerializable(typeof(List<SectionTable>))]
 [JsonSerializable(typeof(SparklineBlock))]
 [JsonSourceGenerationOptions(

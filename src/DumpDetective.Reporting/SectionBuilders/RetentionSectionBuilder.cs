@@ -33,12 +33,12 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (d.SkippedReferenceAddresses > 0)
             caveats.Add($"{d.SkippedReferenceAddresses:N0} reference addresses were skipped.");
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Highly referenced objects", d.HighlyReferencedObjectCount.ToString("N0"), d.HighlyReferencedObjectCount),
-            KM("Top retained total",        FormatBytes(d.TopHighlyReferencedTotalBytes), (double)Math.Min(d.TopHighlyReferencedTotalBytes, long.MaxValue)),
-            KM("Finalizer queue",           d.FinalizerQueueCount.ToString("N0"),         d.FinalizerQueueCount),
-            KM("Skipped ref addresses",     d.SkippedReferenceAddresses.ToString("N0"),   d.SkippedReferenceAddresses),
+            ["highly_referenced_objects"] = new NumericMetricValue(d.HighlyReferencedObjectCount, MetricUnit.Count),
+            ["top_retained_total"] = new NumericMetricValue((double)Math.Min(d.TopHighlyReferencedTotalBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(d.TopHighlyReferencedTotalBytes)),
+            ["finalizer_queue"] = new NumericMetricValue(d.FinalizerQueueCount, MetricUnit.Count),
+            ["skipped_ref_addresses"] = new NumericMetricValue(d.SkippedReferenceAddresses, MetricUnit.Count),
         };
 
         if (d.TopHighlyReferencedObjects is { Count: > 0 })

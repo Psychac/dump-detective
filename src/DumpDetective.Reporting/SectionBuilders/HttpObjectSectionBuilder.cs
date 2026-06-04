@@ -19,15 +19,15 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total HTTP Objects",   $"{d.TotalHttpObjects:N0}",      d.TotalHttpObjects),
-            KM("HttpClient",           $"{d.HttpClientCount:N0}",       d.HttpClientCount),
-            KM("HttpWebRequest",       $"{d.HttpWebRequestCount:N0}",   d.HttpWebRequestCount),
-            KM("HttpWebResponse",      $"{d.HttpWebResponseCount:N0}",  d.HttpWebResponseCount),
-            KM("Handlers",             $"{d.HttpMessageHandlerCount:N0}", d.HttpMessageHandlerCount),
-            KM("ServicePoint",         $"{d.ServicePointCount:N0}",     d.ServicePointCount),
-            KM("Total Heap Size",      FormatBytes(d.TotalBytes)),
+            ["total_http_objects"] = new NumericMetricValue(d.TotalHttpObjects, MetricUnit.Count),
+            ["http_client"] = new NumericMetricValue(d.HttpClientCount, MetricUnit.Count),
+            ["http_web_request"] = new NumericMetricValue(d.HttpWebRequestCount, MetricUnit.Count),
+            ["http_web_response"] = new NumericMetricValue(d.HttpWebResponseCount, MetricUnit.Count),
+            ["handlers"] = new NumericMetricValue(d.HttpMessageHandlerCount, MetricUnit.Count),
+            ["service_point"] = new NumericMetricValue(d.ServicePointCount, MetricUnit.Count),
+            ["total_heap_size"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatBytes(d.TotalBytes)),
         };
 
         if (!d.HttpObjectsFound)

@@ -22,12 +22,12 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             BuildConfidenceBand(0.85, ["Derived from recorded wait chains and lock ownership."]),
         };
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Held Locks",                $"{d.TotalHeldLocks:N0}",          d.TotalHeldLocks),
-            KM("Contested Locks",           $"{d.ContestedLockCount:N0}",       d.ContestedLockCount),
-            KM("Max Waiters on Single Lock",$"{d.MaxWaitersOnSingleLock:N0}",   d.MaxWaitersOnSingleLock),
-            KM("Deadlock Candidates",       $"{d.DeadlockCandidateCount:N0}",   d.DeadlockCandidateCount),
+            ["held_locks"] = new NumericMetricValue(d.TotalHeldLocks, MetricUnit.Count),
+            ["contested_locks"] = new NumericMetricValue(d.ContestedLockCount, MetricUnit.Count),
+            ["max_waiters_on_single_lock"] = new NumericMetricValue(d.MaxWaitersOnSingleLock, MetricUnit.Count),
+            ["deadlock_candidates"] = new NumericMetricValue(d.DeadlockCandidateCount, MetricUnit.Count),
         };
 
         var topTypes = d.TopContestedLockTypes ?? [];

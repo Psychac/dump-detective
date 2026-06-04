@@ -22,17 +22,17 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Potential Leak Groups", $"{d.TotalEventLeakInstances:N0}", d.TotalEventLeakInstances),
-            KM("Total Subscribers",     $"{d.TotalSubscribers:N0}",         d.TotalSubscribers),
-            KM("Static Event Leaks",    $"{d.StaticEventLeakCount:N0}",      d.StaticEventLeakCount),
-            KM("Instance Event Leaks",  $"{d.InstanceEventLeakCount:N0}",    d.InstanceEventLeakCount),
+            ["potential_leak_groups"] = new NumericMetricValue(d.TotalEventLeakInstances, MetricUnit.Count),
+            ["total_subscribers"] = new NumericMetricValue(d.TotalSubscribers, MetricUnit.Count),
+            ["static_event_leaks"] = new NumericMetricValue(d.StaticEventLeakCount, MetricUnit.Count),
+            ["instance_event_leaks"] = new NumericMetricValue(d.InstanceEventLeakCount, MetricUnit.Count),
         };
         if (d.TotalEventsScanned > 0)
-            keyMetrics.Add(KM("Events Scanned", $"{d.TotalEventsScanned:N0}", d.TotalEventsScanned));
+            keyMetrics["events_scanned"] = new NumericMetricValue(d.TotalEventsScanned, MetricUnit.Count);
         if (d.TotalPublisherInstances > 0)
-            keyMetrics.Add(KM("Publisher Instances", $"{d.TotalPublisherInstances:N0}", d.TotalPublisherInstances));
+            keyMetrics["publisher_instances"] = new NumericMetricValue(d.TotalPublisherInstances, MetricUnit.Count);
 
         var instancesWithGeneration = d.TopLeakInstances ?? [];
         if (instancesWithGeneration.Count > 0)

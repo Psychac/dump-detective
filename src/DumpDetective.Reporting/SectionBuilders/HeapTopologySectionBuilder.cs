@@ -21,20 +21,20 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total segments",  d.TotalSegments.ToString("N0"),           d.TotalSegments),
-            KM("Committed bytes", FormatBytes(d.TotalCommittedBytes),      (double)d.TotalCommittedBytes),
-            KM("Used bytes",      FormatBytes(d.TotalUsedBytes),           (double)d.TotalUsedBytes),
-            KM("Reserved bytes",  FormatBytes(d.TotalReservedBytes),       (double)d.TotalReservedBytes),
-            KM("Reservation gap", FormatBytes(d.ReservationGapBytes),     (double)d.ReservationGapBytes),
-            KM("SOH bytes",       FormatBytes(d.SohBytes),                (double)d.SohBytes),
-            KM("LOH bytes",       FormatBytes(d.LohBytes),                (double)d.LohBytes),
-            KM("LOH %",           $"{d.LohPercent:F1}%",                   d.LohPercent),
-            KM("POH bytes",       FormatBytes(d.PohBytes),                (double)d.PohBytes),
-            KM("POH %",           $"{d.PohPercent:F1}%",                   d.PohPercent),
-            KM("FOH bytes",       FormatBytes(d.FrozenBytes),             (double)d.FrozenBytes),
-            KM("FOH %",           $"{d.FrozenPercent:F1}%",               d.FrozenPercent),
+            ["total_segments"] = new NumericMetricValue(d.TotalSegments, MetricUnit.Count),
+            ["committed_bytes"] = new NumericMetricValue((double)d.TotalCommittedBytes, MetricUnit.Bytes, FormatBytes(d.TotalCommittedBytes)),
+            ["used_bytes"] = new NumericMetricValue((double)d.TotalUsedBytes, MetricUnit.Bytes, FormatBytes(d.TotalUsedBytes)),
+            ["reserved_bytes"] = new NumericMetricValue((double)d.TotalReservedBytes, MetricUnit.Bytes, FormatBytes(d.TotalReservedBytes)),
+            ["reservation_gap"] = new NumericMetricValue((double)d.ReservationGapBytes, MetricUnit.Bytes, FormatBytes(d.ReservationGapBytes)),
+            ["soh_bytes"] = new NumericMetricValue((double)d.SohBytes, MetricUnit.Bytes, FormatBytes(d.SohBytes)),
+            ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
+            ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
+            ["poh_bytes"] = new NumericMetricValue((double)d.PohBytes, MetricUnit.Bytes, FormatBytes(d.PohBytes)),
+            ["poh_pct"] = new NumericMetricValue(d.PohPercent, MetricUnit.Percent, $"{d.PohPercent:F1}%"),
+            ["foh_bytes"] = new NumericMetricValue((double)d.FrozenBytes, MetricUnit.Bytes, FormatBytes(d.FrozenBytes)),
+            ["foh_pct"] = new NumericMetricValue(d.FrozenPercent, MetricUnit.Percent, $"{d.FrozenPercent:F1}%"),
         };
 
         if (d.FrozenBytes > 100UL * 1024 * 1024)

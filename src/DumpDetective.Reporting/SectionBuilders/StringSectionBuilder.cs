@@ -33,39 +33,42 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ? "Skipped"
             : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Strings",              $"{d.TotalStrings:N0}",                                    d.TotalStrings),
-            KM("Total String Memory",        FormatHelper.FormatBytes(d.TotalStringMemoryBytes),         (double)d.TotalStringMemoryBytes),
-            KM("% of Managed Heap",          $"{d.PctOfManagedHeap:F2}%",                              d.PctOfManagedHeap),
-            KM("Unique Strings",             $"{d.UniqueStrings:N0}",                                   d.UniqueStrings),
-            KM("Sampling Mode",              d.SamplingMode ?? "(unknown)"),
-            KM("Dedup Mode",                 d.DeduplicationMode ?? "(unknown)"),
-            KM("Dedup Threshold",            $"{d.DeduplicationThreshold:N0}",                          d.DeduplicationThreshold),
-            KM("Max To Dedup",               $"{d.MaxStringsToDedup:N0}",                              d.MaxStringsToDedup),
-            KM("Deduplication",              dedupLine,                                                  d.DeduplicationSkipped ? 0 : d.StringsSampled),
-            KM("Dedup Source",               d.DedupSource ?? "(none)"),
-            KM("Analysis Duration",          d.AnalysisDurationMs > 0 ? $"{d.AnalysisDurationMs} ms" : "(n/a)", (double)d.AnalysisDurationMs),
-            KM("Duplication Ratio",          $"{d.DuplicationRatio:P1}",                               d.DuplicationRatio),
-            KM("Duplicate Waste",            FormatHelper.FormatBytes(d.DuplicateWastedBytes),           (double)d.DuplicateWastedBytes),
-            KM("Estimated Interning Saving", FormatHelper.FormatBytes(estimatedInterningSaving),         (double)estimatedInterningSaving),
-            KM("LOH String Bytes",           FormatHelper.FormatBytes(d.LohStringBytes),                (double)d.LohStringBytes),
-            KM("Gen2 String Count",          $"{d.Gen2StringCount:N0}",                                  d.Gen2StringCount),
-            KM("Interned Strings (FOH)",     $"{d.InternedStringCount:N0} ({FormatHelper.FormatBytes(d.InternedStringBytes)})", d.InternedStringCount),
+            ["total_strings"] = new NumericMetricValue(d.TotalStrings, MetricUnit.Count),
+            ["total_string_memory_bytes"] = new NumericMetricValue((double)d.TotalStringMemoryBytes, MetricUnit.Bytes),
+            ["pct_of_managed_heap"] = new NumericMetricValue(d.PctOfManagedHeap, MetricUnit.Percent),
+            ["unique_strings"] = new NumericMetricValue(d.UniqueStrings, MetricUnit.Count),
+            ["sampling_mode"] = new TextMetricValue(d.SamplingMode ?? "(unknown)"),
+            ["dedup_mode"] = new TextMetricValue(d.DeduplicationMode ?? "(unknown)"),
+            ["dedup_threshold"] = new NumericMetricValue(d.DeduplicationThreshold, MetricUnit.Count),
+            ["max_to_dedup"] = new NumericMetricValue(d.MaxStringsToDedup, MetricUnit.Count),
+            ["deduplication"] = new TextMetricValue(dedupLine),
+            ["dedup_source"] = new TextMetricValue(d.DedupSource ?? "(none)"),
+            ["analysis_duration_ms"] = (d.AnalysisDurationMs > 0)
+                ? new NumericMetricValue((double)d.AnalysisDurationMs, MetricUnit.Milliseconds)
+                : new TextMetricValue("N/A"),
+            ["duplication_ratio"] = new NumericMetricValue(d.DuplicationRatio, MetricUnit.Ratio),
+            ["duplicate_waste_bytes"] = new NumericMetricValue((double)d.DuplicateWastedBytes, MetricUnit.Bytes),
+            ["estimated_interning_saving_bytes"] = new NumericMetricValue((double)estimatedInterningSaving, MetricUnit.Bytes),
+            ["loh_string_bytes"] = new NumericMetricValue((double)d.LohStringBytes, MetricUnit.Bytes),
+            ["gen2_string_count"] = new NumericMetricValue(d.Gen2StringCount, MetricUnit.Count),
+            ["interned_strings_foh"] = new NumericMetricValue(d.InternedStringCount, MetricUnit.Count),
+            ["interned_string_bytes"] = new NumericMetricValue((double)d.InternedStringBytes, MetricUnit.Bytes),
         };
         if (!string.IsNullOrEmpty(d.DedupSkipReason))
-            keyMetrics.Add(KM("Dedup Skip Reason", d.DedupSkipReason));
+            keyMetrics["dedup_skip_reason"] = new TextMetricValue(d.DedupSkipReason);
 
         if (d.Distribution is not null && d.Distribution.SampleCount > 0)
         {
-            keyMetrics.Add(KM("Samples", $"{d.Distribution.SampleCount:N0}", d.Distribution.SampleCount));
+            keyMetrics["samples"] = new NumericMetricValue(d.Distribution.SampleCount, MetricUnit.Count);
             var p = d.Distribution.Percentiles ?? new System.Collections.Generic.Dictionary<string, double>();
             if (p.Count > 0)
             {
-                keyMetrics.Add(KM("p50 (median)", $"{p.GetValueOrDefault("p50", 0):F0} chars", (double)p.GetValueOrDefault("p50", 0)));
-                keyMetrics.Add(KM("p75",           $"{p.GetValueOrDefault("p75", 0):F0} chars", (double)p.GetValueOrDefault("p75", 0)));
-                keyMetrics.Add(KM("p90",           $"{p.GetValueOrDefault("p90", 0):F0} chars", (double)p.GetValueOrDefault("p90", 0)));
-                keyMetrics.Add(KM("p95",           $"{p.GetValueOrDefault("p95", 0):F0} chars", (double)p.GetValueOrDefault("p95", 0)));
+                keyMetrics["p50_median"] = new NumericMetricValue((double)p.GetValueOrDefault("p50", 0), MetricUnit.Count);
+                keyMetrics["p75"] = new NumericMetricValue((double)p.GetValueOrDefault("p75", 0), MetricUnit.Count);
+                keyMetrics["p90"] = new NumericMetricValue((double)p.GetValueOrDefault("p90", 0), MetricUnit.Count);
+                keyMetrics["p95"] = new NumericMetricValue((double)p.GetValueOrDefault("p95", 0), MetricUnit.Count);
             }
 
             var lb = d.Distribution.LengthBuckets ?? new System.Collections.Generic.Dictionary<string, int>();

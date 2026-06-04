@@ -23,16 +23,16 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         var blocks = new List<SectionBlock>();
         var tables = new List<SectionTable>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total weak handles", $"{d.TotalWeakHandles:N0}", d.TotalWeakHandles),
-            KM("Alive targets", $"{d.AliveWeakTargets:N0}", d.AliveWeakTargets),
-            KM("Dead targets", $"{d.DeadWeakTargets:N0}", d.DeadWeakTargets),
-            KM("Dead target ratio", $"{d.DeadTargetRatio:P1}", d.DeadTargetRatio),
-            KM("WeakReference objects", $"{d.WeakReferenceObjectCount:N0}", d.WeakReferenceObjectCount),
-            KM("WeakReference object bytes", FormatHelper.FormatBytes(d.WeakReferenceObjectBytes), (double)d.WeakReferenceObjectBytes),
-            KM("Stale wrappers (m_handle=0)", $"{d.StaleWrapperCount:N0}", d.StaleWrapperCount),
-            KM("Dependent handles with dead primary key", $"{d.DependentHandleDeadKeyCount:N0}", d.DependentHandleDeadKeyCount),
+            ["total_weak_handles"] = new NumericMetricValue(d.TotalWeakHandles, MetricUnit.Count),
+            ["alive_targets"] = new NumericMetricValue(d.AliveWeakTargets, MetricUnit.Count),
+            ["dead_targets"] = new NumericMetricValue(d.DeadWeakTargets, MetricUnit.Count),
+            ["dead_target_ratio"] = new NumericMetricValue(d.DeadTargetRatio, MetricUnit.Percent, $"{d.DeadTargetRatio:P1}"),
+            ["weakreference_objects"] = new NumericMetricValue(d.WeakReferenceObjectCount, MetricUnit.Count),
+            ["weakreference_object_bytes"] = new NumericMetricValue((double)d.WeakReferenceObjectBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.WeakReferenceObjectBytes)),
+            ["stale_wrappers_m_handle_0"] = new NumericMetricValue(d.StaleWrapperCount, MetricUnit.Count),
+            ["dependent_handles_dead_primary_key"] = new NumericMetricValue(d.DependentHandleDeadKeyCount, MetricUnit.Count),
         };
 
         if (d.ScanCapped)

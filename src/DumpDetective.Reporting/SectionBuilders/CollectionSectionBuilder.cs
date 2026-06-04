@@ -19,19 +19,19 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var d = (CollectionDomainResult)result;
         var tables = new List<SectionTable>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Collections",    $"{d.TotalCollections:N0}",                              d.TotalCollections),
-            KM("Dictionaries",         $"{d.Dictionaries:N0}",                                 d.Dictionaries),
-            KM("Lists",                $"{d.Lists:N0}",                                        d.Lists),
-            KM("HashSets",             $"{d.HashSets:N0}",                                     d.HashSets),
-            KM("Queues",               $"{d.Queues:N0}",                                       d.Queues),
-            KM("Stacks",               $"{d.Stacks:N0}",                                       d.Stacks),
-            KM("ArrayLists",           $"{d.ArrayLists:N0}",                                   d.ArrayLists),
-            KM("SortedLists",          $"{d.SortedLists:N0}",                                  d.SortedLists),
-            KM("SortedSets",           $"{d.SortedSets:N0}",                                   d.SortedSets),
-            KM("Wasteful Collections", $"{d.WastefulCollectionCount:N0}",                      d.WastefulCollectionCount),
-            KM("Total Wasted Memory",  FormatHelper.FormatBytes(d.TotalWastedMemory),          (double)d.TotalWastedMemory),
+            ["total_collections"] = new NumericMetricValue(d.TotalCollections, MetricUnit.Count),
+            ["dictionaries"] = new NumericMetricValue(d.Dictionaries, MetricUnit.Count),
+            ["lists"] = new NumericMetricValue(d.Lists, MetricUnit.Count),
+            ["hashsets"] = new NumericMetricValue(d.HashSets, MetricUnit.Count),
+            ["queues"] = new NumericMetricValue(d.Queues, MetricUnit.Count),
+            ["stacks"] = new NumericMetricValue(d.Stacks, MetricUnit.Count),
+            ["arraylists"] = new NumericMetricValue(d.ArrayLists, MetricUnit.Count),
+            ["sortedlists"] = new NumericMetricValue(d.SortedLists, MetricUnit.Count),
+            ["sortedsets"] = new NumericMetricValue(d.SortedSets, MetricUnit.Count),
+            ["wasteful_collections"] = new NumericMetricValue(d.WastefulCollectionCount, MetricUnit.Count),
+            ["total_wasted_memory"] = new NumericMetricValue((double)d.TotalWastedMemory, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalWastedMemory)),
         };
 
         var inventoryRows = new List<TableRow>

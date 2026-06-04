@@ -23,16 +23,16 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Finalizable Objects",    $"{d.TotalFinalizableObjects:N0}",               d.TotalFinalizableObjects),
-            KM("Total Finalizable Memory",     FormatHelper.FormatBytes(d.TotalFinalizableBytes),  (double)d.TotalFinalizableBytes),
-            KM("Gen 0 Count",                  $"{d.Gen0Count:N0}",                              d.Gen0Count),
-            KM("Gen 1 Count",                  $"{d.Gen1Count:N0}",                              d.Gen1Count),
-            KM("Gen 2 Count",                  $"{d.Gen2Count:N0}",                              d.Gen2Count),
-            KM("Finalizer Queue Objects",       $"{d.FinalizerQueueCount:N0}",                   d.FinalizerQueueCount),
-            KM("Finalizer Queue Retained",      FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes), (double)d.FinalizerQueueRetainedBytes),
-            KM("Potential Resurrection",       d.PotentialResurrectionDetected ? "Yes" : "No",  d.PotentialResurrectionDetected ? 1.0 : 0.0),
+            ["total_finalizable_objects"] = new NumericMetricValue(d.TotalFinalizableObjects, MetricUnit.Count),
+            ["total_finalizable_memory"] = new NumericMetricValue((double)d.TotalFinalizableBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalFinalizableBytes)),
+            ["gen0_count"] = new NumericMetricValue(d.Gen0Count, MetricUnit.Count),
+            ["gen1_count"] = new NumericMetricValue(d.Gen1Count, MetricUnit.Count),
+            ["gen2_count"] = new NumericMetricValue(d.Gen2Count, MetricUnit.Count),
+            ["finalizer_queue_objects"] = new NumericMetricValue(d.FinalizerQueueCount, MetricUnit.Count),
+            ["finalizer_queue_retained"] = new NumericMetricValue((double)d.FinalizerQueueRetainedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)),
+            ["potential_resurrection"] = new TextMetricValue(d.PotentialResurrectionDetected ? "Yes" : "No"),
         };
 
         if (d.TopFinalizableTypesByGen2Count.Count > 0)

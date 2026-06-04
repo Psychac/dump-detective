@@ -19,12 +19,12 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Channels", $"{d.TotalChannels:N0}",   d.TotalChannels),
-            KM("Opened",         $"{d.OpenedChannels:N0}",  d.OpenedChannels),
-            KM("Faulted",        $"{d.FaultedChannels:N0}", d.FaultedChannels),
-            KM("Closed",         $"{d.ClosedChannels:N0}",  d.ClosedChannels),
+            ["total_channels"] = new NumericMetricValue(d.TotalChannels, MetricUnit.Count),
+            ["opened"] = new NumericMetricValue(d.OpenedChannels, MetricUnit.Count),
+            ["faulted"] = new NumericMetricValue(d.FaultedChannels, MetricUnit.Count),
+            ["closed"] = new NumericMetricValue(d.ClosedChannels, MetricUnit.Count),
         };
 
         if (!d.WcfPresent)

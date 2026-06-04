@@ -33,6 +33,38 @@ function parseBytesFromDisplay(display) {
   return value * Math.pow(1024, power);
 }
 
+function formatTypedMetricNumber(metricValue) {
+  const numeric = Number(metricValue && metricValue.value);
+  if (!Number.isFinite(numeric)) return '';
+
+  const unit = String(metricValue.unit || '').toLowerCase();
+  if (unit === 'bytes') {
+    const abs = Math.abs(numeric);
+    const sign = numeric < 0 ? '-' : '';
+    if (abs >= 1099511627776) return sign + (abs / 1099511627776).toFixed(2) + ' TB';
+    if (abs >= 1073741824) return sign + (abs / 1073741824).toFixed(2) + ' GB';
+    if (abs >= 1048576) return sign + (abs / 1048576).toFixed(2) + ' MB';
+    if (abs >= 1024) return sign + (abs / 1024).toFixed(1) + ' KB';
+    return sign + abs.toFixed(0) + ' B';
+  }
+
+  if (unit === 'percent') return numeric.toFixed(1) + '%';
+  if (unit === 'ratio') return numeric.toFixed(2) + 'x';
+  if (unit === 'milliseconds') return formatMilliseconds(numeric);
+  if (unit === 'custom' && metricValue && typeof metricValue.formatted === 'string' && metricValue.formatted.trim()) {
+    return metricValue.formatted;
+  }
+  return Number.isInteger(numeric) ? numeric.toLocaleString('en-US') : numeric.toFixed(2);
+}
+
+function formatMilliseconds(value) {
+  const abs = Math.abs(value);
+  if (abs < 1000) return value.toFixed(0) + ' ms';
+  if (abs < 60000) return (value / 1000).toFixed(2) + ' s';
+  if (abs < 3600000) return (value / 60000).toFixed(2) + ' min';
+  return (value / 3600000).toFixed(2) + ' h';
+}
+
 function buildTopTypesTreemap(tbl) {
   const title = String(tbl.title || '').toLowerCase();
   if (!(title.includes('top') && title.includes('type'))) return null;
@@ -239,12 +271,40 @@ export function buildAnalyzerSection(section, i) {
 
   // ── Key metrics strip ─────────────────────────────────────────────────────
   const metrics = section.keyMetrics;
-  if (metrics && metrics.length) {
+  function humanizeKey(k) {
+    if (!k) return '';
+    const parts = String(k).split('_').filter(Boolean);
+    for (let i = 0; i < parts.length; i++) parts[i] = parts[i].charAt(0).toUpperCase() + parts[i].slice(1);
+    return parts.join(' ');
+  }
+  if (metrics && typeof metrics === 'object' && !Array.isArray(metrics)) {
     const strip = el('div', 'key-metrics');
-    for (let mi = 0; mi < metrics.length; mi++) {
-      const m = metrics[mi]; const chip = el('div', 'key-metric');
-      const lbl = el('span', 'key-metric__label'); lbl.textContent = m.label || '';
-      const val = el('span', 'key-metric__value'); val.textContent = m.value || '';
+    // If an explicit order is provided, prefer it
+    const order = Array.isArray(section.keyMetricsOrder) ? section.keyMetricsOrder : Object.keys(metrics);
+    for (let ki = 0; ki < order.length; ki++) {
+      const k = order[ki];
+      if (!Object.prototype.hasOwnProperty.call(metrics, k)) continue;
+      const v = metrics[k];
+      const chip = el('div', 'key-metric');
+      const lbl = el('span', 'key-metric__label');
+      const labelText = (v && v.label) ? v.label : humanizeKey(k);
+      lbl.textContent = labelText;
+      // expose full label on hover for truncated labels
+      if (labelText && labelText.length > 0) lbl.title = labelText;
+      const val = el('span', 'key-metric__value');
+      const metricValue = v;
+      if (metricValue && typeof metricValue === 'object') {
+        if (metricValue.kind === 'number') {
+          val.textContent = formatTypedMetricNumber(metricValue);
+        } else if (metricValue.kind === 'enum' || metricValue.kind === 'text') {
+          val.textContent = metricValue.value || '';
+        } else {
+          val.textContent = '';
+        }
+      } else {
+        // Non-object metric values are unsupported in the modern contract; render empty
+        val.textContent = '';
+      }
       chip.appendChild(lbl); chip.appendChild(val); strip.appendChild(chip);
     }
     content.appendChild(strip);

@@ -18,8 +18,25 @@ internal sealed record SectionLeadFinding(
 /// <summary>A single key metric shown in the always-visible metrics strip.</summary>
 internal sealed record SectionKeyMetric(
     string Label,
+    MetricValue Value);
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(NumericMetricValue), "number")]
+[JsonDerivedType(typeof(TextMetricValue), "text")]
+[JsonDerivedType(typeof(EnumMetricValue), "enum")]
+internal abstract record MetricValue;
+
+internal sealed record NumericMetricValue(
+    double Value,
+    MetricUnit Unit,
+    string? Formatted = null) : MetricValue;
+
+internal sealed record TextMetricValue(
+    string Value) : MetricValue;
+
+internal sealed record EnumMetricValue(
     string Value,
-    double? RawValue = null);
+    string? EnumType = null) : MetricValue;
 
 /// <summary>A titled data table extracted from the section's block stream.</summary>
 internal sealed record SectionTable(
@@ -49,7 +66,7 @@ internal sealed record AnalyzerDetailSection(
     string Domain = "",                      // "Memory" | "GC" | "Leaks" | "Threads" | "Async" | "Exceptions" | "Runtime" | "TypeSystem"
     FindingSeverity? LeadSeverity = null,    // Severity of the lead finding (null = informational only)
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
-    IReadOnlyList<SectionKeyMetric>? KeyMetrics = null, // Always-visible metric strip
+    IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
     IReadOnlyList<SectionTable>? Tables = null,         // Data tables, each collapsible
     SectionProvenance? Provenance = null);  // Run provenance — collapsed footer
 

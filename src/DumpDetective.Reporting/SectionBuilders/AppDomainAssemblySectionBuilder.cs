@@ -25,17 +25,17 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
-        var keyMetrics = new List<SectionKeyMetric>();
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
 
         if (domains is not null)
         {
-            keyMetrics.Add(KM("Total domains",         domains.TotalDomains.ToString("N0"),          domains.TotalDomains));
-            keyMetrics.Add(KM("Anonymous modules",     domains.AnonymousModuleCount.ToString("N0"),   domains.AnonymousModuleCount));
-            keyMetrics.Add(KM("Dynamic modules",       domains.TotalDynamicModules.ToString("N0"),    domains.TotalDynamicModules));
+            keyMetrics["total_domains"] = new NumericMetricValue(domains.TotalDomains, MetricUnit.Count);
+            keyMetrics["anonymous_modules"] = new NumericMetricValue(domains.AnonymousModuleCount, MetricUnit.Count);
+            keyMetrics["dynamic_modules"] = new NumericMetricValue(domains.TotalDynamicModules, MetricUnit.Count);
             if (domains.DynamicModuleBytes > 0)
-                keyMetrics.Add(KM("Dynamic module bytes",  FormatBytes(domains.DynamicModuleBytes),   (double)domains.DynamicModuleBytes));
+                keyMetrics["dynamic_module_bytes"] = new NumericMetricValue((double)domains.DynamicModuleBytes, MetricUnit.Bytes, FormatBytes(domains.DynamicModuleBytes));
             if (domains.ExcludedModuleCount > 0)
-                keyMetrics.Add(KM("Excluded modules",      domains.ExcludedModuleCount.ToString("N0"), domains.ExcludedModuleCount));
+                keyMetrics["excluded_modules"] = new NumericMetricValue(domains.ExcludedModuleCount, MetricUnit.Count);
             tables.Add(ST(
                 "AppDomain inventory",
                 ["Domain Name", "ID", "Address", "Module Count", "Estimated Managed Bytes"],
@@ -44,10 +44,10 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
         if (modules is not null)
         {
-            keyMetrics.Add(KM("Total modules",       modules.TotalModules.ToString("N0"),          modules.TotalModules));
-            keyMetrics.Add(KM("Unique module names", modules.UniqueModuleNames.ToString("N0"),      modules.UniqueModuleNames));
-            keyMetrics.Add(KM("Conflict groups",     modules.VersionConflictGroups.ToString("N0"),  modules.VersionConflictGroups));
-            keyMetrics.Add(KM("Dynamic module count",modules.DynamicModules.ToString("N0"),          modules.DynamicModules));
+            keyMetrics["total_modules"] = new NumericMetricValue(modules.TotalModules, MetricUnit.Count);
+            keyMetrics["unique_module_names"] = new NumericMetricValue(modules.UniqueModuleNames, MetricUnit.Count);
+            keyMetrics["conflict_groups"] = new NumericMetricValue(modules.VersionConflictGroups, MetricUnit.Count);
+            keyMetrics["dynamic_module_count"] = new NumericMetricValue(modules.DynamicModules, MetricUnit.Count);
 
             blocks.Add(T(modules.ConflictingAssemblyNames.Count > 0
                 ? $"Conflict groups include: {string.Join(", ", modules.ConflictingAssemblyNames.Take(6))}."
@@ -146,7 +146,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
 
         return new AnalyzerDetailSection(
             "Modules & Assemblies", DisplayTitle, SortOrder, blocks,
-            KeyMetrics: keyMetrics.Count > 0 ? keyMetrics : null,
+            KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
 

@@ -18,12 +18,12 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     {
         var d = (ModuleDomainResult)result;
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total modules",        d.TotalModules.ToString("N0"),           d.TotalModules),
-            KM("Unique module names",  d.UniqueModuleNames.ToString("N0"),       d.UniqueModuleNames),
-            KM("Conflict groups",      d.VersionConflictGroups.ToString("N0"),   d.VersionConflictGroups),
-            KM("Dynamic modules",      d.DynamicModules.ToString("N0"),          d.DynamicModules),
+            ["total_modules"] = new NumericMetricValue(d.TotalModules, MetricUnit.Count),
+            ["unique_module_names"] = new NumericMetricValue(d.UniqueModuleNames, MetricUnit.Count),
+            ["conflict_groups"] = new NumericMetricValue(d.VersionConflictGroups, MetricUnit.Count),
+            ["dynamic_modules"] = new NumericMetricValue(d.DynamicModules, MetricUnit.Count),
         };
 
         var blocks = new List<SectionBlock>

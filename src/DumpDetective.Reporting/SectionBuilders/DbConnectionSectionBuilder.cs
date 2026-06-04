@@ -20,12 +20,12 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
         var blocks = new List<SectionBlock>();
 
         // Key metrics strip
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Connections",  $"{d.TotalConnections:N0}",  d.TotalConnections),
-            KM("Open",               $"{d.OpenConnections:N0}",   d.OpenConnections),
-            KM("Closed",             $"{d.ClosedConnections:N0}", d.ClosedConnections),
-            KM("Other",              $"{d.OtherConnections:N0}",  d.OtherConnections),
+            ["total_connections"] = new NumericMetricValue(d.TotalConnections, MetricUnit.Count),
+            ["open_connections"] = new NumericMetricValue(d.OpenConnections, MetricUnit.Count),
+            ["closed_connections"] = new NumericMetricValue(d.ClosedConnections, MetricUnit.Count),
+            ["other_connections"] = new NumericMetricValue(d.OtherConnections, MetricUnit.Count),
         };
 
         if (!d.ConnectionsFound)

@@ -19,14 +19,14 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Timer Objects",     $"{d.TotalTimers:N0}", d.TotalTimers),
-            KM("Threading.Timer",         $"{d.ThreadingTimerCount:N0}", d.ThreadingTimerCount),
-            KM("Timers.Timer",            $"{d.TimersTimerCount:N0}", d.TimersTimerCount),
-            KM("TimerQueueTimer",         $"{d.TimerQueueTimerCount:N0}", d.TimerQueueTimerCount),
-            KM("TimerHolder",             $"{d.TimerHolderCount:N0}", d.TimerHolderCount),
-            KM("Total Heap Size",         FormatBytes(d.TotalBytes)),
+            ["total_timer_objects"] = new NumericMetricValue(d.TotalTimers, MetricUnit.Count),
+            ["threading_timer"] = new NumericMetricValue(d.ThreadingTimerCount, MetricUnit.Count),
+            ["timers_timer"] = new NumericMetricValue(d.TimersTimerCount, MetricUnit.Count),
+            ["timer_queue_timer"] = new NumericMetricValue(d.TimerQueueTimerCount, MetricUnit.Count),
+            ["timer_holder"] = new NumericMetricValue(d.TimerHolderCount, MetricUnit.Count),
+            ["total_heap_size"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatBytes(d.TotalBytes)),
         };
 
         if (!d.TimersFound)

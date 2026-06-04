@@ -17,12 +17,12 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ThreadStackClusterDomainResult)result;
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Alive Threads",       d.AliveThreadCount.ToString("N0"),  d.AliveThreadCount),
-            KM("Unique Signatures",   d.UniqueClusters.ToString("N0"),    d.UniqueClusters),
-            KM("Singleton Signatures",d.SingletonSignatures.ToString("N0"),d.SingletonSignatures),
-            KM("Signature Diversity", $"{d.DiversityPercent:F1}%",        d.DiversityPercent),
+            ["alive_threads"] = new NumericMetricValue(d.AliveThreadCount, MetricUnit.Count),
+            ["unique_signatures"] = new NumericMetricValue(d.UniqueClusters, MetricUnit.Count),
+            ["singleton_signatures"] = new NumericMetricValue(d.SingletonSignatures, MetricUnit.Count),
+            ["signature_diversity_pct"] = new NumericMetricValue(d.DiversityPercent, MetricUnit.Percent, $"{d.DiversityPercent:F1}%"),
         };
         var blocks = new List<SectionBlock>();
 

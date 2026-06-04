@@ -37,19 +37,28 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         IReadOnlyList<InsightFinding> criticalFindings = BuildFindingsBySeverity(findings, FindingSeverity.Critical, 5);
         IReadOnlyList<InsightFinding> warningFindings = BuildFindingsBySeverity(findings, FindingSeverity.Warning, 5);
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
+        if (memory is not null)
         {
-            KM("Total managed memory", memory is null ? "N/A" : FormatBytes(memory.TotalBytes),         memory is null ? null : (double?)memory.TotalBytes),
-            KM("LOH %",                memory is null ? "N/A" : memory.LohPercent.ToString("F1") + "%", memory is null ? null : (double?)memory.LohPercent),
-            KM("Gen2 %",               gcGen is null  ? "N/A" : gcGen.Gen2Pct.ToString("F1") + "%",    gcGen is null  ? null : (double?)gcGen.Gen2Pct),
-            KM("GC pressure",          allocation?.GCPressure.ToString() ?? "N/A",                      allocation is null ? null : (double?)allocation.GCPressure),
-            KM("Leak candidates",      leakCandidates?.TotalCandidates.ToString("N0") ?? "N/A",         leakCandidates is null ? null : (double?)leakCandidates.TotalCandidates),
-            KM("Hang score",           hang?.HealthScore.ToString("N0") ?? "N/A",                       hang is null ? null : (double?)hang.HealthScore),
-            KM("Blocked threads",      threads?.BlockedThreadCount.ToString("N0") ?? "N/A",             threads is null ? null : (double?)threads.BlockedThreadCount),
-            KM("Deadlock cycles",      lockGraph?.DeadlockCandidateCount.ToString("N0") ?? "N/A",       lockGraph is null ? null : (double?)lockGraph.DeadlockCandidateCount),
-            KM("Active exceptions",    crash?.ActiveExceptions.ToString("N0") ?? "N/A",                 crash is null ? null : (double?)crash.ActiveExceptions),
-            KM("Finalizer queue",      finalizable?.FinalizerQueueCount.ToString("N0") ?? "N/A",        finalizable is null ? null : (double?)finalizable.FinalizerQueueCount),
-        };
+            keyMetrics["total_managed_memory"] = new NumericMetricValue((double)memory.TotalBytes, MetricUnit.Bytes, FormatBytes(memory.TotalBytes));
+            keyMetrics["loh_pct"] = new NumericMetricValue(memory.LohPercent, MetricUnit.Percent, memory.LohPercent.ToString("F1") + "%");
+        }
+        if (gcGen is not null)
+            keyMetrics["gen2_pct"] = new NumericMetricValue(gcGen.Gen2Pct, MetricUnit.Percent, gcGen.Gen2Pct.ToString("F1") + "%");
+        if (allocation is not null)
+            keyMetrics["gc_pressure"] = new TextMetricValue(allocation.GCPressure.ToString());
+        if (leakCandidates is not null)
+            keyMetrics["leak_candidates"] = new NumericMetricValue(leakCandidates.TotalCandidates, MetricUnit.Count, leakCandidates.TotalCandidates.ToString("N0"));
+        if (hang is not null)
+            keyMetrics["hang_score"] = new NumericMetricValue(hang.HealthScore, MetricUnit.Count, hang.HealthScore.ToString("N0"));
+        if (threads is not null)
+            keyMetrics["blocked_threads"] = new NumericMetricValue(threads.BlockedThreadCount, MetricUnit.Count, threads.BlockedThreadCount.ToString("N0"));
+        if (lockGraph is not null)
+            keyMetrics["deadlock_cycles"] = new NumericMetricValue(lockGraph.DeadlockCandidateCount, MetricUnit.Count, lockGraph.DeadlockCandidateCount.ToString("N0"));
+        if (crash is not null)
+            keyMetrics["active_exceptions"] = new NumericMetricValue(crash.ActiveExceptions, MetricUnit.Count, crash.ActiveExceptions.ToString("N0"));
+        if (finalizable is not null)
+            keyMetrics["finalizer_queue"] = new NumericMetricValue(finalizable.FinalizerQueueCount, MetricUnit.Count, finalizable.FinalizerQueueCount.ToString("N0"));
 
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>

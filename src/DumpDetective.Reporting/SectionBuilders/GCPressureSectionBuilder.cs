@@ -20,19 +20,19 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Gen0 bytes",     FormatBytes(d.Gen0Bytes),              (double)d.Gen0Bytes),
-            KM("Gen0 objects",   d.Gen0Objects.ToString("N0"),           d.Gen0Objects),
-            KM("Gen1 bytes",     FormatBytes(d.Gen1Bytes),              (double)d.Gen1Bytes),
-            KM("Gen1 objects",   d.Gen1Objects.ToString("N0"),           d.Gen1Objects),
-            KM("Gen2 bytes",     FormatBytes(d.Gen2Bytes),              (double)d.Gen2Bytes),
-            KM("Gen2 objects",   d.Gen2Objects.ToString("N0"),           d.Gen2Objects),
-            KM("LOH bytes",      FormatBytes(d.LohBytes),              (double)d.LohBytes),
-            KM("LOH objects",    d.LohObjects.ToString("N0"),            d.LohObjects),
-            KM("Total objects",  d.TotalObjects.ToString("N0"),          d.TotalObjects),
-            KM("Gen2 %",         $"{d.Gen2Pct:F1}%",                    d.Gen2Pct),
-            KM("LOH %",          $"{d.LohPercent:F1}%",                 d.LohPercent),
+            ["gen0_bytes"] = new NumericMetricValue((double)d.Gen0Bytes, MetricUnit.Bytes, FormatBytes(d.Gen0Bytes)),
+            ["gen0_objects"] = new NumericMetricValue(d.Gen0Objects, MetricUnit.Count),
+            ["gen1_bytes"] = new NumericMetricValue((double)d.Gen1Bytes, MetricUnit.Bytes, FormatBytes(d.Gen1Bytes)),
+            ["gen1_objects"] = new NumericMetricValue(d.Gen1Objects, MetricUnit.Count),
+            ["gen2_bytes"] = new NumericMetricValue((double)d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
+            ["gen2_objects"] = new NumericMetricValue(d.Gen2Objects, MetricUnit.Count),
+            ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
+            ["loh_objects"] = new NumericMetricValue(d.LohObjects, MetricUnit.Count),
+            ["total_objects"] = new NumericMetricValue(d.TotalObjects, MetricUnit.Count),
+            ["gen2_pct"] = new NumericMetricValue(d.Gen2Pct, MetricUnit.Percent, $"{d.Gen2Pct:F1}%"),
+            ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
         };
 
         if (d.Gen2Pct >= 40.0)

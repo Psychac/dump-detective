@@ -24,15 +24,16 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Array Objects",     $"{d.TotalArrayObjects:N0}",                                    d.TotalArrayObjects),
-            KM("Total Array Memory",      FormatHelper.FormatBytes(d.TotalArrayBytes)),
-            KM("LOH Arrays",              $"{d.LohArrayCount:N0} ({FormatHelper.FormatBytes(d.LohArrayBytes)})", d.LohArrayCount),
-            KM("Multi-Dimensional Arrays",$"{d.MultiDimArrayCount:N0}",                                   d.MultiDimArrayCount),
+            ["total_array_objects"] = new NumericMetricValue(d.TotalArrayObjects, MetricUnit.Count),
+            ["total_array_memory"] = new NumericMetricValue((double)d.TotalArrayBytes, MetricUnit.Bytes),
+            ["loh_arrays"] = new NumericMetricValue(d.LohArrayCount, MetricUnit.Count),
+            ["loh_array_bytes"] = new NumericMetricValue((double)d.LohArrayBytes, MetricUnit.Bytes),
+            ["multi_dimensional_arrays"] = new NumericMetricValue(d.MultiDimArrayCount, MetricUnit.Count),
         };
         if (d.ScanLimited)
-            keyMetrics.Add(KM("Scan Limit Reached", "Yes — sparse sampling cap hit; results may be partial", 1.0));
+            keyMetrics["scan_limit_reached"] = new TextMetricValue("Yes — sparse sampling cap hit; results may be partial");
 
         if (d.TopArrayTypesBySize.Count > 0)
         {

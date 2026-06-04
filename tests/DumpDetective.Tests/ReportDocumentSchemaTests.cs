@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Serialization;
 
@@ -128,6 +129,37 @@ public sealed class ReportDocumentSchemaTests
         TableBlock table = (TableBlock)blocks[7];
         table.Rows[0].Cells[0].RawValue.Should().Be(1L);
         table.Rows[0].Cells[1].RawValue.Should().BeNull();
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesTypedKeyMetrics()
+    {
+        AnalyzerDetailSection original = new(
+            AnalyzerName: "DemoAnalyzer",
+            DisplayTitle: "Demo",
+            SortOrder: 1,
+            Blocks: [],
+            KeyMetrics: new System.Collections.Generic.Dictionary<string, MetricValue>
+            {
+                ["committed_bytes"] = new NumericMetricValue(2_220_929_024, MetricUnit.Bytes, "2.1 GB"),
+                ["gc_mode"] = new EnumMetricValue("Server", "GCLatencyMode"),
+                ["status"] = new TextMetricValue("Healthy")
+            });
+
+        string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalyzerDetailSection);
+        json.Should().Contain("\"kind\":\"number\"");
+        json.Should().Contain("\"kind\":\"enum\"");
+        json.Should().Contain("\"kind\":\"text\"");
+
+        AnalyzerDetailSection? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalyzerDetailSection);
+        restored.Should().NotBeNull();
+        restored.KeyMetrics.Should().HaveCount(3);
+        restored.KeyMetrics.Should().ContainKey("committed_bytes");
+        restored.KeyMetrics["committed_bytes"].Should().BeOfType<NumericMetricValue>().Which.Formatted.Should().Be("2.1 GB");
+        restored.KeyMetrics.Should().ContainKey("gc_mode");
+        restored.KeyMetrics["gc_mode"].Should().BeOfType<EnumMetricValue>().Which.EnumType.Should().Be("GCLatencyMode");
+        restored.KeyMetrics.Should().ContainKey("status");
+        restored.KeyMetrics["status"].Should().BeOfType<TextMetricValue>().Which.Value.Should().Be("Healthy");
     }
 
     [Fact]

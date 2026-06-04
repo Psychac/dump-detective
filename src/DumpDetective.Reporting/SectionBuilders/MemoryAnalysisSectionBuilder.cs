@@ -22,17 +22,17 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Memory pressure", d.MemoryPressureScore.ToString("F1"), d.MemoryPressureScore),
-            KM("Total bytes",    FormatHelper.FormatBytes(d.TotalBytes),   (double)d.TotalBytes),
-            KM("Total objects",  d.TotalObjects.ToString("N0"),             d.TotalObjects),
-            KM("Unique types",   d.UniqueTypes.ToString("N0"),              d.UniqueTypes),
-            KM("LOH bytes",      FormatHelper.FormatBytes(d.LohBytes),     (double)d.LohBytes),
-            KM("LOH %",          $"{d.LohPercent:F1}%",                    d.LohPercent),
-            KM("Top 5 share",    $"{d.Top5BytesPercent:F1}%",              d.Top5BytesPercent),
-            KM("<256 B objects", $"{d.SmallObjectCountPercent:F1}%",       d.SmallObjectCountPercent),
-            KM("Objects / MB",   d.ObjectsPerMb.ToString("F1"),            d.ObjectsPerMb),
+            ["memory_pressure_score"] = new NumericMetricValue(d.MemoryPressureScore, MetricUnit.Custom, d.MemoryPressureScore.ToString("F1")),
+            ["total_bytes"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalBytes)),
+            ["total_objects"] = new NumericMetricValue(d.TotalObjects, MetricUnit.Count),
+            ["unique_types"] = new NumericMetricValue(d.UniqueTypes, MetricUnit.Count),
+            ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.LohBytes)),
+            ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
+            ["top5_share"] = new NumericMetricValue(d.Top5BytesPercent, MetricUnit.Percent, $"{d.Top5BytesPercent:F1}%"),
+            ["small_object_pct"] = new NumericMetricValue(d.SmallObjectCountPercent, MetricUnit.Percent, $"{d.SmallObjectCountPercent:F1}%"),
+            ["objects_per_mb"] = new NumericMetricValue(d.ObjectsPerMb, MetricUnit.Custom, d.ObjectsPerMb.ToString("F1")),
         };
 
         string pressureBand = d.MemoryPressureScore >= 75 ? "High"

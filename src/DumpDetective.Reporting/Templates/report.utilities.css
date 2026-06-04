@@ -83,6 +83,10 @@
   text-transform: uppercase;
   letter-spacing: 0.045em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
 }
 .key-metric__value {
   font-size: 14px;

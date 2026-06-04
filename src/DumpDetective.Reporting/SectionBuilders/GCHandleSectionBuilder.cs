@@ -22,15 +22,18 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
         double weakPct = d.TotalHandles == 0 ? 0 : d.WeakLikeHandles * 100.0 / d.TotalHandles;
         double pinnedPct = d.TotalHandles == 0 ? 0 : d.PinnedHandleTargets * 100.0 / d.TotalHandles;
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Handles", $"{d.TotalHandles:N0}", d.TotalHandles),
-            KM("Strong-like Handles", $"{d.StrongLikeHandles:N0}  ({strongPct:F1}%)", d.StrongLikeHandles),
-            KM("Weak-like Handles", $"{d.WeakLikeHandles:N0}  ({weakPct:F1}%)", d.WeakLikeHandles),
-            KM("Pinned Handle Targets", $"{d.PinnedHandleTargets:N0}  ({pinnedPct:F1}%)", d.PinnedHandleTargets),
+            ["total_handles"] = new NumericMetricValue(d.TotalHandles, MetricUnit.Count),
+            ["strong_like_handles"] = new NumericMetricValue(d.StrongLikeHandles, MetricUnit.Count),
+            ["strong_like_handles_pct"] = new NumericMetricValue(strongPct, MetricUnit.Percent),
+            ["weak_like_handles"] = new NumericMetricValue(d.WeakLikeHandles, MetricUnit.Count),
+            ["weak_like_handles_pct"] = new NumericMetricValue(weakPct, MetricUnit.Percent),
+            ["pinned_handle_targets"] = new NumericMetricValue(d.PinnedHandleTargets, MetricUnit.Count),
+            ["pinned_handle_targets_pct"] = new NumericMetricValue(pinnedPct, MetricUnit.Percent),
         };
         if (d.PinnedRetainedBytes > 0)
-            keyMetrics.Add(KM("Pinned Retained Bytes", FormatHelper.FormatBytes(d.PinnedRetainedBytes), (long)d.PinnedRetainedBytes));
+            keyMetrics["pinned_retained_bytes"] = new NumericMetricValue((double)d.PinnedRetainedBytes, MetricUnit.Bytes);
 
         var byKind = d.HandlesByKind ?? [];
         if (byKind.Count > 0)

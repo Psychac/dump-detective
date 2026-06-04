@@ -55,7 +55,8 @@ public sealed class AppDomainSectionBuilderTests
         section.Tables.Should().NotBeNull();
         section.Tables!.Any(t => t.Title != null && t.Title.Contains("AppDomain", StringComparison.OrdinalIgnoreCase)).Should().BeTrue();
         section.KeyMetrics.Should().NotBeNull();
-        section.KeyMetrics!.Any(m => m.Label == "Total domains" && (int)m.RawValue == 1).Should().BeTrue();
+        section.KeyMetrics!.Should().ContainKey("total_domains");
+        section.KeyMetrics["total_domains"].Should().BeOfType<NumericMetricValue>().Which.Value.Should().Be(1);
         section.Tables.Should().ContainSingle();
     }
 }

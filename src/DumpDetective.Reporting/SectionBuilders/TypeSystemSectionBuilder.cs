@@ -146,7 +146,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         if (memory.TopTypes.Count > TopRows)
             blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypes.Count - TopRows} additional type(s) omitted."));
 
-        var keyMetrics = new List<SectionKeyMetric>();
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
 
         if (finalizableOverheadRows.Count > 0)
         {
@@ -169,7 +169,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(candidate.ModuleName)));
             }
 
-            keyMetrics.Add(KM("Estimated finalizable Gen2 bytes", FormatBytes(totalEstimatedBytes), (double)Math.Min(totalEstimatedBytes, long.MaxValue)));
+            keyMetrics["estimated_finalizable_gen2_bytes"] = new NumericMetricValue((double)Math.Min(totalEstimatedBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(totalEstimatedBytes));
             tables.Add(ST(
                 "Finalizable types by estimated Gen2 overhead",
                 ["Type", "Gen2 Count", "Avg Size", "Est. Gen2 Bytes", "Module"],
@@ -214,7 +214,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         return new AnalyzerDetailSection(
             "TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem",
-            KeyMetrics: keyMetrics.Count > 0 ? keyMetrics : null,
+            KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
 

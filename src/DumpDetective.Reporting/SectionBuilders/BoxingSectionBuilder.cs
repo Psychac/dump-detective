@@ -24,13 +24,13 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total boxed objects",    $"{d.TotalBoxedObjects:N0}",                         d.TotalBoxedObjects),
-            KM("Total boxed bytes",      FormatHelper.FormatBytes(d.TotalBoxedBytes),          (double)d.TotalBoxedBytes),
-            KM("Boxed enum instances",   $"{d.BoxedEnumCount:N0}",                            d.BoxedEnumCount),
-            KM("Boxed enum bytes",       FormatHelper.FormatBytes(d.BoxedEnumBytes),           (double)d.BoxedEnumBytes),
-            KM("Oversized value types",  $"{d.OversizedValueTypeCount:N0}",                   d.OversizedValueTypeCount),
+            ["total_boxed_objects"] = new NumericMetricValue(d.TotalBoxedObjects, MetricUnit.Count),
+            ["total_boxed_bytes"] = new NumericMetricValue((double)d.TotalBoxedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalBoxedBytes)),
+            ["boxed_enum_instances"] = new NumericMetricValue(d.BoxedEnumCount, MetricUnit.Count),
+            ["boxed_enum_bytes"] = new NumericMetricValue((double)d.BoxedEnumBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.BoxedEnumBytes)),
+            ["oversized_value_types"] = new NumericMetricValue(d.OversizedValueTypeCount, MetricUnit.Count),
         };
 
         if (d.TypeScanCapped)

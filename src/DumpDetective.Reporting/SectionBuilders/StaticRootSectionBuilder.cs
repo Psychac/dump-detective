@@ -18,10 +18,10 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (StaticRootDomainResult)result;
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Concerning Static Roots", $"{d.RootCount:N0}", d.RootCount),
-            KM("Total Retained Bytes", FormatHelper.FormatBytes(d.TotalRetainedBytes), (double)d.TotalRetainedBytes),
+            ["concerning_static_roots"] = new NumericMetricValue(d.RootCount, MetricUnit.Count),
+            ["total_retained_bytes"] = new NumericMetricValue((double)d.TotalRetainedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalRetainedBytes)),
         };
 
         var tables = new List<SectionTable>();

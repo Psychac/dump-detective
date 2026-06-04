@@ -1,4 +1,6 @@
+using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Utilities;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -31,7 +33,23 @@ internal abstract class SectionBuilderBase
 
     /// <summary>Creates a key metric for the always-visible KPI strip.</summary>
     protected static SectionKeyMetric KM(string label, string value, double? raw = null)
-        => new(label, value, raw);
+        => raw.HasValue
+            ? new(label, new NumericMetricValue(raw.Value, MetricUtils.InferUnitFromLabel(label, value), string.IsNullOrWhiteSpace(value) ? null : value))
+            : new(label, new TextMetricValue(value));
+
+    /// <summary>Creates a numeric key metric with a formatted display string.</summary>
+    protected static SectionKeyMetric KM(string label, double value, MetricUnit unit, string? formatted = null)
+        => new(label, new NumericMetricValue(value, unit, formatted));
+
+    /// <summary>Creates a numeric key metric when the value may be absent.</summary>
+    protected static SectionKeyMetric KM(string label, double? value, MetricUnit unit, string? formatted = null, string fallbackText = "N/A")
+        => value.HasValue
+            ? new(label, new NumericMetricValue(value.Value, unit, formatted))
+            : new(label, new TextMetricValue(fallbackText));
+
+    /// <summary>Creates a categorical/enum-like key metric.</summary>
+    protected static SectionKeyMetric KMEnum(string label, string value, string? enumType = null)
+        => new(label, new EnumMetricValue(value, enumType));
 
     /// <summary>Creates a typed section table (collapsed by default in HTML).</summary>
     protected static SectionTable ST(
@@ -57,4 +75,29 @@ internal abstract class SectionBuilderBase
 
     protected static double RatioValue(ulong part, ulong total)
         => total == 0 ? 0.0 : part * 100.0 / total;
+
+    // Convert a human label like "Total Bytes" to a stable snake_case key: "total_bytes"
+    protected static string ToSnakeCase(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        bool lastWasUnderscore = false;
+        foreach (char ch in label)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+                lastWasUnderscore = false;
+            }
+            else if (!lastWasUnderscore)
+            {
+                sb.Append('_');
+                lastWasUnderscore = true;
+            }
+        }
+        var res = sb.ToString().Trim('_');
+        return string.IsNullOrEmpty(res) ? label : res;
+    }
+
+    // NOTE: `AsKeyMap` removed — builders now create `KeyMetrics` dictionaries directly.
 }

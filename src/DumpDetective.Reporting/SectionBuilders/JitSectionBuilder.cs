@@ -27,19 +27,21 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
         int totalFrames = d.ManagedFrameCount + d.UnmanagedFrameCount;
         double unmanagedRatio = totalFrames > 0 ? (double)d.UnmanagedFrameCount / totalFrames : 0.0;
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total JIT code heap",           FormatHelper.FormatBytes(d.TotalJitHeapBytes),  (double)d.TotalJitHeapBytes),
-            KM("JIT manager count",             $"{d.JitManagerCount:N0}",                       d.JitManagerCount),
-            KM("Active managed frames",         $"{d.ManagedFrameCount:N0}",                     d.ManagedFrameCount),
-            KM("Runtime/internal frames",       $"{d.UnmanagedFrameCount:N0}",                   d.UnmanagedFrameCount),
-            KM("Active method instances on stacks", $"{d.ActiveMethodsOnStacks:N0}",             d.ActiveMethodsOnStacks),
-            KM("Tiered recompilations observed",$"{d.TieredMethodCount:N0}",                     d.TieredMethodCount),
+            ["total_jit_code_heap"] = new NumericMetricValue((double)d.TotalJitHeapBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalJitHeapBytes)),
+            ["jit_manager_count"] = new NumericMetricValue(d.JitManagerCount, MetricUnit.Count),
+            ["active_managed_frames"] = new NumericMetricValue(d.ManagedFrameCount, MetricUnit.Count),
+            ["runtime_internal_frames"] = new NumericMetricValue(d.UnmanagedFrameCount, MetricUnit.Count),
+            ["active_method_instances_on_stacks"] = new NumericMetricValue(d.ActiveMethodsOnStacks, MetricUnit.Count),
+            ["tiered_recompilations_observed"] = new NumericMetricValue(d.TieredMethodCount, MetricUnit.Count),
         };
         if (d.JitHeapPctOfTotalProcess > 0.0)
-            keyMetrics.Add(KM("JIT heap % of process", $"{d.JitHeapPctOfTotalProcess:P1}", d.JitHeapPctOfTotalProcess));
+        {
+            keyMetrics["jit_heap_pct_of_total_process"] = new NumericMetricValue(d.JitHeapPctOfTotalProcess, MetricUnit.Percent, $"{d.JitHeapPctOfTotalProcess:P1}");
+        }
         if (totalFrames > 0)
-            keyMetrics.Add(KM("Unmanaged frame ratio", $"{unmanagedRatio:P1}", unmanagedRatio));
+            keyMetrics["unmanaged_frame_ratio"] = new NumericMetricValue(unmanagedRatio, MetricUnit.Percent, $"{unmanagedRatio:P1}");
 
         if (d.TopActiveFrameTypes.Count > 0)
         {

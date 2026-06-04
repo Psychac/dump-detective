@@ -44,16 +44,16 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             }
         }
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total candidates", leak.TotalCandidates.ToString("N0"), leak.TotalCandidates),
-            KM("Heuristic only",   leak.HeuristicOnly ? "Yes" : "No"),
+            ["total_candidates"] = new NumericMetricValue(leak.TotalCandidates, MetricUnit.Count),
+            ["heuristic_only"] = new TextMetricValue(leak.HeuristicOnly ? "Yes" : "No"),
         };
         if (leak.TopCandidates.Count > 0)
         {
             LeakCandidateRecord top = leak.TopCandidates[0];
-            keyMetrics.Add(KM("Top suspect",        $"{top.TypeName} ({top.Severity})", top.SuspicionScore));
-            keyMetrics.Add(KM("Top suspicion score", top.SuspicionScore.ToString("N0"), top.SuspicionScore));
+            keyMetrics["top_suspect"] = new TextMetricValue($"{top.TypeName} ({top.Severity})");
+            keyMetrics["top_suspicion_score"] = new NumericMetricValue(top.SuspicionScore, MetricUnit.Custom, top.SuspicionScore.ToString("N0"));
         }
 
         if (leak.CandidatesByClass.Count > 0)

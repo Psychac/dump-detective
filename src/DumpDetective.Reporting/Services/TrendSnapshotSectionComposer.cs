@@ -97,9 +97,17 @@ internal static class TrendSnapshotSectionComposer
         if (section.KeyMetrics is { Count: > 0 })
         {
             blocks.Add(new HeadingBlock("Analyzer Key Metrics", 1));
-            foreach (SectionKeyMetric metric in section.KeyMetrics)
+            foreach (var kv in section.KeyMetrics)
             {
-                blocks.Add(new MetricBlock(metric.Label, metric.Value, metric.RawValue, 2));
+                // kv.Key is the snake_case metric key; use the human label from the value where available
+                var label = kv.Value switch
+                {
+                    NumericMetricValue n => (kv.Key ?? string.Empty),
+                    TextMetricValue t => (kv.Key ?? string.Empty),
+                    EnumMetricValue e => (kv.Key ?? string.Empty),
+                    _ => kv.Key
+                };
+                blocks.Add(ToMetricBlock(kv.Key, kv.Value, 2));
             }
         }
 
@@ -249,6 +257,55 @@ internal static class TrendSnapshotSectionComposer
                 Headers: ["Metric", "Value", "Δ vs Baseline"],
                 Rows: rows));
         }
+    }
+
+    private static MetricBlock ToMetricBlock(string snakeKey, MetricValue value, int indent = 0)
+    {
+        // Humanize snake_case key into a display label
+        static string Humanize(string k)
+        {
+            if (string.IsNullOrWhiteSpace(k)) return string.Empty;
+            var parts = k.Split('_', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+                parts[i] = char.ToUpperInvariant(parts[i][0]) + (parts[i].Length > 1 ? parts[i].Substring(1) : string.Empty);
+            return string.Join(' ', parts);
+        }
+
+        var label = Humanize(snakeKey ?? string.Empty);
+        return value switch
+        {
+            NumericMetricValue number => new MetricBlock(label, FormatNumericValue(number), number.Value, indent),
+            TextMetricValue text => new MetricBlock(label, text.Value, null, indent),
+            EnumMetricValue enumValue => new MetricBlock(label, enumValue.Value, null, indent),
+            _ => new MetricBlock(label, string.Empty, null, indent)
+        };
+    }
+
+    private static string FormatNumericValue(NumericMetricValue value)
+    {
+        return value.Unit switch
+        {
+            MetricUnit.Bytes => FormatHelper.FormatBytes((ulong)Math.Max(0, value.Value)),
+            MetricUnit.Percent => $"{value.Value:F1}%",
+            MetricUnit.Ratio => $"{value.Value:F2}x",
+            MetricUnit.Milliseconds => FormatMilliseconds(value.Value),
+            MetricUnit.Custom => !string.IsNullOrWhiteSpace(value.Formatted)
+                ? value.Formatted
+                : value.Value % 1 == 0 ? value.Value.ToString("N0") : value.Value.ToString("N2"),
+            _ => value.Value % 1 == 0 ? value.Value.ToString("N0") : value.Value.ToString("N2")
+        };
+    }
+
+    private static string FormatMilliseconds(double value)
+    {
+        double abs = Math.Abs(value);
+        if (abs < 1000)
+            return $"{value:F0} ms";
+        if (abs < 60_000)
+            return $"{value / 1000.0:F2} s";
+        if (abs < 3_600_000)
+            return $"{value / 60_000.0:F2} min";
+        return $"{value / 3_600_000.0:F2} h";
     }
 
     private static TableRow MetricRow(string metric, string value, string? delta) =>

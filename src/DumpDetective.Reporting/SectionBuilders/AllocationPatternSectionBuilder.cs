@@ -20,19 +20,19 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("GC pressure",        d.GCPressure.ToString(),           (double)d.GCPressure),
-            KM("Promotion pressure", $"{d.PromotionPressureScore:F1}",   d.PromotionPressureScore),
-            KM("Profile",            d.Profile.ToString()),
-            KM("Gen0 count %",       $"{d.Gen0CountPct:F1}%",            d.Gen0CountPct),
-            KM("Gen1 count %",       $"{d.Gen1CountPct:F1}%",            d.Gen1CountPct),
-            KM("Gen2 count %",       $"{d.Gen2CountPct:F1}%",            d.Gen2CountPct),
-            KM("LOH count %",        $"{d.LohCountPct:F1}%",             d.LohCountPct),
-            KM("Gen0 size %",        $"{d.Gen0SizePct:F1}%",             d.Gen0SizePct),
-            KM("Gen1 size %",        $"{d.Gen1SizePct:F1}%",             d.Gen1SizePct),
-            KM("Gen2 size %",        $"{d.Gen2SizePct:F1}%",             d.Gen2SizePct),
-            KM("LOH size %",         $"{d.LohSizePct:F1}%",              d.LohSizePct),
+            ["gc_pressure"] = new EnumMetricValue(d.GCPressure.ToString(), nameof(GCPressureLevel)),
+            ["promotion_pressure"] = new NumericMetricValue(d.PromotionPressureScore, MetricUnit.Custom, $"{d.PromotionPressureScore:F1}"),
+            ["profile"] = new EnumMetricValue(d.Profile.ToString(), nameof(AllocationProfile)),
+            ["gen0_count_pct"] = new NumericMetricValue(d.Gen0CountPct, MetricUnit.Percent, $"{d.Gen0CountPct:F1}%"),
+            ["gen1_count_pct"] = new NumericMetricValue(d.Gen1CountPct, MetricUnit.Percent, $"{d.Gen1CountPct:F1}%"),
+            ["gen2_count_pct"] = new NumericMetricValue(d.Gen2CountPct, MetricUnit.Percent, $"{d.Gen2CountPct:F1}%"),
+            ["loh_count_pct"] = new NumericMetricValue(d.LohCountPct, MetricUnit.Percent, $"{d.LohCountPct:F1}%"),
+            ["gen0_size_pct"] = new NumericMetricValue(d.Gen0SizePct, MetricUnit.Percent, $"{d.Gen0SizePct:F1}%"),
+            ["gen1_size_pct"] = new NumericMetricValue(d.Gen1SizePct, MetricUnit.Percent, $"{d.Gen1SizePct:F1}%"),
+            ["gen2_size_pct"] = new NumericMetricValue(d.Gen2SizePct, MetricUnit.Percent, $"{d.Gen2SizePct:F1}%"),
+            ["loh_size_pct"] = new NumericMetricValue(d.LohSizePct, MetricUnit.Percent, $"{d.LohSizePct:F1}%"),
         };
 
         blocks.Add(T(d.GCPressure switch

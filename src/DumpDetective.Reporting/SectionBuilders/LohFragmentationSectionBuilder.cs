@@ -20,16 +20,16 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Segment Count",          $"{d.SegmentCount:N0}",                          d.SegmentCount),
-            KM("Total LOH Bytes",        FormatHelper.FormatBytes(d.TotalBytes),          (double)d.TotalBytes),
-            KM("Used Bytes",             FormatHelper.FormatBytes(d.UsedBytes),           (double)d.UsedBytes),
-            KM("Free Bytes",             FormatHelper.FormatBytes(d.FreeBytes),           (double)d.FreeBytes),
-            KM("Free Blocks",            $"{d.FreeBlockCount:N0}",                        d.FreeBlockCount),
-            KM("Overall Fragmentation",  $"{d.FragmentationPercent:F1}%",                 d.FragmentationPercent),
-            KM("Largest Free Block",     FormatHelper.FormatBytes(d.LargestFreeBlock),    (double)d.LargestFreeBlock),
-            KM("Severity Band",          GetSeverityBand(d.FragmentationPercent)),
+            ["segment_count"] = new NumericMetricValue(d.SegmentCount, MetricUnit.Count),
+            ["total_loh_bytes"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalBytes)),
+            ["used_bytes"] = new NumericMetricValue((double)d.UsedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.UsedBytes)),
+            ["free_bytes"] = new NumericMetricValue((double)d.FreeBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.FreeBytes)),
+            ["free_blocks"] = new NumericMetricValue(d.FreeBlockCount, MetricUnit.Count),
+            ["overall_fragmentation_pct"] = new NumericMetricValue(d.FragmentationPercent, MetricUnit.Percent, $"{d.FragmentationPercent:F1}%"),
+            ["largest_free_block"] = new NumericMetricValue((double)d.LargestFreeBlock, MetricUnit.Bytes, FormatHelper.FormatBytes(d.LargestFreeBlock)),
+            ["severity_band"] = new TextMetricValue(GetSeverityBand(d.FragmentationPercent)),
         };
 
         var segments = d.TopFragmentedSegments ?? [];

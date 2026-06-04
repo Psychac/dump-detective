@@ -27,13 +27,13 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ]),
         };
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Candidate count",       d.CandidateCount.ToString("N0"),                        d.CandidateCount),
-            KM("Analyzed count",        d.AnalyzedCount.ToString("N0"),                         d.AnalyzedCount),
-            KM("Total retained (est.)", FormatBytes(d.TotalEstimatedRetainedBytes),             (double)Math.Min(d.TotalEstimatedRetainedBytes, long.MaxValue)),
-            KM("Max BFS breadth",       d.MaxBreadth.ToString("N0"),                             d.MaxBreadth),
-            KM("Max BFS depth",         d.MaxDepth.ToString("N0"),                               d.MaxDepth),
+            ["candidate_count"] = new NumericMetricValue(d.CandidateCount, MetricUnit.Count),
+            ["analyzed_count"] = new NumericMetricValue(d.AnalyzedCount, MetricUnit.Count),
+            ["total_retained_est"] = new NumericMetricValue((double)Math.Min(d.TotalEstimatedRetainedBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(d.TotalEstimatedRetainedBytes)),
+            ["max_bfs_breadth"] = new NumericMetricValue(d.MaxBreadth, MetricUnit.Count),
+            ["max_bfs_depth"] = new NumericMetricValue(d.MaxDepth, MetricUnit.Count),
         };
 
         if (d.TopDominatorTypes.Count > 0)
@@ -75,9 +75,9 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             Tables: tables.Count > 0 ? tables : null);
     }
 
-    private static string FormatRatio(ulong retained, ulong shallow)
+    private static new string FormatRatio(ulong retained, ulong shallow)
         => shallow == 0 ? "—" : $"{(double)retained / shallow:F2}x";
 
-    private static double RatioValue(ulong retained, ulong shallow)
+    private static new double RatioValue(ulong retained, ulong shallow)
         => shallow == 0 ? 0.0 : (double)retained / shallow;
 }

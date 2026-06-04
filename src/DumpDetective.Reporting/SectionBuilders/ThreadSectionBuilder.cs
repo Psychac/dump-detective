@@ -19,32 +19,33 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total Threads",        $"{d.TotalThreadCount:N0}",      d.TotalThreadCount),
-            KM("Alive Threads",        $"{d.AliveThreadCount:N0}",      d.AliveThreadCount),
-            KM("Inactive Threads",     $"{d.InactiveThreadCount:N0}",   d.InactiveThreadCount),
-            KM("Background Threads",   $"{d.BackgroundThreadCount:N0}", d.BackgroundThreadCount),
-            KM("GC Threads",           $"{d.GcThreadCount:N0}",         d.GcThreadCount),
-            KM("Thread Pool Workers",  $"{d.ThreadPoolWorkerCount:N0}", d.ThreadPoolWorkerCount),
-            KM("Blocked Threads",      $"{d.BlockedThreadCount:N0}",    d.BlockedThreadCount),
-            KM("Lock-Holding Threads", $"{d.LockHoldingThreadCount:N0}",d.LockHoldingThreadCount),
-            KM("Threads w/ Exceptions",$"{d.ThreadsWithActiveExceptionsCount:N0}", d.ThreadsWithActiveExceptionsCount),
-            KM("Finalizer Blocked",    d.FinalizerThreadBlocked ? "Yes" : "No"),
-            KM("Finalizer Lock Count", $"{d.FinalizerLockCount:N0}",    d.FinalizerLockCount),
-            KM("Async Chain Threads",  $"{d.AsyncChainThreadCount:N0}", d.AsyncChainThreadCount),
-            KM("Max Async Chain Depth",$"{d.MaxAsyncChainDepth:N0}",    d.MaxAsyncChainDepth),
+            ["total_threads"] = new NumericMetricValue(d.TotalThreadCount, MetricUnit.Count),
+            ["alive_threads"] = new NumericMetricValue(d.AliveThreadCount, MetricUnit.Count),
+            ["inactive_threads"] = new NumericMetricValue(d.InactiveThreadCount, MetricUnit.Count),
+            ["background_threads"] = new NumericMetricValue(d.BackgroundThreadCount, MetricUnit.Count),
+            ["gc_threads"] = new NumericMetricValue(d.GcThreadCount, MetricUnit.Count),
+            ["thread_pool_workers"] = new NumericMetricValue(d.ThreadPoolWorkerCount, MetricUnit.Count),
+            ["blocked_threads"] = new NumericMetricValue(d.BlockedThreadCount, MetricUnit.Count),
+            ["lock_holding_threads"] = new NumericMetricValue(d.LockHoldingThreadCount, MetricUnit.Count),
+            ["threads_with_exceptions"] = new NumericMetricValue(d.ThreadsWithActiveExceptionsCount, MetricUnit.Count),
+            ["finalizer_blocked"] = new TextMetricValue(d.FinalizerThreadBlocked ? "Yes" : "No"),
+            ["finalizer_lock_count"] = new NumericMetricValue(d.FinalizerLockCount, MetricUnit.Count),
+            ["async_chain_threads"] = new NumericMetricValue(d.AsyncChainThreadCount, MetricUnit.Count),
+            ["max_async_chain_depth"] = new NumericMetricValue(d.MaxAsyncChainDepth, MetricUnit.Count),
         };
         if (d.FinalizerManagedThreadId.HasValue)
         {
-            keyMetrics.Add(KM("Finalizer Thread ID",    $"{d.FinalizerManagedThreadId.Value:N0}", d.FinalizerManagedThreadId.Value));
+            keyMetrics["finalizer_thread_id"] = new NumericMetricValue(d.FinalizerManagedThreadId.Value, MetricUnit.Count);
             if (d.FinalizerOsThreadId.HasValue)
-                keyMetrics.Add(KM("Finalizer OS Thread", $"{d.FinalizerOsThreadId.Value:N0}",     d.FinalizerOsThreadId.Value));
+                keyMetrics["finalizer_os_thread"] = new NumericMetricValue(d.FinalizerOsThreadId.Value, MetricUnit.Count);
         }
         if (d.SamplingCapacity > 0 || d.SampledSnapshotCount > 0)
         {
-            keyMetrics.Add(KM("Sampled Snapshots", $"{d.SampledSnapshotCount:N0} sampled (capacity {d.SamplingCapacity:N0})", d.SampledSnapshotCount));
-            keyMetrics.Add(KM("Sampling Seed", $"0x{d.SamplingSeed:X8}"));
+            keyMetrics["sampled_snapshots"] = new NumericMetricValue(d.SampledSnapshotCount, MetricUnit.Count);
+            keyMetrics["sampling_capacity"] = new NumericMetricValue(d.SamplingCapacity, MetricUnit.Count);
+            keyMetrics["sampling_seed"] = new TextMetricValue($"0x{d.SamplingSeed:X8}");
         }
 
         // Finalizer frames — small bounded stack, show inline for immediate visibility

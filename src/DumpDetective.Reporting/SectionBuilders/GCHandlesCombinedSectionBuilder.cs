@@ -33,7 +33,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>();
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
 
         // ── GC Handles ────────────────────────────────────────────────────────
         if (handles is not null)
@@ -42,12 +42,16 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
             double weakPct    = handles.TotalHandles == 0 ? 0 : handles.WeakLikeHandles      * 100.0 / handles.TotalHandles;
             double pinnedPct  = handles.TotalHandles == 0 ? 0 : handles.PinnedHandleTargets  * 100.0 / handles.TotalHandles;
 
-            keyMetrics.Add(KM("Total handles",        $"{handles.TotalHandles:N0}",                             handles.TotalHandles));
-            keyMetrics.Add(KM("Strong-like handles",  $"{handles.StrongLikeHandles:N0} ({strongPct:F1}%)",      handles.StrongLikeHandles));
-            keyMetrics.Add(KM("Weak-like handles",    $"{handles.WeakLikeHandles:N0} ({weakPct:F1}%)",          handles.WeakLikeHandles));
-            keyMetrics.Add(KM("Pinned targets",       $"{handles.PinnedHandleTargets:N0} ({pinnedPct:F1}%)",    handles.PinnedHandleTargets));
+            keyMetrics["strong_like_handles"] = new NumericMetricValue(handles.StrongLikeHandles, MetricUnit.Count);
+            keyMetrics["strong_like_handles_pct"] = new NumericMetricValue(strongPct, MetricUnit.Percent);
+            keyMetrics["weak_like_handles"] = new NumericMetricValue(handles.WeakLikeHandles, MetricUnit.Count);
+            keyMetrics["weak_like_handles_pct"] = new NumericMetricValue(weakPct, MetricUnit.Percent);
+            keyMetrics["pinned_targets"] = new NumericMetricValue(handles.PinnedHandleTargets, MetricUnit.Count);
+            keyMetrics["pinned_targets_pct"] = new NumericMetricValue(pinnedPct, MetricUnit.Percent);
             if (handles.PinnedRetainedBytes > 0)
-                keyMetrics.Add(KM("Pinned retained", FormatHelper.FormatBytes(handles.PinnedRetainedBytes),     (long)handles.PinnedRetainedBytes));
+            {
+                keyMetrics["pinned_retained"] = new NumericMetricValue((double)handles.PinnedRetainedBytes, MetricUnit.Bytes);
+            }
 
             var byKind = handles.HandlesByKind ?? [];
             if (byKind.Count > 0)
@@ -85,12 +89,12 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
         // ── Weak References ───────────────────────────────────────────────────
         if (weakRefs is not null)
         {
-            keyMetrics.Add(KM("Total weak handles",     $"{weakRefs.TotalWeakHandles:N0}",             weakRefs.TotalWeakHandles));
-            keyMetrics.Add(KM("Alive weak targets",     $"{weakRefs.AliveWeakTargets:N0}",             weakRefs.AliveWeakTargets));
-            keyMetrics.Add(KM("Dead weak targets",      $"{weakRefs.DeadWeakTargets:N0}",              weakRefs.DeadWeakTargets));
-            keyMetrics.Add(KM("Dead target ratio",      $"{weakRefs.DeadTargetRatio:P1}",              weakRefs.DeadTargetRatio));
-            keyMetrics.Add(KM("WeakReference objects",  $"{weakRefs.WeakReferenceObjectCount:N0}",     weakRefs.WeakReferenceObjectCount));
-            keyMetrics.Add(KM("Stale wrappers",         $"{weakRefs.StaleWrapperCount:N0}",            weakRefs.StaleWrapperCount));
+            keyMetrics["total_weak_handles"] = new NumericMetricValue(weakRefs.TotalWeakHandles, MetricUnit.Count);
+            keyMetrics["alive_weak_targets"] = new NumericMetricValue(weakRefs.AliveWeakTargets, MetricUnit.Count);
+            keyMetrics["dead_weak_targets"] = new NumericMetricValue(weakRefs.DeadWeakTargets, MetricUnit.Count);
+            keyMetrics["dead_target_ratio"] = new NumericMetricValue(weakRefs.DeadTargetRatio, MetricUnit.Percent);
+            keyMetrics["weakreference_objects"] = new NumericMetricValue(weakRefs.WeakReferenceObjectCount, MetricUnit.Count);
+            keyMetrics["stale_wrappers"] = new NumericMetricValue(weakRefs.StaleWrapperCount, MetricUnit.Count);
 
             if (weakRefs.ScanCapped)
                 blocks.Add(T("⚠ Handle scan was capped — totals may be underestimated."));
@@ -123,9 +127,8 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
         // ── Dependent Handles ─────────────────────────────────────────────────
         if (dependent is not null)
         {
-            keyMetrics.Add(KM("Dependent handles",    $"{dependent.DependentHandleCount:N0}",          dependent.DependentHandleCount));
-            keyMetrics.Add(KM("Resolved edges",       $"{dependent.ResolvedEdgeCount:N0}",             dependent.ResolvedEdgeCount));
-            keyMetrics.Add(KM("Unresolved targets",   $"{dependent.UnresolvedTargetCount:N0} ({dependent.UnresolvedPercent:F1}%)", dependent.UnresolvedTargetCount));
+            keyMetrics["unresolved_targets"] = new NumericMetricValue(dependent.UnresolvedTargetCount, MetricUnit.Count);
+            keyMetrics["unresolved_targets_pct"] = new NumericMetricValue(dependent.UnresolvedPercent, MetricUnit.Percent);
 
             if ((dependent.TopSourceTypes ?? []).Count > 0)
             {
@@ -157,7 +160,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
             Blocks: blocks,
-            KeyMetrics: keyMetrics.Count > 0 ? keyMetrics : null,
+            KeyMetrics: keyMetrics,
             Tables: tables.Count > 0 ? tables : null);
     }
 }

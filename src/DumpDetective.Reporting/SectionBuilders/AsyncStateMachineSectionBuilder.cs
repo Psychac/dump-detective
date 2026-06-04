@@ -24,15 +24,15 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total State Machines", $"{d.TotalStateMachines:N0}", d.TotalStateMachines),
-            KM("Total Memory",         FormatHelper.FormatBytes(d.TotalStateMachineBytes)),
-            KM("Distinct Types",       $"{d.TopStateMachineTypes.Count:N0}"),
-            KM("Suspended Methods",    $"{d.SuspendedMethodMap.Count:N0}"),
+            ["total_state_machines"] = new NumericMetricValue(d.TotalStateMachines, MetricUnit.Count),
+            ["total_memory"] = new NumericMetricValue((double)d.TotalStateMachineBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalStateMachineBytes)),
+            ["distinct_types"] = new NumericMetricValue(d.TopStateMachineTypes.Count, MetricUnit.Count),
+            ["suspended_methods"] = new NumericMetricValue(d.SuspendedMethodMap.Count, MetricUnit.Count),
         };
         if (d.ScanLimited)
-            keyMetrics.Add(KM("Scan Limit Reached", "Yes — type candidate cap hit; results may be partial", 1.0));
+            keyMetrics["scan_limit_reached"] = new EnumMetricValue("Yes — type candidate cap hit; results may be partial");
 
         if (d.TopStateMachineTypes.Count > 0)
         {

@@ -21,12 +21,12 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         var tables = new List<SectionTable>();
         var blocks = new List<SectionBlock>();
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total types analyzed",    d.TotalTypesAnalyzed.ToString("N0"),  d.TotalTypesAnalyzed),
-            KM("Avg ref fields per type", $"{d.AvgRefFieldsPerType:F1}",        d.AvgRefFieldsPerType),
-            KM("Reference-heavy types",  d.TopReferenceHeavyTypes.Count.ToString("N0"), d.TopReferenceHeavyTypes.Count),
-            KM("Value-heavy types",      d.TopValueHeavyTypes.Count.ToString("N0"),     d.TopValueHeavyTypes.Count),
+            ["total_types_analyzed"] = new NumericMetricValue(d.TotalTypesAnalyzed, MetricUnit.Count),
+            ["avg_ref_fields_per_type"] = new NumericMetricValue(d.AvgRefFieldsPerType, MetricUnit.Custom, $"{d.AvgRefFieldsPerType:F1}"),
+            ["reference_heavy_types"] = new NumericMetricValue(d.TopReferenceHeavyTypes.Count, MetricUnit.Count),
+            ["value_heavy_types"] = new NumericMetricValue(d.TopValueHeavyTypes.Count, MetricUnit.Count),
         };
 
         if (d.TopReferenceHeavyTypes.Count > 0)

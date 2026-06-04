@@ -1,5 +1,6 @@
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Core.Models;
 
 using FluentAssertions;
 
@@ -17,10 +18,10 @@ public sealed class TrendSnapshotSectionComposerTests
             DisplayTitle: "Demo Analyzer",
             SortOrder: 10,
             Blocks: [],
-            KeyMetrics:
-            [
-                new SectionKeyMetric("Metric A", "123", 123)
-            ],
+            KeyMetrics: new System.Collections.Generic.Dictionary<string, MetricValue>
+            {
+                ["metric_a"] = new NumericMetricValue(123, MetricUnit.Count, "123")
+            },
             Tables:
             [
                 new SectionTable(

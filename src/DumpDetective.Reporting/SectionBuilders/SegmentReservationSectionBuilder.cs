@@ -52,16 +52,16 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                 Caveats: []);
         }
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total committed",         FormatBytes(d.TotalCommittedBytes),     (double)d.TotalCommittedBytes),
-            KM("Total reserved",          FormatBytes(d.TotalReservedBytes),      (double)d.TotalReservedBytes),
-            KM("Reservation gap",         FormatBytes(d.ReservationGapBytes),     (double)d.ReservationGapBytes),
-            KM("Reserved / committed",    $"{d.ReservedToCommittedRatio:F2}×",   d.ReservedToCommittedRatio),
-            KM("Ephemeral segments",      d.EphemeralSegmentCount.ToString("N0"), d.EphemeralSegmentCount),
-            KM("Avg ephemeral fill",      $"{d.AvgEphemeralFillPct:F1}%",        d.AvgEphemeralFillPct),
-            KM("Non-ephemeral SOH segs",  d.NonEphemeralSohSegmentCount.ToString("N0"), d.NonEphemeralSohSegmentCount),
-            KM("Address space pressure",  d.AddressSpacePressureRisk ? "Yes" : "No", d.AddressSpacePressureRisk ? 1.0 : 0.0),
+            ["total_committed_bytes"] = new NumericMetricValue((double)d.TotalCommittedBytes, MetricUnit.Bytes),
+            ["total_reserved_bytes"] = new NumericMetricValue((double)d.TotalReservedBytes, MetricUnit.Bytes),
+            ["reservation_gap_bytes"] = new NumericMetricValue((double)d.ReservationGapBytes, MetricUnit.Bytes),
+            ["reserved_committed_ratio"] = new NumericMetricValue(d.ReservedToCommittedRatio, MetricUnit.Ratio),
+            ["ephemeral_segments"] = new NumericMetricValue(d.EphemeralSegmentCount, MetricUnit.Count),
+            ["avg_ephemeral_fill_pct"] = new NumericMetricValue(d.AvgEphemeralFillPct, MetricUnit.Percent),
+            ["non_ephemeral_soh_segs"] = new NumericMetricValue(d.NonEphemeralSohSegmentCount, MetricUnit.Count),
+            ["address_space_pressure"] = new TextMetricValue(d.AddressSpacePressureRisk ? "Yes" : "No"),
         };
 
         if (d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason))

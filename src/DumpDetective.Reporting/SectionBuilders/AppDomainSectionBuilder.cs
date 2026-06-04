@@ -18,16 +18,16 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
     {
         var d = (AppDomainDomainResult)result;
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total domains",       d.TotalDomains.ToString("N0"),           d.TotalDomains),
-            KM("Anonymous modules",   d.AnonymousModuleCount.ToString("N0"),    d.AnonymousModuleCount),
-            KM("Dynamic modules",     d.TotalDynamicModules.ToString("N0"),     d.TotalDynamicModules),
+            ["total_domains"] = new NumericMetricValue(d.TotalDomains, MetricUnit.Count),
+            ["anonymous_modules"] = new NumericMetricValue(d.AnonymousModuleCount, MetricUnit.Count),
+            ["dynamic_modules"] = new NumericMetricValue(d.TotalDynamicModules, MetricUnit.Count),
         };
         if (d.DynamicModuleBytes > 0)
-            keyMetrics.Add(KM("Dynamic module bytes", FormatBytes(d.DynamicModuleBytes), (double)d.DynamicModuleBytes));
+            keyMetrics["dynamic_module_bytes"] = new NumericMetricValue((double)d.DynamicModuleBytes, MetricUnit.Bytes, FormatBytes(d.DynamicModuleBytes));
         if (d.ExcludedModuleCount > 0)
-            keyMetrics.Add(KM("Excluded modules", d.ExcludedModuleCount.ToString("N0"), d.ExcludedModuleCount));
+            keyMetrics["excluded_modules"] = new NumericMetricValue(d.ExcludedModuleCount, MetricUnit.Count);
 
         var tables = new List<SectionTable>();
 

@@ -60,12 +60,12 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         tables.Add(ST("Analyzer run status",
             ["Analyzer", "Status", "Duration (ms)", "Objects Scanned", "Error/Skip Reason"], rows));
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Completed",              completed.ToString("N0"),      completed),
-            KM("Failed",                 failed.ToString("N0"),         failed),
-            KM("Skipped by filter",      skippedFilter.ToString("N0"),  skippedFilter),
-            KM("Skipped by cancellation",skippedCancelled.ToString("N0"),skippedCancelled),
+            ["completed"] = new NumericMetricValue(completed, MetricUnit.Count),
+            ["failed"] = new NumericMetricValue(failed, MetricUnit.Count),
+            ["skipped_by_filter"] = new NumericMetricValue(skippedFilter, MetricUnit.Count),
+            ["skipped_by_cancellation"] = new NumericMetricValue(skippedCancelled, MetricUnit.Count),
         };
 
         var memoryRows = new List<TableRow>();

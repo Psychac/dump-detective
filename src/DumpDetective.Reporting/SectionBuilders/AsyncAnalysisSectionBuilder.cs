@@ -37,18 +37,18 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 Caveats: asyncTasks.TaskScanLimited ? ["Task scan was limited; chain depth may be underestimated."] : []);
         }
 
-        var keyMetrics = new List<SectionKeyMetric>
+        var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            KM("Total tasks",               asyncTasks.TotalTasks.ToString("N0"),               asyncTasks.TotalTasks),
-            KM("Pending tasks",             asyncTasks.PendingTasks.ToString("N0"),              asyncTasks.PendingTasks),
-            KM("Running tasks",             asyncTasks.RunningTasks.ToString("N0"),              asyncTasks.RunningTasks),
-            KM("Faulted tasks",             asyncTasks.FaultedTasks.ToString("N0"),              asyncTasks.FaultedTasks),
-            KM("Canceled tasks",            asyncTasks.CanceledTasks.ToString("N0"),             asyncTasks.CanceledTasks),
-            KM("Completed tasks",           asyncTasks.CompletedTasks.ToString("N0"),            asyncTasks.CompletedTasks),
-            KM("Orphaned tasks",            asyncTasks.OrphanedTasks.ToString("N0"),             asyncTasks.OrphanedTasks),
-            KM("Total task continuations",  asyncTasks.TotalTaskContinuations.ToString("N0"),    asyncTasks.TotalTaskContinuations),
-            KM("Max continuation depth",    asyncTasks.MaxContinuationDepth.ToString("N0"),      asyncTasks.MaxContinuationDepth),
-            KM("Avg continuation depth",    asyncTasks.AvgContinuationDepth.ToString("F1"),      asyncTasks.AvgContinuationDepth),
+            ["total_tasks"] = new NumericMetricValue(asyncTasks.TotalTasks, MetricUnit.Count),
+            ["pending_tasks"] = new NumericMetricValue(asyncTasks.PendingTasks, MetricUnit.Count),
+            ["running_tasks"] = new NumericMetricValue(asyncTasks.RunningTasks, MetricUnit.Count),
+            ["faulted_tasks"] = new NumericMetricValue(asyncTasks.FaultedTasks, MetricUnit.Count),
+            ["canceled_tasks"] = new NumericMetricValue(asyncTasks.CanceledTasks, MetricUnit.Count),
+            ["completed_tasks"] = new NumericMetricValue(asyncTasks.CompletedTasks, MetricUnit.Count),
+            ["orphaned_tasks"] = new NumericMetricValue(asyncTasks.OrphanedTasks, MetricUnit.Count),
+            ["total_task_continuations"] = new NumericMetricValue(asyncTasks.TotalTaskContinuations, MetricUnit.Count),
+            ["max_continuation_depth"] = new NumericMetricValue(asyncTasks.MaxContinuationDepth, MetricUnit.Count),
+            ["avg_continuation_depth"] = new NumericMetricValue(asyncTasks.AvgContinuationDepth, MetricUnit.Custom, asyncTasks.AvgContinuationDepth.ToString("F1")),
         };
 
         tables.Add(ST(

@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DbConnectionDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         // Key metrics strip
@@ -51,9 +52,9 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(t.TotalBytes)),
                 ]));
             }
-            tables.Add(ST("Connection objects by type",
-                ["Type", "Total", "Open", "Closed", "Other", "Heap Size"],
-                typeRows));
+            compactTables.Add(STCompact("Connection objects by type",
+                new[] { CH("Type"), CH("Total","number"), CH("Open","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") },
+                typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Top open connections table
@@ -70,9 +71,9 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(s.StateLabel),
                 ]));
             }
-            tables.Add(ST("Top open connections",
-                ["Type", "Address", "State"],
-                openRows));
+            compactTables.Add(STCompact("Top open connections",
+                new[] { CH("Type"), CH("Address"), CH("State") },
+                openRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.StateScanCapped)
@@ -80,6 +81,6 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

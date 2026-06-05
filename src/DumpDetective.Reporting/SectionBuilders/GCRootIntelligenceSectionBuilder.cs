@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
     {
         var roots = (GCRootDomainResult)result;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(0.55, ["Average retained bytes are heuristic estimates."]),
@@ -30,28 +31,23 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             ["path_search_capped"] = new TextMetricValue(roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
         };
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "GC root kinds",
-            ["Root Kind", "Count", "Estimated Retained", "% of Heap"],
-            BuildKindRows(roots.ByKind)));
+            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap") },
+            BuildKindRows(roots.ByKind).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "Top GC roots by severity",
-            ["Root Kind", "Root Addr", "Field", "Target Type", "Target Addr", "Est. Retained", "Severity"],
-            BuildSeverityRows(roots.TopRootsBySeverity)));
+            new[] { CH("Root Kind"), CH("Root Addr"), CH("Field"), CH("Target Type"), CH("Target Addr"), CH("Est. Retained","bytes"), CH("Severity","number") },
+            BuildSeverityRows(roots.TopRootsBySeverity).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToArray();
         if (finalizerRoots.Length > 0)
         {
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Finalizer roots",
-                ["Target Type", "Field", "Est. Retained", "Severity", "Root Addr"],
-                finalizerRoots.Take(10).Select(root => Row(
-                    Cell(root.TargetTypeName),
-                    Cell(root.FieldDescription ?? "—"),
-                    Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
-                    Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
-                    Cell($"0x{root.RootAddress:X}"))).ToArray()));
+                new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
+                finalizerRoots.Take(10).Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", FormatBytes(root.EstimatedRetainedBytes), root.SeverityScore.ToString("N0"), $"0x{root.RootAddress:X}" })).ToArray()));
         }
 
         // ── Root paths: outer collapsible wrapper ─────────────────────────
@@ -122,6 +118,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                     blocks.Add(T("No intermediate references recorded."));
                 }
             }
+            
 
             blocks.Add(CollapseEnd()); // end type group
             blocks.Add(Blank());
@@ -132,7 +129,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildKindRows(IReadOnlyList<RootKindSummary> kinds)

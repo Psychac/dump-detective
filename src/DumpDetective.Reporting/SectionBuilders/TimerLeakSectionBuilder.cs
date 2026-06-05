@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (TimerLeakDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -47,7 +48,7 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatBytes(t.TotalBytes))));
             }
 
-            tables.Add(ST("Timer-related objects by type", ["Type", "Count", "Heap Size"], rows));
+            compactTables.Add(STCompact("Timer-related objects by type", new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if ((d.TimerHolderCount + d.TimerQueueTimerCount) >= 50)
@@ -61,6 +62,6 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

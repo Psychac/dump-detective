@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (HttpObjectDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -49,9 +50,9 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(FormatBytes(t.TotalBytes)),
                 ]));
             }
-            tables.Add(ST("HTTP objects by type",
-                ["Type", "Count", "Heap Size"],
-                typeRows));
+            compactTables.Add(STCompact("HTTP objects by type",
+                new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") },
+                typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.HttpClientCount >= 5)
@@ -61,6 +62,6 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

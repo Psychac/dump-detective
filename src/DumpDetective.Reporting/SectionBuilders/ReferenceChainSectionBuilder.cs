@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -24,7 +25,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             ["retained_samples"] = new NumericMetricValue(d.RetainedSamples, MetricUnit.Count),
             ["retained_pct"] = new NumericMetricValue(d.RetainedPercent, MetricUnit.Percent, $"{d.RetainedPercent:F1}%"),
         };
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var traces = d.TopTypeSampleTraces ?? [];
@@ -66,7 +67,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             int rtLimit = Math.Min(topRetained.Count, 8);
             for (int i = 0; i < rtLimit; i++)
                 rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(topRetained[i].Name, 80)), Cell($"{topRetained[i].Count:N0} retained sample(s)", topRetained[i].Count)]));
-            tables.Add(ST("Top retained sampled types", ["Type", "Retained Samples"], rtRows));
+            compactTables.Add(STCompact("Top retained sampled types", new[] { CH("Type"), CH("Retained Samples","number") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var chains = d.SampleReferenceChains ?? [];
@@ -87,6 +88,6 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

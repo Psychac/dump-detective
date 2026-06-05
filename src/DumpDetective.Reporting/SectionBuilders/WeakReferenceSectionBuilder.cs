@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -21,7 +22,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
     {
         var d = (WeakReferenceDomainResult)result;
         var blocks = new List<SectionBlock>();
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -43,7 +44,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(d.WeakHandleKinds.Count);
             foreach (NameCountEntry e in d.WeakHandleKinds.Take(TopTypesToShow))
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            tables.Add(ST("Weak handle kinds", ["Kind", "Count"], rows));
+            compactTables.Add(STCompact("Weak handle kinds", new[] { CH("Kind"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopWeakTargetTypes.Count > 0)
@@ -51,7 +52,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(d.TopWeakTargetTypes.Count);
             foreach (NameCountEntry e in d.TopWeakTargetTypes.Take(TopTypesToShow))
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            tables.Add(ST("Top alive weak target types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Top alive weak target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopStaleWrapperHolderTypes.Count > 0)
@@ -59,7 +60,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(d.TopStaleWrapperHolderTypes.Count);
             foreach (NameCountEntry e in d.TopStaleWrapperHolderTypes.Take(TopTypesToShow))
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            tables.Add(ST("Top stale wrapper holder types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Exported artifacts note (if any)
@@ -81,6 +82,6 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         return new AnalyzerDetailSection(
             AnalyzerName, "Weak Reference Analysis", SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

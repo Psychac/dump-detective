@@ -23,7 +23,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
         AppDomainDomainResult? domains = results.Get<AppDomainDomainResult>();
         ModuleDomainResult? modules = results.Get<ModuleDomainResult>();
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
 
@@ -36,10 +36,10 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                 keyMetrics["dynamic_module_bytes"] = new NumericMetricValue((double)domains.DynamicModuleBytes, MetricUnit.Bytes, FormatBytes(domains.DynamicModuleBytes));
             if (domains.ExcludedModuleCount > 0)
                 keyMetrics["excluded_modules"] = new NumericMetricValue(domains.ExcludedModuleCount, MetricUnit.Count);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "AppDomain inventory",
-                ["Domain Name", "ID", "Address", "Module Count", "Estimated Managed Bytes"],
-                BuildDomainRows(domains.Domains)));
+                new[] { CH("Domain Name"), CH("ID", "number"), CH("Address"), CH("Module Count", "number"), CH("Estimated Managed Bytes", "bytes") },
+                BuildDomainRows(domains.Domains).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (modules is not null)
@@ -68,7 +68,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                         Cell(m.IsDynamic ? "Yes" : "No"),
                         Cell(m.IsPEFile ? "Yes" : "No")));
                 }
-                tables.Add(ST("Top modules by size", ["Name", "Assembly", "Full Path", "Address", "Size", "Dynamic", "PE File"], rows));
+                compactTables.Add(STCompact("Top modules by size", new[] { CH("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (modules.ConflictDetails.Count > 0)
@@ -82,7 +82,7 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                         Cell(conflict.Instances.Count.ToString("N0"), conflict.Instances.Count),
                         Cell(string.Join("; ", conflict.Instances.Take(3).Select(m => m.AssemblyName)))));
                 }
-                tables.Add(ST("Conflict details", ["Module", "Instances", "Assemblies"], rows));
+                compactTables.Add(STCompact("Conflict details", new[] { CH("Module"), CH("Instances","number"), CH("Assemblies") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (modules.TopModulesByHeapMemory is { Count: > 0 })
@@ -100,8 +100,8 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                         Cell(FormatBytes(stats.TotalBytes), (long)Math.Min(stats.TotalBytes, long.MaxValue)),
                         Cell(objectsPerType.ToString("F1"))));
                 }
-                tables.Add(ST("Modules by heap footprint",
-                    ["Module", "Assembly", "Types", "Objects", "Bytes", "Objects/Type"], rows));
+                compactTables.Add(STCompact("Modules by heap footprint",
+                    new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Objects/Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (modules.HeavyTypeDensityModules is { Count: > 0 })
@@ -118,8 +118,8 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                         Cell(FormatBytes(density.TotalBytes), (long)Math.Min(density.TotalBytes, long.MaxValue)),
                         Cell(FormatBytes(density.BytesPerType), (long)Math.Min(density.BytesPerType, long.MaxValue))));
                 }
-                tables.Add(ST("Type density",
-                    ["Module", "Assembly", "Types", "Objects", "Bytes", "Bytes/Type"], rows));
+                compactTables.Add(STCompact("Type density",
+                    new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -137,17 +137,17 @@ internal sealed class AppDomainAssemblySectionBuilder : SectionBuilderBase, IRep
                     Cell(entry.ObjectCount.ToString("N0"), entry.ObjectCount),
                     Cell(FormatBytes(entry.TotalBytes), (long)Math.Min(entry.TotalBytes, long.MaxValue))));
             }
-            tables.Add(ST("Top modules by type count",
-                ["Module", "Assembly", "Types", "Live Types", "Objects", "Bytes"], rows));
+            compactTables.Add(STCompact("Top modules by type count",
+                new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Live Types","number"), CH("Objects","number"), CH("Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (domains is null && modules is null)
             blocks.Add(T("No appdomain or module result was available."));
 
-        return new AnalyzerDetailSection(
+            return new AnalyzerDetailSection(
             "Modules & Assemblies", DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildDomainRows(IReadOnlyList<AppDomainSnapshot> domains)

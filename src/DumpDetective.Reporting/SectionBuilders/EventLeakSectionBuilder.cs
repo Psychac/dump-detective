@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -19,7 +20,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (EventLeakDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -46,12 +47,8 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 else if (generation >= 2) gen2++;
                 else unknown++;
             }
-            tables.Add(ST("Publisher generation distribution", ["Generation", "Count"], [
-                new([Cell("Gen0"),    Cell($"{gen0:N0}",    gen0)]),
-                new([Cell("Gen1"),    Cell($"{gen1:N0}",    gen1)]),
-                new([Cell("Gen2"),    Cell($"{gen2:N0}",    gen2)]),
-                new([Cell("Unknown"), Cell($"{unknown:N0}", unknown)]),
-            ]));
+            compactTables.Add(STCompact("Publisher generation distribution", new[] { CH("Generation"), CH("Count","number") },
+                new[] { R("Gen0", gen0), R("Gen1", gen1), R("Gen2", gen2), R("Unknown", unknown) }));
         }
 
         var topPublishers = d.TopPublisherEvents ?? [];
@@ -68,9 +65,9 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell($"{p.InstanceCount:N0}", p.InstanceCount),
                     Cell(p.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(p.EstimatedRetainedBytes) : "-")]));
             }
-            tables.Add(ST("Publisher events by subscriber count",
-                ["Publisher Type", "Event Field", "Subscribers", "Instances", "Est. Retained"],
-                pubRows));
+            compactTables.Add(STCompact("Publisher events by subscriber count",
+                new[] { CH("Publisher Type"), CH("Event Field"), CH("Subscribers","number"), CH("Instances","number"), CH("Est. Retained","bytes") },
+                pubRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var leakGroupsForTable = d.TopLeakGroups ?? [];
@@ -94,9 +91,9 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(g.HasLifetimeMismatch ? "Yes" : "No"),
                     Cell($"{g.OrphanedSubscriberInstances:N0}", g.OrphanedSubscriberInstances)]));
             }
-            tables.Add(ST("Leak groups",
-                ["Publisher Type", "Event Field", "Static", "Severity", "Instances", "Subscribers", "Avg Subs", "Min/Max", "Est. Retained", "Dup Subs", "Lifetime Mismatch", "Orphaned"],
-                groupRows));
+            compactTables.Add(STCompact("Leak groups",
+                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Severity","number"), CH("Instances","number"), CH("Subscribers","number"), CH("Avg Subs"), CH("Min/Max"), CH("Est. Retained","bytes"), CH("Dup Subs"), CH("Lifetime Mismatch"), CH("Orphaned","number") },
+                groupRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var leakInstancesForTable = d.TopLeakInstances ?? [];
@@ -117,9 +114,9 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(inst.PublisherGeneration >= 0 ? $"Gen{inst.PublisherGeneration}" : "-"),
                     Cell($"{inst.DuplicateSubscriptionCount:N0}", inst.DuplicateSubscriptionCount)]));
             }
-            tables.Add(ST("Top leak instances",
-                ["Publisher Type", "Event Field", "Static", "Publisher Addr", "Severity", "Subscribers", "Root Hint", "Publisher Gen", "Dup Subs"],
-                instRows));
+            compactTables.Add(STCompact("Top leak instances",
+                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Publisher Addr"), CH("Severity","number"), CH("Subscribers","number"), CH("Root Hint"), CH("Publisher Gen"), CH("Dup Subs","number") },
+                instRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Per-group collapsibles — all content stays in blocks (per-item detail)
@@ -169,7 +166,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     var subRows = new List<TableRow>(subTypes.Count);
                     for (int j = 0; j < subTypes.Count; j++)
                         subRows.Add(new TableRow([Cell(subTypes[j].Name), Cell($"{subTypes[j].Count:N0}", subTypes[j].Count)]));
-                    blocks.Add(new TableBlock(null, ["Subscriber Type", "Count"], subRows));
+                            blocks.Add(new TableBlock(null, ["Subscriber Type", "Count"], subRows));
                 }
                 blocks.Add(CollapseEnd());
             }
@@ -223,6 +220,6 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

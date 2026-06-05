@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -19,7 +20,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
         ThreadDomainResult? threads = null;
         ModuleDomainResult? modules = null;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(0.85, ["Exception counts are taken from measured runtime objects and thread snapshots."]),
@@ -52,14 +53,14 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
             ["inferred_traces"] = new NumericMetricValue(crash.InferredTraceCount, MetricUnit.Count),
         };
 
-        tables.Add(ST("Exception counts",
-            ["Signal", "Count", "Notes"],
-            [
-                Row(Cell("Total exceptions"),   Cell(crash.TotalExceptions.ToString("N0"), crash.TotalExceptions),           Cell("All exception objects")),
-                Row(Cell("Active exceptions"),  Cell(crash.ActiveExceptions.ToString("N0"), crash.ActiveExceptions),          Cell("Exceptions currently on threads")),
-                Row(Cell("Unique types"),       Cell(crash.ExceptionTypeCounts.Count.ToString("N0"), crash.ExceptionTypeCounts.Count), Cell("Distinct exception types")),
-                Row(Cell("Inferred traces"),    Cell(crash.InferredTraceCount.ToString("N0"), crash.InferredTraceCount),       Cell("Heuristic original stack traces")),
-            ]));
+        compactTables.Add(STCompact("Exception counts",
+            new[] { CH("Signal"), CH("Count","number"), CH("Notes") },
+            new[] {
+                R("Total exceptions", crash.TotalExceptions, "All exception objects"),
+                R("Active exceptions", crash.ActiveExceptions, "Exceptions currently on threads"),
+                R("Unique types", crash.ExceptionTypeCounts.Count, "Distinct exception types"),
+                R("Inferred traces", crash.InferredTraceCount, "Heuristic original stack traces"),
+            }));
 
         // All-heap exception type counts
         if (crash.ExceptionTypeCounts.Count > 0)
@@ -67,7 +68,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
             var heapTypeRows = new List<TableRow>(Math.Min(crash.ExceptionTypeCounts.Count, 15));
             foreach (KeyValuePair<string, int> kvp in crash.ExceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Take(15))
                 heapTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-            tables.Add(ST("Exception type counts (all heap)", ["Exception Type", "Count"], heapTypeRows));
+            compactTables.Add(STCompact("Exception type counts (all heap)", new[] { CH("Exception Type"), CH("Count","number") }, heapTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Active exception type counts — separate table per spec
@@ -76,7 +77,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
             var activeTypeRows = new List<TableRow>(crash.ActiveExceptionTypeCounts.Count);
             foreach (KeyValuePair<string, int> kvp in crash.ActiveExceptionTypeCounts.OrderByDescending(kvp => kvp.Value))
                 activeTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-            tables.Add(ST("Active exception type counts", ["Exception Type", "Active Count"], activeTypeRows));
+            compactTables.Add(STCompact("Active exception type counts", new[] { CH("Exception Type"), CH("Active Count","number") }, activeTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (crash.TopCrashThreadCandidates is { Count: > 0 })
@@ -94,9 +95,9 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                     Cell(candidate.OriginalStackTraceInferredFrom ?? "—"),
                     Cell(candidate.TopFrames.Count > 0 ? candidate.TopFrames[0] : "—")));
             }
-            tables.Add(ST("Crash thread candidates",
-                ["Managed Thread", "OS Thread", "Active Exceptions", "Primary Exception", "Trace Confidence", "Trace Source", "Top Frame"],
-                hotspotRows));
+            compactTables.Add(STCompact("Crash thread candidates",
+                new[] { CH("Managed Thread","number"), CH("OS Thread","number"), CH("Active Exceptions","number"), CH("Primary Exception"), CH("Trace Confidence"), CH("Trace Source"), CH("Top Frame") },
+                hotspotRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var originRows = new List<TableRow>(crash.TopCrashThreadCandidates.Count);
             for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
@@ -120,9 +121,9 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                     Cell(userCodeFrames.ToString("N0"), userCodeFrames),
                     Cell(candidate.TopFrames.Count.ToString("N0"), candidate.TopFrames.Count)));
             }
-            tables.Add(ST("Frame origin classification",
-                ["Managed Thread", "Framework", "ThirdParty", "UserCode", "Total Frames"],
-                originRows));
+            compactTables.Add(STCompact("Frame origin classification",
+                new[] { CH("Managed Thread","number"), CH("Framework","number"), CH("ThirdParty","number"), CH("UserCode","number"), CH("Total Frames","number") },
+                originRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             if (threads is not null && threads.TopBlockedThreads is { Count: > 0 })
                 blocks.Add(T("Thread hotspots can be cross-checked against the blocked-thread tables in the thread/concurrency section."));
@@ -145,9 +146,9 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                     Cell(ex.ThreadId.HasValue ? ex.ThreadId.Value.ToString("N0") : "—"),
                     Cell(ex.OSThreadId.HasValue ? ex.OSThreadId.Value.ToString("N0") : "—")));
             }
-            tables.Add(ST("Exception instances",
-                ["Type", "Address", "Message", "HRESULT", "Inner Type", "Chain Depth", "Status", "Thread", "OS Thread"],
-                rows));
+            compactTables.Add(STCompact("Exception instances",
+                new[] { CH("Type"), CH("Address"), CH("Message"), CH("HRESULT"), CH("Inner Type"), CH("Chain Depth","number"), CH("Status"), CH("Thread","number"), CH("OS Thread","number") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var depthBuckets = new Dictionary<int, int>();
             for (int i = 0; i < crash.TopExceptionInstances.Count; i++)
@@ -163,7 +164,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                 var depthRows = new List<TableRow>(depthBuckets.Count);
                 foreach (KeyValuePair<int, int> kvp in depthBuckets.OrderBy(kvp => kvp.Key))
                     depthRows.Add(Row(Cell(kvp.Key.ToString("N0"), kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-                tables.Add(ST("Exception chain depth histogram", ["Depth", "Count"], depthRows));
+                compactTables.Add(STCompact("Exception chain depth histogram", new[] { CH("Depth","number"), CH("Count","number") }, depthRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -175,7 +176,7 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string ClassifyFrameOrigin(string frame, ModuleDomainResult? modules)

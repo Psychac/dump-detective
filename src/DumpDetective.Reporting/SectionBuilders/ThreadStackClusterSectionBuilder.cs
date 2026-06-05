@@ -24,6 +24,7 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             ["singleton_signatures"] = new NumericMetricValue(d.SingletonSignatures, MetricUnit.Count),
             ["signature_diversity_pct"] = new NumericMetricValue(d.DiversityPercent, MetricUnit.Percent, $"{d.DiversityPercent:F1}%"),
         };
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         if (d.TopClusterSignatures.Count > 0)
@@ -74,7 +75,8 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             DisplayTitle: AnalyzerName,
             SortOrder: SortOrder,
             Blocks: blocks,
-            KeyMetrics: keyMetrics);
+            KeyMetrics: keyMetrics,
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static IEnumerable<string> BuildOsIdList(IReadOnlyList<uint> ids)

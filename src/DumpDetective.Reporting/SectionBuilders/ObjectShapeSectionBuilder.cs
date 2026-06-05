@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -18,7 +19,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
     {
         var d = (ObjectShapeAnalyzerDomainResult)result;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -30,23 +31,27 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         };
 
         if (d.TopReferenceHeavyTypes.Count > 0)
-            tables.Add(ST(
+        {
+            compactTables.Add(STCompact(
                 "Reference-heavy types",
-                ["Type", "Total Fields", "Ref Fields", "Val Fields", "Ref Ratio", "Instances", "Finalizable", "Value Type", "Array", "Chain Depth", "Interfaces", "Category"],
-                BuildShapeRows(d.TopReferenceHeavyTypes)));
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
+                BuildShapeRows(d.TopReferenceHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         if (d.TopValueHeavyTypes.Count > 0)
-            tables.Add(ST(
+        {
+            compactTables.Add(STCompact(
                 "Value-heavy types",
-                ["Type", "Total Fields", "Ref Fields", "Val Fields", "Ref Ratio", "Instances", "Finalizable", "Value Type", "Array", "Chain Depth", "Interfaces", "Category"],
-                BuildShapeRows(d.TopValueHeavyTypes)));
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
+                BuildShapeRows(d.TopValueHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation."));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildShapeRows(IReadOnlyList<TypeShapeProfile> types)

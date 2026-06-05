@@ -244,7 +244,17 @@ export function buildDetailTable(block, announce, sparkRegistry) {
         continue;
       }
       const td = document.createElement('td');
-      const disp = cell.display || '';
+      let disp = '';
+      let rawVal = null;
+      let linkTarget = null;
+      if (cell && typeof cell === 'object') {
+        disp = cell.display || '';
+        rawVal = cell.rawValue != null ? cell.rawValue : null;
+        linkTarget = cell.linkTarget || null;
+      } else {
+        disp = String(cell || '');
+        if (typeof cell === 'number') rawVal = cell;
+      }
       if (disp.startsWith('__SPARK__')) {
         const payload = disp.substring('__SPARK__'.length);
         td.setAttribute('data-sparkline', payload);
@@ -273,7 +283,7 @@ export function buildDetailTable(block, announce, sparkRegistry) {
           td.textContent = disp;
         }
       }
-      if (cell.rawValue != null) td.dataset.value = cell.rawValue;
+      if (rawVal != null) td.dataset.value = String(rawVal);
 
       if (isTimelineTable) {
         if (ci === 0) td.classList.add('timeline-metric-cell');

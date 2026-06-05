@@ -456,7 +456,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb.AppendLine($"### {Esc(section.DisplayTitle)}");
                 sb.AppendLine();
                 RenderBlocksMd(section.Blocks, sb);
-                RenderSectionTablesMd(section.Tables, sb);
+                RenderSectionTablesMd(section.CompactTables, sb);
                 sb.AppendLine();
             }
         }
@@ -727,19 +727,19 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine();
     }
 
-    private static void RenderSectionTablesMd(IReadOnlyList<SectionTable>? tables, StringBuilder sb)
+    private static void RenderSectionTablesMd(IReadOnlyList<CompactTable>? tables, StringBuilder sb)
     {
         if (tables is not { Count: > 0 })
             return;
 
         for (int i = 0; i < tables.Count; i++)
         {
-            SectionTable table = tables[i];
+            CompactTable table = tables[i];
             RenderTableMd(
                 new TableBlock(
                     Caption: table.Title,
-                    Headers: table.Headers,
-                    Rows: table.Rows),
+                    Headers: table.Headers.Select(h => h.Name).ToArray(),
+                    Rows: table.Rows.Select(r => new TableRow(r.Values.Select(v => new TableCell(v?.ToString() ?? string.Empty)).ToArray())).ToArray()),
                 sb);
         }
     }

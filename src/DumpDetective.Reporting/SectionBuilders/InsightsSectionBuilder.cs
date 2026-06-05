@@ -40,6 +40,7 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
 
         double averageConfidence = findings.Count == 0 ? 0.0 : confidenceSum / findings.Count;
 
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             H("RANKED FINDINGS"),
@@ -92,7 +93,8 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
             SortOrder: SortOrder,
             Blocks: blocks,
             SectionId: SectionId,
-            Domain: "CrossDomain");
+            Domain: "CrossDomain",
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static IReadOnlyList<InsightFinding> GetCrossDomainFindings(AnalyzerResultSet results)

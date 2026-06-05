@@ -26,6 +26,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
                 highSeverity.Add(finding);
         }
 
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             H("CAUSE -> EFFECT -> EVIDENCE -> FIX"),
@@ -77,7 +78,8 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
             AnalyzerName: "Finding Narratives",
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
-            Blocks: blocks);
+            Blocks: blocks,
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string BuildCause(InsightFinding finding)

@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -20,7 +21,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (FinalizableObjectDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -38,10 +39,10 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         if (d.TopFinalizableTypesByGen2Count.Count > 0)
         {
             int limit = Math.Min(d.TopFinalizableTypesByGen2Count.Count, TopTypeRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top finalizable types by Gen2 object count",
-                ["Type Name", "Gen 0", "Gen 1", "Gen 2", "LOH", "Total Bytes", "Finalizable"],
-                BuildTypeRows(d.TopFinalizableTypesByGen2Count, limit)));
+                new[] { CH("Type Name"), CH("Gen 0","number"), CH("Gen 1","number"), CH("Gen 2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Finalizable") },
+                BuildTypeRows(d.TopFinalizableTypesByGen2Count, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopFinalizableTypesByGen2Count.Count > limit)
                 blocks.Add(T($"Showing top {limit} finalizable types by Gen2 count. {d.TopFinalizableTypesByGen2Count.Count - limit} additional type(s) omitted."));
         }
@@ -49,10 +50,10 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         if (d.TopQueueEntriesByRetainedSize.Count > 0)
         {
             int limit = Math.Min(d.TopQueueEntriesByRetainedSize.Count, TopQueueRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top finalizer queue entries by estimated retained size",
-                ["Address", "Type Name", "Shallow Size", "Est. Retained", "IDisposable", "Disposed Field Found", "Disposed"],
-                BuildQueueRows(d.TopQueueEntriesByRetainedSize, limit)));
+                new[] { CH("Address"), CH("Type Name"), CH("Shallow Size","bytes"), CH("Est. Retained","bytes"), CH("IDisposable"), CH("Disposed Field Found"), CH("Disposed") },
+                BuildQueueRows(d.TopQueueEntriesByRetainedSize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopQueueEntriesByRetainedSize.Count > limit)
                 blocks.Add(T($"Showing top {limit} finalizer queue entries. {d.TopQueueEntriesByRetainedSize.Count - limit} additional entries omitted."));
         }
@@ -81,7 +82,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildTypeRows(IReadOnlyList<TypeGenerationProfile> types, int limit)

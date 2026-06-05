@@ -4,6 +4,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Text.Json;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -30,7 +31,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         ObjectShapeAnalyzerDomainResult? shape = results.Get<ObjectShapeAnalyzerDomainResult>();
         GCRootDomainResult? roots = results.Get<GCRootDomainResult>();
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             T("Types are ranked by shallow size; retained size remains approximate unless the BFS-backed analysis is present."),
@@ -92,10 +93,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             }
         }
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "Type table",
-            ["Type", "Count", "Shallow Size", "LOH Bytes", "Avg Size", "Est. Retained", "Gen0%", "Gen1%", "Gen2%", "Finalizable", "Value Type", "Ref Fields", "Ref Ratio", "Array", "Base Depth", "Interfaces", "Module", "Method Table"],
-            rows));
+            new[] { CH("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%"), CH("Gen1%"), CH("Gen2%"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Module"), CH("Method Table") },
+            rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (shape?.TopValueHeavyTypes is { Count: > 0 })
         {
@@ -116,10 +117,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(profile.InterfaceCount.ToString("N0"), profile.InterfaceCount),
                     Cell(profile.Category.ToString())));
             }
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Value-heavy types",
-                ["Type", "Total Fields", "Reference Fields", "Value Fields", "Ref Ratio", "Instances", "Value Type", "Array", "Base Depth", "Interfaces", "Category"],
-                valueRows));
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Reference Fields","number"), CH("Value Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Value Type"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Category") },
+                valueRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var treemapItems = new List<object>();
@@ -170,10 +171,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             }
 
             keyMetrics["estimated_finalizable_gen2_bytes"] = new NumericMetricValue((double)Math.Min(totalEstimatedBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(totalEstimatedBytes));
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Finalizable types by estimated Gen2 overhead",
-                ["Type", "Gen2 Count", "Avg Size", "Est. Gen2 Bytes", "Module"],
-                overheadRows));
+                new[] { CH("Type"), CH("Gen2 Count","number"), CH("Avg Size","bytes"), CH("Est. Gen2 Bytes","bytes"), CH("Module") },
+                overheadRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             if (finalizableOverheadRows.Count > finalizableLimit)
                 blocks.Add(T($"Showing top {finalizableLimit} finalizable type(s). {finalizableOverheadRows.Count - finalizableLimit} additional type(s) omitted."));
@@ -203,10 +204,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(candidate.SampleAddress == 0 ? "—" : $"0x{candidate.SampleAddress:X}"),
                     Cell(candidate.Rooted ? "Rooted" : "Unknown")));
             }
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Dominator candidates",
-                ["Type", "Reason", "Instances", "Shallow Size", "Gen2%", "Estimated Retained", "Sample Address", "GC Root Reachability"],
-                candidateRows));
+                new[] { CH("Type"), CH("Reason"), CH("Instances","number"), CH("Shallow Size","bytes"), CH("Gen2%"), CH("Estimated Retained","bytes"), CH("Sample Address"), CH("GC Root Reachability") },
+                candidateRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         blocks.Add(H("TYPE SHAPE NOTES"));
@@ -215,7 +216,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         return new AnalyzerDetailSection(
             "TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem",
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static TypeShapeProfile? FindShape(ObjectShapeAnalyzerDomainResult? shape, string typeName)
@@ -341,7 +342,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
         while (bytes >= 1024 && unitIndex < units.Length - 1)

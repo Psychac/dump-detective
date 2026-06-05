@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -18,7 +19,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (HeapTopologyDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -56,7 +57,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(s.ReservedBytes), (long)Math.Min(s.ReservedBytes, long.MaxValue))));
             }
             if (rows.Count > 0)
-                tables.Add(ST("Kind summary", ["Kind", "Segments", "Objects", "Committed", "Reserved"], rows));
+                compactTables.Add(STCompact("Kind summary", new[] { CH("Kind"), CH("Segments","number"), CH("Objects"), CH("Committed","bytes"), CH("Reserved","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Per-logical-heap breakdown
@@ -77,7 +78,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(heap.ObjectCount >= 0 ? heap.ObjectCount.ToString("N0") : "N/A", heap.ObjectCount >= 0 ? heap.ObjectCount : null),
                     Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
-            tables.Add(ST("Per logical heap", ["Heap", "Committed Bytes", "% of Total", "Objects", "Segments"], rows));
+            compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
                 blocks.Add(T("Warning: Logical heaps are skewed: largest heap is more than 2x the smallest."));
         }
@@ -99,8 +100,9 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(seg.Generation.ToString("N0"), seg.Generation),
                     Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount)));
             }
-            tables.Add(ST("Top segments by size",
-                ["Address", "Kind", "Length", "Committed", "Used", "Reserved", "Gen", "Objects"], rows));
+            compactTables.Add(STCompact("Top segments by size",
+                new[] { CH("Address"), CH("Kind"), CH("Length","bytes"), CH("Committed","bytes"), CH("Used","bytes"), CH("Reserved","bytes"), CH("Gen","number"), CH("Objects","number") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // POH types
@@ -114,7 +116,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.AverageSize > 0 ? FormatBytes(t.AverageSize) : "—")));
             }
-            tables.Add(ST("POH types", ["Type", "Count", "Size", "Avg Size"], rows));
+            compactTables.Add(STCompact("POH types", new[] { CH("Type"), CH("Count","number"), CH("Size","bytes"), CH("Avg Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Frozen types
@@ -128,7 +130,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.AverageSize > 0 ? FormatBytes(t.AverageSize) : "—")));
             }
-            tables.Add(ST("FOH types", ["Type", "Count", "Size", "Avg Size"], rows));
+            compactTables.Add(STCompact("FOH types", new[] { CH("Type"), CH("Count","number"), CH("Size","bytes"), CH("Avg Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
@@ -137,12 +139,12 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
         while (bytes >= 1024 && unitIndex < units.Length - 1) { bytes /= 1024; unitIndex++; }

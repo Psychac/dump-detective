@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -30,7 +31,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
         WeakReferenceDomainResult? weakRefs = results.Get<WeakReferenceDomainResult>();
         DependentHandleDomainResult? dependent = results.Get<DependentHandleDomainResult>();
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
@@ -62,7 +63,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                     double pct = handles.TotalHandles == 0 ? 0 : byKind[i].Count * 100.0 / handles.TotalHandles;
                     rows.Add(Row(Cell(byKind[i].Name), Cell($"{byKind[i].Count:N0}", byKind[i].Count), Cell($"{pct:F1}%")));
                 }
-                tables.Add(ST("Handle kind breakdown", ["Kind", "Count", "% Total"], rows));
+                compactTables.Add(STCompact("Handle kind breakdown", new[] { CH("Kind"), CH("Count","number"), CH("% Total") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if ((handles.TopPinnedTargetTypes ?? []).Count > 0)
@@ -70,7 +71,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(handles.TopPinnedTargetTypes!.Count);
                 foreach (var e in handles.TopPinnedTargetTypes!)
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Top pinned target types", ["Type", "Count"], rows));
+                compactTables.Add(STCompact("Top pinned target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if ((handles.TopPinnedObjectsBySize ?? []).Count > 0)
@@ -82,7 +83,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                     double pct = total == 0 ? 0 : e.Bytes * 100.0 / total;
                     rows.Add(Row(Cell(e.Name), Cell(FormatHelper.FormatBytes(e.Bytes), (long)e.Bytes), Cell($"{pct:F1}%")));
                 }
-                tables.Add(ST("Top pinned objects by size", ["Type", "Size", "% Pinned"], rows));
+                compactTables.Add(STCompact("Top pinned objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("% Pinned") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -104,7 +105,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(weakRefs.WeakHandleKinds.Count);
                 foreach (var e in weakRefs.WeakHandleKinds.Take(15))
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Weak handle kinds", ["Kind", "Count"], rows));
+                compactTables.Add(STCompact("Weak handle kinds", new[] { CH("Kind"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (weakRefs.TopWeakTargetTypes.Count > 0)
@@ -112,7 +113,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(weakRefs.TopWeakTargetTypes.Count);
                 foreach (var e in weakRefs.TopWeakTargetTypes.Take(15))
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Top alive weak target types", ["Type", "Count"], rows));
+                compactTables.Add(STCompact("Top alive weak target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (weakRefs.TopStaleWrapperHolderTypes.Count > 0)
@@ -120,7 +121,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(weakRefs.TopStaleWrapperHolderTypes.Count);
                 foreach (var e in weakRefs.TopStaleWrapperHolderTypes.Take(15))
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Stale wrapper holder types", ["Type", "Count"], rows));
+                compactTables.Add(STCompact("Stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -135,7 +136,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(dependent.TopSourceTypes!.Count);
                 foreach (var e in dependent.TopSourceTypes!)
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Dependent handle source types", ["Type", "Count"], rows));
+                compactTables.Add(STCompact("Dependent handle source types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if ((dependent.TopTargetTypes ?? []).Count > 0)
@@ -143,7 +144,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(dependent.TopTargetTypes!.Count);
                 foreach (var e in dependent.TopTargetTypes!)
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Dependent handle target types", ["Type", "Count"], rows));
+                compactTables.Add(STCompact("Dependent handle target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if (dependent.TopSourceTargetEdges is { Count: > 0 })
@@ -151,7 +152,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                 var rows = new List<TableRow>(dependent.TopSourceTargetEdges.Count);
                 foreach (var e in dependent.TopSourceTargetEdges)
                     rows.Add(Row(Cell(e.Name), Cell($"{e.Count:N0}", e.Count)));
-                tables.Add(ST("Source → target pairs", ["Pair", "Count"], rows));
+                compactTables.Add(STCompact("Source → target pairs", new[] { CH("Pair"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -161,6 +162,6 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

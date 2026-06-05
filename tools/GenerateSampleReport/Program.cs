@@ -58,18 +58,18 @@ var sample = new
             analyzerName = "LeakAnalyzer",
             displayTitle = "Leak Analysis",
             sortOrder = 100,
-            blocks = new object[] {
-                new { type = "heading", text = "Top suspects", indentLevel = 0 },
+            // Emit compactTables (preferred) instead of legacy table blocks
+            compactTables = new[] {
                 new {
-                    type = "table",
-                    caption = "Top types by retained size",
-                    headers = new[] { "Type", "Instances", "TotalSize" },
-                    rows = new object[] {
-                        new { cells = new object[] { new { display = "System.String", rawValue = "" }, new { display = "3402" }, new { display = "1200000000", rawValue = "1200000000" } } },
-                        new { cells = new object[] { new { display = "MyApp.LargeBuffer" }, new { display = "128" }, new { display = "512000000" } } }
+                    title = "Top types by retained size",
+                    headers = new[] { new { name = "Type", type = "string" }, new { name = "Instances", type = "number" }, new { name = "TotalSize", type = "bytes" } },
+                    rows = new[] {
+                        new { values = new object[] { "System.String", 3402, 1200000000L } },
+                        new { values = new object[] { "MyApp.LargeBuffer", 128, 512000000L } }
                     }
                 }
-            }
+            },
+            blocks = new object[] { new { type = "heading", text = "Top suspects", indentLevel = 0 } }
         }
     }
 };

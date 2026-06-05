@@ -1,5 +1,6 @@
 ﻿using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
+using System.Linq;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
@@ -17,7 +18,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (AllocationPatternDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -45,28 +46,31 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
 
         blocks.Add(T("Allocation-site precision is ETW-dependent; these signals summarize heap pressure from the dump state only."));
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "Classification summary",
-            ["Signal", "Value"],
-            [
-                Row(Cell("Allocation profile"), Cell(d.Profile.ToString())),
-                Row(Cell("GC pressure level"),  Cell(d.GCPressure.ToString())),
-            ]));
+            new[] { CH("Signal"), CH("Value") },
+            new[] { R("Allocation profile", d.Profile.ToString()), R("GC pressure level", d.GCPressure.ToString()) }));
 
         if (d.TopTransientTypes is { Count: > 0 })
-            tables.Add(ST("Top transient types",
-                ["Type", "Gen0 Count", "Gen1 Count", "Gen2 Count", "Long-lived Ratio", "Profile"],
-                BuildRows(d.TopTransientTypes)));
+        {
+            compactTables.Add(STCompact("Top transient types",
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                BuildRows(d.TopTransientTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         if (d.TopShortishTypes is { Count: > 0 })
-            tables.Add(ST("Top medium-lived types",
-                ["Type", "Gen0 Count", "Gen1 Count", "Gen2 Count", "Long-lived Ratio", "Profile"],
-                BuildRows(d.TopShortishTypes)));
+        {
+            compactTables.Add(STCompact("Top medium-lived types",
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                BuildRows(d.TopShortishTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         if (d.TopLongLivedTypes is { Count: > 0 })
-            tables.Add(ST("Top long-lived types",
-                ["Type", "Gen0 Count", "Gen1 Count", "Gen2 Count", "Long-lived Ratio", "Profile"],
-                BuildRows(d.TopLongLivedTypes)));
+        {
+            compactTables.Add(STCompact("Top long-lived types",
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                BuildRows(d.TopLongLivedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         return new AnalyzerDetailSection(
             AnalyzerName: "Allocation Pattern Analysis",
@@ -74,7 +78,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildRows(IReadOnlyList<TypeAllocationProfile> types)

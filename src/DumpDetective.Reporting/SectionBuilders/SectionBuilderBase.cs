@@ -29,6 +29,15 @@ internal abstract class SectionBuilderBase
     protected static TableRow Row(params TableCell[] cells) => new(cells);
     protected static TableCell Cell(string display, long? raw = null) => new(display, raw);
 
+    // ── Compact table helpers (Batch 0)
+    protected static CompactHeader CH(string name, string type = "string", string? format = null, bool sortable = true)
+        => new(name, type, format, sortable);
+
+    protected static CompactRow R(params object?[] values) => new(values);
+
+    protected static CompactTable STCompact(string title, IReadOnlyList<CompactHeader> headers, IReadOnlyList<CompactRow> rows, int rowLimit = 20)
+        => new(title, headers, rows, rowLimit);
+
     // ── Typed contract-slot helpers ───────────────────────────────────────────
 
     /// <summary>Creates a key metric for the always-visible KPI strip.</summary>
@@ -51,13 +60,7 @@ internal abstract class SectionBuilderBase
     protected static SectionKeyMetric KMEnum(string label, string value, string? enumType = null)
         => new(label, new EnumMetricValue(value, enumType));
 
-    /// <summary>Creates a typed section table (collapsed by default in HTML).</summary>
-    protected static SectionTable ST(
-        string title,
-        IReadOnlyList<string> headers,
-        IReadOnlyList<TableRow> rows,
-        int rowLimit = 20)
-        => new(title, headers, rows, rowLimit);
+    // Legacy ST/STFromCompact helpers removed — builders should use STCompact and CompactTable.
 
     // ── Formatting helpers ────────────────────────────────────────────────────
     protected static string FormatBytes(ulong bytes)

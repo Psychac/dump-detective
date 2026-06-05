@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (HangDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         SectionLeadFinding? leadFinding = null;
@@ -69,7 +70,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
             var rows = new List<TableRow>(d.WaitCategoryBreakdown.Count);
             foreach (KeyValuePair<string, int> kvp in d.WaitCategoryBreakdown.OrderByDescending(kvp => kvp.Value))
                 rows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-            tables.Add(ST("Wait category breakdown", ["Category", "Count"], rows));
+            compactTables.Add(STCompact("Wait category breakdown", new[] { CH("Category"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopWaitingThreads is { Count: > 0 })
@@ -86,24 +87,24 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     Cell(t.LockCount.ToString("N0"), t.LockCount),
                     Cell(t.TopStackFrame ?? "—")));
             }
-            tables.Add(ST("Top waiting threads", ["Thread", "OS Thread", "Wait Type", "Wait Reason", "Locks", "Top Frame"], rows));
+            compactTables.Add(STCompact("Top waiting threads", new[] { CH("Thread","number"), CH("OS Thread","number"), CH("Wait Type"), CH("Wait Reason"), CH("Locks","number"), CH("Top Frame") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.RuntimeThreadPoolDataAvailable)
         {
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Runtime thread-pool metrics",
-                ["Signal", "Value"],
-                [
-                    Row(Cell("Min worker threads"),    Cell(d.RuntimeMinThreads.ToString("N0"),            d.RuntimeMinThreads)),
-                    Row(Cell("Max worker threads"),    Cell(d.RuntimeMaxThreads.ToString("N0"),            d.RuntimeMaxThreads)),
-                    Row(Cell("Active worker threads"), Cell(d.RuntimeActiveWorkerThreads.ToString("N0"),  d.RuntimeActiveWorkerThreads)),
-                    Row(Cell("Idle worker threads"),   Cell(d.RuntimeIdleWorkerThreads.ToString("N0"),    d.RuntimeIdleWorkerThreads)),
-                    Row(Cell("Retired worker threads"),Cell(d.RuntimeRetiredWorkerThreads.ToString("N0"), d.RuntimeRetiredWorkerThreads)),
-                    Row(Cell("Runtime queue length"),  Cell(d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "Unavailable", d.RuntimeQueueLength.HasValue ? (long?)d.RuntimeQueueLength.Value : null)),
-                    Row(Cell("CPU utilization"),       Cell($"{d.RuntimeCpuUtilization:N0}%",             d.RuntimeCpuUtilization)),
-                    Row(Cell("Starvation flag"),       Cell(d.IsStarved ? "Yes" : "No",                   d.IsStarved ? 1L : 0L)),
-                ]));
+                new[] { CH("Signal"), CH("Value") },
+                new[] {
+                    R("Min worker threads", d.RuntimeMinThreads.ToString("N0")),
+                    R("Max worker threads", d.RuntimeMaxThreads.ToString("N0")),
+                    R("Active worker threads", d.RuntimeActiveWorkerThreads.ToString("N0")),
+                    R("Idle worker threads", d.RuntimeIdleWorkerThreads.ToString("N0")),
+                    R("Retired worker threads", d.RuntimeRetiredWorkerThreads.ToString("N0")),
+                    R("Runtime queue length", d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "Unavailable"),
+                    R("CPU utilization", $"{d.RuntimeCpuUtilization:N0}%"),
+                    R("Starvation flag", d.IsStarved ? "Yes" : "No"),
+                }));
 
             blocks.Add(T(d.RuntimeQueueLength.HasValue
                 ? "Runtime queue length is exposed directly by ClrMD; queued work items remain a dump-derived proxy."
@@ -119,7 +120,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
             var rows = new List<TableRow>(d.TopContinuationTypes.Count);
             for (int i = 0; i < d.TopContinuationTypes.Count; i++)
                 rows.Add(Row(Cell(d.TopContinuationTypes[i].Name), Cell(d.TopContinuationTypes[i].Count.ToString("N0"), d.TopContinuationTypes[i].Count)));
-            tables.Add(ST("Top continuation types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Top continuation types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
@@ -129,6 +130,6 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
             Blocks: blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

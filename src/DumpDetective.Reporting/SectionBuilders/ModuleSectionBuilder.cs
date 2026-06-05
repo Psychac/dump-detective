@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -33,7 +34,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 : "No version conflict groups were reported."),
         };
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
 
         if (d.TopModulesBySize is { Count: > 0 })
         {
@@ -50,8 +51,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(m.IsDynamic  ? "Yes" : "No"),
                     Cell(m.IsPEFile   ? "Yes" : "No")));
             }
-            tables.Add(ST("Top modules by size",
-                ["Name", "Assembly", "Full Path", "Address", "Size", "Dynamic", "PE File"], rows));
+            compactTables.Add(STCompact("Top modules by size", new[] { CH("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ConflictDetails.Count > 0)
@@ -65,7 +65,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(conflict.Instances.Count.ToString("N0"), conflict.Instances.Count),
                     Cell(string.Join("; ", conflict.Instances.Take(3).Select(m => m.AssemblyName)))));
             }
-            tables.Add(ST("Conflict details", ["Module", "Instances", "Assemblies"], rows));
+            compactTables.Add(STCompact("Conflict details", new[] { CH("Module"), CH("Instances","number"), CH("Assemblies") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopModulesByHeapMemory is { Count: > 0 })
@@ -83,8 +83,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(stats.TotalBytes),         (long)Math.Min(stats.TotalBytes, long.MaxValue)),
                     Cell(objectsPerType.ToString("F1"))));
             }
-            tables.Add(ST("Modules by heap footprint",
-                ["Module", "Assembly", "Types", "Objects", "Bytes", "Objects/Type"], rows));
+            compactTables.Add(STCompact("Modules by heap footprint", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Objects/Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.HeavyTypeDensityModules is { Count: > 0 })
@@ -101,15 +100,14 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(density.TotalBytes),         (long)Math.Min(density.TotalBytes, long.MaxValue)),
                     Cell(FormatBytes(density.BytesPerType),       (long)Math.Min(density.BytesPerType, long.MaxValue))));
             }
-            tables.Add(ST("Type density",
-                ["Module", "Assembly", "Types", "Objects", "Bytes", "Bytes/Type"], rows));
+            compactTables.Add(STCompact("Type density", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder,
             Blocks: blocks.Count > 0 ? blocks : [],
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatBytes(ulong value)

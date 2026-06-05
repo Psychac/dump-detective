@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -21,7 +22,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (JitDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         int totalFrames = d.ManagedFrameCount + d.UnmanagedFrameCount;
@@ -48,7 +49,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             var typeRows = new List<TableRow>(Math.Min(d.TopActiveFrameTypes.Count, TopFrameTypesToShow));
             foreach (NameCountEntry e in d.TopActiveFrameTypes.Take(TopFrameTypesToShow))
                 typeRows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            tables.Add(ST("Active frame types (stack hotspots)", ["Type", "Stack Hits"], typeRows));
+            compactTables.Add(STCompact("Active frame types (stack hotspots)", new[] { CH("Type"), CH("Stack Hits","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLargestMethods.Count > 0)
@@ -69,8 +70,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
                     Cell(m.IsTiered ? "Yes" : "No"),
                     Cell(largeFlag)]));
             }
-            tables.Add(ST("Large JIT-compiled methods (native code size)",
-                ["Signature", "Declaring Type", "Native Code Addr", "Hot", "Cold", "Total", "Tiered", "Flag"], methodRows));
+            compactTables.Add(STCompact("Large JIT-compiled methods (native code size)", new[] { CH("Signature"), CH("Declaring Type"), CH("Native Code Addr"), CH("Hot","bytes"), CH("Cold","bytes"), CH("Total","bytes"), CH("Tiered"), CH("Flag") }, methodRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TieredMethodCount == 0)
@@ -83,6 +83,6 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

@@ -77,6 +77,7 @@ async function bootstrap() {
   const reportContent = document.getElementById('report-content');
   const hasPreRenderedContent = renderMode === 'prerendered'
     || !!(reportContent && reportContent.children && reportContent.children.length > 0);
+  const hasPreRenderedDomains = !!document.getElementById('report-domains');
 
   const headerNode = R.buildHeader(doc);
   if (headerNode) {
@@ -119,12 +120,12 @@ async function bootstrap() {
   if (filterBar) main.appendChild(filterBar);
 
   let domains = null;
-  if (!hasPreRenderedContent) {
+  if (!hasPreRenderedDomains) {
     domains = R.buildDomains(doc);
     if (domains) main.appendChild(domains);
   }
 
-  if (!hasPreRenderedContent) {
+  if (!hasPreRenderedDomains) {
     const crossDomain = R.buildCrossDomainInsights(doc);
     if (crossDomain) main.appendChild(crossDomain);
   }

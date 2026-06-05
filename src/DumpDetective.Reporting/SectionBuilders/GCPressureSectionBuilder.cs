@@ -2,6 +2,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (GCGenerationDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -66,7 +67,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                         Cell(p.LohCount.ToString("N0"),  p.LohCount),
                         Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "—")));
                 }
-                tables.Add(ST("Top LOH types", ["Type", "Gen0", "Gen1", "Gen2", "LOH Count", "Total Bytes"], rows));
+                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
         else if (d.TopLohTypes.Count > 0)
@@ -82,7 +83,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.LohBytes > 0 ? FormatBytes(t.LohBytes) : "—")));
             }
-            tables.Add(ST("Top LOH types", ["Type", "Count", "Total Bytes", "LOH Bytes"], rows));
+            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.PerTypeGenerationProfiles is { Count: > 0 })
@@ -106,9 +107,9 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{survivalR:P1}"),
                     Cell(p.IsFinalizable ? "Yes" : "No")));
             }
-            tables.Add(ST("Per-type generation profiles",
-                ["Type", "Gen0", "Gen1", "Gen2", "LOH", "Total Bytes", "Gen2%", "Survival Ratio", "Finalizable"],
-                rows));
+            compactTables.Add(STCompact("Per-type generation profiles",
+                new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Gen2%"), CH("Survival Ratio"), CH("Finalizable") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
@@ -117,12 +118,12 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
         while (bytes >= 1024 && unitIndex < units.Length - 1) { bytes /= 1024; unitIndex++; }

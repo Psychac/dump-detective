@@ -45,10 +45,14 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(NumericMetricValue))]
 [JsonSerializable(typeof(TextMetricValue))]
 [JsonSerializable(typeof(EnumMetricValue))]
-[JsonSerializable(typeof(SectionTable))]
+[JsonSerializable(typeof(CompactHeader))]
+[JsonSerializable(typeof(CompactRow))]
+[JsonSerializable(typeof(CompactTable))]
+[JsonSerializable(typeof(List<CompactRow>))]
+[JsonSerializable(typeof(List<CompactHeader>))]
 [JsonSerializable(typeof(SectionProvenance))]
 [JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, MetricValue>))]
-[JsonSerializable(typeof(List<SectionTable>))]
+[JsonSerializable(typeof(List<CompactTable>))]
 [JsonSerializable(typeof(SparklineBlock))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,

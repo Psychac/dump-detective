@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -18,7 +19,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
     {
         var asyncTasks = (AsyncTaskDomainResult)result;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             T("Task counts, orphaned tasks, and continuation pressure are summarized here."),
@@ -51,24 +52,24 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             ["avg_continuation_depth"] = new NumericMetricValue(asyncTasks.AvgContinuationDepth, MetricUnit.Custom, asyncTasks.AvgContinuationDepth.ToString("F1")),
         };
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "Task status summary",
-            ["Status", "Count"],
-            [
-                Row(Cell("Pending"),          Cell(asyncTasks.PendingTasks.ToString("N0"),     asyncTasks.PendingTasks)),
-                Row(Cell("Running"),           Cell(asyncTasks.RunningTasks.ToString("N0"),     asyncTasks.RunningTasks)),
-                Row(Cell("Faulted"),           Cell(asyncTasks.FaultedTasks.ToString("N0"),     asyncTasks.FaultedTasks)),
-                Row(Cell("Canceled"),          Cell(asyncTasks.CanceledTasks.ToString("N0"),    asyncTasks.CanceledTasks)),
-                Row(Cell("RanToCompletion"),   Cell(asyncTasks.CompletedTasks.ToString("N0"),   asyncTasks.CompletedTasks)),
-                Row(Cell("Orphaned"),          Cell(asyncTasks.OrphanedTasks.ToString("N0"),    asyncTasks.OrphanedTasks)),
-            ]));
+            new[] { CH("Status"), CH("Count","number") },
+            new[] {
+                R("Pending", asyncTasks.PendingTasks),
+                R("Running", asyncTasks.RunningTasks),
+                R("Faulted", asyncTasks.FaultedTasks),
+                R("Canceled", asyncTasks.CanceledTasks),
+                R("RanToCompletion", asyncTasks.CompletedTasks),
+                R("Orphaned", asyncTasks.OrphanedTasks),
+            }));
 
         if (asyncTasks.TopContinuationTypes.Count > 0)
         {
             var rows = new List<TableRow>(asyncTasks.TopContinuationTypes.Count);
             for (int i = 0; i < asyncTasks.TopContinuationTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopContinuationTypes[i].Name), Cell(asyncTasks.TopContinuationTypes[i].Count.ToString("N0"), asyncTasks.TopContinuationTypes[i].Count)));
-            tables.Add(ST("Continuation types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Continuation types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopDeepestChains.Count > 0)
@@ -84,7 +85,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(chain.Depth.ToString("N0"), chain.Depth),
                     Cell(FormatHelper.TruncateString(chainText, 80))));
             }
-            tables.Add(ST("Deepest continuation chains", ["Root Address", "Root Type", "Depth", "Chain"], rows));
+            compactTables.Add(STCompact("Deepest continuation chains", new[] { CH("Root Address"), CH("Root Type"), CH("Depth","number"), CH("Chain") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopPendingTaskTypes.Count > 0)
@@ -92,7 +93,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(asyncTasks.TopPendingTaskTypes.Count);
             for (int i = 0; i < asyncTasks.TopPendingTaskTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopPendingTaskTypes[i].Name), Cell(asyncTasks.TopPendingTaskTypes[i].Count.ToString("N0"), asyncTasks.TopPendingTaskTypes[i].Count)));
-            tables.Add(ST("Pending task types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Pending task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopFaultedTaskTypes.Count > 0)
@@ -100,7 +101,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(asyncTasks.TopFaultedTaskTypes.Count);
             for (int i = 0; i < asyncTasks.TopFaultedTaskTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopFaultedTaskTypes[i].Name), Cell(asyncTasks.TopFaultedTaskTypes[i].Count.ToString("N0"), asyncTasks.TopFaultedTaskTypes[i].Count)));
-            tables.Add(ST("Faulted task types", ["Type", "Count"], rows));
+            compactTables.Add(STCompact("Faulted task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopOrphanedTasks.Count > 0)
@@ -117,9 +118,9 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.ExceptionType ?? "—"),
                     Cell(snapshot.ExceptionMessage is null ? "—" : FormatHelper.TruncateString(snapshot.ExceptionMessage, 80))));
             }
-            tables.Add(ST("Orphaned tasks",
-                ["Address", "Task Type", "Result Type", "Size", "Exception Type", "Exception Message"],
-                rows));
+            compactTables.Add(STCompact("Orphaned tasks",
+                new[] { CH("Address"), CH("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TaskScanLimited)
@@ -129,7 +130,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatBytes(ulong value)

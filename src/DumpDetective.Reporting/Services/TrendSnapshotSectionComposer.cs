@@ -111,14 +111,14 @@ internal static class TrendSnapshotSectionComposer
             }
         }
 
-        if (section.Tables is { Count: > 0 })
+        if (section.CompactTables is { Count: > 0 })
         {
-            foreach (SectionTable table in section.Tables)
+            foreach (CompactTable table in section.CompactTables)
             {
                 blocks.Add(new TableBlock(
                     Caption: table.Title,
-                    Headers: table.Headers,
-                    Rows: table.Rows));
+                    Headers: table.Headers.Select(header => header.Name).ToArray(),
+                    Rows: table.Rows.Select(row => new TableRow(row.Values.Select(value => new TableCell(value?.ToString() ?? string.Empty)).ToArray())).ToArray()));
             }
         }
 

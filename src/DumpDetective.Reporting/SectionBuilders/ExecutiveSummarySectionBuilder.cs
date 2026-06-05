@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -60,7 +61,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         if (finalizable is not null)
             keyMetrics["finalizer_queue"] = new NumericMetricValue(finalizable.FinalizerQueueCount, MetricUnit.Count, finalizable.FinalizerQueueCount.ToString("N0"));
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             T("Cross-analyzer summary of the highest-signal conditions in the dump."),
@@ -83,7 +84,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
                     Cell(type.Count.ToString("N0"), type.Count)));
             }
 
-            tables.Add(ST("Top object types by shallow size", ["Type", "Shallow Size", "Count"], rows));
+            compactTables.Add(STCompact("Top object types by shallow size", new[] { CH("Type"), CH("Shallow Size","bytes"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             if (topTypes.Count > TopMemoryItems)
                 blocks.Add(T($"Showing top {TopMemoryItems:N0} of {topTypes.Count:N0} object types by shallow size."));
@@ -180,7 +181,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static IReadOnlyList<InsightFinding> BuildTopRecommendations(IReadOnlyList<InsightFinding> findings)
@@ -236,7 +237,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
 

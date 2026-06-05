@@ -22,14 +22,14 @@ public sealed class TrendSnapshotSectionComposerTests
             {
                 ["metric_a"] = new NumericMetricValue(123, MetricUnit.Count, "123")
             },
-            Tables:
+            CompactTables:
             [
-                new SectionTable(
+                new CompactTable(
                     Title: "Top Items",
-                    Headers: ["Name", "Count"],
+                    Headers: [ new CompactHeader("Name"), new CompactHeader("Count","number") ],
                     Rows:
                     [
-                        new TableRow([new TableCell("Alpha"), new TableCell("42")])
+                        new CompactRow([ "Alpha", 42 ])
                     ])
             ],
             LeadFinding: new SectionLeadFinding(

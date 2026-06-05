@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -18,7 +19,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             T("Status mapping: Completed, Failed, Skipped (filter), and Skipped (cancelled)."),
@@ -57,8 +58,9 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(string.IsNullOrWhiteSpace(run.SkipReason) ? (string.IsNullOrWhiteSpace(run.ErrorMessage) ? "-" : run.ErrorMessage) : run.SkipReason)));
         }
 
-        tables.Add(ST("Analyzer run status",
-            ["Analyzer", "Status", "Duration (ms)", "Objects Scanned", "Error/Skip Reason"], rows));
+        compactTables.Add(STCompact("Analyzer run status",
+            new[] { CH("Analyzer"), CH("Status"), CH("Duration (ms)", "number"), CH("Objects Scanned","number"), CH("Error/Skip Reason") },
+            rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -86,9 +88,11 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         if (memoryRows.Count > 0)
-            tables.Add(ST("Analyzer memory impact",
-                ["Analyzer", "WS Before", "WS After", "WS Delta", "MH Before", "MH After", "MH Delta"],
-                memoryRows));
+        {
+            compactTables.Add(STCompact("Analyzer memory impact",
+                new[] { CH("Analyzer"), CH("WS Before","bytes"), CH("WS After","bytes"), CH("WS Delta","bytes"), CH("MH Before","bytes"), CH("MH After","bytes"), CH("MH Delta","bytes") },
+                memoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         blocks.Add(T("Measured = 1.0, High-confidence heuristic = 0.8, Partial/bounded = 0.5, Speculative < 0.5."));
 
@@ -101,8 +105,11 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         AddLimitation(limitationRows, "Arrays", results.Get<ArrayDomainResult>() is ArrayDomainResult array && array.ScanLimited, BuildArrayText(results.Get<ArrayDomainResult>()));
 
         if (limitationRows.Count > 0)
-            tables.Add(ST("Current bounded-scan signals",
-                ["Area", "Flagged", "What it means"], limitationRows));
+        {
+            compactTables.Add(STCompact("Current bounded-scan signals",
+                new[] { CH("Area"), CH("Flagged"), CH("What it means") },
+                limitationRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         blocks.Add(Li("Bounded retained-size BFS still uses a breadth cap and depth cap."));
         blocks.Add(Li("Retention and root-path metrics remain selective, not exhaustive, on large dumps."));
@@ -114,7 +121,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static void AddLimitation(List<TableRow> rows, string area, bool flagged, string text)

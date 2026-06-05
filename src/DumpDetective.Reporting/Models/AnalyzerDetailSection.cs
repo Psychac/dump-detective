@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 using DumpDetective.Core.Models;
 
@@ -39,11 +42,29 @@ internal sealed record EnumMetricValue(
     string? EnumType = null) : MetricValue;
 
 /// <summary>A titled data table extracted from the section's block stream.</summary>
-internal sealed record SectionTable(
+/// <summary>Compact table header metadata for the compact table representation.</summary>
+internal sealed record CompactHeader(
+    string Name,
+    string? Type = "string",
+    string? Format = null,
+    bool Sortable = true);
+
+/// <summary>Compact row as a dense array of primitive values (strings, numbers, nulls).
+/// Values are interpreted according to the corresponding header metadata.</summary>
+internal sealed record CompactRow(object?[] Values);
+
+/// <summary>Compact table: headers carry typing/formatting metadata and rows are arrays-of-values.
+/// This representation is much smaller on the wire than per-cell objects.</summary>
+internal sealed record CompactTable(
     string Title,
-    IReadOnlyList<string> Headers,
-    IReadOnlyList<TableRow> Rows,
+    IReadOnlyList<CompactHeader> Headers,
+    IReadOnlyList<CompactRow> Rows,
     int RowLimit = 20);
+
+internal static class CompactTableExtensions
+{
+    // Legacy translators removed; producers now emit CompactTable directly.
+}
 
 /// <summary>Run provenance — duration, scan count, cache stats — shown collapsed at the bottom of the section.</summary>
 internal sealed record SectionProvenance(
@@ -67,8 +88,9 @@ internal sealed record AnalyzerDetailSection(
     FindingSeverity? LeadSeverity = null,    // Severity of the lead finding (null = informational only)
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
     IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
-    IReadOnlyList<SectionTable>? Tables = null,         // Data tables, each collapsible
-    SectionProvenance? Provenance = null);  // Run provenance — collapsed footer
+    // Legacy typed tables removed: producers should populate `CompactTables` only.
+    SectionProvenance? Provenance = null,  // Run provenance — collapsed footer
+    IReadOnlyList<CompactTable>? CompactTables = null); // Compact table representation (preferred)
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]

@@ -29,12 +29,12 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (d.ExcludedModuleCount > 0)
             keyMetrics["excluded_modules"] = new NumericMetricValue(d.ExcludedModuleCount, MetricUnit.Count);
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
 
-        tables.Add(ST(
+        compactTables.Add(STCompact(
             "AppDomain inventory",
-            ["Domain Name", "ID", "Address", "Module Count", "Estimated Managed Bytes"],
-            BuildDomainRows(d.Domains)));
+            new[] { CH("Domain Name"), CH("ID", "number"), CH("Address"), CH("Module Count", "number"), CH("Estimated Managed Bytes", "bytes") },
+            BuildDomainRows(d.Domains).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (d.TopModulesByTypeCount is { Count: > 0 })
         {
@@ -50,15 +50,16 @@ internal sealed class AppDomainSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(entry.ObjectCount.ToString("N0"),   entry.ObjectCount),
                     Cell(FormatBytes(entry.TotalBytes),      (long)Math.Min(entry.TotalBytes, long.MaxValue))));
             }
-            tables.Add(ST("Top modules by type count",
-                ["Module", "Assembly", "Types", "Live Types", "Objects", "Bytes"], rows));
+            compactTables.Add(STCompact("Top modules by type count",
+                new[] { CH("Module"), CH("Assembly"), CH("Types", "number"), CH("Live Types", "number"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder,
             Blocks: [],
             KeyMetrics: keyMetrics,
-            Tables: tables);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildDomainRows(IReadOnlyList<AppDomainSnapshot> domains)

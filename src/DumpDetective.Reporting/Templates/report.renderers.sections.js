@@ -65,6 +65,17 @@ function formatMilliseconds(value) {
   return (value / 3600000).toFixed(2) + ' h';
 }
 
+function formatBytes(numeric) {
+  if (!Number.isFinite(numeric)) return '';
+  const abs = Math.abs(Number(numeric));
+  const sign = numeric < 0 ? '-' : '';
+  if (abs >= 1099511627776) return sign + (abs / 1099511627776).toFixed(2) + ' TB';
+  if (abs >= 1073741824) return sign + (abs / 1073741824).toFixed(2) + ' GB';
+  if (abs >= 1048576) return sign + (abs / 1048576).toFixed(2) + ' MB';
+  if (abs >= 1024) return sign + (abs / 1024).toFixed(1) + ' KB';
+  return sign + abs.toFixed(0) + ' B';
+}
+
 function buildTopTypesTreemap(tbl) {
   const title = String(tbl.title || '').toLowerCase();
   if (!(title.includes('top') && title.includes('type'))) return null;
@@ -314,7 +325,12 @@ export function buildAnalyzerSection(section, i) {
   renderBlocks(blocks, content);
 
   // ── Typed section tables (collapsed by default) ──────────────────────────
-  const sectionTables = section.tables;
+  const sectionTables = Array.isArray(section.compactTables) ? section.compactTables.map(function (ct) {
+    const headers = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return (h && h.name) ? String(h.name) : String(h || ''); }) : [];
+    const headerMeta = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return ({ type: h && h.type ? String(h.type) : 'string', format: h && h.format ? String(h.format) : null, sortable: (h && (h.sortable === undefined)) ? true : Boolean(h && h.sortable) }); }) : [];
+    const rows = Array.isArray(ct.rows) ? ct.rows.map(function (r) { return Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []); }) : [];
+    return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit };
+  }) : [];
   if (sectionTables && sectionTables.length) {
     for (let ti = 0; ti < sectionTables.length; ti++) {
       const tbl = sectionTables[ti];
@@ -379,6 +395,8 @@ export function buildAnalyzerSection(section, i) {
         thead.appendChild(hrow); tableEl.appendChild(thead);
         const tbody = document.createElement('tbody');
         tbody.dataset.lazyBody = shouldLazyHydrate ? '1' : '0';
+        // attach header metadata (if present) to the table element for use during hydration/sorting
+        tableEl._headerMeta = tbl.headerMeta || null;
         const allRows = tbl.rows || [];
 
         function hydrateRows() {
@@ -390,10 +408,53 @@ export function buildAnalyzerSection(section, i) {
               ? dataRow
               : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
             for (let ci = 0; ci < cells.length; ci++) {
-              const td = document.createElement('td');
-              const cellData = cells[ci];
-              td.textContent = extractCellDisplay(cellData);
-              td.dataset.colLabel = String(tbl.headers[ci] || ('Column ' + (ci + 1)));
+                const td = document.createElement('td');
+                const cellData = cells[ci];
+                td.dataset.colLabel = String(tbl.headers[ci] || ('Column ' + (ci + 1)));
+
+                // Best-effort: compute numeric value for sorting/filtering and
+                // normalize display for bytes-typed columns.
+                try {
+                  const meta = tableEl._headerMeta && tableEl._headerMeta[ci] ? tableEl._headerMeta[ci] : null;
+                  let numeric = null;
+                  // extract raw display first
+                  let display = extractCellDisplay(cellData);
+                  if (meta && (meta.type === 'number' || meta.type === 'bytes')) {
+                    if (typeof cellData === 'number') numeric = cellData;
+                    else if (typeof cellData === 'string') {
+                      const n = Number(String(cellData).replace(/,/g, '').replace(/%$/g, ''));
+                      if (!Number.isNaN(n)) numeric = n;
+                      else {
+                        const parsed = parseBytesFromDisplay(cellData);
+                        if (parsed != null) numeric = parsed;
+                      }
+                    }
+                    else if (cellData && typeof cellData === 'object') {
+                      const raw = extractCellRaw(cellData);
+                      if (raw != null) numeric = raw;
+                      else {
+                        const parsed = parseBytesFromDisplay(display);
+                        if (parsed != null) numeric = parsed;
+                      }
+                    }
+
+                    if (numeric != null && Number.isFinite(Number(numeric))) {
+                      td.dataset.value = String(Number(numeric));
+                      if (meta.type === 'bytes') {
+                        td.textContent = formatBytes(Number(numeric));
+                      } else {
+                        // Use locale formatting for numeric columns when possible
+                        td.textContent = Number.isInteger(Number(numeric)) ? Number(numeric).toLocaleString('en-US') : Number(numeric).toFixed(2);
+                      }
+                    } else {
+                      td.textContent = display;
+                    }
+                  } else {
+                    td.textContent = display;
+                  }
+                } catch (e) {
+                  td.textContent = extractCellDisplay(cellData);
+                }
               tr.appendChild(td);
             }
             if (limit > 0 && rowCount > limit && ri >= limit) {

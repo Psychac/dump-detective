@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -21,7 +22,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (AsyncStateMachineDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -39,10 +40,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             blocks.Add(T("Each entry represents a distinct suspended async method. " +
                           "High counts for the same method indicate fire-and-forget patterns or unbounded parallelism."));
             int limit = Math.Min(d.TopStateMachineTypes.Count, TopTypeRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top async state machine types by instance count",
-                ["Type Name", "Originating Method", "Declaring Type", "Count", "Total Size", "Avg State", "Ref Fields"],
-                BuildTypeRows(d.TopStateMachineTypes, limit)));
+                new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Avg State"), CH("Ref Fields","number") },
+                BuildTypeRows(d.TopStateMachineTypes, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopByCapturedSize.Count > 0)
@@ -50,10 +51,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             blocks.Add(T("Async methods capture all variables referenced across await boundaries. " +
                           "Instances with large captured closures may indicate long-lived objects being retained unintentionally."));
             int limit = Math.Min(d.TopByCapturedSize.Count, TopCaptureRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top async state machine instances by captured reference bytes",
-                ["Address", "Type Name", "Captured Ref Bytes", "Large Captures"],
-                BuildCaptureRows(d.TopByCapturedSize, limit)));
+                new[] { CH("Address"), CH("Type Name"), CH("Captured Ref Bytes","bytes"), CH("Large Captures") },
+                BuildCaptureRows(d.TopByCapturedSize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.SuspendedMethodMap.Count > 0)
@@ -61,16 +62,16 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             blocks.Add(T("Methods with the most suspended instances. " +
                           "High counts for a single method typically indicate fire-and-forget usage or long-running awaits."));
             int limit = Math.Min(d.SuspendedMethodMap.Count, TopSuspendedRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Suspended async methods by instance count",
-                ["Declaring Type", "Method Name", "Suspended Count", "Total Size"],
-                BuildSuspendedRows(d.SuspendedMethodMap, limit)));
+                new[] { CH("Declaring Type"), CH("Method Name"), CH("Suspended Count","number"), CH("Total Size","bytes") },
+                BuildSuspendedRows(d.SuspendedMethodMap, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildTypeRows(IReadOnlyList<StateMachineTypeProfile> types, int limit)

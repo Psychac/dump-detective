@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (CollectionDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -45,14 +46,14 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             new([Cell("SortedSet"),   Cell($"{d.SortedSets:N0}",   d.SortedSets)]),
             new([Cell("ArrayList"),   Cell($"{d.ArrayLists:N0}",   d.ArrayLists)])
         };
-        tables.Add(ST("Collection inventory", ["Kind", "Count"], inventoryRows));
+        compactTables.Add(STCompact("Collection inventory", new[] { CH("Kind"), CH("Count","number") }, inventoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (d.WasteCountsByKind is { Count: > 0 })
         {
             var wasteKindRows = new List<TableRow>(d.WasteCountsByKind.Count);
             foreach (var kvp in d.WasteCountsByKind)
                 wasteKindRows.Add(new TableRow([Cell(kvp.Key.ToString()), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            tables.Add(ST("Wasteful collections by kind", ["Kind", "Wasteful Count"], wasteKindRows));
+            compactTables.Add(STCompact("Wasteful collections by kind", new[] { CH("Kind"), CH("Wasteful Count","number") }, wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var topWasteful = d.TopWastefulCollections ?? [];
@@ -80,10 +81,9 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.DetectionMethod),
                     Cell(c.RootDescription ?? "—")]));
             }
-            tables.Add(ST("Wasteful collections",
-                ["Type", "Kind", "Count", "Capacity", "Fill Rate", "Wasted", "Head", "Tail",
-                 "Largest Free Gap", "Free Segments", "Element Type", "Element Size", "Confidence", "Method", "Root"],
-                wcRows));
+            compactTables.Add(STCompact("Wasteful collections",
+                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root") },
+                wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {
                 // note will be shown in narrative blocks
@@ -103,12 +103,12 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{s.LohCount:N0}", s.LohCount)
                 ]));
             }
-            tables.Add(ST("Collections by GC generation", ["Type", "Gen0", "Gen1", "Gen2", "LOH"], genRows));
+            compactTables.Add(STCompact("Collections by GC generation", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number") }, genRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, [],
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

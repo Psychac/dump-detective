@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (LockGraphDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(0.85, ["Derived from recorded wait chains and lock ownership."]),
@@ -39,7 +40,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 ctRows.Add(new TableRow([
                     Cell(FormatHelper.TruncateString(topTypes[i].Name, 70)),
                     Cell($"{topTypes[i].Count:N0} cumulative waiter(s)", topTypes[i].Count)]));
-            tables.Add(ST("Top contested lock types", ["Type", "Waiters"], ctRows));
+            compactTables.Add(STCompact("Top contested lock types", new[] { CH("Type"), CH("Waiters") }, ctRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var contestedDetails = d.ContestedLockDetails ?? [];
@@ -58,9 +59,9 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(owner),
                     Cell($"{cl.RecursionCount:N0}")]));
             }
-            tables.Add(ST("Contested lock objects",
-                ["Type", "Address", "Waiters", "Owner Thread", "Recursion"],
-                clRows));
+            compactTables.Add(STCompact("Contested lock objects",
+                new[] { CH("Type"), CH("Address"), CH("Waiters","number"), CH("Owner Thread"), CH("Recursion","number") },
+                clRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.DeadlockCandidateCount >= 2)
@@ -93,9 +94,9 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatHelper.TruncateString(lockAddresses, 70)),
                     Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
             }
-            tables.Add(ST("Deadlock candidate threads",
-                ["Managed ID", "OS Thread ID", "Held Lock Types", "Held Lock Addresses", "Summary"],
-                dcRows));
+            compactTables.Add(STCompact("Deadlock candidate threads",
+                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Summary") },
+                dcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (deadlockOwnerIds.Count > 0 && contestedDetails.Count > 0)
@@ -114,13 +115,13 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell($"{cl.RecursionCount:N0}", cl.RecursionCount)]));
             }
 
-            if (suspectedRows.Count > 0)
-            {
-                blocks.Add(T("Contested locks owned by threads that already participate in a deadlock candidate."));
-                tables.Add(ST("Suspected deadlock locks",
-                    ["Type", "Address", "Owner Thread", "Waiters", "Recursion"],
-                    suspectedRows));
-            }
+                if (suspectedRows.Count > 0)
+                {
+                    blocks.Add(T("Contested locks owned by threads that already participate in a deadlock candidate."));
+                    compactTables.Add(STCompact("Suspected deadlock locks",
+                        new[] { CH("Type"), CH("Address"), CH("Owner Thread","number"), CH("Waiters","number"), CH("Recursion","number") },
+                        suspectedRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                }
         }
 
         SectionLeadFinding? leadFinding = null;
@@ -138,6 +139,6 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

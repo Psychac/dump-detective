@@ -3,6 +3,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Text.Json;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (LohFragmentationDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -45,7 +46,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell($"{s.FragmentationPercent:F1}%", (long)(s.FragmentationPercent * 100)),
                     Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock)]));
             }
-            tables.Add(ST("Top fragmented segments", ["Address", "Size", "Frag %", "Largest Free Block"], segRows));
+            compactTables.Add(STCompact("Top fragmented segments", new[] { CH("Address"), CH("Size","bytes"), CH("Frag %"), CH("Largest Free Block","bytes") }, segRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var heatmapItems = new List<object>(segments.Count);
             for (int i = 0; i < segments.Count; i++)
@@ -86,7 +87,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell($"{bucket.GapCount:N0}", bucket.GapCount),
                     Cell($"{pct:F1}%")]));
             }
-            tables.Add(ST("Free-gap size distribution", ["Gap Size Range", "Count", "% of Gaps"], hRows));
+            compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var largeObjects = d.TopLargeObjects ?? [];
@@ -101,7 +102,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell(FormatHelper.FormatBytes(lo.Size), (long)lo.Size),
                     Cell($"0x{lo.Address:x16}")]));
             }
-            tables.Add(ST("Top large objects by size", ["Type", "Size", "Address"], loRows));
+            compactTables.Add(STCompact("Top large objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("Address") }, loRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         SectionLeadFinding? leadFinding = null;
@@ -128,7 +129,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string GetSeverityBand(double fragmentationPercent)

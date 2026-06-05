@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -21,7 +22,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ArrayDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -38,10 +39,10 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         if (d.TopArrayTypesBySize.Count > 0)
         {
             int limit = Math.Min(d.TopArrayTypesBySize.Count, TopTypeRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                ["Element Type", "Rank", "Count", "Total Size", "Multi-Dim"],
-                BuildTypeRows(d.TopArrayTypesBySize, limit)));
+                new[] { CH("Element Type"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim") },
+                BuildTypeRows(d.TopArrayTypesBySize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopArrayTypesBySize.Count > limit)
                 blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
         }
@@ -51,10 +52,10 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             blocks.Add(T("Individual array instances on the Large Object Heap (≥85 KB). " +
                           "LOH allocations are never compacted and contribute to heap fragmentation."));
             int limit = Math.Min(d.TopLargeArrays.Count, TopLargeRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Largest individual array instances",
-                ["Address", "Element Type", "Length", "Rank", "Size", "Label"],
-                BuildLargeRows(d.TopLargeArrays, limit)));
+                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
+                BuildLargeRows(d.TopLargeArrays, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopLargeArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} large arrays. {d.TopLargeArrays.Count - limit} additional array(s) omitted."));
         }
@@ -64,10 +65,10 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             blocks.Add(T("Arrays where the majority of elements are null or default. " +
                           "These waste heap memory and could be replaced with sparse data structures such as Dictionary<int, T>."));
             int limit = Math.Min(d.TopSparseArrays.Count, TopSparseRows);
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Sparse arrays by estimated wasted bytes",
-                ["Address", "Element Type", "Length", "Null/Default %", "Wasted Bytes"],
-                BuildSparseRows(d.TopSparseArrays, limit)));
+                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Null/Default %"), CH("Wasted Bytes","bytes") },
+                BuildSparseRows(d.TopSparseArrays, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopSparseArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));
         }
@@ -75,7 +76,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static List<TableRow> BuildTypeRows(IReadOnlyList<ArrayTypeProfile> types, int limit)

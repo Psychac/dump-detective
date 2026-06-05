@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DominatorDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(0.55,
@@ -42,27 +43,26 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 ? $"Retained bytes are estimated with a bounded BFS over {d.AnalyzedCount:N0} suspects (breadth cap {d.MaxBreadth:N0}, depth cap {d.MaxDepth:N0})."
                 : "Retained bytes are available for the listed suspects."));
 
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top dominator suspects by retained bytes",
-                ["Type", "Objects", "Shallow", "Retained", "Ratio", "Avg Size", "Sample Addr"],
-                d.TopDominatorTypes.Take(20).Select(type => Row(
-                    Cell(type.TypeName),
-                    Cell(type.Count.ToString("N0"), type.Count),
-                    Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
-                    Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
-                    Cell(FormatRatio(type.EstimatedRetainedBytes, type.TotalBytes), (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000)),
-                    Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—"),
-                    Cell($"0x{type.SampleAddress:X}"))).ToArray()));
-
+                new[] { CH("Type"), CH("Objects","number"), CH("Shallow","bytes"), CH("Retained","bytes"), CH("Ratio"), CH("Avg Size","bytes"), CH("Sample Addr") },
+                d.TopDominatorTypes.Take(20).Select(type => R(
+                    type.TypeName,
+                    type.Count,
+                    FormatBytes(type.TotalBytes),
+                    type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—",
+                    (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000),
+                    type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—",
+                    $"0x{type.SampleAddress:X}")).ToArray()));
             if (d.TotalEstimatedRetainedBytes > 0)
             {
-                tables.Add(ST(
+                compactTables.Add(STCompact(
                     "Dominator impact per-mille (of total estimated retained)",
-                    ["Type", "Est. Retained", "Per-mille"],
-                    d.TopDominatorTypes.Take(20).Select(type => Row(
-                        Cell(type.TypeName),
-                        Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—", (long)Math.Min(type.EstimatedRetainedBytes, long.MaxValue)),
-                        Cell(type.EstimatedRetainedBytes == 0 ? "—" : $"{(double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes:F1}‰"))).ToArray()));
+                    new[] { CH("Type"), CH("Est. Retained","bytes"), CH("Per-mille") },
+                    d.TopDominatorTypes.Take(20).Select(type => R(
+                        type.TypeName,
+                        type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—",
+                        type.EstimatedRetainedBytes == 0 ? "—" : $"{(double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes:F1}‰")).ToArray()));
             }
         }
 
@@ -72,7 +72,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static new string FormatRatio(ulong retained, ulong shallow)

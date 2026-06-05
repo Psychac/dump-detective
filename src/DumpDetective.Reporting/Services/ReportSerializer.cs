@@ -1050,7 +1050,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
     /// <summary>
     /// Extracts typed contract slots from each section's raw block stream and populates
     /// <see cref="AnalyzerDetailSection.LeadFinding"/>, <see cref="AnalyzerDetailSection.KeyMetrics"/>,
-    /// <see cref="AnalyzerDetailSection.Tables"/>, and <see cref="AnalyzerDetailSection.Provenance"/>.
+    /// <see cref="AnalyzerDetailSection.CompactTables"/>, and <see cref="AnalyzerDetailSection.Provenance"/>.
     /// MetricBlocks and TableBlocks are removed from <c>Blocks</c> once promoted.
     /// Runs that have no matching analyzer run still get metric/table extraction from blocks.
     /// For cross-cutting <see cref="IReportSectionBuilder"/> sections, provenance is built from all

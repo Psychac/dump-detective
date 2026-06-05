@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -17,7 +18,7 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (RetentionDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(
@@ -43,30 +44,18 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         if (d.TopHighlyReferencedObjects is { Count: > 0 })
         {
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Highly referenced objects",
-                ["Address", "Type", "Size", "Incoming Refs", "Est. Retained"],
-                d.TopHighlyReferencedObjects.Take(20).Select(o => Row(
-                    Cell($"0x{o.Address:X}"),
-                    Cell(o.TypeName),
-                    Cell(FormatBytes(o.Size), (long)Math.Min(o.Size, long.MaxValue)),
-                    Cell(o.IncomingReferences.ToString("N0"), o.IncomingReferences),
-                    Cell(o.EstimatedRetainedBytes > 0 ? FormatBytes(o.EstimatedRetainedBytes) : "—", (long)Math.Min(o.EstimatedRetainedBytes, long.MaxValue)))).ToArray()));
+                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Incoming Refs","number"), CH("Est. Retained","bytes") },
+                d.TopHighlyReferencedObjects.Take(20).Select(o => R(new object?[] { $"0x{o.Address:X}", o.TypeName, FormatBytes(o.Size), o.IncomingReferences, o.EstimatedRetainedBytes > 0 ? FormatBytes(o.EstimatedRetainedBytes) : "—" })).ToArray()));
         }
 
         if (d.TopRetentionTypes is { Count: > 0 })
         {
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Top retention types",
-                ["Type", "Objects", "Footprint", "Total Incoming Refs", "Max Incoming Refs", "Est. Retained", "Ratio"],
-                d.TopRetentionTypes.Take(20).Select(t => Row(
-                    Cell(t.TypeName),
-                    Cell(t.ObjectCount.ToString("N0"), t.ObjectCount),
-                    Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
-                    Cell(t.TotalIncomingReferences.ToString("N0"), t.TotalIncomingReferences),
-                    Cell(t.MaxIncomingReferences.ToString("N0"), (long)t.MaxIncomingReferences),
-                    Cell(t.EstimatedRetainedBytes > 0 ? FormatBytes(t.EstimatedRetainedBytes) : "—", (long)Math.Min(t.EstimatedRetainedBytes, long.MaxValue)),
-                    Cell(FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes), (long)Math.Round(Ratio(t.EstimatedRetainedBytes, t.TotalBytes) * 1000)))).ToArray()));
+                new[] { CH("Type"), CH("Objects","number"), CH("Footprint","bytes"), CH("Total Incoming Refs","number"), CH("Max Incoming Refs","number"), CH("Est. Retained","bytes"), CH("Ratio") },
+                d.TopRetentionTypes.Take(20).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, FormatBytes(t.TotalBytes), t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? FormatBytes(t.EstimatedRetainedBytes) : "—", FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
         }
 
         if (caveats.Count > 0)
@@ -78,7 +67,7 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatRatio(ulong retained, ulong shallow)

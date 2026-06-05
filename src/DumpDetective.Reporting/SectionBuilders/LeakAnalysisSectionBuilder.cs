@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -19,7 +20,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
     {
         var leak = (LeakCandidateDomainResult)result;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(leak.HeuristicOnly ? 0.55 : 0.70, leak.HeuristicOnly
@@ -78,31 +79,31 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(classSize), (long)Math.Min(classSize, long.MaxValue)),
                     Cell(string.IsNullOrWhiteSpace(topTypes) ? "—" : topTypes)));
             }
-            tables.Add(ST(
+            compactTables.Add(STCompact(
                 "Candidate groups by leak class",
-                new[] { "Class", "Count", "Total Size", "Top Types" },
-                classRows));
+                new[] { CH("Class"), CH("Count","number"), CH("Total Size","bytes"), CH("Top Types") },
+                classRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (leak.TopCandidates.Count > 0)
         {
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
-                tables.Add(ST(
+                compactTables.Add(STCompact(
                 "Top leak candidates by suspicion score",
-                new[] { "Type", "Score", "Severity", "Class", "Total Size", "Instances", "Gen2%", "Root Kind", "Finalizable", "Container", "Ref Ratio" },
-                leak.TopCandidates.Take(TopCandidateCount).Select(candidate => Row(
-                    Cell(candidate.TypeName),
-                    Cell(candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore),
-                    Cell(candidate.Severity.ToString()),
-                    Cell(candidate.Classification.ToString()),
-                    Cell(FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)),
-                    Cell(candidate.InstanceCount.ToString("N0"), candidate.InstanceCount),
-                    Cell(candidate.Gen2Pct.ToString("F1") + "%", (long)Math.Round(candidate.Gen2Pct * 10)),
-                    Cell(candidate.RootKind ?? "—"),
-                    Cell(candidate.IsFinalizable ? "Yes" : "No"),
-                    Cell(candidate.IsContainer ? "Yes" : "No"),
-                    Cell(candidate.ReferenceFieldRatio.ToString("F2"))
-                )).ToArray()));
+                new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio") },
+                leak.TopCandidates.Take(TopCandidateCount).Select(candidate => R(new object?[] {
+                    candidate.TypeName,
+                    candidate.SuspicionScore,
+                    candidate.Severity.ToString(),
+                    candidate.Classification.ToString(),
+                    FormatBytes(candidate.TotalSize),
+                    candidate.InstanceCount,
+                    candidate.Gen2Pct.ToString("F1") + "%",
+                    candidate.RootKind ?? "—",
+                    candidate.IsFinalizable ? "Yes" : "No",
+                    candidate.IsContainer ? "Yes" : "No",
+                    candidate.ReferenceFieldRatio.ToString("F2")
+                })).ToArray()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
         }
@@ -173,7 +174,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             Blocks: blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string GetImpactBand(ulong totalSize)
@@ -230,7 +231,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
         while (bytes >= 1024 && unitIndex < units.Length - 1)

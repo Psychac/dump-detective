@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -18,7 +19,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
     {
         var d = (SegmentReservationDomainResult)result;
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         SectionLeadFinding? leadFinding = null;
@@ -83,9 +84,9 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                     Cell(seg.LogicalHeap.ToString("N0"), seg.LogicalHeap),
                     Cell($"{seg.FillPct:F1}%")));
             }
-            tables.Add(ST("Segment table",
-                ["Address", "Kind", "Committed", "Reserved", "Ephemeral", "Logical Heap", "Fill %"],
-                rows));
+            compactTables.Add(STCompact("Segment table",
+                new[] { CH("Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ReservedByLogicalHeap.Count > 0)
@@ -95,19 +96,18 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                 heapRows.Add(Row(
                     Cell(kvp.Key.ToString("N0"), kvp.Key),
                     Cell(FormatBytes(kvp.Value), (long)Math.Min(kvp.Value, long.MaxValue))));
-            tables.Add(ST("Reserved by logical heap", ["Logical Heap", "Reserved Bytes"], heapRows));
+            compactTables.Add(STCompact("Reserved by logical heap", new[] { CH("Logical Heap","number"), CH("Reserved Bytes","bytes") }, heapRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
-
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static string FormatBytes(ulong value)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double bytes = value;
         int unitIndex = 0;
         while (bytes >= 1024 && unitIndex < units.Length - 1) { bytes /= 1024; unitIndex++; }

@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (ThreadDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -63,7 +64,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var wcRows = new List<TableRow>(d.WaitPatternBreakdown.Count);
             foreach (var kvp in d.WaitPatternBreakdown)
                 wcRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            tables.Add(ST("Wait category distribution", ["Category", "Count"], wcRows));
+            compactTables.Add(STCompact("Wait category distribution", new[] { CH("Category"), CH("Count","number") }, wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopBlockedThreads is { Count: > 0 })
@@ -83,9 +84,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            tables.Add(ST("Top blocked threads",
-                ["Thread ID", "OS Thread", "Lock Count", "State", "GC Mode", "Wait Category", "Wait Reason", "Stack Size", "Top Frame"],
-                bRows));
+            compactTables.Add(STCompact("Top blocked threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, bRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLockedThreads is { Count: > 0 })
@@ -105,9 +104,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            tables.Add(ST("Top lock-holding threads",
-                ["Thread ID", "OS Thread", "Lock Count", "State", "GC Mode", "Wait Category", "Wait Reason", "Stack Size", "Top Frame"],
-                lRows));
+            compactTables.Add(STCompact("Top lock-holding threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, lRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ThreadStateDistribution is { Count: > 0 })
@@ -115,7 +112,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var stateRows = new List<TableRow>(d.ThreadStateDistribution.Count);
             foreach (var kvp in d.ThreadStateDistribution.OrderByDescending(kvp => kvp.Value))
                 stateRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            tables.Add(ST("Thread state distribution", ["Thread State", "Count"], stateRows));
+            compactTables.Add(STCompact("Thread state distribution", new[] { CH("Thread State"), CH("Count","number") }, stateRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.GcModeDistribution is { Count: > 0 })
@@ -123,7 +120,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var gcModeRows = new List<TableRow>(d.GcModeDistribution.Count);
             foreach (var kvp in d.GcModeDistribution.OrderByDescending(kvp => kvp.Value))
                 gcModeRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            tables.Add(ST("GC mode distribution", ["GC Mode", "Count"], gcModeRows));
+            compactTables.Add(STCompact("GC mode distribution", new[] { CH("GC Mode"), CH("Count","number") }, gcModeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ThreadsWithActiveExceptions is { Count: > 0 })
@@ -141,9 +138,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(snapshot.GcMode),
                     Cell(snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0] : "—")]));
             }
-            tables.Add(ST("Threads with active exceptions",
-                ["Thread ID", "OS Thread", "Exception Type", "Message", "Lock Count", "GC Mode", "Top Frame"],
-                exRows));
+            compactTables.Add(STCompact("Threads with active exceptions", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Exception Type"), CH("Message"), CH("Lock Count","number"), CH("GC Mode"), CH("Top Frame") }, exRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var hotspots = d.TopStackHotspots ?? [];
@@ -152,7 +147,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var hsRows = new List<TableRow>(hotspots.Count);
             for (int i = 0; i < hotspots.Count; i++)
                 hsRows.Add(new TableRow([Cell(hotspots[i].Name), Cell($"{hotspots[i].Count:N0}", hotspots[i].Count)]));
-            tables.Add(ST("Top frame hotspots", ["Frame", "Count"], hsRows));
+            compactTables.Add(STCompact("Top frame hotspots", new[] { CH("Frame"), CH("Count","number") }, hsRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var sampled = d.SampledThreads ?? [];
@@ -200,13 +195,13 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var appRows = new List<TableRow>(d.AppDomainDistribution.Count);
             foreach (var kvp in d.AppDomainDistribution)
                 appRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            tables.Add(ST("AppDomain thread distribution", ["AppDomain", "Thread Count"], appRows));
+            compactTables.Add(STCompact("AppDomain thread distribution", new[] { CH("AppDomain"), CH("Thread Count","number") }, appRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
     private static bool IsFrameworkFrame(string frame) =>

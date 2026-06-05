@@ -18,7 +18,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (StringDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(0.85, ["String statistics are measured from analyzed heap data."]),
@@ -80,7 +80,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     double pct = d.Distribution.SampleCount > 0 ? kv.Value * 100.0 / d.Distribution.SampleCount : 0.0;
                     lbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                tables.Add(ST("String length buckets", ["Range", "Count", "% of samples"], lbRows));
+                compactTables.Add(STCompact("String length buckets", new[] { CH("Range"), CH("Count","number"), CH("% of samples") }, lbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             var fb = d.Distribution.FrequencyBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
@@ -93,7 +93,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     double pct = totalPatterns > 0 ? kv.Value * 100.0 / totalPatterns : 0.0;
                     fbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                tables.Add(ST("Duplicate frequency buckets", ["Frequency", "Pattern Count", "% of patterns"], fbRows));
+                compactTables.Add(STCompact("Duplicate frequency buckets", new[] { CH("Frequency","number"), CH("Pattern Count","number"), CH("% of patterns") }, fbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -102,7 +102,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var rows = new List<TableRow>(d.TopDuplicateTypes.Count);
             foreach (var t in d.TopDuplicateTypes)
                 rows.Add(Row(Cell(t.Name), Cell($"{t.Count:N0}", t.Count)));
-            tables.Add(ST("Types by duplicate occurrence", ["Type", "Duplicate Count"], rows));
+            compactTables.Add(STCompact("Types by duplicate occurrence", new[] { CH("Type"), CH("Duplicate Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopDuplicates.Count > 0)
@@ -130,9 +130,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(sampling),
                     Cell(examples)));
             }
-            tables.Add(ST("Top duplicate strings",
-                ["Fingerprint", "Preview", "Count", "Avg Size", "Total Size", "Wasted", "% of strings", "Dominant Type", "Sampling", "Examples"],
-                rows));
+            compactTables.Add(STCompact("Top duplicate strings", new[] { CH("Fingerprint"), CH("Preview"), CH("Count","number"), CH("Avg Size","bytes"), CH("Total Size","bytes"), CH("Wasted","bytes"), CH("% of strings"), CH("Dominant Type"), CH("Sampling"), CH("Examples") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Very long strings → typed Tables slot
@@ -147,12 +145,12 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{s.CharLength:N0} chars", s.CharLength),
                     Cell(FormatHelper.FormatBytes(s.SizeBytes), (long)s.SizeBytes)));
             }
-            tables.Add(ST("Strings exceeding LOH threshold", ["Address", "Char Length", "Size"], rows));
+            compactTables.Add(STCompact("Strings exceeding LOH threshold", new[] { CH("Address"), CH("Char Length","number"), CH("Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

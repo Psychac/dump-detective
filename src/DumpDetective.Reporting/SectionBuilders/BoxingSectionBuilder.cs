@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -21,7 +22,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (BoxingDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -47,7 +48,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes),
                     Cell(e.IsEnum ? "Yes" : "No")]));
             }
-            tables.Add(ST("Top boxed types by total size", ["Value Type", "Box Count", "Total Box Bytes", "IsEnum"], rows));
+            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopBoxedTypes.Count > TopTypesToShow)
                 blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
         }
@@ -64,8 +65,8 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WastedPaddingBytes} B",  e.WastedPaddingBytes),
                     Cell($"{e.WasteRatio:P0}")]));
             }
-            tables.Add(ST("Struct types with highest padding waste",
-                ["Type", "Size", "Field Bytes", "Wasted", "Waste %"], padRows));
+            compactTables.Add(STCompact("Struct types with highest padding waste",
+                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopPaddingWasteTypes.Count > TopPaddingToShow)
                 blocks.Add(T($"Showing top {TopPaddingToShow} padding-waste types. {d.TopPaddingWasteTypes.Count - TopPaddingToShow} additional type(s) omitted."));
         }
@@ -77,6 +78,6 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         return new AnalyzerDetailSection(
             AnalyzerName, "Boxing & Value Type Pressure", SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

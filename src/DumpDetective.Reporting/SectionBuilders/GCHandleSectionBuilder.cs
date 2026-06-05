@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -16,7 +17,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (GCHandleDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
 
         double strongPct = d.TotalHandles == 0 ? 0 : d.StrongLikeHandles * 100.0 / d.TotalHandles;
         double weakPct = d.TotalHandles == 0 ? 0 : d.WeakLikeHandles * 100.0 / d.TotalHandles;
@@ -48,7 +49,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
                     Cell($"{entry.Count:N0}", entry.Count),
                     Cell($"{pct:F1}%")]));
             }
-            tables.Add(ST("Handles by kind", ["Kind", "Count", "% Total"], kindRows));
+            compactTables.Add(STCompact("Handles by kind", new[] { CH("Kind"), CH("Count","number"), CH("% Total") }, kindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var topTargets = d.TopTargetTypes ?? [];
@@ -57,7 +58,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
             var ttRows = new List<TableRow>(topTargets.Count);
             for (int i = 0; i < topTargets.Count; i++)
                 ttRows.Add(new TableRow([Cell(topTargets[i].Name), Cell($"{topTargets[i].Count:N0}", topTargets[i].Count)]));
-            tables.Add(ST("Top handle target types", ["Type", "Count"], ttRows));
+            compactTables.Add(STCompact("Top handle target types", new[] { CH("Type"), CH("Count","number") }, ttRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var pinnedTypes = d.TopPinnedTargetTypes ?? [];
@@ -66,7 +67,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
             var ptRows = new List<TableRow>(pinnedTypes.Count);
             for (int i = 0; i < pinnedTypes.Count; i++)
                 ptRows.Add(new TableRow([Cell(pinnedTypes[i].Name), Cell($"{pinnedTypes[i].Count:N0}", pinnedTypes[i].Count)]));
-            tables.Add(ST("Pinned handle target types", ["Type", "Count"], ptRows));
+            compactTables.Add(STCompact("Pinned handle target types", new[] { CH("Type"), CH("Count","number") }, ptRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var pinnedBySizeList = d.TopPinnedObjectsBySize ?? [];
@@ -83,12 +84,12 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
                     Cell(FormatHelper.FormatBytes(entry.Bytes), (long)entry.Bytes),
                     Cell($"{pct:F1}%")]));
             }
-            tables.Add(ST("Pinned types by retained bytes", ["Type", "Retained Bytes", "% Pinned"], pbRows));
+            compactTables.Add(STCompact("Pinned types by retained bytes", new[] { CH("Type"), CH("Retained Bytes","bytes"), CH("% Pinned") }, pbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, AnalyzerName, SortOrder, [],
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

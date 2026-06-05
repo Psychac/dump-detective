@@ -2,6 +2,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -24,7 +25,7 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["total_retained_bytes"] = new NumericMetricValue((double)d.TotalRetainedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalRetainedBytes)),
         };
 
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var roots = d.TopRootsByRetainedBytes ?? [];
@@ -39,7 +40,7 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(FormatHelper.TruncateString(r.Name, 90)),
                     Cell(FormatHelper.FormatBytes(r.Bytes), (long)r.Bytes)]));
             }
-            tables.Add(ST("Top roots by retained bytes", ["Field / Type", "Retained Bytes"], rootRows));
+                compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Roots Count","number") }, rootRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
         else
         {
@@ -53,6 +54,6 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

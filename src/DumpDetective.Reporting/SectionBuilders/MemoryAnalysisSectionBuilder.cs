@@ -4,6 +4,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Text.Json;
+using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -19,7 +20,7 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (MemoryDomainResult)result;
-        var tables = new List<SectionTable>();
+        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -106,9 +107,7 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
                     Cell($"0x{t.SampleAddress:X}"),
                     Cell(t.ModuleName ?? "—")));
             }
-                    tables.Add(ST("Top types",
-                ["Type", "Count", "Total Bytes", "LOH Bytes", "Avg Size", "Est. Retained", "Sample Addr", "Module"],
-                rows));
+                    compactTables.Add(STCompact("Top types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Sample Addr"), CH("Module") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.SizeBucketHistogram is { Count: > 0 })
@@ -132,7 +131,7 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
                     Cell($"{cumulativePct:F1}%"),
                     Cell(FormatHelper.FormatBytes(b.TotalBytes), (long)Math.Min(b.TotalBytes, long.MaxValue))));
             }
-            tables.Add(ST("Object size histogram", ["Range", "Objects", "% Objects", "Cumulative %", "Total Bytes"], rows));
+            compactTables.Add(STCompact("Object size histogram", new[] { CH("Range"), CH("Objects","number"), CH("% Objects"), CH("Cumulative %"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
 
@@ -145,6 +144,6 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            Tables: tables.Count > 0 ? tables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 }

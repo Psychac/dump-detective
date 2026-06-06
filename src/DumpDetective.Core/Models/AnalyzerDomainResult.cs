@@ -8,6 +8,9 @@ public abstract record AnalyzerDomainResult
     public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = [];
 }
 
+/// <summary>
+/// Used only for tests and benchmarks.
+/// </summary>
 public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
 
 /// <summary>A snapshot of a CLR type's object count and byte footprint on the heap.</summary>

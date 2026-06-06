@@ -2,6 +2,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Analyzers;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
@@ -13,7 +14,7 @@ public class PresetBehaviorTests
         var fast = ThreadAnalysisOptions.Preset(AnalysisProfile.Fast);
         fast.IncludeStackSamples.Should().BeFalse();
         // MaxSampledStackSnapshots is zero for Fast; capacity should be zero regardless of tier
-        int cap = ThreadAnalyzer.ComputeSamplerCapacity(fast.MaxSampledStackSnapshots, DumpDetective.Core.Models.DumpSizeTier.Small, totalThreads: 100);
+        int cap = ThreadAnalyzer.ComputeSamplerCapacity(fast.MaxSampledStackSnapshots, DumpSizeTier.Small, totalThreads: 100);
         cap.Should().Be(0);
     }
 
@@ -22,7 +23,7 @@ public class PresetBehaviorTests
     {
         var balanced = ThreadAnalysisOptions.Default; // Balanced
         balanced.IncludeStackSamples.Should().BeTrue();
-        var cap = ThreadAnalyzer.ComputeSamplerCapacity(balanced.MaxSampledStackSnapshots, DumpDetective.Core.Models.DumpSizeTier.Small, totalThreads: 100);
+        var cap = ThreadAnalyzer.ComputeSamplerCapacity(balanced.MaxSampledStackSnapshots, DumpSizeTier.Small, totalThreads: 100);
         cap.Should().BeGreaterThan(0);
     }
 

@@ -9,6 +9,7 @@ using DumpDetective.Reporting.SectionBuilders;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests;
 

@@ -1,5 +1,7 @@
 using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Enums;
+
 using FluentAssertions;
 using Xunit;
 
@@ -30,7 +32,7 @@ public sealed class WeakReferenceFindingGeneratorTests
         findings.Should().HaveCount(2);
         findings[0].Title.Should().Contain("overview");
         findings[1].Title.Should().Contain("dead weak handle targets");
-        findings[0].Severity.Should().Be(DumpDetective.Core.Models.FindingSeverity.Critical);
+        findings[0].Severity.Should().Be(FindingSeverity.Critical);
     }
 
     private static WeakReferenceDomainResult BuildResult(

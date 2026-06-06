@@ -1,5 +1,6 @@
-using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
+
 using System.Text.RegularExpressions;
 
 namespace DumpDetective.Reporting.Services;

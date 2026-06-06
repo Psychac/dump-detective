@@ -5,6 +5,7 @@ using DumpDetective.Core.Utilities;
 using System.Reflection;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Options;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {

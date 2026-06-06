@@ -1,5 +1,6 @@
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;

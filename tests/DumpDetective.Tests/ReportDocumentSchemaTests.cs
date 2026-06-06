@@ -1,5 +1,6 @@
 using System.Text.Json;
-using DumpDetective.Core.Models;
+
+using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Serialization;
 
@@ -34,7 +35,7 @@ public sealed class ReportDocumentSchemaTests
             [
                 new ReportDomainSection(
                     Domain: "Memory",
-                    LeadSeverity: DumpDetective.Core.Models.FindingSeverity.Critical,
+                    LeadSeverity: FindingSeverity.Critical,
                     Sections:
                     [
                         new AnalyzerDetailSection("RetentionAnalyzer", "Retention Analysis", 25,

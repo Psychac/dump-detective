@@ -1,7 +1,7 @@
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Models;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

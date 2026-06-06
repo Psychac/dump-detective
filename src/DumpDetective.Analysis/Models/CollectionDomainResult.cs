@@ -5,6 +5,7 @@ namespace DumpDetective.Analysis.Models;
 // Collections
 
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Enums;
 
 internal sealed record CollectionDomainResult(
     int TotalCollections,

@@ -1,4 +1,5 @@
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
@@ -33,7 +34,7 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
 
         // If a particular kind dominates wasted bytes we can add a focused recommendation.
         var topKind = r.TopWastefulCollections?.FirstOrDefault()?.Kind;
-        if (topKind.HasValue && topKind.Value != DumpDetective.Core.Models.CollectionKind.List)
+        if (topKind.HasValue && topKind.Value != CollectionKind.List)
         {
             recommendation += $" Consider addressing {topKind.Value} instances specifically (e.g., TrimExcess / Resize / Use alternative collection) if they are long-lived.";
         }

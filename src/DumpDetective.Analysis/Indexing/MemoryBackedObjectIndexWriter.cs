@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Indexing;
 
@@ -17,7 +18,7 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
-        DumpDetective.Core.Models.DumpSizeTier sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium)
+        DumpSizeTier sizeTier = DumpSizeTier.Medium)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
 

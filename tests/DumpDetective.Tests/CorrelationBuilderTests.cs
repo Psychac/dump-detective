@@ -5,6 +5,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Analysis.Models;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests
 {

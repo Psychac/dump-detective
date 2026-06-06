@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Enums;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {

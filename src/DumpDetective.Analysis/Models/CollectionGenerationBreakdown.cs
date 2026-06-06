@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using DumpDetective.Core.Models;
+
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Models
 {

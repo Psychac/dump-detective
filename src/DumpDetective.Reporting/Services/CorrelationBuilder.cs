@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
 
 internal static class CorrelationBuilder
 {

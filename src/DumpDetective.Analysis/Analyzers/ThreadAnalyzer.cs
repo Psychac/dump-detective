@@ -5,22 +5,23 @@ using DumpDetective.Core.Utilities;
 using System.Runtime.InteropServices;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
     public class ThreadAnalyzer : IAnalyzer
     {
-        internal static int ComputeSamplerCapacity(int maxSampled, DumpDetective.Core.Models.DumpSizeTier? tier, int totalThreads)
+        internal static int ComputeSamplerCapacity(int maxSampled, DumpSizeTier? tier, int totalThreads)
         {
             int capacity = maxSampled;
             if (tier is not null)
             {
                 switch (tier.Value)
                 {
-                    case DumpDetective.Core.Models.DumpSizeTier.Large:
+                    case DumpSizeTier.Large:
                         capacity = Math.Max(1, capacity / 4);
                         break;
-                    case DumpDetective.Core.Models.DumpSizeTier.Medium:
+                    case DumpSizeTier.Medium:
                         capacity = Math.Max(1, capacity / 2);
                         break;
                     default:
@@ -90,7 +91,7 @@ namespace DumpDetective.Analysis.Analyzers
                         progress?.Report(new(prewarm, $"Background prewarm complete: {Math.Min(prewarm, prewarm)} threads"));
                     });
                 }
-                else if (cache.SizeTier != DumpDetective.Core.Models.DumpSizeTier.Large)
+                else if (cache.SizeTier != DumpSizeTier.Large)
                 {
                     progress?.Report(new(0, "Prewarming thread stack-root counts"));
                     int idx = 0;

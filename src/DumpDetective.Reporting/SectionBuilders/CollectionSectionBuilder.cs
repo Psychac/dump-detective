@@ -4,6 +4,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Linq;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 

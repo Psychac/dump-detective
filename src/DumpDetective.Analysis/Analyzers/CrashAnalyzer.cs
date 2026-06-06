@@ -6,6 +6,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Options;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {

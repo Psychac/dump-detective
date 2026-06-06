@@ -1,4 +1,6 @@
-﻿namespace DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Enums;
+
+namespace DumpDetective.Core.Models;
 
 public sealed record InsightFinding(
 string Analyzer,

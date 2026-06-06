@@ -1,3 +1,5 @@
+using DumpDetective.Core.Enums;
+
 namespace DumpDetective.Core.Options;
 
 public enum AsyncChainDetectionMode
@@ -60,12 +62,12 @@ public sealed class ThreadAnalysisOptions
 
     // Adapt options heuristically based on dump size tier. This keeps presets
     // behavior stable while reducing work on very large dumps.
-    public static ThreadAnalysisOptions AdaptForSize(ThreadAnalysisOptions options, DumpDetective.Core.Models.DumpSizeTier sizeTier)
+    public static ThreadAnalysisOptions AdaptForSize(ThreadAnalysisOptions options, DumpSizeTier sizeTier)
     {
         int divisor = sizeTier switch
         {
-            DumpDetective.Core.Models.DumpSizeTier.Large => 4,
-            DumpDetective.Core.Models.DumpSizeTier.Medium => 2,
+            DumpSizeTier.Large => 4,
+            DumpSizeTier.Medium => 2,
             _ => 1
         };
 

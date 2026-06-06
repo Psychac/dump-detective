@@ -1,5 +1,5 @@
 using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;

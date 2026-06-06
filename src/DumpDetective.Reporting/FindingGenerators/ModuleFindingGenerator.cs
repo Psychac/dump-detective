@@ -2,6 +2,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.FindingGenerators;
 

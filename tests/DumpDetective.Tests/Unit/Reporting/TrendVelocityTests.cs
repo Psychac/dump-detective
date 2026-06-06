@@ -4,6 +4,7 @@ using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Models;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests.Unit.Reporting;
 

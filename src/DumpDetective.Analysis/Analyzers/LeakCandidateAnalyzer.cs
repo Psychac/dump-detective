@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 

@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Indexing.Satellite;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Indexing;
 
@@ -25,7 +26,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
-        DumpDetective.Core.Models.DumpSizeTier sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium)
+        DumpSizeTier sizeTier = DumpSizeTier.Medium)
     {
         ArgumentNullException.ThrowIfNull(dumpPath, nameof(dumpPath));
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -51,8 +52,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         int writeBuffer = sizeTier switch
         {
-            DumpDetective.Core.Models.DumpSizeTier.Large => 4 * 1024 * 1024,
-            DumpDetective.Core.Models.DumpSizeTier.Medium => 1 * 1024 * 1024,
+            DumpSizeTier.Large => 4 * 1024 * 1024,
+            DumpSizeTier.Medium => 1 * 1024 * 1024,
             _ => 128 * 1024,
         };
         // Each segment gets its own entry list sized from its own byte length (see below).
@@ -62,8 +63,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // give additional throughput; smaller tiers use fewer to bound page-cache pressure.
         int maxSegmentParallelism = sizeTier switch
         {
-            DumpDetective.Core.Models.DumpSizeTier.Large => Math.Min(Environment.ProcessorCount, 8),
-            DumpDetective.Core.Models.DumpSizeTier.Medium => Math.Min(Environment.ProcessorCount, 4),
+            DumpSizeTier.Large => Math.Min(Environment.ProcessorCount, 8),
+            DumpSizeTier.Medium => Math.Min(Environment.ProcessorCount, 4),
             _ => 2,
         };
 

@@ -5,9 +5,9 @@ using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Core.Models;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
@@ -114,7 +114,7 @@ public class RunAnalyzersPipelineStageTests
         public long ObjectScanCount => 0;
         public long CacheHits => 0;
         public long CacheMisses => 0;
-        public DumpDetective.Core.Models.DumpSizeTier SizeTier => DumpDetective.Core.Models.DumpSizeTier.Small;
+        public DumpSizeTier SizeTier => DumpSizeTier.Small;
         public HashSet<ulong> GetStaticRootedAddresses(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
         public Dictionary<string, DumpDetective.Core.Models.CachedTypeStatistics> GetOrBuildTypeStatistics(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
         public ulong? GetSampleInstanceAddress(string typeName) => null;

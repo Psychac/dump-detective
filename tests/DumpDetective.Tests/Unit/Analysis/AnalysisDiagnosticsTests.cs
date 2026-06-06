@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 

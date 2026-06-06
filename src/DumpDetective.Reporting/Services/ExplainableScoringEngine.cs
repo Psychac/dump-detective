@@ -1,4 +1,4 @@
-using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
 
 namespace DumpDetective.Reporting.Services;

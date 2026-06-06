@@ -1,4 +1,4 @@
-namespace DumpDetective.Core.Models;
+namespace DumpDetective.Core.Enums;
 
 /// <summary>
 /// Shared enum describing kinds of collections recognized by the analyzers.

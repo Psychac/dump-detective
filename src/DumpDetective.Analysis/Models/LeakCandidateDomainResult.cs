@@ -1,3 +1,4 @@
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Models;

@@ -1,6 +1,8 @@
 using DumpDetective.Analysis.Analyzers;
-using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
+
 using FluentAssertions;
+
 using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analysis;

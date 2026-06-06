@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Readers;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Cache
 {
@@ -25,7 +26,7 @@ namespace DumpDetective.Analysis.Cache
         private long _cacheHits;
         private long _cacheMisses;
         private IProgress<AnalyzerProgressReport>? _progress;
-        private DumpDetective.Core.Models.DumpSizeTier _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
+        private DumpSizeTier _sizeTier = DumpSizeTier.Medium;
         private Dictionary<ulong, bool>? _methodTableHasRefs;
         private Dictionary<(ulong ThreadAddress, int MaxStackRootsToCount), int>? _threadStackRootCountCache;
 
@@ -98,13 +99,13 @@ namespace DumpDetective.Analysis.Cache
             try
             {
                 long dumpBytes = new FileInfo(dumpPath).Length;
-                _sizeTier = dumpBytes > 4L * 1024 * 1024 * 1024 ? DumpDetective.Core.Models.DumpSizeTier.Large :
-                            dumpBytes > 512L * 1024 * 1024 ? DumpDetective.Core.Models.DumpSizeTier.Medium :
-                            DumpDetective.Core.Models.DumpSizeTier.Small;
+                _sizeTier = dumpBytes > 4L * 1024 * 1024 * 1024 ? DumpSizeTier.Large :
+                            dumpBytes > 512L * 1024 * 1024 ? DumpSizeTier.Medium :
+                            DumpSizeTier.Small;
             }
             catch
             {
-                _sizeTier = DumpDetective.Core.Models.DumpSizeTier.Medium;
+                _sizeTier = DumpSizeTier.Medium;
             }
             IObjectIndexWriter writer = selectedMode == HeapIndexPrebuildMode.Memory
                 ? new MemoryBackedObjectIndexWriter()
@@ -114,7 +115,7 @@ namespace DumpDetective.Analysis.Cache
             return _heapIndex;
         }
 
-        public DumpDetective.Core.Models.DumpSizeTier SizeTier => _sizeTier;
+        public DumpSizeTier SizeTier => _sizeTier;
 
         public int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount)
         {

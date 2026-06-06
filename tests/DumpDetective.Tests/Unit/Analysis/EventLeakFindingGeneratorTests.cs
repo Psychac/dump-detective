@@ -1,7 +1,9 @@
 using DumpDetective.Analysis.FindingGenerators;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Models;
+using DumpDetective.Core.Enums;
+
 using FluentAssertions;
+
 using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analysis;

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
-using DumpDetective.Core.Models;
+
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Reporting.Models;
 

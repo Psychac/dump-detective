@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using System.Linq;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 

@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Analysis.Trend.Comparers;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 using FluentAssertions;

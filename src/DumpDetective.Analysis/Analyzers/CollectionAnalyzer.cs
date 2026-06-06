@@ -11,6 +11,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using Microsoft.Extensions.Logging;
 using DumpDetective.Core.Options;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -99,7 +100,7 @@ namespace DumpDetective.Analysis.Analyzers
                 WastefulCollection w = collectionStats.WastefulCollections[i];
                 topSnapshots.Add(new WastefulCollectionSnapshot(
                     w.Type,
-                    (DumpDetective.Core.Models.CollectionKind)w.Kind,
+                    (CollectionKind)w.Kind,
                     w.Count,
                     w.Capacity,
                     w.FillRate,

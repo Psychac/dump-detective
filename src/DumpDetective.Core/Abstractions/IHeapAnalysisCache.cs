@@ -1,3 +1,4 @@
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 using Microsoft.Diagnostics.Runtime;
@@ -10,7 +11,7 @@ public interface IHeapAnalysisCache
     long CacheHits { get; }
     long CacheMisses { get; }
     // Dump size tier determined at index prebuild time. Used to tune IO buffers and sampling.
-    DumpDetective.Core.Models.DumpSizeTier SizeTier { get; }
+    DumpSizeTier SizeTier { get; }
 
     HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap);
     Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap);

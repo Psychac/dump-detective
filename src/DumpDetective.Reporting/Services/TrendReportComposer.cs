@@ -7,6 +7,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Core.Enums;
 
 internal sealed class TrendReportComposer(
     CanonicalReportDocumentFactory documentFactory,

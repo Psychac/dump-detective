@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace DumpDetective.Core.Models;
+namespace DumpDetective.Core.Enums;
 
 public enum FindingSeverity
 {

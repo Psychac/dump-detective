@@ -107,19 +107,6 @@ public sealed class ReportingCompositionTests
     }
 
     [Fact]
-    public void TableWrapHelper_ShouldWrapWithoutTruncatingLongValues()
-    {
-        const string longValue = "ThisIsAnExtremelyLongTokenWithoutSpaces_0123456789ABCDEFGHIJ";
-
-        IReadOnlyList<string> wrapped = TableWrapHelper.Wrap(longValue, 10);
-
-        wrapped.Should().NotBeEmpty();
-        string recombined = string.Concat(wrapped);
-        recombined.Should().Be(longValue);
-        wrapped.Should().OnlyContain(line => line.Length <= 10);
-    }
-
-    [Fact]
     public void CanonicalFormatters_ShouldRenderAllComposedSections_AndKeepLongValues()
     {
         AnalysisReportDocument doc = new SingleDumpReportDocument

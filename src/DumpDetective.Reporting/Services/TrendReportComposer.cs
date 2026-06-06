@@ -21,8 +21,7 @@ internal sealed class TrendReportComposer(
         DumpDetective.Core.Models.AnalysisIncidentContext? currentIncidentContext,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        TrendReportData trendData,
-        ReportAudience audience = ReportAudience.All)
+        TrendReportData trendData)
     {
         string dumpPath = trendData.Snapshots.Count > 0 ? trendData.Snapshots[^1].DumpPath : string.Empty;
         FindingLifecycleResult lifecycle = new(
@@ -38,7 +37,7 @@ internal sealed class TrendReportComposer(
         foreach (InsightFinding f in BuildTopImprovementFindings(trendData.Overall))
             trendFindings.Add(f);
 
-        AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, Array.Empty<IAnalyzerSectionBuilder>(), reportBuilders, audience, currentIncidentContext);
+        AnalysisReportDocument baseDoc = _documentFactory.BuildDocument(dumpPath, currentRuns, elapsed, Array.Empty<IAnalyzerSectionBuilder>(), reportBuilders, currentIncidentContext);
 
         // T1.3: Build trend scorecard using all snapshots (not just baseline vs current)
         HealthScorecard? trendScorecard = trendData.Snapshots.Count >= 2
@@ -48,7 +47,7 @@ internal sealed class TrendReportComposer(
         // T8: Build trend-specific analyzer sections using dedicated builders
         var analyzerSections = new List<AnalyzerDetailSection>();
 
-        ExecutiveSummaryRecord? trendSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots, audience);
+        ExecutiveSummaryRecord? trendSummary = ComputeTrendExecutiveSummary(baseDoc, trendData.Snapshots);
 
         // T9: Map trend findings with MetricBaseline/MetricCurrent populated
         var trendDeltaLookup = BuildTrendDeltaLookup(trendData.Overall);
@@ -122,10 +121,10 @@ internal sealed class TrendReportComposer(
         analyzerSections.Add(TrendSnapshotStripBuilder.Build(trendData.Snapshots));
 
         // T6 — Per-dump sections (for text/markdown/JSON canonical output)
-        analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, reportBuilders, audience));
+        analyzerSections.AddRange(BuildPerDumpSections(trendData.Snapshots, builders, reportBuilders));
 
         // T6 — Per-dump full documents (serialized separately by HtmlReportRenderer; JS renders them via perDumpDocs)
-        List<AnalysisReportDocument> perDumpDocuments = BuildPerDumpDocuments(trendData.Snapshots, builders, reportBuilders, audience);
+        List<AnalysisReportDocument> perDumpDocuments = BuildPerDumpDocuments(trendData.Snapshots, builders, reportBuilders);
 
         // T7 — Trend Appendix
         analyzerSections.Add(TrendAppendixBuilder.Build(trendData, currentRuns));
@@ -308,8 +307,7 @@ internal sealed class TrendReportComposer(
 
     private ExecutiveSummaryRecord? ComputeTrendExecutiveSummary(
         AnalysisReportDocument baseDoc,
-        IReadOnlyList<AnalysisSnapshot> snapshots,
-        ReportAudience audience)
+        IReadOnlyList<AnalysisSnapshot> snapshots)
     {
         if (baseDoc.ExecutiveSummary is not { } summary)
             return null;
@@ -377,8 +375,7 @@ internal sealed class TrendReportComposer(
     private IReadOnlyList<AnalyzerDetailSection> BuildPerDumpSections(
         IReadOnlyList<AnalysisSnapshot> snapshots,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
-        IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        ReportAudience audience)
+        IReadOnlyList<IReportSectionBuilder> reportBuilders)
     {
         var sections = new List<AnalyzerDetailSection>();
 
@@ -386,7 +383,7 @@ internal sealed class TrendReportComposer(
         {
             AnalysisSnapshot snapshot = snapshots[i];
             IReadOnlyList<AnalyzerDetailSection> snapshotSections = _documentFactory
-                .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, reportBuilders, audience, snapshot.IncidentContext);
+                .BuildSnapshotSections(snapshot.DumpPath, snapshot.Runs, builders, reportBuilders, snapshot.IncidentContext);
             IReadOnlyList<FindingRecord> findings = snapshot.Findings.Select(f => MapFinding(f, snapshot.Index)).ToArray();
 
             sections.Add(TrendSnapshotSectionComposer.Build(
@@ -422,8 +419,7 @@ internal sealed class TrendReportComposer(
     private List<AnalysisReportDocument> BuildPerDumpDocuments(
         IReadOnlyList<AnalysisSnapshot> snapshots,
         IReadOnlyList<IAnalyzerSectionBuilder> builders,
-        IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        ReportAudience audience)
+        IReadOnlyList<IReportSectionBuilder> reportBuilders)
     {
         var docs = new List<AnalysisReportDocument>(snapshots.Count);
 
@@ -432,7 +428,7 @@ internal sealed class TrendReportComposer(
             AnalysisSnapshot snapshot = snapshots[i];
             // Build a full single-dump document — same path that produces standalone single-dump reports.
             AnalysisReportDocument fullDoc = _documentFactory.BuildDocument(
-                snapshot.DumpPath, snapshot.Runs, TimeSpan.Zero, builders, reportBuilders, audience, snapshot.IncidentContext);
+                snapshot.DumpPath, snapshot.Runs, TimeSpan.Zero, builders, reportBuilders, snapshot.IncidentContext);
             docs.Add(fullDoc);
         }
 

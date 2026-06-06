@@ -33,7 +33,7 @@ internal static class TrendSnapshotSectionComposer
             blocks.Add(new HeadingBlock("INCIDENT CONTEXT"));
             blocks.Add(new DividerBlock());
             blocks.Add(new MetricBlock("Mode", ctx.Mode));
-            blocks.Add(new MetricBlock("Report", $"{ctx.ReportFormat} / {ctx.ReportAudience}"));
+            blocks.Add(new MetricBlock("Report", $"{ctx.ReportFormat}"));
             blocks.Add(new MetricBlock("Runtime", $"{ctx.RuntimeFlavor ?? "n/a"}{(string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : " " + ctx.RuntimeVersion)}"));
             blocks.Add(new MetricBlock("GC Mode", ctx.GcMode ?? "n/a"));
             blocks.Add(new MetricBlock("Heap Count", ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a"));

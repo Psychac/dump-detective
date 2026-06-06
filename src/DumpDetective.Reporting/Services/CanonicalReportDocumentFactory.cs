@@ -1,4 +1,3 @@
-using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -15,25 +14,22 @@ internal sealed class CanonicalReportDocumentFactory(ReportSerializer serializer
         TimeSpan elapsed,
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        ReportAudience audience = ReportAudience.All,
         AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<InsightFinding>? additionalFindings = null)
-        => _serializer.Serialize(dumpPath, runs, elapsed, analyzerBuilders, reportBuilders, audience, incidentContext, additionalFindings);
+        => _serializer.Serialize(dumpPath, runs, elapsed, analyzerBuilders, reportBuilders, incidentContext, additionalFindings);
 
     public AnalysisReportDocument BuildSnapshotDocument(
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> runs,
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
-        ReportAudience audience = ReportAudience.All,
         AnalysisIncidentContext? incidentContext = null)
-        => _serializer.Serialize(dumpPath, runs, TimeSpan.Zero, analyzerBuilders, Array.Empty<IReportSectionBuilder>(), audience, incidentContext);
+        => _serializer.Serialize(dumpPath, runs, TimeSpan.Zero, analyzerBuilders, Array.Empty<IReportSectionBuilder>(), incidentContext);
 
     public IReadOnlyList<AnalyzerDetailSection> BuildSnapshotSections(
         string dumpPath,
         IReadOnlyList<AnalyzerRunResult> runs,
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        ReportAudience audience = ReportAudience.All,
         AnalysisIncidentContext? incidentContext = null)
         => _serializer.SerializeSectionsOnly(runs, analyzerBuilders, reportBuilders, incidentContext);
 }

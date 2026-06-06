@@ -19,7 +19,6 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
         // Build the serializable report document and keep it in state for artifact persistence.
         var doc = reportBuilderFacade.BuildReportDocument(
             state.Resolved.DumpPath,
-            state.Resolved.Report.Audience,
             state.Runs,
             state.AnalysisElapsed,
             state.IncidentContext,

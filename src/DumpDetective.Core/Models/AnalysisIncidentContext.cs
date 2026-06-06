@@ -8,7 +8,6 @@ internal sealed record AnalysisIncidentContext(
     string? BaselineDumpPath,
     IReadOnlyList<string>? TrendDumpPaths,
     string ReportFormat,
-    string ReportAudience,
     string? ConfigPath,
     bool UsedConfigFile,
     bool DiagnosticMode,
@@ -23,17 +22,5 @@ internal sealed record AnalysisIncidentContext(
     bool IsTrendReport,
     double AnalysisElapsedSeconds,
     IReadOnlyList<TrendSnapshotContext>? TrendSnapshots = null,
-    long? DumpFileSizeBytes = null,
-    DateTime? DumpCapturedAtUtc = null);
-
-internal sealed record TrendSnapshotContext(
-    int Index,
-    string DumpPath,
-    DateTime GeneratedAtUtc,
-    double ElapsedSeconds,
-    int AnalyzerCount,
-    int FindingCount,
-    bool IsBaseline,
-    bool IsCurrent,
     long? DumpFileSizeBytes = null,
     DateTime? DumpCapturedAtUtc = null);

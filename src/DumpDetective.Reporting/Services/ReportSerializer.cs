@@ -1,5 +1,4 @@
 using System.Linq;
-using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -20,7 +19,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         TimeSpan elapsed,
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
-        ReportAudience audience = ReportAudience.All,
+        
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
@@ -113,12 +112,9 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         // ── 4. Audience-specific projections ─────────────────────────────────
         long totalManagedBytes = _executiveSummaryProjector.ComputeTotalManagedBytes(runs);
 
-        // Include Executive summary for explicit Executive audience or when Audience==All
+        // Always include Executive summary (previously included for Executive/All)
         HealthScorecard scorecard = HealthScorecardBuilder.Build(runs);
-
-        ExecutiveSummaryRecord? executiveSummary = (audience == ReportAudience.Executive || audience == ReportAudience.All)
-            ? _executiveSummaryProjector.Build(deduped, scorecard, runs, totalManagedBytes)
-            : null;
+        ExecutiveSummaryRecord? executiveSummary = _executiveSummaryProjector.Build(deduped, scorecard, runs, totalManagedBytes);
 
         string? analyzerVersion = typeof(ReportSerializer).Assembly.GetName().Version?.ToString(3);
 

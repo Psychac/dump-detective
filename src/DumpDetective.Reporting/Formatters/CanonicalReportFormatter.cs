@@ -93,7 +93,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"- Mode: {ctx.Mode}");
             sb.AppendLine($"- Dump Path: {ctx.DumpPath}");
             if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"- Baseline Dump: {ctx.BaselineDumpPath}");
-            sb.AppendLine($"- Report: {ctx.ReportFormat} / {ctx.ReportAudience}");
+            sb.AppendLine($"- Report: {ctx.ReportFormat}");
             sb.AppendLine($"- Config: {(ctx.UsedConfigFile ? "config file" : "command line")}" + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})"));
             sb.AppendLine($"- Diagnostic Mode: {(ctx.DiagnosticMode ? "on" : "off")}");
             sb.AppendLine($"- Index Prebuild: {ctx.IndexPrebuildMode}");
@@ -417,7 +417,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"| **Mode** | {Esc(ctx.Mode)} |");
             sb.AppendLine($"| **Dump Path** | `{ctx.DumpPath}` |");
             if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"| **Baseline Dump** | `{ctx.BaselineDumpPath}` |");
-            sb.AppendLine($"| **Report** | {Esc(ctx.ReportFormat)} / {ctx.ReportAudience} |");
+            sb.AppendLine($"| **Report** | {Esc(ctx.ReportFormat)} |");
             sb.AppendLine($"| **Config** | {(ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({Esc(ctx.ConfigPath)})")} |");
             sb.AppendLine($"| **Diagnostic Mode** | {(ctx.DiagnosticMode ? "on" : "off")} |");
             sb.AppendLine($"| **Index Prebuild** | {Esc(ctx.IndexPrebuildMode)} |");
@@ -830,7 +830,7 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"<tr><td>Mode</td><td>{Enc(ctx.Mode)}</td></tr>");
             sb.AppendLine($"<tr><td>Dump Path</td><td class=\"wrap\">{Enc(ctx.DumpPath)}</td></tr>");
             if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"<tr><td>Baseline Dump</td><td class=\"wrap\">{Enc(ctx.BaselineDumpPath)}</td></tr>");
-            sb.AppendLine($"<tr><td>Report</td><td>{Enc(ctx.ReportFormat)} / {ctx.ReportAudience}</td></tr>");
+            sb.AppendLine($"<tr><td>Report</td><td>{Enc(ctx.ReportFormat)}</td></tr>");
             sb.AppendLine($"<tr><td>Config</td><td>{Enc(configText)}</td></tr>");
             sb.AppendLine($"<tr><td>Diagnostic Mode</td><td>{(ctx.DiagnosticMode ? "on" : "off")}</td></tr>");
             sb.AppendLine($"<tr><td>Index Prebuild</td><td>{Enc(ctx.IndexPrebuildMode)}</td></tr>");

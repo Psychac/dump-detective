@@ -39,13 +39,12 @@ internal static class IncidentContextFactory
         }
         catch { /* best-effort — skip if file not accessible */ }
 
-        return new AnalysisIncidentContext(
+            return new AnalysisIncidentContext(
             Mode: mode,
             DumpPath: dumpPath,
             BaselineDumpPath: resolved.BaselineDumpPath,
             TrendDumpPaths: resolved.TrendDumpPaths,
             ReportFormat: resolved.Report.Format.ToString(),
-            ReportAudience: resolved.Report.Audience.ToString(),
             ConfigPath: resolved.ConfigPath,
             UsedConfigFile: resolved.UsedConfigFile,
             DiagnosticMode: resolved.DiagnosticMode,

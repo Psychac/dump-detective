@@ -62,7 +62,6 @@ public sealed class ReportFlowIntegrationTests
         string output = facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
             format: format,
-            audience: ReportAudience.All,
             runs: [runA, runB],
             elapsed: TimeSpan.FromSeconds(1),
             cancellationToken: CancellationToken.None);
@@ -104,7 +103,6 @@ public sealed class ReportFlowIntegrationTests
         Action act = () => facade.BuildRenderedReport(
             dumpPath: "C:/dumps/int-test.dmp",
             format: ReportFormat.Text,
-            audience: ReportAudience.All,
             runs: [run],
             elapsed: TimeSpan.FromSeconds(1),
             cancellationToken: cts.Token);
@@ -166,7 +164,6 @@ public sealed class ReportFlowIntegrationTests
 
         string output = facade.BuildRenderedTrendReport(
             format: ReportFormat.Text,
-            audience: ReportAudience.All,
             currentRuns: [currentRun],
             elapsed: TimeSpan.FromSeconds(2),
             trendData: trendData,
@@ -193,7 +190,6 @@ public sealed class ReportFlowIntegrationTests
         // Verify HTML format contains perDumpDocuments in the embedded JSON
         string htmlOutput = facade.BuildRenderedTrendReport(
             format: ReportFormat.Html,
-            audience: ReportAudience.All,
             currentRuns: [currentRun],
             elapsed: TimeSpan.FromSeconds(2),
             trendData: trendData,

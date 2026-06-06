@@ -22,23 +22,6 @@ internal static class ConfigurationParseHelpers
         };
     }
 
-    public static ReportAudience? ParseReportAudience(string? audience)
-    {
-        if (string.IsNullOrWhiteSpace(audience))
-        {
-            return null;
-        }
-
-        return audience.Trim().ToLowerInvariant() switch
-        {
-            "all" => ReportAudience.All,
-            "executive" or "exec" => ReportAudience.Executive,
-            "developer" or "dev" => ReportAudience.Developer,
-            "deep" or "full" => ReportAudience.Deep,
-            _ => throw new ArgumentException($"Invalid ReportAudience value '{audience}' in config.")
-        };
-    }
-
     public static ReportFormat? ParseReportFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))

@@ -18,6 +18,8 @@ namespace DumpDetective.Cli.Services;
 /// <summary>
 /// Orchestrates a multi-dump trend analysis run: per-dump pipelines → trend report → output.
 /// </summary>
+/// TODO: Need to deeply review trend orchestration for potential optimizations, especially around parallelizing per-dump analysis and incremental report building. Initial implementation focuses on correctness and observability, with a simple sequential approach to per-dump analysis to maximize shared indexing benefits and minimize resource contention. 
+/// Potential future optimizations include: Fixing duplication in AnalysisSnapshot.
 internal sealed class TrendOrchestrationService(
     ReportBuilderFacade reportBuilderFacade,
     TrendAnalyzer trendAnalyzer,
@@ -124,7 +126,6 @@ internal sealed class TrendOrchestrationService(
 
         IReadOnlyList<AnalyzerRunResult> currentRuns = trendExecutions[^1].Runs;
         AnalysisReportDocument trendDoc = _reportBuilderFacade.BuildTrendReportDocument(
-            resolved.Report.Audience,
             currentRuns,
             totalStopwatch.Elapsed,
             trendExecutions[^1].IncidentContext,

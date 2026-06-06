@@ -22,7 +22,6 @@ internal sealed record AnalysisCommandRequest(
     int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
-    ReportAudience? ReportAudience = null,
     ReportStyleVersion? ReportStyleVersion = null,
     HeapIndexPrebuildMode? IndexPrebuildMode = null,
     bool PreRender = false,

@@ -1,17 +1,5 @@
 namespace DumpDetective.Core.Models;
 
-public enum AnalysisDiagnosticsEventType
-{
-    RunStarted,
-    AnalyzerStarted,
-    AnalyzerProgress,
-    AnalyzerSubmoduleProgress,
-    AnalyzerCompleted,
-    AnalyzerFailed,
-    AnalyzerCanceled,
-    RunCompleted
-}
-
 public sealed record AnalysisDiagnosticsEvent(
     Guid RunId,
     AnalysisDiagnosticsEventType EventType,
@@ -25,3 +13,15 @@ public sealed record AnalysisDiagnosticsEvent(
     string Message,
     string? ExceptionType,
     string? ExceptionMessage);
+
+public enum AnalysisDiagnosticsEventType
+{
+    RunStarted,
+    AnalyzerStarted,
+    AnalyzerProgress,
+    AnalyzerSubmoduleProgress,
+    AnalyzerCompleted,
+    AnalyzerFailed,
+    AnalyzerCanceled,
+    RunCompleted
+}

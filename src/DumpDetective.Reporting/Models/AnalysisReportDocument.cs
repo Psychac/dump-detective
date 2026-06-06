@@ -95,7 +95,7 @@ internal abstract record AnalysisReportDocument
     public IReadOnlyList<FindingRecord>? CrossDomainInsights { get; init; } = null;
     public IReadOnlyList<CorrelationEventRecord>? CorrelationEvents { get; init; } = null;
     public ReportAppendix? Appendix { get; init; } = null;
-    public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // null unless audience == Executive (or ReportAudience.All when enabled)
+    public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // optional executive summary
 
     [JsonIgnore]
     public IReadOnlyList<FindingRecord> Findings { get; init; } = Array.Empty<FindingRecord>();

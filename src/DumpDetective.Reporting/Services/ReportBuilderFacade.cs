@@ -21,23 +21,21 @@ internal sealed class ReportBuilderFacade(
     public string BuildRenderedReport(
         string dumpPath,
         ReportFormat format,
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         CancellationToken cancellationToken)
-        => BuildRenderedReport(dumpPath, format, audience, runs, elapsed, null, cancellationToken);
+        => BuildRenderedReport(dumpPath, format, runs, elapsed, null, cancellationToken);
 
     public string BuildRenderedReport(
         string dumpPath,
         ReportFormat format,
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AnalysisReportDocument doc = BuildReportDocument(dumpPath, audience, runs, elapsed, incidentContext);
+        AnalysisReportDocument doc = BuildReportDocument(dumpPath, runs, elapsed, incidentContext);
         IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
             ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
@@ -51,16 +49,14 @@ internal sealed class ReportBuilderFacade(
 
     public string BuildRenderedTrendReport(
         ReportFormat format,
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
         TrendReportData trendData,
         CancellationToken cancellationToken)
-        => BuildRenderedTrendReport(format, audience, currentRuns, elapsed, null, trendData, cancellationToken);
+        => BuildRenderedTrendReport(format, currentRuns, elapsed, null, trendData, cancellationToken);
 
     public string BuildRenderedTrendReport(
         ReportFormat format,
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext,
@@ -69,7 +65,6 @@ internal sealed class ReportBuilderFacade(
     {
         cancellationToken.ThrowIfCancellationRequested();
         AnalysisReportDocument doc = BuildTrendReportDocument(
-            audience,
             currentRuns,
             elapsed,
             incidentContext,
@@ -82,23 +77,21 @@ internal sealed class ReportBuilderFacade(
     }
 
     public AnalysisReportDocument BuildTrendReportDocument(
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> currentRuns,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext,
         TrendReportData trendData)
         => _trendComposer.ComposeCanonicalTrendReport(
-            currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData, audience);
+            currentRuns, elapsed, incidentContext, _analyzerBuilders, _reportBuilders, trendData);
 
     public AnalysisReportDocument BuildReportDocument(
         string dumpPath,
-        ReportAudience audience,
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<InsightFinding>? additionalFindings = null)
     {
-        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, audience, incidentContext, additionalFindings);
+        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings);
     }
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format, HtmlRenderSettings? htmlRenderSettings = null)

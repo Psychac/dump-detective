@@ -223,7 +223,7 @@ export function buildIncidentContext(doc) {
     item.appendChild(statLabel); item.appendChild(statValue); summary.appendChild(item);
   }
   stat('Mode', ctx.mode || '');
-  stat('Report', ((ctx.reportFormat || '') + ' / ' + (ctx.reportAudience || '')).trim().replace(/^\s*\/\s*|\s*\/\s*$/g, '').replace(/^\s*$/, '\u2014'));
+  stat('Report', ((ctx.reportFormat || '')).trim().replace(/^\s*$/, '\u2014'));
   stat('Runtime', ((ctx.runtimeFlavor || 'n/a') + (ctx.runtimeVersion ? ' ' + ctx.runtimeVersion : '')).trim());
   stat('GC Mode', ctx.gcMode || 'n/a');
   stat('Heap Count', ctx.heapCount != null ? String(ctx.heapCount) : 'n/a');

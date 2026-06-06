@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Serialization;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Reporting.Formatters;
 

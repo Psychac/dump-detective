@@ -1,4 +1,5 @@
 using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Core.Options;
 

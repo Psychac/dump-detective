@@ -10,6 +10,7 @@ using static DumpDetective.Cli.Services.Configuration.ConfigurationParseHelpers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Cli.Configuration;
 

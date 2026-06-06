@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Indexing;
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Cli.Commands;
 

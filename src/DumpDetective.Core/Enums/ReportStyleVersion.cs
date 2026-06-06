@@ -1,4 +1,4 @@
-namespace DumpDetective.Core.Configuration;
+namespace DumpDetective.Core.Enums;
 
 internal enum ReportStyleVersion
 {

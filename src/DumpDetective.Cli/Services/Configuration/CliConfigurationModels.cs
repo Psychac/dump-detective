@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Cli.Services.Configuration;
 

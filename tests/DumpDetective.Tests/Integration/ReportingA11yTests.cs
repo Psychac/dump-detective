@@ -1,9 +1,10 @@
 using FluentAssertions;
+
 using Xunit;
 
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;
-using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Tests.Integration;
 

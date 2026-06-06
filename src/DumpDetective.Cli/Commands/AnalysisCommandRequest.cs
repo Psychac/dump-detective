@@ -1,5 +1,6 @@
 using DumpDetective.Core.Configuration;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Cli.Commands;
 

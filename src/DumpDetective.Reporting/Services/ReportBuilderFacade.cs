@@ -1,4 +1,5 @@
 using DumpDetective.Core.Configuration;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Formatters;

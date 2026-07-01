@@ -17,33 +17,28 @@
 .category { font-size: 12px; color: var(--muted); }
 .summary { margin: 8px 0 10px 0; }
 .finding-card { position: relative; overflow: hidden; border-radius: 8px; }
-/* Finding cards nested inside domain insights or cross-domain list get tighter padding
-   and no box-shadow; they still inherit the severity background tint. */
-.domain-insights__list .finding-card,
-.cross-domain-insights__list .finding-card {
-  padding: 10px 12px;
-  border-radius: 6px;
-  box-shadow: none;
-  transition: border-color 0.12s, background 0.12s;
+/* Finding cards nested inside domain insights get a flatter, slightly elevated treatment. */
+.domain-insights__list .finding-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.12s, background 0.12s;
 }
 
-.domain-insights__list .finding-card--critical,
-.cross-domain-insights__list .finding-card--critical {
+.domain-insights__list .finding-card--critical {
   border-color: var(--sev-critical-border-mid);
 }
-.domain-insights__list .finding-card--warning,
-.cross-domain-insights__list .finding-card--warning {
+.domain-insights__list .finding-card--warning {
   border-color: var(--sev-warning-border-mid);
 }
-.domain-insights__list .finding-card--info,
-.cross-domain-insights__list .finding-card--info {
-  border: 1px solid #e2e8f0;
-  background: #fafbfc;
+.domain-insights__list .finding-card--info {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #ffffff;
 }
 
-.domain-insights__list .finding-card:hover,
-.cross-domain-insights__list .finding-card:hover {
-  filter: brightness(0.97);
+.domain-insights__list .finding-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
 }
 .finding-card--critical {
   background: var(--sev-critical-bg);

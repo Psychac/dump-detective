@@ -3,18 +3,22 @@
 
 /* Lead Finding — compact signal card aligned with domain findings */
 .lead-finding.finding-card {
-  margin: 6px 0 4px;
+  margin: 5px 0 4px;
   padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .lead-finding.finding-card .finding-card__header {
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .lead-finding__title.finding-card__title {
   margin: 0 0 4px;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 750;
 }
 
 .lead-finding.finding-card .finding-card__brief {
@@ -25,20 +29,20 @@
   font-size: 12px;
 }
 
-.lead-finding.__caveat.finding-card__caveat {
+.lead-finding__caveat.finding-card__caveat {
   font-size: 10px;
 }
 
 .lead-caution {
   margin: 6px 0 6px;
-  border: 1px solid var(--sev-warning-border-mid);
-  border-radius: var(--radius-sm);
-  background: var(--sev-warning-bg);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,251,235,0.95), rgba(255,255,255,0.98));
   overflow: hidden;
 }
 
 .lead-caution__summary {
-  padding: 7px 10px;
+  padding: 8px 12px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -46,7 +50,7 @@
 }
 
 .lead-caution__body {
-  padding: 2px 10px 8px;
+  padding: 2px 12px 10px;
 }
 
 .lead-caution__item {
@@ -60,17 +64,17 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
-  padding: 10px 14px 12px;
-  background: #f3f8ff;
-  border-bottom: 1px solid #dce6f2;
+  padding: 8px 12px 10px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
 .key-metric {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.12);
   border-left: 3px solid var(--sev-neutral-bar);
-  border-radius: var(--radius-md);
-  padding: 7px 10px;
+  border-radius: 10px;
+  padding: 6px 9px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -100,34 +104,52 @@
 .key-metric--critical {
   border-left-color: var(--sev-critical-bar);
   border-color: var(--sev-critical-border);
-  background: var(--sev-critical-bg);
+  background: #fff5f5;
 }
 .key-metric--critical .key-metric__value { color: var(--sev-critical-text); }
 
 .key-metric--warning {
   border-left-color: var(--sev-warning-bar);
   border-color: var(--sev-warning-border);
-  background: var(--sev-warning-bg);
+  background: #fffaf0;
 }
 .key-metric--warning .key-metric__value { color: var(--sev-warning-text); }
 
 .key-metric--ok {
   border-left-color: var(--sev-ok-bar);
   border-color: var(--sev-ok-border);
-  background: var(--sev-ok-bg);
+  background: #f0fdf4;
 }
 .key-metric--ok .key-metric__value { color: var(--sev-ok-text); }
 
 .key-metric--info {
   border-left-color: var(--sev-info-bar);
   border-color: var(--sev-info-border);
-  background: var(--sev-info-bg);
+  background: #eff6ff;
 }
 .key-metric--info .key-metric__value { color: var(--sev-info-text); }
 
 /* Per-table collapse inside detail-block */
 .table-collapse { margin: 8px 0; border: 1px solid #dce5f1; border-radius: 8px; overflow: hidden; background: #fff; }
-.table-collapse > summary { padding: 8px 12px; font-weight: 650; font-size: 12px; color: #334155; background: #f1f6fd; border-bottom: 1px solid transparent; }
+.table-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 14px;
+  font-weight: 650;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #334155;
+  background: #f8fafc;
+  border-bottom: 1px solid transparent;
+  min-width: 0;
+  overflow: hidden;
+}
+.table-collapse > summary::before {
+  margin-right: 2px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
 /* Chevron geometry handled by shared rule in report.base.css. */
 
 .table-collapse[open] > summary {
@@ -140,9 +162,9 @@
   gap: 10px;
   flex-wrap: wrap;
   padding: 9px 10px;
-  border-top: 1px solid #dfe7f2;
-  border-bottom: 1px solid #dfe7f2;
-  background: #f8fbff;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: #ffffff;
 }
 
 .table-filter-input {
@@ -150,7 +172,7 @@
   min-width: 220px;
   flex: 1 1 220px;
   padding: 6px 10px;
-  border: 1px solid #cfdae8;
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: var(--radius-sm);
   background: #fff;
   color: var(--text);
@@ -160,7 +182,7 @@
 .table-filter-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
 
 .table-tools__count {
@@ -176,9 +198,9 @@
 .table-lazy-hint {
   margin: 8px 10px 10px;
   padding: 8px 10px;
-  border: 1px dashed #cbd5e1;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
   border-radius: var(--radius-sm);
-  background: #f8fafc;
+  background: #fafbfc;
   color: #475569;
   font-size: 12px;
 }
@@ -242,9 +264,9 @@
 }
 
 /* Provenance footer ΓÇö collapsed by default */
-.provenance { border-top: 1px solid #dce6f2; margin-top: 0; background: #f4f8fe; }
-.provenance__summary { font-size: 11px; color: var(--muted); padding: 8px 16px; background: transparent; font-weight: 650; line-height: 1.45; }
-.provenance__content { padding: 10px 14px; background: transparent; font-size: 11px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-family: Consolas, "Cascadia Mono", monospace; border-top: 1px solid #dce6f2; }
+.provenance { border-top: 1px solid rgba(148, 163, 184, 0.10); margin-top: 0; background: #fbfcfd; }
+.provenance__summary { font-size: 11px; color: var(--muted); padding: 9px 16px; background: transparent; font-weight: 700; line-height: 1.45; letter-spacing: 0.02em; }
+.provenance__content { padding: 10px 16px 12px; background: transparent; font-size: 11px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-family: Consolas, "Cascadia Mono", monospace; border-top: 1px solid rgba(148, 163, 184, 0.10); }
 .provenance__label { color: #7d8ca2; font-weight: 650; }
 .provenance__value { color: #34465b; }
 .provenance__note  { grid-column: 1 / -1; color: #b45309; }
@@ -254,7 +276,7 @@
 .table-with-pagination tbody tr:hover td,
 .exec-trend-scores tbody tr:hover td,
 .exec-trend-findings tbody tr:hover td {
-  background: #f0f6ff;
+  background: #f8fafc;
 }
 
 .detail-block tbody td:focus,

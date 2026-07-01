@@ -126,15 +126,16 @@ export function buildAnalyzerSection(section, i) {
   const anchorScope = arguments.length > 2 ? arguments[2] : '';
   const scopedFallback = anchorScope ? ('detail-' + slugifyAnchor(anchorScope, 'scope') + '-' + i) : ('detail-' + i);
   const stableId = section.sectionId && section.sectionId.trim() ? section.sectionId.trim() : scopedFallback;
+  const leadSev = String((section.leadFinding && section.leadFinding.severity) || 'info').toLowerCase();
   const sectionAnchorId = ensureUniqueDomId('section-' + stableId);
   const sectionIndexKey = anchorScope ? (slugifyAnchor(anchorScope, 'scope') + '-' + i) : String(i);
-  const wrapper = el('section', 'section-card analyzer-section detail-color-' + (i % 6));
+  const wrapper = el('section', 'section-card analyzer-section detail-color-' + (i % 6) + ' analyzer-section--' + leadSev);
   wrapper.id = sectionAnchorId;
   wrapper.dataset.sectionCardId = sectionAnchorId;
   wrapper.dataset.legacySectionId = stableId;
   wrapper.dataset.detailIndex = sectionIndexKey;
   wrapper.dataset.analyzerName = String(section.analyzerName || section.displayTitle || '');
-  wrapper.dataset.leadSeverity = String((section.leadFinding && section.leadFinding.severity) || 'info').toLowerCase();
+  wrapper.dataset.leadSeverity = leadSev;
   wrapper.dataset.leadConfidence = String((section.leadFinding && section.leadFinding.confidence != null)
     ? Number(section.leadFinding.confidence)
     : 1);
@@ -160,10 +161,10 @@ export function buildAnalyzerSection(section, i) {
   const title = el('span', 'detail-summary__title'); title.textContent = section.displayTitle || section.analyzerName || '';
   const blocks = section.blocks || [];
   const explicitTopTypesChart = hasExplicitTopTypesChart(section);
-  const leadSev = section.leadFinding ? (section.leadFinding.severity || '').toLowerCase() : '';
-  if (leadSev && leadSev !== 'info') {
-    const sevBadge = el('span', 'detail-summary__sev detail-summary__sev--' + leadSev);
-    sevBadge.textContent = leadSev.charAt(0).toUpperCase() + leadSev.slice(1);
+  const summaryLeadSev = section.leadFinding ? (section.leadFinding.severity || '').toLowerCase() : '';
+  if (summaryLeadSev && summaryLeadSev !== 'info') {
+    const sevBadge = el('span', 'detail-summary__sev detail-summary__sev--' + summaryLeadSev);
+    sevBadge.textContent = summaryLeadSev.charAt(0).toUpperCase() + summaryLeadSev.slice(1);
     summaryEl.appendChild(title); summaryEl.appendChild(sevBadge);
   } else {
     summaryEl.appendChild(title);

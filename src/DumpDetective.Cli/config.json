@@ -12,6 +12,12 @@
   },
   "Indexing": {
     "Mode": "auto"
+  },
+  "TrendSuppression": {
+    "Enabled": true,
+    "MinRelativeDeltaPercent": 10.0,
+    "ConsecutiveWorsenings": 2,
+    "KeepRawValuesInJson": true
   }//,
   //"Analyzers": {
   //  "Crash": {
@@ -40,5 +46,5 @@
   //    "TopModulesByHeapCount": 20
   //  }
   //} ,
-  //"IncludeAnalyzers": [ "AppDomain Analysis" ]
+  //,"IncludeAnalyzers": [ "GC Root Analysis" ]
 }

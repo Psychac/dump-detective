@@ -6,7 +6,15 @@
   "IncludeAnalyzers": [ "MemoryLeak", "ReferenceChain" ],
   "ExcludeAnalyzers": [ "Thread" ],
   "ReportFormat": "html",
-  "ReportAudience": "developer",
+  "ReportStyleVersion": "v1",
+  "Diagnostics": {
+    "EnableMemoryDiagnostics": false,
+    "EnablePerformanceDiagnostics": false,
+    "CollectAfterAnalyzerRun": false,
+    "CollectAfterAnalyzerRunEveryKAnalyzers": 0,
+    "CollectAfterAnalyzerRunWorkingSetThresholdBytes": 0,
+    "CompactLargeObjectHeapAfterAnalyzerCollection": true
+  },
   "Analyzers": {
     "MemoryLeak": {
       "Profile": "fast",
@@ -18,5 +26,13 @@
   },
   "Indexing": {
     "Mode": "auto"
+  },
+  "ExecutionPolicy": {
+    "MaxLeakScanObjects": 2000000,
+    "MaxReferenceAddresses": 1000000,
+    "ReferenceChainMaxPathDepth": 25,
+    "ReferenceChainFastModeMaxDepth": 25,
+    "ReferenceChainMaxPathSearchObjects": 5000,
+    "IndexPrebuildMode": "auto"
   }
 }

@@ -68,10 +68,26 @@ export function buildDomains(doc) {
   if (!Array.isArray(domains) || !domains.length) return null;
   const sectionTargetMap = buildAnalyzerSectionTargetMap(doc);
 
-  function buildDomainHistogram(domain) {
-    const critical = Number(nvl(nvl(domain.crit, domain.criticalCount), 0));
-    const warning = Number(nvl(nvl(domain.warn, domain.warningCount), 0));
-    const totalFindings = Number(nvl(nvl(domain.find, domain.findingCount), 0));
+  function buildDomainCounts(findings) {
+    const counts = { critical: 0, warning: 0, info: 0, total: 0 };
+    if (!Array.isArray(findings)) return counts;
+
+    for (let i = 0; i < findings.length; i++) {
+      const finding = findings[i] || {};
+      const severity = String(finding.severity || 'Info').toLowerCase();
+      counts.total += 1;
+      if (severity === 'critical') counts.critical += 1;
+      else if (severity === 'warning') counts.warning += 1;
+      else counts.info += 1;
+    }
+
+    return counts;
+  }
+
+  function buildDomainHistogram(counts) {
+    const critical = Number(nvl(counts.critical, 0));
+    const warning = Number(nvl(counts.warning, 0));
+    const totalFindings = Number(nvl(counts.total, 0));
     const info = Math.max(0, totalFindings - critical - warning);
     const buckets = [
       { cls: 'critical', count: critical },
@@ -96,6 +112,12 @@ export function buildDomains(doc) {
     return wrap;
   }
 
+  function buildMetaChip(text, modifier) {
+    const chip = el('span', 'domain-header__chip' + (modifier ? ' domain-header__chip--' + modifier : ''));
+    chip.textContent = text;
+    return chip;
+  }
+
   const wrap = el('div', 'report-domains');
   wrap.id = 'report-domains';
   for (let i = 0; i < domains.length; i++) {
@@ -107,23 +129,57 @@ export function buildDomains(doc) {
     sec.dataset.domain = domain.domain || '';
     sec.dataset.leadSeverity = domainSev;
 
+    const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
+    const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
+    const domainCounts = buildDomainCounts(insights);
+
     const details = el('details', 'report-domain__details');
     details.open = domainSev === 'critical' || domainSev === 'warning';
 
     const hdr = document.createElement('summary');
     hdr.className = 'domain-header domain-header--' + domainSev;
-    const dot = el('span', 'toc-dot toc-dot--' + domainSev); hdr.appendChild(dot);
-    const title = el('span', 'domain-header__name'); title.textContent = domain.domain || 'Domain';
-    hdr.appendChild(title);
-    const histogram = buildDomainHistogram(domain);
-    hdr.appendChild(histogram);
+    const lead = el('div', 'domain-header__lead');
+    const dot = el('span', 'toc-dot toc-dot--' + domainSev);
+    lead.appendChild(dot);
+    const copy = el('div', 'domain-header__copy');
+    const eyebrow = el('div', 'domain-header__eyebrow');
+    eyebrow.textContent = 'Domain';
+    copy.appendChild(eyebrow);
+    const title = el('span', 'domain-header__name');
+    title.textContent = domain.domain || 'Domain';
+    copy.appendChild(title);
+    const summary = el('div', 'domain-header__summary');
+    const summaryBits = [
+      String(sections.length) + ' analyzer section' + (sections.length === 1 ? '' : 's'),
+      String(domainCounts.total) + ' insight' + (domainCounts.total === 1 ? '' : 's')
+    ];
+    if (domainCounts.critical || domainCounts.warning) {
+      summaryBits.push(String(domainCounts.critical) + ' critical, ' + String(domainCounts.warning) + ' warning');
+    } else {
+      summaryBits.push('No critical or warning insights');
+    }
+    summary.textContent = summaryBits.join(' · ');
+    copy.appendChild(summary);
+    const meta = el('div', 'domain-header__meta');
+    meta.appendChild(buildMetaChip(String(sections.length) + ' sections', 'sections'));
+    meta.appendChild(buildMetaChip(String(domainCounts.total) + ' insights', 'insights'));
+    meta.appendChild(buildMetaChip(String(domainCounts.critical) + ' crit · ' + String(domainCounts.warning) + ' warn', 'severity'));
+    copy.appendChild(meta);
+    lead.appendChild(copy);
+    hdr.appendChild(lead);
+
+    const visual = el('div', 'domain-header__visual');
     const domSevLabel = domainSevLabel(domain.leadSeverity);
     if (domSevLabel !== 'Info') {
-      const pill = el('span', 'domain-header__sev domain-header__sev--' + domainSev); pill.textContent = domSevLabel; hdr.appendChild(pill);
+      const pill = el('span', 'domain-header__sev domain-header__sev--' + domainSev);
+      pill.textContent = domSevLabel;
+      visual.appendChild(pill);
     }
+    const histogram = buildDomainHistogram(domainCounts);
+    visual.appendChild(histogram);
+    hdr.appendChild(visual);
     details.appendChild(hdr);
 
-    const insights = Array.isArray(domain.domainInsights) ? domain.domainInsights : [];
     if (insights.length) {
       const insightsSec = el('section', 'report-domain__insights');
       insightsSec.id = domainId + '-insights';
@@ -144,11 +200,10 @@ export function buildDomains(doc) {
       details.appendChild(insightsSec);
     }
 
-    const sections = Array.isArray(domain.sections) ? sortSectionsForRender(domain.sections) : [];
     if (sections.length) {
       const body = el('div', 'domain-body');
       const heading = el('div', 'domain-body__heading');
-      heading.textContent = 'Analyzer Details';
+      heading.textContent = 'Analyzer details';
       body.appendChild(heading);
 
       const batchSize = 8;

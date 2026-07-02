@@ -838,7 +838,6 @@ details[open] > .toc-domain-summary { background: rgba(59,130,246,0.05); }
 }
 .toc-dot--critical { background: var(--sev-critical-bar); }
 .toc-dot--warning  { background: var(--sev-warning-bar); }
-.toc-dot--ok       { background: var(--sev-ok-bar); }
 .toc-dot--info     { background: var(--sev-info-bar); }
 
 /* Domain name ΓÇö clickable link inside summary */

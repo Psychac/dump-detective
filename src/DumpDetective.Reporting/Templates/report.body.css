@@ -815,10 +815,9 @@ body.reading-mode-forensics .toc-incident-only {
 .domain-header--critical { border-left: 5px solid var(--sev-critical-bar); }
 .domain-header--warning  { border-left: 5px solid var(--sev-warning-bar); }
 .domain-header--info     { border-left: 5px solid var(--sev-info-bar); }
-.domain-header--ok       { border-left: 5px solid var(--sev-ok-bar); }
 .domain-header__lead {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   min-width: 0;
   flex: 1 1 auto;
@@ -844,11 +843,6 @@ body.reading-mode-forensics .toc-incident-only {
   letter-spacing: -0.02em;
   line-height: 1.2;
   color: #0f172a;
-}
-.domain-header__summary {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--muted);
 }
 .domain-header__meta {
   display: flex;
@@ -915,7 +909,6 @@ body.reading-mode-forensics .toc-incident-only {
 .domain-header__histogram-bar--critical { background: var(--sev-critical-bar); }
 .domain-header__histogram-bar--warning  { background: var(--sev-warning-bar); }
 .domain-header__histogram-bar--info     { background: var(--sev-info-bar); }
-.domain-header__histogram-bar--ok       { background: var(--sev-ok-bar); }
 .domain-header__histogram-bar--unknown  { background: #94a3b8; }
 
 /* Domain body wraps the analyzer sections */

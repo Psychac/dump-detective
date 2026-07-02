@@ -92,9 +92,7 @@ export function buildDomains(doc) {
     const buckets = [
       { cls: 'critical', count: critical },
       { cls: 'warning', count: warning },
-      { cls: 'info', count: info },
-      { cls: 'ok', count: 0 },
-      { cls: 'unknown', count: 0 }
+      { cls: 'info', count: info }
     ];
 
     const wrap = el('span', 'domain-header__histogram');
@@ -148,18 +146,6 @@ export function buildDomains(doc) {
     const title = el('span', 'domain-header__name');
     title.textContent = domain.domain || 'Domain';
     copy.appendChild(title);
-    const summary = el('div', 'domain-header__summary');
-    const summaryBits = [
-      String(sections.length) + ' analyzer section' + (sections.length === 1 ? '' : 's'),
-      String(domainCounts.total) + ' insight' + (domainCounts.total === 1 ? '' : 's')
-    ];
-    if (domainCounts.critical || domainCounts.warning) {
-      summaryBits.push(String(domainCounts.critical) + ' critical, ' + String(domainCounts.warning) + ' warning');
-    } else {
-      summaryBits.push('No critical or warning insights');
-    }
-    summary.textContent = summaryBits.join(' · ');
-    copy.appendChild(summary);
     const meta = el('div', 'domain-header__meta');
     meta.appendChild(buildMetaChip(String(sections.length) + ' sections', 'sections'));
     meta.appendChild(buildMetaChip(String(domainCounts.total) + ' insights', 'insights'));

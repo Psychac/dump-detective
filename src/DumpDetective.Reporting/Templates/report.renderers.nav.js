@@ -192,41 +192,11 @@ export function buildDomains(doc) {
       heading.textContent = 'Analyzer details';
       body.appendChild(heading);
 
-      const batchSize = 8;
-      let rendered = 0;
-
-      function renderNextBatch() {
-        const end = Math.min(sections.length, rendered + batchSize);
-        for (let j = rendered; j < end; j++) {
-          body.appendChild(buildAnalyzerSection(sections[j], j, domainId));
-        }
-        rendered = end;
-      }
-
-      renderNextBatch();
-      if (rendered < sections.length) {
-        const loadMore = el('button', 'action-btn domain-load-more');
-        loadMore.type = 'button';
-        loadMore.textContent = 'Load more sections (' + (sections.length - rendered) + ' remaining)';
-        loadMore.addEventListener('click', function () {
-          renderNextBatch();
-          try {
-            document.dispatchEvent(new CustomEvent('dumpdetective:domain-sections-appended', {
-              detail: {
-                domainId: domainId,
-                renderedCount: rendered,
-                totalCount: sections.length
-              }
-            }));
-          } catch (e) { }
-          const remaining = sections.length - rendered;
-          if (remaining > 0) {
-            loadMore.textContent = 'Load more sections (' + remaining + ' remaining)';
-          } else {
-            loadMore.remove();
-          }
-        });
-        body.appendChild(loadMore);
+      // Render all analyzer sections inline. The previous behavior batched
+      // sections and added a "Load more sections" button; for Incident mode
+      // and simpler reports we render all sections immediately.
+      for (let j = 0; j < sections.length; j++) {
+        body.appendChild(buildAnalyzerSection(sections[j], j, domainId));
       }
       details.appendChild(body);
     }

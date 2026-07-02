@@ -120,19 +120,7 @@ export function setupInteractivity(doc, announce) {
     return sev === 'critical';
   }
 
-  function materializeForensicsSections() {
-    let guard = 0;
-    while (guard < 32) {
-      const loadMoreButtons = Array.from(document.querySelectorAll('.domain-load-more'));
-      if (!loadMoreButtons.length) break;
-      for (let i = 0; i < loadMoreButtons.length; i++) {
-        const btn = loadMoreButtons[i];
-        if (!btn || btn.disabled) continue;
-        btn.click();
-      }
-      guard++;
-    }
-  }
+  // materializeForensicsSections removed — sections are rendered inline now.
 
   function setToggleLabel(mode) {
     const btn = document.getElementById('reading-mode-toggle');
@@ -151,9 +139,7 @@ export function setupInteractivity(doc, announce) {
     const opts = options || {};
     const normalized = mode === 'forensics' ? 'forensics' : 'incident';
     activeReadingMode = normalized;
-    if (normalized === 'forensics') {
-      materializeForensicsSections();
-    }
+    // No deferred load-more behavior; all sections are already materialized.
     document.body.dataset.readingMode = normalized;
     document.body.classList.toggle('reading-mode-incident', normalized === 'incident');
     document.body.classList.toggle('reading-mode-forensics', normalized === 'forensics');

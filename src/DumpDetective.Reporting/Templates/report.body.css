@@ -776,6 +776,13 @@ body.reading-mode-incident .domain-body__heading {
   display: none;
 }
 
+/* In incident reading mode the analyzer sections are often hidden; remove
+   the domain body padding/gap so no empty spacing remains. */
+body.reading-mode-incident .domain-body {
+  padding: 0;
+  gap: 0;
+}
+
 body.reading-mode-forensics .domain-header {
   background-image: linear-gradient(180deg, rgba(15, 23, 42, 0.02), rgba(15, 23, 42, 0));
 }
@@ -931,16 +938,7 @@ body.reading-mode-forensics .toc-incident-only {
   color: var(--muted);
   margin-bottom: -4px;
 }
-.domain-load-more {
-  align-self: flex-start;
-  margin-top: -4px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255,255,255,0.92);
-  box-shadow: var(--shadow-soft);
-  color: var(--text-secondary);
-}
+/* `.domain-load-more` removed — sections are rendered inline now. */
 
 .domain-empty-state {
   margin: 0 18px 18px;

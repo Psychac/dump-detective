@@ -761,6 +761,9 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
   overflow: hidden;
   padding: 0 !important;
 }
+/* `.report-domain[hidden]` rule removed — container-level hiding not used.
+   Individual children (e.g. `.domain-body`, analyzer sections) are hidden
+   by JS/CSS as needed. Keeping this comment for historical context. */
 .report-domain__details { display: flex; flex-direction: column; }
 
 /* Reading mode visual identity */
@@ -776,22 +779,22 @@ body.reading-mode-incident .domain-body__heading {
   display: none;
 }
 
-/* In incident reading mode the analyzer sections are often hidden; remove
-   the domain body padding/gap so no empty spacing remains. */
+/* In incident reading mode hide analyzer container completely so no
+   stray line is shown when its children are hidden. Forensics mode
+   restores the normal layout. */
 body.reading-mode-incident .domain-body {
-  padding: 0;
-  gap: 0;
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
 }
+
+/* Forensics mode uses the base `.domain-body` and `.domain-body__heading`
+   styles defined below; no overrides required here. */
 
 body.reading-mode-forensics .domain-header {
   background-image: linear-gradient(180deg, rgba(15, 23, 42, 0.02), rgba(15, 23, 42, 0));
-}
-
-body.reading-mode-forensics .domain-body__heading {
-  display: block;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-size: 11px;
 }
 
 /* Navbar mode filtering */

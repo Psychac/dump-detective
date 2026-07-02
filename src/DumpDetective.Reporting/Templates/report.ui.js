@@ -120,6 +120,8 @@ export function setupInteractivity(doc, announce) {
     return sev === 'critical';
   }
 
+  // Domain content visibility helpers removed — rely on CSS to hide .domain-body in incident mode
+
   // materializeForensicsSections removed — sections are rendered inline now.
 
   function setToggleLabel(mode) {
@@ -139,34 +141,41 @@ export function setupInteractivity(doc, announce) {
     const opts = options || {};
     const normalized = mode === 'forensics' ? 'forensics' : 'incident';
     activeReadingMode = normalized;
-    // No deferred load-more behavior; all sections are already materialized.
-    document.body.dataset.readingMode = normalized;
-    document.body.classList.toggle('reading-mode-incident', normalized === 'incident');
-    document.body.classList.toggle('reading-mode-forensics', normalized === 'forensics');
+
+    // Update body state and classes (CSS drives visual differences)
+    try {
+      document.body.dataset.readingMode = normalized;
+      document.body.classList.toggle('reading-mode-incident', normalized === 'incident');
+      document.body.classList.toggle('reading-mode-forensics', normalized === 'forensics');
+    } catch (e) { /* ignore */ }
+
     const targets = collectModeTargets();
     const hideForIncident = normalized === 'incident';
+
+    // Hide/show forensics-scoped nodes (analyzer sections, provenance, etc.)
     for (let i = 0; i < targets.forensics.length; i++) {
       const node = targets.forensics[i];
       if (!node) continue;
       node.hidden = hideForIncident;
     }
 
+    // domain visibility is handled by CSS for reading modes
+
+    // Incident-only elements (ribbons, packets)
     for (let i = 0; i < targets.incidentOnly.length; i++) {
       const node = targets.incidentOnly[i];
       if (!node) continue;
       node.hidden = normalized === 'forensics';
     }
 
+    // Domain details: open in forensics, otherwise may open for critical domains
     for (let i = 0; i < targets.domainDetails.length; i++) {
       const detailsNode = targets.domainDetails[i];
       if (!detailsNode) continue;
-      if (normalized === 'forensics') {
-        detailsNode.open = true;
-      } else {
-        detailsNode.open = shouldOpenInIncident(detailsNode);
-      }
+      detailsNode.open = normalized === 'forensics' ? true : shouldOpenInIncident(detailsNode);
     }
 
+    // Analyzer and provenance detail panels: open only in forensics (respect lock)
     for (let i = 0; i < targets.analyzerDetails.length; i++) {
       const detailsNode = targets.analyzerDetails[i];
       if (!detailsNode) continue;
@@ -179,23 +188,20 @@ export function setupInteractivity(doc, announce) {
       detailsNode.open = normalized === 'forensics' ? forensicsLockOpen : false;
     }
 
+    // Appendix panels
     for (let i = 0; i < targets.appendixPanels.length; i++) {
       const panel = targets.appendixPanels[i];
       if (!panel) continue;
       panel.open = normalized === 'forensics' ? forensicsLockOpen : false;
     }
 
-    // Defer one more pass to cover asynchronously appended analyzer nodes.
+    // Defer one more pass to catch asynchronously appended nodes
     window.requestAnimationFrame(function () {
       const deferredTargets = collectModeTargets();
       for (let i = 0; i < deferredTargets.domainDetails.length; i++) {
         const detailsNode = deferredTargets.domainDetails[i];
         if (!detailsNode) continue;
-        if (normalized === 'forensics') {
-          detailsNode.open = true;
-        } else {
-          detailsNode.open = shouldOpenInIncident(detailsNode);
-        }
+        detailsNode.open = normalized === 'forensics' ? true : shouldOpenInIncident(detailsNode);
       }
       for (let i = 0; i < deferredTargets.analyzerDetails.length; i++) {
         const detailsNode = deferredTargets.analyzerDetails[i];
@@ -207,10 +213,10 @@ export function setupInteractivity(doc, announce) {
         if (!detailsNode) continue;
         detailsNode.open = normalized === 'forensics' ? forensicsLockOpen : false;
       }
+      // domain visibility is handled by CSS for reading modes
     });
 
     applyForensicsControls();
-
     setToggleLabel(normalized);
     if (!opts.silent && announce) announce('Reading mode: ' + normalized);
     if (!opts.skipPersist) {

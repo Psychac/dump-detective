@@ -22,13 +22,10 @@ export function buildHeader(doc) {
   const exportName = rawName.replace(/\.[^.]+$/, '') || 'report';
   const trendDumpCount = doc.trendDumpCount || paths.length || snapshots.length;
 
-  const sec = el('section', 'section-card header-card report-header');
-  sec.id = 'report-header';
-  sec.setAttribute('data-component-id', 'report-header');
-  const headerLegacyAnchor = el('span', 'section-anchor-legacy');
-  headerLegacyAnchor.id = 'sec-header';
-  headerLegacyAnchor.setAttribute('aria-hidden', 'true');
-  sec.appendChild(headerLegacyAnchor);
+  const shell = el('div', 'report-header-shell');
+
+  const banner = el('section', 'report-header__banner');
+  banner.setAttribute('aria-label', title + ' banner');
 
   // ── Hero band ────────────────────────────────────────────────────────────
   const hero = el('div', 'header-hero');
@@ -55,7 +52,19 @@ export function buildHeader(doc) {
   heroActions.appendChild(heroBtn('reading-mode-toggle', 'Switch reading mode', '\u25CC\u202FMode: Incident'));
   heroActions.appendChild(heroBtn('btn-toggle-contrast', 'Toggle high contrast mode', '\u25D1\u202FContrast'));
   hero.appendChild(heroActions);
-  sec.appendChild(hero);
+  banner.appendChild(hero);
+  shell.appendChild(banner);
+
+  const sec = el('section', 'report-header__body');
+  sec.id = 'report-header';
+  sec.setAttribute('data-component-id', 'report-header');
+  const headerLegacyAnchor = el('span', 'section-anchor-legacy');
+  headerLegacyAnchor.id = 'sec-header';
+  headerLegacyAnchor.setAttribute('aria-hidden', 'true');
+  sec.appendChild(headerLegacyAnchor);
+
+  const body = el('div', 'header-body');
+  sec.appendChild(body);
 
   const trendStory = isTrend ? (doc.trendStory || null) : null;
   if (isTrend && trendStory) {
@@ -95,7 +104,7 @@ export function buildHeader(doc) {
     addStoryRow('Metric references', Array.isArray(trendStory.metricReferences) ? trendStory.metricReferences.join(' · ') : '');
 
     if (storyBrief.childNodes.length) storyCard.appendChild(storyBrief);
-    sec.appendChild(storyCard);
+    body.appendChild(storyCard);
   }
 
   const topActions = Array.isArray(execSum.topActions) ? execSum.topActions : [];
@@ -130,7 +139,7 @@ export function buildHeader(doc) {
     hint.textContent = 'Use Promote to Forensics for deep context.';
     triageRibbon.appendChild(hint);
 
-    sec.appendChild(triageRibbon);
+    body.appendChild(triageRibbon);
   }
 
   function storyText(value) {
@@ -138,7 +147,6 @@ export function buildHeader(doc) {
   }
 
   // ── Body (meta-stat rows) ────────────────────────────────────────────────
-  const body = el('div', 'header-body');
 
   function splitPathParts(path) {
     const normalized = String(path || '').replace(/\\/g, '/');
@@ -158,10 +166,20 @@ export function buildHeader(doc) {
   }
   function statRow(groupLabel, items) {
     if (!items.length) return null;
-    const row = el('div', 'header-meta-row');
-    const grpBadge = el('span', 'header-meta-row__group'); grpBadge.textContent = groupLabel; row.appendChild(grpBadge);
-    for (const [lbl, val] of items) row.appendChild(statItem(lbl, val));
-    return row;
+    const kind = String(groupLabel || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const card = el('section', 'header-meta-row' + (kind ? ' header-meta-row--' + kind : ''));
+    const head = el('div', 'header-meta-row__head');
+    const grpBadge = el('span', 'header-meta-row__group');
+    grpBadge.textContent = groupLabel;
+    head.appendChild(grpBadge);
+    card.appendChild(head);
+    const itemsWrap = el('div', 'header-meta-row__items');
+    for (const [lbl, val] of items) itemsWrap.appendChild(statItem(lbl, val));
+    card.appendChild(itemsWrap);
+    return card;
   }
   function fmtDate(utcStr) {
     if (!utcStr) return '';
@@ -342,8 +360,8 @@ export function buildHeader(doc) {
     }
   }
 
-  sec.appendChild(body);
-  return sec;
+  shell.appendChild(sec);
+  return shell;
 }
 
 // ── Health Scorecard (single-dump rows + trend cards with timeline bars) ──────

@@ -223,7 +223,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 0;
+  padding: 8px 0;
   font-size: 13px;
   flex-wrap: wrap;
   border-bottom: 1px dashed var(--border);
@@ -278,8 +278,8 @@
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
-  background: #f3f4f6;
+  color: #475569;
+  background: #f8fafc;
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
@@ -287,9 +287,9 @@
 }
 .header-trend-dump__ts {
   font-size: 11px;
-  color: #3730a3;
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  color: #0f766e;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -321,8 +321,15 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 0;
+  padding: 12px 14px;
   flex-wrap: wrap;
+  border: 1px solid #dbe3ee;
+  border-left: 4px solid #2563eb;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: var(--shadow-soft);
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .header-trend-range__label {
   flex-shrink: 0;
@@ -341,24 +348,34 @@
 .header-trend-range__count {
   margin-left: auto;
   padding: 2px 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  color: #374151;
+  color: #1d4ed8;
   white-space: nowrap;
 }
 
 /* Trend header: dump list */
-.header-trend-dumps { margin-top: 10px; }
+.header-trend-dumps {
+  margin-top: 0;
+  padding: 12px 14px;
+  border: 1px solid #dbe3ee;
+  border-left: 4px solid #0f766e;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: var(--shadow-soft);
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .header-trend-dumps__list { display: flex; flex-direction: column; gap: 0; }
 .header-trend-dumps__summary {
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted);
-  padding: 6px 0;
+  color: #334155;
+  padding: 2px 0 8px;
   list-style: none;
   user-select: none;
 }
@@ -366,6 +383,17 @@
 .header-trend-dumps__summary::before { content: '\25B6\A0'; font-size: 9px; }
 details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 .header-trend-dumps__list .header-trend-dump:last-child { border-bottom: none; }
+
+@media (max-width: 760px) {
+  .header-trend-dump {
+    gap: 8px;
+  }
+
+  .header-trend-range__count,
+  .header-trend-dump__meta {
+    margin-left: 0;
+  }
+}
 
 /* Score triplet */
 .exec-scores {

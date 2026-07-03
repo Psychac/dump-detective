@@ -54,7 +54,6 @@ internal sealed class ExecutiveSummaryProjector
 
     public ExecutiveSummaryRecord Build(
         IReadOnlyList<FindingRecord> findings,
-        HealthScorecard scorecard,
         IReadOnlyList<AnalyzerRunResult> runs,
         long? totalManagedBytes = null)
     {
@@ -93,7 +92,6 @@ internal sealed class ExecutiveSummaryProjector
             ThreadContentionScore: thread.Score,
             TopRecommendations: top3)
         {
-            HealthScorecard = scorecard,
             CriticalFindings = criticalFindings,
             WarningFindings = warningFindings,
             ScoreBreakdowns = [leak, gcPressure, thread],

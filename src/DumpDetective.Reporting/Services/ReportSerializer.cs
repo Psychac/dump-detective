@@ -116,7 +116,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
         // Always include Executive summary (previously included for Executive/All)
         HealthScorecard scorecard = HealthScorecardBuilder.Build(runs);
-        ExecutiveSummaryRecord? executiveSummary = _executiveSummaryProjector.Build(deduped, scorecard, runs, totalManagedBytes);
+        ExecutiveSummaryRecord? executiveSummary = _executiveSummaryProjector.Build(deduped, runs, totalManagedBytes);
 
         string? analyzerVersion = typeof(ReportSerializer).Assembly.GetName().Version?.ToString(3);
 

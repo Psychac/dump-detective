@@ -216,7 +216,6 @@ internal sealed partial record ExecutiveSummaryRecord(
 // P1.2: Explicit score breakdowns with contributors and trend-mode deltas
 internal partial record ExecutiveSummaryRecord
 {
-    public HealthScorecard? HealthScorecard { get; init; } = null;
     public IReadOnlyList<FindingRecord>? CriticalFindings { get; init; } = null;
     public IReadOnlyList<FindingRecord>? WarningFindings { get; init; } = null;
     public IReadOnlyList<ScoreBreakdown>? ScoreBreakdowns { get; init; } = null;

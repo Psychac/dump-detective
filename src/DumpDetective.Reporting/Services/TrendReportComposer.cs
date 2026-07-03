@@ -331,8 +331,8 @@ internal sealed class TrendReportComposer(
             .ToArray();
         lastFindings = SortFindings(lastFindings).ToArray();
 
-        ExecutiveSummaryRecord first = _executiveSummaryProjector.Build(firstFindings, firstScorecard, snapshots[0].Runs);
-        ExecutiveSummaryRecord last = _executiveSummaryProjector.Build(lastFindings, lastScorecard, snapshots[^1].Runs);
+        ExecutiveSummaryRecord first = _executiveSummaryProjector.Build(firstFindings, snapshots[0].Runs);
+        ExecutiveSummaryRecord last = _executiveSummaryProjector.Build(lastFindings, snapshots[^1].Runs);
 
         return summary with
         {

@@ -37,12 +37,14 @@ function formatTypedMetricNumber(metricValue) {
 
 function formatCompactNumericValue(numeric, meta) {
   if (!Number.isFinite(numeric)) return '';
+  const type = String(meta && meta.type ? meta.type : '').toLowerCase();
   const format = String(meta && meta.format ? meta.format : '').toLowerCase();
-  if (format === 'bytes') return formatBytes(numeric);
-  if (format === 'percent') return numeric.toFixed(1) + '%';
-  if (format === 'ratio') return numeric.toFixed(2) + 'x';
-  if (format === 'permille') return numeric.toFixed(1) + '‰';
-  if (format === 'milliseconds') return formatMilliseconds(numeric);
+  const kind = format || type;
+  if (kind === 'bytes') return formatBytes(numeric);
+  if (kind === 'percent') return numeric.toFixed(1) + '%';
+  if (kind === 'ratio') return numeric.toFixed(2) + 'x';
+  if (kind === 'permille') return numeric.toFixed(1) + '‰';
+  if (kind === 'milliseconds') return formatMilliseconds(numeric);
   return Number.isInteger(numeric) ? numeric.toLocaleString('en-US') : numeric.toFixed(2);
 }
 

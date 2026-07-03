@@ -34,7 +34,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
 
         compactTables.Add(STCompact(
             "GC root kinds",
-            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap") },
+            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap", "number", "percent") },
             BuildKindRows(roots.ByKind).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         compactTables.Add(STCompact(
@@ -48,7 +48,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             compactTables.Add(STCompact(
                 "Finalizer roots",
                 new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
-                finalizerRoots.Take(10).Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", FormatBytes(root.EstimatedRetainedBytes), root.SeverityScore.ToString("N0"), $"0x{root.RootAddress:X}" })).ToArray()));
+                finalizerRoots.Take(10).Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
         }
 
         // ── Root paths: outer collapsible wrapper ─────────────────────────

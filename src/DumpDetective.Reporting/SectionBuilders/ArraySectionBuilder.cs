@@ -68,7 +68,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             int limit = Math.Min(d.TopSparseArrays.Count, TopSparseRows);
             compactTables.Add(STCompact(
                 "Sparse arrays by estimated wasted bytes",
-                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Null/Default %"), CH("Wasted Bytes","bytes") },
+                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Null/Default %", "number", "percent"), CH("Wasted Bytes","bytes") },
                 BuildSparseRows(d.TopSparseArrays, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopSparseArrays.Count > limit)
                 blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));

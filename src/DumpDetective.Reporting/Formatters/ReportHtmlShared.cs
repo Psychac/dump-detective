@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using DumpDetective.Reporting.Models;
@@ -193,7 +194,7 @@ internal static class ReportHtmlShared
             sb.Append("<tr>");
             foreach (TableCell cell in row.Cells)
             {
-                string da = cell.RawValue.HasValue ? $" data-value=\"{cell.RawValue.Value}\"" : string.Empty;
+                string da = cell.RawValue.HasValue ? $" data-value=\"{cell.RawValue.Value.ToString(CultureInfo.InvariantCulture)}\"" : string.Empty;
                 string display = cell.Display ?? string.Empty;
                 // Sparkline payload token: __SPARK__<json> (legacy)
                 if (display.StartsWith("__SPARK__", StringComparison.Ordinal))

@@ -46,24 +46,24 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             compactTables.Add(STCompact(
                 "Top dominator suspects by retained bytes",
-                new[] { CH("Type"), CH("Objects","number"), CH("Shallow","bytes"), CH("Retained","bytes"), CH("Ratio"), CH("Avg Size","bytes"), CH("Sample Addr") },
+                new[] { CH("Type"), CH("Objects","number"), CH("Shallow","bytes"), CH("Retained","bytes"), CH("Ratio", "number", "permille"), CH("Avg Size","bytes"), CH("Sample Addr") },
                 d.TopDominatorTypes.Take(20).Select(type => R(
                     type.TypeName,
                     type.Count,
-                    FormatBytes(type.TotalBytes),
-                    type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—",
+                    type.TotalBytes,
+                    type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
                     (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000),
-                    type.AverageSize > 0 ? FormatBytes(type.AverageSize) : "—",
+                    type.AverageSize > 0 ? type.AverageSize : null,
                     $"0x{type.SampleAddress:X}")).ToArray()));
             if (d.TotalEstimatedRetainedBytes > 0)
             {
                 compactTables.Add(STCompact(
                     "Dominator impact per-mille (of total estimated retained)",
-                    new[] { CH("Type"), CH("Est. Retained","bytes"), CH("Per-mille") },
+                    new[] { CH("Type"), CH("Est. Retained","bytes"), CH("Per-mille", "number", "permille") },
                     d.TopDominatorTypes.Take(20).Select(type => R(
                         type.TypeName,
-                        type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—",
-                        type.EstimatedRetainedBytes == 0 ? "—" : $"{(double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes:F1}‰")).ToArray()));
+                        type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
+                        type.EstimatedRetainedBytes == 0 ? null : (double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes)).ToArray()));
             }
         }
 

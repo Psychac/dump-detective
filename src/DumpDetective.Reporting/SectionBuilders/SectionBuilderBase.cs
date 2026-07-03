@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
 using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Utilities;
@@ -27,7 +30,16 @@ internal abstract class SectionBuilderBase
     protected static CollapsibleSectionBeginBlock CollapseBegin(string title) => new(title);
     protected static CollapsibleSectionEndBlock CollapseEnd() => new();
     protected static TableRow Row(params TableCell[] cells) => new(cells);
-    protected static TableCell Cell(string display, long? raw = null) => new(display, raw);
+    protected static TableCell Cell(string display, double? raw = null)
+    {
+        if (raw.HasValue)
+            return new(display, raw);
+
+        if (TryInferNumericRaw(display, out double inferred))
+            return new(display, inferred);
+
+        return new(display);
+    }
 
     // ── Compact table helpers (Batch 0)
     protected static CompactHeader CH(string name, string type = "string", string? format = null, bool sortable = true)
@@ -72,6 +84,64 @@ internal abstract class SectionBuilderBase
     }
 
     protected static string FormatBytes(long bytes) => FormatBytes((ulong)Math.Max(0, bytes));
+
+    private static bool TryInferNumericRaw(string display, out double raw)
+    {
+        raw = 0;
+        if (string.IsNullOrWhiteSpace(display))
+            return false;
+
+        string text = display.Trim();
+
+        if (double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out raw))
+            return true;
+
+        Match bytesMatch = Regex.Match(text, @"^([+-]?\d[\d,]*(?:\.\d+)?)\s*(B|KB|MB|GB|TB|PB|EB)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (bytesMatch.Success && TryParseInvariantDouble(bytesMatch.Groups[1].Value, out double bytesValue))
+        {
+            int power = bytesMatch.Groups[2].Value.ToUpperInvariant() switch
+            {
+                "B" => 0,
+                "KB" => 1,
+                "MB" => 2,
+                "GB" => 3,
+                "TB" => 4,
+                "PB" => 5,
+                _ => 6,
+            };
+
+            raw = bytesValue * Math.Pow(1024, power);
+            return true;
+        }
+
+        Match timeMatch = Regex.Match(text, @"^([+-]?\d[\d,]*(?:\.\d+)?)\s*(MS|S|SEC|SECS|SECOND|SECONDS|MIN|MINS|MINUTE|MINUTES|H|HR|HRS|HOUR|HOURS)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (timeMatch.Success && TryParseInvariantDouble(timeMatch.Groups[1].Value, out double timeValue))
+        {
+            string unit = timeMatch.Groups[2].Value.ToLowerInvariant();
+            raw = unit switch
+            {
+                "ms" => timeValue,
+                "s" or "sec" or "secs" or "second" or "seconds" => timeValue * 1000,
+                "min" or "mins" or "minute" or "minutes" => timeValue * 60000,
+                "h" or "hr" or "hrs" or "hour" or "hours" => timeValue * 3600000,
+                _ => timeValue,
+            };
+            return true;
+        }
+
+        Match percentMatch = Regex.Match(text, @"^([+-]?\d[\d,]*(?:\.\d+)?)%$", RegexOptions.CultureInvariant);
+        if (percentMatch.Success && TryParseInvariantDouble(percentMatch.Groups[1].Value, out raw))
+            return true;
+
+        Match ratioMatch = Regex.Match(text, @"^([+-]?\d[\d,]*(?:\.\d+)?)x$", RegexOptions.CultureInvariant);
+        if (ratioMatch.Success && TryParseInvariantDouble(ratioMatch.Groups[1].Value, out raw))
+            return true;
+
+        return false;
+    }
+
+    private static bool TryParseInvariantDouble(string value, out double raw)
+        => double.TryParse(value.Replace(",", string.Empty), NumberStyles.Float, CultureInfo.InvariantCulture, out raw);
 
     protected static string FormatRatio(ulong part, ulong total)
         => total == 0 ? "0.0%" : $"{part * 100.0 / total:F1}%";

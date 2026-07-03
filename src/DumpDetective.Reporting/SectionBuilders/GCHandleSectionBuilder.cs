@@ -50,7 +50,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
                     Cell($"{entry.Count:N0}", entry.Count),
                     Cell($"{pct:F1}%")]));
             }
-            compactTables.Add(STCompact("Handles by kind", new[] { CH("Kind"), CH("Count","number"), CH("% Total") }, kindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Handles by kind", new[] { CH("Kind"), CH("Count","number"), CH("% Total", "number", "percent") }, kindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var topTargets = d.TopTargetTypes ?? [];
@@ -85,7 +85,7 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
                     Cell(FormatHelper.FormatBytes(entry.Bytes), (long)entry.Bytes),
                     Cell($"{pct:F1}%")]));
             }
-            compactTables.Add(STCompact("Pinned types by retained bytes", new[] { CH("Type"), CH("Retained Bytes","bytes"), CH("% Pinned") }, pbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Pinned types by retained bytes", new[] { CH("Type"), CH("Retained Bytes","bytes"), CH("% Pinned", "number", "percent") }, pbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

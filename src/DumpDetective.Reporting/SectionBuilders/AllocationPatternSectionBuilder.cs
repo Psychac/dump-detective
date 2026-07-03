@@ -55,21 +55,21 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         if (d.TopTransientTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top transient types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Profile") },
                 BuildRows(d.TopTransientTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopShortishTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top medium-lived types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Profile") },
                 BuildRows(d.TopShortishTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLongLivedTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top long-lived types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio"), CH("Profile") },
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Profile") },
                 BuildRows(d.TopLongLivedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -93,7 +93,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Cell(p.Gen0Count.ToString("N0"), p.Gen0Count),
                 Cell(p.Gen1Count.ToString("N0"), p.Gen1Count),
                 Cell(p.Gen2Count.ToString("N0"), p.Gen2Count),
-                Cell($"{p.LongLivedRatio:P1}"),
+                Cell(p.LongLivedRatio.ToString("P1"), p.LongLivedRatio),
                 Cell(p.Profile.ToString())));
         }
         return rows;

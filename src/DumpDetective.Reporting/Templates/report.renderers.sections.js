@@ -11,28 +11,6 @@ function extractCellDisplay(cellData) {
   return '';
 }
 
-function extractCellRaw(cellData) {
-  if (!cellData || typeof cellData !== 'object') return null;
-  if (cellData.rawValue != null && Number.isFinite(Number(cellData.rawValue))) return Number(cellData.rawValue);
-  return null;
-}
-
-function parseBytesFromDisplay(display) {
-  const text = String(display || '').trim();
-  const m = text.match(/^([+-]?\d[\d,]*(?:\.\d+)?)\s*(B|KB|MB|GB|TB|PB|EB)$/i);
-  if (!m) return null;
-  const value = Number(m[1].replace(/,/g, ''));
-  if (!Number.isFinite(value)) return null;
-  const unit = m[2].toUpperCase();
-  const power = unit === 'B' ? 0 :
-    unit === 'KB' ? 1 :
-    unit === 'MB' ? 2 :
-    unit === 'GB' ? 3 :
-    unit === 'TB' ? 4 :
-    unit === 'PB' ? 5 : 6;
-  return value * Math.pow(1024, power);
-}
-
 function formatTypedMetricNumber(metricValue) {
   const numeric = Number(metricValue && metricValue.value);
   if (!Number.isFinite(numeric)) return '';
@@ -54,6 +32,17 @@ function formatTypedMetricNumber(metricValue) {
   if (unit === 'custom' && metricValue && typeof metricValue.formatted === 'string' && metricValue.formatted.trim()) {
     return metricValue.formatted;
   }
+  return Number.isInteger(numeric) ? numeric.toLocaleString('en-US') : numeric.toFixed(2);
+}
+
+function formatCompactNumericValue(numeric, meta) {
+  if (!Number.isFinite(numeric)) return '';
+  const format = String(meta && meta.format ? meta.format : '').toLowerCase();
+  if (format === 'bytes') return formatBytes(numeric);
+  if (format === 'percent') return numeric.toFixed(1) + '%';
+  if (format === 'ratio') return numeric.toFixed(2) + 'x';
+  if (format === 'permille') return numeric.toFixed(1) + '‰';
+  if (format === 'milliseconds') return formatMilliseconds(numeric);
   return Number.isInteger(numeric) ? numeric.toLocaleString('en-US') : numeric.toFixed(2);
 }
 
@@ -92,9 +81,11 @@ function buildTopTypesTreemap(tbl) {
     const cells = Array.isArray(row) ? row : (row && Array.isArray(row.cells) ? row.cells : []);
     if (!cells.length || sizeIdx >= cells.length || labelIdx >= cells.length) continue;
     const label = extractCellDisplay(cells[labelIdx]);
-    const raw = extractCellRaw(cells[sizeIdx]);
-    const parsed = parseBytesFromDisplay(extractCellDisplay(cells[sizeIdx]));
-    const value = raw != null ? raw : parsed;
+    const value = typeof cells[sizeIdx] === 'number'
+      ? cells[sizeIdx]
+      : (cells[sizeIdx] && typeof cells[sizeIdx] === 'object' && Number.isFinite(Number(cells[sizeIdx].rawValue))
+        ? Number(cells[sizeIdx].rawValue)
+        : Number(cells[sizeIdx]));
     if (!label || value == null || value <= 0) continue;
     items.push({ label: label, value: value });
   }
@@ -420,33 +411,16 @@ export function buildAnalyzerSection(section, i) {
                   let numeric = null;
                   // extract raw display first
                   let display = extractCellDisplay(cellData);
-                  if (meta && (meta.type === 'number' || meta.type === 'bytes')) {
+                  if (meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format)) {
                     if (typeof cellData === 'number') numeric = cellData;
-                    else if (typeof cellData === 'string') {
-                      const n = Number(String(cellData).replace(/,/g, '').replace(/%$/g, ''));
-                      if (!Number.isNaN(n)) numeric = n;
-                      else {
-                        const parsed = parseBytesFromDisplay(cellData);
-                        if (parsed != null) numeric = parsed;
-                      }
-                    }
-                    else if (cellData && typeof cellData === 'object') {
-                      const raw = extractCellRaw(cellData);
-                      if (raw != null) numeric = raw;
-                      else {
-                        const parsed = parseBytesFromDisplay(display);
-                        if (parsed != null) numeric = parsed;
-                      }
+                    else if (cellData && typeof cellData === 'object' && Number.isFinite(Number(cellData.rawValue))) numeric = Number(cellData.rawValue);
+                    else if (typeof cellData === 'string' && Number.isFinite(Number(String(cellData).replace(/,/g, '').replace(/%$/g, '')))) {
+                      numeric = Number(String(cellData).replace(/,/g, '').replace(/%$/g, ''));
                     }
 
                     if (numeric != null && Number.isFinite(Number(numeric))) {
                       td.dataset.value = String(Number(numeric));
-                      if (meta.type === 'bytes') {
-                        td.textContent = formatBytes(Number(numeric));
-                      } else {
-                        // Use locale formatting for numeric columns when possible
-                        td.textContent = Number.isInteger(Number(numeric)) ? Number(numeric).toLocaleString('en-US') : Number(numeric).toFixed(2);
-                      }
+                      td.textContent = formatCompactNumericValue(Number(numeric), meta);
                     } else {
                       td.textContent = display;
                     }

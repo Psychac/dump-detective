@@ -132,7 +132,7 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
                     Cell($"{cumulativePct:F1}%"),
                     Cell(FormatHelper.FormatBytes(b.TotalBytes), (long)Math.Min(b.TotalBytes, long.MaxValue))));
             }
-            compactTables.Add(STCompact("Object size histogram", new[] { CH("Range"), CH("Objects","number"), CH("% Objects"), CH("Cumulative %"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Object size histogram", new[] { CH("Range"), CH("Objects","number"), CH("% Objects", "number", "percent"), CH("Cumulative %", "number", "percent"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
 

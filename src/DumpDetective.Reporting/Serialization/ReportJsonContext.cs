@@ -38,6 +38,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(List<RankedActionRecord>))]
 [JsonSerializable(typeof(CorrelationEventRecord))]
 [JsonSerializable(typeof(List<CorrelationEventRecord>))]
+[JsonSerializable(typeof(ulong))]
 // Section contract-slot types
 [JsonSerializable(typeof(SectionLeadFinding))]
 [JsonSerializable(typeof(SectionKeyMetric))]

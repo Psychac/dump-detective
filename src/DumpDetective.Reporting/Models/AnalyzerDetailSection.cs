@@ -51,7 +51,7 @@ internal sealed record CompactHeader(
     bool Sortable = true);
 
 /// <summary>Compact row as a dense array of primitive values (strings, numbers, nulls).
-/// Values are interpreted according to the corresponding header metadata.</summary>
+/// Numeric columns should be emitted as raw numbers; formatting belongs in the client layer.</summary>
 internal sealed record CompactRow(object?[] Values);
 
 /// <summary>Compact table: headers carry typing/formatting metadata and rows are arrays-of-values.
@@ -138,7 +138,7 @@ internal sealed record ConfidenceBandBlock(
     string[] Caveats) : SectionBlock;
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
-internal sealed record TableCell(string Display, long? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links
+internal sealed record TableCell(string Display, double? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links
 
 internal sealed record CollapsibleSectionBeginBlock(string Title) : SectionBlock;
 internal sealed record CollapsibleSectionEndBlock : SectionBlock;

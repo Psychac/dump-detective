@@ -91,19 +91,19 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
                 compactTables.Add(STCompact(
                 "Top leak candidates by suspicion score",
-                new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio") },
+                    new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio") },
                 leak.TopCandidates.Take(TopCandidateCount).Select(candidate => R(new object?[] {
                     candidate.TypeName,
                     candidate.SuspicionScore,
                     candidate.Severity.ToString(),
                     candidate.Classification.ToString(),
-                    FormatBytes(candidate.TotalSize),
+                        candidate.TotalSize,
                     candidate.InstanceCount,
-                    candidate.Gen2Pct.ToString("F1") + "%",
+                        candidate.Gen2Pct,
                     candidate.RootKind ?? "—",
                     candidate.IsFinalizable ? "Yes" : "No",
                     candidate.IsContainer ? "Yes" : "No",
-                    candidate.ReferenceFieldRatio.ToString("F2")
+                        candidate.ReferenceFieldRatio
                 })).ToArray()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));

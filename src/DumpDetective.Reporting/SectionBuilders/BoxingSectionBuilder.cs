@@ -67,7 +67,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WasteRatio:P0}")]));
             }
             compactTables.Add(STCompact("Struct types with highest padding waste",
-                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopPaddingWasteTypes.Count > TopPaddingToShow)
                 blocks.Add(T($"Showing top {TopPaddingToShow} padding-waste types. {d.TopPaddingWasteTypes.Count - TopPaddingToShow} additional type(s) omitted."));
         }

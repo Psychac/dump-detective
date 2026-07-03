@@ -60,7 +60,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         compactTables.Add(STCompact("Analyzer run status",
-            new[] { CH("Analyzer"), CH("Status"), CH("Duration (ms)", "number"), CH("Objects Scanned","number"), CH("Error/Skip Reason") },
+            new[] { CH("Analyzer"), CH("Status"), CH("Duration (ms)", "number", "milliseconds"), CH("Objects Scanned","number"), CH("Error/Skip Reason") },
             rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>

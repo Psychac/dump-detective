@@ -70,7 +70,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.Kind.ToString()),
                     Cell($"{c.Count:N0}", c.Count),
                     Cell($"{c.Capacity:N0}", c.Capacity),
-                    Cell($"{c.FillRate:F1}%",   (long)(c.FillRate * 100)),
+                    Cell($"{c.FillRate:F1}%",   c.FillRate),
                     Cell(FormatHelper.FormatBytes(c.WastedMemory), (long)c.WastedMemory),
                     Cell(c.Head.HasValue ? c.Head.Value.ToString("N0") : "—", c.Head.HasValue ? c.Head.Value : null),
                     Cell(c.Tail.HasValue ? c.Tail.Value.ToString("N0") : "—", c.Tail.HasValue ? c.Tail.Value : null),

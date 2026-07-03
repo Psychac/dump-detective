@@ -61,13 +61,13 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 Cell(type.LohBytes > 0 ? FormatBytes(type.LohBytes) : "—"),
                 Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : (type.Count > 0 ? FormatBytes(type.TotalBytes / (ulong)type.Count) : "—")),
                 Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—"),
-                Cell(gen is null ? "—" : GenPct(gen, 0)),
-                Cell(gen is null ? "—" : GenPct(gen, 1)),
-                Cell(gen is null ? "—" : GenRatio(gen)),
+                Cell(gen is null ? "—" : GenPct(gen, 0), gen is null ? null : GenPctValue(gen, 0)),
+                Cell(gen is null ? "—" : GenPct(gen, 1), gen is null ? null : GenPctValue(gen, 1)),
+                Cell(gen is null ? "—" : GenRatio(gen), gen is null ? null : GenRatioValue(gen)),
                 Cell(profile is null ? "—" : profile.IsFinalizable ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.IsValueType ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.ReferenceFields.ToString("N0"), profile is null ? null : profile.ReferenceFields),
-                Cell(profile is null ? "—" : profile.ReferenceFieldRatio.ToString("F2")),
+                Cell(profile is null ? "—" : profile.ReferenceFieldRatio.ToString("F2"), profile is null ? null : profile.ReferenceFieldRatio),
                 Cell(profile is null ? "—" : profile.IsArray ? "Yes" : "No"),
                 Cell(profile is null ? "—" : profile.BaseTypeChainDepth.ToString("N0"), profile is null ? null : profile.BaseTypeChainDepth),
                 Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
@@ -96,7 +96,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         compactTables.Add(STCompact(
             "Type table",
-            new[] { CH("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%"), CH("Gen1%"), CH("Gen2%"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Module"), CH("Method Table") },
+            new[] { CH("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%", "number", "percent"), CH("Gen1%", "number", "percent"), CH("Gen2%", "number", "percent"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio", "number", "ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Module"), CH("Method Table") },
             rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (shape?.TopValueHeavyTypes is { Count: > 0 })
@@ -110,7 +110,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                     Cell(profile.TotalFields.ToString("N0"), profile.TotalFields),
                     Cell(profile.ReferenceFields.ToString("N0"), profile.ReferenceFields),
                     Cell(profile.ValueFields.ToString("N0"), profile.ValueFields),
-                    Cell(profile.ReferenceFieldRatio.ToString("F2")),
+                    Cell(profile.ReferenceFieldRatio.ToString("F2"), profile.ReferenceFieldRatio),
                     Cell(profile.InstanceCount.ToString("N0"), profile.InstanceCount > (ulong)long.MaxValue ? long.MaxValue : (long)profile.InstanceCount),
                     Cell(profile.IsValueType ? "Yes" : "No"),
                     Cell(profile.IsArray ? "Yes" : "No"),
@@ -120,7 +120,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             }
             compactTables.Add(STCompact(
                 "Value-heavy types",
-                new[] { CH("Type"), CH("Total Fields","number"), CH("Reference Fields","number"), CH("Value Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Value Type"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Category") },
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Reference Fields","number"), CH("Value Fields","number"), CH("Ref Ratio", "number", "ratio"), CH("Instances","number"), CH("Value Type"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Category") },
                 valueRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -207,7 +207,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             }
             compactTables.Add(STCompact(
                 "Dominator candidates",
-                new[] { CH("Type"), CH("Reason"), CH("Instances","number"), CH("Shallow Size","bytes"), CH("Gen2%"), CH("Estimated Retained","bytes"), CH("Sample Address"), CH("GC Root Reachability") },
+                new[] { CH("Type"), CH("Reason"), CH("Instances","number"), CH("Shallow Size","bytes"), CH("Gen2%", "number", "percent"), CH("Estimated Retained","bytes"), CH("Sample Address"), CH("GC Root Reachability") },
                 candidateRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -248,23 +248,29 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         return null;
     }
 
-    private static string GenRatio(TypeGenerationProfile profile)
+    private static double GenRatioValue(TypeGenerationProfile profile)
     {
         int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count;
         if (total == 0)
-            return "—";
+            return 0.0;
 
-        return $"{profile.Gen2Count * 100.0 / total:F1}%";
+        return profile.Gen2Count * 100.0 / total;
     }
 
-    private static string GenPct(TypeGenerationProfile profile, int gen)
+    private static string GenRatio(TypeGenerationProfile profile)
+        => $"{GenRatioValue(profile):F1}%";
+
+    private static double GenPctValue(TypeGenerationProfile profile, int gen)
     {
         int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
         if (total == 0)
-            return "—";
+            return 0.0;
         int count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
-        return $"{count * 100.0 / total:F1}%";
+        return count * 100.0 / total;
     }
+
+    private static string GenPct(TypeGenerationProfile profile, int gen)
+        => $"{GenPctValue(profile, gen):F1}%";
 
     private sealed record DominatorCandidate(
         string TypeName,
@@ -333,12 +339,6 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         return candidates.OrderByDescending(c => c.ShallowBytes).Take(TopRows).ToArray();
-    }
-
-    private static double GenRatioValue(TypeGenerationProfile profile)
-    {
-        int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count;
-        return total == 0 ? 0.0 : profile.Gen2Count * 100.0 / total;
     }
 
     private static string FormatBytes(ulong value)

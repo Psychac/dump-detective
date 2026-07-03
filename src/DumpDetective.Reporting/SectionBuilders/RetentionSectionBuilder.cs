@@ -48,15 +48,15 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
             compactTables.Add(STCompact(
                 "Highly referenced objects",
                 new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Incoming Refs","number"), CH("Est. Retained","bytes") },
-                d.TopHighlyReferencedObjects.Take(20).Select(o => R(new object?[] { $"0x{o.Address:X}", o.TypeName, FormatBytes(o.Size), o.IncomingReferences, o.EstimatedRetainedBytes > 0 ? FormatBytes(o.EstimatedRetainedBytes) : "—" })).ToArray()));
+                d.TopHighlyReferencedObjects.Take(20).Select(o => R(new object?[] { $"0x{o.Address:X}", o.TypeName, o.Size, o.IncomingReferences, o.EstimatedRetainedBytes > 0 ? o.EstimatedRetainedBytes : null })).ToArray()));
         }
 
         if (d.TopRetentionTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact(
                 "Top retention types",
-                new[] { CH("Type"), CH("Objects","number"), CH("Footprint","bytes"), CH("Total Incoming Refs","number"), CH("Max Incoming Refs","number"), CH("Est. Retained","bytes"), CH("Ratio") },
-                d.TopRetentionTypes.Take(20).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, FormatBytes(t.TotalBytes), t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? FormatBytes(t.EstimatedRetainedBytes) : "—", FormatRatio(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
+                new[] { CH("Type"), CH("Objects","number"), CH("Footprint","bytes"), CH("Total Incoming Refs","number"), CH("Max Incoming Refs","number"), CH("Est. Retained","bytes"), CH("Ratio", "number", "ratio") },
+                d.TopRetentionTypes.Take(20).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, t.TotalBytes, t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? t.EstimatedRetainedBytes : null, Ratio(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
         }
 
         if (caveats.Count > 0)
@@ -70,9 +70,6 @@ internal sealed class RetentionSectionBuilder : SectionBuilderBase, IAnalyzerSec
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
-
-    private static string FormatRatio(ulong retained, ulong shallow)
-        => shallow == 0 ? "—" : $"{(double)retained / shallow:F2}x";
 
     private static double Ratio(ulong retained, ulong shallow)
         => shallow == 0 ? 0.0 : (double)retained / shallow;

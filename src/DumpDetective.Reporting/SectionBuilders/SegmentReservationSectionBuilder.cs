@@ -86,7 +86,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                     Cell($"{seg.FillPct:F1}%")));
             }
             compactTables.Add(STCompact("Segment table",
-                new[] { CH("Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %") },
+                new[] { CH("Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %", "number", "percent") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

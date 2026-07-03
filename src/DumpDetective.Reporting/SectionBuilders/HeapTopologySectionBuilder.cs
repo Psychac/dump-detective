@@ -79,7 +79,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(heap.ObjectCount >= 0 ? heap.ObjectCount.ToString("N0") : "N/A", heap.ObjectCount >= 0 ? heap.ObjectCount : null),
                     Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
-            compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total", "number", "percent"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
                 blocks.Add(T("Warning: Logical heaps are skewed: largest heap is more than 2x the smallest."));
         }

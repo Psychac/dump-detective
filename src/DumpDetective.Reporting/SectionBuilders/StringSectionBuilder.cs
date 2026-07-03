@@ -81,7 +81,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     double pct = d.Distribution.SampleCount > 0 ? kv.Value * 100.0 / d.Distribution.SampleCount : 0.0;
                     lbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                compactTables.Add(STCompact("String length buckets", new[] { CH("Range"), CH("Count","number"), CH("% of samples") }, lbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("String length buckets", new[] { CH("Range"), CH("Count","number"), CH("% of samples", "number", "percent") }, lbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             var fb = d.Distribution.FrequencyBuckets ?? new System.Collections.Generic.Dictionary<string, int>();
@@ -94,7 +94,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     double pct = totalPatterns > 0 ? kv.Value * 100.0 / totalPatterns : 0.0;
                     fbRows.Add(new TableRow([Cell(kv.Key), Cell($"{kv.Value:N0}", kv.Value), Cell($"{pct:F1}%", null)]));
                 }
-                compactTables.Add(STCompact("Duplicate frequency buckets", new[] { CH("Frequency","number"), CH("Pattern Count","number"), CH("% of patterns") }, fbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Duplicate frequency buckets", new[] { CH("Frequency","number"), CH("Pattern Count","number"), CH("% of patterns", "number", "percent") }, fbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 
@@ -131,7 +131,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(sampling),
                     Cell(examples)));
             }
-            compactTables.Add(STCompact("Top duplicate strings", new[] { CH("Fingerprint"), CH("Preview"), CH("Count","number"), CH("Avg Size","bytes"), CH("Total Size","bytes"), CH("Wasted","bytes"), CH("% of strings"), CH("Dominant Type"), CH("Sampling"), CH("Examples") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top duplicate strings", new[] { CH("Fingerprint"), CH("Preview"), CH("Count","number"), CH("Avg Size","bytes"), CH("Total Size","bytes"), CH("Wasted","bytes"), CH("% of strings", "number", "percent"), CH("Dominant Type"), CH("Sampling"), CH("Examples") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Very long strings → typed Tables slot

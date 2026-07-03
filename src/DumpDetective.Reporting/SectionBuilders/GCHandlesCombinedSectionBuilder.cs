@@ -64,7 +64,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                     double pct = handles.TotalHandles == 0 ? 0 : byKind[i].Count * 100.0 / handles.TotalHandles;
                     rows.Add(Row(Cell(byKind[i].Name), Cell($"{byKind[i].Count:N0}", byKind[i].Count), Cell($"{pct:F1}%")));
                 }
-                compactTables.Add(STCompact("Handle kind breakdown", new[] { CH("Kind"), CH("Count","number"), CH("% Total") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Handle kind breakdown", new[] { CH("Kind"), CH("Count","number"), CH("% Total", "number", "percent") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
 
             if ((handles.TopPinnedTargetTypes ?? []).Count > 0)
@@ -84,7 +84,7 @@ internal sealed class GCHandlesCombinedSectionBuilder : SectionBuilderBase, IRep
                     double pct = total == 0 ? 0 : e.Bytes * 100.0 / total;
                     rows.Add(Row(Cell(e.Name), Cell(FormatHelper.FormatBytes(e.Bytes), (long)e.Bytes), Cell($"{pct:F1}%")));
                 }
-                compactTables.Add(STCompact("Top pinned objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("% Pinned") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Top pinned objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("% Pinned", "number", "percent") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 

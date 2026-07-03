@@ -44,10 +44,10 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                 segRows.Add(new TableRow([
                     Cell($"0x{s.Address:x16}"),
                     Cell(FormatHelper.FormatBytes(d.TotalBytes / (ulong)Math.Max(1, d.SegmentCount))),
-                    Cell($"{s.FragmentationPercent:F1}%", (long)(s.FragmentationPercent * 100)),
+                    Cell($"{s.FragmentationPercent:F1}%", s.FragmentationPercent),
                     Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock)]));
             }
-            compactTables.Add(STCompact("Top fragmented segments", new[] { CH("Address"), CH("Size","bytes"), CH("Frag %"), CH("Largest Free Block","bytes") }, segRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top fragmented segments", new[] { CH("Address"), CH("Size","bytes"), CH("Frag %", "number", "percent"), CH("Largest Free Block","bytes") }, segRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var heatmapItems = new List<object>(segments.Count);
             for (int i = 0; i < segments.Count; i++)
@@ -88,7 +88,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell($"{bucket.GapCount:N0}", bucket.GapCount),
                     Cell($"{pct:F1}%")]));
             }
-            compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps", "number", "percent") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var largeObjects = d.TopLargeObjects ?? [];

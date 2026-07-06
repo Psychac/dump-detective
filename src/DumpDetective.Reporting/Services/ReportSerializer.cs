@@ -120,7 +120,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
         string? analyzerVersion = typeof(ReportSerializer).Assembly.GetName().Version?.ToString(3);
 
-        return new SingleDumpReportDocument
+        var resultDoc = new SingleDumpReportDocument
         {
             DumpPath = dumpPath,
             ScoringModelVersion = ActionPriorityService.ScoringModelVersion,
@@ -135,6 +135,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             Appendix = appendix,
             ExecutiveSummary = executiveSummary,
         };
+
+        // In-memory only: make the composed findings available to tests and callers.
+        resultDoc = resultDoc with { Findings = deduped };
+
+        return resultDoc;
     }
 
     public IReadOnlyList<AnalyzerDetailSection> SerializeSectionsOnly(
@@ -1225,13 +1230,11 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
             AnalyzerMemoryStats s = run.MemoryStats;
             memoryDiagnostics.Add(new AnalyzerMemoryDiagnosticRecord(
-                AnalyzerName:        run.AnalyzerName,
-                WorkingSetBefore:    s.WorkingSetBefore,
-                WorkingSetAfter:     s.WorkingSetAfter,
-                WorkingSetDelta:     s.WorkingSetDelta,
-                ManagedHeapBefore:   s.ManagedHeapBefore,
-                ManagedHeapAfter:    s.ManagedHeapAfter,
-                ManagedHeapDelta:    s.ManagedHeapDelta));
+                AnalyzerName:      run.AnalyzerName,
+                WorkingSetBefore:  s.WorkingSetBefore,
+                WorkingSetAfter:   s.WorkingSetAfter,
+                ManagedHeapBefore: s.ManagedHeapBefore,
+                ManagedHeapAfter:  s.ManagedHeapAfter));
         }
 
         return new ReportAppendix(

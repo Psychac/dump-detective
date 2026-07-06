@@ -14,46 +14,46 @@ internal enum DomainSeverityChange { Stable, Improved, Regressed, NewDomain, Rem
 internal enum DomainConfidenceTrend { Low, Medium, High }
 
 internal sealed record DomainHealthEntry(
-    [property: System.Text.Json.Serialization.JsonIgnore]
+    [property: JsonIgnore]
     string Domain,
-    [property: System.Text.Json.Serialization.JsonPropertyName("sev")]
+    [property: JsonPropertyName("sev")]
     DomainSeverity Severity,
-    [property: System.Text.Json.Serialization.JsonPropertyName("find")]
+    [property: JsonPropertyName("find")]
     int FindingCount,
-    [property: System.Text.Json.Serialization.JsonPropertyName("crit")]
+    [property: JsonPropertyName("crit")]
     int CriticalCount,
-    [property: System.Text.Json.Serialization.JsonPropertyName("warn")]
+    [property: JsonPropertyName("warn")]
     int WarningCount,
     // Trend-mode additions (null in single-dump mode):
-    [property: System.Text.Json.Serialization.JsonPropertyName("baseCrit")]
+    [property: JsonPropertyName("baseCrit")]
     int? BaselineCriticalCount = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("deltaCrit")]
+    [property: JsonPropertyName("deltaCrit")]
     int? DeltaCritical = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("baseWarn")]
+    [property: JsonPropertyName("baseWarn")]
     int? BaselineWarningCount = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("deltaWarn")]
+    [property: JsonPropertyName("deltaWarn")]
     int? DeltaWarning = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("peakCrit")]
+    [property: JsonPropertyName("peakCrit")]
     int? PeakCriticalCount = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("peakCritIdx")]
+    [property: JsonPropertyName("peakCritIdx")]
     int? PeakCriticalSnapshotIndex = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("peakWarn")]
+    [property: JsonPropertyName("peakWarn")]
     int? PeakWarningCount = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("peakWarnIdx")]
+    [property: JsonPropertyName("peakWarnIdx")]
     int? PeakWarningSnapshotIndex = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("baseSev")]
+    [property: JsonPropertyName("baseSev")]
     DomainSeverity? BaselineSeverity = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("change")]
+    [property: JsonPropertyName("change")]
     DomainSeverityChange? Change = null,
     // Per-snapshot severity across all dumps (index 0 = baseline, last = current).
     // Null in single-dump mode or when only 2 snapshots (baseline/current already cover it).
-    [property: System.Text.Json.Serialization.JsonPropertyName("hist")]
+    [property: JsonPropertyName("hist")]
     IReadOnlyList<DomainSeverity>? SeverityHistory = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("vel")]
+    [property: JsonPropertyName("vel")]
     double? VelocityScore = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("vol")]
+    [property: JsonPropertyName("vol")]
     double? VolatilityScore = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("conf")]
+    [property: JsonPropertyName("conf")]
     string? ConfidenceTrend = null);
 
 internal sealed record TrendSummary(
@@ -90,7 +90,7 @@ internal abstract record AnalysisReportDocument
     public DateTime GeneratedAtUtc { get; init; }
     public double ElapsedSeconds { get; init; }
     public string? AnalyzerVersion { get; init; }
-    public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; init; }
+    public Core.Models.AnalysisIncidentContext? IncidentContext { get; init; }
     public HealthScorecard? HealthScorecard { get; init; }
     public IReadOnlyList<ReportDomainSection>? Domains { get; init; } = null;
     public IReadOnlyList<FindingRecord>? CrossDomainInsights { get; init; } = null;
@@ -210,14 +210,12 @@ internal sealed partial record ExecutiveSummaryRecord(
     long TotalManagedBytes,
     int LeakLikelihoodScore,        // 0–100
     int GcPressureScore,            // 0–100
-    int ThreadContentionScore,      // 0–100
-    IReadOnlyList<FindingRecord> TopRecommendations);   // Top 3 Critical/Warning findings
+    int ThreadContentionScore       // 0–100
+    );
 
 // P1.2: Explicit score breakdowns with contributors and trend-mode deltas
 internal partial record ExecutiveSummaryRecord
 {
-    public IReadOnlyList<FindingRecord>? CriticalFindings { get; init; } = null;
-    public IReadOnlyList<FindingRecord>? WarningFindings { get; init; } = null;
     public IReadOnlyList<ScoreBreakdown>? ScoreBreakdowns { get; init; } = null;
     public int? LeakScoreDelta { get; init; } = null;
     public int? GcPressureScoreDelta { get; init; } = null;
@@ -305,13 +303,11 @@ internal sealed record ReportAppendix(
     IReadOnlyList<string> KnownLimitations);
 
 internal sealed record AnalyzerMemoryDiagnosticRecord(
-    string AnalyzerName,
-    long WorkingSetBefore,
-    long WorkingSetAfter,
-    long WorkingSetDelta,
-    long ManagedHeapBefore,
-    long ManagedHeapAfter,
-    long ManagedHeapDelta);
+    [property: JsonPropertyName("an")] string AnalyzerName,
+    [property: JsonPropertyName("wsB")] long WorkingSetBefore,
+    [property: JsonPropertyName("wsA")] long WorkingSetAfter,
+    [property: JsonPropertyName("mhB")] long ManagedHeapBefore,
+    [property: JsonPropertyName("mhA")] long ManagedHeapAfter);
 
 internal sealed record ReportDomainSection(
     string Domain,

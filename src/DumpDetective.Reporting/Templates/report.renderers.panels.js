@@ -98,17 +98,35 @@ export function buildAppendix(doc) {
 
     const body = el('div', 'appendix-panel__body');
     const wrap = el('div', 'detail-block');
+
     wrap.appendChild(buildSimpleTable(
       ['Analyzer', 'WS Before', 'WS After', 'WS \u0394', 'Heap Before', 'Heap After', 'Heap \u0394'],
-      memory.map(r => [
-        r.analyzerName || '',
-        formatBytes(Number(r.workingSetBefore || 0)),
-        formatBytes(Number(r.workingSetAfter || 0)),
-        (Number(r.workingSetDelta || 0) > 0 ? '+' : '') + formatBytes(Number(r.workingSetDelta || 0)),
-        formatBytes(Number(r.managedHeapBefore || 0)),
-        formatBytes(Number(r.managedHeapAfter || 0)),
-        (Number(r.managedHeapDelta || 0) > 0 ? '+' : '') + formatBytes(Number(r.managedHeapDelta || 0))
-      ])
+      memory.map(r => {
+        const analyzer = String(r.an || '');
+        const wsb = Number(r.wsB || 0);
+        const wsa = Number(r.wsA || 0);
+        const mhb = Number(r.mhB || 0);
+        const mha = Number(r.mhA || 0);
+        const wsDelta = wsa - wsb;
+        const heapDelta = mha - mhb;
+        const wsPct = (wsb > 0) ? (wsDelta / wsb) * 100 : null;
+        const heapPct = (mhb > 0) ? (heapDelta / mhb) * 100 : null;
+        const fmtDelta = (val, pct) => {
+          const sign = val > 0 ? '+' : '';
+          const pctText = (pct == null) ? '' : (' (' + (pct > 0 ? '+' : '') + pct.toFixed(1) + '%)');
+          return sign + formatBytes(val) + pctText;
+        };
+
+        return [
+          analyzer,
+          formatBytes(wsb),
+          formatBytes(wsa),
+          { text: fmtDelta(wsDelta, wsPct), cls: (wsDelta > 0 ? 'delta-negative' : (wsDelta < 0 ? 'delta-positive' : 'delta-neutral')) },
+          formatBytes(mhb),
+          formatBytes(mha),
+          { text: fmtDelta(heapDelta, heapPct), cls: (heapDelta > 0 ? 'delta-negative' : (heapDelta < 0 ? 'delta-positive' : 'delta-neutral')) }
+        ];
+      })
     ));
     body.appendChild(wrap);
     panel.appendChild(body);
@@ -157,7 +175,8 @@ function buildSimpleTable(headers, rows) {
   for (const row of rows) {
     const tr = el('tr');
     for (let ci = 0; ci < row.length; ci++) {
-      tr.appendChild(tdText(String(nvl(row[ci], '')), headers[ci] || ('Column ' + (ci + 1))));
+      const cell = nvl(row[ci], '');
+      tr.appendChild(tdText(cell, headers[ci] || ('Column ' + (ci + 1))));
     }
     tbody.appendChild(tr);
   }
@@ -165,10 +184,17 @@ function buildSimpleTable(headers, rows) {
   return table;
 }
 
-function tdText(text, colLabel) {
+function tdText(value, colLabel) {
   const td = document.createElement('td');
-  td.textContent = text;
   td.dataset.colLabel = String(colLabel || '');
+  if (value && typeof value === 'object') {
+    const text = value.text != null ? String(value.text) : '';
+    if (value.cls) td.className = String(value.cls);
+    if (value.title) td.title = String(value.title);
+    td.textContent = text;
+  } else {
+    td.textContent = String(value != null ? value : '');
+  }
   return td;
 }
 

@@ -68,8 +68,6 @@ public sealed class ReportFlowIntegrationTests
             cancellationToken: CancellationToken.None);
 
         output.Should().Contain("UNIQUE_DUP_TITLE");
-        output.Should().Contain("Evidence A");
-        output.Should().Contain("Evidence B");
         output.Should().Contain("Remediation A");
         output.Should().Contain("Remediation B");
     }

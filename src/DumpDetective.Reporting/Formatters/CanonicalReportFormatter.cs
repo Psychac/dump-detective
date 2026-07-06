@@ -308,20 +308,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
         sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
 
-        if (summary.CriticalFindings is { Count: > 0 })
-        {
-            sb.AppendLine("Critical findings:");
-                foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
-        }
-
-        if (summary.WarningFindings is { Count: > 0 })
-        {
-            sb.AppendLine("Warning findings:");
-                foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
-        }
-
         if (summary.TopActions is { Count: > 0 })
         {
             sb.AppendLine("Action queue:");
@@ -529,22 +515,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"- Leak likelihood score: {summary.LeakLikelihoodScore}");
         sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
         sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
-
-        if (summary.CriticalFindings is { Count: > 0 })
-        {
-            sb.AppendLine();
-            sb.AppendLine("### Critical Findings");
-            foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.GetSummaryText())} | {Esc(finding.Recommendation)}");
-        }
-
-        if (summary.WarningFindings is { Count: > 0 })
-        {
-            sb.AppendLine();
-            sb.AppendLine("### Warning Findings");
-            foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"- **{Esc(finding.Title)}**: {Esc(finding.GetSummaryText())} | {Esc(finding.Recommendation)}");
-        }
+ 
 
         if (summary.TopActions is { Count: > 0 })
         {
@@ -599,19 +570,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         sb.AppendLine($"- GC pressure score: {summary.GcPressureScore}");
         sb.AppendLine($"- Thread contention score: {summary.ThreadContentionScore}");
 
-        if (summary.CriticalFindings is { Count: > 0 })
-        {
-            sb.AppendLine("Critical findings:");
-                foreach (FindingRecord finding in summary.CriticalFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
-        }
-
-        if (summary.WarningFindings is { Count: > 0 })
-        {
-            sb.AppendLine("Warning findings:");
-                foreach (FindingRecord finding in summary.WarningFindings)
-                sb.AppendLine($"  - {finding.Title}: {finding.GetSummaryText()} | {finding.Recommendation}");
-        }
 
         if (summary.TopActions is { Count: > 0 })
         {

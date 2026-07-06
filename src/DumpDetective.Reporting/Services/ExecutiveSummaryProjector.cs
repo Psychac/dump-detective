@@ -59,41 +59,15 @@ internal sealed class ExecutiveSummaryProjector
     {
         var (leak, gcPressure, thread) = ExplainableScoringEngine.ComputeScores(findings);
 
-        List<FindingRecord> criticalFindings = new(5);
-        List<FindingRecord> warningFindings = new(5);
-        List<FindingRecord> top3 = new(3);
-
-        for (int i = 0; i < findings.Count && top3.Count < 3; i++)
-        {
-            int ord = SeverityOrdinal(findings[i].Severity);
-            if (ord >= 1)
-                top3.Add(findings[i]);
-        }
-
-        for (int i = 0; i < findings.Count; i++)
-        {
-            FindingRecord finding = findings[i];
-            int ord = SeverityOrdinal(finding.Severity);
-            if (ord == 2 && criticalFindings.Count < 5)
-                criticalFindings.Add(finding);
-            else if (ord == 1 && warningFindings.Count < 5)
-                warningFindings.Add(finding);
-
-            if (criticalFindings.Count == 5 && warningFindings.Count == 5)
-                break;
-        }
-
+        
         IReadOnlyList<RankedActionRecord> topActions = ActionPriorityService.BuildTopActions(findings);
 
         return new ExecutiveSummaryRecord(
             TotalManagedBytes: totalManagedBytes ?? ComputeTotalManagedBytes(runs),
             LeakLikelihoodScore: leak.Score,
             GcPressureScore: gcPressure.Score,
-            ThreadContentionScore: thread.Score,
-            TopRecommendations: top3)
+            ThreadContentionScore: thread.Score)
         {
-            CriticalFindings = criticalFindings,
-            WarningFindings = warningFindings,
             ScoreBreakdowns = [leak, gcPressure, thread],
             LohBytes = ExtractLohBytes(runs),
             LohPercent = ExtractLohPercent(runs),

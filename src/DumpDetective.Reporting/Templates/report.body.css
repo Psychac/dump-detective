@@ -750,6 +750,11 @@ details[open] .header-trend-dumps__summary::before { content: '\25BC\A0'; }
 /* Memory diagnostics table */
 .appendix-panel__body .detail-block { margin: 0; border-radius: var(--radius-sm); }
 
+/* Delta value styling: positive (decrease), negative (increase), neutral */
+.appendix-panel__body .detail-block td.delta-positive { color: var(--sev-ok-text); font-weight: 600; }
+.appendix-panel__body .detail-block td.delta-negative { color: var(--sev-critical-text); font-weight: 600; }
+.appendix-panel__body .detail-block td.delta-neutral  { color: var(--muted); }
+
 /* ΓöÇΓöÇ Domain sections ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
 .report-domains { display: block; }
 .report-domains > * + * { margin-top: var(--section-gap); }

@@ -49,11 +49,9 @@ public sealed class ReportingCompositionTests
             reportBuilders: []);
 
         doc.ExecutiveSummary.Should().NotBeNull();
-        doc.ExecutiveSummary!.CriticalFindings.Should().HaveCount(1);
-        doc.ExecutiveSummary.WarningFindings.Should().HaveCount(1);
-        doc.ExecutiveSummary.TopRecommendations.Should().HaveCount(2);
-        doc.ExecutiveSummary.CriticalFindings![0].Details![0].Should().Be("Evidence B");
-        doc.ExecutiveSummary.WarningFindings![0].Details![0].Should().Be("Evidence A");
+        // Critical/Warning/top-recommendation projection removed from ExecutiveSummaryRecord.
+        // Verify findings were composed and remain available on the report document.
+        doc.Findings.Should().HaveCountGreaterOrEqualTo(1);
     }
 
     [Fact]
@@ -912,8 +910,7 @@ public sealed class ReportingCompositionTests
                 TotalManagedBytes: 123,
                 LeakLikelihoodScore: 22,
                 GcPressureScore: 31,
-                ThreadContentionScore: 15,
-                TopRecommendations: [])
+                ThreadContentionScore: 15)
             {
                 TopActions =
                 [

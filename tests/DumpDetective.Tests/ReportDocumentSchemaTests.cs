@@ -57,7 +57,7 @@ public sealed class ReportDocumentSchemaTests
                     CrossDomainInsights = [new FindingRecord("cross-01", "InsightEngine", "CrossDomain", "Warning", "Cross-domain issue", ["Evidence"], "Recommendation", [])],
             Appendix = new ReportAppendix(
                 AnalyzerRunSummary: [new AnalyzerRunStatusRecord("RetentionAnalyzer", "Success", 42.5, 1, 0, 123, 4, 5, null)],
-                MemoryDiagnostics: [new AnalyzerMemoryDiagnosticRecord("RetentionAnalyzer", 10, 12, 2, 3, 4, 1)],
+                MemoryDiagnostics: [new AnalyzerMemoryDiagnosticRecord("RetentionAnalyzer", 10, 12, 3, 4)],
                 KnownLimitations: ["Limited sample"])
         };
 

@@ -64,25 +64,22 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        // Exported artifacts note (if any)
-        if (d.Artifacts is { Count: > 0 })
+        // Typed Artifacts slot
+        var artifacts = new List<AnalyzerArtifact>();
+        foreach (var a in d.Artifacts ?? [])
         {
-            blocks.Add(H("EXPORTS"));
-            blocks.Add(T("This analyzer produced on-disk exports for deeper offline inspection."));
-            foreach (var a in d.Artifacts)
-            {
-                if (a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                    blocks.Add(Li($"{a.FileName} — Pretty JSON; open in VS Code or any JSON viewer."));
-                else if (a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase))
-                    blocks.Add(Li($"{a.FileName} — NDJSON + gzip (streamable). To inspect: 'gzip -cd {a.FileName} | jq -C '.' or open in 7-Zip/VS Code after extraction."));
-                else
-                    blocks.Add(Li(a.FileName));
-            }
+            string instructions = a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                ? "Pretty JSON — open in VS Code or any JSON viewer."
+                : a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase)
+                    ? $"NDJSON + gzip (streamable). Inspect with: gzip -cd {a.FileName} | jq -C '.' or open in 7-Zip/VS Code after extraction."
+                    : "Analyzer export file.";
+            artifacts.Add(new AnalyzerArtifact(a.FileName, instructions));
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, "Weak Reference Analysis", SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            Artifacts: artifacts.Count > 0 ? artifacts : null);
     }
 }

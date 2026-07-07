@@ -32,43 +32,39 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
         {
             int sigLimit = Math.Min(d.TopClusterSignatures.Count, TopSignaturesToShow);
             for (int i = 0; i < sigLimit; i++)
-                blocks.Add(Li(FormatHelper.TruncateString(d.TopClusterSignatures[i], 120)));
-        }
-
-        var clusters = d.TopClusters ?? [];
-        if (clusters.Count > 0)
-        {
-            for (int i = 0; i < clusters.Count; i++)
-            {
-                var cluster = clusters[i];
-                string osIds = cluster.SampleOsThreadIds.Count == 0
-                    ? "none"
-                    : string.Join(", ", BuildOsIdList(cluster.SampleOsThreadIds));
-
-                blocks.Add(CollapseBegin($"[{cluster.Count} threads] OSThreadIds: {osIds}"));
-                blocks.Add(M("Thread Count", $"{cluster.Count:N0}", cluster.Count, 1));
-                blocks.Add(T(FormatHelper.TruncateString(cluster.Signature, 220), 1));
-                blocks.Add(CollapseEnd());
-            }
+                blocks.Add(T(FormatHelper.TruncateString(d.TopClusterSignatures[i], 120)));
         }
 
         blocks.Add(d.DiversityPercent < 20
             ? T("Low signature diversity; large clusters may indicate coordinated blocking/contention.")
             : T("Signature diversity suggests varied active work."));
 
-        // Exported artifacts note (if any)
-        if (d.Artifacts is { Count: > 0 })
+        // Typed StackClusters slot
+        var stackClusters = new List<StackCluster>();
+        var clusters = d.TopClusters ?? [];
+        for (int i = 0; i < clusters.Count; i++)
         {
-            blocks.Add(T("This analyzer produced on-disk exports for deeper offline inspection."));
-            foreach (var a in d.Artifacts)
-            {
-                if (a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                    blocks.Add(Li($"{a.FileName} — Pretty JSON; open in VS Code or any JSON viewer."));
-                else if (a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase))
-                    blocks.Add(Li($"{a.FileName} — NDJSON + gzip (streamable). To inspect: 'gzip -cd {a.FileName} | jq -C \'.' or open in 7-Zip/VS Code after extraction."));
-                else
-                    blocks.Add(Li(a.FileName));
-            }
+            var cluster = clusters[i];
+            var osIds = new List<string>(cluster.SampleOsThreadIds.Count);
+            for (int j = 0; j < cluster.SampleOsThreadIds.Count; j++)
+                osIds.Add($"0x{cluster.SampleOsThreadIds[j]:X}");
+            stackClusters.Add(new StackCluster(
+                ThreadCount: cluster.Count,
+                OsThreadIds: osIds,
+                Signature:   cluster.Signature,
+                Truncated:   false));
+        }
+
+        // Typed Artifacts slot
+        var artifacts = new List<AnalyzerArtifact>();
+        foreach (var a in d.Artifacts ?? [])
+        {
+            string instructions = a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                ? "Pretty JSON — open in VS Code or any JSON viewer."
+                : a.FileName.EndsWith(".ndjson.gz", StringComparison.OrdinalIgnoreCase)
+                    ? $"NDJSON + gzip (streamable). Inspect with: gzip -cd {a.FileName} | jq -C '.' or open in 7-Zip/VS Code after extraction."
+                    : "Analyzer export file.";
+            artifacts.Add(new AnalyzerArtifact(a.FileName, instructions));
         }
 
         return new AnalyzerDetailSection(
@@ -77,12 +73,8 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
-    }
-
-    private static IEnumerable<string> BuildOsIdList(IReadOnlyList<uint> ids)
-    {
-        for (int i = 0; i < ids.Count; i++)
-            yield return $"0x{ids[i]:X}";
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            StackClusters: stackClusters.Count > 0 ? stackClusters : null,
+            Artifacts:     artifacts.Count > 0 ? artifacts : null);
     }
 }

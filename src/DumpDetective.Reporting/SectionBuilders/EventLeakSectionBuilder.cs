@@ -120,23 +120,16 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 instRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        // Per-group collapsibles — all content stays in blocks (per-item detail)
+        // Per-group typed cards
+        var eventLeakGroupCards = new List<EventLeakGroupCard>();
         var leakGroups = d.TopLeakGroups ?? [];
         if (leakGroups.Count > 0)
         {
             var allInstances = d.TopLeakInstances ?? [];
-            blocks.Add(H("LEAK GROUP DETAILS"));
-
             int groupLimit = Math.Min(leakGroups.Count, MaxGroupsToShow);
             for (int i = 0; i < groupLimit; i++)
             {
                 var group = leakGroups[i];
-                string shape = group.IsStatic ? "STATIC" : "INSTANCE";
-                blocks.Add(CollapseBegin($"[{i + 1}] [{shape}] {group.PublisherType}.{group.EventFieldName}  (Severity: {group.SeverityScore})"));
-                blocks.Add(M("Instance Count",       $"{group.InstanceCount:N0}",       group.InstanceCount,        indent: 1));
-                blocks.Add(M("Total Subscribers",    $"{group.TotalSubscribers:N0}",    group.TotalSubscribers,     indent: 1));
-                blocks.Add(M("Avg Subscribers",      $"{group.AverageSubscribers:F2}",                              indent: 1));
-                blocks.Add(M("Min/Max Subscribers",  $"{group.MinSubscribers}/{group.MaxSubscribers}",              indent: 1));
 
                 int matchingInstances = 0; int gen2Instances = 0;
                 for (int j = 0; j < allInstances.Count; j++)
@@ -147,80 +140,67 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     matchingInstances++;
                     if (inst.PublisherGeneration >= 2) gen2Instances++;
                 }
-                if (matchingInstances > 0)
-                {
-                    double gen2Percent = gen2Instances * 100.0 / matchingInstances;
-                    blocks.Add(M("Gen2 Publisher Share", $"{gen2Percent:F1}% ({gen2Instances:N0}/{matchingInstances:N0})", gen2Percent, indent: 1));
-                }
-                if (group.EstimatedSubscriberRetainedBytes > 0)
-                    blocks.Add(M("Est. Retained Bytes", FormatHelper.FormatBytes(group.EstimatedSubscriberRetainedBytes), (double)group.EstimatedSubscriberRetainedBytes, indent: 1));
-                if (group.HasDuplicateSubscriptions)
-                    blocks.Add(M("Duplicate Subscriptions", "YES \u2013 same subscriber registered multiple times", indent: 1));
-                if (group.HasLifetimeMismatch)
-                    blocks.Add(M("Lifetime Mismatch", "YES \u2013 Gen2 publisher retaining Gen0/Gen1 subscribers", indent: 1));
-                if (group.OrphanedSubscriberInstances > 0)
-                    blocks.Add(M("Orphaned Sub. Instances", $"{group.OrphanedSubscriberInstances:N0} instance(s) with dead-subscriber pattern", (double)group.OrphanedSubscriberInstances, indent: 1));
+                double gen2Pct = matchingInstances > 0 ? gen2Instances * 100.0 / matchingInstances : 0;
 
-                var subTypes = group.TopSubscriberTypes ?? [];
-                if (subTypes.Count > 0)
-                {
-                    var subRows = new List<TableRow>(subTypes.Count);
-                    for (int j = 0; j < subTypes.Count; j++)
-                        subRows.Add(new TableRow([Cell(subTypes[j].Name), Cell($"{subTypes[j].Count:N0}", subTypes[j].Count)]));
-                            blocks.Add(new TableBlock(null, ["Subscriber Type", "Count"], subRows));
-                }
-                blocks.Add(CollapseEnd());
+                var subTypes = new List<SubscriberDetailEntry>();
+                foreach (var e in group.TopSubscriberTypes ?? [])
+                    subTypes.Add(new SubscriberDetailEntry(e.Name, null, e.Count, 0));
+
+                eventLeakGroupCards.Add(new EventLeakGroupCard(
+                    PublisherType:               group.PublisherType,
+                    EventFieldName:              group.EventFieldName,
+                    IsStatic:                    group.IsStatic,
+                    SeverityScore:               group.SeverityScore,
+                    InstanceCount:               group.InstanceCount,
+                    TotalSubscribers:            group.TotalSubscribers,
+                    AverageSubscribers:          group.AverageSubscribers,
+                    MinSubscribers:              group.MinSubscribers,
+                    MaxSubscribers:              group.MaxSubscribers,
+                    Gen2PublisherPercent:         gen2Pct,
+                    EstimatedRetainedBytes:      group.EstimatedSubscriberRetainedBytes,
+                    HasDuplicateSubscriptions:   group.HasDuplicateSubscriptions,
+                    HasLifetimeMismatch:         group.HasLifetimeMismatch,
+                    OrphanedSubscriberInstances: group.OrphanedSubscriberInstances,
+                    TopSubscriberTypes:          subTypes));
             }
             if (leakGroups.Count > groupLimit)
                 blocks.Add(T($"Showing top {groupLimit} event types. {leakGroups.Count - groupLimit} additional group(s) omitted."));
         }
 
+        // Per-instance typed cards
+        var eventLeakInstanceCards = new List<EventLeakInstanceCard>();
         var instances = d.TopLeakInstances ?? [];
         if (instances.Count > 0)
         {
-            blocks.Add(H("TOP LEAK INSTANCES"));
-
             int instLimit = Math.Min(instances.Count, MaxInstancesToShow);
             for (int i = 0; i < instLimit; i++)
             {
                 var inst = instances[i];
-                string shape = inst.IsStatic ? "STATIC" : "INSTANCE";
-                blocks.Add(CollapseBegin($"[{i + 1}] [{shape}] {inst.PublisherType}.{inst.EventFieldName}  ({inst.SubscriberCount} subscribers)"));
-                blocks.Add(M("Publisher Address", $"0x{inst.PublisherAddress:X}", indent: 1));
-                blocks.Add(M("Severity Score",    $"{inst.SeverityScore:N0}", inst.SeverityScore, indent: 1));
-                if (!string.IsNullOrWhiteSpace(inst.RootHint))
-                    blocks.Add(M("Root Hint", inst.RootHint, indent: 1));
-                if (inst.PublisherGeneration >= 0)
-                    blocks.Add(M("Publisher Generation", $"Gen{inst.PublisherGeneration}", inst.PublisherGeneration, indent: 1));
-                if (inst.DuplicateSubscriptionCount > 0)
-                    blocks.Add(M("Duplicate Subscriptions", $"{inst.DuplicateSubscriptionCount:N0} extra registration(s)", inst.DuplicateSubscriptionCount, indent: 1));
-                if (inst.OrphanedSubscriberCount > 0)
-                    blocks.Add(M("Orphaned Subscribers", $"{inst.OrphanedSubscriberCount:N0} not independently GC-rooted", inst.OrphanedSubscriberCount, indent: 1));
-                if (inst.HasLifetimeMismatch)
-                    blocks.Add(M("Lifetime Mismatch", "YES \u2013 Gen2 publisher retaining Gen0/Gen1 subscribers", indent: 1));
+                var subDetails = new List<SubscriberDetailEntry>();
+                foreach (var det in inst.SubscriberDetails ?? [])
+                    subDetails.Add(new SubscriberDetailEntry(det.Type, det.MethodName, det.Count, det.Size));
 
-                var subDetails = inst.SubscriberDetails ?? [];
-                if (subDetails.Count > 0)
-                {
-                    var detailRows = new List<TableRow>(subDetails.Count);
-                    for (int j = 0; j < subDetails.Count; j++)
-                    {
-                        var det = subDetails[j];
-                        detailRows.Add(new TableRow([
-                            Cell(FormatHelper.TruncateString(det.Type, 60)),
-                            Cell(det.MethodName != null ? FormatHelper.TruncateString(det.MethodName, 70) : "-"),
-                            Cell($"{det.Count:N0}", det.Count),
-                            Cell(det.Size > 0 ? FormatHelper.FormatBytes(det.Size) : "-")]));
-                    }
-                    blocks.Add(new TableBlock("Subscribers", ["Type", "Handler Method", "Count", "Avg Size"], detailRows));
-                }
-                blocks.Add(CollapseEnd());
+                eventLeakInstanceCards.Add(new EventLeakInstanceCard(
+                    PublisherType:            inst.PublisherType,
+                    EventFieldName:           inst.EventFieldName,
+                    IsStatic:                 inst.IsStatic,
+                    PublisherAddress:         $"0x{inst.PublisherAddress:X}",
+                    SeverityScore:            inst.SeverityScore,
+                    SubscriberCount:          inst.SubscriberCount,
+                    RootHint:                 inst.RootHint,
+                    PublisherGeneration:      inst.PublisherGeneration,
+                    DuplicateSubscriptionCount: inst.DuplicateSubscriptionCount,
+                    OrphanedSubscriberCount:  inst.OrphanedSubscriberCount,
+                    HasLifetimeMismatch:      inst.HasLifetimeMismatch,
+                    SubscriberDetails:        subDetails.Count > 0 ? subDetails : null));
             }
         }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            EventLeakGroupCards:    eventLeakGroupCards.Count > 0 ? eventLeakGroupCards : null,
+            EventLeakInstanceCards: eventLeakInstanceCards.Count > 0 ? eventLeakInstanceCards : null);
     }
 }

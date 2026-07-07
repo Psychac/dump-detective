@@ -1106,6 +1106,127 @@ thead th.sortable[aria-sort="ascending"]::after  {
   content: "\25B2";
   opacity: 1;
 }
+
+/* ── Typed slots (StackTraces, RootPathGroups, TypeTraces) ─────────────────── */
+.typed-slot { margin: 14px 0; }
+.typed-slot__header {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #64748b; padding: 0 0 6px 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 10px;
+}
+
+/* ── Stack trace cards ─────────────────────────────────────────────────────── */
+.stack-trace-card {
+  border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden;
+}
+.stack-trace-card > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+  background: #f8fafc; list-style: none;
+}
+.stack-trace-card > summary:hover { background: #f1f5f9; }
+.stack-trace-card[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.stack-trace-card__cat {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+}
+.stack-trace-card__cat--finalizer { background: #fef3c7; color: #92400e; }
+.stack-trace-card__cat--sampled   { background: #ede9fe; color: #5b21b6; }
+.stack-trace-card__cat--captured  { background: #fee2e2; color: #991b1b; }
+.stack-trace-card__cat--blocked   { background: #fee2e2; color: #991b1b; }
+.stack-trace-card__label { font-size: 12.5px; font-weight: 500; color: #1e293b; flex: 1; }
+.stack-trace-card__truncated { font-size: 11px; color: #94a3b8; font-style: italic; }
+.stack-trace-card__body { padding: 10px 14px; }
+.stack-trace-card__meta {
+  display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-bottom: 10px;
+}
+.stack-trace-card__meta-key { font-size: 11px; font-weight: 600; color: #64748b; }
+.stack-trace-card__meta-val { font-size: 11px; color: #1e293b; }
+.stack-trace-card__fw-toggle {
+  font-size: 10px; padding: 2px 8px; margin-bottom: 6px;
+  border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; cursor: pointer;
+}
+.stack-trace-card__fw-toggle:hover { background: #e2e8f0; }
+.stack-trace-card__frames { font-family: ui-monospace, 'Cascadia Code', monospace; }
+.stack-frame {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 2px 0; font-size: 11.5px; line-height: 1.5;
+}
+.stack-frame--fw { color: #94a3b8; }
+.stack-frame__idx { flex-shrink: 0; min-width: 22px; color: #94a3b8; font-size: 10.5px; text-align: right; }
+.stack-frame__text { word-break: break-all; }
+
+/* ── Root path groups ──────────────────────────────────────────────────────── */
+.root-path-outer {
+  border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+}
+.root-path-outer__summary {
+  padding: 8px 14px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+  color: #1e293b; background: #f8fafc; list-style: none;
+}
+.root-path-outer__summary:hover { background: #f1f5f9; }
+.root-path-outer[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.root-path-group {
+  border-bottom: 1px solid #f1f5f9; margin: 8px 12px; border-radius: 6px;
+  border: 1px solid #e2e8f0; overflow: hidden;
+}
+.root-path-group__summary {
+  padding: 6px 12px; cursor: pointer; background: #f8fafc;
+  font-size: 12px; font-weight: 600; color: #334155; list-style: none; display: flex; align-items: center; gap: 4px;
+}
+.root-path-group__summary:hover { background: #f1f5f9; }
+.root-path-group[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.root-path-group__short { color: #1e293b; }
+.root-path-group__count { font-size: 11px; color: #64748b; font-weight: 400; }
+.root-path-group__warn  { font-size: 11px; color: #d97706; }
+.root-path-group__body { padding: 10px 14px; }
+.root-path-group__fqn  { font-size: 10.5px; color: #64748b; margin-bottom: 8px; word-break: break-all; }
+.root-path { margin-bottom: 12px; }
+.root-path__divider { border-top: 1px dashed #e2e8f0; margin: 12px 0; }
+.root-path__meta {
+  display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 8px;
+}
+.root-path__kv { display: flex; gap: 4px; align-items: baseline; }
+.root-path__kv-key { font-size: 10.5px; font-weight: 600; color: #64748b; }
+.root-path__kv-val { font-size: 11px; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.root-path__chain { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding-left: 4px; }
+.root-path__hop {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 3px 10px; font-size: 11.5px; color: #1e293b; word-break: break-all; max-width: 100%;
+}
+.root-path__hop--root   { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; font-weight: 600; }
+.root-path__hop--target { background: #fef2f2; border-color: #fecaca; color: #991b1b; font-weight: 600; }
+.root-path__hop--truncated { background: #fafafa; border-color: #e2e8f0; color: #94a3b8; font-style: italic; }
+.root-path__arrow { font-size: 12px; color: #94a3b8; padding: 1px 0 1px 8px; }
+.root-path__no-refs { font-size: 11px; color: #94a3b8; font-style: italic; }
+
+/* ── Type trace cards ──────────────────────────────────────────────────────── */
+.type-trace-card {
+  border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden;
+}
+.type-trace-card > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; background: #f8fafc; list-style: none;
+}
+.type-trace-card > summary:hover { background: #f1f5f9; }
+.type-trace-card[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.type-trace-card__status {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+}
+.type-trace-card__status--rooted  { background: #dcfce7; color: #166534; }
+.type-trace-card__status--limited { background: #fef3c7; color: #92400e; }
+.type-trace-card__status--free    { background: #f1f5f9; color: #475569; }
+.type-trace-card__name { font-size: 12.5px; font-weight: 500; color: #1e293b; flex: 1; word-break: break-all; }
+.type-trace-card__size { font-size: 11.5px; color: #64748b; flex-shrink: 0; }
+.type-trace-card__body { padding: 10px 14px; }
+.type-trace-card__meta {
+  display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-bottom: 10px;
+}
+.type-trace-card__meta-key { font-size: 11px; font-weight: 600; color: #64748b; }
+.type-trace-card__meta-val { font-size: 11px; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.type-trace-card__chain-label { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
+.type-trace-card__chain { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding-left: 4px; }
+.type-trace-card__no-root { font-size: 11px; color: #94a3b8; font-style: italic; }
 thead th.sortable[aria-sort="descending"]::after {
   content: "\25BC";
   opacity: 1;
@@ -1247,4 +1368,69 @@ body.high-contrast .severity-critical { background: #ffb4b4 !important; color: #
 body.high-contrast .severity-warning  { background: #ffe9b4 !important; color: #6a3c00 !important; }
 body.high-contrast .severity-info     { background: #bfe1ff !important; color: #002b5c !important; }
 body.high-contrast .filter-btn.active { background: #fff !important; color: #000 !important; }
+
+/* ── Leak candidate cards ──────────────────────────────────────────────────── */
+.leak-card { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+.leak-card > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; background: #f8fafc; list-style: none; }
+.leak-card > summary:hover { background: #f1f5f9; }
+.leak-card[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.leak-card--critical > summary { border-left: 3px solid #ef4444; }
+.leak-card--warning  > summary { border-left: 3px solid #f59e0b; }
+.leak-card__sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+.leak-card__sev--critical { background: #fee2e2; color: #991b1b; }
+.leak-card__sev--warning  { background: #fef3c7; color: #92400e; }
+.leak-card__sev--info     { background: #f1f5f9; color: #475569; }
+.leak-card__impact { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+.leak-card__impact--critical { background: #fecaca; color: #7f1d1d; }
+.leak-card__impact--high     { background: #fed7aa; color: #7c2d12; }
+.leak-card__impact--medium   { background: #fef3c7; color: #78350f; }
+.leak-card__impact--low      { background: #f1f5f9; color: #475569; }
+.leak-card__name  { font-size: 12.5px; font-weight: 500; color: #1e293b; flex: 1; word-break: break-all; }
+.leak-card__score { font-size: 11px; color: #64748b; flex-shrink: 0; }
+.leak-card__body  { padding: 10px 14px; }
+.leak-card__meta  { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-bottom: 10px; }
+.leak-card__meta-key { font-size: 11px; font-weight: 600; color: #64748b; }
+.leak-card__meta-val { font-size: 11px; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.leak-card__explanation { font-size: 12px; color: #1e293b; line-height: 1.55; margin-bottom: 8px; padding: 8px 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid #bfdbfe; }
+.leak-card__impact-notes { display: flex; flex-direction: column; gap: 3px; }
+.leak-card__impact-note  { font-size: 11px; color: #475569; }
+
+/* ── Event leak cards (groups + instances) ─────────────────────────────────── */
+.event-leak-card { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+.event-leak-card > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; background: #f8fafc; list-style: none; }
+.event-leak-card > summary:hover { background: #f1f5f9; }
+.event-leak-card[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.event-leak-card__shape { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+.event-leak-card__shape--static   { background: #ede9fe; color: #5b21b6; }
+.event-leak-card__shape--instance { background: #dbeafe; color: #1d4ed8; }
+.event-leak-card__title { font-size: 12.5px; font-weight: 500; color: #1e293b; flex: 1; word-break: break-all; }
+.event-leak-card__sev   { font-size: 11px; color: #64748b; flex-shrink: 0; }
+.event-leak-card__body  { padding: 10px 14px; }
+.event-leak-card__meta  { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-bottom: 10px; }
+.event-leak-card__meta-key { font-size: 11px; font-weight: 600; color: #64748b; }
+.event-leak-card__meta-val { font-size: 11px; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.event-leak-card__sub-label { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.event-leak-card__sub-list  { display: flex; flex-direction: column; gap: 2px; padding-left: 4px; }
+.event-leak-card__sub-row   { display: flex; gap: 6px; align-items: baseline; font-size: 11.5px; }
+.event-leak-card__sub-count { font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; min-width: 30px; }
+.event-leak-card__sub-type  { color: #1e293b; word-break: break-all; flex: 1; }
+.event-leak-card__sub-method { color: #64748b; font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 11px; }
+.event-leak-card__sub-size  { color: #94a3b8; font-size: 11px; }
+
+/* ── Stack cluster cards ───────────────────────────────────────────────────── */
+.stack-cluster-card { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+.stack-cluster-card > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; background: #f8fafc; list-style: none; }
+.stack-cluster-card > summary:hover { background: #f1f5f9; }
+.stack-cluster-card[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.stack-cluster-card__count { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; flex-shrink: 0; }
+.stack-cluster-card__osids { font-size: 11px; color: #64748b; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.stack-cluster-card__truncated { font-size: 11px; color: #94a3b8; font-style: italic; }
+.stack-cluster-card__sig { padding: 10px 14px; font-size: 11.5px; font-family: ui-monospace, 'Cascadia Code', monospace; color: #1e293b; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
+
+/* ── Artifact list ─────────────────────────────────────────────────────────── */
+.artifact-list__note { font-size: 11px; color: #64748b; margin-bottom: 8px; }
+.artifact-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.artifact-list__item { display: flex; gap: 6px; align-items: baseline; padding: 6px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+.artifact-list__filename { font-size: 12px; font-weight: 600; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; word-break: break-all; }
+.artifact-list__instructions { font-size: 11px; color: #64748b; }
 

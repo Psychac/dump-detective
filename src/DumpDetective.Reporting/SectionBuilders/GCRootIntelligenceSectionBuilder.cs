@@ -51,86 +51,52 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 finalizerRoots.Take(10).Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
         }
 
-        // ── Root paths: outer collapsible wrapper ─────────────────────────
-        const int ChainInitial = 5;
+        // ── Root paths: typed RootPathGroups slot ─────────────────────────
+        var rootPathGroups = new List<RootPathGroup>();
 
-        var pathGroups = roots.RootPaths
-            .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
-            .OrderByDescending(g => g.Count())
-            .ThenBy(g => g.Key)
-            .ToArray();
-
-        string outerTitle = roots.PathSearchCapped
-            ? $"Root paths by target type ({pathGroups.Length} type(s)) ⚠ some paths truncated"
-            : $"Root paths by target type ({pathGroups.Length} type(s))";
-
-        blocks.Add(CollapseBegin(outerTitle));
-        blocks.Add(T($"Grouped by target type, shortest path first. Reference chains longer than {ChainInitial} hops are collapsed — expand inline to see the full chain."));
-
-        foreach (var group in pathGroups)
+        if (roots.RootPaths.Count > 0)
         {
-            var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToArray();
-            bool anyGroupCapped = pathsInGroup.Any(p => p.WasCapped);
-            string shortName = TrimTypeName(group.Key);
-            string groupTitle = anyGroupCapped
-                ? $"{shortName} ({group.Count()} path(s)) ⚠ truncated"
-                : $"{shortName} ({group.Count()} path(s))";
+            var pathGroupings = roots.RootPaths
+                .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key);
 
-            blocks.Add(CollapseBegin(groupTitle));
-            blocks.Add(T(group.Key)); // full qualified name
-
-            for (int pi = 0; pi < pathsInGroup.Length; pi++)
+            foreach (var group in pathGroupings)
             {
-                var path = pathsInGroup[pi];
-                if (pi > 0)
-                    blocks.Add(Divider());
+                var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToArray();
+                bool anyGroupCapped = false;
+                for (int pi = 0; pi < pathsInGroup.Length; pi++)
+                    if (pathsInGroup[pi].WasCapped) { anyGroupCapped = true; break; }
 
-                blocks.Add(M("Root Kind",   path.RootKind));
-                blocks.Add(M("Target Addr", $"0x{path.TargetAddress:X}"));
-                blocks.Add(M("Path Length", path.WasCapped
-                    ? $"{path.PathLength}+ (truncated)"
-                    : path.PathLength.ToString("N0")));
-
-                if (path.PathTypeNames.Count > 0)
+                var typedPaths = new List<RootPath>(pathsInGroup.Length);
+                for (int pi = 0; pi < pathsInGroup.Length; pi++)
                 {
-                    blocks.Add(H("Reference chain:"));
-                    blocks.Add(Li($"[{path.RootKind}] (root)"));
-
-                    int shown = Math.Min(path.PathTypeNames.Count, ChainInitial);
-                    for (int hi = 0; hi < shown; hi++)
-                        blocks.Add(Li($"→ {path.PathTypeNames[hi]}"));
-
-                    int remaining = path.PathTypeNames.Count - shown;
-                    if (remaining > 0 || path.WasCapped)
-                    {
-                        string overflowTitle = remaining > 0
-                            ? $"… show {remaining} more hop(s){(path.WasCapped ? " (truncated)" : string.Empty)}"
-                            : "… (truncated — further references may exist)";
-                        blocks.Add(CollapseBegin(overflowTitle));
-                        for (int hi = shown; hi < path.PathTypeNames.Count; hi++)
-                            blocks.Add(Li($"→ {path.PathTypeNames[hi]}"));
-                        if (path.WasCapped)
-                            blocks.Add(Li("→ … (truncated — further references may exist)"));
-                        blocks.Add(CollapseEnd());
-                    }
+                    var p = pathsInGroup[pi];
+                    typedPaths.Add(new RootPath(
+                        RootKind:      p.RootKind,
+                        TargetAddress: $"0x{p.TargetAddress:X8}",
+                        PathLength:    p.PathLength,
+                        WasCapped:     p.WasCapped,
+                        Hops:          p.PathTypeNames));
                 }
-                else
-                {
-                    blocks.Add(T("No intermediate references recorded."));
-                }
+
+                rootPathGroups.Add(new RootPathGroup(
+                    TargetType:      group.Key,
+                    TargetTypeShort: TrimTypeName(group.Key),
+                    TotalPathCount:  group.Count(),
+                    AnyCapped:       anyGroupCapped,
+                    Paths:           typedPaths));
             }
-            
 
-            blocks.Add(CollapseEnd()); // end type group
-            blocks.Add(Blank());
+            if (roots.PathSearchCapped)
+                blocks.Add(T($"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated) — some types may have incomplete chains."));
         }
-
-        blocks.Add(CollapseEnd()); // end outer root-paths section
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            RootPathGroups: rootPathGroups.Count > 0 ? rootPathGroups : null);
     }
 
     private static List<TableRow> BuildKindRows(IReadOnlyList<RootKindSummary> kinds)

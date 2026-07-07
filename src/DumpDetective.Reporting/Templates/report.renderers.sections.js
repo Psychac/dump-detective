@@ -468,6 +468,431 @@ export function buildAnalyzerSection(section, i) {
     }
   }
 
+  // ── StackTraces slot ──────────────────────────────────────────────────────
+  const stackTraces = Array.isArray(section.stackTraces) ? section.stackTraces : [];
+  if (stackTraces.length) {
+    const stWrap = el('div', 'typed-slot typed-slot--stack-traces');
+    const stHeader = el('div', 'typed-slot__header');
+    stHeader.textContent = 'Thread Stack Traces';
+    stWrap.appendChild(stHeader);
+
+    for (let ti = 0; ti < stackTraces.length; ti++) {
+      const trace = stackTraces[ti];
+      const tDetails = el('details', 'stack-trace-card');
+      tDetails.dataset.category = String(trace.category || 'sampled').toLowerCase();
+
+      const tSummary = el('summary', 'stack-trace-card__summary');
+      const catBadge = el('span', 'stack-trace-card__cat stack-trace-card__cat--' + String(trace.category || 'sampled').toLowerCase());
+      catBadge.textContent = trace.category || 'Sampled';
+      const tLabel = el('span', 'stack-trace-card__label');
+      tLabel.textContent = trace.label || '';
+      tSummary.appendChild(catBadge);
+      tSummary.appendChild(tLabel);
+      if (trace.truncated) {
+        const trunc = el('span', 'stack-trace-card__truncated');
+        trunc.textContent = ' (truncated)';
+        tSummary.appendChild(trunc);
+      }
+      tDetails.appendChild(tSummary);
+
+      const tBody = el('div', 'stack-trace-card__body');
+
+      // Metadata key-value pairs
+      const meta = trace.meta;
+      if (meta && typeof meta === 'object' && Object.keys(meta).length) {
+        const metaGrid = el('div', 'stack-trace-card__meta');
+        for (const [k, v] of Object.entries(meta)) {
+          const kEl = el('span', 'stack-trace-card__meta-key'); kEl.textContent = k + ':';
+          const vEl = el('span', 'stack-trace-card__meta-val'); vEl.textContent = String(v || '');
+          metaGrid.appendChild(kEl); metaGrid.appendChild(vEl);
+        }
+        tBody.appendChild(metaGrid);
+      }
+
+      // Frame list with toggle
+      const frames = Array.isArray(trace.frames) ? trace.frames : [];
+      if (frames.length) {
+        const frameList = el('div', 'stack-trace-card__frames');
+        const fwToggle = document.createElement('button');
+        fwToggle.type = 'button';
+        fwToggle.className = 'action-btn stack-trace-card__fw-toggle';
+        fwToggle.textContent = 'Hide framework frames';
+        fwToggle.dataset.hideFw = '0';
+        fwToggle.addEventListener('click', function () {
+          const hide = this.dataset.hideFw === '1';
+          this.dataset.hideFw = hide ? '0' : '1';
+          this.textContent = hide ? 'Hide framework frames' : 'Show framework frames';
+          const fws = frameList.querySelectorAll('.stack-frame--fw');
+          for (let fi = 0; fi < fws.length; fi++) fws[fi].hidden = !hide;
+        });
+        tBody.appendChild(fwToggle);
+
+        for (let fi = 0; fi < frames.length; fi++) {
+          const f = frames[fi];
+          const fEl = el('div', 'stack-frame' + (f.isFramework ? ' stack-frame--fw' : ''));
+          const idx = el('span', 'stack-frame__idx'); idx.textContent = String(f.index != null ? f.index : fi).padStart(2, ' ');
+          const txt = el('span', 'stack-frame__text'); txt.textContent = f.text || '';
+          fEl.appendChild(idx); fEl.appendChild(txt);
+          frameList.appendChild(fEl);
+        }
+        tBody.appendChild(frameList);
+      }
+
+      tDetails.appendChild(tBody);
+      stWrap.appendChild(tDetails);
+    }
+    content.appendChild(stWrap);
+  }
+
+  // ── RootPathGroups slot ───────────────────────────────────────────────────
+  const rootPathGroups = Array.isArray(section.rootPathGroups) ? section.rootPathGroups : [];
+  if (rootPathGroups.length) {
+    const rpWrap = el('div', 'typed-slot typed-slot--root-paths');
+    const rpOuter = el('details', 'root-path-outer');
+    rpOuter.setAttribute('data-collapsible', 'root-paths');
+    const rpOuterSum = el('summary', 'root-path-outer__summary');
+    const capped = rootPathGroups.some(function (g) { return g.anyCapped; });
+    rpOuterSum.textContent = 'Root paths by target type — ' + rootPathGroups.length + ' type(s)' + (capped ? '  ⚠ some paths truncated' : '');
+    rpOuter.appendChild(rpOuterSum);
+
+    for (let gi = 0; gi < rootPathGroups.length; gi++) {
+      const group = rootPathGroups[gi];
+      const gDetails = el('details', 'root-path-group');
+      const gSum = el('summary', 'root-path-group__summary');
+      const shortName = el('span', 'root-path-group__short'); shortName.textContent = group.targetTypeShort || group.targetType || '';
+      const pathCount = el('span', 'root-path-group__count'); pathCount.textContent = ' (' + (group.totalPathCount || 0) + ' path' + (group.totalPathCount !== 1 ? 's' : '') + ')';
+      gSum.appendChild(shortName); gSum.appendChild(pathCount);
+      if (group.anyCapped) { const warn = el('span', 'root-path-group__warn'); warn.textContent = ' ⚠ truncated'; gSum.appendChild(warn); }
+      gDetails.appendChild(gSum);
+
+      const gBody = el('div', 'root-path-group__body');
+      const fqn = el('div', 'root-path-group__fqn'); fqn.textContent = group.targetType || '';
+      gBody.appendChild(fqn);
+
+      const paths = Array.isArray(group.paths) ? group.paths : [];
+      for (let pi = 0; pi < paths.length; pi++) {
+        const path = paths[pi];
+        if (pi > 0) gBody.appendChild(el('div', 'root-path__divider'));
+
+        const pCard = el('div', 'root-path');
+        const pMeta = el('div', 'root-path__meta');
+        const mkv = function (k, v) {
+          const r = el('span', 'root-path__kv');
+          const kEl = el('span', 'root-path__kv-key'); kEl.textContent = k + ':';
+          const vEl = el('span', 'root-path__kv-val'); vEl.textContent = v;
+          r.appendChild(kEl); r.appendChild(vEl); return r;
+        };
+        pMeta.appendChild(mkv('Root Kind', path.rootKind || '—'));
+        pMeta.appendChild(mkv('Target', path.targetAddress || '—'));
+        const lengthLabel = path.wasCapped ? (path.pathLength + '+ (truncated)') : String(path.pathLength || 0);
+        pMeta.appendChild(mkv('Length', lengthLabel));
+        pCard.appendChild(pMeta);
+
+        // Visual hop chain
+        const hops = Array.isArray(path.hops) ? path.hops : [];
+        if (hops.length) {
+          const chain = el('div', 'root-path__chain');
+          const rootHop = el('div', 'root-path__hop root-path__hop--root');
+          rootHop.textContent = '[' + (path.rootKind || 'root') + ']';
+          chain.appendChild(rootHop);
+          for (let hi = 0; hi < hops.length; hi++) {
+            const arrow = el('div', 'root-path__arrow'); arrow.textContent = '↓';
+            const hop = el('div', 'root-path__hop' + (hi === hops.length - 1 ? ' root-path__hop--target' : ''));
+            hop.textContent = hops[hi];
+            chain.appendChild(arrow); chain.appendChild(hop);
+          }
+          if (path.wasCapped) {
+            const arrow = el('div', 'root-path__arrow'); arrow.textContent = '↓';
+            const more = el('div', 'root-path__hop root-path__hop--truncated'); more.textContent = '… (truncated)';
+            chain.appendChild(arrow); chain.appendChild(more);
+          }
+          pCard.appendChild(chain);
+        } else {
+          const noRef = el('div', 'root-path__no-refs'); noRef.textContent = 'No intermediate references recorded.';
+          pCard.appendChild(noRef);
+        }
+
+        gBody.appendChild(pCard);
+      }
+
+      gDetails.appendChild(gBody);
+      rpOuter.appendChild(gDetails);
+    }
+    rpWrap.appendChild(rpOuter);
+    content.appendChild(rpWrap);
+  }
+
+  // ── TypeTraces slot ───────────────────────────────────────────────────────
+  const typeTraces = Array.isArray(section.typeTraces) ? section.typeTraces : [];
+  if (typeTraces.length) {
+    const ttWrap = el('div', 'typed-slot typed-slot--type-traces');
+    const ttHeader = el('div', 'typed-slot__header');
+    ttHeader.textContent = 'Type Sample Traces';
+    ttWrap.appendChild(ttHeader);
+
+    for (let ti = 0; ti < typeTraces.length; ti++) {
+      const trace = typeTraces[ti];
+      const tDetails = el('details', 'type-trace-card');
+      const tSum = el('summary', 'type-trace-card__summary');
+
+      const statusClass = trace.hasGcRoot ? 'rooted' : (trace.traversalLimited ? 'limited' : 'free');
+      const statusBadge = el('span', 'type-trace-card__status type-trace-card__status--' + statusClass);
+      statusBadge.textContent = trace.statusLabel || '';
+      const tName = el('span', 'type-trace-card__name');
+      tName.textContent = trace.typeName || '';
+      const tSize = el('span', 'type-trace-card__size');
+      if (trace.totalSizeBytes > 0) tSize.textContent = ' — ' + formatBytes(trace.totalSizeBytes);
+      tSum.appendChild(statusBadge); tSum.appendChild(tName); tSum.appendChild(tSize);
+      tDetails.appendChild(tSum);
+
+      const tBody = el('div', 'type-trace-card__body');
+      const metaGrid = el('div', 'type-trace-card__meta');
+      const addMeta = function (k, v) {
+        if (!v && v !== 0) return;
+        const kEl = el('span', 'type-trace-card__meta-key'); kEl.textContent = k + ':';
+        const vEl = el('span', 'type-trace-card__meta-val'); vEl.textContent = String(v);
+        metaGrid.appendChild(kEl); metaGrid.appendChild(vEl);
+      };
+      addMeta('Count', trace.count != null ? Number(trace.count).toLocaleString('en-US') : null);
+      addMeta('Total Size', trace.totalSizeBytes > 0 ? formatBytes(trace.totalSizeBytes) : null);
+      addMeta('Sample Address', trace.sampleAddress || null);
+      addMeta('Sample Size', trace.sampleObjectSize > 0 ? formatBytes(trace.sampleObjectSize) : null);
+      tBody.appendChild(metaGrid);
+
+      // Root hop chain
+      const hops = Array.isArray(trace.rootHops) ? trace.rootHops : [];
+      if (hops.length) {
+        const chainLabel = el('div', 'type-trace-card__chain-label');
+        chainLabel.textContent = trace.statusLabel === 'Reference chain' ? 'Reference chain:' : 'GC root chain:';
+        tBody.appendChild(chainLabel);
+        const chain = el('div', 'type-trace-card__chain');
+        for (let hi = 0; hi < hops.length; hi++) {
+          if (hi > 0) { const arr = el('div', 'root-path__arrow'); arr.textContent = '↓'; chain.appendChild(arr); }
+          const hop = el('div', 'root-path__hop' + (hi === 0 ? ' root-path__hop--root' : hi === hops.length - 1 ? ' root-path__hop--target' : ''));
+          hop.textContent = hops[hi];
+          chain.appendChild(hop);
+        }
+        tBody.appendChild(chain);
+      } else if (!trace.hasGcRoot && trace.sampleAddress) {
+        const noRoot = el('div', 'type-trace-card__no-root');
+        noRoot.textContent = trace.traversalLimited
+          ? 'Search limit reached — GC root status inconclusive.'
+          : 'No GC root found — object may be eligible for collection.';
+        tBody.appendChild(noRoot);
+      }
+
+      tDetails.appendChild(tBody);
+      ttWrap.appendChild(tDetails);
+    }
+    content.appendChild(ttWrap);
+  }
+
+  // ── LeakCandidateCards slot ───────────────────────────────────────────────
+  const leakCandidateCards = Array.isArray(section.leakCandidateCards) ? section.leakCandidateCards : [];
+  if (leakCandidateCards.length) {
+    const lcWrap = el('div', 'typed-slot typed-slot--leak-candidates');
+    const lcHeader = el('div', 'typed-slot__header'); lcHeader.textContent = 'Leak Candidate Detail'; lcWrap.appendChild(lcHeader);
+
+    for (let ci = 0; ci < leakCandidateCards.length; ci++) {
+      const card = leakCandidateCards[ci];
+      const sev = String(card.severity || 'info').toLowerCase();
+      const cDetails = el('details', 'leak-card leak-card--' + sev);
+      const cSum = el('summary', 'leak-card__summary');
+
+      const sevBadge = el('span', 'leak-card__sev leak-card__sev--' + sev); sevBadge.textContent = card.severity || 'Info';
+      const impactBadge = el('span', 'leak-card__impact leak-card__impact--' + String(card.impactBand || 'low').toLowerCase()); impactBadge.textContent = card.impactBand || '';
+      const cName = el('span', 'leak-card__name'); cName.textContent = card.typeName || '';
+      const cScore = el('span', 'leak-card__score'); cScore.textContent = card.suspicionScore != null ? 'Score ' + Number(card.suspicionScore).toLocaleString('en-US') : '';
+      cSum.appendChild(sevBadge); cSum.appendChild(impactBadge); cSum.appendChild(cName); cSum.appendChild(cScore);
+      cDetails.appendChild(cSum);
+
+      const cBody = el('div', 'leak-card__body');
+      const metaGrid = el('div', 'leak-card__meta');
+      const addM = function (k, v) {
+        if (v == null || v === '') return;
+        const kEl = el('span', 'leak-card__meta-key'); kEl.textContent = k + ':';
+        const vEl = el('span', 'leak-card__meta-val'); vEl.textContent = String(v);
+        metaGrid.appendChild(kEl); metaGrid.appendChild(vEl);
+      };
+      addM('Class',      card.classification);
+      addM('Instances',  card.instanceCount != null ? Number(card.instanceCount).toLocaleString('en-US') : null);
+      addM('Total Size', card.totalSize != null ? formatBytes(Number(card.totalSize)) : null);
+      addM('Gen2%',      card.gen2Pct != null ? Number(card.gen2Pct).toFixed(1) + '%' : null);
+      addM('Root Kind',  card.rootKind || null);
+      addM('Finalizable', card.isFinalizable ? 'Yes' : null);
+      addM('Container',  card.isContainer ? 'Yes' : null);
+      addM('Ref Ratio',  card.referenceFieldRatio != null ? Number(card.referenceFieldRatio).toFixed(2) : null);
+      cBody.appendChild(metaGrid);
+
+      if (card.explanationText) {
+        const expl = el('div', 'leak-card__explanation'); expl.textContent = card.explanationText; cBody.appendChild(expl);
+      }
+      if (card.gcImpactNote || card.lohImpactNote) {
+        const impact = el('div', 'leak-card__impact-notes');
+        if (card.gcImpactNote) { const n = el('div', 'leak-card__impact-note'); n.textContent = '⊙ ' + card.gcImpactNote; impact.appendChild(n); }
+        if (card.lohImpactNote) { const n = el('div', 'leak-card__impact-note'); n.textContent = '⊙ ' + card.lohImpactNote; impact.appendChild(n); }
+        cBody.appendChild(impact);
+      }
+      cDetails.appendChild(cBody);
+      lcWrap.appendChild(cDetails);
+    }
+    content.appendChild(lcWrap);
+  }
+
+  // ── EventLeakGroupCards slot ──────────────────────────────────────────────
+  const eventLeakGroupCards = Array.isArray(section.eventLeakGroupCards) ? section.eventLeakGroupCards : [];
+  if (eventLeakGroupCards.length) {
+    const egWrap = el('div', 'typed-slot typed-slot--event-leak-groups');
+    const egHeader = el('div', 'typed-slot__header'); egHeader.textContent = 'Event Leak Group Detail'; egWrap.appendChild(egHeader);
+
+    for (let gi = 0; gi < eventLeakGroupCards.length; gi++) {
+      const group = eventLeakGroupCards[gi];
+      const shape = group.isStatic ? 'STATIC' : 'INSTANCE';
+      const gDetails = el('details', 'event-leak-card');
+      const gSum = el('summary', 'event-leak-card__summary');
+      const shapeBadge = el('span', 'event-leak-card__shape event-leak-card__shape--' + shape.toLowerCase()); shapeBadge.textContent = shape;
+      const gTitle = el('span', 'event-leak-card__title'); gTitle.textContent = (group.publisherType || '') + '.' + (group.eventFieldName || '');
+      const gSev = el('span', 'event-leak-card__sev'); gSev.textContent = 'Severity ' + (group.severityScore != null ? group.severityScore : '');
+      gSum.appendChild(shapeBadge); gSum.appendChild(gTitle); gSum.appendChild(gSev);
+      gDetails.appendChild(gSum);
+
+      const gBody = el('div', 'event-leak-card__body');
+      const metaGrid = el('div', 'event-leak-card__meta');
+      const addM = function (k, v) {
+        if (v == null || v === '') return;
+        const kEl = el('span', 'event-leak-card__meta-key'); kEl.textContent = k + ':';
+        const vEl = el('span', 'event-leak-card__meta-val'); vEl.textContent = String(v);
+        metaGrid.appendChild(kEl); metaGrid.appendChild(vEl);
+      };
+      addM('Instances',       group.instanceCount != null ? Number(group.instanceCount).toLocaleString('en-US') : null);
+      addM('Total Subs',      group.totalSubscribers != null ? Number(group.totalSubscribers).toLocaleString('en-US') : null);
+      addM('Avg / Min / Max', group.averageSubscribers != null ? Number(group.averageSubscribers).toFixed(1) + ' / ' + group.minSubscribers + ' / ' + group.maxSubscribers : null);
+      addM('Gen2 Publishers', group.gen2PublisherPercent != null ? Number(group.gen2PublisherPercent).toFixed(1) + '%' : null);
+      addM('Est. Retained',   group.estimatedRetainedBytes > 0 ? formatBytes(Number(group.estimatedRetainedBytes)) : null);
+      if (group.hasDuplicateSubscriptions) addM('Dup Subscriptions', 'Yes — same subscriber registered multiple times');
+      if (group.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
+      if (group.orphanedSubscriberInstances > 0) addM('Orphaned Instances', Number(group.orphanedSubscriberInstances).toLocaleString('en-US') + ' dead-subscriber pattern');
+      gBody.appendChild(metaGrid);
+
+      const subTypes = Array.isArray(group.topSubscriberTypes) ? group.topSubscriberTypes : [];
+      if (subTypes.length) {
+        const stLabel = el('div', 'event-leak-card__sub-label'); stLabel.textContent = 'Top Subscriber Types:'; gBody.appendChild(stLabel);
+        const stList = el('div', 'event-leak-card__sub-list');
+        for (let si = 0; si < subTypes.length; si++) {
+          const row = el('div', 'event-leak-card__sub-row');
+          const cnt = el('span', 'event-leak-card__sub-count'); cnt.textContent = Number(subTypes[si].count || 0).toLocaleString('en-US');
+          const typ = el('span', 'event-leak-card__sub-type'); typ.textContent = subTypes[si].type || '';
+          row.appendChild(cnt); row.appendChild(typ); stList.appendChild(row);
+        }
+        gBody.appendChild(stList);
+      }
+      gDetails.appendChild(gBody);
+      egWrap.appendChild(gDetails);
+    }
+    content.appendChild(egWrap);
+  }
+
+  // ── EventLeakInstanceCards slot ───────────────────────────────────────────
+  const eventLeakInstanceCards = Array.isArray(section.eventLeakInstanceCards) ? section.eventLeakInstanceCards : [];
+  if (eventLeakInstanceCards.length) {
+    const eiWrap = el('div', 'typed-slot typed-slot--event-leak-instances');
+    const eiHeader = el('div', 'typed-slot__header'); eiHeader.textContent = 'Event Leak Instance Detail'; eiWrap.appendChild(eiHeader);
+
+    for (let ii = 0; ii < eventLeakInstanceCards.length; ii++) {
+      const inst = eventLeakInstanceCards[ii];
+      const shape = inst.isStatic ? 'STATIC' : 'INSTANCE';
+      const iDetails = el('details', 'event-leak-card');
+      const iSum = el('summary', 'event-leak-card__summary');
+      const shapeBadge = el('span', 'event-leak-card__shape event-leak-card__shape--' + shape.toLowerCase()); shapeBadge.textContent = shape;
+      const iTitle = el('span', 'event-leak-card__title'); iTitle.textContent = (inst.publisherType || '') + '.' + (inst.eventFieldName || '');
+      const iSubs = el('span', 'event-leak-card__sev'); iSubs.textContent = (inst.subscriberCount != null ? inst.subscriberCount : '') + ' subscriber(s)';
+      iSum.appendChild(shapeBadge); iSum.appendChild(iTitle); iSum.appendChild(iSubs);
+      iDetails.appendChild(iSum);
+
+      const iBody = el('div', 'event-leak-card__body');
+      const metaGrid = el('div', 'event-leak-card__meta');
+      const addM = function (k, v) {
+        if (v == null || v === '') return;
+        const kEl = el('span', 'event-leak-card__meta-key'); kEl.textContent = k + ':';
+        const vEl = el('span', 'event-leak-card__meta-val'); vEl.textContent = String(v);
+        metaGrid.appendChild(kEl); metaGrid.appendChild(vEl);
+      };
+      addM('Publisher Addr',  inst.publisherAddress || null);
+      addM('Severity Score',  inst.severityScore != null ? inst.severityScore : null);
+      addM('Root Hint',       inst.rootHint || null);
+      addM('Publisher Gen',   inst.publisherGeneration >= 0 ? 'Gen' + inst.publisherGeneration : null);
+      addM('Dup Subscriptions', inst.duplicateSubscriptionCount > 0 ? inst.duplicateSubscriptionCount + ' extra registration(s)' : null);
+      addM('Orphaned Subs',   inst.orphanedSubscriberCount > 0 ? inst.orphanedSubscriberCount + ' not independently GC-rooted' : null);
+      if (inst.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
+      iBody.appendChild(metaGrid);
+
+      const subDetails = Array.isArray(inst.subscriberDetails) ? inst.subscriberDetails : [];
+      if (subDetails.length) {
+        const sdLabel = el('div', 'event-leak-card__sub-label'); sdLabel.textContent = 'Subscriber Details:'; iBody.appendChild(sdLabel);
+        const sdList = el('div', 'event-leak-card__sub-list');
+        for (let si = 0; si < subDetails.length; si++) {
+          const det = subDetails[si];
+          const row = el('div', 'event-leak-card__sub-row');
+          const cnt = el('span', 'event-leak-card__sub-count'); cnt.textContent = Number(det.count || 0).toLocaleString('en-US');
+          const typ = el('span', 'event-leak-card__sub-type'); typ.textContent = det.type || '';
+          const mth = el('span', 'event-leak-card__sub-method'); mth.textContent = det.methodName ? ' → ' + det.methodName : '';
+          const sz  = el('span', 'event-leak-card__sub-size');  sz.textContent  = det.size > 0 ? ' ' + formatBytes(Number(det.size)) : '';
+          row.appendChild(cnt); row.appendChild(typ); row.appendChild(mth); row.appendChild(sz);
+          sdList.appendChild(row);
+        }
+        iBody.appendChild(sdList);
+      }
+      iDetails.appendChild(iBody);
+      eiWrap.appendChild(iDetails);
+    }
+    content.appendChild(eiWrap);
+  }
+
+  // ── StackClusters slot ────────────────────────────────────────────────────
+  const stackClusters = Array.isArray(section.stackClusters) ? section.stackClusters : [];
+  if (stackClusters.length) {
+    const scWrap = el('div', 'typed-slot typed-slot--stack-clusters');
+    const scHeader = el('div', 'typed-slot__header'); scHeader.textContent = 'Thread Stack Signature Clusters'; scWrap.appendChild(scHeader);
+
+    for (let sci = 0; sci < stackClusters.length; sci++) {
+      const cluster = stackClusters[sci];
+      const scDetails = el('details', 'stack-cluster-card');
+      const scSum = el('summary', 'stack-cluster-card__summary');
+      const cntBadge = el('span', 'stack-cluster-card__count'); cntBadge.textContent = cluster.threadCount + ' thread' + (cluster.threadCount !== 1 ? 's' : '');
+      const osIds = Array.isArray(cluster.osThreadIds) && cluster.osThreadIds.length
+        ? el('span', 'stack-cluster-card__osids')
+        : null;
+      if (osIds) osIds.textContent = 'OS: ' + cluster.osThreadIds.join(', ');
+      scSum.appendChild(cntBadge);
+      if (osIds) scSum.appendChild(osIds);
+      if (cluster.truncated) { const tr = el('span', 'stack-cluster-card__truncated'); tr.textContent = ' (truncated)'; scSum.appendChild(tr); }
+      scDetails.appendChild(scSum);
+
+      const sig = el('div', 'stack-cluster-card__sig'); sig.textContent = cluster.signature || '';
+      scDetails.appendChild(sig);
+      scWrap.appendChild(scDetails);
+    }
+    content.appendChild(scWrap);
+  }
+
+  // ── Artifacts slot ────────────────────────────────────────────────────────
+  const artifacts = Array.isArray(section.artifacts) ? section.artifacts : [];
+  if (artifacts.length) {
+    const artWrap = el('div', 'typed-slot typed-slot--artifacts');
+    const artHeader = el('div', 'typed-slot__header'); artHeader.textContent = 'Analyzer Exports'; artWrap.appendChild(artHeader);
+    const artNote = el('div', 'artifact-list__note'); artNote.textContent = 'These files were written to disk for deeper offline inspection.'; artWrap.appendChild(artNote);
+    const artList = el('ul', 'artifact-list');
+    for (let ai = 0; ai < artifacts.length; ai++) {
+      const a = artifacts[ai];
+      const li = document.createElement('li'); li.className = 'artifact-list__item';
+      const fn = el('span', 'artifact-list__filename'); fn.textContent = a.fileName || '';
+      const instr = el('span', 'artifact-list__instructions'); instr.textContent = a.instructions ? ' — ' + a.instructions : '';
+      li.appendChild(fn); li.appendChild(instr); artList.appendChild(li);
+    }
+    artWrap.appendChild(artList);
+    content.appendChild(artWrap);
+  }
+
   details.appendChild(content); wrapper.appendChild(details);
 
   // ── Provenance footer ─────────────────────────────────────────────────────

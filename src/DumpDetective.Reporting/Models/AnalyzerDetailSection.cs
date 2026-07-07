@@ -77,21 +77,143 @@ internal sealed record SectionProvenance(
     long CacheMisses,
     IReadOnlyList<string>? CappingNotes = null);
 
+// ── Typed structured-data slots ───────────────────────────────────────────────
+
+/// <summary>A single frame in a named stack trace.</summary>
+internal sealed record StackFrameEntry(
+    int Index,
+    string Text,
+    bool IsFramework);
+
+/// <summary>A named thread/finalizer stack with metadata key-value pairs and frames.</summary>
+internal sealed record NamedStackTrace(
+    string Label,       // e.g. "Finalizer Thread — BLOCKED", "Thread 42 (OS 1234) — Blocked | 2 locks"
+    string Category,    // "Finalizer" | "Sampled" | "Captured" | "Blocked"
+    IReadOnlyDictionary<string, string> Meta,  // {"State":"Waiting","GC Mode":"Preemptive","Locks":"2",…}
+    IReadOnlyList<StackFrameEntry> Frames,
+    bool Truncated);
+
+/// <summary>A single GC root path from root through intermediate types to a target object.</summary>
+internal sealed record RootPath(
+    string RootKind,
+    string TargetAddress,   // hex string e.g. "0x1A2B3C"
+    int PathLength,
+    bool WasCapped,
+    IReadOnlyList<string> Hops);  // type names, root-first; final entry is target type
+
+/// <summary>All root paths reaching a particular target type, grouped for display.</summary>
+internal sealed record RootPathGroup(
+    string TargetType,         // fully qualified
+    string TargetTypeShort,    // simple (last segment) name
+    int TotalPathCount,        // total paths in group before any take() limit
+    bool AnyCapped,
+    IReadOnlyList<RootPath> Paths);  // top paths (limited to 3)
+
+/// <summary>A single scored leak candidate with pre-computed explanation and impact text.</summary>
+internal sealed record LeakCandidateCard(
+    string TypeName,
+    string Severity,
+    string Classification,
+    double SuspicionScore,
+    long InstanceCount,
+    ulong TotalSize,
+    double Gen2Pct,
+    string? RootKind,
+    bool IsFinalizable,
+    bool IsContainer,
+    double ReferenceFieldRatio,
+    string ExplanationText,
+    string ImpactBand,
+    string GcImpactNote,
+    string LohImpactNote);
+
+/// <summary>Subscriber type/method detail row embedded in an EventLeakInstanceCard.</summary>
+internal sealed record SubscriberDetailEntry(
+    string Type,
+    string? MethodName,
+    int Count,
+    ulong Size);
+
+/// <summary>Per-publisher event group summary with embedded subscriber type breakdown.</summary>
+internal sealed record EventLeakGroupCard(
+    string PublisherType,
+    string EventFieldName,
+    bool IsStatic,
+    int SeverityScore,
+    int InstanceCount,
+    int TotalSubscribers,
+    double AverageSubscribers,
+    int MinSubscribers,
+    int MaxSubscribers,
+    double Gen2PublisherPercent,
+    ulong EstimatedRetainedBytes,
+    bool HasDuplicateSubscriptions,
+    bool HasLifetimeMismatch,
+    int OrphanedSubscriberInstances,
+    IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes);
+
+/// <summary>Per-publisher instance drill-down with optional per-subscriber details.</summary>
+internal sealed record EventLeakInstanceCard(
+    string PublisherType,
+    string EventFieldName,
+    bool IsStatic,
+    string PublisherAddress,
+    int SeverityScore,
+    int SubscriberCount,
+    string? RootHint,
+    int PublisherGeneration,
+    int DuplicateSubscriptionCount,
+    int OrphanedSubscriberCount,
+    bool HasLifetimeMismatch,
+    IReadOnlyList<SubscriberDetailEntry>? SubscriberDetails);
+
+/// <summary>A cluster of threads sharing the same stack signature.</summary>
+internal sealed record StackCluster(
+    int ThreadCount,
+    IReadOnlyList<string> OsThreadIds,
+    string Signature,
+    bool Truncated);
+
+/// <summary>An on-disk artifact produced by an analyzer for offline inspection.</summary>
+internal sealed record AnalyzerArtifact(
+    string FileName,
+    string Instructions);
+
+/// <summary>A per-type sample trace entry with optional parsed GC root hop chain.</summary>
+internal sealed record TypeSampleTrace(
+    string TypeName,
+    int Count,
+    ulong TotalSizeBytes,
+    string? SampleAddress,       // hex string; null when sample unavailable
+    ulong SampleObjectSize,
+    bool HasGcRoot,
+    IReadOnlyList<string>? RootHops,  // parsed hop list root-first; null when no root found
+    bool TraversalLimited,
+    string StatusLabel);  // "GC root found" | "No root (search limit)" | "No root" | "Sample unavailable"
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 internal sealed record AnalyzerDetailSection(
     string AnalyzerName,
     string DisplayTitle,
     int SortOrder,
-    IReadOnlyList<SectionBlock> Blocks,      // Narrative blocks after metrics+tables are extracted to typed slots
+    IReadOnlyList<SectionBlock> Blocks,      // Narrative prose: TextBlock, ConfidenceBand, H headings only
     string SectionId = "",                   // Stable anchor e.g. "A1", "B4" — set by ReportSerializer via SectionIdDomainMap
     string Domain = "",                      // "Memory" | "GC" | "Leaks" | "Threads" | "Async" | "Exceptions" | "Runtime" | "TypeSystem"
     FindingSeverity? LeadSeverity = null,    // Severity of the lead finding (null = informational only)
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
     IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
     // Legacy typed tables removed: producers should populate `CompactTables` only.
-    SectionProvenance? Provenance = null,  // Run provenance — collapsed footer
-    IReadOnlyList<CompactTable>? CompactTables = null); // Compact table representation (preferred)
+    SectionProvenance? Provenance = null,    // Run provenance — collapsed footer
+    IReadOnlyList<CompactTable>? CompactTables = null,           // Compact table representation (preferred)
+    IReadOnlyList<NamedStackTrace>? StackTraces = null,          // Named thread/stack traces (replaces H+SF[] blocks)
+    IReadOnlyList<RootPathGroup>? RootPathGroups = null,         // GC root paths grouped by target type (replaces nested collapses)
+    IReadOnlyList<TypeSampleTrace>? TypeTraces = null,           // Per-type sample traces with root chains (replaces collapse+M[] blocks)
+    IReadOnlyList<LeakCandidateCard>? LeakCandidateCards = null, // Scored leak candidates with explanation+impact text
+    IReadOnlyList<EventLeakGroupCard>? EventLeakGroupCards = null,       // Event leak per-group drill-down
+    IReadOnlyList<EventLeakInstanceCard>? EventLeakInstanceCards = null, // Event leak per-instance drill-down
+    IReadOnlyList<StackCluster>? StackClusters = null,           // Thread stack signature clusters
+    IReadOnlyList<AnalyzerArtifact>? Artifacts = null);          // On-disk artifacts produced by the analyzer
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]

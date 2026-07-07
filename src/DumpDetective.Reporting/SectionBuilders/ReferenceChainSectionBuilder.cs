@@ -30,6 +30,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
         var blocks = new List<SectionBlock>();
 
         var traces = d.TopTypeSampleTraces ?? [];
+        var typeTraces = new List<TypeSampleTrace>();
         if (traces.Count > 0)
         {
             int limit = Math.Min(traces.Count, MaxTraces);
@@ -37,30 +38,55 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             {
                 var trace = traces[i];
                 string status = trace.HasGcRoot
-                    ? "GC root path found"
+                    ? "GC root found"
                     : trace.TraversalLimited
-                        ? "No GC root (search limit reached — inconclusive)"
-                        : "No GC root (may be eligible for collection)";
+                        ? "No root (search limit)"
+                        : "No root";
+                if (!trace.SampleAddress.HasValue)
+                    status = "Sample unavailable";
 
-                blocks.Add(CollapseBegin($"[{i + 1}] {trace.TypeName} — {trace.Count:N0} objects, {FormatHelper.FormatBytes(trace.TotalSizeBytes)}"));
-                blocks.Add(M("Count", $"{trace.Count:N0}", trace.Count, indent: 1));
-                blocks.Add(M("Total Size", FormatHelper.FormatBytes(trace.TotalSizeBytes), (double)trace.TotalSizeBytes, indent: 1));
-                if (trace.SampleAddress.HasValue)
+                IReadOnlyList<string>? rootHops = null;
+                if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
                 {
-                    blocks.Add(M("Sample Instance", $"0x{trace.SampleAddress.Value:X}", indent: 1));
-                    blocks.Add(M("Size", FormatHelper.FormatBytes(trace.SampleObjectSize), (double)trace.SampleObjectSize, indent: 1));
-                    blocks.Add(M("Status", status, indent: 1));
-                    if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
-                        blocks.Add(new PathBlock("Root Path", trace.RootPath, 1));
+                    // Raw format: "root → TypeA → TypeB → target" — split on arrow separators
+                    var hops = trace.RootPath!
+                        .Split([" → ", " -> "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    rootHops = hops.Length > 0 ? hops : null;
                 }
-                else
-                {
-                    blocks.Add(M("Status", "Sample instance unavailable for tracing", indent: 1));
-                }
-                blocks.Add(CollapseEnd());
+
+                typeTraces.Add(new TypeSampleTrace(
+                    TypeName:         trace.TypeName,
+                    Count:            trace.Count,
+                    TotalSizeBytes:   trace.TotalSizeBytes,
+                    SampleAddress:    trace.SampleAddress.HasValue ? $"0x{trace.SampleAddress.Value:X}" : null,
+                    SampleObjectSize: trace.SampleObjectSize,
+                    HasGcRoot:        trace.HasGcRoot,
+                    RootHops:         rootHops,
+                    TraversalLimited: trace.TraversalLimited,
+                    StatusLabel:      status));
             }
         }
 
+        var chains = d.SampleReferenceChains ?? [];
+        if (chains.Count > 0)
+        {
+            int chainLimit = Math.Min(chains.Count, MaxChains);
+            for (int i = 0; i < chainLimit; i++)
+            {
+                var hops = chains[i]
+                    .Split([" → ", " -> "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                typeTraces.Add(new TypeSampleTrace(
+                    TypeName:         $"Chain [{i + 1}]",
+                    Count:            1,
+                    TotalSizeBytes:   0,
+                    SampleAddress:    null,
+                    SampleObjectSize: 0,
+                    HasGcRoot:        true,
+                    RootHops:         hops.Length > 0 ? hops : [chains[i]],
+                    TraversalLimited: false,
+                    StatusLabel:      "Reference chain"));
+            }
+        }
         var topRetained = d.TopRetainedTypes ?? [];
         if (topRetained.Count > 0)
         {
@@ -71,24 +97,13 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             compactTables.Add(STCompact("Top retained sampled types", new[] { CH("Type"), CH("Retained Samples","number") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        var chains = d.SampleReferenceChains ?? [];
-        if (chains.Count > 0)
-        {
-            int chainLimit = Math.Min(chains.Count, MaxChains);
-            for (int i = 0; i < chainLimit; i++)
-            {
-                blocks.Add(CollapseBegin($"Chain [{i + 1}]"));
-                blocks.Add(new PathBlock("Chain", chains[i], 1));
-                blocks.Add(CollapseEnd());
-            }
-        }
-
         return new AnalyzerDetailSection(
             AnalyzerName: AnalyzerName,
             DisplayTitle: AnalyzerName,
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            TypeTraces: typeTraces.Count > 0 ? typeTraces : null);
     }
 }

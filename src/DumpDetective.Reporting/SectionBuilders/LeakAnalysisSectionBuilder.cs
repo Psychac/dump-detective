@@ -109,63 +109,39 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
         }
 
-        LeakCandidateRecord[] explanationCandidates = leak.TopCandidates
-            .Where(candidate => candidate.Severity != FindingSeverity.Info)
-            .OrderByDescending(candidate => candidate.SuspicionScore)
-            .ThenByDescending(candidate => candidate.TotalSize)
-            .ToArray();
+        var leakCandidateCards = new List<LeakCandidateCard>();
 
-        if (explanationCandidates.Length > 0)
+        // Merge explanation + impact into typed cards for all high-signal candidates
+        for (int i = 0; i < leak.TopCandidates.Count; i++)
         {
-            blocks.Add(H("LEAK EXPLANATIONS"));
-            blocks.Add(T("These explanations are generated for the highest-signal candidates in the list."));
+            LeakCandidateRecord candidate = leak.TopCandidates[i];
+            string impactBand = GetImpactBand(candidate.TotalSize);
+            string gcImpact = candidate.IsFinalizable
+                ? "Finalizable objects can extend collection cycles and add second-pass GC pressure."
+                : "No finalizer-specific impact detected.";
+            string lohImpact = candidate.TotalSize > 85_000 && IsLargeObjectLike(candidate.TypeName)
+                ? "Potential LOH fragmentation risk due to large array/string-like allocations."
+                : "No LOH-specific fragmentation note.";
+            string explanationText = candidate.Severity != FindingSeverity.Info
+                ? LeakExplainer.Explain(candidate)
+                : string.Empty;
 
-            for (int i = 0; i < explanationCandidates.Length; i++)
-            {
-                LeakCandidateRecord candidate = explanationCandidates[i];
-                blocks.Add(CollapseBegin($"[{i + 1}] {candidate.TypeName} — {candidate.Severity} / {candidate.Classification} ({candidate.SuspicionScore:N0})"));
-                blocks.Add(M("Class",    candidate.Classification.ToString()));
-                blocks.Add(M("Severity", candidate.Severity.ToString()));
-                blocks.Add(M("Score",    candidate.SuspicionScore.ToString("N0"), candidate.SuspicionScore));
-                blocks.Add(M("Root kind",candidate.RootKind ?? "—"));
-                blocks.Add(M("Instances",candidate.InstanceCount.ToString("N0"), candidate.InstanceCount));
-                blocks.Add(M("Total size",FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
-                blocks.Add(M("Gen2%",    candidate.Gen2Pct.ToString("F1") + "%", (long)Math.Round(candidate.Gen2Pct * 10)));
-                blocks.Add(M("Finalizable", candidate.IsFinalizable ? "Yes" : "No"));
-                blocks.Add(M("Container",   candidate.IsContainer ? "Yes" : "No"));
-                blocks.Add(M("Reference field ratio", candidate.ReferenceFieldRatio.ToString("F2"), candidate.ReferenceFieldRatio));
-                blocks.Add(T(LeakExplainer.Explain(candidate)));
-                blocks.Add(CollapseEnd());
-                if (i + 1 < explanationCandidates.Length) blocks.Add(Blank());
-            }
-        }
-
-        if (leak.TopCandidates.Count > 0)
-        {
-            blocks.Add(H("LEAK IMPACT"));
-            blocks.Add(T("Impact bands are derived from the candidate's shallow size so the report can rank operational risk without a separate retained-size scan."));
-
-            for (int i = 0; i < leak.TopCandidates.Count; i++)
-            {
-                LeakCandidateRecord candidate = leak.TopCandidates[i];
-                string impactBand = GetImpactBand(candidate.TotalSize);
-                string gcImpact = candidate.IsFinalizable
-                    ? "Finalizable objects can extend collection cycles and add second-pass GC pressure."
-                    : "No finalizer-specific impact detected.";
-                string lohImpact = candidate.TotalSize > 85_000 && IsLargeObjectLike(candidate.TypeName)
-                    ? "Potential LOH fragmentation risk due to large array/string-like allocations."
-                    : "No LOH-specific fragmentation note.";
-                string heapShare = "N/A";
-
-                blocks.Add(CollapseBegin($"[{i + 1}] {candidate.TypeName} — {impactBand}"));
-                blocks.Add(M("Shallow size",    FormatBytes(candidate.TotalSize), (long)Math.Min(candidate.TotalSize, long.MaxValue)));
-                blocks.Add(M("Heap share",      heapShare));
-                blocks.Add(M("Stability risk",  impactBand));
-                blocks.Add(T(gcImpact));
-                blocks.Add(T(lohImpact));
-                blocks.Add(CollapseEnd());
-                if (i + 1 < leak.TopCandidates.Count) blocks.Add(Blank());
-            }
+            leakCandidateCards.Add(new LeakCandidateCard(
+                TypeName:            candidate.TypeName,
+                Severity:            candidate.Severity.ToString(),
+                Classification:      candidate.Classification.ToString(),
+                SuspicionScore:      candidate.SuspicionScore,
+                InstanceCount:       candidate.InstanceCount,
+                TotalSize:           candidate.TotalSize,
+                Gen2Pct:             candidate.Gen2Pct,
+                RootKind:            candidate.RootKind,
+                IsFinalizable:       candidate.IsFinalizable,
+                IsContainer:         candidate.IsContainer,
+                ReferenceFieldRatio: candidate.ReferenceFieldRatio,
+                ExplanationText:     explanationText,
+                ImpactBand:          impactBand,
+                GcImpactNote:        gcImpact,
+                LohImpactNote:       lohImpact));
         }
 
         return new AnalyzerDetailSection(
@@ -175,7 +151,8 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             Blocks: blocks,
             LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            LeakCandidateCards: leakCandidateCards.Count > 0 ? leakCandidateCards : null);
     }
 
     private static string GetImpactBand(ulong totalSize)

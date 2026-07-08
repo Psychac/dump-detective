@@ -253,6 +253,6 @@ public sealed class AllocationPatternAnalyzerTests
         var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
 
         // shortish bucket was empty; Mixed should allow spillover from long-lived to fill transient/shortish up to TopTypeLimit
-        (result.TopTransientTypes.Count + result.TopShortishTypes.Count + result.TopLongLivedTypes.Count).Should().BeGreaterOrEqualTo(2);
+        (result.TopTransientTypes.Count + result.TopShortishTypes.Count + result.TopLongLivedTypes.Count).Should().BeGreaterThanOrEqualTo(2);
     }
 }

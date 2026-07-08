@@ -51,7 +51,7 @@ public sealed class ReportingCompositionTests
         doc.ExecutiveSummary.Should().NotBeNull();
         // Critical/Warning/top-recommendation projection removed from ExecutiveSummaryRecord.
         // Verify findings were composed and remain available on the report document.
-        doc.Findings.Should().HaveCountGreaterOrEqualTo(1);
+        doc.Findings.Should().HaveCountGreaterThanOrEqualTo(1);
     }
 
     [Fact]

@@ -13,7 +13,7 @@ public class ThreadAnalyzerSamplingTests
         var b = ThreadAnalyzer.SampleCandidateIndices(totalCandidates: 1000, capacity: 20, seed: 12345);
 
         a.Should().Equal(b);
-        a.Count.Should().BeLessOrEqualTo(20);
+        a.Count.Should().BeLessThanOrEqualTo(20);
     }
 
     [Fact]

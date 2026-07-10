@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Analysis.Cache;
@@ -7,7 +10,13 @@ internal class TypeMetadataCache
 {
     private readonly Func<HeapIndexBuildResult?> _getHeapIndex;
     private readonly MethodTableCache? _methodTableCache;
-    private readonly Dictionary<ulong, bool> _methodTableHasRefs = new Dictionary<ulong, bool>(capacity: 512);
+    private readonly ConcurrentDictionary<ulong, TypeMetadata> _cache = new ConcurrentDictionary<ulong, TypeMetadata>();
+
+    // Observability counters
+    private long _cacheHits;
+    private long _cacheMisses;
+    private long _extractErrors;
+    private DateTime? _lastExtractTime;
 
     public TypeMetadataCache(Func<HeapIndexBuildResult?> getHeapIndex, MethodTableCache? methodTableCache = null)
     {
@@ -15,6 +24,45 @@ internal class TypeMetadataCache
         _methodTableCache = methodTableCache;
     }
 
+    public bool TryGet(ulong methodTable, out TypeMetadata metadata)
+    {
+        if (methodTable == 0)
+        {
+            metadata = default;
+            return false;
+        }
+
+        bool found = _cache.TryGetValue(methodTable, out metadata!);
+        if (found) System.Threading.Interlocked.Increment(ref _cacheHits);
+        else System.Threading.Interlocked.Increment(ref _cacheMisses);
+        return found;
+    }
+
+    public TypeMetadata GetOrCreate(ClrHeap heap, ulong methodTable)
+    {
+        if (methodTable == 0)
+            throw new ArgumentOutOfRangeException(nameof(methodTable));
+
+        if (heap is null)
+            throw new ArgumentNullException(nameof(heap));
+
+        // Fast-path: return if present
+        if (_cache.TryGetValue(methodTable, out var existing))
+            return existing;
+
+        // Otherwise, extract and add
+        var metadata = ExtractFromClrMd(heap, methodTable);
+        _cache.TryAdd(methodTable, metadata);
+        return metadata;
+    }
+
+    public void Clear() => _cache.Clear();
+
+    /// <summary>
+    /// Back-compat convenience: determine whether the method table has outgoing references.
+    /// Preserves behaviour where methodTable == 0 returns false without requiring a heap.
+    /// Exceptions from extraction are propagated.
+    /// </summary>
     public bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable)
     {
         if (methodTable == 0)
@@ -23,65 +71,93 @@ internal class TypeMetadataCache
         if (heap is null)
             throw new ArgumentNullException(nameof(heap));
 
-        if (_methodTableHasRefs.TryGetValue(methodTable, out var cached))
-            return cached;
+        if (TryGet(methodTable, out var metadata))
+            return metadata.ContainsPointers;
 
-        // Fast path: if we have a prebuilt index, hydrate from the index sample address.
-        var built = _getHeapIndex();
-        if (built?.TypeAggregates is IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates
-            && aggregates.TryGetValue(methodTable, out var aggregate))
-        {
-            if (aggregate.SampleAddress != 0)
-            {
-                try
-                {
-                    ClrObject sample = heap.GetObject(aggregate.SampleAddress);
-                    bool has = sample.IsValid && sample.Type is not null && sample.Type.ContainsPointers;
-                    _methodTableHasRefs[methodTable] = has;
-                    return has;
-                }
-                catch
-                {
-                    // fallthrough to conservative default below
-                }
-            }
-        }
+        var md = GetOrCreate(heap, methodTable);
+        return md.ContainsPointers;
+    }
 
-        // Fallback: resolve the ClrType via MethodTableCache when available, otherwise ask ClrHeap.
+    private TypeMetadata ExtractFromClrMd(ClrHeap heap, ulong methodTable)
+    {
         try
         {
-            ClrType? type = _methodTableCache?.GetTypeByMethodTable(heap, methodTable) ?? heap.GetTypeByMethodTable(methodTable);
+            // Fast path: use prebuilt index sample address when available
+            var built = _getHeapIndex();
+            if (built?.TypeAggregates is IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates
+                && aggregates.TryGetValue(methodTable, out var aggregate)
+                && aggregate.SampleAddress != 0)
+            {
+                var sample = heap.GetObject(aggregate.SampleAddress);
+                if (sample.IsValid && sample.Type is not null)
+                {
+                    _lastExtractTime = DateTime.UtcNow;
+                    return ConvertClrTypeToMetadata(sample.Type, methodTable);
+                }
+            }
+
+            // Fallback: resolve via MethodTableCache or ClrHeap
+            var type = _methodTableCache?.GetTypeByMethodTable(heap, methodTable) ?? heap.GetTypeByMethodTable(methodTable);
             if (type is not null)
             {
-                bool has = false;
-                if (type.IsArray)
-                {
-                    has = type.ComponentType?.IsObjectReference == true;
-                }
-                else
-                {
-                    foreach (ClrInstanceField field in type.Fields)
-                    {
-                        if (field.IsObjectReference)
-                        {
-                            has = true;
-                            break;
-                        }
-                    }
-                }
+                _lastExtractTime = DateTime.UtcNow;
+                return ConvertClrTypeToMetadata(type, methodTable);
+            }
 
-                _methodTableHasRefs[methodTable] = has;
-                return has;
+            // If we reached here, the type couldn't be resolved. Treat as conservative: assume contains pointers.
+            _lastExtractTime = DateTime.UtcNow;
+            return new TypeMetadata(methodTable, containsPointers: true, isArray: false, arrayContainsPointers: false, isString: false, isDelegate: false, isException: false, isFreeObject: false, instanceSize: 0, referenceFieldOffsets: ImmutableArray<int>.Empty);
+        }
+        catch (Exception)
+        {
+            System.Threading.Interlocked.Increment(ref _extractErrors);
+            // per user instruction, rethrow extraction errors
+            throw;
+        }
+    }
+
+    private static TypeMetadata ConvertClrTypeToMetadata(ClrType type, ulong methodTable)
+    {
+        bool isArray = type.IsArray;
+        bool arrayContainsPointers = false;
+        bool containsPointers = false;
+        var offsets = ImmutableArray.CreateBuilder<int>();
+
+        if (isArray)
+        {
+            arrayContainsPointers = type.ComponentType?.IsObjectReference == true;
+            containsPointers = arrayContainsPointers;
+        }
+        else
+        {
+            foreach (var field in type.Fields)
+            {
+                if (field.IsObjectReference)
+                {
+                    containsPointers = true;
+                    offsets.Add(field.Offset);
+                }
             }
         }
-        catch
-        {
-            // ignore and fall through to conservative default
-        }
 
-        // Conservative default: assume method-table has outgoing refs to avoid missing referents.
-        _methodTableHasRefs[methodTable] = true;
-        return true;
+        int instanceSize = (int)(type.StaticSize);
+
+        bool isString = type.Name is not null && type.Name.Equals("System.String", StringComparison.Ordinal);
+        bool isDelegate = TypeFilterHelper.IsDelegateType(type);
+        bool isException = type.IsException;
+        bool isFreeObject = false; // ClrMD provides free-object checks on instances, not types
+
+        return new TypeMetadata(
+            methodTable: methodTable,
+            containsPointers: containsPointers,
+            isArray: isArray,
+            arrayContainsPointers: arrayContainsPointers,
+            isString: isString,
+            isDelegate: isDelegate,
+            isException: isException,
+            isFreeObject: isFreeObject,
+            instanceSize: instanceSize,
+            referenceFieldOffsets: offsets.ToImmutable());
     }
 
     public CacheMetrics GetMetrics()
@@ -91,10 +167,11 @@ internal class TypeMetadataCache
             Name = nameof(TypeMetadataCache),
             LastBuildDurationMs = null,
             LastBuildStatus = "success",
-            EntryCount = _methodTableHasRefs.Count,
+            EntryCount = _cache.Count,
             MemoryUsageBytes = 0,
-            LastBuildTime = null,
-            IsHealthy = true
+            LastBuildTime = _lastExtractTime,
+            IsHealthy = true,
+            LastError = _extractErrors > 0 ? "extract errors occurred" : null
         };
     }
 }

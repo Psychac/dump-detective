@@ -1,0 +1,221 @@
+using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Abstractions;
+
+namespace DumpDetective.Analysis.Cache;
+
+internal class StatisticsCache
+{
+    private Dictionary<string, CachedTypeStatistics>? _typeStats;
+    private Dictionary<string, ulong>? _sampleInstances;
+
+    private readonly Func<HeapIndexBuildResult?> _getHeapIndex;
+    private IProgress<AnalyzerProgressReport>? _progress;
+    private DateTime? _lastBuildTime;
+    private TimeSpan? _lastBuildDuration;
+    private string? _lastBuildError;
+
+    public StatisticsCache(Func<HeapIndexBuildResult?> getHeapIndex)
+    {
+        _getHeapIndex = getHeapIndex ?? throw new ArgumentNullException(nameof(getHeapIndex));
+    }
+
+    public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
+    {
+        if (heap is null)
+            throw new ArgumentNullException(nameof(heap));
+
+        if (_typeStats != null)
+            return _typeStats;
+
+        var heapIndex = _getHeapIndex();
+        if (heapIndex is not null)
+        {
+            if (TryHydrateTypeStatisticsFromIndex(heap, heapIndex.TypeAggregates, out var hydratedStats, out var hydratedSamples))
+            {
+                _typeStats = hydratedStats;
+                _sampleInstances = hydratedSamples;
+                return _typeStats;
+            }
+        }
+
+        _typeStats = new Dictionary<string, CachedTypeStatistics>(capacity: 1024);
+        _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
+
+        var threadLocalResults = new System.Collections.Concurrent.ConcurrentBag<
+            (Dictionary<string, CachedTypeStatistics> Stats, Dictionary<string, ulong> Samples)>();
+        long totalScanned = 0;
+
+        Parallel.ForEach(
+            heap.Segments,
+            () => (Stats: new Dictionary<string, CachedTypeStatistics>(),
+                   Samples: new Dictionary<string, ulong>()),
+            (segment, _, localState) =>
+            {
+                foreach (ClrObject obj in segment.EnumerateObjects())
+                {
+                    if (!obj.IsValid || obj.Type == null)
+                        continue;
+
+                    string typeName = obj.Type.Name ?? "<unknown>";
+                    ulong size = obj.Size;
+                    bool isLoh = size >= 85000;
+
+                    if (!localState.Stats.TryGetValue(typeName, out var stats))
+                    {
+                        stats = new CachedTypeStatistics { TypeName = typeName };
+                        localState.Stats[typeName] = stats;
+                        localState.Samples[typeName] = obj.Address;
+                    }
+
+                    if (string.IsNullOrEmpty(stats.ModuleName) && obj.Type.Module?.Name is string moduleName)
+                        stats.ModuleName = System.IO.Path.GetFileName(moduleName);
+
+                    stats.Count++;
+                    stats.TotalSize += size;
+                    if (isLoh)
+                    {
+                        stats.LohCount++;
+                        stats.LohSize += size;
+                    }
+
+                    Interlocked.Increment(ref totalScanned);
+                }
+                return localState;
+            },
+            localState => threadLocalResults.Add(localState));
+
+        foreach (var (localStats, localSamples) in threadLocalResults)
+        {
+            foreach ((string typeName, CachedTypeStatistics localStat) in localStats)
+            {
+                if (!_typeStats.TryGetValue(typeName, out var stat))
+                {
+                    stat = new CachedTypeStatistics { TypeName = typeName };
+                    _typeStats[typeName] = stat;
+                    if (localSamples.TryGetValue(typeName, out ulong sample))
+                        _sampleInstances[typeName] = sample;
+                }
+
+                stat.Count = AddClamped(stat.Count, localStat.Count);
+                stat.TotalSize += localStat.TotalSize;
+                stat.LohCount = AddClamped(stat.LohCount, localStat.LohCount);
+                stat.LohSize += localStat.LohSize;
+            }
+        }
+
+        _progress?.Report(new AnalyzerProgressReport(totalScanned, "building type statistics"));
+        _lastBuildTime = DateTime.UtcNow;
+        // lastBuildDuration not tracked for parallel aggregation currently
+        _lastBuildDuration = TimeSpan.Zero;
+        _lastBuildError = null;
+
+        return _typeStats;
+    }
+
+    public ulong? GetSampleInstanceAddress(string typeName)
+    {
+        if (_sampleInstances != null && _sampleInstances.TryGetValue(typeName, out var address))
+            return address;
+
+        return null;
+    }
+
+    public void SetProgress(IProgress<AnalyzerProgressReport>? progress)
+    {
+        _progress = progress;
+    }
+
+    public CacheMetrics GetMetrics()
+    {
+        return new CacheMetrics
+        {
+            Name = nameof(StatisticsCache),
+            LastBuildDurationMs = _lastBuildDuration?.TotalMilliseconds is double d ? (long?)d : null,
+            LastBuildStatus = _lastBuildError is null ? "success" : "failure",
+            EntryCount = _typeStats?.Count ?? 0,
+            MemoryUsageBytes = 0,
+            LastBuildTime = _lastBuildTime,
+            IsHealthy = _lastBuildError is null,
+            LastError = _lastBuildError
+        };
+    }
+
+    private static bool TryHydrateTypeStatisticsFromIndex(
+        ClrHeap heap,
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
+        out Dictionary<string, CachedTypeStatistics> hydratedStats,
+        out Dictionary<string, ulong> hydratedSamples)
+    {
+        hydratedStats = new Dictionary<string, CachedTypeStatistics>(Math.Max(1024, typeAggregates.Count));
+        hydratedSamples = new Dictionary<string, ulong>(Math.Max(1024, typeAggregates.Count));
+
+        foreach ((ulong methodTable, TypeAggregateIndexEntry aggregate) in typeAggregates)
+        {
+            string typeName = ResolveTypeNameFromSample(heap, aggregate.SampleAddress, methodTable);
+
+            if (!hydratedStats.TryGetValue(typeName, out CachedTypeStatistics? stats))
+            {
+                stats = new CachedTypeStatistics { TypeName = typeName };
+                hydratedStats[typeName] = stats;
+
+                if (aggregate.SampleAddress != 0)
+                {
+                    hydratedSamples[typeName] = aggregate.SampleAddress;
+                }
+            }
+
+            if (string.IsNullOrEmpty(stats.ModuleName))
+                stats.ModuleName = ResolveModuleNameFromSample(heap, aggregate.SampleAddress, methodTable);
+
+            stats.Count = AddClamped(stats.Count, aggregate.Count);
+            stats.TotalSize += aggregate.TotalSize;
+            stats.LohCount = AddClamped(stats.LohCount, aggregate.LohCount);
+            stats.LohSize += aggregate.LohSize;
+        }
+
+        return hydratedStats.Count > 0;
+    }
+
+    private static string ResolveTypeNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
+    {
+        ClrType? type = heap.GetTypeByMethodTable(methodTable);
+        if (type?.Name is string name)
+            return name;
+
+        if (sampleAddress != 0)
+        {
+            ClrObject sample = heap.GetObject(sampleAddress);
+            if (sample.IsValid && sample.Type?.Name is string sampleName)
+                return sampleName;
+        }
+
+        return $"MethodTable@0x{methodTable:X}";
+    }
+
+    private static string ResolveModuleNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
+    {
+        ClrType? type = heap.GetTypeByMethodTable(methodTable);
+        if (type?.Module?.Name is string moduleName && !string.IsNullOrWhiteSpace(moduleName))
+            return System.IO.Path.GetFileName(moduleName);
+
+        if (sampleAddress != 0)
+        {
+            ClrObject sample = heap.GetObject(sampleAddress);
+            if (sample.IsValid && sample.Type?.Module?.Name is string sampleModuleName && !string.IsNullOrWhiteSpace(sampleModuleName))
+                return System.IO.Path.GetFileName(sampleModuleName);
+        }
+
+        return "N/A";
+    }
+
+    private static int AddClamped(int existing, long delta)
+    {
+        if (delta <= 0)
+            return existing;
+
+        long result = existing + delta;
+        return result >= int.MaxValue ? int.MaxValue : (int)result;
+    }
+}

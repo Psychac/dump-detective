@@ -38,7 +38,18 @@ public sealed class MemoryAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             MemoryDomainResult diskResult = (MemoryDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalBytes.Should().Be(memResult.TotalBytes);
+            diskResult.LohBytes.Should().Be(memResult.LohBytes);
+            diskResult.LohPercent.Should().Be(memResult.LohPercent);
             diskResult.TotalObjects.Should().Be(memResult.TotalObjects);
+            diskResult.LohObjects.Should().Be(memResult.LohObjects);
+            diskResult.LohThresholdBytes.Should().Be(memResult.LohThresholdBytes);
+            diskResult.UniqueTypes.Should().Be(memResult.UniqueTypes);
+            diskResult.SmallObjectCountPercent.Should().Be(memResult.SmallObjectCountPercent);
+            diskResult.SmallObjectBytesPercent.Should().Be(memResult.SmallObjectBytesPercent);
+            diskResult.ObjectsPerMb.Should().Be(memResult.ObjectsPerMb);
+            diskResult.MemoryPressureScore.Should().Be(memResult.MemoryPressureScore);
+            diskResult.TopTypes.Count.Should().Be(memResult.TopTypes.Count);
+            (diskResult.SizeBucketHistogram?.Count ?? 0).Should().Be(memResult.SizeBucketHistogram?.Count ?? 0);
         }
         finally
         {

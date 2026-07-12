@@ -39,6 +39,10 @@ public sealed class AsyncStateMachineAnalyzerDiscrepancyTests
             AsyncStateMachineDomainResult diskResult = (AsyncStateMachineDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalStateMachines.Should().Be(memResult.TotalStateMachines);
             diskResult.TotalStateMachineBytes.Should().Be(memResult.TotalStateMachineBytes);
+            diskResult.ScanLimited.Should().Be(memResult.ScanLimited);
+            diskResult.TopStateMachineTypes.Count.Should().Be(memResult.TopStateMachineTypes.Count);
+            diskResult.TopByCapturedSize.Count.Should().Be(memResult.TopByCapturedSize.Count);
+            diskResult.SuspendedMethodMap.Count.Should().Be(memResult.SuspendedMethodMap.Count);
         }
         finally
         {

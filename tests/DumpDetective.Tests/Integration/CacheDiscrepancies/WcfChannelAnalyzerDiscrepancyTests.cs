@@ -29,7 +29,7 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        AnalyzerDomainResult memResult = await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        WcfChannelDomainResult memResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
@@ -37,8 +37,16 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            AnalyzerDomainResult diskResult = await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
-            diskResult.Should().NotBeNull();
+            WcfChannelDomainResult diskResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            diskResult.WcfPresent.Should().Be(memResult.WcfPresent);
+            diskResult.TotalChannels.Should().Be(memResult.TotalChannels);
+            diskResult.OpenedChannels.Should().Be(memResult.OpenedChannels);
+            diskResult.FaultedChannels.Should().Be(memResult.FaultedChannels);
+            diskResult.ClosedChannels.Should().Be(memResult.ClosedChannels);
+            diskResult.OtherChannels.Should().Be(memResult.OtherChannels);
+            diskResult.StateScanCapped.Should().Be(memResult.StateScanCapped);
+            diskResult.ByType.Count.Should().Be(memResult.ByType.Count);
+            diskResult.TopFaultedChannels.Count.Should().Be(memResult.TopFaultedChannels.Count);
         }
         finally
         {

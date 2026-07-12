@@ -38,6 +38,17 @@ public sealed class WeakReferenceAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             WeakReferenceDomainResult diskResult = (WeakReferenceDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalWeakHandles.Should().Be(memResult.TotalWeakHandles);
+            diskResult.AliveWeakTargets.Should().Be(memResult.AliveWeakTargets);
+            diskResult.DeadWeakTargets.Should().Be(memResult.DeadWeakTargets);
+            diskResult.DeadTargetRatio.Should().Be(memResult.DeadTargetRatio);
+            diskResult.WeakReferenceObjectCount.Should().Be(memResult.WeakReferenceObjectCount);
+            diskResult.WeakReferenceObjectBytes.Should().Be(memResult.WeakReferenceObjectBytes);
+            diskResult.StaleWrapperCount.Should().Be(memResult.StaleWrapperCount);
+            diskResult.DependentHandleDeadKeyCount.Should().Be(memResult.DependentHandleDeadKeyCount);
+            diskResult.ScanCapped.Should().Be(memResult.ScanCapped);
+            diskResult.WeakHandleKinds.Count.Should().Be(memResult.WeakHandleKinds.Count);
+            diskResult.TopWeakTargetTypes.Count.Should().Be(memResult.TopWeakTargetTypes.Count);
+            diskResult.TopStaleWrapperHolderTypes.Count.Should().Be(memResult.TopStaleWrapperHolderTypes.Count);
         }
         finally
         {

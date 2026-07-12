@@ -38,6 +38,11 @@ public sealed class ThreadStackClusterAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             ThreadStackClusterDomainResult diskResult = (ThreadStackClusterDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.AliveThreadCount.Should().Be(memResult.AliveThreadCount);
+            diskResult.UniqueClusters.Should().Be(memResult.UniqueClusters);
+            diskResult.SingletonSignatures.Should().Be(memResult.SingletonSignatures);
+            diskResult.DiversityPercent.Should().Be(memResult.DiversityPercent);
+            diskResult.TopClusterSignatures.Count.Should().Be(memResult.TopClusterSignatures.Count);
+            (diskResult.TopClusters?.Count ?? 0).Should().Be(memResult.TopClusters?.Count ?? 0);
         }
         finally
         {

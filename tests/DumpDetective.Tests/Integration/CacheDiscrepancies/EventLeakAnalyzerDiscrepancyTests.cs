@@ -39,6 +39,14 @@ public sealed class EventLeakAnalyzerDiscrepancyTests
             EventLeakDomainResult diskResult = (EventLeakDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalEventLeakInstances.Should().Be(memResult.TotalEventLeakInstances);
             diskResult.TotalSubscribers.Should().Be(memResult.TotalSubscribers);
+            diskResult.StaticEventLeakCount.Should().Be(memResult.StaticEventLeakCount);
+            diskResult.InstanceEventLeakCount.Should().Be(memResult.InstanceEventLeakCount);
+            diskResult.TotalEventsScanned.Should().Be(memResult.TotalEventsScanned);
+            diskResult.TotalPublisherInstances.Should().Be(memResult.TotalPublisherInstances);
+            (diskResult.TopPublisherEventsBySubscribers?.Count ?? 0).Should().Be(memResult.TopPublisherEventsBySubscribers?.Count ?? 0);
+            (diskResult.TopLeakGroups?.Count ?? 0).Should().Be(memResult.TopLeakGroups?.Count ?? 0);
+            (diskResult.TopLeakInstances?.Count ?? 0).Should().Be(memResult.TopLeakInstances?.Count ?? 0);
+            (diskResult.TopPublisherEvents?.Count ?? 0).Should().Be(memResult.TopPublisherEvents?.Count ?? 0);
         }
         finally
         {

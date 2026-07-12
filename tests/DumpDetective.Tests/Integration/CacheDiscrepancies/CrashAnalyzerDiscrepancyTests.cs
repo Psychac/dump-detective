@@ -39,6 +39,11 @@ public sealed class CrashAnalyzerDiscrepancyTests
             CrashDomainResult diskResult = (CrashDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalExceptions.Should().Be(memResult.TotalExceptions);
             diskResult.ActiveExceptions.Should().Be(memResult.ActiveExceptions);
+            diskResult.InferredTraceCount.Should().Be(memResult.InferredTraceCount);
+            diskResult.ExceptionTypeCounts.Count.Should().Be(memResult.ExceptionTypeCounts.Count);
+            diskResult.ActiveExceptionTypeCounts.Count.Should().Be(memResult.ActiveExceptionTypeCounts.Count);
+            (diskResult.TopCrashThreadCandidates?.Count ?? 0).Should().Be(memResult.TopCrashThreadCandidates?.Count ?? 0);
+            (diskResult.TopExceptionInstances?.Count ?? 0).Should().Be(memResult.TopExceptionInstances?.Count ?? 0);
         }
         finally
         {

@@ -38,6 +38,14 @@ public sealed class GCHandleAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             GCHandleDomainResult diskResult = (GCHandleDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalHandles.Should().Be(memResult.TotalHandles);
+            diskResult.StrongLikeHandles.Should().Be(memResult.StrongLikeHandles);
+            diskResult.WeakLikeHandles.Should().Be(memResult.WeakLikeHandles);
+            diskResult.PinnedHandleTargets.Should().Be(memResult.PinnedHandleTargets);
+            diskResult.PinnedRetainedBytes.Should().Be(memResult.PinnedRetainedBytes);
+            (diskResult.HandlesByKind?.Count ?? 0).Should().Be(memResult.HandlesByKind?.Count ?? 0);
+            (diskResult.TopTargetTypes?.Count ?? 0).Should().Be(memResult.TopTargetTypes?.Count ?? 0);
+            (diskResult.TopPinnedTargetTypes?.Count ?? 0).Should().Be(memResult.TopPinnedTargetTypes?.Count ?? 0);
+            (diskResult.TopPinnedObjectsBySize?.Count ?? 0).Should().Be(memResult.TopPinnedObjectsBySize?.Count ?? 0);
         }
         finally
         {

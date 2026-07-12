@@ -38,6 +38,12 @@ public sealed class DependentHandleAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             DependentHandleDomainResult diskResult = (DependentHandleDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.DependentHandleCount.Should().Be(memResult.DependentHandleCount);
+            diskResult.ResolvedEdgeCount.Should().Be(memResult.ResolvedEdgeCount);
+            diskResult.UnresolvedTargetCount.Should().Be(memResult.UnresolvedTargetCount);
+            diskResult.UnresolvedPercent.Should().Be(memResult.UnresolvedPercent);
+            (diskResult.TopSourceTypes?.Count ?? 0).Should().Be(memResult.TopSourceTypes?.Count ?? 0);
+            (diskResult.TopTargetTypes?.Count ?? 0).Should().Be(memResult.TopTargetTypes?.Count ?? 0);
+            (diskResult.TopSourceTargetEdges?.Count ?? 0).Should().Be(memResult.TopSourceTargetEdges?.Count ?? 0);
         }
         finally
         {

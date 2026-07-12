@@ -38,6 +38,16 @@ public sealed class SegmentReservationAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             SegmentReservationDomainResult diskResult = (SegmentReservationDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalCommittedBytes.Should().Be(memResult.TotalCommittedBytes);
+            diskResult.TotalReservedBytes.Should().Be(memResult.TotalReservedBytes);
+            diskResult.ReservationGapBytes.Should().Be(memResult.ReservationGapBytes);
+            diskResult.ReservedToCommittedRatio.Should().Be(memResult.ReservedToCommittedRatio);
+            diskResult.EphemeralSegmentCount.Should().Be(memResult.EphemeralSegmentCount);
+            diskResult.AvgEphemeralFillPct.Should().Be(memResult.AvgEphemeralFillPct);
+            diskResult.NonEphemeralSohSegmentCount.Should().Be(memResult.NonEphemeralSohSegmentCount);
+            diskResult.AddressSpacePressureRisk.Should().Be(memResult.AddressSpacePressureRisk);
+            diskResult.PressureRiskReason.Should().Be(memResult.PressureRiskReason);
+            diskResult.SegmentTable.Count.Should().Be(memResult.SegmentTable.Count);
+            diskResult.ReservedByLogicalHeap.Count.Should().Be(memResult.ReservedByLogicalHeap.Count);
         }
         finally
         {

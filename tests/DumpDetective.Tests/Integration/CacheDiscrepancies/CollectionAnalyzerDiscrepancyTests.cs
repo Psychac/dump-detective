@@ -39,6 +39,18 @@ public sealed class CollectionAnalyzerDiscrepancyTests
             CollectionDomainResult diskResult = (CollectionDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalCollections.Should().Be(memResult.TotalCollections);
             diskResult.Dictionaries.Should().Be(memResult.Dictionaries);
+            diskResult.Lists.Should().Be(memResult.Lists);
+            diskResult.ArrayLists.Should().Be(memResult.ArrayLists);
+            diskResult.Stacks.Should().Be(memResult.Stacks);
+            diskResult.SortedLists.Should().Be(memResult.SortedLists);
+            diskResult.SortedSets.Should().Be(memResult.SortedSets);
+            diskResult.HashSets.Should().Be(memResult.HashSets);
+            diskResult.Queues.Should().Be(memResult.Queues);
+            diskResult.TotalWastedMemory.Should().Be(memResult.TotalWastedMemory);
+            diskResult.WastefulCollectionCount.Should().Be(memResult.WastefulCollectionCount);
+            (diskResult.TopWastefulCollections?.Count ?? 0).Should().Be(memResult.TopWastefulCollections?.Count ?? 0);
+            (diskResult.WasteCountsByKind?.Count ?? 0).Should().Be(memResult.WasteCountsByKind?.Count ?? 0);
+            (diskResult.GenerationBreakdown?.Count ?? 0).Should().Be(memResult.GenerationBreakdown?.Count ?? 0);
         }
         finally
         {

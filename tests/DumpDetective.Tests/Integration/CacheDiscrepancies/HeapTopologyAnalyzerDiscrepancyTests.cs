@@ -38,6 +38,26 @@ public sealed class HeapTopologyAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             HeapTopologyDomainResult diskResult = (HeapTopologyDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalSegments.Should().Be(memResult.TotalSegments);
+            diskResult.TotalCommittedBytes.Should().Be(memResult.TotalCommittedBytes);
+            diskResult.TotalUsedBytes.Should().Be(memResult.TotalUsedBytes);
+            diskResult.TotalReservedBytes.Should().Be(memResult.TotalReservedBytes);
+            diskResult.ReservationGapBytes.Should().Be(memResult.ReservationGapBytes);
+            diskResult.SohSegmentCount.Should().Be(memResult.SohSegmentCount);
+            diskResult.SohBytes.Should().Be(memResult.SohBytes);
+            diskResult.LohSegmentCount.Should().Be(memResult.LohSegmentCount);
+            diskResult.LohBytes.Should().Be(memResult.LohBytes);
+            diskResult.PohSegmentCount.Should().Be(memResult.PohSegmentCount);
+            diskResult.PohBytes.Should().Be(memResult.PohBytes);
+            diskResult.FrozenSegmentCount.Should().Be(memResult.FrozenSegmentCount);
+            diskResult.FrozenBytes.Should().Be(memResult.FrozenBytes);
+            diskResult.FrozenPercent.Should().Be(memResult.FrozenPercent);
+            diskResult.LohPercent.Should().Be(memResult.LohPercent);
+            diskResult.PohPercent.Should().Be(memResult.PohPercent);
+            diskResult.KindSummaries.Count.Should().Be(memResult.KindSummaries.Count);
+            diskResult.PerLogicalHeapSummaries.Count.Should().Be(memResult.PerLogicalHeapSummaries.Count);
+            (diskResult.TopPohTypes?.Count ?? 0).Should().Be(memResult.TopPohTypes?.Count ?? 0);
+            (diskResult.TopFrozenTypes?.Count ?? 0).Should().Be(memResult.TopFrozenTypes?.Count ?? 0);
+            (diskResult.TopSegmentsBySize?.Count ?? 0).Should().Be(memResult.TopSegmentsBySize?.Count ?? 0);
         }
         finally
         {

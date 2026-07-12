@@ -38,6 +38,12 @@ public sealed class LockGraphAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             LockGraphDomainResult diskResult = (LockGraphDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalHeldLocks.Should().Be(memResult.TotalHeldLocks);
+            diskResult.ContestedLockCount.Should().Be(memResult.ContestedLockCount);
+            diskResult.MaxWaitersOnSingleLock.Should().Be(memResult.MaxWaitersOnSingleLock);
+            diskResult.DeadlockCandidateCount.Should().Be(memResult.DeadlockCandidateCount);
+            (diskResult.TopContestedLockTypes?.Count ?? 0).Should().Be(memResult.TopContestedLockTypes?.Count ?? 0);
+            (diskResult.DeadlockCandidateDetails?.Count ?? 0).Should().Be(memResult.DeadlockCandidateDetails?.Count ?? 0);
+            (diskResult.ContestedLockDetails?.Count ?? 0).Should().Be(memResult.ContestedLockDetails?.Count ?? 0);
         }
         finally
         {

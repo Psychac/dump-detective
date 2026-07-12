@@ -37,11 +37,14 @@ public sealed class DbConnectionAnalyzerDiscrepancyTests
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             DbConnectionDomainResult diskResult = (DbConnectionDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            diskResult.ConnectionsFound.Should().Be(memResult.ConnectionsFound);
             diskResult.TotalConnections.Should().Be(memResult.TotalConnections);
             diskResult.OpenConnections.Should().Be(memResult.OpenConnections);
             diskResult.ClosedConnections.Should().Be(memResult.ClosedConnections);
             diskResult.OtherConnections.Should().Be(memResult.OtherConnections);
-            diskResult.ConnectionsFound.Should().Be(memResult.ConnectionsFound);
+            diskResult.StateScanCapped.Should().Be(memResult.StateScanCapped);
+            diskResult.ByType.Count.Should().Be(memResult.ByType.Count);
+            diskResult.TopOpenConnections.Count.Should().Be(memResult.TopOpenConnections.Count);
         }
         finally
         {

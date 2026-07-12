@@ -38,6 +38,12 @@ public sealed class DominatorAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             DominatorDomainResult diskResult = (DominatorDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.CandidateCount.Should().Be(memResult.CandidateCount);
+            diskResult.AnalyzedCount.Should().Be(memResult.AnalyzedCount);
+            diskResult.TotalEstimatedRetainedBytes.Should().Be(memResult.TotalEstimatedRetainedBytes);
+            diskResult.HeuristicOnly.Should().Be(memResult.HeuristicOnly);
+            diskResult.MaxBreadth.Should().Be(memResult.MaxBreadth);
+            diskResult.MaxDepth.Should().Be(memResult.MaxDepth);
+            diskResult.TopDominatorTypes.Count.Should().Be(memResult.TopDominatorTypes.Count);
         }
         finally
         {

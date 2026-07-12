@@ -39,6 +39,33 @@ public sealed class ThreadAnalyzerDiscrepancyTests
             ThreadDomainResult diskResult = (ThreadDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalThreadCount.Should().Be(memResult.TotalThreadCount);
             diskResult.AliveThreadCount.Should().Be(memResult.AliveThreadCount);
+            diskResult.InactiveThreadCount.Should().Be(memResult.InactiveThreadCount);
+            diskResult.GcThreadCount.Should().Be(memResult.GcThreadCount);
+            diskResult.BlockedThreadCount.Should().Be(memResult.BlockedThreadCount);
+            diskResult.LockHoldingThreadCount.Should().Be(memResult.LockHoldingThreadCount);
+            diskResult.ThreadsWithActiveExceptionsCount.Should().Be(memResult.ThreadsWithActiveExceptionsCount);
+            diskResult.BackgroundThreadCount.Should().Be(memResult.BackgroundThreadCount);
+            diskResult.ThreadPoolWorkerCount.Should().Be(memResult.ThreadPoolWorkerCount);
+            diskResult.FinalizerThreadCount.Should().Be(memResult.FinalizerThreadCount);
+            diskResult.FinalizerThreadBlocked.Should().Be(memResult.FinalizerThreadBlocked);
+            diskResult.FinalizerLockCount.Should().Be(memResult.FinalizerLockCount);
+            diskResult.AsyncChainThreadCount.Should().Be(memResult.AsyncChainThreadCount);
+            diskResult.MaxAsyncChainDepth.Should().Be(memResult.MaxAsyncChainDepth);
+            diskResult.SampledSnapshotCount.Should().Be(memResult.SampledSnapshotCount);
+            diskResult.CapturedSnapshotCount.Should().Be(memResult.CapturedSnapshotCount);
+            diskResult.SamplingCapacity.Should().Be(memResult.SamplingCapacity);
+            diskResult.SamplingSeed.Should().Be(memResult.SamplingSeed);
+            diskResult.WaitPatternBreakdown.Count.Should().Be(memResult.WaitPatternBreakdown.Count);
+            (diskResult.ThreadStateDistribution?.Count ?? 0).Should().Be(memResult.ThreadStateDistribution?.Count ?? 0);
+            (diskResult.AppDomainDistribution?.Count ?? 0).Should().Be(memResult.AppDomainDistribution?.Count ?? 0);
+            (diskResult.GcModeDistribution?.Count ?? 0).Should().Be(memResult.GcModeDistribution?.Count ?? 0);
+            (diskResult.TopLockedThreads?.Count ?? 0).Should().Be(memResult.TopLockedThreads?.Count ?? 0);
+            (diskResult.TopBlockedThreads?.Count ?? 0).Should().Be(memResult.TopBlockedThreads?.Count ?? 0);
+            (diskResult.ThreadsWithActiveExceptions?.Count ?? 0).Should().Be(memResult.ThreadsWithActiveExceptions?.Count ?? 0);
+            (diskResult.TopStackHotspots?.Count ?? 0).Should().Be(memResult.TopStackHotspots?.Count ?? 0);
+            (diskResult.TopActiveThreadHotspots?.Count ?? 0).Should().Be(memResult.TopActiveThreadHotspots?.Count ?? 0);
+            (diskResult.SampledThreads?.Count ?? 0).Should().Be(memResult.SampledThreads?.Count ?? 0);
+            (diskResult.FinalizerFrames?.Count ?? 0).Should().Be(memResult.FinalizerFrames?.Count ?? 0);
         }
         finally
         {

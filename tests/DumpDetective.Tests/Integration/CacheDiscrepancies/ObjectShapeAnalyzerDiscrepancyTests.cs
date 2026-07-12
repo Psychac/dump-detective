@@ -38,6 +38,9 @@ public sealed class ObjectShapeAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             ObjectShapeAnalyzerDomainResult diskResult = (ObjectShapeAnalyzerDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalTypesAnalyzed.Should().Be(memResult.TotalTypesAnalyzed);
+            diskResult.AvgRefFieldsPerType.Should().Be(memResult.AvgRefFieldsPerType);
+            diskResult.TopReferenceHeavyTypes.Count.Should().Be(memResult.TopReferenceHeavyTypes.Count);
+            diskResult.TopValueHeavyTypes.Count.Should().Be(memResult.TopValueHeavyTypes.Count);
         }
         finally
         {

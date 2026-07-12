@@ -38,6 +38,12 @@ public sealed class ReferenceChainAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             ReferenceChainDomainResult diskResult = (ReferenceChainDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.AnalyzedSamples.Should().Be(memResult.AnalyzedSamples);
+            diskResult.RetainedSamples.Should().Be(memResult.RetainedSamples);
+            diskResult.RetainedPercent.Should().Be(memResult.RetainedPercent);
+            diskResult.TraversalLimitedSamples.Should().Be(memResult.TraversalLimitedSamples);
+            (diskResult.TopRetainedTypes?.Count ?? 0).Should().Be(memResult.TopRetainedTypes?.Count ?? 0);
+            (diskResult.SampleReferenceChains?.Count ?? 0).Should().Be(memResult.SampleReferenceChains?.Count ?? 0);
+            (diskResult.TopTypeSampleTraces?.Count ?? 0).Should().Be(memResult.TopTypeSampleTraces?.Count ?? 0);
         }
         finally
         {

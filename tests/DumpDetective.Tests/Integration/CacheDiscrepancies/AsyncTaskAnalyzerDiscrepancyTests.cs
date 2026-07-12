@@ -39,7 +39,20 @@ public sealed class AsyncTaskAnalyzerDiscrepancyTests
             AsyncTaskDomainResult diskResult = (AsyncTaskDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalTasks.Should().Be(memResult.TotalTasks);
             diskResult.PendingTasks.Should().Be(memResult.PendingTasks);
+            diskResult.RunningTasks.Should().Be(memResult.RunningTasks);
+            diskResult.FaultedTasks.Should().Be(memResult.FaultedTasks);
+            diskResult.CanceledTasks.Should().Be(memResult.CanceledTasks);
             diskResult.CompletedTasks.Should().Be(memResult.CompletedTasks);
+            diskResult.OrphanedTasks.Should().Be(memResult.OrphanedTasks);
+            diskResult.TotalTaskContinuations.Should().Be(memResult.TotalTaskContinuations);
+            diskResult.MaxContinuationDepth.Should().Be(memResult.MaxContinuationDepth);
+            diskResult.AvgContinuationDepth.Should().Be(memResult.AvgContinuationDepth);
+            diskResult.TaskScanLimited.Should().Be(memResult.TaskScanLimited);
+            diskResult.TopPendingTaskTypes.Count.Should().Be(memResult.TopPendingTaskTypes.Count);
+            diskResult.TopFaultedTaskTypes.Count.Should().Be(memResult.TopFaultedTaskTypes.Count);
+            diskResult.TopContinuationTypes.Count.Should().Be(memResult.TopContinuationTypes.Count);
+            diskResult.TopOrphanedTasks.Count.Should().Be(memResult.TopOrphanedTasks.Count);
+            diskResult.TopDeepestChains.Count.Should().Be(memResult.TopDeepestChains.Count);
         }
         finally
         {

@@ -38,6 +38,9 @@ public sealed class LeakCandidateAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             LeakCandidateDomainResult diskResult = (LeakCandidateDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalCandidates.Should().Be(memResult.TotalCandidates);
+            diskResult.HeuristicOnly.Should().Be(memResult.HeuristicOnly);
+            diskResult.TopCandidates.Count.Should().Be(memResult.TopCandidates.Count);
+            diskResult.CandidatesByClass.Count.Should().Be(memResult.CandidatesByClass.Count);
         }
         finally
         {

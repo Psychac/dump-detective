@@ -29,7 +29,7 @@ public sealed class HttpObjectAnalyzerDiscrepancyTests
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        AnalyzerDomainResult memResult = await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        HttpObjectDomainResult memResult = (HttpObjectDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
@@ -37,8 +37,16 @@ public sealed class HttpObjectAnalyzerDiscrepancyTests
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            AnalyzerDomainResult diskResult = await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
-            diskResult.Should().NotBeNull();
+            HttpObjectDomainResult diskResult = (HttpObjectDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            diskResult.HttpObjectsFound.Should().Be(memResult.HttpObjectsFound);
+            diskResult.TotalHttpObjects.Should().Be(memResult.TotalHttpObjects);
+            diskResult.HttpClientCount.Should().Be(memResult.HttpClientCount);
+            diskResult.HttpWebRequestCount.Should().Be(memResult.HttpWebRequestCount);
+            diskResult.HttpWebResponseCount.Should().Be(memResult.HttpWebResponseCount);
+            diskResult.HttpMessageHandlerCount.Should().Be(memResult.HttpMessageHandlerCount);
+            diskResult.ServicePointCount.Should().Be(memResult.ServicePointCount);
+            diskResult.TotalBytes.Should().Be(memResult.TotalBytes);
+            diskResult.ByType.Count.Should().Be(memResult.ByType.Count);
         }
         finally
         {

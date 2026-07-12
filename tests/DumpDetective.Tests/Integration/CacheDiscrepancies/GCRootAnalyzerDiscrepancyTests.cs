@@ -38,6 +38,11 @@ public sealed class GCRootAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             GCRootDomainResult diskResult = (GCRootDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalRoots.Should().Be(memResult.TotalRoots);
+            diskResult.ByKind.Count.Should().Be(memResult.ByKind.Count);
+            diskResult.TopRootsBySeverity.Count.Should().Be(memResult.TopRootsBySeverity.Count);
+            diskResult.RootPaths.Count.Should().Be(memResult.RootPaths.Count);
+            diskResult.PathSearchCapped.Should().Be(memResult.PathSearchCapped);
+            diskResult.PathSearchCappedCount.Should().Be(memResult.PathSearchCappedCount);
         }
         finally
         {

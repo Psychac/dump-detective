@@ -38,6 +38,15 @@ public sealed class FinalizableObjectAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             FinalizableObjectDomainResult diskResult = (FinalizableObjectDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalFinalizableObjects.Should().Be(memResult.TotalFinalizableObjects);
+            diskResult.TotalFinalizableBytes.Should().Be(memResult.TotalFinalizableBytes);
+            diskResult.Gen0Count.Should().Be(memResult.Gen0Count);
+            diskResult.Gen1Count.Should().Be(memResult.Gen1Count);
+            diskResult.Gen2Count.Should().Be(memResult.Gen2Count);
+            diskResult.FinalizerQueueCount.Should().Be(memResult.FinalizerQueueCount);
+            diskResult.FinalizerQueueRetainedBytes.Should().Be(memResult.FinalizerQueueRetainedBytes);
+            diskResult.PotentialResurrectionDetected.Should().Be(memResult.PotentialResurrectionDetected);
+            diskResult.TopFinalizableTypesByGen2Count.Count.Should().Be(memResult.TopFinalizableTypesByGen2Count.Count);
+            diskResult.TopQueueEntriesByRetainedSize.Count.Should().Be(memResult.TopQueueEntriesByRetainedSize.Count);
         }
         finally
         {

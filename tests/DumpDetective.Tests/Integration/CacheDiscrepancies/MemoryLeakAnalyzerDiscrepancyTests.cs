@@ -41,6 +41,12 @@ public sealed class MemoryLeakAnalyzerDiscrepancyTests
             diskResult.FinalizerQueueCount.Should().Be(memResult.FinalizerQueueCount);
             diskResult.HighlyReferencedObjectCount.Should().Be(memResult.HighlyReferencedObjectCount);
             diskResult.SkippedReferenceAddresses.Should().Be(memResult.SkippedReferenceAddresses);
+            diskResult.ObjectScanCapped.Should().Be(memResult.ObjectScanCapped);
+            diskResult.ReferenceCountingSkipped.Should().Be(memResult.ReferenceCountingSkipped);
+            diskResult.TopHighlyReferencedTotalBytes.Should().Be(memResult.TopHighlyReferencedTotalBytes);
+            (diskResult.TopFinalizerTypes?.Count ?? 0).Should().Be(memResult.TopFinalizerTypes?.Count ?? 0);
+            (diskResult.TopHighlyReferencedObjects?.Count ?? 0).Should().Be(memResult.TopHighlyReferencedObjects?.Count ?? 0);
+            (diskResult.TopRetentionTypes?.Count ?? 0).Should().Be(memResult.TopRetentionTypes?.Count ?? 0);
         }
         finally
         {

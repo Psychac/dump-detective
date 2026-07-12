@@ -39,6 +39,14 @@ public sealed class LohFragmentationAnalyzerDiscrepancyTests
             LohFragmentationDomainResult diskResult = (LohFragmentationDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.SegmentCount.Should().Be(memResult.SegmentCount);
             diskResult.TotalBytes.Should().Be(memResult.TotalBytes);
+            diskResult.FreeBytes.Should().Be(memResult.FreeBytes);
+            diskResult.UsedBytes.Should().Be(memResult.UsedBytes);
+            diskResult.FreeBlockCount.Should().Be(memResult.FreeBlockCount);
+            diskResult.FragmentationPercent.Should().Be(memResult.FragmentationPercent);
+            diskResult.LargestFreeBlock.Should().Be(memResult.LargestFreeBlock);
+            (diskResult.TopFragmentedSegments?.Count ?? 0).Should().Be(memResult.TopFragmentedSegments?.Count ?? 0);
+            (diskResult.FreeGapHistogram?.Count ?? 0).Should().Be(memResult.FreeGapHistogram?.Count ?? 0);
+            (diskResult.TopLargeObjects?.Count ?? 0).Should().Be(memResult.TopLargeObjects?.Count ?? 0);
         }
         finally
         {

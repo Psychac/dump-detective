@@ -39,6 +39,11 @@ public sealed class AppDomainAnalyzerDiscrepancyTests
             AppDomainDomainResult diskResult = (AppDomainDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalDomains.Should().Be(memResult.TotalDomains);
             diskResult.TotalDynamicModules.Should().Be(memResult.TotalDynamicModules);
+            diskResult.DynamicModuleBytes.Should().Be(memResult.DynamicModuleBytes);
+            diskResult.AnonymousModuleCount.Should().Be(memResult.AnonymousModuleCount);
+            diskResult.ExcludedModuleCount.Should().Be(memResult.ExcludedModuleCount);
+            diskResult.Domains.Count.Should().Be(memResult.Domains.Count);
+            diskResult.TopModulesByTypeCount.Count.Should().Be(memResult.TopModulesByTypeCount.Count);
         }
         finally
         {

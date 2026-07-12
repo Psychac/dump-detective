@@ -39,6 +39,13 @@ public sealed class ArrayAnalyzerDiscrepancyTests
             ArrayDomainResult diskResult = (ArrayDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalArrayObjects.Should().Be(memResult.TotalArrayObjects);
             diskResult.TotalArrayBytes.Should().Be(memResult.TotalArrayBytes);
+            diskResult.MultiDimArrayCount.Should().Be(memResult.MultiDimArrayCount);
+            diskResult.LohArrayCount.Should().Be(memResult.LohArrayCount);
+            diskResult.LohArrayBytes.Should().Be(memResult.LohArrayBytes);
+            diskResult.ScanLimited.Should().Be(memResult.ScanLimited);
+            diskResult.TopArrayTypesBySize.Count.Should().Be(memResult.TopArrayTypesBySize.Count);
+            diskResult.TopLargeArrays.Count.Should().Be(memResult.TopLargeArrays.Count);
+            diskResult.TopSparseArrays.Count.Should().Be(memResult.TopSparseArrays.Count);
         }
         finally
         {

@@ -40,6 +40,17 @@ public sealed class AllocationPatternAnalyzerDiscrepancyTests
             diskResult.Gen0CountPct.Should().Be(memResult.Gen0CountPct);
             diskResult.Gen1CountPct.Should().Be(memResult.Gen1CountPct);
             diskResult.Gen2CountPct.Should().Be(memResult.Gen2CountPct);
+            diskResult.LohCountPct.Should().Be(memResult.LohCountPct);
+            diskResult.Gen0SizePct.Should().Be(memResult.Gen0SizePct);
+            diskResult.Gen1SizePct.Should().Be(memResult.Gen1SizePct);
+            diskResult.Gen2SizePct.Should().Be(memResult.Gen2SizePct);
+            diskResult.LohSizePct.Should().Be(memResult.LohSizePct);
+            diskResult.Profile.Should().Be(memResult.Profile);
+            diskResult.GCPressure.Should().Be(memResult.GCPressure);
+            diskResult.PromotionPressureScore.Should().Be(memResult.PromotionPressureScore);
+            diskResult.TopTransientTypes.Count.Should().Be(memResult.TopTransientTypes.Count);
+            diskResult.TopShortishTypes.Count.Should().Be(memResult.TopShortishTypes.Count);
+            diskResult.TopLongLivedTypes.Count.Should().Be(memResult.TopLongLivedTypes.Count);
         }
         finally
         {

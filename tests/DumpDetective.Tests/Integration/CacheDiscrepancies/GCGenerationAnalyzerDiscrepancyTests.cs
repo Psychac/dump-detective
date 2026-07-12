@@ -38,7 +38,18 @@ public sealed class GCGenerationAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             GCGenerationDomainResult diskResult = (GCGenerationDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.Gen0Bytes.Should().Be(memResult.Gen0Bytes);
+            diskResult.Gen0Objects.Should().Be(memResult.Gen0Objects);
             diskResult.Gen1Bytes.Should().Be(memResult.Gen1Bytes);
+            diskResult.Gen1Objects.Should().Be(memResult.Gen1Objects);
+            diskResult.Gen2Bytes.Should().Be(memResult.Gen2Bytes);
+            diskResult.Gen2Objects.Should().Be(memResult.Gen2Objects);
+            diskResult.LohBytes.Should().Be(memResult.LohBytes);
+            diskResult.LohPercent.Should().Be(memResult.LohPercent);
+            diskResult.TotalObjects.Should().Be(memResult.TotalObjects);
+            diskResult.LohObjects.Should().Be(memResult.LohObjects);
+            diskResult.Gen2Pct.Should().Be(memResult.Gen2Pct);
+            diskResult.TopLohTypes.Count.Should().Be(memResult.TopLohTypes.Count);
+            (diskResult.PerTypeGenerationProfiles?.Count ?? 0).Should().Be(memResult.PerTypeGenerationProfiles?.Count ?? 0);
         }
         finally
         {

@@ -38,6 +38,14 @@ public sealed class ModuleAnalyzerDiscrepancyTests
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             ModuleDomainResult diskResult = (ModuleDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalModules.Should().Be(memResult.TotalModules);
+            diskResult.DynamicModules.Should().Be(memResult.DynamicModules);
+            diskResult.UniqueModuleNames.Should().Be(memResult.UniqueModuleNames);
+            diskResult.VersionConflictGroups.Should().Be(memResult.VersionConflictGroups);
+            diskResult.ConflictingAssemblyNames.Count.Should().Be(memResult.ConflictingAssemblyNames.Count);
+            diskResult.TopModulesBySize.Count.Should().Be(memResult.TopModulesBySize.Count);
+            diskResult.ConflictDetails.Count.Should().Be(memResult.ConflictDetails.Count);
+            (diskResult.TopModulesByHeapMemory?.Count ?? 0).Should().Be(memResult.TopModulesByHeapMemory?.Count ?? 0);
+            (diskResult.HeavyTypeDensityModules?.Count ?? 0).Should().Be(memResult.HeavyTypeDensityModules?.Count ?? 0);
         }
         finally
         {

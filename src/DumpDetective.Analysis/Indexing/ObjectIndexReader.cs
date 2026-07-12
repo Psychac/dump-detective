@@ -36,11 +36,16 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         byte[] readBuffer = ArrayPool<byte>.Shared.Rent(batchSize);
         try
         {
+            // carryOver holds a record fragment left over from the previous read that
+            // straddled a batch boundary — it's kept at the front of the buffer and
+            // completed by the next read rather than discarded.
+            int carryOver = 0;
             int bytesRead;
-            while ((bytesRead = stream.Read(readBuffer, 0, batchSize)) > 0)
+            while ((bytesRead = stream.Read(readBuffer, carryOver, batchSize - carryOver)) > 0)
             {
+                int total = carryOver + bytesRead;
                 int offset = 0;
-                while (offset + RecordSize <= bytesRead)
+                while (offset + RecordSize <= total)
                 {
                     ulong address = BinaryPrimitives.ReadUInt64LittleEndian(readBuffer.AsSpan(offset, 8));
                     ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(readBuffer.AsSpan(offset + 8, 8));
@@ -49,18 +54,9 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
                     offset += RecordSize;
                 }
 
-                // If a partial record was read at the end, move the remainder to the start and read next chunk.
-                if (offset < bytesRead)
-                {
-                    int remaining = bytesRead - offset;
-                    Buffer.BlockCopy(readBuffer, offset, readBuffer, 0, remaining);
-                    int nextRead = stream.Read(readBuffer, remaining, batchSize - remaining);
-                    if (nextRead <= 0)
-                        break;
-
-                    bytesRead = remaining + nextRead;
-                    offset = 0;
-                }
+                carryOver = total - offset;
+                if (carryOver > 0)
+                    Buffer.BlockCopy(readBuffer, offset, readBuffer, 0, carryOver);
             }
         }
         finally

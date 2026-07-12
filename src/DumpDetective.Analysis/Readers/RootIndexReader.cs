@@ -23,7 +23,8 @@ internal static class RootIndexReader
             return result;
         }
 
-        string rootPath = DumpIndexPaths.RootIndex(index.IndexPath);
+        string indexDir = Path.GetDirectoryName(index.IndexPath) ?? string.Empty;
+        string rootPath = Path.Combine(indexDir, DumpIndexPaths.RootIndexFile);
         return ReadRootIndexFile(rootPath, cancellationToken);
     }
 

@@ -41,7 +41,8 @@ internal class RootCache
         {
             try
             {
-                string rootIndexPath = DumpDetective.Analysis.Indexing.DumpIndexPaths.RootIndex(builtRootIndex.IndexPath);
+                string indexDir = Path.GetDirectoryName(builtRootIndex.IndexPath) ?? string.Empty;
+                string rootIndexPath = Path.Combine(indexDir, DumpIndexPaths.RootIndexFile);
                 if (File.Exists(rootIndexPath))
                 {
                     var roots = RootIndexReader.ReadRootTargets(rootIndexPath, CancellationToken.None);

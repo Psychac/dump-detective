@@ -1,10 +1,8 @@
-# Cache Analysis Findings (2026-07-11)
+# Cache Analysis Findings
 
-Analysis-only pass over the current heap-index caching subsystem
+Analysis of the heap-index caching subsystem
 (`src/DumpDetective.Analysis/Cache/`, `src/DumpDetective.Analysis/Indexing/`).
-No code changes made. Earlier docs in this folder (`01-*` through `10-*`,
-`ArchitectureDecisions.md`) are outdated and were intentionally **not** used
-as input — everything below is derived directly from current source.
+Current status as of 2026-07-12.
 
 ## Architecture as-built
 
@@ -16,133 +14,371 @@ is a facade over six sub-caches — `HeapIndexCache`, `StatisticsCache`, `RootCa
 a 4 GB dump-size threshold. The cache is session-scoped with no eviction,
 which is appropriate given the one-shot-per-dump usage pattern.
 
-## Finding 1 — Memory vs. disk indexing produce non-equivalent output
+## Findings
 
-This is the direct cause of the differing HTML report sizes for the same
-dump under memory-tier vs. disk-tier indexing.
+### Finding 1 — Memory vs. disk indexing produce non-equivalent output
 
-- **String dedup is exact on disk, sampled in memory.**
-  [MemoryBackedObjectIndexWriter.cs:47-51](../../src/DumpDetective.Analysis/Indexing/MemoryBackedObjectIndexWriter.cs#L47-L51)
-  adaptively skips `AsString()` calls (down to 1-in-10 or 1-in-50) once the
-  duplicate yield rate drops below 5%/1%. `DiskBackedObjectIndexWriter.cs:186`
-  samples every string object with no skipping. `StringAnalyzer`'s dedup
-  counts/tables will differ between modes on an identical dump.
+**Status:** Open — structural gap identified, three fix options defined.
 
-- **Large-object / LOH-free-block data only exists on disk.** The disk
-  writer collects `largeCandidates` and `lohFreeBlockCandidates` and writes
-  `LargeObjectIndex.bin` / `LohFreeBlockIndex.bin`
-  ([DiskBackedObjectIndexWriter.cs:80-82,176-181](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L80-L181)).
-  The memory writer never collects these — there is no
-  `InMemoryLargeCandidates` / `InMemoryLohFreeBlockCandidates` field on
-  `HeapIndexBuildResult`. Consumers compensate inconsistently:
-  - `LohFragmentationAnalyzer` detects the gap and falls back to a full
-    segment re-scan in memory mode
-    ([LohFragmentationAnalyzer.cs:209-213](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L209-L213)),
-    producing correct but redundant output (defeats the purpose of a
-    prebuilt index for small dumps).
-  - `ArrayAnalyzer` does **not** compensate the same way. It only reads
-    `LargeObjectIndex.bin` when `StorageKind == Disk`
-    ([ArrayAnalyzer.cs:160-168](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L160-L168));
-    in memory mode it falls back to a much weaker "one sample per LOH type
-    from TypeAggregates" heuristic instead of a true top-100-by-size list.
-    This alone changes the "large arrays" section of the report between
-    modes.
+**Issue:** Disk writer collects `largeCandidates` and `lohFreeBlockCandidates`,
+writes `LargeObjectIndex.bin` / `LohFreeBlockIndex.bin`
+([DiskBackedObjectIndexWriter.cs:80-82,176-181](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L80-L181)).
+Memory writer does not — no `InMemoryLargeCandidates` / `InMemoryLohFreeBlockCandidates`
+field exists on `HeapIndexBuildResult`.
 
-**Suggested fix:** add `InMemoryLargeCandidates` /
-`InMemoryLohFreeBlockCandidates` to `HeapIndexBuildResult`, collect them in
-`MemoryBackedObjectIndexWriter` the same way the disk writer does, and
-update `ArrayAnalyzer` / `LohFragmentationAnalyzer` to consume them directly
-instead of scan-fallback vs. degraded-heuristic. Separately, make string
-dedup sampling mode-symmetric (either apply the same adaptive sampling to
-disk, or scale memory-mode sampling deterministically by dump size) so
-`StringAnalyzer` output doesn't vary with which writer happened to run.
+Consumers compensate inconsistently:
+- `LohFragmentationAnalyzer` detects the gap and falls back to `AnalyzeFromHeap`
+  (full segment re-scan) in memory mode instead of reading `LohFreeBlockIndex.bin`.
+  Result: `TotalBytes` differs by 159,646 bytes between modes.
+- `ArrayAnalyzer` only reads `LargeObjectIndex.bin` when `StorageKind == Disk`
+  ([ArrayAnalyzer.cs:160-168](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L160-L168));
+  memory mode falls back to weaker "one sample per LOH type" heuristic.
+  Result: `TopSparseArrays` differs (disk=3, memory=4).
 
-## Finding 2 — `GetRootDescription` is broken in both modes
+Additionally, string dedup sampling is asymmetric: `MemoryBackedObjectIndexWriter.cs:47-51`
+adaptively skips dedup calls (down to 1-in-10 or 1-in-50) based on yield rate,
+while `DiskBackedObjectIndexWriter` samples every string. `StringAnalyzerDiscrepancyTests`
+currently passes on the test dump, but the bug is dump-dependent (higher string
+duplication would trigger it).
 
-`HeapAnalysisCache._rootDescriptions`
+**Fix options:**
+1. **Full structural fix:** add `InMemoryLargeCandidates` and
+   `InMemoryLohFreeBlockCandidates` to `HeapIndexBuildResult`, populate them in
+   `MemoryBackedObjectIndexWriter`, update `LohFragmentationAnalyzer` and
+   `ArrayAnalyzer` to consume them directly. Only option that makes output
+   byte-for-byte identical. Touches writer, result type, two analyzers.
+2. **Document as divergence:** update tests to allow documented divergence,
+   reflecting that memory-tier (< 4 GB) uses a structurally different computation.
+3. **Partial fix:** implement only `InMemoryLohFreeBlockCandidates` now (fixes
+   `LohFragmentationAnalyzer`), defer `InMemoryLargeCandidates` to separate pass.
+
+For string dedup: make sampling symmetric (apply same adaptive logic to disk, or
+scale memory sampling deterministically by dump size).
+
+### Finding 2 — `GetRootDescription` is broken in both modes
+
+**Status:** Open — correctness gap, not a disk-vs-memory discrepancy.
+
+**Issue:** `HeapAnalysisCache._rootDescriptions`
 ([HeapAnalysisCache.cs:21](../../src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs#L21))
-is declared but never assigned. The population logic lives in
-`RootCache._rootDescriptions` instead, but
-`HeapAnalysisCache.GetRootDescription`
+is declared but never assigned. `HeapAnalysisCache.GetRootDescription`
 ([HeapAnalysisCache.cs:298-305](../../src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs#L298-L305))
-never delegates to `_rootCache` — it always returns `null`.
+never delegates to `_rootCache` — always returns `null`. `RootCache.GetOrBuildValidRoots`'s
+disk fast-path reads `RootIndex.bin` (target/root/kind only, no description string)
+and returns early, never populating descriptions on large dumps.
 
-`CollectionAnalyzer.PopulateRootDescriptions` calls this on the "fast
-profile" path for every wasteful-collection item
-([CollectionAnalyzer.cs:1046-1054](../../src/DumpDetective.Analysis/Analyzers/CollectionAnalyzer.cs#L1046-L1054)),
-so it silently misses every time. Per the surrounding comment, Balanced/Deep
-profiles then pay for a full `ReferenceChainAnalyzer` BFS instead — a
-correctness gap that also costs performance.
+The bug affects both modes identically; no tests fail. This is a correctness gap
+but not an output-changing divergence. Features depending on root descriptions
+are incomplete.
 
-Even after fixing the delegation, root descriptions still won't survive the
-**disk** fast-path: `RootCache.GetOrBuildValidRoots`
-([RootCache.cs:38-70](../../src/DumpDetective.Analysis/Cache/RootCache.cs#L38-L70))
-reads `RootIndex.bin` (target/root/kind only, no description string) and
-returns early, never populating `_rootDescriptions` on large dumps. Only the
-`EnsureRootCaches` heap-walk fallback fills it in.
+**Suggested fix:** delegate `HeapAnalysisCache.GetRootDescription` to `_rootCache`.
+Persist descriptions into `RootIndex.bin` or derive lazily via `ClrRoot.ToString()`
+for top-N addresses needed. Also delete dead duplicate type-statistics hydration
+code (`TryHydrateTypeStatisticsFromIndex` / `ResolveTypeNameFromSample` /
+`ResolveModuleNameFromSample` / `AddClamped`) that still lives in `HeapAnalysisCache`.
 
-**Suggested fix:** delegate `HeapAnalysisCache.GetRootDescription` to
-`_rootCache`. Then either persist descriptions into `RootIndex.bin`, or
-derive them lazily via `ClrRoot.ToString()` for just the top-N addresses
-`CollectionAnalyzer` needs, so disk mode isn't permanently blank either.
+### Finding 3 — Redundant root enumeration in memory mode
 
-This looks like leftover debris from the cache-refactor commits (`cache:
-HeapAnalysisCache breakdown and refactor`, etc.) — `HeapAnalysisCache` also
-still carries a dead duplicate of `TryHydrateTypeStatisticsFromIndex` /
-`ResolveTypeNameFromSample` / `ResolveModuleNameFromSample` / `AddClamped`
-now solely owned by `StatisticsCache`. Worth deleting to avoid future edits
-landing in the wrong copy.
+**Status:** Open — performance issue, scoped to `RootCache` consumers only.
 
-## Finding 3 — Redundant root enumeration in memory mode
-
-`RootCache.GetOrBuildValidRoots` only fast-paths off disk-backed
-`RootIndex.bin`
-([RootCache.cs:38-70](../../src/DumpDetective.Analysis/Cache/RootCache.cs#L38-L70)).
-It never checks `heapIndex.InMemoryRootCandidates`, even though
-`RootIndexReader.ReadRootCandidates` already has a memory-mode branch built
-for exactly this purpose
+**Issue:** `RootCache.GetOrBuildValidRoots` only fast-paths off disk-backed
+`RootIndex.bin` ([RootCache.cs:38-70](../../src/DumpDetective.Analysis/Cache/RootCache.cs#L38-L70)).
+Never checks `heapIndex.InMemoryRootCandidates`, even though
+`RootIndexReader.ReadRootCandidates` already has a memory-mode branch
 ([RootIndexReader.cs:17-24](../../src/DumpDetective.Analysis/Readers/RootIndexReader.cs#L17-L24))
-and `MemoryBackedObjectIndexWriter` already collects roots during Phase 1.
-Every memory-tier dump (< 4 GB) therefore redundantly re-walks
-`heap.EnumerateRoots()` in `EnsureRootCaches`, duplicating work already done
-during index build.
+and `MemoryBackedObjectIndexWriter` collects roots during Phase 1. Memory-tier
+dumps therefore redundantly re-walk `heap.EnumerateRoots()` in `EnsureRootCaches`,
+duplicating work already done.
+
+`GCRootAnalyzer` independently reads roots correctly via `RootIndexReader.ReadRootCandidates`
+(which does branch on `InMemoryRootCandidates`), so that path is not affected.
+The redundant walk impacts only `RootCache`'s own consumers: `GetStaticRootedAddresses`,
+`CollectionAnalyzer`'s static-root leak detector.
 
 **Suggested fix:** branch on `heapIndex.StorageKind == Memory` in
 `GetOrBuildValidRoots` and hydrate from `InMemoryRootCandidates` via
-`RootIndexReader.ReadRootCandidates`, same as the disk branch does from the
-file.
+`RootIndexReader.ReadRootCandidates`.
 
-## Finding 4 — Disk fast-path doesn't validate satellite files
+### Finding 4 — Disk fast-path doesn't validate satellite files
 
-`DiskBackedObjectIndexWriter.TryLoadFromCache`
+**Status:** Open — rare edge case, unverified by tests.
+
+**Issue:** `DiskBackedObjectIndexWriter.TryLoadFromCache`
 ([DiskBackedObjectIndexWriter.cs:633-647](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L633-L647))
-only validates presence/stamp of `ObjectIndex.bin` and
-`TypeAggregateIndex.bin`. Satellite files (`RootIndex.bin`,
-`LargeObjectIndex.bin`, `HandleSnapshot.bin`, etc.) can fail to write on a
-prior run — the write is wrapped in try/catch and only logged as a
-non-fatal warning ([DiskBackedObjectIndexWriter.cs:478-557](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L478-L557))
-— yet `TypeAggregateIndex.bin` is still written last, which is the sole
-signal the fast-path uses to decide the build was "complete". A later run
-against the same dump will hit the cache fast-path and skip the full scan,
-permanently missing whatever satellite file failed to write the first time,
-with no retry mechanism.
+only validates `ObjectIndex.bin` and `TypeAggregateIndex.bin`. Satellite files
+(`RootIndex.bin`, `LargeObjectIndex.bin`, `HandleSnapshot.bin`, etc.) can fail
+to write on a prior run (wrapped in try/catch, logged only as non-fatal warning),
+yet `TypeAggregateIndex.bin` is written last as the sole "complete" signal. A
+later run hits cache fast-path and skips the full scan, permanently missing any
+satellite file that failed to write the first time.
 
-**Suggested fix:** on cache-hit, check for expected satellite files and
-regenerate any that are missing rather than assuming completeness from
-`TypeAggregateIndex.bin` alone.
+No discrepancy test covers this (requires corrupted/partial prior cache). Reasoning
+is code-inspection only.
 
-## Summary of suggested changes (unprioritized)
+**Suggested fix:** on cache-hit, check for expected satellite files and regenerate
+any that are missing.
 
-1. Add memory-mode large-object / free-block candidate collection so
-   `ArrayAnalyzer` and `LohFragmentationAnalyzer` get parity with disk mode
-   without a fallback re-scan. **Directly fixes the reported HTML-size
-   divergence.**
-2. Make string dedup sampling symmetric between memory and disk writers.
-3. Fix `HeapAnalysisCache.GetRootDescription` delegation; persist or
-   lazily derive descriptions for disk-backed roots too.
-4. Delete the dead duplicate type-statistics hydration code in
-   `HeapAnalysisCache`.
-5. Hydrate `RootCache` from `InMemoryRootCandidates` in memory mode instead
-   of re-walking `heap.EnumerateRoots()`.
-6. Validate/repair satellite index files on disk cache-hit instead of
-   trusting `TypeAggregateIndex.bin` alone.
+### Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
+
+**Status:** Open — root cause unknown, highest-severity item.
+
+**Issue:** `CollectionAnalyzerDiscrepancyTests` fails on first assertion:
+
+```
+Expected diskResult.TotalCollections to be 798912, but found 702893 (difference of -96019)
+```
+
+Ruled out:
+- Not raw object-index loss (`MemoryAnalyzerDiscrepancyTests` passes).
+- Not an obvious race (`ProcessEntry` uses single `lock (heapLock)`; classification
+  is identical by method table).
+
+Root cause not isolated. Requires diffing the actual entry stream per mode
+(e.g., dump addresses classified as `Dictionary` in each mode and compare).
+Highest-severity: 12% swing in headline metric is worse than originally-reported
+HTML-size difference.
+
+### Finding 6 — Buffer-boundary carry-over bug in satellite-index readers
+
+**Status:** Fixed — all instances corrected, and the whole class migrated off the bug-prone pattern.
+
+**Issue:** `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks`
+both had a pattern where `stream.Read()` is not guaranteed to return record-aligned
+byte counts. Trailing fragments were discarded instead of carried forward, silently
+losing records. Same bug class already fixed in `ObjectIndexReader.cs` (commit `8dd4d72`),
+but two more instances existed independently.
+
+The follow-up audit named below (`RootIndexReader`, and the `StringDedupIndex`
+block of `TypeAggregateIndexReader`) turned up a **third live instance**:
+`RootIndexReader.ReadRootIndexFile` had the identical unfixed bug — batch-read
+into a buffer at offset 0, `records = bytesRead / RootRecordSize`, trailing
+bytes dropped. It hadn't been caught by `GCRootAnalyzerDiscrepancyTests`
+because the test dump's `RootIndex.bin` size happens to land on a clean
+multiple of the read-buffer size.
+
+**Root cause of the recurrence:** the "batch read + manual carry-over" idiom
+was hand-implemented independently four times (`ObjectIndexReader`,
+`AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, `RootIndexReader`), and got it
+wrong three of the four times. A second idiom already existed elsewhere
+(`ArrayAnalyzer.ReadLargeArraysFromIndex`, `TypeAggregateIndexReader`'s main
+record loops) — read one record at a time via `stream.ReadAtLeast(recordSpan,
+recordSize, throwOnEndOfStream: false)` — and never had the bug, because
+"did I get a full record" is an explicit checked precondition instead of
+something the caller reconstructs from a byte count.
+
+**Fix:** rather than adding a fourth hand-rolled carry-over implementation for
+`RootIndexReader`, all four readers were migrated to the proven-safe
+`ReadAtLeast`-per-record idiom, eliminating the batch-buffer/carry-over
+pattern (and its `ArrayPool` rentals) entirely:
+- [RootIndexReader.cs](../../src/DumpDetective.Analysis/Readers/RootIndexReader.cs)
+  — `ReadRootIndexFile` (the actual bug fix) and its header read.
+- [AsyncTaskAnalyzer.cs:319-346](../../src/DumpDetective.Analysis/Analyzers/AsyncTaskAnalyzer.cs#L319-L346)
+  — `ReadTaskIndexFile`. Root cause of the `TotalTasks` off-by-one discrepancy
+  (disk=12263, memory=12262); test passes both before and after this migration.
+- [LohFragmentationAnalyzer.cs:327-360](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L327-L360)
+  — `ReadFreeBlocks`. Does not resolve the `LohFragmentationAnalyzer`
+  discrepancy (structural, per Finding 1) — confirmed unchanged after migration.
+- [TypeAggregateIndexReader.cs](../../src/DumpDetective.Analysis/Indexing/TypeAggregateIndexReader.cs)
+  — the `StringDedupIndex` block used bare `Stream.Read` per record (fails
+  loudly via a length check rather than silently dropping data, but the same
+  unsafe-API smell); switched to `ReadAtLeast` for consistency.
+
+`ObjectIndexReader.cs` was deliberately **left on the batch+carry-over
+pattern**: it's the hottest read path in the codebase (every heap object,
+potentially 100M+ records on a 25GB dump), the carry-over logic there is
+already correct, and per-record `ReadAtLeast` call overhead at that volume is
+a real cost the smaller satellite readers (bounded by root/task/free-block
+counts) don't pay.
+
+`LohFragmentationAnalyzer.ReadTopLargeObjects` already used `ReadAtLeast` and
+did not have this bug.
+
+Verified via `AsyncTaskAnalyzerDiscrepancyTests`, `GCRootAnalyzerDiscrepancyTests`,
+`StringAnalyzerDiscrepancyTests`, and `RootIndexReaderTests` — all pass after
+the migration; `LohFragmentationAnalyzerDiscrepancyTests` still fails with the
+same pre-existing 159,646-byte Finding 1 gap, confirming the migration changed
+nothing behaviorally beyond removing the bug.
+
+## Open Items
+
+| Item | Severity | Status |
+|---|---|---|
+| **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | **Highest** | Root cause unknown |
+| **Finding 1** — LOH free-block/large-object data disk-only | High | 3 fix options identified |
+| `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Medium | Not investigated |
+| `DominatorAnalyzer` `TotalEstimatedRetainedBytes` large mismatch | Medium | Not investigated |
+| **Finding 2** — `GetRootDescription` dead delegation | Low | Correctness gap, symmetric |
+| **Finding 3** — Redundant root enumeration in memory mode | Low | Scoped to `RootCache` consumers |
+| **Finding 4** — Disk cache-hit doesn't validate satellites | Low | Rare edge case |
+
+## Closed Items
+
+| Item | Fix |
+|---|---|
+| **Finding 6** — Buffer-boundary carry-over in satellite readers | Fixed in `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, and `RootIndexReader` (3rd live instance found on audit); all four batch-read sites migrated to `ReadAtLeast`-per-record except `ObjectIndexReader` (kept for perf) |
+
+## Analysis & Verification (2026-07-12)
+
+Since the initial analysis above was written, `8dd4d72` ("cache: fixes to make
+disk and memory based caches equivalent") landed and fixed two unrelated bugs —
+a batch-boundary record-drop in
+[ObjectIndexReader.cs](../../src/DumpDetective.Analysis/Indexing/ObjectIndexReader.cs)
+and a wrong `RootIndex.bin` path in `RootCache`/`RootIndexReader` — plus a
+full suite of per-analyzer `*DiscrepancyTests` (`tests/DumpDetective.Tests/Integration/CacheDiscrepancies/`)
+that build the same real dump under both `HeapIndexPrebuildMode.Memory` and
+`.Disk` and assert the analyzer output is identical.
+
+### Methodology
+
+Read current source for each finding, then ran the relevant discrepancy tests
+**one at a time** (`dotnet test --filter FullyQualifiedName~<Name>`) against
+the ~3.35 GB dump at `D:\DUmps\Crash_IIS_BALTSTPRD\...dmp` — sequentially,
+not in bulk, to avoid loading multiple full heap indices into memory at once.
+Several existing discrepancy tests only asserted 1-2 fields out of the domain
+result's full field set (e.g. `ArrayAnalyzerDiscrepancyTests` checked only
+`TotalArrayObjects`/`TotalArrayBytes`, ignoring `TopLargeArrays` — precisely
+the field Finding 1 says diverges). Assertions for `ArrayAnalyzer`,
+`LohFragmentationAnalyzer`, `GCRootAnalyzer`, `CollectionAnalyzer`, and
+`EventLeakAnalyzer` tests were expanded to cover every scalar field and
+every top-N list's `Count` before re-running. `StringAnalyzerDiscrepancyTests`
+was already comprehensive.
+
+### Initial Findings Status (2026-07-12 early pass)
+
+| Finding | Status | Evidence |
+|---|---|---|
+| 1 — LOH large-object/free-block data disk-only | **Confirmed, still present** | `ArrayAnalyzer.cs` still branches on `StorageKind == Disk` to read `LargeObjectIndex.bin`; `InMemoryLargeCandidates`/`InMemoryLohFreeBlockCandidates` still don't exist anywhere in `src/`. `LohFragmentationAnalyzerDiscrepancyTests` **fails**: `TotalBytes` differs by 159,646 bytes between modes. `ArrayAnalyzerDiscrepancyTests` **fails** once `TopSparseArrays` is asserted: disk=3, memory=4. |
+| 1 — string dedup sampling asymmetry | **Code asymmetry confirmed, not reproduced** | Adaptive-sampling code in `MemoryBackedObjectIndexWriter.cs` (`DedupYieldCutoff1`/`2`) is unchanged and still asymmetric with the disk writer. However `StringAnalyzerDiscrepancyTests` (already asserted all ~18 `StringDomainResult` fields) **passes** on this dump — the duplicate-yield rate on this heap never drops low enough to trigger the skip path. The bug is real but dump-dependent; a dump with a higher string-duplication ratio would very likely trip it. |
+| 2 — `HeapAnalysisCache.GetRootDescription` dead delegation | **Confirmed, still present** | `HeapAnalysisCache.cs:21` still declares `_rootDescriptions` and never assigns it; `GetRootDescription` (line ~298) still reads only that dead field instead of delegating to `_rootCache.GetRootDescription`. `RootCache.GetOrBuildValidRoots`'s disk fast-path (line 40-66) still returns before populating `_rootDescriptions`, confirming descriptions stay empty on disk mode too. Because the bug is symmetric (always returns `null` in both modes), `EventLeakAnalyzerDiscrepancyTests` (now asserting all fields) **passes** — there's no disk-vs-memory *discrepancy*, just a silently-dead feature in both. |
+| 3 — Redundant `heap.EnumerateRoots()` walk in memory mode | **Confirmed, still present — but scoped correctly** | `RootCache.GetOrBuildValidRoots` still has no `StorageKind == Memory` branch and still falls through to `EnsureRootCaches` (full root walk) for memory-tier dumps; `InMemoryRootCandidates` is never referenced in `RootCache.cs`. However, `GCRootAnalyzer` reads roots via `RootIndexReader.ReadRootCandidates`, which *does* branch on `InMemoryRootCandidates` and correctly avoids `heap.EnumerateRoots()` in both modes. `GCRootAnalyzerDiscrepancyTests` (expanded to assert all 6 fields) **passes**. The redundant walk is confined to `RootCache`'s own consumers, not to `GCRootAnalyzer`. |
+| 4 — Disk fast-path doesn't validate satellite files | **Confirmed, still present** | `DiskBackedObjectIndexWriter.TryLoadFromCache` (line ~633) still only checks `File.Exists(indexPath)` and `File.Exists(typeAggPath)`; no satellite-file check was added. No discrepancy test exercises this path (requires a corrupted/partial prior cache directory), so reasoning is code-inspection only. |
+
+### New Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
+
+Not documented in earlier analysis. `CollectionAnalyzerDiscrepancyTests`
+(expanded to assert all 14 `CollectionDomainResult` fields) **fails** on the
+very first assertion:
+
+```
+Expected diskResult.TotalCollections to be 798912, but found 702893 (difference of -96019)
+```
+
+Ruled out as explanations:
+- **Not raw object-index loss.** `MemoryAnalyzerDiscrepancyTests` (asserts
+  `TotalObjects`) **passes** — the underlying `ObjectIndex.bin` stream and
+  `InMemoryEntries` array agree exactly on total object count, so the
+  `ObjectIndexReader` carry-over fix is working correctly.
+- **Not an obvious data race.** Both memory and disk paths funnel every
+  `ClrHeap` touch through a single `lock (heapLock)` in `ProcessEntry`,
+  and classify identically by method table.
+
+Root cause not yet isolated — needs a follow-up pass diffing the actual
+entry stream per mode. Flagged as the highest-severity open item since
+a 12% swing in a headline metric is worse than the originally-reported
+HTML-size difference.
+
+### Test suite gap
+
+Most of the ~29 discrepancy-test files not touched during this pass still
+assert only 1-2 fields out of their domain result's full field set. Recommend
+expanding the remaining files the same way before trusting a green run as
+proof of disk/memory parity.
+
+### Follow-up: New Finding 6 — buffer-boundary carry-over bugs in satellite-index readers
+
+Continued the discrepancy-test sweep one analyzer at a time. Discovered two
+independent instances of a buffer-boundary read bug in satellite-index readers:
+
+`AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks`
+both use a loop of the shape:
+
+```csharp
+while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+{
+    int offset = 0;
+    while (offset + RecordSize <= read) { /* decode record at offset */ }
+    // any trailing bytes < RecordSize at the end of `read` were silently dropped
+}
+```
+
+`Stream.Read` is not guaranteed to return a record-aligned byte count, so
+whenever a read landed mid-record, the trailing fragment was discarded
+instead of being carried into the next read — silently and permanently
+losing a record. This is the same bug class already fixed once in
+`ObjectIndexReader.cs` by `8dd4d72`, but two more independent instances of
+the same anti-pattern existed.
+
+Both were fixed by carrying the leftover fragment forward
+(`stream.Read(buffer, carryOver, buffer.Length - carryOver)` +
+`Buffer.BlockCopy` of the tail to the front of the buffer before the next
+read), mirroring `ObjectIndexReader`'s existing pattern. A third read loop
+in the same file, `LohFragmentationAnalyzer.ReadTopLargeObjects`, already
+used `ReadAtLeast` and does not have this bug.
+
+**Verified impact:**
+- `AsyncTaskAnalyzerDiscrepancyTests` (`TotalTasks` off by one:
+  disk=12263, memory=12262) — **fixed, test now passes.** This was purely
+  a disk-side read bug: `TaskIndex.bin` had the correct record written, but
+  `ReadTaskIndexFile` was dropping the last record whenever the file size
+  wasn't a clean multiple of the 4096-record read buffer.
+- `LohFragmentationAnalyzerDiscrepancyTests` — **fix applied, but did not
+  change the test outcome.** `TotalBytes` still differs by the same 159,646
+  bytes before and after, confirming the real cause is structural, not a
+  reader bug.
+
+Diagnostic experiment: forcing `MaxSegmentParallelism` to 1 in both writers
+confirmed the `AsyncTaskAnalyzer` discrepancy was **not** a race condition —
+the off-by-one reproduced identically at DOP=1.
+
+**Suggested follow-up:** audit remaining satellite-index readers for the
+same `stream.Read(buffer, 0, buffer.Length)`-without-carry-over pattern.
+Candidates: `RootIndexReader`, `LargeObjectIndex.bin` reads in `ArrayAnalyzer`,
+and any other hand-rolled binary parser in `src/DumpDetective.Analysis/Indexing/`
+and `Analyzers/`.
+
+### Root cause of LohFragmentationAnalyzer discrepancy: Finding 1 structural gap
+
+With the reader bug ruled out, re-read `LohFragmentationAnalyzer.AnalyzeFromIndex`
+directly. It short-circuits before ever calling `ReadFreeBlocks` in memory
+mode:
+
+```csharp
+string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
+// heapIndex.IndexPath == "<memory>" in memory mode, so indexDir == ""
+if (indexDir.Length == 0)
+    return AnalyzeFromHeap(heap, progress, options);
+```
+
+Memory mode never reads a `LohFreeBlockIndex.bin` at all (it doesn't exist — see Finding 1)
+and instead computes `TotalBytes` via `AnalyzeFromHeap`, a structurally different
+full-segment re-scan/heuristic. This is exactly Finding 1 as originally documented.
+
+**Options for closing Finding 1's `LohFragmentationAnalyzer`/`ArrayAnalyzer` gap:**
+
+1. **Full structural fix (original Finding 1 suggestion):** add
+   `InMemoryLargeCandidates` and `InMemoryLohFreeBlockCandidates` fields to
+   `HeapIndexBuildResult`, populate them in `MemoryBackedObjectIndexWriter`
+   the same way the disk writer does, and update `LohFragmentationAnalyzer.AnalyzeFromIndex`
+   and `ArrayAnalyzer` to consume them directly instead of falling back to
+   `AnalyzeFromHeap` / weaker per-type sampling heuristic. Only option that
+   makes memory- and disk-mode output byte-for-byte identical. Largest scope —
+   touches the writer, the shared result type, and two analyzers.
+2. **Leave as a documented, accepted divergence.** `AnalyzeFromHeap` is not
+   *wrong* — just structurally different, and memory tier only applies to
+   dumps small enough (< 4 GB) that a full re-scan is cheap. Would require
+   updating discrepancy tests to allow documented divergence instead of
+   exact equality.
+3. **Partial fix, LOH only:** implement only `InMemoryLohFreeBlockCandidates`
+   now (fixes `LohFragmentationAnalyzer`) and defer `InMemoryLargeCandidates`
+   (for `ArrayAnalyzer`) to a separate pass.
+
+### Final Status Summary
+
+| Item | Status | Evidence |
+|---|---|---|
+| AsyncTaskAnalyzer `TotalTasks` off-by-one | **Fixed** | Carry-over bug in `ReadTaskIndexFile` (Finding 6). `AsyncTaskAnalyzerDiscrepancyTests` passes. |
+| Finding 1 — LOH free-block data disk-only (`LohFragmentationAnalyzer`) | **Root cause confirmed, unfixed** | Carry-over fix in `ReadFreeBlocks` applied but did not change outcome — proves discrepancy is 100% structural (`AnalyzeFromIndex` → `AnalyzeFromHeap` fallback in memory mode), not a reader bug. `LohFragmentationAnalyzerDiscrepancyTests` still fails: `TotalBytes` differs by 159,646 bytes. Three fix options documented above. |
+| Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. Other hand-rolled binary readers (candidates: `RootIndexReader`, `ArrayAnalyzer`'s large-object reads) not yet audited. |
+| Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Highest-severity open item** | Root cause not yet isolated. |
+| `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | **Not yet investigated** | |
+| `DominatorAnalyzer` `TotalEstimatedRetainedBytes` | **Not yet investigated** | |

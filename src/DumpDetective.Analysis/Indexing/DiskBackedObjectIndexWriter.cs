@@ -87,13 +87,19 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var globalLengthSamples = new List<int>();
         var globalLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // OPT: open the index file before the parallel scan so each segment writes directly to
-        // disk as it completes — eliminating the post-scan bag + flat-array accumulation
-        // (~1.2 GB of pool buffers + flat array that were previously simultaneously live).
-        // Serialization (CPU) runs outside the lock; only stream.Write is serialized.
+        // OPT: each segment is scanned in parallel but serialized to its own scratch file.
+        // Scratch files are concatenated in segment order after the scan instead of writing
+        // directly to a shared stream under a lock — a shared-stream write order depends on
+        // whichever thread's chunk finishes first, which is non-deterministic and made capped
+        // scans (e.g. RetentionAnalyzer's MaxLeakScanObjects) see a different subset of objects
+        // — and therefore different results — on every disk-mode run.
         int serialChunkEntries = Math.Max(writeBuffer / RecordSize, 1);
         int serialChunkBytes = serialChunkEntries * RecordSize;
-        object streamWriteLock = new();
+        string indexDir = Path.GetDirectoryName(indexPath)!;
+        ClrSegment[] segments = heap.Segments.ToArray();
+        string[] segScratchFiles = new string[segments.Length];
+        for (int i = 0; i < segments.Length; i++)
+            segScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.tmp");
         using FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read,
             bufferSize: writeBuffer, FileOptions.SequentialScan);
         WriteObjIndexHeader(stream, recordCount: 0); // placeholder — overwritten after scan
@@ -104,12 +110,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             MaxDegreeOfParallelism = maxSegmentParallelism
         };
 
-        Parallel.ForEach(
-            heap.Segments,
+        try
+        {
+        Parallel.For(
+            0,
+            segments.Length,
             parallelOptions,
             () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
-            (segment, _, state) =>
+            (segIdx, _, state) =>
             {
+                ClrSegment segment = segments[segIdx];
                 // Determine generation from segment kind — avoids per-object GetGeneration call
                 // for server GC where each segment is dedicated to a single generation.
                 // For Ephemeral segments (workstation GC) segGen = -1; generation is resolved
@@ -219,14 +229,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                // Serialize segment entries to disk in fixed-size chunks.
-                // Each chunk is serialized to a pooled byte[] outside the lock, then flushed
-                // to the stream under the write lock.  The HeapEntry pool buffer is returned
-                // immediately after — at most MaxSegmentParallelism buffers are live at any instant.
+                // Serialize segment entries to this segment's own scratch file in fixed-size
+                // chunks — no shared-stream lock, so segments make independent progress.
+                // Scratch files are concatenated in segment order after the scan completes.
+                if (segCount > 0)
                 {
                     byte[] serialBuf = ArrayPool<byte>.Shared.Rent(serialChunkBytes);
                     try
                     {
+                        using FileStream segStream = new(segScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
+                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
                         int srcIdx = 0;
                         while (srcIdx < segCount)
                         {
@@ -240,8 +252,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                                 BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 8), e.MethodTable);
                                 BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 16), e.Size);
                             }
-                            lock (streamWriteLock)
-                                stream.Write(serialBuf, 0, chunkBytes);
+                            segStream.Write(serialBuf, 0, chunkBytes);
                             srcIdx += chunkEntries;
                         }
                     }
@@ -250,6 +261,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         ArrayPool<byte>.Shared.Return(serialBuf);
                         ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
                     }
+                }
+                else
+                {
+                    ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
                 }
 
                 return state;
@@ -300,6 +315,41 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     }
                 }
             });
+        }
+        catch
+        {
+            for (int i = 0; i < segScratchFiles.Length; i++)
+            {
+                try { File.Delete(segScratchFiles[i]); } catch { /* best-effort cleanup */ }
+            }
+            throw;
+        }
+
+        // Concatenate the per-segment scratch files into the final index in segment order —
+        // this is what makes disk-mode entry order deterministic and match memory-mode's
+        // segment-ordered output.
+        byte[] copyBuf = ArrayPool<byte>.Shared.Rent(writeBuffer);
+        try
+        {
+            for (int i = 0; i < segScratchFiles.Length; i++)
+            {
+                string segFile = segScratchFiles[i];
+                if (!File.Exists(segFile))
+                    continue;
+                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
+                    bufferSize: writeBuffer, FileOptions.SequentialScan))
+                {
+                    int read;
+                    while ((read = segStream.Read(copyBuf, 0, copyBuf.Length)) > 0)
+                        stream.Write(copyBuf, 0, read);
+                }
+                File.Delete(segFile);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(copyBuf);
+        }
 
         // Seal the index: flush buffered data, rewind, and overwrite the placeholder header
         // with the actual record count now that all segment writes have completed.

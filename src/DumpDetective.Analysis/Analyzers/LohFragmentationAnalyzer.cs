@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -317,35 +316,29 @@ namespace DumpDetective.Analysis.Analyzers
             using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
                 FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
 
-            if (!IndexHeader.TryRead(stream, out _))
+            if (!IndexHeader.TryRead(stream, out IndexHeader header))
                 return;
 
-            byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 4096);
-            try
+            // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
+            // return record-aligned byte counts, and a hand-rolled batch buffer with
+            // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
+            // own internal buffer (see bufferSize above) makes this as cheap as batching.
+            Span<byte> rec = stackalloc byte[RecordSize];
+            for (long i = 0; i < header.RecordCount; i++)
             {
-                int bytesRead;
-                while ((bytesRead = stream.Read(buf, 0, buf.Length)) > 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    int records = bytesRead / RecordSize;
-                    for (int i = 0; i < records; i++)
-                    {
-                        int off = i * RecordSize;
-                        ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                        // offset field at off+8 is unused for aggregation
-                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 16));
+                cancellationToken.ThrowIfCancellationRequested();
+                if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
+                    break;
 
-                        allSizes.Add(size);
-                        if (bySegment.TryGetValue(segAddr, out var ex))
-                            bySegment[segAddr] = (ex.TotalFree + size, size > ex.Largest ? size : ex.Largest, ex.Count + 1);
-                        else
-                            bySegment[segAddr] = (size, size, 1);
-                    }
-                }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buf);
+                ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                // offset field at [8..16) is unused for aggregation
+                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+
+                allSizes.Add(size);
+                if (bySegment.TryGetValue(segAddr, out var ex))
+                    bySegment[segAddr] = (ex.TotalFree + size, size > ex.Largest ? size : ex.Largest, ex.Count + 1);
+                else
+                    bySegment[segAddr] = (size, size, 1);
             }
         }
 

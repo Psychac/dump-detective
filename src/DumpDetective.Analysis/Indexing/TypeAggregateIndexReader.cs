@@ -218,7 +218,7 @@ internal static class TypeAggregateIndexReader
             {
                 using var ds = new FileStream(dedupPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, FileOptions.SequentialScan);
                 Span<byte> hdr = stackalloc byte[12];
-                if (ds.Read(hdr) != 12) throw new InvalidDataException("short header");
+                if (ds.ReadAtLeast(hdr, 12, throwOnEndOfStream: false) != 12) throw new InvalidDataException("short header");
                 int magic = BinaryPrimitives.ReadInt32LittleEndian(hdr);
                 int version = BinaryPrimitives.ReadInt32LittleEndian(hdr[4..]);
                 int entries = BinaryPrimitives.ReadInt32LittleEndian(hdr[8..]);
@@ -229,7 +229,7 @@ internal static class TypeAggregateIndexReader
                     Span<byte> addrBuf = stackalloc byte[8];
                     for (int i = 0; i < entries; i++)
                     {
-                        if (ds.Read(rec) != rec.Length) throw new InvalidDataException("short record");
+                        if (ds.ReadAtLeast(rec, rec.Length, throwOnEndOfStream: false) != rec.Length) throw new InvalidDataException("short record");
                         ulong hash = BinaryPrimitives.ReadUInt64LittleEndian(rec);
                         int cnt = BinaryPrimitives.ReadInt32LittleEndian(rec[8..]);
                         ulong totalSize = BinaryPrimitives.ReadUInt64LittleEndian(rec[12..]);
@@ -243,7 +243,7 @@ internal static class TypeAggregateIndexReader
                             samples = new ulong[Math.Min(2, sampleCount)];
                             for (int s = 0; s < Math.Min(2, sampleCount); s++)
                             {
-                                if (ds.Read(addrBuf) != 8) throw new InvalidDataException("short addr");
+                                if (ds.ReadAtLeast(addrBuf, 8, throwOnEndOfStream: false) != 8) throw new InvalidDataException("short addr");
                                 samples[s] = BinaryPrimitives.ReadUInt64LittleEndian(addrBuf);
                             }
                         }
@@ -252,7 +252,7 @@ internal static class TypeAggregateIndexReader
                         if (previewLen > 0)
                         {
                             byte[] pbuf = new byte[previewLen];
-                            if (ds.Read(pbuf, 0, previewLen) != previewLen) throw new InvalidDataException("short preview");
+                            if (ds.ReadAtLeast(pbuf, previewLen, throwOnEndOfStream: false) != previewLen) throw new InvalidDataException("short preview");
                             preview = System.Text.Encoding.UTF8.GetString(pbuf);
                         }
 

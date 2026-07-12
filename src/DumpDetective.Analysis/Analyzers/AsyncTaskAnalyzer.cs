@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
@@ -337,35 +336,22 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             int cap = (int)Math.Min(recordCount, maxTasksToScan);
             var result = new List<(ulong, ulong, int)>(capacity: cap);
 
-            byte[] buffer = ArrayPool<byte>.Shared.Rent(RecordSize * 4096);
-            try
+            // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
+            // return record-aligned byte counts, and a hand-rolled batch buffer with
+            // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
+            // own internal buffer (see bufferSize above) makes this as cheap as batching.
+            Span<byte> rec = stackalloc byte[RecordSize];
+            for (long i = 0; i < recordCount && result.Count < maxTasksToScan; i++)
             {
-                int read;
-                int recordsRead = 0;
+                ct.ThrowIfCancellationRequested();
+                if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
+                    break;
 
-                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    int offset = 0;
-                    while (offset + RecordSize <= read)
-                    {
-                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset));
-                        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset + 8));
-                        int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset + 16));
+                ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+                int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(rec[16..]);
 
-                        result.Add((address, mt, stateFlags));
-                        offset += RecordSize;
-                        recordsRead++;
-
-                        if (recordsRead >= maxTasksToScan)
-                            goto done;
-                    }
-                }
-            done:;
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buffer);
+                result.Add((address, mt, stateFlags));
             }
 
             progress?.Report(new(result.Count, "task index loaded",

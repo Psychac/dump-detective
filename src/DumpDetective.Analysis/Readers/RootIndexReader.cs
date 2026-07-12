@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using DumpDetective.Analysis.Indexing;
 
@@ -50,7 +49,7 @@ internal static class RootIndexReader
         using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
 
         Span<byte> headerBuf = stackalloc byte[24];
-        if (fs.Read(headerBuf) < 24)
+        if (fs.ReadAtLeast(headerBuf, 24, throwOnEndOfStream: false) < 24)
             return roots;
 
         int magic = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
@@ -64,27 +63,24 @@ internal static class RootIndexReader
 
         roots.Capacity = (int)Math.Min(recordCount, 65_536);
 
-        byte[] buf = ArrayPool<byte>.Shared.Rent(RootRecordSize * 4096);
-        try
+        // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
+        // return record-aligned byte counts. A batch read into `buf` at offset 0
+        // followed by `bytesRead / RootRecordSize` silently drops any trailing
+        // partial-record bytes instead of carrying them into the next read — the
+        // same bug class fixed in ObjectIndexReader, AsyncTaskAnalyzer, and
+        // LohFragmentationAnalyzer. FileStream's own internal buffer (see
+        // bufferSize above) makes per-record reads as cheap as batching.
+        Span<byte> rec = stackalloc byte[RootRecordSize];
+        for (long i = 0; i < recordCount; i++)
         {
-            int bytesRead;
-            while ((bytesRead = fs.Read(buf, 0, buf.Length)) > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                int records = bytesRead / RootRecordSize;
-                for (int i = 0; i < records; i++)
-                {
-                    int off = i * RootRecordSize;
-                    ulong target = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off));
-                    ulong rootAddr = BinaryPrimitives.ReadUInt64LittleEndian(buf.AsSpan(off + 8));
-                    byte kind = buf[off + 16];
-                    roots.Add((target, rootAddr, kind));
-                }
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buf);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (fs.ReadAtLeast(rec, RootRecordSize, throwOnEndOfStream: false) < RootRecordSize)
+                break;
+
+            ulong target = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+            ulong rootAddr = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+            byte kind = rec[16];
+            roots.Add((target, rootAddr, kind));
         }
 
         return roots;

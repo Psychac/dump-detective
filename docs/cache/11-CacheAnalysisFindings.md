@@ -120,23 +120,33 @@ any that are missing.
 
 ### Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
 
-**Status:** Open — root cause unknown, highest-severity item.
+**Status:** Fixed.
 
-**Issue:** `CollectionAnalyzerDiscrepancyTests` fails on first assertion:
+**Issue:** `CollectionAnalyzerDiscrepancyTests` failed on first assertion:
 
 ```
 Expected diskResult.TotalCollections to be 798912, but found 702893 (difference of -96019)
 ```
 
-Ruled out:
-- Not raw object-index loss (`MemoryAnalyzerDiscrepancyTests` passes).
-- Not an obvious race (`ProcessEntry` uses single `lock (heapLock)`; classification
-  is identical by method table).
+**Root cause:** it *was* a race, just not in the calls that were checked.
+`RunParallelCollectionAnalysis`'s `ProcessEntry` local function wraps every
+heap-touching call in `lock (heapLock)` — kind resolution, `AnalyzeDictionary`,
+`AnalyzeList`, `AnalyzeHashSet`, `AnalyzeArrayBackedCollection`, `AnalyzeQueue`
+— except the per-kind generation-counter call, `ResolveGeneration`
+([CollectionAnalyzer.cs:244](../../src/DumpDetective.Analysis/Analyzers/CollectionAnalyzer.cs#L244)),
+which calls `heap.GetGeneration`/`ClrObject.Generation` via reflection with no
+lock, concurrently with other threads holding `heapLock` for `heap.GetObject()`
+reads. `ClrHeap`/`ClrRuntime` are not thread-safe, so this unsynchronized
+concurrent access corrupted shared ClrMD state, surfacing on unrelated
+*locked* threads as `obj.IsValid == false` / `obj.Type == null`, which
+`ResolveCollectionKindConcurrent` silently treats as `CollectionKind.None`,
+dropping the object from `TotalCollections` before it's ever counted. Disk
+mode doesn't hit this because `AnalyzeCollectionsSequentialDisk` is a plain
+single-threaded `foreach` — there's no parallelism to race against.
 
-Root cause not isolated. Requires diffing the actual entry stream per mode
-(e.g., dump addresses classified as `Dictionary` in each mode and compare).
-Highest-severity: 12% swing in headline metric is worse than originally-reported
-HTML-size difference.
+**Fix:** moved the `ResolveGeneration` call inside the same `lock (heapLock)`
+block. `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` now passes —
+`TotalCollections` agrees between disk and memory mode on the same heap.
 
 ### Finding 6 — Buffer-boundary carry-over bug in satellite-index readers
 
@@ -203,7 +213,6 @@ nothing behaviorally beyond removing the bug.
 
 | Item | Severity | Status |
 |---|---|---|
-| **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | **Highest** | Root cause unknown |
 | **Finding 1** — LOH free-block/large-object data disk-only | High | 3 fix options identified |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Medium | Not investigated |
 | `DominatorAnalyzer` `TotalEstimatedRetainedBytes` large mismatch | Medium | Not investigated |
@@ -216,6 +225,7 @@ nothing behaviorally beyond removing the bug.
 | Item | Fix |
 |---|---|
 | **Finding 6** — Buffer-boundary carry-over in satellite readers | Fixed in `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, and `RootIndexReader` (3rd live instance found on audit); all four batch-read sites migrated to `ReadAtLeast`-per-record except `ObjectIndexReader` (kept for perf) |
+| **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | Unlocked `ResolveGeneration` call in `ProcessEntry`'s parallel path raced against other threads' `lock (heapLock)` heap reads, corrupting shared ClrMD state and silently dropping objects from classification. Fixed by moving the call inside `heapLock`; `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` now passes |
 
 ## Analysis & Verification (2026-07-12)
 
@@ -255,34 +265,22 @@ was already comprehensive.
 
 ### New Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
 
-Not documented in earlier analysis. `CollectionAnalyzerDiscrepancyTests`
-(expanded to assert all 14 `CollectionDomainResult` fields) **fails** on the
-very first assertion:
+**Status:** Fixed. See [Finding 5](#finding-5--collectionanalyzer-disk-vs-memory-disagree-by-12)
+above for the confirmed root cause and fix.
+
+`CollectionAnalyzerDiscrepancyTests` (expanded to assert all 14
+`CollectionDomainResult` fields) originally **failed** on the very first
+assertion:
 
 ```
 Expected diskResult.TotalCollections to be 798912, but found 702893 (difference of -96019)
 ```
 
-Ruled out as explanations:
-- **Not raw object-index loss.** `MemoryAnalyzerDiscrepancyTests` (asserts
-  `TotalObjects`) **passes** — the underlying `ObjectIndex.bin` stream and
-  `InMemoryEntries` array agree exactly on total object count, so the
-  `ObjectIndexReader` carry-over fix is working correctly.
-- **Not an obvious data race.** Both memory and disk paths funnel every
-  `ClrHeap` touch through a single `lock (heapLock)` in `ProcessEntry`,
-  and classify identically by method table.
-
-Root cause not yet isolated — needs a follow-up pass diffing the actual
-entry stream per mode. Flagged as the highest-severity open item since
-a 12% swing in a headline metric is worse than the originally-reported
-HTML-size difference.
-
-### Test suite gap
-
-Most of the ~29 discrepancy-test files not touched during this pass still
-assert only 1-2 fields out of their domain result's full field set. Recommend
-expanding the remaining files the same way before trusting a green run as
-proof of disk/memory parity.
+It *was* a data race, just not the obvious one: `ProcessEntry` locks every
+`Analyze*` classification call via `lock (heapLock)`, but the per-kind
+`ResolveGeneration` call sat outside that lock, racing against other
+threads' locked heap reads on the shared, non-thread-safe `ClrHeap`. Fixed
+by moving `ResolveGeneration` inside `heapLock`; test now passes.
 
 ### Follow-up: New Finding 6 — buffer-boundary carry-over bugs in satellite-index readers
 
@@ -378,7 +376,7 @@ full-segment re-scan/heuristic. This is exactly Finding 1 as originally document
 |---|---|---|
 | AsyncTaskAnalyzer `TotalTasks` off-by-one | **Fixed** | Carry-over bug in `ReadTaskIndexFile` (Finding 6). `AsyncTaskAnalyzerDiscrepancyTests` passes. |
 | Finding 1 — LOH free-block data disk-only (`LohFragmentationAnalyzer`) | **Root cause confirmed, unfixed** | Carry-over fix in `ReadFreeBlocks` applied but did not change outcome — proves discrepancy is 100% structural (`AnalyzeFromIndex` → `AnalyzeFromHeap` fallback in memory mode), not a reader bug. `LohFragmentationAnalyzerDiscrepancyTests` still fails: `TotalBytes` differs by 159,646 bytes. Three fix options documented above. |
-| Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. Other hand-rolled binary readers (candidates: `RootIndexReader`, `ArrayAnalyzer`'s large-object reads) not yet audited. |
-| Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Highest-severity open item** | Root cause not yet isolated. |
+| Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. |
+| Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Fixed** | Unlocked `ResolveGeneration` call raced against `lock (heapLock)` heap reads in the parallel path; moved inside the lock. `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` passes. |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | **Not yet investigated** | |
 | `DominatorAnalyzer` `TotalEstimatedRetainedBytes` | **Not yet investigated** | |

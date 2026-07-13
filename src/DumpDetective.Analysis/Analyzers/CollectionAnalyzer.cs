@@ -241,7 +241,9 @@ namespace DumpDetective.Analysis.Analyzers
                 // determine generation and increment per-kind generation counter
                 try
                 {
-                    int gen = ResolveGeneration(heap, address, generationProperty, getGenerationMethod);
+                    int gen;
+                    lock (heapLock)
+                        gen = ResolveGeneration(heap, address, generationProperty, getGenerationMethod);
                     int idx = gen >= 3 ? 3 : Math.Max(0, gen);
                     var arr = generationCounts.GetOrAdd(kind, _ => new int[4]);
                     Interlocked.Increment(ref arr[idx]);
@@ -662,6 +664,86 @@ namespace DumpDetective.Analysis.Analyzers
                         AddToTopWasteful(wasteful, qWaste, topCapacity);
                     }
                 }
+                else if (kind == CollectionKind.ArrayList)
+                {
+                    stats.TotalCollections++;
+                    stats.ArrayLists++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.ArrayList][idx]++;
+                    }
+                    catch { }
+                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
+                    }
+                }
+                else if (kind == CollectionKind.Stack)
+                {
+                    stats.TotalCollections++;
+                    stats.Stacks++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.Stack][idx]++;
+                    }
+                    catch { }
+                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
+                    }
+                }
+                else if (kind == CollectionKind.SortedList)
+                {
+                    stats.TotalCollections++;
+                    stats.SortedLists++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.SortedList][idx]++;
+                    }
+                    catch { }
+                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
+                    }
+                }
+                else if (kind == CollectionKind.SortedSet)
+                {
+                    stats.TotalCollections++;
+                    stats.SortedSets++;
+                    try
+                    {
+                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
+                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                        generationCounts[CollectionKind.SortedSet][idx]++;
+                    }
+                    catch { }
+                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        wastefulCount++;
+                        totalWasted += waste.WastedMemory;
+                        AddToTopWasteful(wasteful, waste, topCapacity);
+                    }
+                }
             }
 
             scanCounter.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
@@ -687,6 +769,31 @@ namespace DumpDetective.Analysis.Analyzers
             catch (Exception ex)
             {
                 _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
+            }
+
+            // Aggregate a typed per-kind breakdown for reporting.
+            try
+            {
+                int wasteCount = stats.WastefulCollectionCount;
+                if (wasteCount > 0)
+                {
+                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
+                    {
+                        [CollectionKind.Dictionary] = stats.Dictionaries,
+                        [CollectionKind.List] = stats.Lists,
+                        [CollectionKind.ArrayList] = stats.ArrayLists,
+                        [CollectionKind.Stack] = stats.Stacks,
+                        [CollectionKind.SortedList] = stats.SortedLists,
+                        [CollectionKind.SortedSet] = stats.SortedSets,
+                        [CollectionKind.HashSet] = stats.HashSets,
+                        [CollectionKind.Queue] = stats.Queues,
+                    };
+                    stats.WasteCountsByKind = wasteCountsByKind;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing waste metrics (disk path)");
             }
 
             // Post-scan root descriptions for top-N — never per-item during the scan.

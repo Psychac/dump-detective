@@ -55,6 +55,30 @@ while `DiskBackedObjectIndexWriter` samples every string. **Fixed** — see
 
 **Status:** Fixed.
 
+### Finding 1c — SampleAddress selection non-deterministic in memory mode
+
+**Status:** Fixed.
+
+**Issue:** `TypeIndexBuilder.Add()` and `TypeIndexBuilder.Merge()` accepted the first
+encountered instance's address as `SampleAddress`, but parallel segment scan order is
+non-deterministic (thread-scheduler dependent), causing different types' sample instances
+to be selected on different runs or between disk and memory modes. Analyzers consuming
+`SampleAddress` (`ArrayAnalyzer`, `StringAnalyzer`, `MemoryAnalyzer`, `CrashAnalyzer`,
+`WeakReferenceAnalyzer`, `DominatorAnalyzer`, `AsyncStateMachineAnalyzer`) could therefore
+produce divergent results: `ArrayAnalyzer.TopSparseArrays` (disk=3, memory=4) and
+`DominatorAnalyzer.TotalEstimatedRetainedBytes` both showed non-deterministic drift.
+
+**Fix:** both `Add()` and `Merge()` now apply a deterministic tie-break: lowest address
+always wins, independent of scan/merge order ([TypeIndexBuilder.cs:24-34, 65-73](../../src/DumpDetective.Analysis/Indexing/TypeIndexBuilder.cs#L24-L34)).
+Later `Add()` calls and `Merge()` operations overwrite `SampleAddress` if they encounter
+a lower address, ensuring the selected instance is stable across all modes and runs.
+
+**Verified impact:**
+- `ArrayAnalyzerDiscrepancyTests` — **fixed, test now passes.** `TopSparseArrays` and
+  `TopLargeArrays` now agree between disk and memory mode.
+- `DominatorAnalyzerDiscrepancyTests` — **fixed, test now passes.** Previously marked
+  "not yet investigated"; `TotalEstimatedRetainedBytes` now agrees between modes.
+
 **Issue:** `StringDedupEntry.Count`/`TotalSize` were incremented by 1/`obj.Size`
 per sampled instance, but `MemoryBackedObjectIndexWriter`'s adaptive sampling
 (1-in-10 or 1-in-50 once yield rate drops, `MemoryBackedObjectIndexWriter.cs:105-163`)
@@ -234,7 +258,7 @@ nothing behaviorally beyond removing the bug.
 |---|---|---|
 | **Finding 1** — LOH free-block/large-object data disk-only | High | 3 fix options identified |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Medium | Not investigated |
-| `DominatorAnalyzer` `TotalEstimatedRetainedBytes` large mismatch | Medium | Not investigated |
+| `CrashAnalyzer` `InferredTraceCount` mismatch (disk=1, memory=0) | Medium | Confirmed pre-existing, not caused by cache determinism fixes |
 | **Finding 2** — `GetRootDescription` dead delegation | Low | Correctness gap, symmetric |
 | **Finding 3** — Redundant root enumeration in memory mode | Low | Scoped to `RootCache` consumers |
 | **Finding 4** — Disk cache-hit doesn't validate satellites | Low | Rare edge case |
@@ -246,6 +270,7 @@ nothing behaviorally beyond removing the bug.
 | **Finding 6** — Buffer-boundary carry-over in satellite readers | Fixed in `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, and `RootIndexReader` (3rd live instance found on audit); all four batch-read sites migrated to `ReadAtLeast`-per-record except `ObjectIndexReader` (kept for perf) |
 | **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | Unlocked `ResolveGeneration` call in `ProcessEntry`'s parallel path raced against other threads' `lock (heapLock)` heap reads, corrupting shared ClrMD state and silently dropping objects from classification. Fixed by moving the call inside `heapLock`; `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` now passes |
 | **Finding 1b** — string dedup sampling undercount in memory mode | `StringDedupEntry.AddInstance`/constructor gained an optional `weight` parameter (default `1`, disk mode unaffected); `MemoryBackedObjectIndexWriter` passes the active `segSampleDivisor` as weight so each sampled string instance scales up to represent the real instances it stands in for, fixing the undercount from adaptive 1-in-10/1-in-50 sampling |
+| **Finding 1c** — SampleAddress selection non-deterministic in memory mode | `TypeIndexBuilder.Add()` and `Merge()` now apply deterministic tie-break: lowest address always wins, independent of segment scan/merge order. Fixed both `ArrayAnalyzer.TopSparseArrays` (disk=3, memory=4 → now agrees) and `DominatorAnalyzer.TotalEstimatedRetainedBytes` (previously "not investigated" → now agrees). All consuming analyzers benefit from the shared fix. |
 
 ## Analysis & Verification (2026-07-12)
 
@@ -285,6 +310,11 @@ was already comprehensive.
 
 Row "1 — string dedup sampling asymmetry" above is now **Fixed** — see
 [Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode).
+
+Row "1 — LOH large-object/free-block data disk-only" (the `ArrayAnalyzer.TopSparseArrays`
+part: disk=3, memory=4) is now **Fixed** — not by LOH structural work, but as a side
+effect of deterministic `SampleAddress` selection. See
+[Finding 1c](#finding-1c--sampleaddress-selection-non-deterministic-in-memory-mode).
 
 ### New Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
 
@@ -402,5 +432,6 @@ full-segment re-scan/heuristic. This is exactly Finding 1 as originally document
 | Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. |
 | Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Fixed** | Unlocked `ResolveGeneration` call raced against `lock (heapLock)` heap reads in the parallel path; moved inside the lock. `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` passes. |
 | Finding 1b — string dedup sampling undercount in memory mode | **Fixed** | `StringDedupEntry` gained a `weight` parameter; `MemoryBackedObjectIndexWriter` passes `segSampleDivisor` as weight so sampled counts scale up instead of undercounting. See [Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode). |
+| Finding 1c — SampleAddress selection non-deterministic in memory mode | **Fixed** | `TypeIndexBuilder.Add()` and `Merge()` apply deterministic tie-break: lowest address always wins. Fixed both `ArrayAnalyzer.TopSparseArrays` (disk=3, memory=4 → now agrees) and `DominatorAnalyzer.TotalEstimatedRetainedBytes` (was "not yet investigated" → now agrees). See [Finding 1c](#finding-1c--sampleaddress-selection-non-deterministic-in-memory-mode). |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | **Not yet investigated** | |
-| `DominatorAnalyzer` `TotalEstimatedRetainedBytes` | **Not yet investigated** | |
+| `CrashAnalyzer` `InferredTraceCount` (disk=1, memory=0) | **Confirmed pre-existing, not investigated** | Reproduced identically with this fix stashed out — not caused by cache determinism work. Separate root cause. |

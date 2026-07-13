@@ -28,6 +28,13 @@ internal sealed class TypeIndexBuilder
             // Flags are type-level (same for all instances); set once on first encounter.
             aggregate.Flags = flags;
         }
+        // Deterministic tie-break: lowest address always wins, independent of scan order.
+        // Segments assigned to the same thread are not guaranteed to be processed in
+        // address order, so a later Add() can see a lower address than the first one seen.
+        else if (entry.Address < aggregate.SampleAddress)
+        {
+            aggregate.SampleAddress = entry.Address;
+        }
 
         aggregate.Count++;
         aggregate.TotalSize += entry.Size;
@@ -67,6 +74,12 @@ internal sealed class TypeIndexBuilder
                 aggregate.SampleAddress = otherAgg.SampleAddress;
                 aggregate.ModuleId = otherAgg.ModuleId;
                 aggregate.Flags = otherAgg.Flags;
+            }
+            // Deterministic tie-break: lowest address always wins, independent of the
+            // non-deterministic order in which parallel segment builders get merged.
+            else if (otherAgg.SampleAddress < aggregate.SampleAddress)
+            {
+                aggregate.SampleAddress = otherAgg.SampleAddress;
             }
 
             aggregate.Count += otherAgg.Count;

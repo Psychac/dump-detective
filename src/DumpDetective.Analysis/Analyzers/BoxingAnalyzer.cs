@@ -64,16 +64,35 @@ namespace DumpDetective.Analysis.Analyzers
             int boxedEnumCount = 0;
             ulong boxedEnumBytes = 0;
             int oversizedCount = 0;
-            bool scanCapped = false;
 
             // Struct padding candidates: collect during the same pass
             var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes)>(64);
 
+            // Dictionary enumeration order depends on parallel segment-merge order,
+            // which differs between disk/memory index builders (and across runs of
+            // the same builder). Capping on raw iteration order therefore truncated
+            // to a different arbitrary subset of types each time once distinct-type
+            // count exceeded TypeScanCap, making TotalBoxedObjects non-deterministic.
+            // Only sort (by TotalSize desc, MethodTable as tiebreak) when a cap will
+            // actually bite, so the common case (types <= cap) pays no extra cost.
+            bool scanCapped = typeAggregates.Count > options.TypeScanCap;
+            IEnumerable<KeyValuePair<ulong, TypeAggregateIndexEntry>> scanOrder = typeAggregates;
+            if (scanCapped)
+            {
+                var ordered = new List<KeyValuePair<ulong, TypeAggregateIndexEntry>>(typeAggregates);
+                ordered.Sort((a, b) =>
+                {
+                    int cmp = b.Value.TotalSize.CompareTo(a.Value.TotalSize);
+                    return cmp != 0 ? cmp : a.Key.CompareTo(b.Key);
+                });
+                scanOrder = ordered;
+            }
+
             int scanned = 0;
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
+            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in scanOrder)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++scanned > options.TypeScanCap) { scanCapped = true; break; }
+                if (++scanned > options.TypeScanCap) break;
 
                 TypeAggregateIndexEntry entry = kv.Value;
 

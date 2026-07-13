@@ -514,11 +514,16 @@ namespace DumpDetective.Analysis.Analyzers
                 });
             }
 
-            // Sequential post-processing: build per-type exception list with cap enforcement
+            // Sequential post-processing: build per-type exception list with cap enforcement.
+            // exceptionInstances came off a ConcurrentBag whose order depends on thread scheduling;
+            // sort by address first so the capped "first N per type" set is deterministic and agrees
+            // with the disk-backed scan (which enumerates entries in ascending address order).
             long scanned = scanCounter.Scanned;
             progress?.Report(new(scanned, "aggregating exceptions"));
+            var orderedInstances = exceptionInstances.ToArray();
+            Array.Sort(orderedInstances, static (a, b) => a.Instance.Address.CompareTo(b.Instance.Address));
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
-            foreach (var (typeName, instance, isActive) in exceptionInstances)
+            foreach (var (typeName, instance, isActive) in orderedInstances)
             {
                 if (!exceptionsByType.TryGetValue(typeName, out var list))
                 {

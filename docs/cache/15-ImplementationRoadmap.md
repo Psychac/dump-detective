@@ -38,8 +38,8 @@ migration regresses something.
 | `ArrayAnalyzer.TopSparseArrays` divergence (disk=3, memory=4) | Accepted | Documented divergence; full fix would violate bounded-memory principle; Tier 2 migration obsoletes by eliminating memory writer |
 | Finding 2 — `GetRootDescription` dead delegation | Done | Removed — `IHeapAnalysisCache.GetRootDescription`, `HeapAnalysisCache`/`RootCache` implementations, and the dead `_rootDescriptions` fields were unused/always-null; deleted rather than wired up. `CollectionAnalyzer`'s Balanced/Deep BFS fallback is unaffected. |
 | Finding 3 — redundant root enumeration in memory mode | Done | `RootCache.GetOrBuildValidRoots` hydrates from `InMemoryRootCandidates` via `RootIndexReader.ReadRootCandidates` on a `StorageKind == Memory` branch, falling back to the full heap walk only if candidates are absent; `RootCacheDiscrepancyTests` confirms disk/memory agreement |
-| `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Not investigated |
-| `CrashAnalyzer` `InferredTraceCount` mismatch | Confirmed pre-existing, unrelated cache work — lower priority, doesn't block anything below |
+| Finding 7 — `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Done | `TypeScanCap` truncated a raw `foreach` over `TypeAggregates` (dictionary iteration order is non-deterministic across disk/memory builders); now sorts by `TotalSize` desc (`MethodTable` tiebreak) before capping, only when the cap will actually bite; `BoxingAnalyzerDiscrepancyTests` passes |
+| `CrashAnalyzer` `InferredTraceCount` mismatch (disk=1, memory=0) | Done | `RunParallelExceptionScan`'s `ConcurrentBag` collection order was thread-scheduler-dependent, so which instances survived the per-type `MaxExceptionsPerType` cap (and were therefore available for Tier 2-4 inference) differed from disk mode; now sorts by address before capping to match the disk scan's deterministic order |
 
 Finding 4 (disk cache-hit doesn't validate satellites) **not** in
 tier — it's subsumed Tier 2's TOC + per-section checksums, no separate

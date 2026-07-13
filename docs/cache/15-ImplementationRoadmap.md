@@ -37,7 +37,7 @@ migration regresses something.
 | Finding 6 — buffer-boundary carry-over in satellite-index readers | Done | `RootIndexReader`, `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, `TypeAggregateIndexReader` all migrated to `ReadAtLeast`-per-record pattern |
 | `ArrayAnalyzer.TopSparseArrays` divergence (disk=3, memory=4) | Accepted | Documented divergence; full fix would violate bounded-memory principle; Tier 2 migration obsoletes by eliminating memory writer |
 | Finding 2 — `GetRootDescription` dead delegation | Done | Removed — `IHeapAnalysisCache.GetRootDescription`, `HeapAnalysisCache`/`RootCache` implementations, and the dead `_rootDescriptions` fields were unused/always-null; deleted rather than wired up. `CollectionAnalyzer`'s Balanced/Deep BFS fallback is unaffected. |
-| Finding 3 — redundant root enumeration in memory mode | Not started |
+| Finding 3 — redundant root enumeration in memory mode | Done | `RootCache.GetOrBuildValidRoots` hydrates from `InMemoryRootCandidates` via `RootIndexReader.ReadRootCandidates` on a `StorageKind == Memory` branch, falling back to the full heap walk only if candidates are absent; `RootCacheDiscrepancyTests` confirms disk/memory agreement |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Not investigated |
 | `CrashAnalyzer` `InferredTraceCount` mismatch | Confirmed pre-existing, unrelated cache work — lower priority, doesn't block anything below |
 
@@ -77,7 +77,7 @@ root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here
 |---|---|---|
 | Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | |
 | Atomic write (`.tmp` + rename) | [File layout](14-CleanSlateCacheRedesign.md#file-layout) | |
-| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Deletes `MemoryBackedObjectIndexWriter`, `HeapIndexingMode`, `--index-mode`; closes Finding 1 and 3 root causes |
+| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Deletes `MemoryBackedObjectIndexWriter`, `HeapIndexingMode`, `--index-mode`; closes Finding 1 root cause and obsoletes the Finding 3 workaround entirely (no more memory/disk branch to hydrate) |
 | Columnar (struct-of-arrays) layout | [Columnar object index](14-CleanSlateCacheRedesign.md#columnar-object-index) | |
 | Memory-mapped reader | [Reader](14-CleanSlateCacheRedesign.md#reader-memory-mapped-not-filestream--arraypool) | |
 | Schema-driven writer/reader parity (source generator) | [Schema-driven writer/reader parity](14-CleanSlateCacheRedesign.md#schema-driven-writerreader-parity) | |

@@ -63,6 +63,32 @@ internal class RootCache
                 // Fall back to in-memory enumeration on any read error.
             }
         }
+        else if (builtRootIndex is not null && builtRootIndex.StorageKind == HeapIndexStorageKind.Memory
+            && builtRootIndex.InMemoryRootCandidates is not null)
+        {
+            try
+            {
+                var candidates = RootIndexReader.ReadRootCandidates(builtRootIndex, CancellationToken.None);
+                var roots = new List<(string RootKind, ulong Address)>(candidates.Count);
+                _staticRootedAddresses ??= new HashSet<ulong>(capacity: Math.Max(256, candidates.Count));
+                foreach (var (targetAddr, _, kind) in candidates)
+                {
+                    string kindStr = RootIndexReader.KindToString(kind);
+                    roots.Add((kindStr, targetAddr));
+                    if (kindStr.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
+                        _staticRootedAddresses.Add(targetAddr);
+                }
+
+                _validRoots = roots;
+                _lastBuildTime = DateTime.UtcNow;
+                _lastBuildError = null;
+                return _validRoots;
+            }
+            catch
+            {
+                // Fall back to full heap walk on any read error.
+            }
+        }
 
         EnsureRootCaches(heap);
         _lastBuildTime ??= DateTime.UtcNow;

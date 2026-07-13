@@ -169,25 +169,38 @@ See detailed discussion: [Finding 2 — GetRootDescription analysis](Finding-2-G
 
 ### Finding 3 — Redundant root enumeration in memory mode
 
-**Status:** Open — performance issue, scoped to `RootCache` consumers only.
+**Status:** Fixed.
 
-**Issue:** `RootCache.GetOrBuildValidRoots` only fast-paths off disk-backed
-`RootIndex.bin` ([RootCache.cs:38-70](../../src/DumpDetective.Analysis/Cache/RootCache.cs#L38-L70)).
-Never checks `heapIndex.InMemoryRootCandidates`, even though
-`RootIndexReader.ReadRootCandidates` already has a memory-mode branch
+**Issue:** `RootCache.GetOrBuildValidRoots` only fast-pathed off disk-backed
+`RootIndex.bin`. Never checked `heapIndex.InMemoryRootCandidates`, even though
+`RootIndexReader.ReadRootCandidates` already had a memory-mode branch
 ([RootIndexReader.cs:17-24](../../src/DumpDetective.Analysis/Readers/RootIndexReader.cs#L17-L24))
 and `MemoryBackedObjectIndexWriter` collects roots during Phase 1. Memory-tier
-dumps therefore redundantly re-walk `heap.EnumerateRoots()` in `EnsureRootCaches`,
+dumps therefore redundantly re-walked `heap.EnumerateRoots()` in `EnsureRootCaches`,
 duplicating work already done.
 
-`GCRootAnalyzer` independently reads roots correctly via `RootIndexReader.ReadRootCandidates`
-(which does branch on `InMemoryRootCandidates`), so that path is not affected.
-The redundant walk impacts only `RootCache`'s own consumers: `GetStaticRootedAddresses`,
+`GCRootAnalyzer` independently read roots correctly via `RootIndexReader.ReadRootCandidates`
+(which does branch on `InMemoryRootCandidates`), so that path was not affected.
+The redundant walk impacted only `RootCache`'s own consumers: `GetStaticRootedAddresses`,
 `CollectionAnalyzer`'s static-root leak detector.
 
-**Suggested fix:** branch on `heapIndex.StorageKind == Memory` in
-`GetOrBuildValidRoots` and hydrate from `InMemoryRootCandidates` via
-`RootIndexReader.ReadRootCandidates`.
+**Fix:** added a `heapIndex.StorageKind == Memory` branch in `GetOrBuildValidRoots`
+([RootCache.cs:66-91](../../src/DumpDetective.Analysis/Cache/RootCache.cs#L66-L91))
+that hydrates from `InMemoryRootCandidates` via `RootIndexReader.ReadRootCandidates`,
+mapping each `(TargetAddr, RootAddr, Kind)` tuple through `RootIndexReader.KindToString`
+to match the shape the disk branch already produces. Falls back to the full
+`EnsureRootCaches` heap walk if `InMemoryRootCandidates` is absent or the read throws.
+
+Verified the memory writer doesn't filter zero-address roots or apply `IsValid`
+checks any differently than the existing disk writer/reader path — both already
+carry that same (pre-existing, unrelated) divergence from the live-walk fallback,
+so the new branch introduces no additional semantic drift versus what `GCRootAnalyzer`
+and disk mode already produced.
+
+**Verification:** added `RootCacheDiscrepancyTests.RootCache_DiskVsMemoryMode_AgreeOnSameHeap`
+([RootCacheDiscrepancyTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/RootCacheDiscrepancyTests.cs)),
+asserting `GetOrBuildValidRoots`/`GetStaticRootedAddresses` counts agree between
+disk and memory mode on the same heap. Passes against the benchmark dump.
 
 Further discussion: [Finding 3 extrapolation](docs/cache/Finding-3-Extrapolation.md)
 
@@ -309,13 +322,13 @@ nothing behaviorally beyond removing the bug.
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Medium | Not investigated |
 | `CrashAnalyzer` `InferredTraceCount` mismatch (disk=1, memory=0) | Medium | Confirmed pre-existing, not caused by cache determinism fixes |
 | **Finding 2** — `GetRootDescription` dead delegation | Low | Correctness gap, symmetric |
-| **Finding 3** — Redundant root enumeration in memory mode | Low | Scoped to `RootCache` consumers |
 | **Finding 4** — Disk cache-hit doesn't validate satellites | Low | Rare edge case |
 
 ## Closed Items
 
 | Item | Fix |
 |---|---|
+| **Finding 3** — Redundant root enumeration in memory mode | `RootCache.GetOrBuildValidRoots` gained a `StorageKind == Memory` branch that hydrates from `InMemoryRootCandidates` via `RootIndexReader.ReadRootCandidates`, matching the disk branch's output shape; falls back to the full heap walk if candidates are absent. `RootCacheDiscrepancyTests` confirms disk/memory agreement. |
 | **Finding 6** — Buffer-boundary carry-over in satellite readers | Fixed in `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, and `RootIndexReader` (3rd live instance found on audit); all four batch-read sites migrated to `ReadAtLeast`-per-record except `ObjectIndexReader` (kept for perf) |
 | **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | Unlocked `ResolveGeneration` call in `ProcessEntry`'s parallel path raced against other threads' `lock (heapLock)` heap reads, corrupting shared ClrMD state and silently dropping objects from classification. Fixed by moving the call inside `heapLock`; `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` now passes |
 | **Finding 1b** — string dedup sampling undercount in memory mode | `StringDedupEntry.AddInstance`/constructor gained an optional `weight` parameter (default `1`, disk mode unaffected); `MemoryBackedObjectIndexWriter` passes the active `segSampleDivisor` as weight so each sampled string instance scales up to represent the real instances it stands in for, fixing the undercount from adaptive 1-in-10/1-in-50 sampling |

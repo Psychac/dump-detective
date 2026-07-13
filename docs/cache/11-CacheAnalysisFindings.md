@@ -159,6 +159,7 @@ Persist descriptions into `RootIndex.bin` or derive lazily via `ClrRoot.ToString
 for top-N addresses needed. Also delete dead duplicate type-statistics hydration
 code (`TryHydrateTypeStatisticsFromIndex` / `ResolveTypeNameFromSample` /
 `ResolveModuleNameFromSample` / `AddClamped`) that still lives in `HeapAnalysisCache`.
+See detailed discussion: [Finding 2 — GetRootDescription analysis](Finding-2-GetRootDescription.md)
 
 ### Finding 3 — Redundant root enumeration in memory mode
 
@@ -182,6 +183,8 @@ The redundant walk impacts only `RootCache`'s own consumers: `GetStaticRootedAdd
 `GetOrBuildValidRoots` and hydrate from `InMemoryRootCandidates` via
 `RootIndexReader.ReadRootCandidates`.
 
+Further discussion: [Finding 3 extrapolation](docs/cache/Finding-3-Extrapolation.md)
+
 ### Finding 4 — Disk fast-path doesn't validate satellite files
 
 **Status:** Open — rare edge case, unverified by tests.
@@ -199,7 +202,7 @@ No discrepancy test covers this (requires corrupted/partial prior cache). Reason
 is code-inspection only.
 
 **Suggested fix:** on cache-hit, check for expected satellite files and regenerate
-any that are missing.
+any that are missing. See detailed design: [Finding 4 — Cache satellite validation](docs/cache/Finding-4-Cache-Satellite-Validation.md).
 
 ### Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
 

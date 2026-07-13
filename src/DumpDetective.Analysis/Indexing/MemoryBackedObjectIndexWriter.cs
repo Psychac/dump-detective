@@ -188,9 +188,9 @@ internal sealed class MemoryBackedObjectIndexWriter : IObjectIndexWriter
 
                             ulong h = XxHash64.HashToUInt64(MemoryMarshal.AsBytes(val.AsSpan()));
                             if (state.StringDedup.TryGetValue(h, out StringDedupEntry? e))
-                            { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                            { e.AddInstance(obj.Size, obj.Address, obj.Type?.MethodTable ?? 0, segSampleDivisor); }
                             else
-                            { state.StringDedup[h] = new StringDedupEntry(CreatePreview(val), obj.Size, obj.Address, obj.Type?.MethodTable ?? 0); }
+                            { state.StringDedup[h] = new StringDedupEntry(CreatePreview(val), obj.Size, obj.Address, obj.Type?.MethodTable ?? 0, segSampleDivisor); }
                         }
                     }
 

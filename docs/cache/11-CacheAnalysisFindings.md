@@ -35,11 +35,10 @@ Consumers compensate inconsistently:
   memory mode falls back to weaker "one sample per LOH type" heuristic.
   Result: `TopSparseArrays` differs (disk=3, memory=4).
 
-Additionally, string dedup sampling is asymmetric: `MemoryBackedObjectIndexWriter.cs:47-51`
+Additionally, string dedup sampling was asymmetric: `MemoryBackedObjectIndexWriter.cs:47-51`
 adaptively skips dedup calls (down to 1-in-10 or 1-in-50) based on yield rate,
-while `DiskBackedObjectIndexWriter` samples every string. `StringAnalyzerDiscrepancyTests`
-currently passes on the test dump, but the bug is dump-dependent (higher string
-duplication would trigger it).
+while `DiskBackedObjectIndexWriter` samples every string. **Fixed** — see
+[Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode) below.
 
 **Fix options:**
 1. **Full structural fix:** add `InMemoryLargeCandidates` and
@@ -52,8 +51,28 @@ duplication would trigger it).
 3. **Partial fix:** implement only `InMemoryLohFreeBlockCandidates` now (fixes
    `LohFragmentationAnalyzer`), defer `InMemoryLargeCandidates` to separate pass.
 
-For string dedup: make sampling symmetric (apply same adaptive logic to disk, or
-scale memory sampling deterministically by dump size).
+### Finding 1b — string dedup sampling undercount in memory mode
+
+**Status:** Fixed.
+
+**Issue:** `StringDedupEntry.Count`/`TotalSize` were incremented by 1/`obj.Size`
+per sampled instance, but `MemoryBackedObjectIndexWriter`'s adaptive sampling
+(1-in-10 or 1-in-50 once yield rate drops, `MemoryBackedObjectIndexWriter.cs:105-163`)
+only calls `AddInstance`/the constructor for the sampled subset. The other
+9/49 out of every 10/50 duplicate instances were never counted, so `Count` and
+`TotalSize` undercounted by up to 50x whenever sampling kicked in. Disk mode
+samples every string, so it never hit this. `StringAnalyzerDiscrepancyTests`
+passed on the test dump only because its duplication level didn't trigger
+adaptive sampling — the bug was dump-dependent.
+
+**Fix:** added an optional `weight` parameter (default `1`, so disk-mode call
+sites are unchanged) to `StringDedupEntry`'s constructor and `AddInstance`
+([HeapIndexBuildResult.cs:19-30](../../src/DumpDetective.Analysis/Indexing/HeapIndexBuildResult.cs#L19-L30)).
+`MemoryBackedObjectIndexWriter` now passes the active `segSampleDivisor` as
+the weight ([MemoryBackedObjectIndexWriter.cs:190-193](../../src/DumpDetective.Analysis/Indexing/MemoryBackedObjectIndexWriter.cs#L190-L193)),
+so each sampled instance is scaled up to represent the `segSampleDivisor`
+real instances it stands in for, making `Count`/`TotalSize` an unbiased
+estimate instead of a systematic undercount.
 
 ### Finding 2 — `GetRootDescription` is broken in both modes
 
@@ -226,6 +245,7 @@ nothing behaviorally beyond removing the bug.
 |---|---|
 | **Finding 6** — Buffer-boundary carry-over in satellite readers | Fixed in `AsyncTaskAnalyzer`, `LohFragmentationAnalyzer`, and `RootIndexReader` (3rd live instance found on audit); all four batch-read sites migrated to `ReadAtLeast`-per-record except `ObjectIndexReader` (kept for perf) |
 | **Finding 5** — `CollectionAnalyzer` `TotalCollections` ~96k mismatch | Unlocked `ResolveGeneration` call in `ProcessEntry`'s parallel path raced against other threads' `lock (heapLock)` heap reads, corrupting shared ClrMD state and silently dropping objects from classification. Fixed by moving the call inside `heapLock`; `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` now passes |
+| **Finding 1b** — string dedup sampling undercount in memory mode | `StringDedupEntry.AddInstance`/constructor gained an optional `weight` parameter (default `1`, disk mode unaffected); `MemoryBackedObjectIndexWriter` passes the active `segSampleDivisor` as weight so each sampled string instance scales up to represent the real instances it stands in for, fixing the undercount from adaptive 1-in-10/1-in-50 sampling |
 
 ## Analysis & Verification (2026-07-12)
 
@@ -262,6 +282,9 @@ was already comprehensive.
 | 2 — `HeapAnalysisCache.GetRootDescription` dead delegation | **Confirmed, still present** | `HeapAnalysisCache.cs:21` still declares `_rootDescriptions` and never assigns it; `GetRootDescription` (line ~298) still reads only that dead field instead of delegating to `_rootCache.GetRootDescription`. `RootCache.GetOrBuildValidRoots`'s disk fast-path (line 40-66) still returns before populating `_rootDescriptions`, confirming descriptions stay empty on disk mode too. Because the bug is symmetric (always returns `null` in both modes), `EventLeakAnalyzerDiscrepancyTests` (now asserting all fields) **passes** — there's no disk-vs-memory *discrepancy*, just a silently-dead feature in both. |
 | 3 — Redundant `heap.EnumerateRoots()` walk in memory mode | **Confirmed, still present — but scoped correctly** | `RootCache.GetOrBuildValidRoots` still has no `StorageKind == Memory` branch and still falls through to `EnsureRootCaches` (full root walk) for memory-tier dumps; `InMemoryRootCandidates` is never referenced in `RootCache.cs`. However, `GCRootAnalyzer` reads roots via `RootIndexReader.ReadRootCandidates`, which *does* branch on `InMemoryRootCandidates` and correctly avoids `heap.EnumerateRoots()` in both modes. `GCRootAnalyzerDiscrepancyTests` (expanded to assert all 6 fields) **passes**. The redundant walk is confined to `RootCache`'s own consumers, not to `GCRootAnalyzer`. |
 | 4 — Disk fast-path doesn't validate satellite files | **Confirmed, still present** | `DiskBackedObjectIndexWriter.TryLoadFromCache` (line ~633) still only checks `File.Exists(indexPath)` and `File.Exists(typeAggPath)`; no satellite-file check was added. No discrepancy test exercises this path (requires a corrupted/partial prior cache directory), so reasoning is code-inspection only. |
+
+Row "1 — string dedup sampling asymmetry" above is now **Fixed** — see
+[Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode).
 
 ### New Finding 5 — `CollectionAnalyzer` disk vs. memory disagree by ~12%
 
@@ -378,5 +401,6 @@ full-segment re-scan/heuristic. This is exactly Finding 1 as originally document
 | Finding 1 — LOH free-block data disk-only (`LohFragmentationAnalyzer`) | **Root cause confirmed, unfixed** | Carry-over fix in `ReadFreeBlocks` applied but did not change outcome — proves discrepancy is 100% structural (`AnalyzeFromIndex` → `AnalyzeFromHeap` fallback in memory mode), not a reader bug. `LohFragmentationAnalyzerDiscrepancyTests` still fails: `TotalBytes` differs by 159,646 bytes. Three fix options documented above. |
 | Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. |
 | Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Fixed** | Unlocked `ResolveGeneration` call raced against `lock (heapLock)` heap reads in the parallel path; moved inside the lock. `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` passes. |
+| Finding 1b — string dedup sampling undercount in memory mode | **Fixed** | `StringDedupEntry` gained a `weight` parameter; `MemoryBackedObjectIndexWriter` passes `segSampleDivisor` as weight so sampled counts scale up instead of undercounting. See [Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode). |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | **Not yet investigated** | |
 | `DominatorAnalyzer` `TotalEstimatedRetainedBytes` | **Not yet investigated** | |

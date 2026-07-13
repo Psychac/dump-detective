@@ -14,18 +14,20 @@ internal sealed class StringDedupEntry
     // Dominant MethodTable observed for this content (approximate)
     public ulong DominantMethodTable;
 
-    public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0)
+    // weight compensates for uniform-stride sampling (e.g. memory-mode's adaptive string
+    // dedup sampling): a sampled instance represents `weight` real instances.
+    public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0, int weight = 1)
     {
         Preview = preview;
-        Count = 1;
-        TotalSize = size;
+        Count = weight;
+        TotalSize = size * (ulong)weight;
         DominantMethodTable = dominantMt;
         SampleAddresses = sampleAddress != 0 ? new ulong[] { sampleAddress } : null;
     }
-    public void AddInstance(ulong size, ulong sampleAddress = 0, ulong mt = 0)
+    public void AddInstance(ulong size, ulong sampleAddress = 0, ulong mt = 0, int weight = 1)
     {
-        Count++;
-        TotalSize += size;
+        Count += weight;
+        TotalSize += size * (ulong)weight;
         if (sampleAddress != 0)
         {
             if (SampleAddresses is null) SampleAddresses = new ulong[] { sampleAddress };

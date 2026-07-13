@@ -18,7 +18,6 @@ public interface IHeapAnalysisCache
     ulong? GetSampleInstanceAddress(string typeName);
     HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000);
     IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap);
-    string? GetRootDescription(ulong address);
     int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount);
     bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable);
     IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples();

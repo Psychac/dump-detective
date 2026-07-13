@@ -10,7 +10,6 @@ internal class RootCache
 {
     private IReadOnlyList<(string RootKind, ulong Address)>? _validRoots;
     private HashSet<ulong>? _staticRootedAddresses;
-    private Dictionary<ulong, string>? _rootDescriptions;
     private IProgress<AnalyzerProgressReport>? _progress;
     private DateTime? _lastBuildTime;
     private string? _lastBuildError;
@@ -82,15 +81,6 @@ internal class RootCache
         return _staticRootedAddresses ?? new HashSet<ulong>();
     }
 
-    public string? GetRootDescription(ulong address)
-    {
-        if (_rootDescriptions is null)
-            return null;
-
-        _rootDescriptions.TryGetValue(address, out string? desc);
-        return desc;
-    }
-
     private void EnsureRootCaches(ClrHeap heap)
     {
         if (_staticRootedAddresses is not null && _validRoots is not null)
@@ -98,7 +88,6 @@ internal class RootCache
 
         _staticRootedAddresses ??= new HashSet<ulong>(capacity: 4096);
         var roots = new List<(string RootKind, ulong Address)>(capacity: 4096);
-        _rootDescriptions ??= new Dictionary<ulong, string>(capacity: 4096);
 
         var scanCounter = new ObjectScanCounter("enumerating roots", _progress, reportEveryObjects: 10_000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -113,9 +102,6 @@ internal class RootCache
 
             string kind = root.RootKind.ToString();
             roots.Add((kind, address));
-
-            string description = root.ToString() ?? kind;
-            _rootDescriptions.TryAdd(address, description);
 
             if (kind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase) && root.Object.IsValid)
             {

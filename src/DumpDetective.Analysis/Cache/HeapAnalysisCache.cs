@@ -16,9 +16,6 @@ namespace DumpDetective.Analysis.Cache
 
         private HashSet<ulong>? _staticRootedAddresses;
         private IReadOnlyList<(string RootKind, ulong Address)>? _validRoots;
-        // Full root.ToString() descriptions keyed by object address, used by FindStaticRootOnlyEventLeaks
-        // to parse publisher type and field name (e.g. "Static var MyClass._myEvent").
-        private Dictionary<ulong, string>? _rootDescriptions;
 
         private long _objectScanCount;
         private long _cacheHits;
@@ -294,15 +291,6 @@ namespace DumpDetective.Analysis.Cache
         }
 
         // Root enumeration moved into RootCache
-
-        public string? GetRootDescription(ulong address)
-        {
-            if (_rootDescriptions is null)
-                return null;
-
-            _rootDescriptions.TryGetValue(address, out string? desc);
-            return desc;
-        }
 
         private void ReportProgress(string phase, long totalScans)
         {

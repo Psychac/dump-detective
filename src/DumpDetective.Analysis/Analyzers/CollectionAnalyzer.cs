@@ -499,8 +499,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Post-scan: populate root descriptions for top-N only — never during the scan loop.
-            // Fast profile: use cheap cache.GetRootDescription only.
-            // Balanced/Deep: additionally run ReferenceChainAnalyzer for items without a description.
+            // Balanced/Deep only: run ReferenceChainAnalyzer for items without a description.
             PopulateRootDescriptions(heap, cache, wastefulList, _options);
 
             // Reporting-level summary warnings are handled by the findings generator.
@@ -1140,8 +1139,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         // Populate root descriptions for the top-N items only, after the scan is complete.
         // This avoids the catastrophic O(n * heap-walk) cost of doing it per item during scanning.
-        // Fast profile: cache.GetRootDescription only (O(1) lookup).
-        // Balanced/Deep: additionally runs ReferenceChainAnalyzer BFS for items still missing a description.
+        // Balanced/Deep only: runs ReferenceChainAnalyzer BFS for items still missing a description.
         private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options)
         {
             if (wastefulList.Count == 0)
@@ -1149,24 +1147,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             int topN = Math.Min(options.PathAnalysisTopN, wastefulList.Count);
 
-            // Phase 1 (all profiles): cheap cache lookup — O(1) per item.
-            if (cache is not null)
-            {
-                try
-                {
-                    for (int i = 0; i < topN; i++)
-                    {
-                        var item = wastefulList[i];
-                        item.RootDescription = cache.GetRootDescription(item.Address);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogDebug(ex, "Error during cheap root description lookup for top-N collections");
-                }
-            }
-
-            // Phase 2 (Balanced/Deep only): BFS path search for items still missing a description.
+            // Balanced/Deep only: BFS path search for items still missing a description.
             if (options.Profile != AnalysisProfile.Fast && cache is not null)
             {
                 try

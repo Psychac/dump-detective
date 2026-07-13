@@ -1,6 +1,11 @@
 
 # DumpDetective Cache Modernization – Architecture Overview
 
+> **Looking for what to actually work on?** See
+> [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) — the single
+> status-tracked task list. This file and the numbered docs below are the
+> design/analysis history behind it, not a to-do list.
+
 ## Purpose
 
 This modernization improves cache reuse, reduces repeated ClrMD work, and lays the foundation for graph-based analysis while preserving the existing HeapIndex architecture.

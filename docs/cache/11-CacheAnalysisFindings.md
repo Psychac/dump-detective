@@ -18,7 +18,7 @@ which is appropriate given the one-shot-per-dump usage pattern.
 
 ### Finding 1 — Memory vs. disk indexing produce non-equivalent output
 
-**Status:** Partially fixed (option 4 + enhancements implemented).
+**Status:** Resolved for `LohFragmentationAnalyzer`. `ArrayAnalyzer.TopSparseArrays` divergence accepted as documented.
 
 **Issue:** Disk writer collects `largeCandidates` and `lohFreeBlockCandidates`,
 writes `LargeObjectIndex.bin` / `LohFreeBlockIndex.bin`
@@ -33,9 +33,11 @@ field exists on `HeapIndexBuildResult`.
   segment scan, so all `LohFragmentationDomainResult` fields agree.
 - `ArrayAnalyzer` only reads `LargeObjectIndex.bin` when `StorageKind == Disk`
   ([ArrayAnalyzer.cs:160-168](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L160-L168)).
-  **Partially addressed** — the shared 85,000-byte `LohThreshold` constant is now
-  visible to `LohFragmentationAnalyzer`, but `ArrayAnalyzer` still diverges
-  (disk=3, memory=4) until it gains access to in-memory large-object candidates.
+  **Divergence accepted** — `TopSparseArrays` differs between disk (3) and memory (4) mode.
+  The full fix would require materializing large-object candidates in memory, which violates
+  the core design principle (bounded heap usage for handling 1GB–25GB+ dumps). Memory mode
+  (< 4 GB dumps) is the edge case and trades perfect byte-for-byte equivalence for predictable
+  memory usage — an appropriate trade-off. See note below.
 
 **Previously**, the `TotalBytes` gap was structural — disk and memory mode used two
 different *algorithms*: disk mode reads `segment.CommittedMemory` (span size,
@@ -85,11 +87,15 @@ end-to-end. All nine result fields agree between disk and memory mode:
 `FragmentationPercent`, `LargestFreeBlock`, `TopFragmentedSegments`,
 `FreeGapHistogram`, `TopLargeObjects`.
 
-**Remaining:** `ArrayAnalyzer` still has a divergence in `TopSparseArrays`
-(disk=3, memory=4) because `ArrayAnalyzer` only reads `LargeObjectIndex.bin`
-in disk mode (option 1 would fix both analyzers uniformly via
-`InMemoryLargeCandidates`, but this fix addresses `LohFragmentationAnalyzer`
-fully and surfaces the shared `LohThreshold` constant for consistency).
+**Accepted divergence:** `ArrayAnalyzer.TopSparseArrays` (disk=3, memory=4) is a documented,
+accepted difference between modes. The full fix (Option 1 from analysis: add
+`InMemoryLargeCandidates` to `HeapIndexBuildResult` and populate it in memory writer)
+would materialize a large list of candidates in memory on every dump, violating the
+core design principle of bounded memory usage independent of dump size. Memory mode
+(< 4 GB) is the edge case — it trades perfect byte-for-byte equivalence for predictable
+memory usage and robustness on the 1GB–25GB+ dumps that matter most. The Tier 2 migration
+(single-writer, always-disk) will obsolete this trade-off by eliminating the memory
+writer entirely, so the divergence is temporary.
 
 ### Finding 1b — string dedup sampling undercount in memory mode
 
@@ -299,7 +305,7 @@ nothing behaviorally beyond removing the bug.
 
 | Item | Severity | Status |
 |---|---|---|
-| **Finding 1** — LOH free-block/large-object data disk-only | High | 3 fix options identified |
+| `ArrayAnalyzer.TopSparseArrays` divergence (disk=3, memory=4) | Low | Accepted — documented divergence; full fix requires materializing large-object candidates (violates bounded-memory principle); Tier 2 migration obsoletes by eliminating memory writer |
 | `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Medium | Not investigated |
 | `CrashAnalyzer` `InferredTraceCount` mismatch (disk=1, memory=0) | Medium | Confirmed pre-existing, not caused by cache determinism fixes |
 | **Finding 2** — `GetRootDescription` dead delegation | Low | Correctness gap, symmetric |

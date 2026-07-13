@@ -187,7 +187,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         largeCandidates.Add((obj.Address, mt, entry.Size));
                     // Collect LOH/POH free blocks during the scan — avoids a second segment walk
                     // that LohFreeBlockWriter.Write(heap,...) would otherwise require.
-                    if (isLohOrPoh && (flags & TypeAggregateFlags.IsFreeBlobType) != 0)
+                    // Uses obj.IsFree (same detection ClrMD uses in memory mode's
+                    // AccumulateSegmentObjectByAddress) instead of a type-name match, so both
+                    // modes agree even if "Free" name resolution is ever unreliable.
+                    if (isLohOrPoh && obj.IsFree)
                         lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
 
                     // Build string dedup index while dump pages are hot from type resolution.
@@ -626,9 +629,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
             if (name.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
                 flags |= TypeAggregateFlags.IsTaskType;
-
-            if (name == "Free")
-                flags |= TypeAggregateFlags.IsFreeBlobType;
         }
 
         if (type.IsArray)

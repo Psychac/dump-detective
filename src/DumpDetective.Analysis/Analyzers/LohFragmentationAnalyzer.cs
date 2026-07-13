@@ -11,6 +11,9 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public sealed class LohFragmentationAnalyzer : IAnalyzer
     {
+        // Matches LargeObjectTracker's LOH threshold so both modes select the same candidates.
+        private const ulong LohThreshold = 85_000;
+
         // Free-gap histogram bucket boundaries (minSize inclusive, maxSize exclusive).
         private static readonly (ulong Min, ulong Max, string Label)[] s_gapBuckets =
         [
@@ -68,6 +71,8 @@ namespace DumpDetective.Analysis.Analyzers
             // NOTE: fallback path — used when no Phase 1 index is available.
 
             var segmentStats = new List<LohSegmentStats>();
+            var allFreeSizes = new List<ulong>(capacity: 256);
+            var largeObjectCandidates = new List<(ulong Address, string TypeName, ulong Size)>();
             var scanCounter = new ObjectScanCounter("scanning LOH segments", progress, reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
             foreach (ClrSegment segment in heap.Segments)
@@ -75,9 +80,11 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!IsLohSegment(segment))
                     continue;
 
-                ulong totalBytes = 0;
+                // Match disk mode's Step 1 (GetSegmentTotalBytes): committed segment span,
+                // not the sum of enumerable object sizes — those can differ by the
+                // reserve/alignment padding past the last object.
+                ulong totalBytes = GetSegmentTotalBytes(segment);
                 ulong freeBytes = 0;
-                ulong usedBytes = 0;
                 ulong largestFreeBlock = 0;
                 int objectCount = 0;
                 int freeObjectCount = 0;
@@ -96,13 +103,18 @@ namespace DumpDetective.Analysis.Analyzers
                     AccumulateSegmentObjectByAddress(
                         heap,
                         objectAddress,
-                        ref totalBytes,
+                        allFreeSizes,
+                        largeObjectCandidates,
                         ref freeBytes,
-                        ref usedBytes,
                         ref largestFreeBlock,
                         ref objectCount,
                         ref freeObjectCount);
                 }
+
+                // Match disk mode's Step 3 derivation (totalBytes - freeBytes): keeps the
+                // Total = Used + Free invariant consistent between modes now that
+                // GetSegmentTotalBytes can include committed padding no per-object scan sees.
+                ulong usedBytes = totalBytes > freeBytes ? totalBytes - freeBytes : 0;
 
                 double fragmentationPercent = totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
                 segmentStats.Add(new LohSegmentStats(GetSegmentAddress(segment), totalBytes, usedBytes, freeBytes, largestFreeBlock, objectCount, freeObjectCount, fragmentationPercent));
@@ -137,7 +149,15 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topN; i++)
                 topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
 
-            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments);
+            var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
+
+            largeObjectCandidates.Sort(static (a, b) => b.Size.CompareTo(a.Size));
+            int topLargeN = Math.Min(options.TopLargeObjectsCount, largeObjectCandidates.Count);
+            var topLargeObjects = new List<LargeObjectSnapshot>(topLargeN);
+            for (int i = 0; i < topLargeN; i++)
+                topLargeObjects.Add(new LargeObjectSnapshot(largeObjectCandidates[i].Address, largeObjectCandidates[i].TypeName, largeObjectCandidates[i].Size));
+
+            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects);
         }
 
         private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
@@ -163,9 +183,9 @@ namespace DumpDetective.Analysis.Analyzers
         private static void AccumulateSegmentObjectByAddress(
             ClrHeap heap,
             ulong objectAddress,
-            ref ulong totalBytes,
+            List<ulong> allFreeSizes,
+            List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
             ref ulong freeBytes,
-            ref ulong usedBytes,
             ref ulong largestFreeBlock,
             ref int objectCount,
             ref int freeObjectCount)
@@ -177,20 +197,22 @@ namespace DumpDetective.Analysis.Analyzers
             if (!obj.IsValid)
                 return;
 
-            ulong size = obj.Size;
-            totalBytes += size;
-
             if (obj.IsFree)
             {
+                ulong size = obj.Size;
                 freeObjectCount++;
                 freeBytes += size;
+                allFreeSizes.Add(size);
                 if (size > largestFreeBlock)
                     largestFreeBlock = size;
             }
             else
             {
                 objectCount++;
-                usedBytes += size;
+
+                ulong size = obj.Size;
+                if (size >= LohThreshold)
+                    largeObjectCandidates.Add((objectAddress, obj.Type?.Name ?? "Unknown", size));
             }
         }
 

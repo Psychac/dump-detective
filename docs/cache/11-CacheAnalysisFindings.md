@@ -2,7 +2,7 @@
 
 Analysis of the heap-index caching subsystem
 (`src/DumpDetective.Analysis/Cache/`, `src/DumpDetective.Analysis/Indexing/`).
-Current status as of 2026-07-12.
+Current status as of 2026-07-13.
 
 ## Architecture as-built
 
@@ -18,7 +18,7 @@ which is appropriate given the one-shot-per-dump usage pattern.
 
 ### Finding 1 — Memory vs. disk indexing produce non-equivalent output
 
-**Status:** Open — structural gap identified, three fix options defined.
+**Status:** Partially fixed (option 4 + enhancements implemented).
 
 **Issue:** Disk writer collects `largeCandidates` and `lohFreeBlockCandidates`,
 writes `LargeObjectIndex.bin` / `LohFreeBlockIndex.bin`
@@ -26,30 +26,70 @@ writes `LargeObjectIndex.bin` / `LohFreeBlockIndex.bin`
 Memory writer does not — no `InMemoryLargeCandidates` / `InMemoryLohFreeBlockCandidates`
 field exists on `HeapIndexBuildResult`.
 
-Consumers compensate inconsistently:
-- `LohFragmentationAnalyzer` detects the gap and falls back to `AnalyzeFromHeap`
-  (full segment re-scan) in memory mode instead of reading `LohFreeBlockIndex.bin`.
-  Result: `TotalBytes` differs by 159,646 bytes between modes.
+**Previously:** Consumers compensated inconsistently:
+- `LohFragmentationAnalyzer` detected the gap and fell back to `AnalyzeFromHeap`
+  (full segment re-scan) in memory mode. **Now fixed** — memory mode uses the same
+  `GetSegmentTotalBytes` algorithm and collects free/large-object data during
+  segment scan, so all `LohFragmentationDomainResult` fields agree.
 - `ArrayAnalyzer` only reads `LargeObjectIndex.bin` when `StorageKind == Disk`
-  ([ArrayAnalyzer.cs:160-168](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L160-L168));
-  memory mode falls back to weaker "one sample per LOH type" heuristic.
-  Result: `TopSparseArrays` differs (disk=3, memory=4).
+  ([ArrayAnalyzer.cs:160-168](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L160-L168)).
+  **Partially addressed** — the shared 85,000-byte `LohThreshold` constant is now
+  visible to `LohFragmentationAnalyzer`, but `ArrayAnalyzer` still diverges
+  (disk=3, memory=4) until it gains access to in-memory large-object candidates.
+
+**Previously**, the `TotalBytes` gap was structural — disk and memory mode used two
+different *algorithms*: disk mode reads `segment.CommittedMemory` (span size,
+`End - Start`) directly off live `ClrSegment` metadata (`AnalyzeFromIndex` Step 1),
+while memory mode summed `obj.Size` over every enumerated object. `CommittedMemory`
+can exceed the sum of enumerable objects (reserve/alignment padding at the segment
+tail), which was the source of the 159,646-byte gap. **Now unified:** both modes
+call `GetSegmentTotalBytes(segment)` to read `CommittedMemory` directly
+([LohFragmentationAnalyzer.cs:81](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L81)),
+and `UsedBytes` is derived as `TotalBytes - FreeBytes` in both to keep the invariant
+consistent.
 
 Additionally, string dedup sampling was asymmetric: `MemoryBackedObjectIndexWriter.cs:47-51`
 adaptively skips dedup calls (down to 1-in-10 or 1-in-50) based on yield rate,
 while `DiskBackedObjectIndexWriter` samples every string. **Fixed** — see
 [Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode) below.
 
-**Fix options:**
-1. **Full structural fix:** add `InMemoryLargeCandidates` and
-   `InMemoryLohFreeBlockCandidates` to `HeapIndexBuildResult`, populate them in
-   `MemoryBackedObjectIndexWriter`, update `LohFragmentationAnalyzer` and
-   `ArrayAnalyzer` to consume them directly. Only option that makes output
-   byte-for-byte identical. Touches writer, result type, two analyzers.
-2. **Document as divergence:** update tests to allow documented divergence,
-   reflecting that memory-tier (< 4 GB) uses a structurally different computation.
-3. **Partial fix:** implement only `InMemoryLohFreeBlockCandidates` now (fixes
-   `LohFragmentationAnalyzer`), defer `InMemoryLargeCandidates` to separate pass.
+**Implemented fixes:**
+
+1. **Free-block detection now uses `obj.IsFree`** ([DiskBackedObjectIndexWriter.cs:193](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L193)):
+   Disk mode previously detected free blocks via type-name match (`IsFreeBlobType` flag);
+   now uses `obj.IsFree` (same logic memory mode already used in
+   `AccumulateSegmentObjectByAddress`). This ensures both modes select identical
+   free-block candidates. Removed the now-dead `IsFreeBlobType` flag from
+   `TypeAggregateFlags` enum.
+
+2. **Memory mode `TotalBytes` now uses `GetSegmentTotalBytes`** ([LohFragmentationAnalyzer.cs:81](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L81)):
+   Replaced object-size summation with committed-segment-span read (matching
+   disk mode's Step 1). Kept the invariant `Total = Used + Free` by deriving
+   `UsedBytes = TotalBytes - FreeBytes` instead of summing object counts.
+   This closes the 159,646-byte discrepancy (option 4 above).
+
+3. **Memory mode now builds `FreeGapHistogram`** ([LohFragmentationAnalyzer.cs:75-76](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L75-L76)):
+   Collects free-block sizes in `allFreeSizes` list during segment scan,
+   passes to `BuildFreeGapHistogram` (same histogram disk mode builds from
+   `LohFreeBlockIndex.bin`). Previously always returned empty/null.
+
+4. **Memory mode now populates `TopLargeObjects`** ([LohFragmentationAnalyzer.cs:76, 224-226](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L76)):
+   Collects large-object candidates (≥85,000 bytes, matching `LargeObjectTracker`'s
+   threshold) during segment scan. Sorts by size descending and passes top
+   `options.TopLargeObjectsCount` entries to result. Previously always returned
+   empty/null.
+
+**Verification:** `LohFragmentationAnalyzerDiscrepancyTests` now passes
+end-to-end. All nine result fields agree between disk and memory mode:
+`SegmentCount`, `TotalBytes`, `FreeBytes`, `UsedBytes`, `FreeBlockCount`,
+`FragmentationPercent`, `LargestFreeBlock`, `TopFragmentedSegments`,
+`FreeGapHistogram`, `TopLargeObjects`.
+
+**Remaining:** `ArrayAnalyzer` still has a divergence in `TopSparseArrays`
+(disk=3, memory=4) because `ArrayAnalyzer` only reads `LargeObjectIndex.bin`
+in disk mode (option 1 would fix both analyzers uniformly via
+`InMemoryLargeCandidates`, but this fix addresses `LohFragmentationAnalyzer`
+fully and surfaces the shared `LohThreshold` constant for consistency).
 
 ### Finding 1b — string dedup sampling undercount in memory mode
 
@@ -404,6 +444,37 @@ Memory mode never reads a `LohFreeBlockIndex.bin` at all (it doesn't exist — s
 and instead computes `TotalBytes` via `AnalyzeFromHeap`, a structurally different
 full-segment re-scan/heuristic. This is exactly Finding 1 as originally documented.
 
+**`TotalBytes` mismatch is two different algorithms, not just a missing data
+source.** Reading both code paths side by side
+([LohFragmentationAnalyzer.cs:216-226,301-305](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L216-L305)
+vs.
+[LohFragmentationAnalyzer.cs:78-105,180-181](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L78-L181)):
+
+- **Disk mode** (`AnalyzeFromIndex` Step 1, `GetSegmentTotalBytes`): `TotalBytes`
+  = `segment.CommittedMemory` span (`End - Start`), read directly off live
+  `ClrSegment` metadata.
+- **Memory mode** (`AnalyzeFromHeap` fallback): `TotalBytes` = sum of `obj.Size`
+  across every object (free + used) actually enumerated in the segment.
+
+These two quantities are not the same measurement: `CommittedMemory` includes
+any committed-but-unenumerable tail space (segment reserve/alignment padding
+past the last object), while the object-sum only counts bytes covered by
+enumerated objects. That gap is the real source of the 159,646-byte
+discrepancy — it exists independent of whether `LohFreeBlockIndex.bin` is
+present.
+
+The important consequence: **Step 1 (`GetSegmentTotalBytes`) reads
+`heap.Segments` directly and has no dependency on any satellite index file.**
+It is not gated by `StorageKind` or the `LohFreeBlockIndex.bin`/
+`LargeObjectIndex.bin` files at all — only Steps 2 and 5 of `AnalyzeFromIndex`
+need those. So `TotalBytes` specifically does not require
+`InMemoryLohFreeBlockCandidates` to fix — memory mode just needs to stop
+routing through the full `AnalyzeFromHeap` fallback for that one value and
+call the same `GetSegmentTotalBytes` metadata read disk mode already uses.
+`FreeBytes`/`UsedBytes`/fragmentation %, by contrast, genuinely need free-block
+data (from either `LohFreeBlockIndex.bin` or a heap free-object scan), so
+those still require Option 1 or 3 below.
+
 **Options for closing Finding 1's `LohFragmentationAnalyzer`/`ArrayAnalyzer` gap:**
 
 1. **Full structural fix (original Finding 1 suggestion):** add
@@ -422,13 +493,21 @@ full-segment re-scan/heuristic. This is exactly Finding 1 as originally document
 3. **Partial fix, LOH only:** implement only `InMemoryLohFreeBlockCandidates`
    now (fixes `LohFragmentationAnalyzer`) and defer `InMemoryLargeCandidates`
    (for `ArrayAnalyzer`) to a separate pass.
+4. **Cheapest fix, `TotalBytes` only:** in `AnalyzeFromIndex`, don't
+   short-circuit to `AnalyzeFromHeap` entirely for memory mode — always compute
+   segment `TotalBytes` via `GetSegmentTotalBytes` (Step 1, already
+   satellite-file-independent) and only fall back to a heap free-object scan
+   for `FreeBytes`/`UsedBytes`/fragmentation % when `LohFreeBlockIndex.bin`
+   isn't available. Closes the 159,646-byte `TotalBytes` gap without touching
+   `HeapIndexBuildResult` or the writers; `FreeBytes`/fragmentation % remain
+   divergent until Option 1 or 3 lands.
 
 ### Final Status Summary
 
 | Item | Status | Evidence |
 |---|---|---|
 | AsyncTaskAnalyzer `TotalTasks` off-by-one | **Fixed** | Carry-over bug in `ReadTaskIndexFile` (Finding 6). `AsyncTaskAnalyzerDiscrepancyTests` passes. |
-| Finding 1 — LOH free-block data disk-only (`LohFragmentationAnalyzer`) | **Root cause confirmed, unfixed** | Carry-over fix in `ReadFreeBlocks` applied but did not change outcome — proves discrepancy is 100% structural (`AnalyzeFromIndex` → `AnalyzeFromHeap` fallback in memory mode), not a reader bug. `LohFragmentationAnalyzerDiscrepancyTests` still fails: `TotalBytes` differs by 159,646 bytes. Three fix options documented above. |
+| Finding 1 — LOH free-block data disk-only (`LohFragmentationAnalyzer`) | **Partially fixed** | Unified `TotalBytes` algorithm (both modes use `GetSegmentTotalBytes` committed span). Memory mode now collects `FreeGapHistogram` and `TopLargeObjects` during segment scan, matching disk mode output. `LohFragmentationAnalyzerDiscrepancyTests` passes (all 9 fields match). Disk mode free-block detection switched to `obj.IsFree` for consistency. `ArrayAnalyzer` `TopSparseArrays` still diverges (disk=3, memory=4) — requires `InMemoryLargeCandidates` in `HeapIndexBuildResult` (option 1 above). |
 | Finding 6 — carry-over bug in satellite-index readers | **Fixed (2 of 2 known instances)** | `AsyncTaskAnalyzer.ReadTaskIndexFile` and `LohFragmentationAnalyzer.ReadFreeBlocks` both fixed via carry-over pattern. |
 | Finding 5 / `CollectionAnalyzer` `TotalCollections` (~96,019 mismatch) | **Fixed** | Unlocked `ResolveGeneration` call raced against `lock (heapLock)` heap reads in the parallel path; moved inside the lock. `CollectionAnalyzer_DiskVsMemoryMode_AgreeOnSameHeap` passes. |
 | Finding 1b — string dedup sampling undercount in memory mode | **Fixed** | `StringDedupEntry` gained a `weight` parameter; `MemoryBackedObjectIndexWriter` passes `segSampleDivisor` as weight so sampled counts scale up instead of undercounting. See [Finding 1b](#finding-1b--string-dedup-sampling-undercount-in-memory-mode). |

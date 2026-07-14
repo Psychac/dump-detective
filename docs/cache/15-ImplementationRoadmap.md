@@ -53,10 +53,9 @@ there's no reason sequence relative migration.
 | Item | Effort | Status |
 |---|---|---|
 | Delete dead `HeapAnalysisCache` duplicate code (pairs Finding 2 fix above) | Low | Done |
-| `--no-cache` / cache-bypass CLI flag | Low | Not started |
 | `--cache-dir` flag sane default | Medium | Done |
-| Small-dump latency benchmark acceptance gate | Low | Not started — run both current code again Tier 2 lands |
-| Reconcile `README.md`/`cache-modernization-spec.md` actual state | Low | Not started |
+| Small-dump latency benchmark acceptance gate | Low | Baseline captured (pre-Tier 2) — `SmallDumpLatencyBenchmark.RunEndToEnd` MeanNs/AllocatedBytes in `perf-baselines.json`, gated via `compare-benchmarks.ps1`. Re-run once Tier 2 lands to confirm no regression. |
+| Reconcile `README.md`/`cache-modernization-spec.md` actual state | Low | Done |
 
 **Dropped, not deferred** — only useful under incremental
 path pure throwaway now:

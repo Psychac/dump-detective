@@ -1,5 +1,15 @@
 # DumpDetective Cache & Graph Modernization Implementation Specification
 
+> **Looking for what to actually work on?** See
+> [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) — the single
+> status-tracked task list. **Phases 0-2 below are done** (facade split,
+> immutable `TypeMetadata`) and match current code. **Phases 3-9 (dense
+> `ObjectId`, `ReferenceGraphCache`, CSR graph, reverse graph, disk graph)
+> were never built and are not on the current roadmap** — Tier 2 replaced
+> this graph-based direction with the single-file columnar container
+> described in [14](14-CleanSlateCacheRedesign.md). Treat everything past
+> Phase 2 as historical design record, not a live plan.
+
 > **Audience:** AI coding agent
 >
 > **Objective:** Implement the following architecture exactly. Do

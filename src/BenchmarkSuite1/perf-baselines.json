@@ -16,6 +16,13 @@
     "RenderHtml_LongValues": {
       "MeanNs": 850000,
       "AllocatedBytes": 1450000
+    },
+    "RunEndToEnd": {
+      "MeanNs": 32122648333,
+      "AllocatedBytes": 5281894656,
+      "_comment": "MeanNs/AllocatedBytes are BenchmarkDotNet's iteration mean/cumulative-allocation figures — these two fields are what compare-benchmarks.ps1 gates on. PeakWorkingSetBytes below is a reference-only figure from a separate single-shot Process.PeakWorkingSet64 probe (not gated); it reflects actual resident memory, which is far lower than AllocatedBytes because that field counts cumulative GC churn, not live memory.",
+      "PeakWorkingSetBytes": 751058944,
+      "PeakWorkingSetWallClockSeconds": 44.86
     }
   }
 }

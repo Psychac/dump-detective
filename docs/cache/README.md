@@ -31,7 +31,9 @@ Analyzers primarily operate on HeapEntry but graph-oriented analyzers still repe
 ## Design Goals
 
 - Preserve existing analyzer behavior.
-- Preserve MemoryBackedObjectIndexWriter and DiskBackedObjectIndexWriter.
+- ~~Preserve MemoryBackedObjectIndexWriter and DiskBackedObjectIndexWriter.~~
+  Superseded: [Tier 2](15-ImplementationRoadmap.md#tier-2--single-file-container-migration-doc-14)
+  deletes both in favor of a single always-on writer.
 - Keep HeapIndex as the primary source of object metadata.
 - Eliminate repeated reference enumeration.
 - Never cache ClrObject or ClrType.
@@ -48,17 +50,19 @@ Analyzers primarily operate on HeapEntry but graph-oriented analyzers still repe
 
 ## Target Architecture
 
-HeapAnalysisCache (Facade)
+HeapAnalysisCache (Facade) — **built**, matches code
  ├── HeapIndex
  ├── StatisticsCache
  ├── RootCache
  ├── TypeMetadataCache
  ├── ThreadCache
- ├── ReferenceGraphCache (lazy)
- └── Future DiskGraphCache
+ ├── ReferenceGraphCache (lazy) — **not built, not on current roadmap**
+ └── Future DiskGraphCache — **not built, not on current roadmap**
 
 Heap scanners continue using HeapIndex.
-Graph analyzers consume ReferenceGraphCache.
+Graph analyzers would consume ReferenceGraphCache, if it existed — see
+[cache-modernization-spec.md](cache-modernization-spec.md) for why this
+direction was superseded.
 
 ## Guiding Rules
 

@@ -26,4 +26,5 @@ internal sealed record AnalysisCommandRequest(
     ReportStyleVersion? ReportStyleVersion = null,
     HeapIndexPrebuildMode? IndexPrebuildMode = null,
     bool PreRender = false,
-    bool SeparateJson = false);
+    bool SeparateJson = false,
+    string? CacheDirectory = null);

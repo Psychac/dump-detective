@@ -14,6 +14,11 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
 
     public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
+        DumpIndexPaths.ResolveCacheDirectory(
+            state.Resolved.DumpPath,
+            state.Resolved.CacheDirectory,
+            onTempFallback: dir => ConsoleUx.Warning($"Dump folder is not writable; caching index in temp folder: {dir}"));
+
         HeapAnalysisCache heapCache = new();
         IHeapIndexBuilder heapBuilder = heapCache;
 

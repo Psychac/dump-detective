@@ -48,4 +48,5 @@ internal sealed record ResolvedExecutionOptions(
     HeapIndexPrebuildMode IndexPrebuildMode)
 {
     public ExecutionPolicy ExecutionPolicy { get; init; } = DumpDetective.Core.Options.ExecutionPolicy.Default;
+    public string? CacheDirectory { get; init; }
 }

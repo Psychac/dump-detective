@@ -204,12 +204,12 @@ JSON-serialization code that might reflect over `HeapIndexBuildResult`'s fields)
 
 Not designed in this pass — call out explicitly rather than address now:
 
-- **Configurable cache directory.** Currently hardcoded as
-  `{dumpPath}.dumpindex/` next to the dump file
-  ([DumpIndexPaths.cs](../../src/DumpDetective.Analysis/Indexing/DumpIndexPaths.cs)).
-  Once disk caching is unconditional for every dump (not just ≥4GB ones), this matters
-  more for dumps on read-only or network-mounted shares. A `--cache-dir` flag falling
-  back to e.g. `%TEMP%/dumpdetective-cache/` is the likely shape.
+- **Configurable cache directory.** Implemented as the `--cache-dir` CLI flag and
+  `CacheDirectory` config-file setting, with a 4-tier fallback chain:
+  explicit `--cache-dir` → colocated `{dumpPath}.dumpindex/` → temp folder
+  `%TEMP%/dumpdetective-cache/<hash-of-dump-path>/` → throw error asking for
+  `--cache-dir`. See [architecture.md](../../docs/architecture.md#cache-directory-resolution)
+  for full details.
 - **Cache eviction/cleanup.** No mechanism exists today (confirmed — no `Directory.Delete`/
   TTL/LRU/max-age logic anywhere); `.dumpindex/` folders accumulate indefinitely, manual
   deletion is the only invalidation path. Becomes more relevant once every dump gets a

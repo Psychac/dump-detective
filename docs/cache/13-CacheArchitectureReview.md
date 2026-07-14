@@ -268,17 +268,13 @@ folded into its scope. The core argument:
 **Caveats that should gate or shape the rollout, not block it:**
 
 1. **Cache directory location becomes a universal concern, not an edge
-   case, the moment disk-only ships.** Doc 12 correctly defers
-   `--cache-dir` as future work under the current dual-mode world, where a
-   user on a read-only/network-mounted dump share can simply stay under the
-   4GB memory-mode threshold to avoid the problem. Once every dump gets a
-   `.dumpindex/` folder unconditionally, a dump on read-only or
-   permission-restricted storage has no fallback at all — `Build()` throws.
-   Recommend promoting `--cache-dir` (falling back to
-   `%TEMP%/dumpdetective-cache/<hash-of-dump-path>/`) from "deferred" to
-   "Phase 1 blocking," or at minimum landing a clear, actionable error
-   message with a workaround before Phase 1 ships, since Phase 1 is what
-   makes this a hard requirement instead of a nice-to-have.
+   case, the moment disk-only ships.** This has been addressed: the `--cache-dir`
+   CLI flag and `CacheDirectory` config-file setting implement a 4-tier fallback
+   (explicit dir → colocated → temp folder → error) that allows users on
+   read-only/network-mounted storage to specify a writable cache location without
+   needing to stay under the 4GB memory-mode threshold. The temp-folder tier
+   includes explicit user warning and hash-based isolation per dump to avoid
+   collisions. Documented in [architecture.md](../../docs/architecture.md#cache-directory-resolution).
 2. **Measure small-dump latency before flipping the default**, don't just
    reason about it. A CLI user re-running analysis on a 50MB dump
    interactively will notice a regression from "instant, in-memory" to
@@ -305,7 +301,7 @@ folded into its scope. The core argument:
 | 1 | Doc-12 Phase 0: delete dead `HeapAnalysisCache` duplicate code; fix `GetRootDescription` delegation **and** extend it per Finding B (lazy `ToString()` or `RootIndex.bin` format change) | Low | Independent, zero-risk, closes a real correctness gap, unblocks nothing else |
 | 2 | Add a `--no-cache` / cache-bypass CLI flag | Low | Stopgap escape hatch before the manifest exists, cheap insurance for Phase 1 |
 | 3 | Doc-12 Phase 1: delete `MemoryBackedObjectIndexWriter`, collapse dual-paths, remove `--index-mode` | High | Root-cause fix for 5 historical bugs (Finding A); biggest maintainability win in this review |
-| 4 | `--cache-dir` flag with a sane default fallback | Medium | Promote from "deferred" — becomes a hard requirement, not an edge case, once Phase 1 ships (Caveat 1) |
+| 4 | `--cache-dir` flag with a sane default fallback | Medium | Done — implemented with 4-tier fallback chain (Caveat 1) |
 | 5 | Doc-12 Phase 2: unify `ObjectIndex.bin`/`StringDedupIndex.bin` onto `IndexHeader`; ship `CacheManifest.bin` | Medium | Sequence no later than Phase 1 given Finding E's severity change post-migration |
 | 6 | Small-dump latency benchmark as Phase 1 acceptance gate | Low | Cheap to run, prevents a UX regression from shipping unnoticed |
 | 7 | Wire `CacheMetrics`/`GetHealth()` into a real consumer (verbose output or a `cache-health`/`cache-status` surface), or delete it | Low | Currently dead code either way; the manifest work gives it a natural purpose |

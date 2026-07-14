@@ -45,6 +45,11 @@ internal sealed class PerDumpExecutionService(
         long wsAfterLoad = currentProcess.WorkingSet64;
         long managedAfterLoad = GC.GetTotalMemory(false);
 
+        DumpIndexPaths.ResolveCacheDirectory(
+            dumpPath,
+            resolved.CacheDirectory,
+            onTempFallback: dir => ConsoleUx.Warning($"Dump folder is not writable; caching index in temp folder: {dir}"));
+
         HeapAnalysisCache heapCache = new();
         IHeapIndexBuilder heapBuilder = heapCache;
 

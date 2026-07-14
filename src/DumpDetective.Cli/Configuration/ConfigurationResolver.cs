@@ -145,7 +145,8 @@ internal sealed class ConfigurationResolver
             request.DiagnosticMode,
             indexMode)
         {
-            ExecutionPolicy = executionPolicy
+            ExecutionPolicy = executionPolicy,
+            CacheDirectory = fileModel?.CacheDirectory ?? request.CacheDirectory
         };
         }
         catch (Exception ex) when (ex is ArgumentException or FileNotFoundException)

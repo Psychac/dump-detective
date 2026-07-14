@@ -54,7 +54,7 @@ there's no reason sequence relative migration.
 |---|---|---|
 | Delete dead `HeapAnalysisCache` duplicate code (pairs Finding 2 fix above) | Low | Done |
 | `--no-cache` / cache-bypass CLI flag | Low | Not started |
-| `--cache-dir` flag sane default | Medium | Not started |
+| `--cache-dir` flag sane default | Medium | Done |
 | Small-dump latency benchmark acceptance gate | Low | Not started — run both current code again Tier 2 lands |
 | Reconcile `README.md`/`cache-modernization-spec.md` actual state | Low | Not started |
 

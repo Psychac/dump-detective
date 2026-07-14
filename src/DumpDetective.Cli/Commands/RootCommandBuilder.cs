@@ -60,6 +60,10 @@ internal sealed class RootCommandBuilder
     private readonly Option<string?> _outputPathOption = new("--output");
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
     private readonly Option<bool> _separateJsonOption = new("--separate-json") { Description = "Write report.html and report.json side-by-side; client will load external JSON." };
+    private readonly Option<string?> _cacheDirectoryOption = new("--cache-dir")
+    {
+        Description = "Directory to store the disk-based heap index cache. Falls back to a folder next to the dump, then to a temp-folder location if neither is writable."
+    };
 
     public RootCommand Build()
     {
@@ -86,7 +90,8 @@ internal sealed class RootCommandBuilder
             _preRenderOption,
             _separateJsonOption,
             _indexModeOption,
-            _outputPathOption
+            _outputPathOption,
+            _cacheDirectoryOption
         };
 
         return command;
@@ -116,7 +121,8 @@ internal sealed class RootCommandBuilder
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
             ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)),
             parseResult.GetValue(_preRenderOption),
-            parseResult.GetValue(_separateJsonOption));
+            parseResult.GetValue(_separateJsonOption),
+            parseResult.GetValue(_cacheDirectoryOption));
     }
 
     private static IReadOnlyList<string>? ParseTrend(string? value)

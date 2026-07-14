@@ -181,6 +181,27 @@ Consumers and notes:
 - `TypeAggregateIndex.bin` is written last during the build; its presence indicates a successful completed Phase 1 and is used as a cache hit to skip re-scans.
 - Satellite writes are non-fatal: partial failures are surfaced as `SatelliteWarnings` on the `HeapIndexBuildResult` so downstream stages can either degrade gracefully or warn the user.
 
+### Cache directory resolution (`--cache-dir`)
+
+Before the first index access, `DumpIndexPaths.ResolveCacheDirectory` picks where the `.dumpindex/` folder
+above is written, trying each tier in order and stopping at the first writable location:
+
+1. **`--cache-dir <dir>`** (or the `CacheDirectory` config-file setting) — if set, the index is written to
+   `<dir>/<dumpFileName>.dumpindex/`. If this location is not writable, resolution fails immediately with an
+   error rather than silently falling through, since an explicit user override that can't be honored should
+   be surfaced, not masked.
+2. **Colocated** — `<dumpPath>.dumpindex/`, next to the dump file. This is the default when no `--cache-dir`
+   is given.
+3. **Temp folder (best effort)** — `%TEMP%/dumpdetective-cache/<hash>/`, where `<hash>` is a truncated SHA256
+   of the dump's full path, used to isolate the cache per-dump when several dumps share the fallback temp
+   root. Used only when the dump folder itself is not writable (e.g. read-only or network storage). A
+   warning is printed when this tier is used, since the temp folder can be evicted at any time and the
+   cached index is not guaranteed to persist across runs.
+4. **Failure** — if neither the dump folder nor the temp folder are writable, an error is thrown asking the
+   user to specify a writable `--cache-dir`.
+
+The chosen directory is resolved once per dump (keyed by the dump's full path) and reused by all other
+`DumpIndexPaths` call sites for that run.
 
 ---
 

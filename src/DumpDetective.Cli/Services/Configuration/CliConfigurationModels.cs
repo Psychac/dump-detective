@@ -58,6 +58,7 @@ internal sealed class CliConfigurationFileModel
     public string? IndexMode { get; init; }
     public List<string>? IncludeAnalyzers { get; init; }
     public List<string>? ExcludeAnalyzers { get; init; }
+    public string? CacheDirectory { get; init; }
 }
 
 internal sealed class AnalyzerOptionsModel

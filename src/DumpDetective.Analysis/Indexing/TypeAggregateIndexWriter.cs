@@ -44,7 +44,7 @@ internal static class TypeAggregateIndexWriter
     // ── Public write entry point ───────────────────────────────────────────────
 
     public static void Write(
-        string filePath,
+        Stream stream,
         string dumpPath,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
         IReadOnlyList<ModuleInfo>? modules,
@@ -56,9 +56,6 @@ internal static class TypeAggregateIndexWriter
         int bucketCount = sizeBuckets?.Length ?? 0;
         int moduleCount = modules?.Count ?? 0;
         int shapeCount = shapeCache?.Count ?? 0;
-
-        using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
 
         // ── IndexHeader ──────────────────────────────────────────────────────
         new IndexHeader(Magic, Version, recordCount: typeCount).WriteTo(stream);

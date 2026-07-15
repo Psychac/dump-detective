@@ -24,15 +24,13 @@ internal static class HandleSnapshotWriter
     private const int ProgressEveryHandles = 25_000;
 
     public static long Write(
-        string filePath,
+        Stream stream,
         ClrRuntime runtime,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
         Stopwatch? stopwatch = null)
     {
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
+        long baseOffset = stream.Position;
         var header = new IndexHeader(Magic, Version, recordCount: 0);
         header.WriteTo(stream);
 
@@ -81,7 +79,7 @@ internal static class HandleSnapshotWriter
         }
 
         stream.Flush();
-        IndexHeader.PatchRecordCount(stream, recordCount);
+        IndexHeader.PatchRecordCount(stream, recordCount, baseOffset);
         return recordCount;
     }
 }

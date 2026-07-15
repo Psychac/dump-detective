@@ -1,8 +1,9 @@
 namespace DumpDetective.Analysis.Indexing;
 
 /// <summary>
-/// Reads <see cref="HeapEntry"/> records from a heap object index produced by a
-/// <c>DiskBackedObjectIndexWriter</c> or compatible writer.
+/// Reads <see cref="HeapEntry"/> records from the <c>Objects</c> section of a
+/// <c>cache.bin</c> container produced by a <c>DiskBackedObjectIndexWriter</c> or
+/// compatible writer.
 /// </summary>
 /// <remarks>
 /// Implementations use streaming reads — no full materialisation into memory.
@@ -12,9 +13,10 @@ namespace DumpDetective.Analysis.Indexing;
 internal interface IObjectIndexReader
 {
     /// <summary>
-    /// Streams all <see cref="HeapEntry"/> records from the binary index at
-    /// <paramref name="indexPath"/>. Returns an empty sequence if the file does not
-    /// exist or contains no records.
+    /// Streams all <see cref="HeapEntry"/> records from the <c>Objects</c> section of
+    /// the <c>cache.bin</c> container at <paramref name="containerPath"/>. Returns an
+    /// empty sequence if the container is missing, has no <c>Objects</c> section, or
+    /// contains no records.
     /// </summary>
-    IEnumerable<HeapEntry> ReadEntries(string indexPath);
+    IEnumerable<HeapEntry> ReadEntries(string containerPath);
 }

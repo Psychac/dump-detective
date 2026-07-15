@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Readers;
 
 using FluentAssertions;
@@ -70,22 +72,31 @@ public sealed class RootIndexReaderTests
     {
         string path = Path.Combine(Path.GetTempPath(), $"root-index-{Guid.NewGuid():N}.bin");
 
-        byte[] header = new byte[24];
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0, 4), 0x58495452);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 1);
-        BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(8, 8), records.Length);
-
-        using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        stream.Write(header, 0, header.Length);
-
-        for (int i = 0; i < records.Length; i++)
+        var writer = new CacheContainerWriter(path);
+        try
         {
-            (ulong target, ulong root, byte kind) = records[i];
-            byte[] record = new byte[20];
-            BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(0, 8), target);
-            BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(8, 8), root);
-            record[16] = kind;
-            stream.Write(record, 0, record.Length);
+            writer.BeginSection(CacheSectionId.Roots);
+
+            var indexHeader = new IndexHeader(0x58495452, 1, records.Length);
+            indexHeader.WriteTo(writer.Stream);
+
+            for (int i = 0; i < records.Length; i++)
+            {
+                (ulong target, ulong root, byte kind) = records[i];
+                byte[] record = new byte[20];
+                BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(0, 8), target);
+                BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(8, 8), root);
+                record[16] = kind;
+                writer.Stream.Write(record, 0, record.Length);
+            }
+
+            writer.EndSection(records.Length);
+            writer.Finish();
+        }
+        catch
+        {
+            writer.Dispose();
+            throw;
         }
 
         return path;

@@ -40,11 +40,9 @@ internal class RootCache
         {
             try
             {
-                string indexDir = Path.GetDirectoryName(builtRootIndex.IndexPath) ?? string.Empty;
-                string rootIndexPath = Path.Combine(indexDir, DumpIndexPaths.RootIndexFile);
-                if (File.Exists(rootIndexPath))
+                var roots = RootIndexReader.ReadRootTargets(builtRootIndex.IndexPath, CancellationToken.None);
+                if (roots.Count > 0)
                 {
-                    var roots = RootIndexReader.ReadRootTargets(rootIndexPath, CancellationToken.None);
                     _validRoots = roots;
                     _staticRootedAddresses ??= new HashSet<ulong>(capacity: Math.Max(256, roots.Count));
                     foreach (var (kind, addr) in roots)

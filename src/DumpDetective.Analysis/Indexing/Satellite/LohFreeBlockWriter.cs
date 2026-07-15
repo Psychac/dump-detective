@@ -25,11 +25,9 @@ internal static class LohFreeBlockWriter
     // Their type name is "Free" with no namespace.
     private const string FreeTypeName = "Free";
 
-    public static long Write(string filePath, ClrHeap heap, CancellationToken cancellationToken)
+    public static long Write(Stream stream, ClrHeap heap, CancellationToken cancellationToken)
     {
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
-
+        long baseOffset = stream.Position;
         new IndexHeader(Magic, Version, recordCount: 0).WriteTo(stream);
 
         byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 1024);
@@ -85,7 +83,7 @@ internal static class LohFreeBlockWriter
         }
 
         stream.Flush();
-        IndexHeader.PatchRecordCount(stream, recordCount);
+        IndexHeader.PatchRecordCount(stream, recordCount, baseOffset);
         return recordCount;
     }
 
@@ -95,13 +93,11 @@ internal static class LohFreeBlockWriter
     /// Each candidate is <c>(SegmentStart, FreeObjectOffset, FreeObjectSize)</c>.
     /// </summary>
     public static long WriteFromCandidates(
-        string filePath,
+        Stream stream,
         IEnumerable<(ulong SegStart, ulong Offset, ulong Size)> candidates,
         CancellationToken cancellationToken)
     {
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
-
+        long baseOffset = stream.Position;
         new IndexHeader(Magic, Version, recordCount: 0).WriteTo(stream);
 
         byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 1024);
@@ -137,7 +133,7 @@ internal static class LohFreeBlockWriter
         }
 
         stream.Flush();
-        IndexHeader.PatchRecordCount(stream, recordCount);
+        IndexHeader.PatchRecordCount(stream, recordCount, baseOffset);
         return recordCount;
     }
 }

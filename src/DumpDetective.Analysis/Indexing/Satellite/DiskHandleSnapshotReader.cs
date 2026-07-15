@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Buffers;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 using System.IO;
 using System;
 
@@ -8,13 +9,19 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 
 internal sealed class DiskHandleSnapshotReader : IHandleSnapshotReader
 {
-    private readonly FileStream _stream;
+    private readonly Stream _stream;
     private readonly long _recordCount;
     private const int RecordSize = 20;
 
-    public DiskHandleSnapshotReader(string path)
+    public DiskHandleSnapshotReader(string containerPath)
     {
-        _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4 * 1024, options: FileOptions.SequentialScan);
+        if (!CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
+            throw new InvalidDataException("Handle snapshot cache container invalid or missing");
+
+        if (!reader.TryOpenSection(CacheSectionId.Handles, out Stream? sectionStream) || sectionStream is null)
+            throw new InvalidDataException("Handle snapshot section not found in container");
+
+        _stream = sectionStream;
         if (!IndexHeader.TryRead(_stream, out IndexHeader header))
             throw new InvalidDataException("Handle snapshot header invalid");
         _recordCount = header.RecordCount;

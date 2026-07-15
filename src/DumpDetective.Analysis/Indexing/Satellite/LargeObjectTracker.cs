@@ -45,13 +45,10 @@ internal sealed class LargeObjectTracker
         }
     }
 
-    public void Write(string filePath)
+    public void Write(Stream stream)
     {
         // Sort descending by size before writing.
         _top.Sort(static (a, b) => b.Size.CompareTo(a.Size));
-
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 8 * 1024, FileOptions.SequentialScan);
 
         new IndexHeader(Magic, Version, recordCount: _top.Count).WriteTo(stream);
 

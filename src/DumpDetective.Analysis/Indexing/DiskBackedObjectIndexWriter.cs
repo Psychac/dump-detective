@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Enums;
 
@@ -31,18 +32,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         ArgumentNullException.ThrowIfNull(dumpPath, nameof(dumpPath));
         Stopwatch stopwatch = Stopwatch.StartNew();
 
-        // Use canonical per-dump .dumpindex/ directory for all index files.
+        // Use canonical per-dump .dumpindex/ directory for the container file.
         DumpIndexPaths.EnsureDirectory(dumpPath);
-        string indexPath = DumpIndexPaths.ObjectIndex(dumpPath);
-        string typeAggPath = DumpIndexPaths.TypeAggregateIndex(dumpPath);
+        string containerPath = DumpIndexPaths.CacheContainer(dumpPath);
 
-        // ── Fast-path: skip full heap scan if a valid TypeAggregateIndex.bin exists ──
-        // TypeAggregateIndex.bin is written LAST, after all satellite files, so its
-        // presence guarantees the previous build completed successfully.
-        if (TryLoadFromCache(indexPath, typeAggPath, dumpPath, out var cachedResult))
+        // ── Fast-path: skip full heap scan if cache.bin has a valid TypeAggregates section ──
+        // TypeAggregates is written LAST, after all other sections, so its presence
+        // guarantees the previous build completed successfully.
+        if (TryLoadFromCache(containerPath, dumpPath, out var cachedResult))
         {
             progress?.Report(new(cachedResult!.ObjectCount, "index cache hit",
-                Detail: "loaded TypeAggregateIndex.bin — skipping heap scan",
+                Detail: "loaded cache.bin — skipping heap scan",
                 Elapsed: stopwatch.Elapsed));
             stopwatch.Stop();
             return cachedResult!;
@@ -95,13 +95,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // — and therefore different results — on every disk-mode run.
         int serialChunkEntries = Math.Max(writeBuffer / RecordSize, 1);
         int serialChunkBytes = serialChunkEntries * RecordSize;
-        string indexDir = Path.GetDirectoryName(indexPath)!;
+        string indexDir = DumpIndexPaths.GetIndexDirectory(dumpPath);
         ClrSegment[] segments = heap.Segments.ToArray();
         string[] segScratchFiles = new string[segments.Length];
         for (int i = 0; i < segments.Length; i++)
             segScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.tmp");
-        using FileStream stream = new(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read,
-            bufferSize: writeBuffer, FileOptions.SequentialScan);
+
+        using var containerWriter = new CacheContainerWriter(containerPath);
+        containerWriter.BeginSection(CacheSectionId.Objects);
+        Stream stream = containerWriter.Stream;
+        long objSectionBaseOffset = stream.Position;
         WriteObjIndexHeader(stream, recordCount: 0); // placeholder — overwritten after scan
 
         var parallelOptions = new ParallelOptions
@@ -354,12 +357,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             ArrayPool<byte>.Shared.Return(copyBuf);
         }
 
-        // Seal the index: flush buffered data, rewind, and overwrite the placeholder header
-        // with the actual record count now that all segment writes have completed.
+        // Seal the Objects section: flush buffered data, rewind to the section's own header,
+        // overwrite the placeholder with the actual record count, then restore position so
+        // EndSection sees the true section end.
         stream.Flush();
-        stream.Position = 0;
+        long objSectionEnd = stream.Position;
+        stream.Position = objSectionBaseOffset;
         WriteObjIndexHeader(stream, objectCount);
+        stream.Position = objSectionEnd;
         stream.Flush();
+        containerWriter.EndSection(objectCount);
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
         // We keep the stopwatch running during satellite file writes so their progress reports
@@ -367,18 +374,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         TimeSpan scanElapsed = stopwatch.Elapsed;
         progress?.Report(new(objectCount, "index complete", Detail: null, Elapsed: scanElapsed));
 
-        // Write satellite index files serially after the parallel heap scan.
-        IReadOnlyList<string> satelliteWarnings = WriteSatelliteFiles(dumpPath, heap,
+        // Write satellite sections serially after the parallel heap scan.
+        List<string> satelliteWarnings = WriteSatelliteSections(containerWriter, heap,
             taskCandidates, eventCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
 
-        // Write StringDedupIndex satellite file (compact binary) so subsequent analyses
+        // Write StringDedup section (compact binary) so subsequent analyses
         // can read prebuilt dedup data without re-scanning the heap.
         try
         {
-            string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
-            using var ds = new FileStream(dedupPath, FileMode.Create, FileAccess.Write, FileShare.Read,
-                bufferSize: 64 * 1024, FileOptions.SequentialScan);
+            containerWriter.BeginSection(CacheSectionId.StringDedup);
+            Stream ds = containerWriter.Stream;
             Span<byte> hdr = stackalloc byte[12];
             // Magic 'SDUP' (written little-endian), version=1, entryCount (int)
             BinaryPrimitives.WriteInt32LittleEndian(hdr, 0x50554453);
@@ -436,13 +442,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 ArrayPool<byte>.Shared.Return(recBuf);
                 ArrayPool<byte>.Shared.Return(addrBuf);
             }
+            ds.Flush();
+            containerWriter.EndSection(masterStringDedup.Count);
         }
         catch (Exception ex)
         {
-            ((List<string>)satelliteWarnings).Add($"StringDedupIndex.bin: {ex.GetType().Name}: {ex.Message}");
+            containerWriter.AbortSection();
+            satelliteWarnings.Add($"StringDedup: {ex.GetType().Name}: {ex.Message}");
         }
 
-        // Persist lightweight distribution metadata to a small JSON sidecar so readers
+        // Persist lightweight distribution metadata as an opaque UTF-8 JSON section so readers
         // can populate a DistributionSummary without needing a full heap scan.
         try
         {
@@ -484,13 +493,20 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
                 var distribution = new DistributionSummary(percentiles, globalLengthBuckets.Count > 0 ? globalLengthBuckets : new Dictionary<string, int>(), freqBuckets, sampleCount);
 
-                string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
                 var jsOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
-                string json = System.Text.Json.JsonSerializer.Serialize(distribution, jsOpts);
-                File.WriteAllText(metaPath, json);
+                byte[] jsonBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(distribution, jsOpts);
+
+                containerWriter.BeginSection(CacheSectionId.StringDedupMeta);
+                containerWriter.Stream.Write(jsonBytes, 0, jsonBytes.Length);
+                containerWriter.Stream.Flush();
+                containerWriter.EndSection(1);
             }
         }
-        catch { /* non-fatal */ }
+        catch
+        {
+            // non-fatal — abort a partially-opened section so Finish() doesn't throw.
+            try { containerWriter.AbortSection(); } catch { /* no section was open */ }
+        }
 
         stopwatch.Stop();
 
@@ -499,22 +515,27 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var typeAggregates = masterBuilder.Build();
         var globalSizeBuckets = masterBuilder.BuildSizeBuckets();
 
-        // Write TypeAggregateIndex.bin LAST so its presence confirms a complete build.
+        // Write the TypeAggregates section LAST so its presence confirms a complete build.
         // A future call to Build() will detect it and skip the full heap scan entirely.
         try
         {
-            TypeAggregateIndexWriter.Write(typeAggPath, dumpPath, typeAggregates,
+            containerWriter.BeginSection(CacheSectionId.TypeAggregates);
+            TypeAggregateIndexWriter.Write(containerWriter.Stream, dumpPath, typeAggregates,
                 moduleRegistry.Modules, globalSizeBuckets, shapeCache, objectCount);
+            containerWriter.EndSection(typeAggregates.Count);
         }
         catch
         {
-            // Non-fatal: analysis proceeds without the cache. The file will be written on
+            // Non-fatal: analysis proceeds without the cache. The section will be written on
             // the next successful full build (e.g. after a disk-full condition clears).
+            try { containerWriter.AbortSection(); } catch { /* no section was open */ }
         }
+
+        containerWriter.Finish();
 
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
-            indexPath,
+            containerPath,
             objectCount,
             scanElapsed,
             typeAggregates,
@@ -526,10 +547,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null);
     }
 
-    // ── Satellite file writing ─────────────────────────────────────────────────
+    // ── Satellite section writing ────────────────────────────────────────────────
 
-    private static IReadOnlyList<string> WriteSatelliteFiles(
-        string dumpPath,
+    private static List<string> WriteSatelliteSections(
+        CacheContainerWriter containerWriter,
         ClrHeap heap,
         ConcurrentBag<(ulong Addr, ulong Mt)> taskCandidates,
         ConcurrentBag<(ulong Addr, ulong Mt)> eventCandidates,
@@ -541,70 +562,110 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     {
         List<string> warnings = [];
 
-        // HandleSnapshot.bin — GC handle enumeration
+        // Handles — GC handle enumeration
         try
         {
             progress?.Report(new(0, "enumerating GC handles", Detail: null, Elapsed: stopwatch.Elapsed));
-            HandleSnapshotWriter.Write(DumpIndexPaths.HandleSnapshot(dumpPath), heap.Runtime, cancellationToken, progress, stopwatch);
+            containerWriter.BeginSection(CacheSectionId.Handles);
+            long recordCount = HandleSnapshotWriter.Write(containerWriter.Stream, heap.Runtime, cancellationToken, progress, stopwatch);
+            containerWriter.EndSection(recordCount);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"HandleSnapshot.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"Handles: {ex.GetType().Name}: {ex.Message}");
+        }
 
-        // RootIndex.bin — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
+        // Roots — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
         try
         {
             progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
-            RootIndexWriter.Write(DumpIndexPaths.RootIndex(dumpPath), heap, cancellationToken, progress, stopwatch);
+            containerWriter.BeginSection(CacheSectionId.Roots);
+            long recordCount = RootIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
+            containerWriter.EndSection(recordCount);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"RootIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"Roots: {ex.GetType().Name}: {ex.Message}");
+        }
 
-        // TaskIndex.bin — Task objects collected during heap scan
+        // Tasks — Task objects collected during heap scan
         try
         {
-            progress?.Report(new(0, "writing TaskIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            using TaskIndexWriter tw = new(DumpIndexPaths.TaskIndex(dumpPath));
-            foreach ((ulong addr, ulong mt) in taskCandidates)
-                tw.Add(addr, mt, stateFlags: 0); // stateFlags resolved in Phase 2 by AsyncTaskAnalyzer
-            tw.Flush();
+            progress?.Report(new(0, "writing Tasks section", Detail: null, Elapsed: stopwatch.Elapsed));
+            containerWriter.BeginSection(CacheSectionId.Tasks);
+            using (TaskIndexWriter tw = new(containerWriter.Stream))
+            {
+                foreach ((ulong addr, ulong mt) in taskCandidates)
+                    tw.Add(addr, mt, stateFlags: 0); // stateFlags resolved in Phase 2 by AsyncTaskAnalyzer
+                tw.Flush();
+            }
+            containerWriter.EndSection(taskCandidates.Count);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"TaskIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"Tasks: {ex.GetType().Name}: {ex.Message}");
+        }
 
-        // EventCandidateIndex.bin — delegate/event objects collected during heap scan
+        // EventCandidates — delegate/event objects collected during heap scan
         try
         {
-            progress?.Report(new(0, "writing EventCandidateIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            using EventCandidateIndexWriter ew = new(DumpIndexPaths.EventCandidateIndex(dumpPath));
-            foreach ((ulong addr, ulong mt) in eventCandidates)
-                ew.Add(addr, mt);
-            ew.Flush();
+            progress?.Report(new(0, "writing EventCandidates section", Detail: null, Elapsed: stopwatch.Elapsed));
+            containerWriter.BeginSection(CacheSectionId.EventCandidates);
+            using (EventCandidateIndexWriter ew = new(containerWriter.Stream))
+            {
+                foreach ((ulong addr, ulong mt) in eventCandidates)
+                    ew.Add(addr, mt);
+                ew.Flush();
+            }
+            containerWriter.EndSection(eventCandidates.Count);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"EventCandidateIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"EventCandidates: {ex.GetType().Name}: {ex.Message}");
+        }
 
-        // LargeObjectIndex.bin — top-100 LOH objects by size
+        // LargeObjects — top-100 LOH objects by size
         try
         {
-            progress?.Report(new(0, "writing LargeObjectIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
+            progress?.Report(new(0, "writing LargeObjects section", Detail: null, Elapsed: stopwatch.Elapsed));
             var tracker = new LargeObjectTracker();
             foreach ((ulong addr, ulong mt, ulong size) in largeCandidates)
                 tracker.Consider(addr, mt, size);
-            tracker.Write(DumpIndexPaths.LargeObjectIndex(dumpPath));
+            containerWriter.BeginSection(CacheSectionId.LargeObjects);
+            tracker.Write(containerWriter.Stream);
+            containerWriter.EndSection(largeCandidates.Count);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"LargeObjectIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"LargeObjects: {ex.GetType().Name}: {ex.Message}");
+        }
 
-        // LohFreeBlockIndex.bin — free block gaps already collected during the main scan;
+        // LohFreeBlocks — free block gaps already collected during the main scan;
         // no second segment walk required.
         try
         {
-            progress?.Report(new(0, "writing LohFreeBlockIndex.bin", Detail: null, Elapsed: stopwatch.Elapsed));
-            LohFreeBlockWriter.WriteFromCandidates(
-                DumpIndexPaths.LohFreeBlockIndex(dumpPath), lohFreeBlockCandidates, cancellationToken);
+            progress?.Report(new(0, "writing LohFreeBlocks section", Detail: null, Elapsed: stopwatch.Elapsed));
+            containerWriter.BeginSection(CacheSectionId.LohFreeBlocks);
+            long recordCount = LohFreeBlockWriter.WriteFromCandidates(
+                containerWriter.Stream, lohFreeBlockCandidates, cancellationToken);
+            containerWriter.EndSection(recordCount);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { warnings.Add($"LohFreeBlockIndex.bin: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"LohFreeBlocks: {ex.GetType().Name}: {ex.Message}");
+        }
 
         return warnings;
     }
@@ -676,39 +737,43 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // ── Index cache fast-path ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Attempts to skip the full heap scan by loading a previous build's
-    /// <see cref="TypeAggregateIndex.bin"/> and <c>ObjectIndex.bin</c>.
-    /// Returns <c>true</c> and populates <paramref name="result"/> on success.
+    /// Attempts to skip the full heap scan by loading a previous build's <c>cache.bin</c>
+    /// <c>Objects</c> + <c>TypeAggregates</c> sections. Returns <c>true</c> and populates
+    /// <paramref name="result"/> on success.
     /// </summary>
     private static bool TryLoadFromCache(
-        string indexPath,
-        string typeAggPath,
+        string containerPath,
         string dumpPath,
         out HeapIndexBuildResult? result)
     {
         result = null;
-        if (!File.Exists(indexPath) || !File.Exists(typeAggPath))
+        if (!CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             return false;
 
-        if (!TryReadObjectCount(indexPath, out long objectCount))
+        if (!reader.TryOpenSection(CacheSectionId.Objects, out Stream? objStream) || objStream is null)
             return false;
 
-        return TypeAggregateIndexReader.TryLoad(typeAggPath, indexPath, dumpPath, objectCount, out result);
+        long objectCount;
+        using (objStream)
+        {
+            if (!TryReadObjectCount(objStream, out objectCount))
+                return false;
+        }
+
+        return TypeAggregateIndexReader.TryLoad(reader, containerPath, dumpPath, objectCount, out result);
     }
 
     /// <summary>
-    /// Reads the <c>recordCount</c> field from an <c>ObjectIndex.bin</c> header.
-    /// Returns <c>false</c> if the file is missing, too short, or has a wrong magic number.
+    /// Reads the <c>recordCount</c> field from the <c>Objects</c> section header.
+    /// Returns <c>false</c> if the section is too short or has a wrong magic number.
     /// </summary>
-    private static bool TryReadObjectCount(string indexPath, out long objectCount)
+    private static bool TryReadObjectCount(Stream stream, out long objectCount)
     {
         objectCount = 0;
         try
         {
-            using var fs = new FileStream(indexPath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 64, FileOptions.SequentialScan);
             Span<byte> hdr = stackalloc byte[ObjIndexHeaderSize];
-            if (fs.ReadAtLeast(hdr, ObjIndexHeaderSize, throwOnEndOfStream: false) < ObjIndexHeaderSize)
+            if (stream.ReadAtLeast(hdr, ObjIndexHeaderSize, throwOnEndOfStream: false) < ObjIndexHeaderSize)
                 return false;
             if (BinaryPrimitives.ReadInt32LittleEndian(hdr) != ObjIndexMagic)
                 return false;

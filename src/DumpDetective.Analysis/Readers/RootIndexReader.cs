@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Readers;
 
@@ -22,14 +23,12 @@ internal static class RootIndexReader
             return result;
         }
 
-        string indexDir = Path.GetDirectoryName(index.IndexPath) ?? string.Empty;
-        string rootPath = Path.Combine(indexDir, DumpIndexPaths.RootIndexFile);
-        return ReadRootIndexFile(rootPath, cancellationToken);
+        return ReadRootIndexFile(index.IndexPath, cancellationToken);
     }
 
-    public static List<(string RootKind, ulong Address)> ReadRootTargets(string rootIndexPath, CancellationToken cancellationToken)
+    public static List<(string RootKind, ulong Address)> ReadRootTargets(string containerPath, CancellationToken cancellationToken)
     {
-        List<(ulong TargetAddr, ulong RootAddr, byte Kind)> roots = ReadRootIndexFile(rootIndexPath, cancellationToken);
+        List<(ulong TargetAddr, ulong RootAddr, byte Kind)> roots = ReadRootIndexFile(containerPath, cancellationToken);
         var result = new List<(string RootKind, ulong Address)>(roots.Count);
         for (int i = 0; i < roots.Count; i++)
         {
@@ -40,41 +39,35 @@ internal static class RootIndexReader
         return result;
     }
 
-    public static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootIndexFile(string filePath, CancellationToken cancellationToken)
+    public static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootIndexFile(string containerPath, CancellationToken cancellationToken)
     {
         var roots = new List<(ulong, ulong, byte)>();
-        if (!File.Exists(filePath))
+
+        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             return roots;
 
-        using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
-        Span<byte> headerBuf = stackalloc byte[24];
-        if (fs.ReadAtLeast(headerBuf, 24, throwOnEndOfStream: false) < 24)
+        if (!reader.TryOpenSection(CacheSectionId.Roots, out Stream? sectionStream) || sectionStream is null)
             return roots;
 
-        int magic = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
-        int version = BinaryPrimitives.ReadInt32LittleEndian(headerBuf[4..]);
-        if (magic != RootHeaderMagic || version != RootHeaderVersion)
+        using Stream stream = sectionStream;
+
+        if (!IndexHeader.TryRead(stream, out IndexHeader header))
             return roots;
 
-        long recordCount = BinaryPrimitives.ReadInt64LittleEndian(headerBuf[8..]);
+        if (!header.IsValid(RootHeaderMagic, RootHeaderVersion))
+            return roots;
+
+        long recordCount = header.RecordCount;
         if (recordCount <= 0)
             return roots;
 
         roots.Capacity = (int)Math.Min(recordCount, 65_536);
 
-        // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
-        // return record-aligned byte counts. A batch read into `buf` at offset 0
-        // followed by `bytesRead / RootRecordSize` silently drops any trailing
-        // partial-record bytes instead of carrying them into the next read — the
-        // same bug class fixed in ObjectIndexReader, AsyncTaskAnalyzer, and
-        // LohFragmentationAnalyzer. FileStream's own internal buffer (see
-        // bufferSize above) makes per-record reads as cheap as batching.
         Span<byte> rec = stackalloc byte[RootRecordSize];
         for (long i = 0; i < recordCount; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (fs.ReadAtLeast(rec, RootRecordSize, throwOnEndOfStream: false) < RootRecordSize)
+            if (stream.ReadAtLeast(rec, RootRecordSize, throwOnEndOfStream: false) < RootRecordSize)
                 break;
 
             ulong target = BinaryPrimitives.ReadUInt64LittleEndian(rec);

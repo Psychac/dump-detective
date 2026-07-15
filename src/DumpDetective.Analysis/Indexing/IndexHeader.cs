@@ -66,13 +66,16 @@ internal readonly struct IndexHeader
     }
 
     /// <summary>
-    /// Seeks to offset 0 and overwrites only the <see cref="RecordCount"/> field.
-    /// Call after all records are written to patch the count written during header pre-write.
+    /// Seeks to <paramref name="baseOffset"/> + 8 and overwrites only the
+    /// <see cref="RecordCount"/> field. Call after all records are written to patch the count
+    /// written during header pre-write. <paramref name="baseOffset"/> is the header's own start
+    /// offset within <paramref name="stream"/> — 0 for a standalone file, or a section's start
+    /// offset when the header lives inside a container.
     /// </summary>
-    public static void PatchRecordCount(Stream stream, long recordCount)
+    public static void PatchRecordCount(Stream stream, long recordCount, long baseOffset = 0)
     {
         long saved = stream.Position;
-        stream.Position = 8;
+        stream.Position = baseOffset + 8;
         Span<byte> buf = stackalloc byte[8];
         BinaryPrimitives.WriteInt64LittleEndian(buf, recordCount);
         stream.Write(buf);

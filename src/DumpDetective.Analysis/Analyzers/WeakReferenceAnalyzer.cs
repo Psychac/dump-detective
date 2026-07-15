@@ -34,8 +34,6 @@ namespace DumpDetective.Analysis.Analyzers
         private const string WeakRefGenericName = "System.WeakReference`1";
         private const string WeakRefNonGenericName = "System.WeakReference";
 
-        // HandleSnapshot.bin record size: Address(8) | MT(8) | Kind(1) | Pad(3) = 20 bytes
-        private const int RecordSize = 20;
 
         public string Name => "Weak Reference Analysis";
         public string Category => "Memory";
@@ -141,16 +139,12 @@ namespace DumpDetective.Analysis.Analyzers
             else
             {
                 // Otherwise try disk-backed snapshot, or enumerate live handles via a memory reader.
-                string? snapshotPath = null;
-                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath.Length > 0)
+                IHandleSnapshotReader? reader = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
                 {
-                    string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-                    snapshotPath = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
+                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
                 }
-
-                IHandleSnapshotReader? reader = (snapshotPath is not null && File.Exists(snapshotPath))
-                    ? new DiskHandleSnapshotReader(snapshotPath)
-                    : HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
 
                 var scanCounter = new ObjectScanCounter("scanning weak handles", progress,
                     reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
@@ -278,16 +272,12 @@ namespace DumpDetective.Analysis.Analyzers
             }
             else
             {
-                string? snapshotPath = null;
-                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath.Length > 0)
+                IHandleSnapshotReader? reader = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
                 {
-                    string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-                    snapshotPath = Path.Combine(indexDir, DumpIndexPaths.HandleSnapshotFile);
+                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
                 }
-
-                IHandleSnapshotReader? reader = (snapshotPath is not null && File.Exists(snapshotPath))
-                    ? new DiskHandleSnapshotReader(snapshotPath)
-                    : HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
 
                 if (reader is not null)
                 {
@@ -366,89 +356,6 @@ namespace DumpDetective.Analysis.Analyzers
                 Artifacts: rawExports);
         }
 
-        // ── File reader helpers ───────────────────────────────────────────────
-
-        private static void ReadWeakHandlesFromFile(
-            string filePath,
-            ClrHeap heap,
-            ref int totalWeakHandles,
-            ref int aliveWeakTargets,
-            ref int deadWeakTargets,
-            ref bool scanCapped,
-            Dictionary<string, int> targetTypeHits,
-            int handleScanCap,
-            CancellationToken cancellationToken)
-        {
-            using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                return;
-
-            Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < header.RecordCount; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                if (read < RecordSize) break;
-
-                byte kind = rec[16];
-                if (kind != KindWeakShort && kind != KindWeakLong && kind != KindWeakWinRT)
-                    continue;
-
-                totalWeakHandles++;
-                if (totalWeakHandles > handleScanCap) { scanCapped = true; return; }
-
-                ulong addr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                if (addr == 0) { deadWeakTargets++; continue; }
-
-                ClrObject obj = heap.GetObject(addr);
-                if (obj.IsValid)
-                {
-                    aliveWeakTargets++;
-                    string typeName = obj.Type?.Name ?? "Unknown";
-                    IncrementDict(targetTypeHits, typeName);
-                }
-                else
-                {
-                    deadWeakTargets++;
-                }
-            }
-        }
-
-        private static int CountDependentHandleDeadKeys(
-            string filePath,
-            ClrHeap heap,
-            CancellationToken cancellationToken)
-        {
-            using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                return 0;
-
-            int deadCount = 0;
-            Span<byte> rec = stackalloc byte[RecordSize];
-
-            for (long i = 0; i < header.RecordCount; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                if (read < RecordSize) break;
-
-                if (rec[16] != KindDependent) continue;
-
-                ulong addr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                if (addr == 0) { deadCount++; continue; }
-
-                ClrObject obj = heap.GetObject(addr);
-                if (!obj.IsValid) deadCount++;
-            }
-
-            return deadCount;
-        }
 
         // ── Utility ───────────────────────────────────────────────────────────
 

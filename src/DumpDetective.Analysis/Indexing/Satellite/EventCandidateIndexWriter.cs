@@ -20,16 +20,17 @@ internal sealed class EventCandidateIndexWriter : IDisposable
     private const int Version = 1;
     private const int RecordSize = 16; // 8 + 8
 
-    private readonly FileStream _stream;
+    private readonly Stream _stream;
+    private readonly long _baseOffset;
     private readonly byte[] _buf;
     private int _offset;
     private long _recordCount;
     private bool _disposed;
 
-    public EventCandidateIndexWriter(string filePath)
+    public EventCandidateIndexWriter(Stream stream)
     {
-        _stream = new FileStream(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
+        _stream = stream;
+        _baseOffset = stream.Position;
         _buf = ArrayPool<byte>.Shared.Rent(RecordSize * 4096);
 
         new IndexHeader(Magic, Version, recordCount: 0).WriteTo(_stream);
@@ -52,7 +53,7 @@ internal sealed class EventCandidateIndexWriter : IDisposable
     {
         FlushBuffer();
         _stream.Flush();
-        IndexHeader.PatchRecordCount(_stream, _recordCount);
+        IndexHeader.PatchRecordCount(_stream, _recordCount, _baseOffset);
     }
 
     private void FlushBuffer()
@@ -69,6 +70,5 @@ internal sealed class EventCandidateIndexWriter : IDisposable
         if (_disposed) return;
         _disposed = true;
         ArrayPool<byte>.Shared.Return(_buf);
-        _stream.Dispose();
     }
 }

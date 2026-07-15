@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
@@ -288,15 +289,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
                 return ConvertInMemoryTaskCandidates(inMemCandidates, options.MaxTasksToScan);
 
-            string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-            string taskIndexPath = Path.Combine(indexDir, DumpIndexPaths.TaskIndexFile);
-
-            if (File.Exists(taskIndexPath))
-            {
-                var entries = ReadTaskIndexFile(taskIndexPath, progress, options.MaxTasksToScan, ct);
-                if (entries != null)
-                    return entries;
-            }
+            var entries = ReadTaskIndexFile(heapIndex.IndexPath, progress, options.MaxTasksToScan, ct);
+            if (entries != null)
+                return entries;
 
             // Fall back to typed scan via TypeAggregates flags
             return ScanHeapIndexForTasks(heap, heapCache, heapIndex, progress, options.MaxTasksToScan, ct);
@@ -316,47 +311,50 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
     }
 
     private static List<(ulong, ulong, int)>? ReadTaskIndexFile(
-        string path,
+        string containerPath,
         IProgress<AnalyzerProgressReport>? progress,
         int maxTasksToScan,
         CancellationToken ct)
     {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
+            if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.Tasks, out Stream? stream) || stream is null)
                 return null;
 
-            if (header.Magic != TaskIndexMagic || header.Version != TaskIndexVersion)
-                return null;
-
-            long recordCount = header.RecordCount;
-            int cap = (int)Math.Min(recordCount, maxTasksToScan);
-            var result = new List<(ulong, ulong, int)>(capacity: cap);
-
-            // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
-            // return record-aligned byte counts, and a hand-rolled batch buffer with
-            // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
-            // own internal buffer (see bufferSize above) makes this as cheap as batching.
-            Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < recordCount && result.Count < maxTasksToScan; i++)
+            using (stream)
             {
-                ct.ThrowIfCancellationRequested();
-                if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
-                    break;
+                if (!IndexHeader.TryRead(stream, out IndexHeader header))
+                    return null;
 
-                ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
-                int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(rec[16..]);
+                if (header.Magic != TaskIndexMagic || header.Version != TaskIndexVersion)
+                    return null;
 
-                result.Add((address, mt, stateFlags));
+                long recordCount = header.RecordCount;
+                int cap = (int)Math.Min(recordCount, maxTasksToScan);
+                var result = new List<(ulong, ulong, int)>(capacity: cap);
+
+                // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
+                // return record-aligned byte counts, and a hand-rolled batch buffer with
+                // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
+                // own internal buffer makes this as cheap as batching.
+                Span<byte> rec = stackalloc byte[RecordSize];
+                for (long i = 0; i < recordCount && result.Count < maxTasksToScan; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
+                        break;
+
+                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                    ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+                    int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(rec[16..]);
+
+                    result.Add((address, mt, stateFlags));
+                }
+
+                progress?.Report(new(result.Count, "task index loaded",
+                    $"{result.Count:N0} task records read"));
+                return result;
             }
-
-            progress?.Report(new(result.Count, "task index loaded",
-                $"{result.Count:N0} task records read"));
-            return result;
         }
         catch (Exception)
         {

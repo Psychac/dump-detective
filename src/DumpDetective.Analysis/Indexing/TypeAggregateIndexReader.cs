@@ -1,25 +1,27 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
+using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing;
 
 /// <summary>
-/// Reads <c>TypeAggregateIndex.bin</c> to reconstruct a <see cref="HeapIndexBuildResult"/>
-/// without re-scanning the heap. Called by the fast-path check in
-/// <see cref="DiskBackedObjectIndexWriter.Build"/> when both index files are present.
+/// Reads the <c>TypeAggregates</c> (plus <c>StringDedup</c>/<c>StringDedupMeta</c>) sections of
+/// <c>cache.bin</c> to reconstruct a <see cref="HeapIndexBuildResult"/> without re-scanning the
+/// heap. Called by the fast-path check in <see cref="DiskBackedObjectIndexWriter.Build"/> when the
+/// container's <c>TypeAggregates</c> section is present.
 /// </summary>
 internal static class TypeAggregateIndexReader
 {
     /// <summary>
-    /// Attempts to load a cached <see cref="HeapIndexBuildResult"/> from
-    /// <paramref name="typeAggPath"/> and <paramref name="objectIndexPath"/>.
-    /// Returns <c>false</c> if either file is missing, corrupt, or has an
-    /// incompatible version — callers must fall back to a full heap scan.
+    /// Attempts to load a cached <see cref="HeapIndexBuildResult"/> from the container's
+    /// <c>TypeAggregates</c> section (plus the optional <c>StringDedup</c>/<c>StringDedupMeta</c>
+    /// sections). Returns <c>false</c> if the section is missing, corrupt, or has an incompatible
+    /// version — callers must fall back to a full heap scan.
     /// </summary>
     public static bool TryLoad(
-        string typeAggPath,
-        string objectIndexPath,
+        CacheContainerReader reader,
+        string containerPath,
         string dumpPath,
         long objectCount,
         out HeapIndexBuildResult? result)
@@ -27,7 +29,7 @@ internal static class TypeAggregateIndexReader
         result = null;
         try
         {
-            return TryLoadCore(typeAggPath, objectIndexPath, dumpPath, objectCount, out result);
+            return TryLoadCore(reader, containerPath, dumpPath, objectCount, out result);
         }
         catch
         {
@@ -39,15 +41,16 @@ internal static class TypeAggregateIndexReader
     // ── Core load logic ────────────────────────────────────────────────────────
 
     private static bool TryLoadCore(
-        string typeAggPath,
-        string objectIndexPath,
+        CacheContainerReader reader,
+        string containerPath,
         string dumpPath,
         long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
-        using var stream = new FileStream(typeAggPath, FileMode.Open, FileAccess.Read,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
+        if (!reader.TryOpenSection(CacheSectionId.TypeAggregates, out Stream? sectionStream) || sectionStream is null)
+            return false;
+        using var stream = sectionStream;
 
         // ── IndexHeader ──────────────────────────────────────────────────────
         if (!IndexHeader.TryRead(stream, out var header)) return false;
@@ -208,15 +211,14 @@ internal static class TypeAggregateIndexReader
             }
         }
 
-        // Attempt to load optional StringDedupIndex satellite file and metadata sidecar
+        // Attempt to load optional StringDedup/StringDedupMeta sections
         IReadOnlyDictionary<ulong, StringDedupEntry>? stringDedup = null;
         DistributionSummary? stringDedupDistribution = null;
         try
         {
-            string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
-            if (File.Exists(dedupPath))
+            if (reader.TryOpenSection(CacheSectionId.StringDedup, out Stream? dedupStream) && dedupStream is not null)
             {
-                using var ds = new FileStream(dedupPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, FileOptions.SequentialScan);
+                using var ds = dedupStream;
                 Span<byte> hdr = stackalloc byte[12];
                 if (ds.ReadAtLeast(hdr, 12, throwOnEndOfStream: false) != 12) throw new InvalidDataException("short header");
                 int magic = BinaryPrimitives.ReadInt32LittleEndian(hdr);
@@ -265,13 +267,14 @@ internal static class TypeAggregateIndexReader
                 }
             }
 
-            // Attempt to load optional metadata sidecar
+            // Attempt to load optional StringDedupMeta section (opaque UTF-8 JSON bytes)
             try
             {
-                string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
-                if (File.Exists(metaPath))
+                if (reader.TryOpenSection(CacheSectionId.StringDedupMeta, out Stream? metaStream) && metaStream is not null)
                 {
-                    string txt = File.ReadAllText(metaPath);
+                    using var ms = metaStream;
+                    using var textReader = new StreamReader(ms, Encoding.UTF8);
+                    string txt = textReader.ReadToEnd();
                     var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     stringDedupDistribution = System.Text.Json.JsonSerializer.Deserialize<DistributionSummary>(txt, opts);
                 }
@@ -282,7 +285,7 @@ internal static class TypeAggregateIndexReader
 
         result = new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
-            objectIndexPath,
+            containerPath,
             objectCount,
             Elapsed: TimeSpan.Zero,   // elapsed not meaningful for a cache hit
             TypeAggregates: typeAggregates,

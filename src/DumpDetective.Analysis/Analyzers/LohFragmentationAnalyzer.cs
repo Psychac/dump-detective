@@ -6,6 +6,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -251,14 +252,10 @@ namespace DumpDetective.Analysis.Analyzers
                 return new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0);
 
             // Step 2: Read LohFreeBlockIndex.bin.
-            string lohFreeBlockPath = Path.Combine(indexDir, DumpIndexPaths.LohFreeBlockIndexFile);
             var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, int Count)>();
             var allFreeSizes = new List<ulong>(capacity: 256);
-            if (File.Exists(lohFreeBlockPath))
-            {
-                progress?.Report(new(0, "reading LohFreeBlockIndex.bin", null, TimeSpan.Zero));
-                ReadFreeBlocks(lohFreeBlockPath, freeBySegment, allFreeSizes, cancellationToken);
-            }
+            progress?.Report(new(0, "reading LohFreeBlockIndex.bin", null, TimeSpan.Zero));
+            ReadFreeBlocks(heapIndex.IndexPath, freeBySegment, allFreeSizes, cancellationToken);
 
             // Step 3: Compute per-segment and global stats.
             ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
@@ -304,13 +301,9 @@ namespace DumpDetective.Analysis.Analyzers
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
 
             // Step 5: Read LargeObjectIndex.bin and resolve type names (≤ 100 objects).
-            string largeObjPath = Path.Combine(indexDir, DumpIndexPaths.LargeObjectIndexFile);
             List<LargeObjectSnapshot> topLargeObjects = [];
-            if (File.Exists(largeObjPath))
-            {
-                progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
-                topLargeObjects = ReadTopLargeObjects(heap, largeObjPath, options.TopLargeObjectsCount, cancellationToken);
-            }
+            progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
+            topLargeObjects = ReadTopLargeObjects(heap, heapIndex.IndexPath, options.TopLargeObjectsCount, cancellationToken);
 
             return new LohFragmentationDomainResult(
                 segmentTotalBytes.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
@@ -329,80 +322,95 @@ namespace DumpDetective.Analysis.Analyzers
         // ── Index readers ─────────────────────────────────────────────────────────
 
         private static void ReadFreeBlocks(
-            string filePath,
+            string containerPath,
             Dictionary<ulong, (ulong TotalFree, ulong Largest, int Count)> bySegment,
             List<ulong> allSizes,
             CancellationToken cancellationToken)
         {
-            const int RecordSize = 24; // SegmentAddress(8) | Offset(8) | Size(8)
-            using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                return;
-
-            // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
-            // return record-aligned byte counts, and a hand-rolled batch buffer with
-            // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
-            // own internal buffer (see bufferSize above) makes this as cheap as batching.
-            Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < header.RecordCount; i++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
-                    break;
+                if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LohFreeBlocks, out Stream? stream) || stream is null)
+                    return;
 
-                ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                // offset field at [8..16) is unused for aggregation
-                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                using (stream)
+                {
+                    if (!IndexHeader.TryRead(stream, out IndexHeader header))
+                        return;
 
-                allSizes.Add(size);
-                if (bySegment.TryGetValue(segAddr, out var ex))
-                    bySegment[segAddr] = (ex.TotalFree + size, size > ex.Largest ? size : ex.Largest, ex.Count + 1);
-                else
-                    bySegment[segAddr] = (size, size, 1);
+                    const int RecordSize = 24; // SegmentAddress(8) | Offset(8) | Size(8)
+                    Span<byte> rec = stackalloc byte[RecordSize];
+                    for (long i = 0; i < header.RecordCount; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
+                            break;
+
+                        ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                        // offset field at [8..16) is unused for aggregation
+                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+
+                        allSizes.Add(size);
+                        if (bySegment.TryGetValue(segAddr, out var ex))
+                            bySegment[segAddr] = (ex.TotalFree + size, size > ex.Largest ? size : ex.Largest, ex.Count + 1);
+                        else
+                            bySegment[segAddr] = (size, size, 1);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Section not found or read failed; caller will process without free blocks.
             }
         }
 
         private static List<LargeObjectSnapshot> ReadTopLargeObjects(
             ClrHeap heap,
-            string filePath,
+            string containerPath,
                 int topLargeObjectsCount,
             CancellationToken cancellationToken)
         {
-            const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
-            using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                return [];
-
-            int cap = (int)Math.Min(header.RecordCount, topLargeObjectsCount);
-            var result = new List<LargeObjectSnapshot>(cap);
-            var typeByAddr = new Dictionary<ulong, string>(capacity: cap);
-
-            Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < header.RecordCount; i++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                if (read < RecordSize) break;
+                if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LargeObjects, out Stream? stream) || stream is null)
+                    return [];
 
-                ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                // MT field (rec[8..]) unused — resolve via heap
-                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                using (stream)
+                {
+                    if (!IndexHeader.TryRead(stream, out IndexHeader header))
+                        return [];
 
-                ClrObject obj = heap.GetObject(address);
-                if (!obj.IsValid) continue;
+                    int cap = (int)Math.Min(header.RecordCount, topLargeObjectsCount);
+                    var result = new List<LargeObjectSnapshot>(cap);
 
-                string typeName = obj.Type?.Name ?? "Unknown";
-                if (string.Equals(typeName, "Free", StringComparison.Ordinal)) continue;
+                    const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
+                    Span<byte> rec = stackalloc byte[RecordSize];
+                    for (long i = 0; i < header.RecordCount; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
+                        if (read < RecordSize) break;
 
-                result.Add(new LargeObjectSnapshot(address, typeName, size));
-                if (result.Count >= topLargeObjectsCount) break;
+                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                        // MT field (rec[8..]) unused — resolve via heap
+                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+
+                        ClrObject obj = heap.GetObject(address);
+                        if (!obj.IsValid) continue;
+
+                        string typeName = obj.Type?.Name ?? "Unknown";
+                        if (string.Equals(typeName, "Free", StringComparison.Ordinal)) continue;
+
+                        result.Add(new LargeObjectSnapshot(address, typeName, size));
+                        if (result.Count >= topLargeObjectsCount) break;
+                    }
+
+                    return result;
+                }
             }
-
-            return result;
+            catch (Exception)
+            {
+                return [];
+            }
         }
 
         // ── Free-gap histogram ────────────────────────────────────────────────────

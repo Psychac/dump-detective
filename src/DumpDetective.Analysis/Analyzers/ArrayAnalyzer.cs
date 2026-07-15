@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -157,14 +158,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             var topLargeArrays = new List<LargeArrayEntry>(options.TopLargeLimit);
 
-            if (heapIndex is not null
-                && heapIndex.StorageKind == HeapIndexStorageKind.Disk
-                && heapIndex.IndexPath.Length > 0)
+            if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk)
             {
-                string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-                string largeObjPath = Path.Combine(indexDir, DumpIndexPaths.LargeObjectIndexFile);
-                if (File.Exists(largeObjPath))
-                    ReadLargeArraysFromIndex(heap, largeObjPath, arrayMtSet, topLargeArrays, options.TopLargeLimit, cancellationToken);
+                ReadLargeArraysFromIndex(heap, heapIndex.IndexPath, arrayMtSet, topLargeArrays, options.TopLargeLimit, cancellationToken);
             }
 
             // If index wasn't available, use SampleAddress from TypeAggregates for top LOH array types
@@ -262,45 +258,55 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static void ReadLargeArraysFromIndex(
             ClrHeap heap,
-            string filePath,
+            string containerPath,
             HashSet<ulong> arrayMtSet,
             List<LargeArrayEntry> result,
             int topLargeLimit,
             CancellationToken cancellationToken)
         {
-            const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
-            using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 * 1024, FileOptions.SequentialScan);
-
-            if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                return;
-
-            Span<byte> rec = stackalloc byte[RecordSize];
-            for (long i = 0; i < header.RecordCount && result.Count < topLargeLimit; i++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                if (read < RecordSize) break;
+                if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LargeObjects, out Stream? stream) || stream is null)
+                    return;
 
-                ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
-                ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                using (stream)
+                {
+                    if (!IndexHeader.TryRead(stream, out IndexHeader header))
+                        return;
 
-                if (!arrayMtSet.Contains(mt)) continue;
+                    const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
+                    Span<byte> rec = stackalloc byte[RecordSize];
+                    for (long i = 0; i < header.RecordCount && result.Count < topLargeLimit; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
+                        if (read < RecordSize) break;
 
-                ClrObject obj = heap.GetObject(address);
-                if (!obj.IsValid || obj.Type is null) continue;
+                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
 
-                string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
-                if (string.Equals(elemName, "Free", StringComparison.Ordinal)) continue;
+                        if (!arrayMtSet.Contains(mt)) continue;
 
-                ClrArray arr = obj.AsArray();
-                result.Add(new LargeArrayEntry(
-                    Address: address,
-                    ElementTypeName: elemName,
-                    Length: arr.Length,
-                    Rank: arr.Rank,
-                    Size: size));
+                        ClrObject obj = heap.GetObject(address);
+                        if (!obj.IsValid || obj.Type is null) continue;
+
+                        string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
+                        if (string.Equals(elemName, "Free", StringComparison.Ordinal)) continue;
+
+                        ClrArray arr = obj.AsArray();
+                        result.Add(new LargeArrayEntry(
+                            Address: address,
+                            ElementTypeName: elemName,
+                            Length: arr.Length,
+                            Rank: arr.Rank,
+                            Size: size));
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Section not found or read failed; caller will continue without large array index.
             }
         }
 

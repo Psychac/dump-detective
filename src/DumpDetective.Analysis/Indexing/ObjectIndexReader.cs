@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
 
+using DumpDetective.Analysis.Indexing.Container;
+
 namespace DumpDetective.Analysis.Indexing;
 
 internal sealed class ObjectIndexReader : IObjectIndexReader
@@ -11,17 +13,20 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     private const int HeaderSize = 24;
     private const int RecordSize = sizeof(ulong) * 3;
 
-    public IEnumerable<HeapEntry> ReadEntries(string indexPath)
+    public IEnumerable<HeapEntry> ReadEntries(string containerPath)
     {
-        return ReadDiskEntries(indexPath);
+        return ReadDiskEntries(containerPath);
     }
 
     // Internal static helper kept for call sites that don't need DI.
-    internal static IEnumerable<HeapEntry> ReadDiskEntries(string indexPath)
+    internal static IEnumerable<HeapEntry> ReadDiskEntries(string containerPath)
     {
-        if (string.IsNullOrWhiteSpace(indexPath) || !File.Exists(indexPath))
+        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             yield break;
-        using FileStream stream = new(indexPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 128 * 1024, FileOptions.SequentialScan);
+        if (!reader.TryOpenSection(CacheSectionId.Objects, out Stream? sectionStream) || sectionStream is null)
+            yield break;
+
+        using Stream stream = sectionStream;
         if (stream.Length <= HeaderSize)
             yield break;
 

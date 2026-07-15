@@ -40,6 +40,7 @@ migration regresses something.
 | Finding 3 — redundant root enumeration in memory mode | Done | `RootCache.GetOrBuildValidRoots` hydrates from `InMemoryRootCandidates` via `RootIndexReader.ReadRootCandidates` on a `StorageKind == Memory` branch, falling back to the full heap walk only if candidates are absent; `RootCacheDiscrepancyTests` confirms disk/memory agreement |
 | Finding 7 — `BoxingAnalyzer` `TotalBoxedObjects` off-by-45 | Done | `TypeScanCap` truncated a raw `foreach` over `TypeAggregates` (dictionary iteration order is non-deterministic across disk/memory builders); now sorts by `TotalSize` desc (`MethodTable` tiebreak) before capping, only when the cap will actually bite; `BoxingAnalyzerDiscrepancyTests` passes |
 | `CrashAnalyzer` `InferredTraceCount` mismatch (disk=1, memory=0) | Done | `RunParallelExceptionScan`'s `ConcurrentBag` collection order was thread-scheduler-dependent, so which instances survived the per-type `MaxExceptionsPerType` cap (and were therefore available for Tier 2-4 inference) differed from disk mode; now sorts by address before capping to match the disk scan's deterministic order |
+| `EventCandidateIndex.bin` written but never read | Noted, not fixed | `EventCandidateIndexWriter` populates it every disk-mode build and `MemoryBackedObjectIndexWriter` populates the mirroring `InMemoryEventCandidates` array, but no reader for either exists — `EventLeakAnalyzer` always does a full `heap.EnumerateObjects()` scan in both modes, unlike `AsyncTaskAnalyzer`/`RootCache`/etc., which prefer their satellite/in-memory candidates when present. Decision: keep writing the section through the Tier 2 container migration rather than dropping it (unlike the already-dead `PartialRefEdgeIndex.bin`) — wiring `EventLeakAnalyzer` to consume it is a real perf win worth doing as its own follow-up, not something to lose by deleting the data now. |
 
 Finding 4 (disk cache-hit doesn't validate satellites) **not** in
 tier — it's subsumed Tier 2's TOC + per-section checksums, no separate
@@ -72,24 +73,25 @@ single-writer, work-bounded each-dump implementations (see doc 14 design,
 #3). Tier 2 unifies both into one writer; closes the memory/disk divergence
 root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here, instead twice.
 
-| Item | Doc section | Notes |
-|---|---|---|
-| Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | |
-| Atomic write (`.tmp` + rename) | [File layout](14-CleanSlateCacheRedesign.md#file-layout) | |
-| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Deletes `MemoryBackedObjectIndexWriter`, `HeapIndexingMode`, `--index-mode`; closes Finding 1 root cause and obsoletes the Finding 3 workaround entirely (no more memory/disk branch to hydrate) |
-| Columnar (struct-of-arrays) layout | [Columnar object index](14-CleanSlateCacheRedesign.md#columnar-object-index) | |
-| Memory-mapped reader | [Reader](14-CleanSlateCacheRedesign.md#reader-memory-mapped-not-filestream--arraypool) | |
-| Schema-driven writer/reader parity (source generator) | [Schema-driven writer/reader parity](14-CleanSlateCacheRedesign.md#schema-driven-writerreader-parity) | |
-| Content-addressed cache key | [Content-addressed cache key](14-CleanSlateCacheRedesign.md#content-addressed-cache-key) | |
-| Derived data instead precomputed satellites | [Derived data](14-CleanSlateCacheRedesign.md#derived-data-instead-of-precomputed-satellite-files) | |
-| Corruption resilience + one-version-only migration policy | [Corruption resilience](14-CleanSlateCacheRedesign.md#corruption-resilience-and-format-version-migration) | Core to shipping new binary format at all, not optional; also closes Finding 4 |
-| Cache hit/miss telemetry line | [Cache telemetry](14-CleanSlateCacheRedesign.md#cache-telemetry) | Natural fit here — feeds back into Tier 3 decisions, per doc 14 #9 |
+| Item | Doc section | Status | Notes |
+|---|---|---|---|
+| Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | **Done (code + tests)** | `CacheContainerFormat`, `CacheContainerWriter`, `CacheContainerReader`, `CacheSectionAccessor` all implemented; all reader/writer call sites rewired; satellite writers consolidated behind shared helper. ✅ Round-trip + atomic-write tests passing (12 tests). Pending: discrepancy test baseline and manual smoke test in [doc 16](16-ContainerFormatImplementationGuide.md). |
+| Atomic write (`.tmp` + rename) | [File layout](14-CleanSlateCacheRedesign.md#file-layout) | Done | `CacheContainerWriter.Finish()` does atomic `.tmp` → final rename; cleanup on exception. |
+| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Not started | `MemoryBackedObjectIndexWriter` still present; `HeapIndexingMode` and `--index-mode` still exist. Deferred to post-Tier-2-verification (after integration tests pass). |
+| Columnar (struct-of-arrays) layout | [Columnar object index](14-CleanSlateCacheRedesign.md#columnar-object-index) | Not started | Deferred to later Tier 2 row. |
+| Memory-mapped reader | [Reader](14-CleanSlateCacheRedesign.md#reader-memory-mapped-not-filestream--arraypool) | Not started | Current: `CacheContainerReader` uses one-handle-per-call `FileStream` model (matches pre-migration); mmap deferred. |
+| Schema-driven writer/reader parity (source generator) | [Schema-driven writer/reader parity](14-CleanSlateCacheRedesign.md#schema-driven-writerreader-parity) | Not started | Deferred to later Tier 2 row. |
+| Content-addressed cache key | [Content-addressed cache key](14-CleanSlateCacheRedesign.md#content-addressed-cache-key) | Not started | `FileHeader.DumpContentHash` reserved, zero-filled; validation deferred to later row. |
+| Derived data instead precomputed satellites | [Derived data](14-CleanSlateCacheRedesign.md#derived-data-instead-of-precomputed-satellite-files) | Not started | Deferred; all nine sections still written pre-computed. |
+| Corruption resilience + one-version-only migration policy | [Corruption resilience](14-CleanSlateCacheRedesign.md#corruption-resilience-and-format-version-migration) | Not started | `XxHash32` checksums computed and stored in TOC; validation deferred to later row. |
+| Cache hit/miss telemetry line | [Cache telemetry](14-CleanSlateCacheRedesign.md#cache-telemetry) | Not started | Deferred post-verification. |
 
-**De-risk via round-trip tests:** expand existing
-`*DiscrepancyTests` (`tests/DumpDetective.Tests/Integration/CacheDiscrepancies/`)
-to round-trip the new container format
-(pre-migration baseline vs. post-migration actual output from same dump).
-This de-risks the big-bang format swap.
+**De-risk via round-trip tests:** See [doc 16's next steps](16-ContainerFormatImplementationGuide.md#next-steps-in-order):
+1. ✅ Write `CacheContainerRoundTripTests` and atomic-write tests (12 tests passing).
+2. Baseline and re-run existing `*DiscrepancyTests` (`tests/DumpDetective.Tests/Integration/CacheDiscrepancies/`) pre- and post-migration.
+3. Manual CLI smoke test on small/medium/large dumps.
+
+See [doc 16 status table](16-ContainerFormatImplementationGuide.md#status) for detailed per-piece progress.
 
 ### Tier 1.5 — Privacy opt-in (new, gated on Tier 2)
 

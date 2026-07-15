@@ -1,0 +1,155 @@
+using System.Buffers;
+using System.IO.Hashing;
+
+namespace DumpDetective.Analysis.Indexing.Container;
+
+/// <summary>
+/// Builds <c>cache.bin</c>: one section at a time, each section's body byte-identical to
+/// today's per-file formats, with the header + TOC written once all sections are complete.
+/// Writes to a <c>.tmp</c> file and atomically renames it into place on <see cref="Finish"/>.
+/// </summary>
+internal sealed class CacheContainerWriter : IDisposable
+{
+    private static readonly int ReservedSectionCount = Enum.GetValues<CacheSectionId>().Length;
+    private const int ChecksumBufferSize = 64 * 1024;
+
+    private readonly string _finalPath;
+    private readonly string _tmpPath;
+    private readonly FileStream _stream;
+    private readonly List<CacheTocEntry> _entries = new(ReservedSectionCount);
+
+    private CacheSectionId _activeSectionId;
+    private long _activeSectionStart;
+    private bool _sectionOpen;
+    private bool _finished;
+
+    public CacheContainerWriter(string finalPath)
+    {
+        _finalPath = finalPath;
+        _tmpPath = finalPath + ".tmp";
+        _stream = new FileStream(_tmpPath, FileMode.Create, FileAccess.ReadWrite, FileShare.Read,
+            bufferSize: 64 * 1024, FileOptions.SequentialScan);
+
+        // Reserve the max possible TOC size up front so section data can start right after it;
+        // SectionCount in the final header may end up smaller if a section is skipped on failure.
+        long dataStartOffset = CacheFileHeader.Size + (long)ReservedSectionCount * CacheTocEntry.Size;
+        byte[] placeholder = new byte[dataStartOffset];
+        _stream.Write(placeholder, 0, placeholder.Length);
+    }
+
+    /// <summary>
+    /// Underlying stream. Callers write a section's bytes directly to this between
+    /// <see cref="BeginSection"/> and <see cref="EndSection"/>, using their existing
+    /// per-format write logic (including placeholder-header-then-patch idioms).
+    /// </summary>
+    public Stream Stream => _stream;
+
+    /// <summary>Marks the current stream position as the start of section <paramref name="id"/>.</summary>
+    public void BeginSection(CacheSectionId id)
+    {
+        if (_sectionOpen)
+            throw new InvalidOperationException($"Section {_activeSectionId} is still open.");
+
+        _activeSectionId = id;
+        _activeSectionStart = _stream.Position;
+        _sectionOpen = true;
+    }
+
+    /// <summary>
+    /// Abandons the current section without recording a TOC entry — used when a satellite writer
+    /// throws mid-section. Rewinds the stream to the section's start so the partial bytes are
+    /// overwritten by whatever section is opened next, matching the pre-container behavior where a
+    /// failed satellite file simply never got created.
+    /// </summary>
+    public void AbortSection()
+    {
+        if (!_sectionOpen)
+            throw new InvalidOperationException("No section is open.");
+
+        _stream.Position = _activeSectionStart;
+        _stream.SetLength(_activeSectionStart);
+        _sectionOpen = false;
+    }
+
+    /// <summary>
+    /// Closes the current section and records its TOC entry, including a checksum computed by
+    /// re-reading the section's final bytes in bounded chunks. A live incremental hash during the
+    /// write isn't used because satellite writers patch a placeholder record-count header in
+    /// place after streaming all records, which an in-flight hash would miss.
+    /// </summary>
+    public void EndSection(long recordCount)
+    {
+        if (!_sectionOpen)
+            throw new InvalidOperationException("No section is open.");
+
+        long end = _stream.Position;
+        long length = end - _activeSectionStart;
+        uint checksum = ComputeChecksum(_activeSectionStart, length);
+        _stream.Position = end;
+
+        _entries.Add(new CacheTocEntry(_activeSectionId, _activeSectionStart, length, recordCount, checksum));
+        _sectionOpen = false;
+    }
+
+    private uint ComputeChecksum(long start, long length)
+    {
+        var hasher = new XxHash32();
+        _stream.Position = start;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(ChecksumBufferSize);
+        try
+        {
+            long remaining = length;
+            while (remaining > 0)
+            {
+                int toRead = (int)Math.Min(remaining, buffer.Length);
+                int read = _stream.Read(buffer, 0, toRead);
+                if (read <= 0)
+                    break;
+
+                hasher.Append(buffer.AsSpan(0, read));
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return hasher.GetCurrentHashAsUInt32();
+    }
+
+    /// <summary>Writes the real header + TOC and atomically renames the <c>.tmp</c> file into place.</summary>
+    public void Finish()
+    {
+        if (_finished)
+            throw new InvalidOperationException("Finish() already called.");
+        if (_sectionOpen)
+            throw new InvalidOperationException($"Section {_activeSectionId} was never closed.");
+
+        _stream.Flush();
+
+        long tocOffset = CacheFileHeader.Size;
+        _stream.Position = tocOffset;
+        foreach (CacheTocEntry entry in _entries)
+            entry.WriteTo(_stream);
+
+        _stream.Position = 0;
+        new CacheFileHeader(_entries.Count, tocOffset).WriteTo(_stream);
+
+        _stream.Flush(flushToDisk: true);
+        _stream.Dispose();
+
+        File.Move(_tmpPath, _finalPath, overwrite: true);
+        _finished = true;
+    }
+
+    /// <summary>If <see cref="Finish"/> was never called, discards the in-progress <c>.tmp</c> file.</summary>
+    public void Dispose()
+    {
+        if (_finished)
+            return;
+
+        _stream.Dispose();
+        try { File.Delete(_tmpPath); } catch { /* best-effort cleanup */ }
+    }
+}

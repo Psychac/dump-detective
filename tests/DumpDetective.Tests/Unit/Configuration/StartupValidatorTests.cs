@@ -107,10 +107,9 @@ public sealed class StartupValidatorTests
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),
             ExcludeAnalyzers: Array.Empty<string>(),
-            DiagnosticMode: false,
-            IndexPrebuildMode: HeapIndexPrebuildMode.Auto);
+            DiagnosticMode: false
+    );
     }
-
     private static string CreateTempDirectory()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"dumpdetective-validator-tests-{Guid.NewGuid():N}");

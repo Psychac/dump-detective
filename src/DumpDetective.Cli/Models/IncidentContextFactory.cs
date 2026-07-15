@@ -48,7 +48,6 @@ internal static class IncidentContextFactory
             ConfigPath: resolved.ConfigPath,
             UsedConfigFile: resolved.UsedConfigFile,
             DiagnosticMode: resolved.DiagnosticMode,
-            IndexPrebuildMode: resolved.IndexPrebuildMode.ToString(),
             ActiveAnalyzerCount: activeAnalyzers.Count,
             ActiveAnalyzers: activeAnalyzers.Select(a => a.Name).ToArray(),
             RuntimeVersion: runtimeVersion,

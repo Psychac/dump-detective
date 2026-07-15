@@ -57,17 +57,12 @@ internal sealed class PerDumpExecutionService(
             loadContext.Heap,
             dumpPath,
             cancellationToken,
-            progress: progress,
-            mode: resolved.IndexPrebuildMode);
+            progress: progress);
 
-        // Signal stage transition: outer heartbeat uses this to commit the "Scan + Index heap"
-        // section and stop rendering, handing off to ConsoleDiagnosticsSink for analyzers.
         progress?.Report(new AnalyzerProgressReport(
             heapIndex.ObjectCount,
             "running analyzers",
-            Detail: heapIndex.StorageKind == HeapIndexStorageKind.Memory
-                ? "in-memory"
-                : Path.GetFileName(heapIndex.IndexPath),
+            Detail: Path.GetFileName(heapIndex.IndexPath),
             Elapsed: heapIndex.Elapsed));
 
         currentProcess.Refresh();

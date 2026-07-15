@@ -26,7 +26,7 @@ public sealed class ThreadAnalyzerDiscrepancyTests
         AnalysisOptions analysisOptions = new();
         ThreadAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         ThreadDomainResult memResult = (ThreadDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
@@ -34,7 +34,7 @@ public sealed class ThreadAnalyzerDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             ThreadDomainResult diskResult = (ThreadDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalThreadCount.Should().Be(memResult.TotalThreadCount);

@@ -1,5 +1,4 @@
 using DumpDetective.Cli.Commands;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 using DumpDetective.Cli.Configuration;
@@ -37,8 +36,7 @@ internal sealed class ConfigurationResolver
         EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset), fileModel, request);
         DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
-        HeapIndexPrebuildMode indexMode = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig, AnalyzerOptionsBuilder.BuildIndexPrebuildModeFromCli, fileModel, request);
-        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak, refChain, indexMode);
+        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak, refChain);
         CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CrashAnalysisOptions.Preset, CrashAnalysisOptions.Validate), fileModel, request);
         AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
         AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncStateMachineAnalysisOptions.Preset), fileModel, request);
@@ -142,8 +140,7 @@ internal sealed class ConfigurationResolver
             usedConfigFile,
                 effectiveInclude,
                 effectiveExclude,
-            request.DiagnosticMode,
-            indexMode)
+            request.DiagnosticMode)
         {
             ExecutionPolicy = executionPolicy,
             CacheDirectory = fileModel?.CacheDirectory ?? request.CacheDirectory
@@ -274,20 +271,10 @@ internal sealed class ConfigurationResolver
 
 
 
-    private static HeapIndexPrebuildMode BuildIndexPrebuildModeFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-    {
-        return config.ExecutionPolicy?.IndexPrebuildMode
-            ?? ParseHeapIndexMode(config.Indexing?.Mode)
-            ?? ParseHeapIndexMode(config.IndexMode)
-            ?? request.IndexPrebuildMode
-            ?? HeapIndexPrebuildMode.Auto;
-    }
-
     private static ExecutionPolicy BuildExecutionPolicy(
         CliConfigurationFileModel? config,
         RetentionOptions memoryLeak,
-        ReferenceChainOptions referenceChain,
-        HeapIndexPrebuildMode indexMode)
+        ReferenceChainOptions referenceChain)
     {
         ExecutionPolicyModel? policy = config?.ExecutionPolicy;
 

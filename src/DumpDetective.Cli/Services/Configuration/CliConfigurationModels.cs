@@ -87,7 +87,6 @@ internal sealed class ExecutionPolicyModel
     public int? ReferenceChainMaxPathDepth { get; init; }
     public int? ReferenceChainFastModeMaxDepth { get; init; }
     public int? ReferenceChainMaxPathSearchObjects { get; init; }
-    public HeapIndexPrebuildMode? IndexPrebuildMode { get; init; }
 }
 
 [JsonSourceGenerationOptions(

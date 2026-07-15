@@ -1,6 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Readers;
 using DumpDetective.Core.Utilities;
 
@@ -34,9 +34,8 @@ internal class RootCache
         if (_validRoots is not null)
             return _validRoots;
 
-        // Prefer disk-backed RootIndex when an index exists and is on-disk.
         var builtRootIndex = _getHeapIndex();
-        if (builtRootIndex is not null && builtRootIndex.StorageKind == HeapIndexStorageKind.Disk)
+        if (builtRootIndex is not null)
         {
             try
             {
@@ -55,32 +54,6 @@ internal class RootCache
                     _lastBuildError = null;
                     return _validRoots;
                 }
-            }
-            catch
-            {
-                // Fall back to in-memory enumeration on any read error.
-            }
-        }
-        else if (builtRootIndex is not null && builtRootIndex.StorageKind == HeapIndexStorageKind.Memory
-            && builtRootIndex.InMemoryRootCandidates is not null)
-        {
-            try
-            {
-                var candidates = RootIndexReader.ReadRootCandidates(builtRootIndex, CancellationToken.None);
-                var roots = new List<(string RootKind, ulong Address)>(candidates.Count);
-                _staticRootedAddresses ??= new HashSet<ulong>(capacity: Math.Max(256, candidates.Count));
-                foreach (var (targetAddr, _, kind) in candidates)
-                {
-                    string kindStr = RootIndexReader.KindToString(kind);
-                    roots.Add((kindStr, targetAddr));
-                    if (kindStr.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
-                        _staticRootedAddresses.Add(targetAddr);
-                }
-
-                _validRoots = roots;
-                _lastBuildTime = DateTime.UtcNow;
-                _lastBuildError = null;
-                return _validRoots;
             }
             catch
             {

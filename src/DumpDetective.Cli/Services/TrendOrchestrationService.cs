@@ -315,10 +315,8 @@ internal sealed class TrendOrchestrationService(
             ConsoleUx.ObjectScanComplete($"{fileLabel} Load dump", 0, sw.Elapsed, null);
         if (!renderedIndexComplete)
         {
-            string indexTarget = execution.HeapIndex.StorageKind == Analysis.Indexing.HeapIndexStorageKind.Memory
-                ? "in-memory"
-                : Path.GetFileName(execution.HeapIndex.IndexPath);
-            ConsoleUx.ObjectScanComplete($"{fileLabel} Scan + Index heap", execution.HeapIndex.ObjectCount, execution.HeapIndex.Elapsed, $"{execution.HeapIndex.StorageKind} • {indexTarget}");
+            string indexTarget = Path.GetFileName(execution.HeapIndex.IndexPath);
+            ConsoleUx.ObjectScanComplete($"{fileLabel} Scan + Index heap", execution.HeapIndex.ObjectCount, execution.HeapIndex.Elapsed, $"{indexTarget}");
         }
 
         return new TrendDumpExecution(dumpPath, execution.Runs, execution.Elapsed, execution.IncidentContext, DateTime.UtcNow, execution.StageMemoryStats, memoryStats);

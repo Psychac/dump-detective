@@ -56,8 +56,7 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
                 state.LoadContext!.Heap,
                 state.Resolved.DumpPath,
                 cancellationToken,
-                progress: progress,
-                mode: state.Resolved.IndexPrebuildMode),
+                progress: progress),
             cancellationToken);
 
         while (true)
@@ -87,7 +86,7 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
 
         if (state.Resolved.DiagnosticMode)
         {
-            ConsoleUx.Info($"Index built: requested={state.Resolved.IndexPrebuildMode}, selected={heapIndex.StorageKind}, objects={heapIndex.ObjectCount:N0}, elapsed={heapIndex.Elapsed.TotalSeconds:F1}s");
+            ConsoleUx.Info($"Index built: objects={heapIndex.ObjectCount:N0}, elapsed={heapIndex.Elapsed.TotalSeconds:F1}s");
         }
 
         // Both properties point to the same HeapAnalysisCache instance, typed through their respective interfaces.

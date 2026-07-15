@@ -12,7 +12,6 @@ namespace DumpDetective.Analysis.Cache
     internal class HeapAnalysisCache : IHeapAnalysisCache, IHeapIndexBuilder
     {
         private const int ProgressReportEveryScans = 25_000;
-        private const long MemoryIndexDumpSizeThresholdBytes = 4096L * 1024 * 1024; // TEMP-ADAPTIVE-INDEXING: tune threshold with profiling.
 
         private HashSet<ulong>? _staticRootedAddresses;
         private IReadOnlyList<(string RootKind, ulong Address)>? _validRoots;
@@ -117,11 +116,10 @@ namespace DumpDetective.Analysis.Cache
             ClrHeap heap,
             string dumpPath,
             CancellationToken cancellationToken,
-            IProgress<AnalyzerProgressReport>? progress = null,
-            HeapIndexPrebuildMode mode = HeapIndexPrebuildMode.Auto)
+            IProgress<AnalyzerProgressReport>? progress = null)
         {
             Interlocked.Increment(ref _cacheMisses);
-            var result = _heapIndexCache.PrebuildHeapIndex(heap, dumpPath, cancellationToken, progress, mode);
+            var result = _heapIndexCache.PrebuildHeapIndex(heap, dumpPath, cancellationToken, progress);
             return result;
         }
 
@@ -135,24 +133,6 @@ namespace DumpDetective.Analysis.Cache
         public bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable)
         {
             return _typeMetadataCache.MethodTableHasOutgoingRefs(heap, methodTable);
-        }
-
-        private static HeapIndexPrebuildMode SelectPrebuildMode(HeapIndexPrebuildMode requestedMode, string dumpPath)
-        {
-            if (requestedMode != HeapIndexPrebuildMode.Auto)
-                return requestedMode;
-
-            try
-            {
-                long dumpBytes = new FileInfo(dumpPath).Length;
-                return dumpBytes <= MemoryIndexDumpSizeThresholdBytes
-                    ? HeapIndexPrebuildMode.Memory
-                    : HeapIndexPrebuildMode.Disk;
-            }
-            catch
-            {
-                return HeapIndexPrebuildMode.Disk;
-            }
         }
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)

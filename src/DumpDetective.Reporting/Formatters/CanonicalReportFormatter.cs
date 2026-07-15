@@ -96,7 +96,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"- Report: {ctx.ReportFormat}");
             sb.AppendLine($"- Config: {(ctx.UsedConfigFile ? "config file" : "command line")}" + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})"));
             sb.AppendLine($"- Diagnostic Mode: {(ctx.DiagnosticMode ? "on" : "off")}");
-            sb.AppendLine($"- Index Prebuild: {ctx.IndexPrebuildMode}");
             sb.AppendLine($"- Runtime: {ctx.RuntimeFlavor ?? "n/a"}" + (string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : $" {ctx.RuntimeVersion}"));
             sb.AppendLine($"- GC Mode: {ctx.GcMode ?? "n/a"}");
             sb.AppendLine($"- Heap Count: {(ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a")}");
@@ -406,7 +405,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"| **Report** | {Esc(ctx.ReportFormat)} |");
             sb.AppendLine($"| **Config** | {(ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({Esc(ctx.ConfigPath)})")} |");
             sb.AppendLine($"| **Diagnostic Mode** | {(ctx.DiagnosticMode ? "on" : "off")} |");
-            sb.AppendLine($"| **Index Prebuild** | {Esc(ctx.IndexPrebuildMode)} |");
             sb.AppendLine($"| **Runtime** | {Esc(ctx.RuntimeFlavor ?? "n/a")}{(string.IsNullOrWhiteSpace(ctx.RuntimeVersion) ? string.Empty : " " + Esc(ctx.RuntimeVersion))} |");
             sb.AppendLine($"| **GC Mode** | {Esc(ctx.GcMode ?? "n/a")} |");
             sb.AppendLine($"| **Heap Count** | {(ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a")} |");
@@ -791,7 +789,6 @@ internal sealed class HtmlCanonicalReportFormatter : IReportFormatter
             sb.AppendLine($"<tr><td>Report</td><td>{Enc(ctx.ReportFormat)}</td></tr>");
             sb.AppendLine($"<tr><td>Config</td><td>{Enc(configText)}</td></tr>");
             sb.AppendLine($"<tr><td>Diagnostic Mode</td><td>{(ctx.DiagnosticMode ? "on" : "off")}</td></tr>");
-            sb.AppendLine($"<tr><td>Index Prebuild</td><td>{Enc(ctx.IndexPrebuildMode)}</td></tr>");
             sb.AppendLine($"<tr><td>Runtime</td><td>{Enc(runtimeText)}</td></tr>");
             sb.AppendLine($"<tr><td>GC Mode</td><td>{Enc(ctx.GcMode ?? "n/a")}</td></tr>");
             sb.AppendLine($"<tr><td>Heap Count</td><td>{heapCountText}</td></tr>");

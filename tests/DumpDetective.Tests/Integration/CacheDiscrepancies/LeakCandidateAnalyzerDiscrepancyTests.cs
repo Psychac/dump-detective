@@ -26,7 +26,7 @@ public sealed class LeakCandidateAnalyzerDiscrepancyTests
         AnalysisOptions analysisOptions = new();
         LeakCandidateAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         LeakCandidateDomainResult memResult = (LeakCandidateDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
@@ -34,7 +34,7 @@ public sealed class LeakCandidateAnalyzerDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             LeakCandidateDomainResult diskResult = (LeakCandidateDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalCandidates.Should().Be(memResult.TotalCandidates);

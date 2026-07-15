@@ -115,9 +115,7 @@ internal sealed class ExecutePerDumpPipelineStage(PerDumpExecutionService perDum
             ConsoleUx.ObjectScanComplete("Load dump", 0, wallClock.Elapsed, null);
         if (!renderedIndexComplete)
         {
-            string fallbackTarget = result.HeapIndex.StorageKind == DumpDetective.Analysis.Indexing.HeapIndexStorageKind.Memory
-                ? "in-memory"
-                : Path.GetFileName(result.HeapIndex.IndexPath);
+            string fallbackTarget = Path.GetFileName(result.HeapIndex.IndexPath);
             ConsoleUx.ObjectScanComplete("Scan + Index heap", result.HeapIndex.ObjectCount, result.HeapIndex.Elapsed, fallbackTarget);
         }
 
@@ -139,7 +137,7 @@ internal sealed class ExecutePerDumpPipelineStage(PerDumpExecutionService perDum
 
         if (state.Resolved.DiagnosticMode)
         {
-            ConsoleUx.Info($"Index built: requested={state.Resolved.IndexPrebuildMode}, selected={result.HeapIndex.StorageKind}, objects={result.HeapIndex.ObjectCount:N0}, elapsed={result.HeapIndex.Elapsed.TotalSeconds:F1}s");
+            ConsoleUx.Info($"Index built: objects={result.HeapIndex.ObjectCount:N0}, elapsed={result.HeapIndex.Elapsed.TotalSeconds:F1}s");
         }
     }
 }

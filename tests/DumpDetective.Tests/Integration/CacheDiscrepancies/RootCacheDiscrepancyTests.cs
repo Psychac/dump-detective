@@ -22,7 +22,7 @@ public sealed class RootCacheDiscrepancyTests
         ClrHeap heap = runtime.Heap;
 
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         var memRoots = memCache.GetOrBuildValidRoots(heap);
         var memStaticRooted = memCache.GetStaticRootedAddresses(heap);
 
@@ -31,7 +31,7 @@ public sealed class RootCacheDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             var diskRoots = diskCache.GetOrBuildValidRoots(heap);
             var diskStaticRooted = diskCache.GetStaticRootedAddresses(heap);
 

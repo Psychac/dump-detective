@@ -42,12 +42,6 @@ namespace BenchmarkSuite1
             _dataTarget?.Dispose();
         }
 
-        [Benchmark(Description = "MemoryBacked index build")]
-        public long BuildMemoryIndex()
-        {
-            var writer = new MemoryBackedObjectIndexWriter();
-            return writer.Build(_heap!, cancellationToken: default, progress: null).ObjectCount;
-        }
 
         [Benchmark(Description = "DiskBacked index build")]
         public long BuildDiskIndex()

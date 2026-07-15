@@ -26,7 +26,7 @@ public sealed class JitAnalyzerDiscrepancyTests
         AnalysisOptions analysisOptions = new();
         JitAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         JitDomainResult memResult = (JitDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
@@ -34,7 +34,7 @@ public sealed class JitAnalyzerDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             JitDomainResult diskResult = (JitDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalJitHeapBytes.Should().Be(memResult.TotalJitHeapBytes);

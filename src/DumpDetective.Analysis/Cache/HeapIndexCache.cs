@@ -25,15 +25,13 @@ internal class HeapIndexCache
         ClrHeap heap,
         string dumpPath,
         CancellationToken cancellationToken,
-        IProgress<AnalyzerProgressReport>? progress = null,
-        HeapIndexPrebuildMode mode = HeapIndexPrebuildMode.Auto)
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
         if (_heapIndex is not null)
             return _heapIndex;
 
         _progress = progress;
 
-        HeapIndexPrebuildMode selectedMode = SelectPrebuildMode(mode, dumpPath);
         try
         {
             long dumpBytes = new FileInfo(dumpPath).Length;
@@ -46,9 +44,7 @@ internal class HeapIndexCache
             _sizeTier = DumpSizeTier.Medium;
         }
 
-        IObjectIndexWriter writer = selectedMode == HeapIndexPrebuildMode.Memory
-            ? new MemoryBackedObjectIndexWriter()
-            : new DiskBackedObjectIndexWriter();
+        IObjectIndexWriter writer = new DiskBackedObjectIndexWriter();
 
         try
         {
@@ -82,19 +78,6 @@ internal class HeapIndexCache
         if (_heapIndex is null)
             yield break;
 
-        if (_heapIndex.StorageKind == HeapIndexStorageKind.Memory)
-        {
-            if (_heapIndex.InMemoryEntries is null)
-                yield break;
-
-            int safeCount = (int)Math.Min(_heapIndex.ObjectCount, _heapIndex.InMemoryEntries.Length);
-            HeapEntry[] arr = _heapIndex.InMemoryEntries!;
-            for (int i = 0; i < safeCount; i++)
-                yield return arr[i];
-
-            yield break;
-        }
-
         foreach (HeapEntry entry in ObjectIndexReader.Instance.ReadEntries(_heapIndex.IndexPath))
             yield return entry;
     }
@@ -119,22 +102,5 @@ internal class HeapIndexCache
             LastError = _lastBuildError
         };
     }
-
-    private static HeapIndexPrebuildMode SelectPrebuildMode(HeapIndexPrebuildMode requestedMode, string dumpPath)
-    {
-        if (requestedMode != HeapIndexPrebuildMode.Auto)
-            return requestedMode;
-
-        try
-        {
-            long dumpBytes = new FileInfo(dumpPath).Length;
-            return dumpBytes <= 1096L * 1024 * 1024
-                ? HeapIndexPrebuildMode.Memory
-                : HeapIndexPrebuildMode.Disk;
-        }
-        catch
-        {
-            return HeapIndexPrebuildMode.Disk;
-        }
-    }
 }
+

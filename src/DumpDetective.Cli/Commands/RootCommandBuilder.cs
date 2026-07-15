@@ -1,5 +1,4 @@
 using DumpDetective.Core.Configuration;
-using DumpDetective.Analysis.Indexing;
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
@@ -53,10 +52,6 @@ internal sealed class RootCommandBuilder
     {
         Description = "Report style version: v1 or v2."
     };
-    private readonly Option<string?> _indexModeOption = new("--index-mode")
-    {
-        Description = "Indexing mode: auto, memory, or disk."
-    };
     private readonly Option<string?> _outputPathOption = new("--output");
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
     private readonly Option<bool> _separateJsonOption = new("--separate-json") { Description = "Write report.html and report.json side-by-side; client will load external JSON." };
@@ -89,7 +84,6 @@ internal sealed class RootCommandBuilder
             _reportStyleOption,
             _preRenderOption,
             _separateJsonOption,
-            _indexModeOption,
             _outputPathOption,
             _cacheDirectoryOption
         };
@@ -119,7 +113,6 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
-            ParseHeapIndexMode(parseResult.GetValue(_indexModeOption)),
             parseResult.GetValue(_preRenderOption),
             parseResult.GetValue(_separateJsonOption),
             parseResult.GetValue(_cacheDirectoryOption));
@@ -164,22 +157,6 @@ internal sealed class RootCommandBuilder
             "markdown" or "md" => ReportFormat.Markdown,
             "html" or "htm" => ReportFormat.Html,
             _ => throw new ArgumentException($"Invalid report format '{value}'. Expected text, markdown, or html.")
-        };
-    }
-
-    private static HeapIndexPrebuildMode? ParseHeapIndexMode(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim().ToLowerInvariant() switch
-        {
-            "auto" => HeapIndexPrebuildMode.Auto,
-            "memory" or "mem" => HeapIndexPrebuildMode.Memory,
-            "disk" => HeapIndexPrebuildMode.Disk,
-            _ => throw new ArgumentException($"Invalid index mode '{value}'. Expected auto, memory, or disk.")
         };
     }
 

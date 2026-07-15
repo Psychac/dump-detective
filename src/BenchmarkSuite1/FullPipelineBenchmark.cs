@@ -60,8 +60,7 @@ public class FullPipelineBenchmark
             _heap,
             _dumpPath,
             cancellationToken: default,
-            progress: null,
-            mode: HeapIndexPrebuildMode.Auto);
+            progress: null);
 
         // Stage 3: wire up context — identical to RunAnalyzersPipelineStage.BuildContext
         var diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };

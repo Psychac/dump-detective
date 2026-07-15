@@ -14,15 +14,6 @@ internal static class RootIndexReader
         HeapIndexBuildResult index,
         CancellationToken cancellationToken)
     {
-        if (index.StorageKind == HeapIndexStorageKind.Memory && index.InMemoryRootCandidates is { } candidates)
-        {
-            var result = new List<(ulong, ulong, byte)>(candidates.Length);
-            for (int i = 0; i < candidates.Length; i++)
-                result.Add(candidates[i]);
-
-            return result;
-        }
-
         return ReadRootIndexFile(index.IndexPath, cancellationToken);
     }
 

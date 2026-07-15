@@ -1,5 +1,4 @@
 using DumpDetective.Core.Options;
-using DumpDetective.Analysis.Indexing;
 
 namespace DumpDetective.Cli.Models;
 
@@ -44,8 +43,7 @@ internal sealed record ResolvedExecutionOptions(
     bool UsedConfigFile,
     IReadOnlyCollection<string> IncludeAnalyzers,
     IReadOnlyCollection<string> ExcludeAnalyzers,
-    bool DiagnosticMode,
-    HeapIndexPrebuildMode IndexPrebuildMode)
+    bool DiagnosticMode)
 {
     public ExecutionPolicy ExecutionPolicy { get; init; } = DumpDetective.Core.Options.ExecutionPolicy.Default;
     public string? CacheDirectory { get; init; }

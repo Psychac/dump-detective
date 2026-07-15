@@ -27,7 +27,7 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
         AnalysisOptions analysisOptions = new();
         WcfChannelAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         WcfChannelDomainResult memResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
@@ -35,7 +35,7 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             WcfChannelDomainResult diskResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.WcfPresent.Should().Be(memResult.WcfPresent);

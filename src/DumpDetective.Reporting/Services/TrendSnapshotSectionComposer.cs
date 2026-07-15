@@ -40,7 +40,6 @@ internal static class TrendSnapshotSectionComposer
             blocks.Add(new MetricBlock("Heap Count", ctx.HeapCount.HasValue ? ctx.HeapCount.Value.ToString() : "n/a"));
             blocks.Add(new MetricBlock("Heap Walkable", ctx.HeapCanWalk ? "yes" : "no"));
             blocks.Add(new MetricBlock("Config", (ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})")));
-            blocks.Add(new MetricBlock("Index Prebuild", ctx.IndexPrebuildMode));
             blocks.Add(new MetricBlock("Active Analyzers", ctx.ActiveAnalyzerCount.ToString()));
             blocks.Add(new MetricBlock("Elapsed", $"{ctx.AnalysisElapsedSeconds:F1}s"));
         }

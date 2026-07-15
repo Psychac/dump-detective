@@ -1,14 +1,7 @@
 namespace DumpDetective.Analysis.Indexing;
 
-internal enum HeapIndexPrebuildMode
-{
-    Auto,
-    Memory,
-    Disk
-}
-
+// Disk-only indexing mode (memory mode removed in single-writer consolidation)
 internal enum HeapIndexStorageKind
 {
-    Memory,
     Disk
 }

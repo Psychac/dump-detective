@@ -146,8 +146,6 @@ namespace DumpDetective.Analysis.Analyzers
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
             {
                 // In-memory index: parallel over the flat entry array
-                if (heapIdx.StorageKind == HeapIndexStorageKind.Memory && heapIdx.InMemoryEntries is { } entries)
-                    return RunParallelCollectionAnalysis(heap, inMemoryEntries: entries, progress: progress, cancellationToken: cancellationToken, cache: cache);
 
                 // Disk-backed index: sequential (I/O bound; parallel won't help)
                 return AnalyzeCollectionsSequentialDisk(heap, heapCache, progress, cancellationToken);

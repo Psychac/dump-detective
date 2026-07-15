@@ -28,7 +28,7 @@ public sealed class AllocationPatternAnalyzerTests
         };
 
         var heapIndex = new HeapIndexBuildResult(
-            HeapIndexStorageKind.Memory,
+            HeapIndexStorageKind.Disk,
             IndexPath: string.Empty,
             ObjectCount: 300,
             Elapsed: TimeSpan.Zero,
@@ -107,7 +107,7 @@ public sealed class AllocationPatternAnalyzerTests
         };
 
         var heapIndex = new HeapIndexBuildResult(
-            HeapIndexStorageKind.Memory,
+            HeapIndexStorageKind.Disk,
             IndexPath: string.Empty,
             ObjectCount: 170,
             Elapsed: TimeSpan.Zero,
@@ -156,7 +156,7 @@ public sealed class AllocationPatternAnalyzerTests
         };
 
         var heapIndex = new HeapIndexBuildResult(
-            HeapIndexStorageKind.Memory,
+            HeapIndexStorageKind.Disk,
             IndexPath: string.Empty,
             ObjectCount: 1250,
             Elapsed: TimeSpan.Zero,
@@ -200,7 +200,7 @@ public sealed class AllocationPatternAnalyzerTests
             [0x1] = new TypeAggregateIndexEntry(0x1, 0, 100, 1000, 0, 0, 0, Gen0Count: 30, Gen1Count: 40, Gen2Count: 30)
         };
 
-        var heapIndex = new HeapIndexBuildResult(HeapIndexStorageKind.Memory, string.Empty, 100, TimeSpan.Zero, aggregates);
+        var heapIndex = new HeapIndexBuildResult(HeapIndexStorageKind.Disk, string.Empty, 100, TimeSpan.Zero, aggregates);
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
@@ -234,7 +234,7 @@ public sealed class AllocationPatternAnalyzerTests
             [0x3] = new TypeAggregateIndexEntry(0x3, 0, 80, 80, 0, 0, 0, Gen0Count: 4, Gen1Count: 6, Gen2Count: 70)
         };
 
-        var heapIndex = new HeapIndexBuildResult(HeapIndexStorageKind.Memory, string.Empty, 200, TimeSpan.Zero, aggregates);
+        var heapIndex = new HeapIndexBuildResult(HeapIndexStorageKind.Disk, string.Empty, 200, TimeSpan.Zero, aggregates);
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);

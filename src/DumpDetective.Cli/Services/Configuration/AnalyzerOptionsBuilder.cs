@@ -80,7 +80,5 @@ internal static class AnalyzerOptionsBuilder
         };
     }
 
-    public static HeapIndexPrebuildMode BuildIndexPrebuildModeFromCli(AnalysisCommandRequest request)
-        => request.IndexPrebuildMode ?? HeapIndexPrebuildMode.Auto;
 
 }

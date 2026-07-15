@@ -27,7 +27,7 @@ public sealed class HttpObjectAnalyzerDiscrepancyTests
         AnalysisOptions analysisOptions = new();
         HttpObjectAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
-        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Memory);
+        memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         HttpObjectDomainResult memResult = (HttpObjectDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
         string freshDumpPath = dumpPath + ".freshdiskcheck";
@@ -35,7 +35,7 @@ public sealed class HttpObjectAnalyzerDiscrepancyTests
         try
         {
             HeapAnalysisCache diskCache = new();
-            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, HeapIndexPrebuildMode.Disk);
+            diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
             AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
             HttpObjectDomainResult diskResult = (HttpObjectDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.HttpObjectsFound.Should().Be(memResult.HttpObjectsFound);

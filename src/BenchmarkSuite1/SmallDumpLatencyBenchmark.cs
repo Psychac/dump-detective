@@ -54,8 +54,7 @@ public class SmallDumpLatencyBenchmark
             heap,
             _dumpPath,
             cancellationToken: default,
-            progress: null,
-            mode: HeapIndexPrebuildMode.Auto);
+            progress: null);
 
         var diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
         AnalysisOptions analysisOptions = new()

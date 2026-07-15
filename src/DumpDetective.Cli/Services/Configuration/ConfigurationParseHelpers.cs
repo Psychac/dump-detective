@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
@@ -7,21 +6,6 @@ namespace DumpDetective.Cli.Services.Configuration;
 
 internal static class ConfigurationParseHelpers
 {
-    public static HeapIndexPrebuildMode? ParseHeapIndexMode(string? mode)
-    {
-        if (string.IsNullOrWhiteSpace(mode))
-        {
-            return null;
-        }
-
-        return mode.Trim().ToLowerInvariant() switch
-        {
-            "auto" => HeapIndexPrebuildMode.Auto,
-            "memory" or "mem" => HeapIndexPrebuildMode.Memory,
-            "disk" => HeapIndexPrebuildMode.Disk,
-            _ => throw new ArgumentException($"Invalid IndexMode value '{mode}' in config.")
-        };
-    }
 
     public static ReportFormat? ParseReportFormat(string? format)
     {

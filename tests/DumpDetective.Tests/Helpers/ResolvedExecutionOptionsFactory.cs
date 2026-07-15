@@ -48,7 +48,6 @@ internal static class ResolvedExecutionOptionsFactory
             UsedConfigFile: false,
             IncludeAnalyzers: System.Array.Empty<string>(),
             ExcludeAnalyzers: System.Array.Empty<string>(),
-            DiagnosticMode: false,
-            IndexPrebuildMode: HeapIndexPrebuildMode.Auto);
+            DiagnosticMode: false);
     }
 }

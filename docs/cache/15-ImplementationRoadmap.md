@@ -6,9 +6,8 @@ analysis/design record — read them *why*. This doc *what/when*:
 one ordered, status-tracked list. Update status work lands; don't
 copy rationale back out source docs, link to it.
 
-Status current as 2026-07-13, checked against `upgrade/clrmd-4` source
-(`MemoryBackedObjectIndexWriter`, `HeapIndexingMode`, `--index-mode`
-all still present — nothing below started).
+Status current as 2026-07-15, checked against `upgrade/clrmd-4` source
+(Single-writer consolidation completed; all memory/disk branching removed).
 
 **Sequencing note:** deliberately diverges 14's own suggested
 order ("ship incremental manifest plan first, treat container
@@ -77,7 +76,7 @@ root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here
 |---|---|---|---|
 | Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | **Done** | `CacheContainerFormat`, `CacheContainerWriter`, `CacheContainerReader`, `CacheSectionAccessor` all implemented; all reader/writer call sites rewired; satellite writers consolidated behind shared helper. ✅ Round-trip + atomic-write tests (12 tests). ✅ Discrepancy baseline (11 critical tests). ✅ CLI smoke test (3 tiers). ✅ Docs updated (architecture.md, binary-format.md). |
 | Atomic write (`.tmp` + rename) | [File layout](14-CleanSlateCacheRedesign.md#file-layout) | Done | `CacheContainerWriter.Finish()` does atomic `.tmp` → final rename; cleanup on exception. |
-| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Not started | `MemoryBackedObjectIndexWriter` still present; `HeapIndexingMode` and `--index-mode` still exist. Deferred to post-Tier-2-verification (after integration tests pass). |
+| Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | **Done** | Deleted `MemoryBackedObjectIndexWriter`; removed `HeapIndexPrebuildMode` enum and `--index-mode` CLI flag; unified all indexing to disk mode only. Updated 38 test files to remove mode references. All conditional branches checking `StorageKind.Memory` eliminated. |
 | Columnar (struct-of-arrays) layout | [Columnar object index](14-CleanSlateCacheRedesign.md#columnar-object-index) | Not started | Deferred to later Tier 2 row. |
 | Memory-mapped reader | [Reader](14-CleanSlateCacheRedesign.md#reader-memory-mapped-not-filestream--arraypool) | Not started | Current: `CacheContainerReader` uses one-handle-per-call `FileStream` model (matches pre-migration); mmap deferred. |
 | Schema-driven writer/reader parity (source generator) | [Schema-driven writer/reader parity](14-CleanSlateCacheRedesign.md#schema-driven-writerreader-parity) | Not started | Deferred to later Tier 2 row. |

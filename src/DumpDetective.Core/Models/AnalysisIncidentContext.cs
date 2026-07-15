@@ -11,7 +11,6 @@ internal sealed record AnalysisIncidentContext(
     string? ConfigPath,
     bool UsedConfigFile,
     bool DiagnosticMode,
-    string IndexPrebuildMode,
     int ActiveAnalyzerCount,
     IReadOnlyList<string> ActiveAnalyzers,
     string? RuntimeVersion,

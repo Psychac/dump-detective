@@ -29,7 +29,7 @@ public sealed class GCHandleAnalyzerDiscrepancyTests
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         GCHandleDomainResult memResult = (GCHandleDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
-        string freshDumpPath = dumpPath + ".freshdiskcheck";
+        string freshDumpPath = dumpPath + ".freshdiskcheck.GCHandleAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {

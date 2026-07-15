@@ -29,7 +29,7 @@ public sealed class LohFragmentationAnalyzerDiscrepancyTests
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         LohFragmentationDomainResult memResult = (LohFragmentationDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
-        string freshDumpPath = dumpPath + ".freshdiskcheck";
+        string freshDumpPath = dumpPath + ".freshdiskcheck.LohFragmentationAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {

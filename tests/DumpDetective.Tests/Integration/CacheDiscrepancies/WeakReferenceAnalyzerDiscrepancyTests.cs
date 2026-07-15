@@ -29,7 +29,7 @@ public sealed class WeakReferenceAnalyzerDiscrepancyTests
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         WeakReferenceDomainResult memResult = (WeakReferenceDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
-        string freshDumpPath = dumpPath + ".freshdiskcheck";
+        string freshDumpPath = dumpPath + ".freshdiskcheck.WeakReferenceAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {

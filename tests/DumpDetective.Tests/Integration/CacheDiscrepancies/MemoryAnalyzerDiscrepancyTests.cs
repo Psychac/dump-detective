@@ -29,7 +29,7 @@ public sealed class MemoryAnalyzerDiscrepancyTests
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
         AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
         MemoryDomainResult memResult = (MemoryDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
-        string freshDumpPath = dumpPath + ".freshdiskcheck";
+        string freshDumpPath = dumpPath + ".freshdiskcheck.MemoryAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {

@@ -1,12 +1,17 @@
+using System.IO.MemoryMappedFiles;
+
 namespace DumpDetective.Analysis.Indexing.Container;
 
 /// <summary>
 /// Opens <c>cache.bin</c> and hands out bounded, section-scoped streams. The TOC is small
 /// (32 bytes per section, ~10 sections) and is read once into memory by <see cref="TryOpen"/>;
-/// each <see cref="TryOpenSection"/> call then opens its own read-only <see cref="FileStream"/>
-/// handle onto the container, matching the one-handle-per-read-call model the standalone
-/// per-file readers used before this migration (safe for concurrent analyzers per
-/// <see cref="DumpDetective.Core.Abstractions.IAnalyzer.IsThreadSafe"/>).
+/// each <see cref="TryOpenSection"/> call then memory-maps the container and hands back a
+/// <see cref="MemoryMappedViewStream"/> bounded to that section's byte range. The mapping
+/// handle is unnamed (safe for concurrent analyzers per
+/// <see cref="DumpDetective.Core.Abstractions.IAnalyzer.IsThreadSafe"/>) and closed once the
+/// view is created — per <see cref="MemoryMappedFile"/> semantics the OS-level mapping stays
+/// alive for the view's lifetime, so readers get page-cache-backed random access instead of a
+/// fresh <see cref="FileStream"/> handle per call.
 /// </summary>
 internal sealed class CacheContainerReader
 {
@@ -69,7 +74,7 @@ internal sealed class CacheContainerReader
     public bool TryGetSectionInfo(CacheSectionId id, out CacheTocEntry entry) => _sections.TryGetValue(id, out entry);
 
     /// <summary>
-    /// Opens a fresh read-only handle onto <c>cache.bin</c>, bounded to section
+    /// Memory-maps <c>cache.bin</c> and hands back a read-only view stream bounded to section
     /// <paramref name="id"/>'s byte range. Returns <c>false</c> if the section isn't present in
     /// the TOC (e.g. it failed to write during the original build and was skipped).
     /// </summary>
@@ -79,9 +84,17 @@ internal sealed class CacheContainerReader
         if (!_sections.TryGetValue(id, out CacheTocEntry entry))
             return false;
 
-        FileStream fs = new(_containerPath, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 64 * 1024, FileOptions.SequentialScan);
-        sectionStream = new CacheSectionStream(fs, entry.Offset, entry.Length);
+        // A zero-length view means "map to end of file" per MemoryMappedFile semantics, which
+        // is wrong for an empty section sitting mid-file — short-circuit instead.
+        if (entry.Length == 0)
+        {
+            sectionStream = Stream.Null;
+            return true;
+        }
+
+        using MemoryMappedFile mmf = MemoryMappedFile.CreateFromFile(_containerPath, FileMode.Open,
+            mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
+        sectionStream = mmf.CreateViewStream(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
         return true;
     }
 }

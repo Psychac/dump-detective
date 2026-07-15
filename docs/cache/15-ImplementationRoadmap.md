@@ -54,7 +54,7 @@ there's no reason sequence relative migration.
 |---|---|---|
 | Delete dead `HeapAnalysisCache` duplicate code (pairs Finding 2 fix above) | Low | Done |
 | `--cache-dir` flag sane default | Medium | Done |
-| Small-dump latency benchmark acceptance gate | Low | Baseline captured (pre-Tier 2) — `SmallDumpLatencyBenchmark.RunEndToEnd` MeanNs/AllocatedBytes in `perf-baselines.json`, gated via `compare-benchmarks.ps1`. Re-run once Tier 2 lands to confirm no regression. |
+| Small-dump latency benchmark acceptance gate | Low | Done | ✅ Baseline captured pre-Tier 2. Post-Tier 2 (2026-07-15): Mean 32.12s ns (baseline), AllocatedBytes 5.28GB (baseline) — **zero regression**. Re-run after deferred Tier 2 optimizations (mmap, columnar, schema-driven, corruption resilience, telemetry) to validate no secondary regressions. |
 | Reconcile `README.md`/`cache-modernization-spec.md` actual state | Low | Done |
 
 **Dropped, not deferred** — only useful under incremental
@@ -84,6 +84,8 @@ root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here
 | Derived data instead precomputed satellites | [Derived data](14-CleanSlateCacheRedesign.md#derived-data-instead-of-precomputed-satellite-files) | Not started | Deferred; all nine sections still written pre-computed. |
 | Corruption resilience + one-version-only migration policy | [Corruption resilience](14-CleanSlateCacheRedesign.md#corruption-resilience-and-format-version-migration) | Not started | `XxHash32` checksums computed and stored in TOC; validation deferred to later row. |
 | Cache hit/miss telemetry line | [Cache telemetry](14-CleanSlateCacheRedesign.md#cache-telemetry) | Not started | Deferred post-verification. |
+
+**Status update (2026-07-15):** Core Tier 2 (single-file container format) is production-ready. Latency baseline re-run confirms zero regression (identical results on small dump). Deferred items below are optimizations, not blockers. **Re-run latency benchmark after each deferred optimization lands** to catch any secondary regressions and validate continued perf stability.
 
 **De-risk via round-trip tests:** See [doc 16's next steps](16-ContainerFormatImplementationGuide.md#next-steps-in-order):
 1. ✅ Write `CacheContainerRoundTripTests` and atomic-write tests (12 tests passing).

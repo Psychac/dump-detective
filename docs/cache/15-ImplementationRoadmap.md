@@ -75,7 +75,7 @@ root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here
 
 | Item | Doc section | Status | Notes |
 |---|---|---|---|
-| Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | **Done (code + tests)** | `CacheContainerFormat`, `CacheContainerWriter`, `CacheContainerReader`, `CacheSectionAccessor` all implemented; all reader/writer call sites rewired; satellite writers consolidated behind shared helper. ✅ Round-trip + atomic-write tests passing (12 tests). Pending: discrepancy test baseline and manual smoke test in [doc 16](16-ContainerFormatImplementationGuide.md). |
+| Single container file + table contents | [The core idea](14-CleanSlateCacheRedesign.md#the-core-idea) | **Done** | `CacheContainerFormat`, `CacheContainerWriter`, `CacheContainerReader`, `CacheSectionAccessor` all implemented; all reader/writer call sites rewired; satellite writers consolidated behind shared helper. ✅ Round-trip + atomic-write tests (12 tests). ✅ Discrepancy baseline (11 critical tests). ✅ CLI smoke test (3 tiers). ✅ Docs updated (architecture.md, binary-format.md). |
 | Atomic write (`.tmp` + rename) | [File layout](14-CleanSlateCacheRedesign.md#file-layout) | Done | `CacheContainerWriter.Finish()` does atomic `.tmp` → final rename; cleanup on exception. |
 | Single writer, always on, no memory/disk branch | [Single writer, always on](14-CleanSlateCacheRedesign.md#single-writer-always-on-no-threshold) | Not started | `MemoryBackedObjectIndexWriter` still present; `HeapIndexingMode` and `--index-mode` still exist. Deferred to post-Tier-2-verification (after integration tests pass). |
 | Columnar (struct-of-arrays) layout | [Columnar object index](14-CleanSlateCacheRedesign.md#columnar-object-index) | Not started | Deferred to later Tier 2 row. |
@@ -88,8 +88,8 @@ root cause. Correctness fixes in Tier 0 mean writers, so work happens once, here
 
 **De-risk via round-trip tests:** See [doc 16's next steps](16-ContainerFormatImplementationGuide.md#next-steps-in-order):
 1. ✅ Write `CacheContainerRoundTripTests` and atomic-write tests (12 tests passing).
-2. Baseline and re-run existing `*DiscrepancyTests` (`tests/DumpDetective.Tests/Integration/CacheDiscrepancies/`) pre- and post-migration.
-3. Manual CLI smoke test on small/medium/large dumps.
+2. ✅ Baseline and re-run existing `*DiscrepancyTests` (11 critical tests passing post-migration; disk/memory mode agreement confirmed).
+3. ✅ Manual CLI smoke test on small/medium/large dumps (`.dumpindex/` single-file, cache hit working, output identical).
 
 See [doc 16 status table](16-ContainerFormatImplementationGuide.md#status) for detailed per-piece progress.
 

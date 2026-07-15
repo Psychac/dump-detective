@@ -19,6 +19,71 @@ The format is designed for:
 
 ---
 
+# 📦 Container Format (`cache.bin`)
+
+As of **2026-07-15**, all disk-backed index data is written to a single **`cache.bin`** container file instead of nine separate files. The container uses a fixed-size header + table of contents to address sections, preserving all per-section binary layouts unchanged.
+
+## Single Container Layout
+
+| Section | Size | Description |
+|---------|------|-------------|
+| FileHeader | 64 bytes | Magic, version, TOC offset, section count |
+| TOC (Table of Contents) | ~320 bytes | 10 entries × 32 bytes each (Objects, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| Section Data | Variable | Concatenated payload sections (Objects, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+
+## FileHeader (64 bytes)
+
+| Field | Size | Type | Value |
+|-------|------|------|-------|
+| Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
+| FormatVersion | 4 bytes | int | 1 |
+| DumpContentHash | 32 bytes | bytes | Reserved, zero-filled (for future content-addressed caching) |
+| SectionCount | 4 bytes | int | Number of sections in TOC (typically 10) |
+| TocOffset | 8 bytes | long | Offset to TOC = 64 |
+| Reserved | 8 bytes | bytes | Zero-filled |
+
+## TOC Entry (32 bytes each)
+
+| Field | Size | Type | Description |
+|-------|------|------|-------------|
+| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects, 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta) |
+| Offset | 8 bytes | long | Absolute byte offset of section payload in `cache.bin` |
+| Length | 8 bytes | long | Byte length of section payload |
+| RecordCount | 8 bytes | long | Number of records in section |
+| Checksum | 4 bytes | uint | XxHash32 of section bytes (validation deferred to later row) |
+
+## Section Payload
+
+Each section's payload is **exactly the bytes that would have been in the pre-migration per-file format**, unchanged. This preserves all existing reader logic:
+
+- **Objects section**: ObjectIndex.bin format (24-byte header + 24-byte object records)
+- **TypeAggregates section**: TypeAggregateIndex.bin format (extended header + type records)
+- **Roots section**: RootIndex.bin format (24-byte header + 20-byte root records)
+- **Handles section**: HandleSnapshot.bin format (24-byte header + 20-byte handle records)
+- **Tasks section**: TaskIndex.bin format (24-byte header + task records)
+- **EventCandidates section**: EventCandidateIndex.bin format
+- **LargeObjects section**: LargeObjectIndex.bin format
+- **LohFreeBlocks section**: LohFreeBlockIndex.bin format
+- **StringDedup section**: StringDedupIndex.bin format (12-byte header + dedup records)
+- **StringDedupMeta section**: UTF-8 encoded JSON (distribution summary)
+
+## Atomic Write
+
+The container is written atomically:
+1. Writer opens `cache.bin.tmp` (temp file)
+2. Writes sections sequentially to temp file
+3. On `Finish()`: writes TOC and FileHeader, flushes to disk, atomically renames `.tmp` → `cache.bin`
+4. On exception: deletes `.tmp` file; next run sees missing container (cache miss)
+
+## Benefits Over Per-File Design
+
+- **Single validity check**: Verify one `cache.bin` file + magic/version, not two (pre-migration checked only `TypeAggregateIndex.bin` existence + dump mtime)
+- **Atomic writes**: No partial cache state where some files exist and others don't
+- **Simpler reader logic**: One `CacheContainerReader` opens container once, multiple sections access it via bounded streams
+- **Backward-compatible at section level**: Each reader's per-format parsing logic unchanged; only "how do I get a stream" is different
+
+---
+
 offset = 16 + (i * 24)
 # 📦 Object Index Format
 

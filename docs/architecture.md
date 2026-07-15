@@ -157,29 +157,29 @@ Characteristics:
 - Sequential writes
 - Cache-friendly
 
-### Phase 1 — Satellite index files and metadata
+### Phase 1 — Single container format (`cache.bin`)
 
-During the Phase 1 heap scan the system writes a set of satellite index files into a
-per-dump <dump>.dumpindex/ folder to accelerate Phase 2 analyzers and to avoid
-re-scanning the heap on subsequent runs. These files are produced in disk-backed mode
-and mirrored by in-memory structures when the prebuild mode selects `Memory`.
+As of **2026-07-15**, the system writes all index data into a single **`cache.bin`** container file into a per-dump `<dump>.dumpindex/` folder to accelerate Phase 2 analyzers and to avoid re-scanning the heap on subsequent runs. (Prior to this, data was written as nine separate files; the container consolidates them while preserving all binary payload formats unchanged.)
 
-Canonical files (see `DumpDetective.Analysis.Indexing.DumpIndexPaths`):
-- `ObjectIndex.bin` — main fixed-size object records (Address, MethodTable, Size).
-- `TypeAggregateIndex.bin` — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
-- `StringDedupIndex.bin` (+ `.meta.json`) — XxHash64 -> preview/count/total-size table for string deduplication and sampling.
-- `HandleSnapshot.bin` — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.
-- `RootIndex.bin` — pre-enumerated GC roots (TargetAddr, RootAddr, Kind) consumed by `GCRootAnalyzer`, `FinalizableObjectAnalyzer`, and `StaticRootLeakDetector`.
-- `TaskIndex.bin` — Task / ValueTask candidate addresses used by `AsyncTaskAnalyzer`.
-- `EventCandidateIndex.bin` — delegate/event candidates for `EventLeakAnalyzer`.
-- `LohFreeBlockIndex.bin` — LOH/POH free-block candidates used by `LohFragmentationAnalyzer`.
-- `LargeObjectIndex.bin` — top-large-object list (LOH) used by LOH and array analyzers.
-- `PartialRefEdgeIndex.bin` — optional Phase-1.5 partial reference-edge snapshot (Source, Target) written only when dominated by certain analyzers (e.g. `DominatorAnalyzer`) to bound expensive edge collection.
+The container holds these sections (see `DumpDetective.Analysis.Indexing.Container.CacheSectionId`):
+- **Objects** — main fixed-size object records (Address, MethodTable, Size).
+- **TypeAggregates** — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
+- **StringDedup** + **StringDedupMeta** — XxHash64 -> preview/count/total-size table for string deduplication and sampling (meta section holds UTF-8 JSON distribution summary).
+- **Handles** — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.
+- **Roots** — pre-enumerated GC roots (TargetAddr, RootAddr, Kind) consumed by `GCRootAnalyzer`, `FinalizableObjectAnalyzer`, and `StaticRootLeakDetector`.
+- **Tasks** — Task / ValueTask candidate addresses used by `AsyncTaskAnalyzer`.
+- **EventCandidates** — delegate/event candidates for `EventLeakAnalyzer`.
+- **LohFreeBlocks** — LOH/POH free-block candidates used by `LohFragmentationAnalyzer`.
+- **LargeObjects** — top-large-object list (LOH) used by LOH and array analyzers.
 
 Consumers and notes:
-- Many analyzers prefer satellite files when present and will fall back to an in-memory scan otherwise (see `HeapIndexBuildResult` fields: `InMemoryEntries`, `InMemoryTaskCandidates`, `InMemoryEventCandidates`, `InMemoryRootCandidates`, etc.).
-- `TypeAggregateIndex.bin` is written last during the build; its presence indicates a successful completed Phase 1 and is used as a cache hit to skip re-scans.
-- Satellite writes are non-fatal: partial failures are surfaced as `SatelliteWarnings` on the `HeapIndexBuildResult` so downstream stages can either degrade gracefully or warn the user.
+- Index data is produced in disk-backed mode and mirrored by in-memory structures when the prebuild mode selects `Memory`.
+- Many analyzers prefer satellite sections when present in the container and will fall back to an in-memory scan otherwise (see `HeapIndexBuildResult` fields: `InMemoryEntries`, `InMemoryTaskCandidates`, `InMemoryEventCandidates`, `InMemoryRootCandidates`, etc.).
+- Container validity is verified once via `Magic` + `FormatVersion`; subsequent section access is instant. Presence of a valid container indicates a successful completed Phase 1 and is used as a cache hit to skip re-scans.
+- Satellite writes are non-fatal: partial section failures are surfaced as `SatelliteWarnings` on the `HeapIndexBuildResult` so downstream stages can either degrade gracefully or warn the user.
+- Container writes are atomic: a crash during write leaves no partial `.dumpindex/cache.bin` behind (only the `.tmp` file, which cleanup removes); the next run sees a cache miss and rebuilds cleanly.
+
+For binary format details, see [docs/binary-format.md § Container Format](../binary-format.md#-container-format-cachebin).
 
 ### Cache directory resolution (`--cache-dir`)
 

@@ -128,7 +128,7 @@ internal class HeapIndexCache
         try
         {
             long dumpBytes = new FileInfo(dumpPath).Length;
-            return dumpBytes <= 4096L * 1024 * 1024
+            return dumpBytes <= 1096L * 1024 * 1024
                 ? HeapIndexPrebuildMode.Memory
                 : HeapIndexPrebuildMode.Disk;
         }

@@ -9,6 +9,7 @@ namespace DumpDetective.Analysis.Indexing.Container;
 /// </summary>
 internal enum CacheSectionId
 {
+    /// <summary>Unused since format version 2 — superseded by the columnar Object* sections below.</summary>
     Objects = 0,
     TypeAggregates = 1,
     Roots = 2,
@@ -19,6 +20,12 @@ internal enum CacheSectionId
     LohFreeBlocks = 7,
     StringDedup = 8,
     StringDedupMeta = 9,
+    /// <summary>Columnar <c>ulong[]</c> of object addresses, one per heap object.</summary>
+    ObjectAddresses = 10,
+    /// <summary>Columnar <c>ulong[]</c> of object method tables, aligned with <see cref="ObjectAddresses"/>.</summary>
+    ObjectMethodTables = 11,
+    /// <summary>Columnar <c>ulong[]</c> of object sizes, aligned with <see cref="ObjectAddresses"/>.</summary>
+    ObjectSizes = 12,
 }
 
 /// <summary>
@@ -37,7 +44,12 @@ internal enum CacheSectionId
 internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
-    public const int CurrentFormatVersion = 1;
+    /// <summary>
+    /// Bumped to 2 when the Objects section moved from an interleaved array-of-structs
+    /// layout to columnar ObjectAddresses/ObjectMethodTables/ObjectSizes sections — old
+    /// cache.bin files fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
+    /// </summary>
+    public const int CurrentFormatVersion = 2;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

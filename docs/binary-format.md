@@ -28,17 +28,17 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 | Section | Size | Description |
 |---------|------|-------------|
 | FileHeader | 64 bytes | Magic, version, TOC offset, section count |
-| TOC (Table of Contents) | ~320 bytes | 10 entries × 32 bytes each (Objects, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
-| Section Data | Variable | Concatenated payload sections (Objects, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| TOC (Table of Contents) | ~384 bytes | 12 entries × 32 bytes each (ObjectAddresses, ObjectMethodTables, ObjectSizes, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| Section Data | Variable | Concatenated payload sections (ObjectAddresses, ObjectMethodTables, ObjectSizes, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
 
 ## FileHeader (64 bytes)
 
 | Field | Size | Type | Value |
 |-------|------|------|-------|
 | Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
-| FormatVersion | 4 bytes | int | 1 |
+| FormatVersion | 4 bytes | int | 2 (bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt) |
 | DumpContentHash | 32 bytes | bytes | Reserved, zero-filled (for future content-addressed caching) |
-| SectionCount | 4 bytes | int | Number of sections in TOC (typically 10) |
+| SectionCount | 4 bytes | int | Number of sections in TOC (typically 12) |
 | TocOffset | 8 bytes | long | Offset to TOC = 64 |
 | Reserved | 8 bytes | bytes | Zero-filled |
 
@@ -46,7 +46,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
-| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects, 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta) |
+| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects [unused since v2], 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta, 10=ObjectAddresses, 11=ObjectMethodTables, 12=ObjectSizes) |
 | Offset | 8 bytes | long | Absolute byte offset of section payload in `cache.bin` |
 | Length | 8 bytes | long | Byte length of section payload |
 | RecordCount | 8 bytes | long | Number of records in section |
@@ -54,9 +54,9 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 
 ## Section Payload
 
-Each section's payload is **exactly the bytes that would have been in the pre-migration per-file format**, unchanged. This preserves all existing reader logic:
+Each section's payload is **exactly the bytes that would have been in the pre-migration per-file format**, unchanged, except the object index, which moved from an interleaved array-of-structs layout to three parallel columnar sections (see below). This preserves all other existing reader logic:
 
-- **Objects section**: ObjectIndex.bin format (24-byte header + 24-byte object records)
+- **ObjectAddresses / ObjectMethodTables / ObjectSizes sections** (format version 2+): three parallel `ulong[]` columns — struct-of-arrays layout — one entry per heap object, aligned by index across all three columns. Written by `DiskBackedObjectIndexWriter` as per-segment scratch-file columns, concatenated into the container; read back by `ObjectIndexReader`, which zips them into `HeapEntry` records via pooled buffers, batched by index size. Replaces the legacy interleaved `Objects` section (24-byte header + 24-byte `Address|MethodTable|Size` records); `RecordCount` in the TOC replaces the old per-section header.
 - **TypeAggregates section**: TypeAggregateIndex.bin format (extended header + type records)
 - **Roots section**: RootIndex.bin format (24-byte header + 20-byte root records)
 - **Handles section**: HandleSnapshot.bin format (24-byte header + 20-byte handle records)

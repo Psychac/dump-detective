@@ -144,13 +144,9 @@ internal readonly struct HeapEntry
 
 ### Storage Format
 
-Binary layout per object (on-disk record):
+As of format version 2, object records are stored **columnar** (struct-of-arrays), not interleaved: three parallel `ulong[]` sections — `ObjectAddresses`, `ObjectMethodTables`, `ObjectSizes` — one entry per heap object, aligned by index. `DiskBackedObjectIndexWriter` writes per-segment scratch-file columns that are concatenated into the three container sections; `ObjectIndexReader` zips them back into `HeapEntry` records in batches sized to the index's total byte count, using pooled buffers. The container TOC's `RecordCount` field replaces the old per-section header.
 
-| Address (8 bytes) | MethodTable (8 bytes) | Size (8 bytes) |
-
-Record size: 24 bytes (no per-record padding required).
-
-Header: ObjectIndex.bin uses a 24-byte header: `Magic(4) | Version(4) | Ticks(8) | RecordCount(8)`.
+Per-column record size: 8 bytes (`ulong`), no padding.
 
 Characteristics:
 - Append-only
@@ -162,7 +158,7 @@ Characteristics:
 As of **2026-07-15**, the system writes all index data into a single **`cache.bin`** container file into a per-dump `<dump>.dumpindex/` folder to accelerate Phase 2 analyzers and to avoid re-scanning the heap on subsequent runs. (Prior to this, data was written as nine separate files; the container consolidates them while preserving all binary payload formats unchanged.)
 
 The container holds these sections (see `DumpDetective.Analysis.Indexing.Container.CacheSectionId`):
-- **Objects** — main fixed-size object records (Address, MethodTable, Size).
+- **ObjectAddresses / ObjectMethodTables / ObjectSizes** — columnar (struct-of-arrays) object index: three parallel `ulong[]` sections, aligned by index, replacing the legacy interleaved `Objects` section as of format version 2.
 - **TypeAggregates** — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
 - **StringDedup** + **StringDedupMeta** — XxHash64 -> preview/count/total-size table for string deduplication and sampling (meta section holds UTF-8 JSON distribution summary).
 - **Handles** — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.

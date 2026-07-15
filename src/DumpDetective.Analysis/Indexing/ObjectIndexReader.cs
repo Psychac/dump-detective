@@ -10,8 +10,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     /// <summary>Shared singleton — stateless, safe to reuse across calls.</summary>
     internal static readonly ObjectIndexReader Instance = new();
 
-    private const int HeaderSize = 24;
-    private const int RecordSize = sizeof(ulong) * 3;
+    private const int ColumnSize = sizeof(ulong);
 
     public IEnumerable<HeapEntry> ReadEntries(string containerPath)
     {
@@ -23,50 +22,81 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     {
         if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             yield break;
-        if (!reader.TryOpenSection(CacheSectionId.Objects, out Stream? sectionStream) || sectionStream is null)
+
+        if (!reader.TryOpenSection(CacheSectionId.ObjectAddresses, out Stream? addrStream) || addrStream is null)
+            yield break;
+        if (!reader.TryOpenSection(CacheSectionId.ObjectMethodTables, out Stream? mtStream) || mtStream is null)
+        {
+            addrStream.Dispose();
+            yield break;
+        }
+        if (!reader.TryOpenSection(CacheSectionId.ObjectSizes, out Stream? sizeStream) || sizeStream is null)
+        {
+            addrStream.Dispose();
+            mtStream.Dispose();
+            yield break;
+        }
+
+        using Stream addr = addrStream;
+        using Stream mt = mtStream;
+        using Stream size = sizeStream;
+
+        long recordCount = addr.Length / ColumnSize;
+        if (recordCount == 0 || mt.Length / ColumnSize != recordCount || size.Length / ColumnSize != recordCount)
             yield break;
 
-        using Stream stream = sectionStream;
-        if (stream.Length <= HeaderSize)
-            yield break;
-
-        stream.Position = HeaderSize;
-
-        // Choose a batch size relative to the index size for efficient reads.
-        long indexBytes = stream.Length - HeaderSize;
-        int batchSize = indexBytes > 4L * 1024 * 1024 * 1024 ? 8 * 1024 * 1024 :
+        // Choose a batch size (in records) relative to the index size for efficient reads —
+        // each record costs 3x ColumnSize bytes total across the three column streams.
+        long indexBytes = addr.Length + mt.Length + size.Length;
+        int batchBytes = indexBytes > 4L * 1024 * 1024 * 1024 ? 8 * 1024 * 1024 :
                         indexBytes > 512L * 1024 * 1024 ? 2 * 1024 * 1024 :
                         256 * 1024;
+        int batchRecords = Math.Max(batchBytes / (ColumnSize * 3), 1);
 
-        byte[] readBuffer = ArrayPool<byte>.Shared.Rent(batchSize);
+        byte[] addrBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
+        byte[] mtBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
+        byte[] sizeBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
         try
         {
-            // carryOver holds a record fragment left over from the previous read that
-            // straddled a batch boundary — it's kept at the front of the buffer and
-            // completed by the next read rather than discarded.
-            int carryOver = 0;
-            int bytesRead;
-            while ((bytesRead = stream.Read(readBuffer, carryOver, batchSize - carryOver)) > 0)
+            long remaining = recordCount;
+            while (remaining > 0)
             {
-                int total = carryOver + bytesRead;
-                int offset = 0;
-                while (offset + RecordSize <= total)
+                int chunkRecords = (int)Math.Min(batchRecords, remaining);
+                int chunkBytes = chunkRecords * ColumnSize;
+
+                ReadColumnFully(addr, addrBuf, chunkBytes);
+                ReadColumnFully(mt, mtBuf, chunkBytes);
+                ReadColumnFully(size, sizeBuf, chunkBytes);
+
+                for (int i = 0; i < chunkRecords; i++)
                 {
-                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(readBuffer.AsSpan(offset, 8));
-                    ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(readBuffer.AsSpan(offset + 8, 8));
-                    ulong size = BinaryPrimitives.ReadUInt64LittleEndian(readBuffer.AsSpan(offset + 16, 8));
-                    yield return new HeapEntry(address, methodTable, size);
-                    offset += RecordSize;
+                    int off = i * ColumnSize;
+                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(addrBuf.AsSpan(off, 8));
+                    ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(mtBuf.AsSpan(off, 8));
+                    ulong objSize = BinaryPrimitives.ReadUInt64LittleEndian(sizeBuf.AsSpan(off, 8));
+                    yield return new HeapEntry(address, methodTable, objSize);
                 }
 
-                carryOver = total - offset;
-                if (carryOver > 0)
-                    Buffer.BlockCopy(readBuffer, offset, readBuffer, 0, carryOver);
+                remaining -= chunkRecords;
             }
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(readBuffer);
+            ArrayPool<byte>.Shared.Return(addrBuf);
+            ArrayPool<byte>.Shared.Return(mtBuf);
+            ArrayPool<byte>.Shared.Return(sizeBuf);
+        }
+    }
+
+    private static void ReadColumnFully(Stream stream, byte[] buffer, int byteCount)
+    {
+        int total = 0;
+        while (total < byteCount)
+        {
+            int read = stream.Read(buffer, total, byteCount - total);
+            if (read <= 0)
+                throw new EndOfStreamException("Columnar object index section ended before expected record count.");
+            total += read;
         }
     }
 }

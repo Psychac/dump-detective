@@ -15,11 +15,9 @@ namespace DumpDetective.Analysis.Indexing;
 
 internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 {
-    // ObjectIndex.bin header constants (separate from IndexHeader to preserve existing format)
-    internal const int ObjIndexMagic = 0x58494444; // DDIX
-    private const int ObjIndexVersion = 1;
-    internal const int ObjIndexHeaderSize = 24;
-    private const int RecordSize = sizeof(ulong) * 3;
+    // Columnar Object* sections store one ulong per object per section — no per-section
+    // header, since the container's TOC already carries each section's RecordCount.
+    private const int ColumnSize = sizeof(ulong);
     private const int ProgressReportEveryObjects = 100_000;
 
     public HeapIndexBuildResult Build(
@@ -87,25 +85,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var globalLengthSamples = new List<int>();
         var globalLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // OPT: each segment is scanned in parallel but serialized to its own scratch file.
+        // OPT: each segment is scanned in parallel but serialized to its own scratch files.
         // Scratch files are concatenated in segment order after the scan instead of writing
         // directly to a shared stream under a lock — a shared-stream write order depends on
         // whichever thread's chunk finishes first, which is non-deterministic and made capped
         // scans (e.g. RetentionAnalyzer's MaxLeakScanObjects) see a different subset of objects
         // — and therefore different results — on every disk-mode run.
-        int serialChunkEntries = Math.Max(writeBuffer / RecordSize, 1);
-        int serialChunkBytes = serialChunkEntries * RecordSize;
+        //
+        // Each segment writes three columnar scratch files (Address/MethodTable/Size) instead
+        // of one interleaved file, so the concatenation phase can produce the three columnar
+        // container sections directly — readers that only need one column (e.g. type
+        // aggregation only touches MethodTable) then only pay for the bytes they read.
+        int serialChunkEntries = Math.Max(writeBuffer / ColumnSize, 1);
         string indexDir = DumpIndexPaths.GetIndexDirectory(dumpPath);
         ClrSegment[] segments = heap.Segments.ToArray();
-        string[] segScratchFiles = new string[segments.Length];
+        string[] segAddrScratchFiles = new string[segments.Length];
+        string[] segMtScratchFiles = new string[segments.Length];
+        string[] segSizeScratchFiles = new string[segments.Length];
         for (int i = 0; i < segments.Length; i++)
-            segScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.tmp");
+        {
+            segAddrScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.addr.tmp");
+            segMtScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.mt.tmp");
+            segSizeScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.size.tmp");
+        }
 
         using var containerWriter = new CacheContainerWriter(containerPath);
-        containerWriter.BeginSection(CacheSectionId.Objects);
         Stream stream = containerWriter.Stream;
-        long objSectionBaseOffset = stream.Position;
-        WriteObjIndexHeader(stream, recordCount: 0); // placeholder — overwritten after scan
 
         var parallelOptions = new ParallelOptions
         {
@@ -235,36 +240,47 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                // Serialize segment entries to this segment's own scratch file in fixed-size
-                // chunks — no shared-stream lock, so segments make independent progress.
-                // Scratch files are concatenated in segment order after the scan completes.
+                // Serialize segment entries to this segment's own columnar scratch files in
+                // fixed-size chunks — no shared-stream lock, so segments make independent
+                // progress. Scratch files are concatenated in segment order after the scan
+                // completes, one column at a time.
                 if (segCount > 0)
                 {
-                    byte[] serialBuf = ArrayPool<byte>.Shared.Rent(serialChunkBytes);
+                    byte[] addrBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
+                    byte[] mtBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
+                    byte[] sizeBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
                     try
                     {
-                        using FileStream segStream = new(segScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
+                        using FileStream addrStream = new(segAddrScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
+                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
+                        using FileStream mtStream = new(segMtScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
+                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
+                        using FileStream sizeStream = new(segSizeScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
                             FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
                         int srcIdx = 0;
                         while (srcIdx < segCount)
                         {
                             int chunkEntries = Math.Min(serialChunkEntries, segCount - srcIdx);
-                            int chunkBytes = chunkEntries * RecordSize;
+                            int chunkBytes = chunkEntries * ColumnSize;
                             for (int ci = 0; ci < chunkEntries; ci++)
                             {
-                                int off = ci * RecordSize;
+                                int off = ci * ColumnSize;
                                 ref HeapEntry e = ref segBuf[srcIdx + ci];
-                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off), e.Address);
-                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 8), e.MethodTable);
-                                BinaryPrimitives.WriteUInt64LittleEndian(serialBuf.AsSpan(off + 16), e.Size);
+                                BinaryPrimitives.WriteUInt64LittleEndian(addrBuf.AsSpan(off), e.Address);
+                                BinaryPrimitives.WriteUInt64LittleEndian(mtBuf.AsSpan(off), e.MethodTable);
+                                BinaryPrimitives.WriteUInt64LittleEndian(sizeBuf.AsSpan(off), e.Size);
                             }
-                            segStream.Write(serialBuf, 0, chunkBytes);
+                            addrStream.Write(addrBuf, 0, chunkBytes);
+                            mtStream.Write(mtBuf, 0, chunkBytes);
+                            sizeStream.Write(sizeBuf, 0, chunkBytes);
                             srcIdx += chunkEntries;
                         }
                     }
                     finally
                     {
-                        ArrayPool<byte>.Shared.Return(serialBuf);
+                        ArrayPool<byte>.Shared.Return(addrBuf);
+                        ArrayPool<byte>.Shared.Return(mtBuf);
+                        ArrayPool<byte>.Shared.Return(sizeBuf);
                         ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
                     }
                 }
@@ -324,48 +340,27 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
         catch
         {
-            for (int i = 0; i < segScratchFiles.Length; i++)
-            {
-                try { File.Delete(segScratchFiles[i]); } catch { /* best-effort cleanup */ }
-            }
+            DeleteScratchFiles(segAddrScratchFiles);
+            DeleteScratchFiles(segMtScratchFiles);
+            DeleteScratchFiles(segSizeScratchFiles);
             throw;
         }
 
-        // Concatenate the per-segment scratch files into the final index in segment order —
-        // this is what makes disk-mode entry order deterministic and match memory-mode's
-        // segment-ordered output.
-        byte[] copyBuf = ArrayPool<byte>.Shared.Rent(writeBuffer);
-        try
-        {
-            for (int i = 0; i < segScratchFiles.Length; i++)
-            {
-                string segFile = segScratchFiles[i];
-                if (!File.Exists(segFile))
-                    continue;
-                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
-                    bufferSize: writeBuffer, FileOptions.SequentialScan))
-                {
-                    int read;
-                    while ((read = segStream.Read(copyBuf, 0, copyBuf.Length)) > 0)
-                        stream.Write(copyBuf, 0, read);
-                }
-                File.Delete(segFile);
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(copyBuf);
-        }
+        // Concatenate the per-segment scratch files into the three columnar sections, one
+        // column at a time, in segment order — this is what makes disk-mode entry order
+        // deterministic and match memory-mode's segment-ordered output, and keeps each
+        // column contiguous in the container so a reader that only needs MethodTable (type
+        // aggregation) or Size (histograms) doesn't pay to read Address too.
+        containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
+        ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount);
 
-        // Seal the Objects section: flush buffered data, rewind to the section's own header,
-        // overwrite the placeholder with the actual record count, then restore position so
-        // EndSection sees the true section end.
-        stream.Flush();
-        long objSectionEnd = stream.Position;
-        stream.Position = objSectionBaseOffset;
-        WriteObjIndexHeader(stream, objectCount);
-        stream.Position = objSectionEnd;
-        stream.Flush();
+        containerWriter.BeginSection(CacheSectionId.ObjectMethodTables);
+        ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount);
+
+        containerWriter.BeginSection(CacheSectionId.ObjectSizes);
+        ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer);
         containerWriter.EndSection(objectCount);
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
@@ -750,37 +745,52 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (!CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             return false;
 
-        if (!reader.TryOpenSection(CacheSectionId.Objects, out Stream? objStream) || objStream is null)
+        // ObjectAddresses' RecordCount (from the TOC) is authoritative — no per-section
+        // header to read, unlike the pre-columnar format.
+        if (!reader.TryGetSectionInfo(CacheSectionId.ObjectAddresses, out CacheTocEntry objEntry) || objEntry.RecordCount <= 0)
             return false;
 
-        long objectCount;
-        using (objStream)
-        {
-            if (!TryReadObjectCount(objStream, out objectCount))
-                return false;
-        }
+        return TypeAggregateIndexReader.TryLoad(reader, containerPath, dumpPath, objEntry.RecordCount, out result);
+    }
 
-        return TypeAggregateIndexReader.TryLoad(reader, containerPath, dumpPath, objectCount, out result);
+    private static void DeleteScratchFiles(string[] files)
+    {
+        for (int i = 0; i < files.Length; i++)
+        {
+            try { File.Delete(files[i]); } catch { /* best-effort cleanup */ }
+        }
     }
 
     /// <summary>
-    /// Reads the <c>recordCount</c> field from the <c>Objects</c> section header.
-    /// Returns <c>false</c> if the section is too short or has a wrong magic number.
+    /// Streams each scratch file in <paramref name="files"/> into <paramref name="stream"/> in
+    /// order, deleting each as it's consumed. Used to assemble a single columnar section from
+    /// per-segment scratch files without materializing the whole column in memory.
     /// </summary>
-    private static bool TryReadObjectCount(Stream stream, out long objectCount)
+    private static void ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize)
     {
-        objectCount = 0;
+        byte[] copyBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            Span<byte> hdr = stackalloc byte[ObjIndexHeaderSize];
-            if (stream.ReadAtLeast(hdr, ObjIndexHeaderSize, throwOnEndOfStream: false) < ObjIndexHeaderSize)
-                return false;
-            if (BinaryPrimitives.ReadInt32LittleEndian(hdr) != ObjIndexMagic)
-                return false;
-            objectCount = BinaryPrimitives.ReadInt64LittleEndian(hdr[16..]);
-            return objectCount > 0;
+            for (int i = 0; i < files.Length; i++)
+            {
+                string segFile = files[i];
+                if (!File.Exists(segFile))
+                    continue;
+                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
+                    bufferSize: bufferSize, FileOptions.SequentialScan))
+                {
+                    int read;
+                    while ((read = segStream.Read(copyBuf, 0, copyBuf.Length)) > 0)
+                        stream.Write(copyBuf, 0, read);
+                }
+                File.Delete(segFile);
+            }
+            stream.Flush();
         }
-        catch { return false; }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(copyBuf);
+        }
     }
 
     // ── Generation helpers ─────────────────────────────────────────────────────
@@ -806,17 +816,4 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         catch { return -1; }
     }
 
-    // ── ObjectIndex.bin header ─────────────────────────────────────────────────
-    // Uses the existing format (not IndexHeader) to preserve backward compatibility
-    // with any existing ObjectIndex.bin files.
-
-    private static void WriteObjIndexHeader(Stream stream, long recordCount)
-    {
-        Span<byte> buf = stackalloc byte[ObjIndexHeaderSize];
-        BinaryPrimitives.WriteInt32LittleEndian(buf, ObjIndexMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(buf[4..], ObjIndexVersion);
-        BinaryPrimitives.WriteInt64LittleEndian(buf[8..], DateTime.UtcNow.Ticks);
-        BinaryPrimitives.WriteInt64LittleEndian(buf[16..], recordCount);
-        stream.Write(buf);
-    }
 }

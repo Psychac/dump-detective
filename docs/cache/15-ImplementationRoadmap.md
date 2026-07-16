@@ -1,25 +1,26 @@
 # Cache Subsystem — Implementation Roadmap
 
-single "what's next" doc for cache/indexing subsystem. Docs
-[11](11-CacheAnalysisFindings.md)–[14](14-CleanSlateCacheRedesign.md)
-analysis/design record — read them *why*. This doc *what/when*:
-one ordered, status-tracked list. Update status work lands; don't
-copy rationale back out source docs, link to it.
+The single "what's next" doc for the cache/indexing subsystem. Docs
+[11](11-CacheAnalysisFindings.md)–[14](14-CleanSlateCacheRedesign.md) are
+the analysis/design record — read them for *why*. This doc is *what/when*:
+one ordered, status-tracked list. Update status as work lands; don't copy
+rationale back out of the source docs, just link to it.
 
 Status current as 2026-07-15, checked against `upgrade/clrmd-4` source
-(Single-writer consolidation completed; all memory/disk branching removed).
+(single-writer consolidation completed; all memory/disk branching removed).
 
-**Sequencing note:** deliberately diverges 14's own suggested
-order ("ship incremental manifest plan first, treat container
-redesign later, separately-justified pass"). Decision: go straight
-single-file container instead building `CacheManifest.bin`
-unifying remaining `IndexHeader`s first, because work pure
-throwaway once container lands — no reason unify formats nine
-files about be deleted, build manifest container's TOC replaces
-outright. risk 14 actually flagging — debugging new binary format
-same time still-open correctness bugs — handled below fixing
-Tier 0 first porting existing `*DiscrepancyTests` pattern forward
-round-trip tests new format, not inserting manifest step.
+**Sequencing note:** this deliberately diverges from 14's own suggested
+order ("ship the incremental manifest plan first, treat the container
+redesign as a later, separately-justified pass"). Decision: go straight to
+the single-file container instead of building `CacheManifest.bin` and
+unifying the remaining `IndexHeader`s first, because that work would be
+pure throwaway once the container lands — no reason to unify formats for
+nine files about to be deleted, when the container's TOC replaces the
+manifest outright. The risk 14 actually flags — debugging a new binary
+format at the same time as still-open correctness bugs — is handled below
+by fixing Tier 0 first and porting the existing `*DiscrepancyTests` pattern
+forward as round-trip tests for the new format, rather than by inserting a
+manifest step.
 
 ## Tier 0 — Correctness bugs (doc 11) — fix before migrating
 
@@ -61,9 +62,11 @@ there's no reason sequence relative migration.
 path pure throwaway now:
 - ~~`CacheManifest.bin` + unify remaining satellite headers~~ — replaced
 outright by Tier 2's container TOC.
-- ~~Wire old `CacheMetrics`/`GetHealth()` into consumer~~ — replaced by
-Tier 2's telemetry line (below); old per-sub-cache metrics object goes
-away sub-caches it measuring.
+- ~~Wire old `CacheMetrics`/`GetHealth()` into a consumer~~ — deferred to
+Tier 2's telemetry line instead (below). Correction (2026-07-16): the old
+per-sub-cache `CacheMetrics`/`GetHealth()` code was *not* deleted — it's
+still present in `HeapAnalysisCache.cs` with no callers. Delete it once the
+telemetry line ships, rather than leaving both around.
 
 ## Tier 2 — Single-file container migration (doc 14)
 

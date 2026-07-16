@@ -1,5 +1,13 @@
 # Clean-Slate Cache Redesign (Unconstrained)
 
+**Status:** this design shipped as Tier 2 of
+[15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) — single container
+file, atomic write, columnar layout, mmap reader, content-addressed key, and
+corruption resilience are all done. Read this doc for *why* each piece is
+shaped the way it is; read 15 for *what's actually built* vs. deferred
+(schema-driven codegen, analyzer-result caching, telemetry, redaction,
+secondary indices, concurrent-writer locking are all still design-only).
+
 Companion to [13-CacheArchitectureReview.md](13-CacheArchitectureReview.md). That
 review evaluates the current implementation and recommends an incremental path
 (finish `IndexHeader` unification, delete the memory writer, ship a manifest).
@@ -402,6 +410,14 @@ whether analyzer-result caching or secondary indices above are worth their
 added complexity for a given workload rather than shipping them speculatively.
 
 ## Relationship to the incremental plan
+
+**Note: not what happened.** The sequencing below was the original intent,
+but [15](15-ImplementationRoadmap.md) deliberately went straight to the
+container format instead — Tier 0 (correctness bugs) shipped first as
+planned, but the manifest/`IndexHeader`-unification step was skipped rather
+than shipped-then-replaced, since it would have been pure throwaway work.
+Left here for the original reasoning, which was sound at the time it was
+written.
 
 This is deliberately a bigger bet than [13](13-CacheArchitectureReview.md)'s
 recommendation, and the two are not both "do this now" — they're sequential:

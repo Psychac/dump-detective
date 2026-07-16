@@ -1,5 +1,14 @@
 # Cache & Indexing Subsystem — Architecture Review (2026-07-13)
 
+**Historical.** Findings below are confirmed against source as of 2026-07-13
+and most have since been fixed or overtaken by the container-format migration
+in [14](14-CleanSlateCacheRedesign.md). For current status of every item,
+see [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) — don't treat
+the "Prioritized recommendations" table at the end of this doc as current;
+it was superseded by 15's Tier 0-3 breakdown (notably: no `CacheManifest.bin`
+was built — the container's TOC replaced that plan; `CacheMetrics`/`GetHealth()`
+is still dead code, not yet wired into any consumer).
+
 Senior-architect pass over the full cache stack: everything under
 `src/DumpDetective.Analysis/Cache/` (12 files) and
 `src/DumpDetective.Analysis/Indexing/` (writers, readers, satellite files),
@@ -294,19 +303,15 @@ folded into its scope. The core argument:
    hard-failing the whole analysis on a full disk. Worth an explicit test
    case in Phase 3's plan.
 
-## Prioritized recommendations
+## Prioritized recommendations (superseded — see 15)
 
-| # | Recommendation | Effort | Why now |
-|---|---|---|---|
-| 1 | Doc-12 Phase 0: delete dead `HeapAnalysisCache` duplicate code; fix `GetRootDescription` delegation **and** extend it per Finding B (lazy `ToString()` or `RootIndex.bin` format change) | Low | Independent, zero-risk, closes a real correctness gap, unblocks nothing else |
-| 2 | Add a `--no-cache` / cache-bypass CLI flag | Low | Stopgap escape hatch before the manifest exists, cheap insurance for Phase 1 |
-| 3 | Doc-12 Phase 1: delete `MemoryBackedObjectIndexWriter`, collapse dual-paths, remove `--index-mode` | High | Root-cause fix for 5 historical bugs (Finding A); biggest maintainability win in this review |
-| 4 | `--cache-dir` flag with a sane default fallback | Medium | Done — implemented with 4-tier fallback chain (Caveat 1) |
-| 5 | Doc-12 Phase 2: unify `ObjectIndex.bin`/`StringDedupIndex.bin` onto `IndexHeader`; ship `CacheManifest.bin` | Medium | Sequence no later than Phase 1 given Finding E's severity change post-migration |
-| 6 | Small-dump latency benchmark as Phase 1 acceptance gate | Low | Cheap to run, prevents a UX regression from shipping unnoticed |
-| 7 | Wire `CacheMetrics`/`GetHealth()` into a real consumer (verbose output or a `cache-health`/`cache-status` surface), or delete it | Low | Currently dead code either way; the manifest work gives it a natural purpose |
-| 8 | Reconcile `README.md`/`cache-modernization-spec.md` (dedupe the two files, update "preserve both writers" goal, mark `ReferenceGraphCache` as not-yet-started) | Low | Prevents a future contributor/agent from citing stale guidance against this migration |
-| 9 | `dumpdetective cache clean` manual command (not automatic eviction) | Low, defer until after 3-5 | Only relevant once `.dumpindex/` folders are created unconditionally for every dump size |
+This review's original #1-9 list has been overtaken by events; tracked
+instead in [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md)'s
+Tier 0-3 tables. Net outcome: #1, #3, #4, #6, #8 done; #5 (manifest) replaced
+by the container TOC rather than built; #7 (`GetHealth`) still dead code,
+not yet wired; #9 (cache clean command) not built, still low-priority; #2
+(`--no-cache` flag) not built as a separate stopgap since the manifest
+escape-hatch concern it addressed no longer applies to the container design.
 
 ## Explicitly not recommending
 

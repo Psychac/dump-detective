@@ -80,6 +80,33 @@ public class CacheContainerRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void TryOpenSection_CorruptedBytes_ReturnsFalse()
+    {
+        string containerPath = Path.Combine(_testDir, "cache-corrupt-section.bin");
+
+        WriteTestContainer(containerPath);
+
+        CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
+        reader!.TryGetSectionInfo(CacheSectionId.Roots, out var entry).Should().BeTrue();
+
+        using (var fs = new FileStream(containerPath, FileMode.Open, FileAccess.ReadWrite))
+        {
+            fs.Position = entry.Offset;
+            int b = fs.ReadByte();
+            fs.Position = entry.Offset;
+            fs.WriteByte((byte)~b);
+        }
+
+        CacheContainerReader.TryOpen(containerPath, out var corruptedReader).Should().BeTrue();
+        corruptedReader!.TryOpenSection(CacheSectionId.Roots, out var sectionStream).Should().BeFalse();
+        sectionStream.Should().BeNull();
+
+        // Unaffected sections still open successfully.
+        corruptedReader.TryOpenSection(CacheSectionId.Handles, out var handleStream).Should().BeTrue();
+        handleStream!.Dispose();
+    }
+
+    [Fact]
     public void MultipleReads_SectionStreamOpenable()
     {
         string containerPath = Path.Combine(_testDir, "cache-consistent.bin");

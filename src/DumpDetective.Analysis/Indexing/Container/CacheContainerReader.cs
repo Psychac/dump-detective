@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
 namespace DumpDetective.Analysis.Indexing.Container;
@@ -84,10 +86,15 @@ internal sealed class CacheContainerReader
 
     public bool TryGetSectionInfo(CacheSectionId id, out CacheTocEntry entry) => _sections.TryGetValue(id, out entry);
 
+    private const int ChecksumBufferSize = 64 * 1024;
+
     /// <summary>
     /// Memory-maps <c>cache.bin</c> and hands back a read-only view stream bounded to section
     /// <paramref name="id"/>'s byte range. Returns <c>false</c> if the section isn't present in
-    /// the TOC (e.g. it failed to write during the original build and was skipped).
+    /// the TOC (e.g. it failed to write during the original build and was skipped) or if the
+    /// section's bytes no longer match the checksum recorded at build time — corruption is
+    /// treated exactly like a missing section so every caller's existing cold-cache fallback
+    /// handles it without special-casing.
     /// </summary>
     public bool TryOpenSection(CacheSectionId id, out Stream? sectionStream)
     {
@@ -105,7 +112,34 @@ internal sealed class CacheContainerReader
 
         using MemoryMappedFile mmf = MemoryMappedFile.CreateFromFile(_containerPath, FileMode.Open,
             mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
-        sectionStream = mmf.CreateViewStream(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
+        MemoryMappedViewStream view = mmf.CreateViewStream(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
+
+        if (!VerifyChecksum(view, entry.Checksum))
+        {
+            view.Dispose();
+            return false;
+        }
+
+        view.Position = 0;
+        sectionStream = view;
         return true;
+    }
+
+    private static bool VerifyChecksum(Stream sectionStream, uint expected)
+    {
+        var hasher = new XxHash32();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(ChecksumBufferSize);
+        try
+        {
+            int read;
+            while ((read = sectionStream.Read(buffer, 0, buffer.Length)) > 0)
+                hasher.Append(buffer.AsSpan(0, read));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return hasher.GetCurrentHashAsUInt32() == expected;
     }
 }

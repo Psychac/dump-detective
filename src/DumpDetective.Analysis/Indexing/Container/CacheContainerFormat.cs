@@ -125,8 +125,8 @@ internal readonly struct CacheFileHeader
 ///   Offset  4 — Offset (8 bytes)       absolute byte offset into cache.bin
 ///   Offset 12 — Length (8 bytes)       section byte length
 ///   Offset 20 — RecordCount (8 bytes)  number of records in the section
-///   Offset 28 — Checksum (4 bytes)     XxHash32 of the section's bytes; written but not yet
-///                                      validated on read (corruption-resilience is a later item)
+///   Offset 28 — Checksum (4 bytes)     XxHash32 of the section's bytes; validated lazily by
+///                                      <see cref="CacheContainerReader.TryOpenSection"/> on first read
 /// Total = 32 bytes
 /// </remarks>
 internal readonly struct CacheTocEntry

@@ -17,12 +17,23 @@ internal sealed class CacheContainerReader
 {
     private readonly string _containerPath;
     private readonly IReadOnlyDictionary<CacheSectionId, CacheTocEntry> _sections;
+    private readonly byte[] _dumpContentHash;
 
-    private CacheContainerReader(string containerPath, IReadOnlyDictionary<CacheSectionId, CacheTocEntry> sections)
+    private CacheContainerReader(string containerPath, IReadOnlyDictionary<CacheSectionId, CacheTocEntry> sections, byte[] dumpContentHash)
     {
         _containerPath = containerPath;
         _sections = sections;
+        _dumpContentHash = dumpContentHash;
     }
+
+    /// <summary>
+    /// Returns <c>true</c> if <paramref name="dumpPath"/>'s current content matches the hash
+    /// stamped in this container's header — the cheapest possible gate before falling through
+    /// to a section-level read, since it's a handful of sampled-window hashes rather than a
+    /// per-section parse. A header with an all-zero hash (predates content hashing, or hashing
+    /// failed at build time) is treated as "unknown" and passes.
+    /// </summary>
+    public bool MatchesDumpContent(string dumpPath) => DumpContentHasher.Matches(dumpPath, _dumpContentHash);
 
     /// <summary>
     /// Attempts to open the container at <paramref name="containerPath"/> and parse its TOC.
@@ -56,7 +67,7 @@ internal sealed class CacheContainerReader
                 sections[entry.SectionId] = entry;
             }
 
-            reader = new CacheContainerReader(containerPath, sections);
+            reader = new CacheContainerReader(containerPath, sections, header.DumpContentHash);
             return true;
         }
         catch (IOException)

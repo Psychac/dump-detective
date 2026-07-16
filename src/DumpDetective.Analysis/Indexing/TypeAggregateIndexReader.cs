@@ -22,14 +22,13 @@ internal static class TypeAggregateIndexReader
     public static bool TryLoad(
         CacheContainerReader reader,
         string containerPath,
-        string dumpPath,
         long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
         try
         {
-            return TryLoadCore(reader, containerPath, dumpPath, objectCount, out result);
+            return TryLoadCore(reader, containerPath, objectCount, out result);
         }
         catch
         {
@@ -43,7 +42,6 @@ internal static class TypeAggregateIndexReader
     private static bool TryLoadCore(
         CacheContainerReader reader,
         string containerPath,
-        string dumpPath,
         long objectCount,
         out HeapIndexBuildResult? result)
     {
@@ -64,35 +62,19 @@ internal static class TypeAggregateIndexReader
         Span<byte> buf8 = stackalloc byte[8];
         if (stream.ReadAtLeast(buf8, 8, throwOnEndOfStream: false) < 8) return false;
 
-        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+DumpLength(8)+DumpTimeTicks(8) ─
+        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+Reserved(8)+Reserved(8) ─
+        // Trailing 16 bytes used to be a dump length/mtime stamp; that check now happens once at
+        // the container level (see DumpContentHasher/CacheContainerReader.MatchesDumpContent)
+        // before this section is ever opened, so they're read past but otherwise unused.
         Span<byte> extra = stackalloc byte[32];
         if (stream.ReadAtLeast(extra, 32, throwOnEndOfStream: false) < 32) return false;
         int bucketCount = BinaryPrimitives.ReadInt32LittleEndian(extra);
         int moduleCount = BinaryPrimitives.ReadInt32LittleEndian(extra[4..]);
         int shapeCount = BinaryPrimitives.ReadInt32LittleEndian(extra[8..]);
-        long storedLength = BinaryPrimitives.ReadInt64LittleEndian(extra[16..]);
-        long storedTimeTicks = BinaryPrimitives.ReadInt64LittleEndian(extra[24..]);
 
         if (bucketCount is < 0 or > 64) return false;
         if (moduleCount is < 0 or > 65536) return false;
         if (shapeCount < 0) return false;
-
-        // Validate dump identity stamp. If both stored values are 0 the stamp was not
-        // available when the index was written (e.g. a permission error) — accept it.
-        // Otherwise the dump's current size and mtime must match exactly.
-        if (storedLength != 0 || storedTimeTicks != 0)
-        {
-            try
-            {
-                var fi = new FileInfo(dumpPath);
-                if (fi.Length != storedLength || fi.LastWriteTimeUtc.Ticks != storedTimeTicks)
-                    return false; // dump replaced — rebuild required
-            }
-            catch
-            {
-                return false; // cannot stat the dump — treat as mismatch
-            }
-        }
 
         // ── SizeBuckets ──────────────────────────────────────────────────────
         long[]? sizeBuckets = null;

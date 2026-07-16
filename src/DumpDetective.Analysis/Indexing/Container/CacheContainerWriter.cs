@@ -15,6 +15,7 @@ internal sealed class CacheContainerWriter : IDisposable
 
     private readonly string _finalPath;
     private readonly string _tmpPath;
+    private readonly string? _dumpPath;
     private readonly FileStream _stream;
     private readonly List<CacheTocEntry> _entries = new(ReservedSectionCount);
 
@@ -23,9 +24,15 @@ internal sealed class CacheContainerWriter : IDisposable
     private bool _sectionOpen;
     private bool _finished;
 
-    public CacheContainerWriter(string finalPath)
+    /// <param name="dumpPath">
+    /// Source dump path used to compute the content-addressed cache key on <see cref="Finish"/>.
+    /// Optional (defaults to <c>null</c>) so existing direct test construction keeps working;
+    /// omitting it just means the header's <c>DumpContentHash</c> stays zero-filled ("unknown").
+    /// </param>
+    public CacheContainerWriter(string finalPath, string? dumpPath = null)
     {
         _finalPath = finalPath;
+        _dumpPath = dumpPath;
         _tmpPath = finalPath + ".tmp";
         _stream = new FileStream(_tmpPath, FileMode.Create, FileAccess.ReadWrite, FileShare.Read,
             bufferSize: 64 * 1024, FileOptions.SequentialScan);
@@ -133,14 +140,36 @@ internal sealed class CacheContainerWriter : IDisposable
         foreach (CacheTocEntry entry in _entries)
             entry.WriteTo(_stream);
 
+        byte[]? dumpContentHash = TryComputeDumpContentHash();
+
         _stream.Position = 0;
-        new CacheFileHeader(_entries.Count, tocOffset).WriteTo(_stream);
+        new CacheFileHeader(_entries.Count, tocOffset, dumpContentHash).WriteTo(_stream);
 
         _stream.Flush(flushToDisk: true);
         _stream.Dispose();
 
         File.Move(_tmpPath, _finalPath, overwrite: true);
         _finished = true;
+    }
+
+    /// <summary>
+    /// Computes the dump's content signature for the header. Returns <c>null</c> (zero-filled,
+    /// "unknown") if no dump path was supplied or hashing fails — a missing/replaced dump is
+    /// still caught on the next full build, so a hashing hiccup here shouldn't be fatal.
+    /// </summary>
+    private byte[]? TryComputeDumpContentHash()
+    {
+        if (_dumpPath is null)
+            return null;
+
+        try
+        {
+            return DumpContentHasher.Compute(_dumpPath);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>If <see cref="Finish"/> was never called, discards the in-progress <c>.tmp</c> file.</summary>

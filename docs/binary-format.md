@@ -37,7 +37,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 |-------|------|------|-------|
 | Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
 | FormatVersion | 4 bytes | int | 2 (bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt) |
-| DumpContentHash | 32 bytes | bytes | Reserved, zero-filled (for future content-addressed caching) |
+| DumpContentHash | 32 bytes | bytes | Content-addressed cache key: dump file length (8 bytes) + XxHash64 over sampled start/middle/end 1MB windows (8 bytes), remaining 16 bytes reserved/zero. Zero-filled if unknown (predates this field, or hashing failed at build time); an all-zero stored hash is treated as "unknown" and accepted rather than a mismatch. See `DumpContentHasher`. |
 | SectionCount | 4 bytes | int | Number of sections in TOC (typically 12) |
 | TocOffset | 8 bytes | long | Offset to TOC = 64 |
 | Reserved | 8 bytes | bytes | Zero-filled |
@@ -77,7 +77,7 @@ The container is written atomically:
 
 ## Benefits Over Per-File Design
 
-- **Single validity check**: Verify one `cache.bin` file + magic/version, not two (pre-migration checked only `TypeAggregateIndex.bin` existence + dump mtime)
+- **Single validity check**: Verify one `cache.bin` file + magic/version + content hash, not two (pre-migration checked only `TypeAggregateIndex.bin` existence + dump mtime). The content hash (see `DumpContentHasher`) means a dump moved/copied to a new path still hits the cache, and a same-path dump silently replaced with different content doesn't.
 - **Atomic writes**: No partial cache state where some files exist and others don't
 - **Simpler reader logic**: One `CacheContainerReader` opens container once, multiple sections access it via bounded streams
 - **Backward-compatible at section level**: Each reader's per-format parsing logic unchanged; only "how do I get a stream" is different

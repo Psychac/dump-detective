@@ -35,7 +35,7 @@ internal enum CacheSectionId
 /// Layout (little-endian):
 ///   Offset  0 — Magic (8 bytes)            ASCII "DDCACHE1"
 ///   Offset  8 — FormatVersion (4 bytes)     int, readers reject unsupported versions
-///   Offset 12 — DumpContentHash (32 bytes)  reserved, zero-filled (content-addressed key is a later item)
+///   Offset 12 — DumpContentHash (32 bytes)  <see cref="DumpContentHasher"/> signature; zero-filled if unknown
 ///   Offset 44 — SectionCount (4 bytes)      int
 ///   Offset 48 — TocOffset (8 bytes)         long, always equal to <see cref="Size"/>
 ///   Offset 56 — Reserved (8 bytes)          zero
@@ -62,12 +62,14 @@ internal readonly struct CacheFileHeader
     private static readonly byte[] ExpectedMagic = Encoding.ASCII.GetBytes("DDCACHE1");
 
     public readonly int FormatVersion;
+    public readonly byte[] DumpContentHash;
     public readonly int SectionCount;
     public readonly long TocOffset;
 
-    public CacheFileHeader(int sectionCount, long tocOffset)
+    public CacheFileHeader(int sectionCount, long tocOffset, byte[]? dumpContentHash = null)
     {
         FormatVersion = CurrentFormatVersion;
+        DumpContentHash = dumpContentHash ?? new byte[DumpContentHashSize];
         SectionCount = sectionCount;
         TocOffset = tocOffset;
     }
@@ -78,6 +80,7 @@ internal readonly struct CacheFileHeader
         Span<byte> buf = stackalloc byte[Size];
         ExpectedMagic.CopyTo(buf);
         BinaryPrimitives.WriteInt32LittleEndian(buf[FormatVersionOffset..], FormatVersion);
+        DumpContentHash.AsSpan().CopyTo(buf.Slice(DumpContentHashOffset, DumpContentHashSize));
         BinaryPrimitives.WriteInt32LittleEndian(buf[SectionCountOffset..], SectionCount);
         BinaryPrimitives.WriteInt64LittleEndian(buf[TocOffsetOffset..], TocOffset);
         stream.Write(buf);
@@ -107,7 +110,8 @@ internal readonly struct CacheFileHeader
 
         header = new CacheFileHeader(
             BinaryPrimitives.ReadInt32LittleEndian(buf[SectionCountOffset..]),
-            BinaryPrimitives.ReadInt64LittleEndian(buf[TocOffsetOffset..]));
+            BinaryPrimitives.ReadInt64LittleEndian(buf[TocOffsetOffset..]),
+            buf.Slice(DumpContentHashOffset, DumpContentHashSize).ToArray());
         return true;
     }
 }

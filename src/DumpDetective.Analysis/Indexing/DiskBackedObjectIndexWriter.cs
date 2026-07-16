@@ -109,7 +109,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             segSizeScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.size.tmp");
         }
 
-        using var containerWriter = new CacheContainerWriter(containerPath);
+        using var containerWriter = new CacheContainerWriter(containerPath, dumpPath);
         Stream stream = containerWriter.Stream;
 
         var parallelOptions = new ParallelOptions
@@ -515,7 +515,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         try
         {
             containerWriter.BeginSection(CacheSectionId.TypeAggregates);
-            TypeAggregateIndexWriter.Write(containerWriter.Stream, dumpPath, typeAggregates,
+            TypeAggregateIndexWriter.Write(containerWriter.Stream, typeAggregates,
                 moduleRegistry.Modules, globalSizeBuckets, shapeCache, objectCount);
             containerWriter.EndSection(typeAggregates.Count);
         }
@@ -745,12 +745,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (!CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             return false;
 
+        // Cheapest gate first: a sampled content hash mismatch means the dump was replaced,
+        // so there's no point parsing any section.
+        if (!reader.MatchesDumpContent(dumpPath))
+            return false;
+
         // ObjectAddresses' RecordCount (from the TOC) is authoritative — no per-section
         // header to read, unlike the pre-columnar format.
         if (!reader.TryGetSectionInfo(CacheSectionId.ObjectAddresses, out CacheTocEntry objEntry) || objEntry.RecordCount <= 0)
             return false;
 
-        return TypeAggregateIndexReader.TryLoad(reader, containerPath, dumpPath, objEntry.RecordCount, out result);
+        return TypeAggregateIndexReader.TryLoad(reader, containerPath, objEntry.RecordCount, out result);
     }
 
     private static void DeleteScratchFiles(string[] files)

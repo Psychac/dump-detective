@@ -16,7 +16,7 @@ namespace DumpDetective.Analysis.Indexing;
 ///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=2, RecordCount=numTypes
 ///   [ 24 –  31]  ObjectCount (8 B)   total objects from the scan
 ///   [ 32 –  63]  ExtraHeader (32 B)  BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+
-///                                   DumpFileLength(8)+DumpLastWriteUtcTicks(8)
+///                                   Reserved(8)+Reserved(8)
 ///   [ 64 – 127]  SizeBuckets (64 B)  BucketCount × 8-byte signed counters
 ///   [128 –   …]  TypeEntry records   numTypes × 68 B each (see TypeAggregateIndexEntry doc)
 ///   [  … –   …]  ShapeEntry records  ShapeCount × 16 B each (MT(8)+Ref(2)+Val(2)+Pad(4))
@@ -24,8 +24,9 @@ namespace DumpDetective.Analysis.Indexing;
 /// </code>
 /// The file is written last in Phase 1 (after all satellite files). Its presence is
 /// therefore a reliable indicator that the full initial build completed successfully.
-/// The <c>DumpFileLength</c> and <c>DumpLastWriteUtcTicks</c> stamp is validated on
-/// every cache hit so a replaced dump of the same filename is always detected.
+/// Dump identity is validated once at the container level (see
+/// <c>DumpContentHasher</c>/<c>CacheContainerReader.MatchesDumpContent</c>) before this
+/// section is ever opened, so the two reserved fields above are no longer a stamp.
 /// </remarks>
 internal static class TypeAggregateIndexWriter
 {
@@ -45,7 +46,6 @@ internal static class TypeAggregateIndexWriter
 
     public static void Write(
         Stream stream,
-        string dumpPath,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
         IReadOnlyList<ModuleInfo>? modules,
         long[]? sizeBuckets,
@@ -65,24 +65,17 @@ internal static class TypeAggregateIndexWriter
         BinaryPrimitives.WriteInt64LittleEndian(buf8, objectCount);
         stream.Write(buf8);
 
-        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+DumpLength(8)+DumpTimeTicks(8) ─
-        long dumpFileLength = 0;
-        long dumpLastWriteTicks = 0;
-        try
-        {
-            var fi = new FileInfo(dumpPath);
-            dumpFileLength = fi.Length;
-            dumpLastWriteTicks = fi.LastWriteTimeUtc.Ticks;
-        }
-        catch { /* stamp stays 0,0 — reader accepts 0,0 as "unknown" */ }
-
+        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+Reserved(8)+Reserved(8) ─
+        // The last two 8-byte fields used to carry a dump length/mtime stamp; that check is now
+        // done once at the container level (see DumpContentHasher) before this section is ever
+        // parsed, so they're left zero-filled here for layout compatibility.
         Span<byte> extra = stackalloc byte[32];
         BinaryPrimitives.WriteInt32LittleEndian(extra, bucketCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[4..], moduleCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[8..], shapeCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[12..], 0); // pad
-        BinaryPrimitives.WriteInt64LittleEndian(extra[16..], dumpFileLength);
-        BinaryPrimitives.WriteInt64LittleEndian(extra[24..], dumpLastWriteTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(extra[16..], 0);
+        BinaryPrimitives.WriteInt64LittleEndian(extra[24..], 0);
         stream.Write(extra);
 
         // ── SizeBuckets ──────────────────────────────────────────────────────

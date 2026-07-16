@@ -24,6 +24,10 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         IHeapAnalysisCache heapCache,
         IReadOnlyList<IAnalyzer> activeAnalyzers)
     {
+        // TODO: need to evaluate the need for this.
+        // The idea is that if the user doesn't specify a sampling seed,
+        // we derive one from the dump path to ensure deterministic behavior across runs on
+        // the same dump.
         ThreadAnalysisOptions? threadOptions = resolved.ThreadAnalysis;
         if (threadOptions != null && threadOptions.SamplingSeed == 0)
         {

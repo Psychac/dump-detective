@@ -365,3 +365,13 @@ FodyWeavers.xsd
 .code-review-graph/
 
 .tokensave/
+.tokensave/branch-meta.json
+.tokensave/config.json
+.tokensave/tokensave.db
+.tokensave/tokensave.db-shm
+.tokensave/tokensave.db-wal
+/.tokensave/branch-meta.json
+/.tokensave/tokensave.db
+/.tokensave/tokensave.db-shm
+/.tokensave/config.json
+/.tokensave/tokensave.db-wal

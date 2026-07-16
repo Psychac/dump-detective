@@ -5,15 +5,19 @@
     },
     "CrashAnalysis": {
       "commandName": "Project",
-      "commandLineArgs": "\"D:\\\\DUmps\\\\Crash_IIS_BALTSTPRD\\\\w3wp__BALTSTPRD__PID__9704__Date__03_24_2026__Time_03_49_19PM__68__Second_Chance_Exception_E0434352.dmp\" --performance-diagnostics --memory-diagnostics"
+      "commandLineArgs": "D:\\DUmps\\Crash_IIS_BALTSTPRD\\Date__03_23_2026__Time_06_21_21PM__Second_Chance_Exception_E0434352.dmp"
     },
     "Trend1304": {
       "commandName": "Project",
-      "commandLineArgs": "--trend=D:\\\\DUmps\\\\13-04\\\\PID__2876__Date__04_13_2026__Time_11_19_47AM.dmp;D:\\\\DUmps\\\\13-04\\\\PID__2876__Date__04_13_2026__Time_01_04_17PM.dmp;D:\\\\DUmps\\\\13-04\\\\PID__2876__Date__04_13_2026__Time_06_19_40PM.dmp --report-format=html"
+      "commandLineArgs": "--trend=D:\\DUmps\\13-04\\PID__2876__Date__04_13_2026__Time_11_19_47AM.dmp;D:\\DUmps\\13-04\\PID__2876__Date__04_13_2026__Time_01_04_17PM.dmp;D:\\DUmps\\13-04\\PID__2876__Date__04_13_2026__Time_06_19_40PM.dmp --memory-diagnostics"
     },
     "HangAnalysis": {
       "commandName": "Project",
-      "commandLineArgs": "D:\\DUmps\\21-04\\w3wp.exe_260421_175618.dmp --performance-diagnostics --memory-diagnostics"
+      "commandLineArgs": "D:\\DUmps\\21-04\\w3wp.exe_260421_175618.dmp"
+    },
+    "Trend2505": {
+      "commandName": "Project",
+      "commandLineArgs": "--trend=D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_12_45_12PM.dmp;D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_02_19_50PM.dmp;D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_06_15_23PM.dmp --memory-diagnostics"
     }
   }
 }

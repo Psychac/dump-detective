@@ -5,6 +5,7 @@
   "Profile": "balanced",
   "IncludeAnalyzers": [ "MemoryLeak", "ReferenceChain" ],
   "ExcludeAnalyzers": [ "Thread" ],
+  "CacheDirectory": null,
   "ReportFormat": "html",
   "ReportStyleVersion": "v1",
   "Diagnostics": {

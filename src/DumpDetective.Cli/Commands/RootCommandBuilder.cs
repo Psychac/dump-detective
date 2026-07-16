@@ -19,6 +19,8 @@ internal sealed class RootCommandBuilder
         Description = "Path to JSON config. If found, config values take precedence over CLI values."
     };
 
+    // need to see use case and remove this.
+    [Obsolete("Use --trend instead.")]
     private readonly Option<string?> _baselineDumpOption = new("--baseline")
     {
         Description = "Baseline dump path used for comparison."
@@ -29,6 +31,7 @@ internal sealed class RootCommandBuilder
         Description = "Semicolon-separated dump paths ordered oldest->newest."
     };
 
+    // TODO: Need to see if these options are necessary tbh, or if a simpler approach is better. For now, leaving them in for advanced users.
     private readonly Option<int?> _highReferenceThresholdOption = new("--high-reference-threshold");
     private readonly Option<int?> _maxDuplicateStringLengthOption = new("--max-duplicate-string-length");
     private readonly Option<int?> _minDuplicateStringCountOption = new("--min-duplicate-string-count");
@@ -36,9 +39,13 @@ internal sealed class RootCommandBuilder
     private readonly Option<int?> _referenceChainTopCountOption = new("--reference-chain-top-count");
     private readonly Option<int?> _referenceChainMaxPathSearchObjectsOption = new("--reference-chain-max-path-search-objects");
     private readonly Option<int?> _eventLeakMinSubscribersOption = new("--event-leak-min-subscribers");
+
+    // TODO: Need to investigate why there is separate memory and performance diagnostics options
     private readonly Option<bool> _memoryDiagnosticsOption = new("--memory-diagnostics");
     private readonly Option<bool> _performanceDiagnosticsOption = new("--performance-diagnostics");
     private readonly Option<bool> _diagnosticModeOption = new("--diagnostic-mode");
+
+
     private readonly Option<string?> _includeAnalyzersOption = new("--include-analyzers")
     {
         Description = "Comma-separated analyzer names to include."
@@ -47,14 +54,21 @@ internal sealed class RootCommandBuilder
     {
         Description = "Comma-separated analyzer names to exclude."
     };
+
+    // TODO: whats report format? is this for the report output format? if so, we should clarify that in the description.
     private readonly Option<string?> _reportFormatOption = new("--report-format");
     private readonly Option<string?> _reportStyleOption = new("--report-style")
     {
         Description = "Report style version: v1 or v2."
     };
     private readonly Option<string?> _outputPathOption = new("--output");
+
+    // TODO: pre-render?? there is something like this??
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
+    
     private readonly Option<bool> _separateJsonOption = new("--separate-json") { Description = "Write report.html and report.json side-by-side; client will load external JSON." };
+    
+    
     private readonly Option<string?> _cacheDirectoryOption = new("--cache-dir")
     {
         Description = "Directory to store the disk-based heap index cache. Falls back to a folder next to the dump, then to a temp-folder location if neither is writable."

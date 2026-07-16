@@ -1,3 +1,10 @@
+> **Historical design record — written for the graph-based direction
+> (docs 04-09), which was never built.** For the performance/validation
+> approach actually in use for Tier 2 (the single-file container), see
+> the "Small-dump latency benchmark acceptance gate" and
+> `*DiscrepancyTests` rows in
+> [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md), and
+> [docs/performance-checklist.md](../performance-checklist.md).
 
 # Implementation Specification – Performance & Validation
 

@@ -1,3 +1,11 @@
+> **Historical design record — not built, not on the current roadmap.**
+> Tier 2 ([14-CleanSlateCacheRedesign.md](14-CleanSlateCacheRedesign.md))
+> replaced this graph-based direction with the single-file columnar
+> container (`cache.bin` with a TOC — see
+> [docs/binary-format.md](../binary-format.md)), which already covers
+> disk-backed persistence of the object index. See
+> [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) for what's
+> actually being built.
 
 # Implementation Specification – Disk-backed Graph
 

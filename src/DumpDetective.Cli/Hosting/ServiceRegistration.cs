@@ -46,6 +46,7 @@ internal static class ServiceRegistration
         services.AddSingleton<PerDumpExecutionService>();
         services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();
+        services.AddSingleton<SingleDumpStageFactory>();
         services.AddSingleton<SingleDumpOrchestrationService>();
         services.AddSingleton<TrendOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();

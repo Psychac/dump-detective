@@ -1,5 +1,5 @@
-using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
+using DumpDetective.Cli.Output;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -7,7 +7,7 @@ using FluentAssertions;
 
 using Xunit;
 
-namespace DumpDetective.Tests.Unit.Services;
+namespace DumpDetective.Tests.Unit.Output;
 
 public sealed class AnalysisSummaryFormatterTests
 {

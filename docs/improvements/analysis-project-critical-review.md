@@ -3,25 +3,28 @@
 ## Status
 Architectural/code-structure review.
 
-Validated against active source on 2026-05-30.
+Validated against active source on 2026-05-30. Re-validated against active source on 2026-07-17.
 
-## Implementation Status Update (2026-05-30)
-Overall status: Partially remediated (major phase goals delivered; remaining cleanup is now narrower and more localized).
+## Implementation Status Update (2026-07-17)
+Overall status: Partially remediated (major phase goals delivered; remaining cleanup is now narrower and more localized). Consistent with the 2026-05-30 assessment; no regression found, but two nuances below were not previously called out.
 
 Addressed in implementation:
-- Reporting ownership leak removed: Analysis no longer compiles Reporting finding-generator source.
-- `AnalysisPipeline` decomposed via explicit collaborators (`AnalyzerExecutionRunner`, `AnalysisDiagnosticsPublisher`, `AnalyzerCleanupPolicy`, `AnalyzerResultPostProcessor`).
-- `InsightEngine` refactored into grouped rule-set orchestration.
+- Reporting ownership leak removed: `DumpDetective.Analysis.csproj` no longer links/compiles Reporting finding-generator source (verified directly against the current csproj — no `Compile Include` targeting `..\DumpDetective.Reporting\FindingGenerators`).
+- `AnalysisPipeline` decomposed via explicit collaborators (`AnalyzerExecutionRunner`, `AnalysisDiagnosticsPublisher`, `AnalyzerCleanupPolicy`, `AnalyzerResultPostProcessor`), plus a newer `AnalyzerCollectionPolicyEvaluator` collaborator (added as part of the Core boundary-tightening phase).
+- `InsightEngine` reorganized internally into grouped rule objects (`Apply(...)` per rule), which is a real structural improvement over one flat procedure — but it still lives as a single ~80KB / ~70-symbol file (`Insight/InsightEngine.cs`). The "grouped rule-set" claim is accurate at the code-organization level, not at the file-splitting level; a reader still opens one large file to see all rules.
 - Shared traversal extraction adopted in analyzer flow (`ObjectGraphTraversal` used by `AsyncTaskAnalyzer`, `HeapTypePathTraversal` used by `GCRootAnalyzer`).
 - Shared root-index reading extracted into `RootIndexReader` and reused by `GCRootAnalyzer` and `HeapAnalysisCache`.
-- Memory projection/ranking logic extracted out of `MemoryAnalyzer` into `MemoryAnalysisProjection`.
-- Focused direct tests added for heuristic-heavy hotspots (`InsightEngine`, `RootIndexReader`, `MemoryAnalysisProjection`).
+- Memory projection/ranking logic extracted out of `MemoryAnalyzer` into `MemoryAnalysisProjection`; `MemoryAnalyzer.cs` itself is now small (~5.2KB, 18 symbols), confirming the extraction actually shrank the analyzer rather than just adding a helper alongside it.
+- Focused direct tests confirmed present: `InsightEngineTests`, `RootIndexReaderTests`, `MemoryAnalysisProjectionTests`, and `AnalysisPipelineTests` all exist under `tests/DumpDetective.Tests/Unit/Analysis`.
+
+New/refined finding since last review:
+- The Reporting `FindingGenerators/*.cs` files (now physically owned by and compiled in `DumpDetective.Reporting`) still declare `namespace DumpDetective.Analysis.FindingGenerators`. The project-ownership boundary is genuinely fixed (Analysis no longer compiles them), but the namespace is a leftover from the pre-move state and misleads readers about which project owns the type. Low severity, cheap to fix (rename namespace to `DumpDetective.Reporting.FindingGenerators`), but worth doing before it calcifies further.
 
 Remaining follow-on cleanup:
-- heavyweight analyzer decomposition is still incomplete, but the broadest local algorithm blocks have now been peeled off (`MemoryAnalyzer` and `GCRootAnalyzer` are thinner than before)
-- `HeapAnalysisCache` internal split is still pending beyond the root-index reader extraction
+- heavyweight analyzer decomposition is still incomplete, but the broadest local algorithm blocks have now been peeled off (`MemoryAnalyzer` is now thin; `GCRootAnalyzer` is thinner but still ~10KB/22 symbols and still hosts local BFS/grouping logic beyond the extracted `RootIndexReader`)
+- `HeapAnalysisCache` internal split is still pending beyond the root-index reader extraction (still ~11.8KB / 58 symbols)
 - shared traversal/query expansion is partial rather than comprehensive
-- direct focused tests for all heuristic-heavy hotspots remain uneven, but the highest-risk shared helpers now have direct coverage
+- `MemoryAnalyzer` and `GCRootAnalyzer` still have no direct unit-test file of their own (the existing `*AnalyzerDiscrepancyTests` cover cache-vs-live discrepancy behavior, not internal heuristic logic); the extracted `MemoryAnalysisProjection`/`RootIndexReader` helpers are directly tested, which mitigates but does not eliminate this gap
 
 ## Scope
 Project reviewed: `src/DumpDetective.Analysis`

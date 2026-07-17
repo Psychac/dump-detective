@@ -1,9 +1,11 @@
 # DumpDetective Architecture Refactor Roadmap
 
 ## Status
-Proposed roadmap.
+Proposed roadmap — largely executed. This document is the original planning artifact; for current execution status of each phase, see `consolidated-refactor-program.md`, which tracks Phases 0-8 (mapped onto this roadmap's Phases 1-8) and has been re-validated most recently.
 
-Validated against active source layout on 2026-05-30.
+Validated against active source layout on 2026-05-30. Re-validated for stale evidence/file references on 2026-07-17 (see note below).
+
+Re-validation note (2026-07-17): most of the concrete file references in the "Evidence" and "Recommended First 5 Refactor Targets" sections below describe the *pre-refactor* state and no longer exist in current source — this is expected, since those files were the intended refactor targets and have since been replaced by the capability-module system (Phase 2/4 of the consolidated program). They are left in place below as historical evidence for why the roadmap was written, not as a description of current state. One exception was found and is called out inline: the `InternalsVisibleTo` reduction goal referenced under Phase 8/Core tightening in the consolidated program was not actually completed despite being marked done there — see `core-project-critical-review.md`.
 
 ## Purpose
 This document turns the architectural critique into an execution roadmap ordered by payoff and implementation risk.
@@ -35,15 +37,15 @@ Simplify by making ownership explicit:
 
 ## Evidence Behind This Roadmap
 
-### Active complexity seams observed in code
-- `src/DumpDetective.Analysis/DumpDetective.Analysis.csproj` compiles source files from `..\DumpDetective.Reporting\FindingGenerators\*.cs`.
-- `src/DumpDetective.Cli/Services/DefaultAnalyzerFactory.cs` owns the analyzer catalog.
-- `src/DumpDetective.Cli/Hosting/ServiceRegistration.cs` manually registers analyzers, finding generators, trend comparers, formatters, and contains a comment warning that the lists must stay in sync.
-- `src/DumpDetective.Cli/Services/SingleDumpOrchestrationService.cs` constructs stages, invokes `InsightEngine`, and combines analysis policy with host orchestration.
-- `src/DumpDetective.Cli/Services/ReportBuilderFacade.cs` caches builder lists from a CLI-owned section-builder factory.
-- `src/DumpDetective.Reporting/Services/ReportSerializer.cs` and `src/DumpDetective.Reporting/Services/TrendReportComposer.cs` form a deep document-composition stack.
-- `src/DumpDetective.Reporting/Templates/report.ui.js` contains a substantial client-side interaction layer and showed up as a graph hotspot without direct test coverage.
-- `src/DumpDetective.Analysis/Analyzers/MemoryAnalyzer.cs` and `src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs` each contain both domain logic and reusable algorithmic machinery.
+### Active complexity seams observed in code (pre-refactor state; see resolution notes)
+- `src/DumpDetective.Analysis/DumpDetective.Analysis.csproj` compiles source files from `..\DumpDetective.Reporting\FindingGenerators\*.cs`. **Resolved**: confirmed no such linked compilation remains in the current csproj.
+- `src/DumpDetective.Cli/Services/DefaultAnalyzerFactory.cs` owns the analyzer catalog. **Resolved**: this file no longer exists; the catalog now lives in Reporting's `Capabilities/DefaultAnalyzerFeatureModuleCatalog.cs`.
+- `src/DumpDetective.Cli/Hosting/ServiceRegistration.cs` manually registers analyzers, finding generators, trend comparers, formatters, and contains a comment warning that the lists must stay in sync. **Resolved**: `ServiceRegistration.cs` is now a small (~23-symbol) file that iterates the capability-module catalog instead of hand-listing components.
+- `src/DumpDetective.Cli/Services/SingleDumpOrchestrationService.cs` constructs stages, invokes `InsightEngine`, and combines analysis policy with host orchestration. **Partially resolved**: the file still exists in `Cli/Services/` (not moved to a separate `Execution/` folder as some later notes implied), but per `cli-project-critical-review.md` the composition-root/catalog ownership issue this evidence was illustrating is fixed; remaining concern is folder placement only.
+- `src/DumpDetective.Cli/Services/ReportBuilderFacade.cs` caches builder lists from a CLI-owned section-builder factory. **Resolved**: this file no longer exists in current source.
+- `src/DumpDetective.Reporting/Services/ReportSerializer.cs` and `src/DumpDetective.Reporting/Services/TrendReportComposer.cs` form a deep document-composition stack. **Still open**: both files still exist and remain broad (`ReportSerializer.cs` ~60.9KB/60 symbols, `TrendReportComposer.cs` ~51.2KB/51 symbols) — see `reporting-project-critical-review.md`.
+- `src/DumpDetective.Reporting/Templates/report.ui.js` contains a substantial client-side interaction layer and showed up as a graph hotspot without direct test coverage. **Partially resolved**: `report.ui.toc.js` and `report.ui.integrity.js` have been extracted, but `report.ui.js` itself is still ~47.9KB — decomposition has started, not completed.
+- `src/DumpDetective.Analysis/Analyzers/MemoryAnalyzer.cs` and `src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs` each contain both domain logic and reusable algorithmic machinery. **Partially resolved**: `MemoryAnalyzer.cs` is now thin (~5.2KB/18 symbols) after the `MemoryAnalysisProjection` extraction; `GCRootAnalyzer.cs` is thinner but still ~10KB/22 symbols and retains local logic beyond the extracted `RootIndexReader`.
 
 ### Important constraint
 The refactor must not regress the bounded-memory, index-first analysis model.
@@ -493,6 +495,7 @@ This repo already has enough moving parts that structural tests will pay for the
 - Phase 6: Extract reusable algorithm services from heavy analyzers
 
 ## Recommended First 5 Refactor Targets
+Status (2026-07-17): targets 1-4 below are done — the referenced files no longer exist and have been replaced by the capability-module system. Target 5 (`report.ui.js` split) is in progress, not complete.
 
 ### 1. `src/DumpDetective.Analysis/DumpDetective.Analysis.csproj`
 Why:

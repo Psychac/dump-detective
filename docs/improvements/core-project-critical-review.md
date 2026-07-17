@@ -3,21 +3,24 @@
 ## Status
 Architectural/code-structure review.
 
-Validated against active source on 2026-05-30.
+Validated against active source on 2026-05-30. Re-validated against active source on 2026-07-17.
 
-## Implementation Status Update (2026-05-30)
-Overall status: Substantially remediated (boundary tightening complete for current phase scope).
+## Implementation Status Update (2026-07-17)
+Overall status: Partially remediated — narrower than the 2026-05-30 assessment claimed. Directly inspecting `DumpDetective.Core.csproj` shows Finding #6 (`InternalsVisibleTo`) is **not** resolved; the previous "reduced/audited" claim does not match current source and is corrected below.
 
 Addressed in implementation:
 - boundary intent documented: Core is intentionally dump-runtime-aware for current architecture
-- legacy ambient option bag removed from `AnalysisContext` in favor of typed `AnalysisOptions`
+- legacy ambient option bag removed from `AnalysisContext` in favor of typed `AnalysisOptions` — confirmed: `Models/AnalysisContext.cs` is now a small type (~1.3KB / 13 symbols), consistent with the legacy `Options` dictionary having been retired
 - diagnostics collection policy inference moved out of Core into Analysis (`AnalyzerCollectionPolicyEvaluator`)
-- `InternalsVisibleTo` surface reduced/audited to avoid broad Core internals exposure
+
+Correction to prior status:
+- The claim that "`InternalsVisibleTo` surface reduced/audited to avoid broad Core internals exposure" is **inaccurate**. `DumpDetective.Core.csproj` still declares five `InternalsVisibleTo` entries: `BenchmarkSuite1`, `DumpDetective.Analysis`, `DumpDetective.Reporting`, `DumpDetective.Cli`, `DumpDetective.Tests` — the same breadth as the original review. This also contradicts `consolidated-refactor-program.md`'s Phase 7 note claiming retention of "a single Analysis-to-tests entry only." Finding #6 below should be treated as still fully open, not resolved.
 
 Remaining follow-on cleanup:
 - Core remains directly ClrMD-aware by design decision (not migrated to runtime-neutral contracts)
 - some contract-level policy helpers (e.g., category inference patterns) remain candidates for future simplification
-- `IFindingGenerator` placement remains a seam decision to revisit only if boundary strategy changes
+- `IFindingGenerator` placement remains a seam decision to revisit only if boundary strategy changes — unchanged, still in `Abstractions/IFindingGenerator.cs`
+- `InternalsVisibleTo` reduction (Opportunity 5 / Finding #6) has not been started; still five broad friend-assembly entries
 
 ## Scope
 Project reviewed: `src/DumpDetective.Core`
@@ -126,9 +129,10 @@ Refactor opportunity:
 
 ### 6. Internal visibility is broad, which weakens boundary enforcement
 Severity: Medium-Low
+Status (2026-07-17): Still open — unchanged since original review.
 
 Evidence:
-- `InternalsVisibleTo` includes Analysis, Reporting, Cli, Tests, BenchmarkSuite1
+- `InternalsVisibleTo` includes Analysis, Reporting, Cli, Tests, BenchmarkSuite1 (verified directly against `DumpDetective.Core.csproj`, still five entries)
 
 Why this is a problem:
 - Broad friend access can be pragmatic.

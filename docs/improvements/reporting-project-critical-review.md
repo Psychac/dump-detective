@@ -3,21 +3,25 @@
 ## Status
 Architectural/code-structure review.
 
-Validated against active source on 2026-05-30.
+Validated against active source on 2026-05-30. Re-validated against active source on 2026-07-17.
 
-## Implementation Status Update (2026-05-30)
-Overall status: Partially remediated (major decomposition delivered; some internal cleanup remains).
+## Implementation Status Update (2026-07-17)
+Overall status: Partially remediated (major decomposition delivered; some internal cleanup remains). Consistent with the 2026-05-30 assessment on the core claims; one new ownership finding and one clarification below.
 
 Addressed in implementation:
-- mutable static renderer overrides removed; explicit `HtmlRenderSettings` path adopted
-- executive summary projection extracted (`ExecutiveSummaryProjector`) and reused by trend composition
-- browser UI decomposition started with focused module split (`report.ui.toc.js`, `report.ui.integrity.js`)
-- targeted renderer/visuals and baseline guardrail tests added and validated
+- mutable static renderer overrides removed; explicit `HtmlRenderSettings` path adopted — confirmed via source search: no `ForcePreRender`-style static override remains anywhere in the codebase, and `HtmlReportRenderer.cs` is now small (~9.9KB / 24 symbols).
+- executive summary projection extracted (`ExecutiveSummaryProjector`) and reused by trend composition.
+- browser UI decomposition started with a focused module split (`report.ui.toc.js` ~739 bytes, `report.ui.integrity.js` ~3.6KB) — genuinely extracted, but `report.ui.js` itself is still ~47.9KB, so this is an early step rather than a completed decomposition; the "started" wording in the original doc remains the accurate characterization.
+- targeted renderer/visuals and baseline guardrail tests added and validated.
+- Reporting now owns the production capability/module catalog: `Capabilities/DefaultAnalyzerFeatureModuleCatalog.cs` declares ~34 `AnalyzerFeatureModule` entries (analyzer, finding generator, trend comparer, section builder per module) and is consumed directly by `DumpDetective.Cli/Hosting/ServiceRegistration.cs`. This is new scope for Reporting relative to the original review (which predates the capability-module system) and is architecturally consistent with Reporting owning finding-generation/registration composition, though it does widen what "Reporting" is responsible for beyond report projection/rendering.
+
+New/clarified finding since last review:
+- Finding generators physically live under `Reporting/FindingGenerators/*.cs` but still declare `namespace DumpDetective.Analysis.FindingGenerators` (verified in `MemoryFindingGenerator.cs` and referenced this way from `DefaultAnalyzerFeatureModuleCatalog.cs`'s `using DumpDetective.Analysis.FindingGenerators;`). Reporting fully owns and compiles these files, but the namespace still advertises Analysis ownership — a cosmetic leftover from the migration that should be renamed to `DumpDetective.Reporting.FindingGenerators` to match physical/project reality. (Same issue flagged in the Analysis project review.)
 
 Remaining follow-on cleanup:
-- `ReportSerializer` remains broad despite extraction improvements
-- trend composition still has residual complexity and can be further reduced around shared base projection
-- builder/generator internal organization is still relatively flat and can be grouped by domain/capability
+- `ReportSerializer` remains broad despite extraction improvements (confirmed: still ~60.9KB / 60 symbols)
+- trend composition still has residual complexity and can be further reduced around shared base projection (confirmed: `TrendReportComposer.cs` still ~51.2KB / 51 symbols)
+- builder/generator internal organization is still relatively flat and can be grouped by domain/capability (confirmed: `SectionBuilders/` and `FindingGenerators/` each contain dozens of files with no subfolder grouping)
 - Analysis-to-Reporting contract surface can still be narrowed further over time
 
 ## Scope

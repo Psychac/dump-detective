@@ -12,7 +12,7 @@ public sealed class RootCacheDiscrepancyTests
 {
     private static string DumpPath => Environment.GetEnvironmentVariable("DD_BENCHMARK_DUMP") ?? @"D:\DUmps\Crash_IIS_BALTSTPRD\Date__03_23_2026__Time_06_21_21PM__Second_Chance_Exception_E0434352.dmp";
 
-    [Fact]
+    [DiscrepancyFact]
     public void RootCache_DiskVsMemoryMode_AgreeOnSameHeap()
     {
         string dumpPath = DumpPath;

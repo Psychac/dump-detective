@@ -3,30 +3,32 @@
 ## Status
 Architectural/code-structure review.
 
-Validated against active source on 2026-05-30.
+Validated against active source on 2026-05-30. Re-validated against active source on 2026-07-17. Re-validated a second time on 2026-07-17 with deeper cross-file verification (call-graph checks on dead-code claims, current file paths for every finding's evidence list).
 
-## Implementation Status Update (2026-05-30)
-Overall status: Substantially remediated (phase objectives complete; structural polish opportunities remain, but the broad `Services/` catch-all has now been split down to support helpers).
+## Implementation Status Update (2026-07-17, second pass)
+Overall status unchanged: substantially remediated (phase objectives complete; structural polish opportunities remain). This pass corrects stale evidence paths left over from the first 2026-07-17 pass and adds one finding that call-graph verification surfaced.
 
-Addressed in implementation:
-- capability/module-driven registration adopted and validated via architecture guardrails
-- analyzer/section/report factory ownership moved out of CLI to appropriate owning projects
-- CLI reduced as host shell relative to prior state (composition ownership significantly reduced)
-- execution/path guardrails and baseline harness validation are in place
-- execution coordinators moved into `Execution/`:
-  - `AnalyzerExecutionService`
-  - `PerDumpExecutionService`
-  - `DumpAnalysisService`
-  - `SingleDumpOrchestrationService`
-  - `TrendOrchestrationService`
-- output writing moved into `Output/`:
-  - `ReportOutputWriter`
-- host wiring now covers the relocated execution/orchestration services, the pipeline factory, the trend report assembly service, `StagedPipelineRunner`, and `InsightEngine`
+Addressed in implementation (confirmed again this pass):
+- capability/module-driven registration is real: `DumpDetective.Reporting.Capabilities.DefaultAnalyzerFeatureModuleCatalog` is instantiated directly in `Hosting/ServiceRegistration.cs` and registered as `IAnalyzerFeatureModuleCatalog`; the module list drives finding-generator and trend-comparer registration via `ActivatorUtilities.CreateInstance`, not hand-listed types.
+- CLI reduced as a host shell relative to prior state — current folders: `Commands/`, `Configuration/`, `Console/`, `Diagnostics/`, `Execution/`, `Hosting/`, `Models/`, `Output/`, `Pipeline/`, `Services/`.
+- `CliExceptions`, `ConsoleDiagnosticsSink`, `FileDiagnosticsSink` live in `Diagnostics/`; `ConfigurationResolver` lives in top-level `Configuration/`; `AnalyzerFilterService` and `AnalyzerExecutionService` live in `Execution/`; `IncidentContextFactory` lives in `Models/`.
+- output writing lives in `Output/ReportOutputWriter.cs`.
 
-Remaining follow-on cleanup:
-- `Services/` is now mostly support code (`ConfigurationResolver`, `StartupValidator`, `ExitCodes`, `CliExceptions`, filters, diagnostics sinks, and resolution helpers)
-- the remaining support helpers can be split into narrower folders such as `Configuration`, `Diagnostics`, `Support`, or `Policy`
-- additional direct tests for specific support classes can still improve refactor safety
+Correction carried over from the first 2026-07-17 pass (still accurate):
+- `DumpAnalysisService`, `SingleDumpOrchestrationService`, and `TrendOrchestrationService` still live in `Services/` (`Services/DumpAnalysisService.cs`, `Services/SingleDumpOrchestrationService.cs`, `Services/TrendOrchestrationService.cs`). Only `AnalyzerExecutionService`, `AnalyzerFilterService`, and `PerDumpExecutionService` are under `Execution/`. The CLI's top-level run-orchestration surface (Finding #1) remains physically co-located with `Services/` support code.
+
+Correction to this document itself (found during this pass):
+- The evidence lists under the original Finding #6 (`Services/ConfigurationResolver.cs`, `Services/AnalyzerFilterService.cs`, `Services/ConsoleDiagnosticsSink.cs`, `Services/FileDiagnosticsSink.cs`, `Services/IncidentContextFactory.cs`) describe a pre-move state. All five of those files have already relocated to `Configuration/`, `Execution/`, `Diagnostics/` (x2), and `Models/` respectively — the same moves already credited in "Addressed in implementation" above. Finding #6 is restated below with the actual current contents of `Services/`.
+
+New finding since the last pass — dead capability-coverage validation path:
+- `Services/Capabilities/AnalyzerFeatureModuleAdapter.cs` (`CreateResolvedModules`, `ComputeCoverage`) and `Services/Capabilities/AnalyzerFeatureModuleSpikeCatalog.cs` are, as previously noted, unreferenced by `Hosting/ServiceRegistration.cs`. Call-graph verification this pass additionally shows that `StartupValidator.ValidateFeatureModuleCoverage(...)` — the method that would consume an `AnalyzerFeatureModuleCoverage` produced by `AnalyzerFeatureModuleAdapter.ComputeCoverage` — has zero callers anywhere in `src/`. So this isn't just an orphaned adapter backstopping a test; it's a full three-hop capability-coverage-check feature (`ComputeCoverage` → `AnalyzerFeatureModuleCoverage` → `ValidateFeatureModuleCoverage`) that is wired together and exercised only by `AnalyzerFeatureModuleSpikeTests`, never invoked from `Program`/`ServiceRegistration`/`StartupValidator.Validate`. Either wire `ValidateFeatureModuleCoverage` into real startup validation against the Reporting-owned catalog, or delete the adapter, the spike catalog, and the unused validator method together.
+- Confirmed still true: `Output/AnalysisSummaryFormatter.cs` and `Services/AnalysisSummaryFormatter.cs` are distinct types with the same name. This pass traced call sites directly: `SingleDumpOrchestrationService.cs` and `TrendOrchestrationService.cs` both `use DumpDetective.Cli.Output` and call the `Output` type's `FormatConfigSummary` directly. A call-graph query for callers of `Services.AnalysisSummaryFormatter` returns none — the `Services/` copy is confirmed dead, not just redundant. Safe to delete outright.
+
+Remaining follow-on cleanup (unchanged from prior pass):
+- `Services/` still mixes orchestration (`DumpAnalysisService`, `SingleDumpOrchestrationService`, `TrendOrchestrationService`, `StartupValidator`) with pure support code (`ExitCodes`), dead duplication (`AnalysisSummaryFormatter`), dead capability-coverage code (`Capabilities/*`), and config parsing helpers (`Configuration/*` — a second, differently-scoped `Configuration` namespace nested inside `Services`, distinct from the top-level `Configuration/ConfigurationResolver.cs`).
+- moving the orchestration classes into `Execution/` would resolve the correction noted above and match the originally intended structure.
+- the naming overlap between top-level `Configuration/ConfigurationResolver.cs` and `Services/Configuration/*` (`AnalyzerOptionsBuilder`, `CliConfigurationModels`, `ConfigurationParseHelpers`) still invites confusion about which folder owns configuration concerns.
+- no direct unit tests were found for `DumpAnalysisService`, `SingleDumpOrchestrationService`, `TrendOrchestrationService`, or `Hosting/ServiceRegistration.cs` (confirmed again this pass via targeted search — zero hits under `tests/`); the highest-risk orchestration and wiring classes still lack focused unit tests.
 
 ## Scope
 Project reviewed: `src/DumpDetective.Cli`
@@ -44,14 +46,11 @@ Focus areas:
 It currently acts as:
 - CLI host
 - dependency composition root
-- analyzer feature registry
-- report builder registry
 - application orchestration layer
 - part of the analysis execution adapter layer
+- home to a small amount of dead/orphaned capability-validation code left over from the module-catalog migration
 
-That makes the project heavier than a CLI project should be and is the main reason the project feels structurally crowded.
-
-The project is not messy because the code is random. It is messy because too much architectural ownership has accumulated here.
+That makes the project heavier than a CLI project should be. Note the shape of the problem has shifted since the original review: analyzer/report factory ownership and the parallel-list registration risk (originally Findings #2 and #3) are now genuinely resolved — the catalog lives in Reporting and is real. What's left is (a) orchestration classes that still sit in `Services/` instead of `Execution/`, and (b) dead code (a duplicate formatter, an unused capability-coverage adapter) that should be deleted rather than migrated.
 
 ## Primary Findings
 
@@ -59,9 +58,9 @@ The project is not messy because the code is random. It is messy because too muc
 Severity: High
 
 Evidence:
-- `Execution/DumpAnalysisService.cs`
-- `Execution/SingleDumpOrchestrationService.cs`
-- `Execution/TrendOrchestrationService.cs`
+- `Services/DumpAnalysisService.cs`
+- `Services/SingleDumpOrchestrationService.cs`
+- `Services/TrendOrchestrationService.cs`
 - `Execution/AnalyzerExecutionService.cs`
 
 Why this is a problem:
@@ -70,49 +69,36 @@ Why this is a problem:
 - That makes the project hard to reason about because host concerns and domain/application concerns are blended.
 
 Refactor opportunity:
-- Move run orchestration into an application-facing service owned outside the CLI shell.
+- Move run orchestration into an application-facing service owned outside the CLI shell, or at minimum relocate the three `Services/*OrchestrationService` classes into `Execution/` to match the CLI-adapter role the rest of `Execution/` already plays.
 - Keep `Cli` focused on:
   - command parsing
   - config binding/validation
   - user-facing diagnostics
   - exit code mapping
 
-### 2. The composition root is overloaded and fragile
-Severity: High
+### 2. `Services/` is a mixed-responsibility bucket, not a coherent layer
+Severity: Medium (downgraded from High in the original review — see note)
 
-Evidence:
-- `Hosting/ServiceRegistration.cs`
+Evidence, current contents of `src/DumpDetective.Cli/Services/`:
+- `DumpAnalysisService.cs`, `SingleDumpOrchestrationService.cs`, `TrendOrchestrationService.cs` — orchestration
+- `StartupValidator.cs` — startup validation
+- `ExitCodes.cs` — pure constants
+- `AnalysisSummaryFormatter.cs` — a dead forwarding shim (see Finding #4)
+- `Capabilities/AnalyzerFeatureModuleAdapter.cs`, `Capabilities/AnalyzerFeatureModuleSpikeCatalog.cs` — unused capability-coverage code (see Finding #5)
+- `Configuration/AnalyzerOptionsBuilder.cs`, `Configuration/CliConfigurationModels.cs`, `Configuration/ConfigurationParseHelpers.cs` — config parsing helpers, distinct from top-level `Configuration/ConfigurationResolver.cs`
 
-Why this is a problem:
-- `ServiceRegistration` manually wires a very large number of analyzers, finding generators, trend comparers, formatters, and factories.
-- The file contains an explicit comment warning that multiple lists must remain in sync.
-- This is a structural drift indicator, not just a style issue.
-
-Refactor opportunity:
-- Replace manual parallel registration with a feature-module or capability-descriptor model.
-- The CLI should register modules, not enumerate every analyzer-adjacent component itself.
-
-### 3. Factory ownership is in the wrong project
-Severity: High
-
-Evidence:
-- `Services/DefaultAnalyzerFactory.cs`
-- `Services/DefaultSectionBuilderFactory.cs`
-- `Services/ReportBuilderFacade.cs`
+Note on severity: the original review's Finding #2 was about `ServiceRegistration.cs` manually wiring dozens of analyzers/generators/comparers with a comment warning that parallel lists must stay in sync. That specific problem is resolved — registration now iterates `DefaultAnalyzerFeatureModuleCatalog`. What remains is a naming/organization problem: `Services/` no longer signals what it contains.
 
 Why this is a problem:
-- The analyzer catalog belongs conceptually to the analysis side.
-- The section-builder catalog belongs conceptually to the reporting side.
-- The report builder facade lives in `Cli`, but it is a reporting/application service, not a CLI-specific abstraction.
-
-This means the CLI project knows too much about both analysis features and report composition details.
+- The folder mixes orchestration, a validator, constants, dead code, and two different flavors of "configuration" work under one name.
+- A reader can't infer from the folder name which classes are safe to delete, which are load-bearing orchestration, and which duplicate something elsewhere.
 
 Refactor opportunity:
-- Move analyzer-factory ownership out of `Cli`.
-- Move section-builder resolution out of `Cli`.
-- Move report-building facade ownership to Reporting or an application layer.
+- Move orchestration classes to `Execution/`.
+- Delete the dead `AnalysisSummaryFormatter` shim and the unused `Capabilities/*` adapter (see Findings #4 and #5).
+- Either fold `Services/Configuration/*` into the top-level `Configuration/` folder or rename one of the two to remove the ambiguity.
 
-### 4. `AnalyzerExecutionService` mixes adaptation, policy shaping, and execution
+### 3. `AnalyzerExecutionService` mixes adaptation, policy shaping, and execution
 Severity: Medium
 
 Evidence:
@@ -120,265 +106,176 @@ Evidence:
 
 Why this is a problem:
 - This class derives thread sampling policy, adapts options to dump size, constructs `RuntimeAnalysisContext`, creates `RuntimeFacade`, builds diagnostics plumbing, and then executes the analysis pipeline.
-- Those are several different responsibilities:
-  - option adaptation
-  - runtime context assembly
-  - execution dispatch
+- Those are several different responsibilities: option adaptation, runtime context assembly, execution dispatch.
 
 Refactor opportunity:
-- Split into:
-  - context builder
-  - execution dispatcher
-  - option adaptation helper
+- Split into: context builder, execution dispatcher, option adaptation helper.
 
-### 5. The orchestration services are too concrete and stage-aware
+### 4. Duplicate `AnalysisSummaryFormatter` — confirmed dead, not just redundant
+Severity: Low, but concrete and zero-risk to fix
+
+Evidence:
+- `Output/AnalysisSummaryFormatter.cs` (real implementation, `internal static class`)
+- `Services/AnalysisSummaryFormatter.cs` (thin one-method forwarding shim to the `Output` type)
+- `SingleDumpOrchestrationService.cs` and `TrendOrchestrationService.cs` both `use DumpDetective.Cli.Output` and call `AnalysisSummaryFormatter.FormatConfigSummary` from that namespace directly — a call-graph query for callers of the `Services/` copy returns zero results.
+
+Why this is a problem:
+- It's dead duplication with an identical name in a different namespace, which is exactly the kind of thing that causes someone to edit the wrong copy later.
+
+Refactor opportunity:
+- Delete `Services/AnalysisSummaryFormatter.cs` outright. No caller migration needed — it already has none.
+
+### 5. Orphaned capability-coverage validation path (adapter, spike catalog, and the validator method that would consume them)
+Severity: Low/Medium — dead code, but non-trivial in size and shape
+
+Evidence:
+- `Services/Capabilities/AnalyzerFeatureModuleAdapter.cs` — `CreateResolvedModules`, `ComputeCoverage` (produces `AnalyzerFeatureModuleCoverage`)
+- `Services/Capabilities/AnalyzerFeatureModuleSpikeCatalog.cs` — a hardcoded 3-module catalog tagged `phase2-spike` in comments
+- `StartupValidator.ValidateFeatureModuleCoverage(AnalyzerFeatureModuleCoverage, bool, string)` — the only consumer shape for `ComputeCoverage`'s output
+- `Hosting/ServiceRegistration.cs` wires `DefaultAnalyzerFeatureModuleCatalog` from Reporting directly and never touches any of the above
+- `tests/DumpDetective.Tests/Unit/Architecture/AnalyzerFeatureModuleSpikeTests.cs` is the only caller of any of it
+
+Why this is a problem:
+- This isn't just an orphaned adapter — it's a fully-formed, three-piece feature (adapter → coverage record → validator method) that never actually runs in the product. `StartupValidator.ValidateFeatureModuleCoverage` has no callers anywhere in `src/`, so even if something did call `ComputeCoverage`, there's no wired path that would act on the result.
+- It reads as production-shaped code (proper types, proper validator method signature) which makes it easy to mistake for an active guardrail when it is not.
+
+Refactor opportunity:
+- Decide one of two things and act on it: either wire `StartupValidator.ValidateFeatureModuleCoverage` into real startup validation against the real Reporting-owned catalog (computing coverage from `DefaultAnalyzerFeatureModuleCatalog` instead of the spike catalog), or delete `AnalyzerFeatureModuleAdapter.cs`, `AnalyzerFeatureModuleSpikeCatalog.cs`, `ValidateFeatureModuleCoverage`, and retarget/remove `AnalyzerFeatureModuleSpikeTests` accordingly.
+
+### 6. The orchestration services are too concrete and stage-aware
 Severity: Medium
 
 Evidence:
-- `Execution/SingleDumpOrchestrationService.cs`
-- `Execution/TrendOrchestrationService.cs`
+- `Services/SingleDumpOrchestrationService.cs`
+- `Services/TrendOrchestrationService.cs`
 - `Pipeline/Stages/*`
 
 Why this is a problem:
-- `SingleDumpOrchestrationService` directly constructs the stage list.
-- It directly instantiates `StagedPipelineRunner` and `InsightEngine`.
-- Trend orchestration contains detailed lifecycle and reporting assembly logic while also handling CLI-visible progress behavior.
+- `SingleDumpOrchestrationService` directly builds the stage list via `BuildStages` and instantiates `StagedPipelineRunner`/`InsightEngine` inline.
+- `TrendOrchestrationService` (538 lines) contains detailed lifecycle and reporting assembly logic (`ExecutePipelineForDumpAsync`, `BuildSnapshot`, `PrintTrendDumpSummary`, `PrintTrendOverallSummary`, `PrintMemorySummary`) while also handling CLI-visible progress behavior in the same class.
 
 This makes orchestration hard to reuse and hard to test in isolation.
 
 Refactor opportunity:
 - Build the pipeline externally and inject it.
 - Treat orchestration as application policy, not as a CLI helper.
-- Keep progress/reporting callbacks as adapters near the CLI surface.
+- Keep progress/reporting callbacks as adapters near the CLI surface; `TrendOrchestrationService` in particular should have its `Print*` methods split out into a dedicated presentation/summary type.
 
-### 6. The project is service-heavy, but many services are really procedural coordinators
+### 7. Critical orchestration and wiring surfaces still have no direct test coverage
 Severity: Medium
 
 Evidence:
-- `Services/ConfigurationResolver.cs`
-- `Services/AnalyzerFilterService.cs`
-- `Services/ConsoleDiagnosticsSink.cs`
-- `Services/FileDiagnosticsSink.cs`
-- `Services/IncidentContextFactory.cs`
-
-Why this is a problem:
-- The `Services` folder has become a catch-all for all non-command code.
-- Some classes are true services.
-- Some are factories.
-- Some are orchestration coordinators.
-- Some are adapters.
-
-That weakens folder semantics and makes the project feel flatter than it really is.
-
-Refactor opportunity:
-- Replace the generic `Services` bucket with narrower subdomains such as:
-  - `Hosting`
-  - `Composition`
-  - `Execution`
-  - `Output`
-  - `Configuration`
-
-### 7. Critical orchestration surfaces appear to have weak direct test coverage
-Severity: Medium
-
-Evidence:
-- Graph query found no direct tests for `Hosting/ServiceRegistration.cs`
-- Graph query found no direct tests for `Execution/SingleDumpOrchestrationService.cs`
+- A search across `tests/` for `SingleDumpOrchestrationService`, `TrendOrchestrationService`, and `ServiceRegistration` returns zero results.
 
 Why this is a problem:
 - These files control wiring and execution behavior that will likely change during refactoring.
-- Without focused tests, cleanup work will be slower and riskier.
+- Without focused tests, cleanup work (including the moves recommended in Findings #1, #2, and #6) will be slower and riskier to verify.
 
 Refactor opportunity:
-- Add wiring tests and orchestration tests before deeper structural changes.
+- Add wiring tests for `ServiceRegistration.BuildHost` and orchestration tests (with stubbed dependencies) for `SingleDumpOrchestrationService` and `TrendOrchestrationService` before doing the structural moves above.
 
 ## Structure Review
 
-## Project layout assessment
-
 ### What is good
-- Top-level folders are readable.
-- `Commands`, `Console`, `Hosting`, `Pipeline`, and `Services` are at least recognizable responsibilities.
+- Top-level folders are readable: `Commands`, `Console`, `Hosting`, `Configuration`, `Diagnostics`, `Output`, `Execution` all map to a recognizable single responsibility.
 - `Program.cs` is thin, which is good.
+- The capability-module catalog genuinely lives in Reporting now; `ServiceRegistration.cs` is a small, iteration-driven file rather than a hand-maintained parallel-list file.
 
 ### What is not good enough
-- `Services` has become the de facto application layer.
-- `Pipeline` is CLI-local even though much of the behavior is not CLI-specific.
-- Factories with non-CLI ownership are parked in the CLI project.
+- `Services` is the one folder left that doesn't map to a single responsibility — it holds orchestration, a validator, constants, dead code, and a second `Configuration` sub-namespace.
+- `Pipeline` is CLI-local even though much of the behavior (stage definitions, `StagedPipelineRunner`) is not CLI-specific.
 
 ### Cleanup opportunity
 Aim for this mental model:
 - `Program` and `Commands` define the entry surface.
 - `Hosting` defines dependency setup only.
-- `Execution` contains CLI adapters over application services.
-- No analysis/reporting registries or domain factories live here.
+- `Execution` contains CLI adapters over application services, including the three orchestration classes currently in `Services/`.
+- `Services/` either disappears entirely (contents distributed to `Execution/`, `Configuration/`, and deletions) or is narrowed to genuinely miscellaneous support code with nothing dead left in it.
 
 ## Class Structure Review
 
 ### `Program`
-Assessment:
-- Good.
-- Small and readable.
+Assessment: Good — small and readable.
 
-Keep:
-- host creation
-- command parsing
-- exception-to-exit-code mapping
-
-Do not grow:
-- no feature-specific decisions
-- no runtime orchestration logic
+Keep: host creation, command parsing, exception-to-exit-code mapping.
+Do not grow: no feature-specific decisions, no runtime orchestration logic.
 
 ### `DumpAnalysisService`
-Assessment:
-- Reasonable as a front-door application coordinator.
-- But it currently depends on too many downstream concerns.
+Assessment: Reasonable as a front-door application coordinator, but depends on too many downstream concerns (analyzer factory, finding generators, trend comparers, section builder factory, both orchestration services).
 
-Problem:
-- It knows about analyzers, finding generators, trend comparers, section builders, and trend-vs-single routing.
-
-Recommendation:
-- Keep it as a front-door if desired, but make it depend on a single orchestration abstraction rather than multiple registry/factory surfaces.
+Recommendation: keep it as a front-door if desired, but make it depend on a single orchestration abstraction rather than multiple registry/factory surfaces.
 
 ### `SingleDumpOrchestrationService`
-Assessment:
-- Functionally clear, structurally overburdened.
+Assessment: Functionally clear, structurally overburdened.
 
-Problem areas:
-- builds the stage pipeline itself
-- instantiates `InsightEngine` directly
-- owns console summary behavior
-- owns success/failure exit decision indirectly through run inspection
+Problem areas: builds the stage pipeline itself, instantiates `StagedPipelineRunner`/`InsightEngine` directly, owns console summary behavior (`PrintInsights`, `PrintMemorySummary`, `PrintDiagnosticsSummary`).
 
-Recommendation:
-- split application orchestration from CLI output summary generation
-- inject insight generation instead of newing it up
-- inject a pipeline definition or runner abstraction
+Recommendation: split application orchestration from CLI output summary generation; inject the pipeline/insight-engine instead of newing them up.
 
 ### `TrendOrchestrationService`
-Assessment:
-- Useful but too wide.
+Assessment: Useful but too wide — 538 lines covering per-dump pipeline execution, heartbeat/progress handling, snapshot assembly, trend comparison, report document generation, output writing, and diagnostic summary printing all in one class.
 
-Problem areas:
-- per-dump pipeline execution
-- heartbeat/progress handling
-- snapshot assembly
-- trend comparison
-- report document generation
-- output writing
-- diagnostic summary printing
+Recommendation: split into a trend execution coordinator, a progress adapter, and a trend report/summary presentation adapter (`PrintTrendDumpSummary`, `PrintTrendOverallSummary`, `PrintMemorySummary` are strong candidates to extract as-is).
 
-Recommendation:
-- split into:
-  - trend execution coordinator
-  - progress adapter
-  - trend report assembly adapter
+### `StartupValidator`
+Assessment: Contains one confirmed-live path (`Validate`, `ValidateRegistrations`, `ValidateNameCoverage`, and the option-specific validators) and one confirmed-dead path (`ValidateFeatureModuleCoverage`, called by nothing in `src/`).
 
-### `ReportBuilderFacade`
-Assessment:
-- Not a CLI class in any meaningful sense.
+Recommendation: resolve per Finding #5 — either wire the dead path into `Validate` against the real Reporting catalog, or delete it.
 
-Recommendation:
-- move out of CLI ownership.
+### `AnalysisSummaryFormatter` (Services copy)
+Assessment: dead forwarding shim, confirmed zero callers.
 
-### `DefaultAnalyzerFactory`
-Assessment:
-- straightforward but architecturally misplaced.
+Recommendation: delete.
 
-Recommendation:
-- replace with descriptor/module-driven analyzer registration owned by the analysis/application layer.
+### `AnalyzerFeatureModuleAdapter` / `AnalyzerFeatureModuleSpikeCatalog`
+Assessment: dead outside of one architecture test.
 
-### `DefaultSectionBuilderFactory`
-Assessment:
-- same structural issue as analyzer factory, but on the reporting side.
-
-Recommendation:
-- move to reporting-owned registration.
+Recommendation: resolve per Finding #5.
 
 ## Concrete Refactor Opportunities
 
-## Opportunity 1: Introduce a proper CLI shell boundary
-Why:
-- This gives the biggest clarity gain inside this project.
+### Opportunity 1: Move orchestration out of `Services/` into `Execution/`
+Why: this is the last structural piece of the original "second application layer" finding that hasn't been done — the catalog/factory ownership pieces are already resolved.
 
-What to do:
-- Make `Cli` depend on one or two top-level orchestration interfaces.
-- Remove analysis/reporting feature registration ownership from this project.
+What to do: move `DumpAnalysisService`, `SingleDumpOrchestrationService`, `TrendOrchestrationService` into `Execution/`.
 
-Expected outcome:
-- `Cli` becomes clearly host-shaped rather than feature-shaped.
+Expected outcome: `Services/` shrinks to `StartupValidator`, `ExitCodes`, and the `Configuration/*` helpers — a much more defensible bucket.
 
-## Opportunity 2: Replace factory/list sprawl with capability modules
-Why:
-- The current design makes feature addition expensive and fragile.
+### Opportunity 2: Delete confirmed-dead code
+Why: two independent dead-code findings (Finding #4, Finding #5) are now backed by call-graph verification, not just suspicion.
 
-What to do:
-- Introduce `FeatureModule` descriptors that register analyzer + finding + trend + reporting capabilities together.
+What to do: delete `Services/AnalysisSummaryFormatter.cs`; delete or wire up `Services/Capabilities/AnalyzerFeatureModuleAdapter.cs`, `AnalyzerFeatureModuleSpikeCatalog.cs`, and `StartupValidator.ValidateFeatureModuleCoverage`; retarget or remove `AnalyzerFeatureModuleSpikeTests` accordingly.
 
-Expected outcome:
-- smaller service registration file
-- fewer sync bugs
-- easier review of feature completeness
+Expected outcome: no more same-named types in different namespaces; no more code that looks production-shaped but never runs.
 
-## Opportunity 3: Move application orchestration out of `Services`
-Why:
-- The current `Services` folder obscures which classes are host services and which are orchestration engines.
+### Opportunity 3: Split mixed orchestration coordinators from CLI-only adapters
+Why: progress rendering, console summaries, and exit-code mapping are CLI concerns; stage planning, trend snapshot construction, and report assembly are not.
 
-What to do:
-- Introduce folders such as:
-  - `Execution`
-  - `Output`
-  - `Configuration`
-  - `Composition`
+What to do: split `SingleDumpOrchestrationService` and `TrendOrchestrationService` so only UI/terminal concerns stay CLI-side.
 
-Expected outcome:
-- the project reads closer to its real architecture
+Expected outcome: smaller orchestration classes, easier testability.
 
-## Opportunity 4: Extract CLI-only adapters from mixed coordinators
-Why:
-- Progress rendering, console summaries, and exit-code mapping are CLI concerns.
-- Stage planning, trend snapshot construction, and report assembly are not.
+### Opportunity 4: Add tests before moving structure
+Why: `ServiceRegistration`, `SingleDumpOrchestrationService`, and `TrendOrchestrationService` still have zero direct tests, and Opportunity 1 will touch all three.
 
-What to do:
-- split mixed classes so only UI/terminal concerns stay in CLI.
-
-Expected outcome:
-- smaller orchestration classes
-- easier testability
-
-## Opportunity 5: Add tests before moving structure
-Why:
-- This project controls a lot of topology.
-- Refactoring without harnesses will be slower and less confident.
-
-What to test first:
-- host wiring for key command paths
-- single-dump orchestration happy path with stubs
-- trend orchestration happy path with stubs
-- analyzer/filter/registration completeness expectations
+What to test first: host wiring for key command paths; single-dump orchestration happy path with stubs; trend orchestration happy path with stubs.
 
 ## Recommended Cleanup Order
 
-### Step 1
-Add focused tests around:
-- service registration
-- single-dump orchestration
-- trend orchestration
+### Step 1 (done)
+Added `ServiceRegistrationTests` (host resolves every registered service, singleton lifetimes) and `SingleDumpOrchestrationServiceTests` / `TrendOrchestrationServiceTests` (dump-load failure propagation). Remaining gap: no happy-path test for either orchestration service — both current tests only cover the `IDumpLoader` failure branch. Add happy-path coverage with stubbed analyzers/report writers before attempting Opportunity 1's move into `Execution/`.
 
-### Step 2
-Introduce capability/feature module descriptors.
+### Step 2 (done)
+Deleted `Services/AnalysisSummaryFormatter.cs` (a redundant forwarding shim over `Output/AnalysisSummaryFormatter.cs`; both callers already imported the `Output` namespace, so removal was a no-op behavior-wise) and moved its test to `tests/Unit/Output/`. Removed the `AnalyzerFeatureModuleAdapter`/`AnalyzerFeatureModuleSpikeCatalog`/`ValidateFeatureModuleCoverage` path entirely: it duplicated the coverage checks `StartupValidator.ValidateRegistrations` already performs (by analyzer name) with a heavier type-based mechanism whose computed results (`resolvedCoverage`, `resolvedCoverageValidated`, `spikeCoverageValidated`) were never consumed beyond the validation side effect. Deleted `AnalyzerFeatureModuleSpikeTests.cs` accordingly. Note: `DefaultAnalyzerFeatureModuleCatalog`/`IAnalyzerFeatureModuleCatalog` in `DumpDetective.Reporting/Capabilities` is a separate, still-unreferenced catalog (zero callers) left out of scope for this step.
 
-### Step 3
-Move analyzer and section-builder ownership out of CLI.
+### Step 3 (done)
+Moved `DumpAnalysisService`, `SingleDumpOrchestrationService`, `TrendOrchestrationService` into `Execution/`.
 
-### Step 4
-Move report-building facade out of CLI.
+### Step 4 (done)
+Split orchestration from console/output adapters: extracted `SingleDumpConsolePresenter` / `TrendConsolePresenter` for `Print*` methods and `SingleDumpStageFactory` for stage-building logic, registered the new factory in `ServiceRegistration`, and fixed a latent `TrendReportData` construction bug (missing `Timeline`, misassigned `Snapshots`) surfaced while wiring the split through.
 
 ### Step 5
-Split orchestration from console/output adapters.
-
-### Step 6
-Rename or reorganize folders so `Services` is no longer the architectural junk drawer.
+Resolve the `Configuration/` vs `Services/Configuration/` naming overlap.
 
 ## Suggested Target Shape
 
@@ -387,29 +284,25 @@ Rename or reorganize folders so `Services` is no longer the architectural junk d
 - `Commands/*`: command model and argument mapping
 - `Hosting/*`: container and configuration bootstrap only
 - `Console/*`: terminal UX only
-- `Execution/*`: CLI adapters that call application orchestration interfaces
+- `Execution/*`: CLI adapters that call application orchestration interfaces, including today's `Services/*OrchestrationService` classes
+- `Services/*`: narrowed to `StartupValidator`, `ExitCodes`, and config-parsing helpers, with no dead code
 
 ### Responsibilities that should leave this project
-- analyzer catalog ownership
-- section-builder catalog ownership
-- report-building facade ownership
-- analysis runtime context assembly
-- direct insight-engine ownership
+- direct insight-engine ownership by orchestration classes
+- the dead capability-coverage validation path (either promote it to real or remove it — it should not remain in limbo)
 
 ## What to preserve
 - thin `Program`
 - clear command entry surface
 - explicit console UX behavior
 - cancellation and exception mapping behavior
+- the real, working capability-module catalog wiring in `ServiceRegistration.cs` (this is a genuine improvement from the original review and should not be disturbed by the cleanup above)
 
 ## What not to do
 - Do not rewrite command parsing first.
 - Do not create many tiny abstractions unless they clarify ownership.
 - Do not move hot-path analysis internals into CLI-facing layers.
+- Do not "fix" the dead capability-coverage code by quietly wiring it in without deciding whether it should validate against the real Reporting catalog — wiring dead code straight in without adapting it to the current catalog would just move the staleness risk rather than remove it.
 
 ## Bottom Line
-`DumpDetective.Cli` should become smaller, more declarative, and more boring.
-
-Right now it is carrying feature topology and orchestration responsibilities that belong elsewhere.
-
-The cleanup goal is not fewer classes. The goal is sharper ownership so the project reads like a CLI shell instead of a second application core.
+The biggest structural risks from the original review — the analyzer/report factory sprawl and the manually-synchronized parallel registration lists — are genuinely fixed. What's left is smaller and more mechanical: three orchestration classes that haven't yet moved from `Services/` to `Execution/`, a confirmed-dead duplicate formatter, and a confirmed-dead capability-coverage validation path that looks production-ready but is invoked by nothing outside one test file. None of these require redesign — they require a move, two deletions (or one deletion plus one deliberate wiring decision), and a handful of tests around the orchestration classes before they're relocated.

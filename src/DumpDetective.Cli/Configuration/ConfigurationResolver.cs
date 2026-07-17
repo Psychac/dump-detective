@@ -4,8 +4,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Cli.Configuration;
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
-using DumpDetective.Cli.Services.Configuration;
-using static DumpDetective.Cli.Services.Configuration.ConfigurationParseHelpers;
+
+using static DumpDetective.Cli.Configuration.ConfigurationParseHelpers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;

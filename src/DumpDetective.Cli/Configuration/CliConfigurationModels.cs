@@ -6,7 +6,7 @@ using DumpDetective.Core.Configuration;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Enums;
 
-namespace DumpDetective.Cli.Services.Configuration;
+namespace DumpDetective.Cli.Configuration;
 
 internal sealed class CliConfigurationFileModel
 {

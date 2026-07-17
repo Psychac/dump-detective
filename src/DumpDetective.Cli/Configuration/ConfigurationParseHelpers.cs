@@ -2,7 +2,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
 
-namespace DumpDetective.Cli.Services.Configuration;
+namespace DumpDetective.Cli.Configuration;
 
 internal static class ConfigurationParseHelpers
 {

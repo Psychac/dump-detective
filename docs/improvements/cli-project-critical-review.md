@@ -274,8 +274,8 @@ Moved `DumpAnalysisService`, `SingleDumpOrchestrationService`, `TrendOrchestrati
 ### Step 4 (done)
 Split orchestration from console/output adapters: extracted `SingleDumpConsolePresenter` / `TrendConsolePresenter` for `Print*` methods and `SingleDumpStageFactory` for stage-building logic, registered the new factory in `ServiceRegistration`, and fixed a latent `TrendReportData` construction bug (missing `Timeline`, misassigned `Snapshots`) surfaced while wiring the split through.
 
-### Step 5
-Resolve the `Configuration/` vs `Services/Configuration/` naming overlap.
+### Step 5 (done)
+Consolidated `Services/Configuration/` files into top-level `Configuration/` folder, resolving the `Configuration/` vs `Services/Configuration/` naming overlap.
 
 ## Suggested Target Shape
 

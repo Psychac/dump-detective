@@ -4,7 +4,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class ModuleFindingGenerator : IFindingGenerator
 {

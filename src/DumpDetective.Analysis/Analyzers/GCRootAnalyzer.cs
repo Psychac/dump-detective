@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Readers;
 using DumpDetective.Analysis.Traversal;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -12,12 +13,12 @@ namespace DumpDetective.Analysis.Analyzers
 {
     /// <summary>
     /// Phase-2 analyzer: unified GC root intelligence covering all root kinds
-    /// (Stack, Static/StrongHandle, Finalizer, Pinned, etc.) with retention estimates
-    /// and bounded BFS path tracing for the top suspects.
+    /// (Stack, Static/StrongHandle, Finalizer, Pinned, etc.), retention estimates,
+    /// and bounded BFS path tracing for top suspects.
     ///
     /// Root data is sourced entirely from Phase 1:
-    ///   Memory mode — <see cref="HeapIndexBuildResult.InMemoryRootCandidates"/>
-    ///   Disk mode   — reads <c>RootIndex.bin</c> from the dump index directory
+    /// Memory mode — <see cref="HeapIndexBuildResult.InMemoryRootCandidates"/>
+    /// Disk mode — reads <c>RootIndex.bin</c> from the dump index directory
     ///
     /// No direct <c>heap.EnumerateRoots()</c> call is made in Phase 2.
     /// </summary>
@@ -45,84 +46,33 @@ namespace DumpDetective.Analysis.Analyzers
                 return EmptyResult();
             }
 
-            // ── Step 1: Read all roots from Phase 1 index ──────────────────────
+            // ── Step 1: Read all roots from the Phase 1 index ──────────────────
             var roots = ReadRoots(idx, cancellationToken);
             if (roots.Count == 0)
                 return EmptyResult();
 
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
-            // ── Step 2: Compute total managed heap bytes for PctOfManagedHeap ──
-            ulong totalHeapBytes = 0;
-            foreach (TypeAggregateIndexEntry agg in aggregates.Values)
-                totalHeapBytes += agg.TotalSize;
+            // ── Step 2: Group by kind, estimate retained bytes, score severity ─
+            GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, aggregates);
 
-            // ── Step 3: Group roots by kind, compute per-kind retained estimate ─
-            var kindCounts = new Dictionary<string, int>(8);
-            var kindBytes = new Dictionary<string, ulong>(8);
-
-            foreach (var root in roots)
-            {
-                string kind = RootIndexReader.KindToString(root.Kind);
-                kindCounts[kind] = (kindCounts.TryGetValue(kind, out int c) ? c : 0) + 1;
-
-                // Estimate retained bytes for this root: avg size of target's type
-                ulong estimate = EstimateRetainedBytes(root.TargetAddr, heap, aggregates);
-                kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong b) ? b : 0UL) + estimate;
-            }
-
-            var byKind = new List<RootKindSummary>(kindCounts.Count);
-            foreach (var kv in kindCounts)
-            {
-                string kind = kv.Key;
-                ulong estBytes = kindBytes.TryGetValue(kind, out ulong kb) ? kb : 0UL;
-                double pct = totalHeapBytes > 0 ? (double)estBytes / totalHeapBytes * 100.0 : 0.0;
-                byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct));
-            }
-            byKind.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
-
-            // ── Step 4: Build per-root findings and score ──────────────────────
-            var findings = new List<RootFinding>(Math.Min(roots.Count, options.TopSeverityLimit * 4));
-
-            for (int i = 0; i < roots.Count; i++)
-            {
-                var root = roots[i];
-                ulong estimate = EstimateRetainedBytes(root.TargetAddr, heap, aggregates);
-                if (estimate == 0)
-                    continue;
-
-                string kind = RootIndexReader.KindToString(root.Kind);
-                string targetType = ResolveTypeName(root.TargetAddr, heap, aggregates);
-                int severity = ComputeSeverity(estimate, kind);
-
-                findings.Add(new RootFinding(
-                    RootKind: kind,
-                    RootAddress: root.RootAddr,
-                    FieldDescription: null,
-                    TargetTypeName: targetType,
-                    TargetAddress: root.TargetAddr,
-                    EstimatedRetainedBytes: estimate,
-                    SeverityScore: severity));
-            }
-
-            findings.Sort(static (a, b) => b.SeverityScore.CompareTo(a.SeverityScore));
+            List<RootFinding> findings = projection.FindingsBySeverityDescending;
             int topCount = Math.Min(findings.Count, options.TopSeverityLimit);
-            var topFindings = findings.Count <= options.TopSeverityLimit
-                ? (IReadOnlyList<RootFinding>)findings
+            IReadOnlyList<RootFinding> topFindings = findings.Count <= options.TopSeverityLimit
+                ? findings
                 : findings.GetRange(0, topCount);
 
-            // ── Step 5: BFS path tracing for top-N roots ──────────────────────
+            // ── Step 3: BFS path tracing for top-N roots ────────────────────────
             int pathCappedCount = 0;
-            var pathFindings = new List<RootPathFinding>(Math.Min(findings.Count, options.PathSearchTopN));
             int pathN = Math.Min(findings.Count, options.PathSearchTopN);
+            var pathFindings = new List<RootPathFinding>(pathN);
 
             for (int i = 0; i < pathN; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var f = findings[i];
+                RootFinding f = findings[i];
 
-                bool wasCapped = false;
-                var pathTypes = HeapTypePathTraversal.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out wasCapped);
+                var pathTypes = HeapTypePathTraversal.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped);
 
                 if (wasCapped)
                     pathCappedCount++;
@@ -138,14 +88,14 @@ namespace DumpDetective.Analysis.Analyzers
 
             return new GCRootDomainResult(
                 TotalRoots: roots.Count,
-                ByKind: byKind,
+                ByKind: projection.ByKind,
                 TopRootsBySeverity: topFindings,
                 RootPaths: pathFindings,
                 PathSearchCapped: pathCappedCount > 0,
                 PathSearchCappedCount: pathCappedCount);
         }
 
-        // ── Root reading ──────────────────────────────────────────────────────
+        // ── Root reading ─────────────────────────────────────────────────────
 
         private static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRoots(
             HeapIndexBuildResult idx,
@@ -154,85 +104,12 @@ namespace DumpDetective.Analysis.Analyzers
             return RootIndexReader.ReadRootCandidates(idx, cancellationToken);
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
-        private static ulong EstimateRetainedBytes(
-            ulong targetAddr,
-            ClrHeap heap,
-            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
-        {
-            if (targetAddr == 0)
-                return 0;
-
-            try
-            {
-                ClrObject obj = heap.GetObject(targetAddr);
-                if (!obj.IsValid || obj.Type is null)
-                    return 0;
-
-                ulong mt = obj.Type.MethodTable;
-                if (mt != 0 && aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg) && agg.Count > 0)
-                    return agg.TotalSize / (ulong)agg.Count; // avg size as single-object estimate
-
-                return obj.Size;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static string ResolveTypeName(
-            ulong targetAddr,
-            ClrHeap heap,
-            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
-        {
-            if (targetAddr == 0)
-                return "(unknown)";
-            try
-            {
-                ClrObject obj = heap.GetObject(targetAddr);
-                if (obj.IsValid && obj.Type?.Name is string name)
-                    return name;
-            }
-            catch { }
-            return $"0x{targetAddr:X}";
-        }
-
-        private static int ComputeSeverity(ulong retainedBytes, string kind)
-        {
-            // Base score from retained size (log-scaled)
-            int baseScore = retainedBytes switch
-            {
-                >= 100_000_000 => 100,
-                >= 10_000_000 => 80,
-                >= 1_000_000 => 60,
-                >= 100_000 => 40,
-                >= 10_000 => 20,
-                _ => 5
-            };
-
-            // Kind multiplier: static roots are hardest to release
-            int multiplier = kind switch
-            {
-                "StrongHandle" => 3,  // static / global
-                "FinalizerQueue" => 2,
-                "PinnedHandle" => 2,
-                "Stack" => 1,
-                _ => 1
-            };
-
-            return Math.Min(baseScore * multiplier, 300);
-        }
-
         private static GCRootDomainResult EmptyResult() =>
             new(TotalRoots: 0,
-                ByKind: [],
-                TopRootsBySeverity: [],
-                RootPaths: [],
+                ByKind: Array.Empty<RootKindSummary>(),
+                TopRootsBySeverity: Array.Empty<RootFinding>(),
+                RootPaths: Array.Empty<RootPathFinding>(),
                 PathSearchCapped: false,
                 PathSearchCappedCount: 0);
-
-        public void Dispose() { }
     }
 }

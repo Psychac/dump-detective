@@ -54,7 +54,7 @@ public sealed class ReportFlowIntegrationTests
         [
             new TextCanonicalReportFormatter(),
             new MarkdownCanonicalReportFormatter(),
-            new HtmlCanonicalReportFormatter()
+            new HtmlReportRenderer()
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
@@ -90,7 +90,7 @@ public sealed class ReportFlowIntegrationTests
         [
             new TextCanonicalReportFormatter(),
             new MarkdownCanonicalReportFormatter(),
-            new HtmlCanonicalReportFormatter()
+            new HtmlReportRenderer()
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
@@ -155,7 +155,7 @@ public sealed class ReportFlowIntegrationTests
         [
             new TextCanonicalReportFormatter(),
             new MarkdownCanonicalReportFormatter(),
-            new HtmlCanonicalReportFormatter()
+            new HtmlReportRenderer()
         ],
         new DefaultSectionBuilderFactory(),
         new CanonicalReportDocumentFactory(new ReportSerializer()),
@@ -194,8 +194,8 @@ public sealed class ReportFlowIntegrationTests
             trendData: trendData,
             cancellationToken: CancellationToken.None);
 
-        // HtmlCanonicalReportFormatter embeds report JSON with the document; verify it includes trend data
-        htmlOutput.Should().Contain("report-data");
+        // HtmlReportRenderer embeds report JSON with the document; verify it includes trend data
+        htmlOutput.Should().Contain("report-json");
         htmlOutput.Should().Contain("trendAnalyzerSections");
     }
 

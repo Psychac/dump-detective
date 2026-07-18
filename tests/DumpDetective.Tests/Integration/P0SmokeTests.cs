@@ -29,7 +29,6 @@ public sealed class P0SmokeTests
     [
         new TextCanonicalReportFormatter(),
         new MarkdownCanonicalReportFormatter(),
-        new HtmlCanonicalReportFormatter(),
         new HtmlReportRenderer(),
     ],
     new DefaultSectionBuilderFactory(),

@@ -1,5 +1,5 @@
 using DumpDetective.Analysis.Dump;
-using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Commands;

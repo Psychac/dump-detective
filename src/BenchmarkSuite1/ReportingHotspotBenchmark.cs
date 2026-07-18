@@ -21,7 +21,7 @@ public class ReportingHotspotBenchmark
     private IReadOnlyList<IAnalyzerSectionBuilder> _builders = null!;
     private ReportSerializer _serializer = null!;
     private MarkdownCanonicalReportFormatter _markdown = null!;
-    private HtmlCanonicalReportFormatter _html = null!;
+    private HtmlReportRenderer _html = null!;
     private TrendReportComposer _trendComposer = null!;
     private IReadOnlyList<AnalyzerRunResult> _trendCurrentRuns = null!;
     private TrendReportData _trendData = null!;
@@ -33,7 +33,7 @@ public class ReportingHotspotBenchmark
         _builders = Array.Empty<IAnalyzerSectionBuilder>();
         _serializer = new ReportSerializer();
         _markdown = new MarkdownCanonicalReportFormatter();
-        _html = new HtmlCanonicalReportFormatter();
+        _html = new HtmlReportRenderer();
         _trendComposer = new TrendReportComposer(new CanonicalReportDocumentFactory(_serializer));
         _trendCurrentRuns = BuildRuns(120);
         _trendData = BuildTrendData(snapshotCount: 8, runsPerSnapshot: 120);

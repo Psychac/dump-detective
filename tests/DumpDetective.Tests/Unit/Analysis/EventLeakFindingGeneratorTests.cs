@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 

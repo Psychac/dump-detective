@@ -150,11 +150,12 @@ public sealed class ReportingCompositionTests
             ]
         };
 
+        // HtmlReportRenderer relies on Domains (client-rendered), not the legacy
+        // Findings/AnalyzerSections fields, so it is excluded from this literal-content check.
         IReportFormatter[] formatters =
         [
             new TextCanonicalReportFormatter(),
-            new MarkdownCanonicalReportFormatter(),
-            new HtmlCanonicalReportFormatter()
+            new MarkdownCanonicalReportFormatter()
         ];
 
         foreach (IReportFormatter formatter in formatters)
@@ -187,42 +188,6 @@ public sealed class ReportingCompositionTests
             reportBuilders: []);
 
         doc.SchemaVersion.Should().Be("2.1");
-    }
-
-    [Fact]
-    public void HtmlFormatter_ShouldRenderDetailedAnalyzerSections_AsCollapsibleBlocks()
-    {
-        SingleDumpReportDocument doc = new()
-        {
-            DumpPath = "C:/dumps/detailed.dmp",
-            GeneratedAtUtc = DateTime.UtcNow,
-            ElapsedSeconds = 1,
-            AnalyzerSections =
-            [
-                new AnalyzerDetailSection("Memory Leak Analyzer", "Memory Leak Analyzer", 0,
-                [
-                    new MetricBlock("Top type",   "System.String"),
-                    new MetricBlock("Retained MB", "123")
-                ]),
-                new AnalyzerDetailSection("Thread Analyzer", "Thread Analyzer", 10,
-                [
-                    new MetricBlock("Blocked threads", "4"),
-                    new MetricBlock("Wait chains",     "2")
-                ])
-            ]
-        };
-
-        IReportFormatter formatter = new HtmlCanonicalReportFormatter();
-
-        string output = formatter.Render(doc);
-
-        output.Should().Contain("<details>");
-        output.Should().Contain(">Memory Leak Analyzer<");
-        output.Should().Contain(">Thread Analyzer<");
-        output.Should().Contain("<span class=\"detail-key\">Top type:</span>");
-        output.Should().Contain("<span class=\"detail-value wrap\">System.String</span>");
-        output.Should().Contain("<span class=\"detail-key\">Blocked threads:</span>");
-        output.Should().Contain("<span class=\"detail-value wrap\">4</span>");
     }
 
     [Fact]

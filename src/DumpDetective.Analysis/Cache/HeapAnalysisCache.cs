@@ -3,7 +3,6 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Readers;
 using DumpDetective.Core.Enums;
 using System.Linq;
 

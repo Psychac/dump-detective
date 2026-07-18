@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
-using DumpDetective.Analysis.Indexing;
+
 using DumpDetective.Analysis.Indexing.Container;
 
-namespace DumpDetective.Analysis.Readers;
+namespace DumpDetective.Analysis.Indexing;
 
 internal static class RootIndexReader
 {

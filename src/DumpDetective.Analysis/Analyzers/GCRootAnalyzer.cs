@@ -1,8 +1,8 @@
 using Microsoft.Diagnostics.Runtime;
+
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Readers;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;

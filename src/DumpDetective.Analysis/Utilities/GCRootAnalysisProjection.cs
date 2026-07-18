@@ -2,7 +2,6 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Readers;
 
 namespace DumpDetective.Analysis.Utilities;
 

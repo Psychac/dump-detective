@@ -1,7 +1,7 @@
 using Microsoft.Diagnostics.Runtime;
+
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Readers;
 using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Analysis.Cache;

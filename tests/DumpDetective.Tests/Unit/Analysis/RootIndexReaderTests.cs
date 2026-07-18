@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Container;
-using DumpDetective.Analysis.Readers;
 
 using FluentAssertions;
 

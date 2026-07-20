@@ -1,0 +1,21 @@
+{
+  "documentType": "AnalysisReportDocument",
+  "metadata": {
+    "dumpPath": "(placeholder - populated at test time)",
+    "dumpSize": 0,
+    "heapCount": 0,
+    "analysisTimestamp": "2000-01-01T00:00:00Z",
+    "clrVersion": "unknown",
+    "osVersion": "unknown",
+    "processorCount": 0
+  },
+  "sections": [
+    {
+      "name": "Overview",
+      "category": "Summary",
+      "findings": []
+    }
+  ],
+  "insights": [],
+  "analysisStatus": "Ready"
+}

@@ -58,7 +58,6 @@ internal static class ServiceRegistration
         }
 
         services.AddSingleton<FindingGenerationPipeline>();
-        services.AddSingleton<CanonicalReportDocumentFactory>();
 
         foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
         {

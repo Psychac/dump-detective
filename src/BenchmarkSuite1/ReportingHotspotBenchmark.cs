@@ -34,7 +34,7 @@ public class ReportingHotspotBenchmark
         _serializer = new ReportSerializer();
         _markdown = new MarkdownCanonicalReportFormatter();
         _html = new HtmlReportRenderer();
-        _trendComposer = new TrendReportComposer(new CanonicalReportDocumentFactory(_serializer));
+        _trendComposer = new TrendReportComposer(_serializer);
         _trendCurrentRuns = BuildRuns(120);
         _trendData = BuildTrendData(snapshotCount: 8, runsPerSnapshot: 120);
     }

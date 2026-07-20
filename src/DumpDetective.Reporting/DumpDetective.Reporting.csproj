@@ -29,6 +29,12 @@
     <EmbeddedResource Include="Templates\report.renderers.sections.js" />
     <EmbeddedResource Include="Templates\report.ui.toc.js" />
     <EmbeddedResource Include="Templates\report.ui.integrity.js" />
+    <EmbeddedResource Include="Templates\report.ui.motion.js" />
+    <EmbeddedResource Include="Templates\report.ui.filters.js" />
+    <EmbeddedResource Include="Templates\report.ui.search.js" />
+    <EmbeddedResource Include="Templates\report.ui.keyboard.js" />
+    <EmbeddedResource Include="Templates\report.ui.actions.js" />
+    <EmbeddedResource Include="Templates\report.ui.tables.js" />
     <EmbeddedResource Include="Templates\report.ui.js" />
     <EmbeddedResource Include="Templates\report.main.js" />
   </ItemGroup>

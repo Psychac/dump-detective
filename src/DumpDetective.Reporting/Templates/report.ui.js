@@ -1,7 +1,13 @@
 import { renderSparklines, renderCharts } from './report.renderers.js';
 import { nvl } from './report.dom.js';
-import { filterTocList } from './report.ui.toc.js';
+import { filterTocList, setupActiveTocHighlighting } from './report.ui.toc.js';
 import { runRenderIntegrityAudit } from './report.ui.integrity.js';
+import { loadMotionPreference, setupMotionStagger } from './report.ui.motion.js';
+import { setupSeverityFilter, setupT3RegressionFilter } from './report.ui.filters.js';
+import { setupGlobalSearch } from './report.ui.search.js';
+import { setupKeyboardShortcuts } from './report.ui.keyboard.js';
+import { setupExportActions } from './report.ui.actions.js';
+import { setupDetailTables } from './report.ui.tables.js';
 
 export function buildSidebar(tocNode, doc) {
   if (!tocNode) return null;
@@ -59,17 +65,8 @@ export function buildSidebar(tocNode, doc) {
 export function setupInteractivity(doc, announce) {
   const styleVersion = String((doc && doc.reportStyleVersion) || 'v1').toLowerCase();
   const isV2 = styleVersion.startsWith('v2');
-  // Motion preference helper: combine system preference + optional user toggle
-  const _prefersReduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || false;
-  function _loadMotionPreference() {
-    try {
-      const stored = localStorage.getItem('dumpdetective:motion');
-      if (stored === 'on') return true;
-      if (stored === 'off') return false;
-    } catch (e) { }
-    return !_prefersReduced;
-  }
-  let __canMotion = _loadMotionPreference();
+  // Motion preference: combine system preference + optional user toggle
+  const __canMotion = loadMotionPreference();
   // expose for other modules to query at runtime
   try { window.__DUMPDETECTIVE_CAN_MOTION__ = __canMotion; } catch (e) { }
   const READING_MODE_KEY = 'dumpdetective:reading-mode';
@@ -254,123 +251,12 @@ export function setupInteractivity(doc, announce) {
   });
 
   // Setup T3 regression filter wiring
-  function setupT3RegressionFilter() {
-    try {
-      const bar = document.getElementById('t3-regression-filter');
-      if (!bar || bar.dataset.bound) return;
-      bar.dataset.bound = '1';
-      const buttons = Array.from(bar.querySelectorAll('.t3-filter-btn'));
-      function computeCounts() {
-        const counts = { '': 0, 'NewRisk': 0, 'AmplifiedRisk': 0, 'VolatileRisk': 0 };
-        if (doc && Array.isArray(doc.findings)) {
-          for (const f of doc.findings) {
-            const k = String(f && f.regressionClass || '');
-            if (k && counts.hasOwnProperty(k)) counts[k]++;
-            counts['']++;
-          }
-        } else {
-          const cards = Array.from(document.querySelectorAll('.finding-card'));
-          for (const c of cards) {
-            const k = String(c.dataset.regressionClass || '');
-            if (k && counts.hasOwnProperty(k)) counts[k]++;
-            counts['']++;
-          }
-        }
-        return counts;
-      }
-
-      function refreshButtonBadges() {
-        const counts = computeCounts();
-        for (const btn of buttons) {
-          const f = String(btn.dataset.filter || '');
-          // clear previous badge
-          const prev = btn.querySelector('.t3-filter-count'); if (prev) prev.remove();
-          const span = document.createElement('span'); span.className = 't3-filter-count'; span.textContent = ' ' + (counts[f] || 0);
-          btn.appendChild(span);
-        }
-      }
-
-      function applyFilter(filter) {
-        const fnorm = String(filter || '').toLowerCase();
-        const cards = Array.from(document.querySelectorAll('.finding-card'));
-        for (const c of cards) {
-          const rc = String(c.dataset.regressionClass || '').toLowerCase();
-          const show = !fnorm || rc === fnorm;
-          c.hidden = !show;
-        }
-      }
-
-      buttons.forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          buttons.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          const f = String(btn.dataset.filter || '');
-          applyFilter(f);
-        });
-      });
-
-      // initial badge population
-      refreshButtonBadges();
-    } catch (e) { /* ignore */ }
-  }
-
-  document.addEventListener('dumpdetective:sections-rendered', function () { window.setTimeout(setupT3RegressionFilter, 0); });
-  document.addEventListener('dumpdetective:domain-sections-appended', function () { window.setTimeout(setupT3RegressionFilter, 0); });
+  document.addEventListener('dumpdetective:sections-rendered', function () { window.setTimeout(function () { setupT3RegressionFilter(doc); }, 0); });
+  document.addEventListener('dumpdetective:domain-sections-appended', function () { window.setTimeout(function () { setupT3RegressionFilter(doc); }, 0); });
 
   runRenderIntegrityAudit();
 
-  if (isV2) {
-    const staggerTargets = Array.from(document.querySelectorAll('#sec-header, #sec-health, #sec-exec, #sec-action-queue'));
-    if (__canMotion) {
-      for (let i = 0; i < staggerTargets.length; i++) {
-        const node = staggerTargets[i];
-        node.classList.add('summary-stagger');
-        node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
-      }
-    } else {
-      // ensure classes are absent when motion disabled
-      for (let i = 0; i < staggerTargets.length; i++) {
-        staggerTargets[i].classList.remove('summary-stagger');
-      }
-    }
-
-    // Insert a small motion toggle control (non-intrusive) to allow user override
-    try {
-      const existing = document.getElementById('motion-toggle');
-      if (!existing) {
-        const hdr = document.getElementById('sec-header') || document.body;
-        const btn = document.createElement('button');
-        btn.id = 'motion-toggle';
-        btn.type = 'button';
-        btn.className = 'action-btn motion-toggle';
-        btn.setAttribute('aria-pressed', __canMotion ? 'true' : 'false');
-        btn.setAttribute('aria-label', 'Toggle motion animations');
-        btn.textContent = __canMotion ? 'Motion: On' : 'Motion: Off';
-        btn.addEventListener('click', function () {
-          __canMotion = !__canMotion;
-          try { localStorage.setItem('dumpdetective:motion', __canMotion ? 'on' : 'off'); } catch (e) { }
-          try { window.__DUMPDETECTIVE_CAN_MOTION__ = __canMotion; } catch (e) { }
-          btn.setAttribute('aria-pressed', __canMotion ? 'true' : 'false');
-          btn.textContent = __canMotion ? 'Motion: On' : 'Motion: Off';
-          // apply/remove animation classes immediately
-          if (__canMotion) {
-            for (let i = 0; i < staggerTargets.length; i++) {
-              const node = staggerTargets[i];
-              node.classList.add('summary-stagger');
-              node.style.setProperty('--stagger-delay', String(i * 120) + 'ms');
-            }
-          } else {
-            for (let i = 0; i < staggerTargets.length; i++) {
-              staggerTargets[i].classList.remove('summary-stagger');
-            }
-            // remove transient anchor flash
-            document.querySelectorAll('.anchor-flash').forEach(n => n.classList.remove('anchor-flash'));
-          }
-        });
-        try { hdr.insertBefore(btn, hdr.firstChild); } catch (e) { document.body.appendChild(btn); }
-      }
-    } catch (e) { /* non-fatal */ }
-  }
+  setupMotionStagger(isV2, __canMotion);
 
   (function setScreenReaderSummary() {
     const sr = document.getElementById('report-sr-summary');
@@ -548,169 +434,10 @@ export function setupInteractivity(doc, announce) {
   }
 
   // Global report search (cross-section, cross-finding)
-  (function () {
-    const input = document.getElementById('global-search-input');
-    const count = document.getElementById('global-search-count');
-    const prev = document.getElementById('global-search-prev');
-    const next = document.getElementById('global-search-next');
-    const clear = document.getElementById('global-search-clear');
-    if (!input || !count || !prev || !next || !clear) return;
-
-    let matches = [];
-    let activeIndex = -1;
-
-    function setActive(index) {
-      if (!matches.length) {
-        activeIndex = -1;
-        return;
-      }
-
-      matches.forEach(function (node) { node.classList.remove('global-search-match--active'); });
-      activeIndex = ((index % matches.length) + matches.length) % matches.length;
-      const target = matches[activeIndex];
-      target.classList.add('global-search-match--active');
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
-      try { target.focus({ preventScroll: true }); } catch (e) { }
-      count.textContent = (activeIndex + 1) + ' / ' + matches.length + ' matches';
-      if (announce) announce('Search result ' + (activeIndex + 1) + ' of ' + matches.length);
-    }
-
-    function applyGlobalSearch() {
-      const query = input.value.trim().toLowerCase();
-      const nodes = Array.from(document.querySelectorAll('#main .section-card, #main .analyzer-section'));
-
-      nodes.forEach(function (node) {
-        node.classList.remove('global-search-match');
-        node.classList.remove('global-search-match--active');
-      });
-
-      if (!query) {
-        matches = [];
-        activeIndex = -1;
-        count.textContent = '';
-        prev.disabled = true;
-        next.disabled = true;
-        return;
-      }
-
-      matches = nodes.filter(function (node) {
-        if (node.hidden) return false;
-        const text = (node.textContent || '').toLowerCase();
-        if (!text.includes(query)) return false;
-        node.classList.add('global-search-match');
-        return true;
-      });
-
-      prev.disabled = matches.length === 0;
-      next.disabled = matches.length === 0;
-
-      if (!matches.length) {
-        count.textContent = 'No matches';
-        if (announce) announce('No matches found');
-        return;
-      }
-
-      setActive(0);
-    }
-
-    input.addEventListener('input', applyGlobalSearch);
-    input.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        if (!matches.length) return;
-        if (ev.shiftKey) setActive(activeIndex - 1);
-        else setActive(activeIndex + 1);
-      }
-
-      if (ev.key === 'Escape') {
-        ev.preventDefault();
-        input.value = '';
-        applyGlobalSearch();
-      }
-    });
-
-    prev.addEventListener('click', function () {
-      if (!matches.length) return;
-      setActive(activeIndex - 1);
-    });
-
-    next.addEventListener('click', function () {
-      if (!matches.length) return;
-      setActive(activeIndex + 1);
-    });
-
-    clear.addEventListener('click', function () {
-      input.value = '';
-      applyGlobalSearch();
-      input.focus();
-    });
-
-    applyGlobalSearch();
-  })();
+  setupGlobalSearch(announce);
 
   // Keyboard shortcuts for pagination + critical-signal navigation
-  document.addEventListener('keydown', function (ev) {
-    const active = document.activeElement;
-    const tag = active && active.tagName ? active.tagName.toLowerCase() : '';
-    const isEditing = tag === 'input' || tag === 'textarea' || tag === 'select' || (active && active.isContentEditable);
-
-    try {
-      if (active && active.closest && active.closest('.table-with-pagination')) {
-        const container = active.closest('.table-with-pagination');
-        if (container) {
-          const prev = container.querySelector('.table-prev');
-          const next = container.querySelector('.table-next');
-          if (ev.key === 'ArrowLeft' && prev && !prev.disabled) { prev.click(); ev.preventDefault(); }
-          if (ev.key === 'ArrowRight' && next && !next.disabled) { next.click(); ev.preventDefault(); }
-        }
-      }
-    } catch (e) { }
-
-    if (isEditing) return;
-
-    // Shift+N: jump to next critical signal card/section.
-    if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && String(ev.key || '').toLowerCase() === 'n') {
-      const criticalNodes = Array.from(document.querySelectorAll(
-        '.analyzer-section[data-lead-severity="critical"]:not([hidden]), .health-domain-tile--critical:not([hidden])'
-      ));
-      if (criticalNodes.length) {
-        const currentY = window.scrollY;
-        let target = criticalNodes[0];
-        for (let i = 0; i < criticalNodes.length; i++) {
-          const rect = criticalNodes[i].getBoundingClientRect();
-          const top = rect.top + window.scrollY;
-          if (top > currentY + 12) {
-            target = criticalNodes[i];
-            break;
-          }
-        }
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        try {
-          if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
-          target.focus({ preventScroll: true });
-        } catch (e) { }
-        if (announce) announce('Jumped to next critical signal');
-      }
-      ev.preventDefault();
-      return;
-    }
-
-    // Shift+A: jump to action queue.
-    if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && String(ev.key || '').toLowerCase() === 'a') {
-      const queue = document.getElementById('sec-action-queue');
-      if (queue) {
-        queue.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        try {
-          if (!queue.hasAttribute('tabindex')) queue.setAttribute('tabindex', '-1');
-          queue.focus({ preventScroll: true });
-        } catch (e) { }
-        if (announce) announce('Jumped to action queue');
-      }
-      ev.preventDefault();
-      return;
-    }
-  });
+  setupKeyboardShortcuts(announce);
 
   // Smooth scroll for TOC and permalinks
   document.addEventListener('click', function (e) {
@@ -798,252 +525,19 @@ export function setupInteractivity(doc, announce) {
   });
 
   // Active TOC highlighting
-  (function () {
-    const links = document.querySelectorAll('.toc a'); if (!links || !links.length) return; const idToLink = {}; links.forEach(function (l) { if (l.hash) idToLink[l.hash.substring(1)] = l; });
-    const obs = new IntersectionObserver(function (entries) { entries.forEach(function (ent) { if (!ent.target || !ent.target.id) return; if (ent.isIntersecting) { document.querySelectorAll('.toc a.active').forEach(function (x) { x.classList.remove('active'); }); const link = idToLink[ent.target.id]; if (link) link.classList.add('active'); } }); }, { root: null, rootMargin: '-40% 0px -40% 0px', threshold: 0 });
-    // Observe: analyzer sections (stable sectionId or detail-N), domain headers, and top-level sections
-    const targets = document.querySelectorAll('#main .analyzer-section, #main [id^="domain-"], #sec-header, #sec-health, #sec-exec, #sec-appendix'); targets.forEach(function (t) { obs.observe(t); });
-  })();
-
-  // Copy to clipboard (delegated)
-  const sr = document.getElementById('clipboard-status'); function flash(m) { if (sr) { sr.textContent = m; setTimeout(function () { sr.textContent = ''; }, 2000); } }
-  document.addEventListener('click', function (e) {
-    const ticketBtn = e.target.closest && e.target.closest('.ticket-copy-btn');
-    if (!ticketBtn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const payload = ticketBtn.dataset.payload || '';
-    const provider = (ticketBtn.dataset.provider || 'ticket').toUpperCase();
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(payload).then(function () {
-        flash(provider + ' ticket template copied');
-        if (announce) announce(provider + ' ticket template copied');
-      });
-    }
-  });
-  document.addEventListener('click', function (e) { const btn = e.target.closest && e.target.closest('.copy-btn'); if (!btn) return; e.preventDefault(); e.stopPropagation(); if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.copy || '').then(function () { flash('Copied: ' + btn.dataset.copy); }); });
+  setupActiveTocHighlighting();
 
   // Trend-jump handler
   document.addEventListener('click', function (e) { const a = e.target.closest && e.target.closest('.trend-jump'); if (!a) return; try { const href = a.getAttribute('href'); if (!href || !href.startsWith('#')) return; e.preventDefault(); const id = href.substring(1); const target = document.getElementById(id) || document.querySelector('[name="' + id + '"]'); if (target) { if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); target.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (announce) announce('Jumped to ' + (id.replace(/[-_]/g, ' '))); } } catch (err) { } });
 
-  // Download JSON
-  const btnJson = document.getElementById('btn-download-json'); if (btnJson) btnJson.addEventListener('click', function () { try { const jsonEl = document.getElementById('report-json'); let payload = null; if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) { try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; } } else payload = window.__REPORT__ || null; const json = JSON.stringify(payload, null, 2); const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnJson.dataset.filename || 'report') + '.json'; a.click(); URL.revokeObjectURL(a.href); } catch (e) { console.error(e); } });
+  // Export actions: download JSON, export CSV, print, high-contrast toggle, clipboard copy
+  setupExportActions(announce);
 
-  // Export CSV
-  const btnCsv = document.getElementById('btn-export-csv');
-  if (btnCsv) btnCsv.addEventListener('click', function () {
-    try {
-      const jsonEl = document.getElementById('report-json');
-      let payload = null;
-      if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
-        try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
-      } else { payload = window.__REPORT__ || null; }
-      const report = (payload && payload.report) ? payload.report : payload;
-      const findings = (report && Array.isArray(report.findings)) ? report.findings : [];
-      if (!findings.length) { alert('No findings to export.'); return; }
-      const headers = [
-        'ID',
-        'Id',
-        'Severity',
-        'Category',
-        'Title',
-        'Details',
-        'Recommendation',
-        'Analyzer',
-        'Confidence',
-        'Caveats',
-        'Tags'
-      ];
-      function csvCell(v) { const s = String(v == null ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
-      const rows = [headers.map(csvCell).join(',')];
-      function joinItems(items) {
-        return Array.isArray(items) ? items.filter(function (x) { return !!x; }).join(' | ') : '';
-      }
-      findings.forEach(function (f, i) {
-        rows.push([
-          i + 1,
-          f.id || '',
-          f.severity,
-          f.category,
-          f.title,
-          joinItems(f.details),
-          f.recommendation,
-          f.analyzer,
-          f.confidence != null ? Number(f.confidence).toFixed(2) : '',
-          joinItems(f.caveats),
-          joinItems(f.tags)
-        ].map(csvCell).join(','));
-      });
-      const csv = rows.join('\r\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnCsv.dataset.filename || 'report') + '-findings.csv'; a.click(); URL.revokeObjectURL(a.href);
-    } catch (e) { console.error(e); }
-  });
+  // Severity filter behavior
+  setupSeverityFilter();
 
-  // Print
-  const btnPrint = document.getElementById('btn-print'); if (btnPrint) btnPrint.addEventListener('click', function () { window.print(); });
-
-  // High-contrast toggle
-  const btnContrast = document.getElementById('btn-toggle-contrast'); function applyContrast(on) { if (on) document.body.classList.add('high-contrast'); else document.body.classList.remove('high-contrast'); try { localStorage.setItem('dumpdetective:high-contrast', on ? '1' : '0'); } catch (e) { } }
-  if (btnContrast) btnContrast.addEventListener('click', function () { applyContrast(!document.body.classList.contains('high-contrast')); }); try { if (localStorage.getItem('dumpdetective:high-contrast') === '1') applyContrast(true); } catch (e) { }
-
-  // Filter behavior
-  function applyFilter() {
-    const fsi = document.getElementById('filter-search'); const fbs = document.querySelectorAll('.filter-btn[data-sev]'); const fco = document.getElementById('filter-count'); const txt = fsi ? fsi.value.trim().toLowerCase() : ''; let asev = 'all'; fbs.forEach(function (b) { if (b.classList.contains('active')) asev = b.dataset.sev; }); const cards = document.querySelectorAll('.section-card[data-severity]'); let vis = 0; cards.forEach(function (c) { const s = (c.dataset.severity || '').toLowerCase(); const ok = (asev === 'all' || s === asev) && (!txt || (c.dataset.title || '').toLowerCase().includes(txt) || (c.dataset.summary || '').toLowerCase().includes(txt)); c.hidden = !ok; if (ok) vis++; }); if (fco) fco.textContent = cards.length ? vis + ' of ' + cards.length + ' finding(s)' : ''; }
-  document.querySelectorAll('.filter-btn[data-sev]').forEach(function (b) { b.addEventListener('click', function () { document.querySelectorAll('.filter-btn[data-sev]').forEach(function (x) { x.classList.remove('active'); x.setAttribute('aria-pressed', 'false'); }); b.classList.add('active'); b.setAttribute('aria-pressed', 'true'); applyFilter(); }); });
-  const fsi = document.getElementById('filter-search'); if (fsi) fsi.addEventListener('input', applyFilter); applyFilter();
-
-  // Detail table controls: filter + show all/limited
-  function applyTableCellClamp(scope) {
-    const root = scope || document;
-    const cells = root.querySelectorAll('td');
-    for (let i = 0; i < cells.length; i++) {
-      const td = cells[i];
-      if (!td || td.dataset.clampReady === '1') continue;
-      const text = String(td.textContent || '').trim();
-      if (!text || text.length < 140) {
-        td.dataset.clampReady = '1';
-        continue;
-      }
-      if (td.querySelector('a, button, input, select, textarea')) {
-        td.dataset.clampReady = '1';
-        continue;
-      }
-
-      td.textContent = '';
-      const content = document.createElement('span');
-      content.className = 'table-cell-clamp__text is-clamped';
-      content.textContent = text;
-      td.appendChild(content);
-
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'table-cell-clamp__toggle';
-      toggle.textContent = 'Expand';
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.addEventListener('click', function () {
-        const expanded = content.classList.toggle('is-clamped');
-        const isCollapsed = expanded;
-        toggle.textContent = isCollapsed ? 'Expand' : 'Collapse';
-        toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
-      });
-      td.appendChild(toggle);
-      td.dataset.clampReady = '1';
-    }
-  }
-
-  function applyManagedTableState(tbl) {
-    if (!tbl) return;
-    const limit = Number(tbl.dataset.limit || '0');
-    const showAll = tbl.dataset.showAll === '1';
-    const input = document.querySelector('.table-filter-input[data-target-table="' + tbl.id + '"]');
-    const query = input ? input.value.trim().toLowerCase() : '';
-    const rows = Array.from(tbl.querySelectorAll('tbody tr'));
-    let matched = 0;
-    let visible = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const text = (row.textContent || '').toLowerCase();
-      const isMatch = !query || text.includes(query);
-      if (!isMatch) {
-        row.hidden = true;
-        continue;
-      }
-      matched++;
-      if (!showAll && limit > 0 && matched > limit) {
-        row.hidden = true;
-      } else {
-        row.hidden = false;
-        visible++;
-      }
-    }
-
-    const count = document.querySelector('[data-target-table-count="' + tbl.id + '"]');
-    if (count) {
-      count.textContent = query ? (visible + ' of ' + matched + ' matching rows') : (visible + ' rows shown');
-    }
-
-    const btn = document.querySelector('.table-show-all-btn[data-target-table="' + tbl.id + '"]');
-    if (btn) {
-      if (showAll) {
-        btn.textContent = 'Show top ' + limit + ' rows';
-      } else {
-        const labelCount = query ? matched : rows.length;
-        btn.textContent = 'Show all ' + labelCount + ' rows';
-      }
-      btn.disabled = limit <= 0 || matched <= limit;
-    }
-
-    applyTableCellClamp(tbl);
-  }
-
-  document.querySelectorAll('table.detail-filterable-table').forEach(function (tbl) {
-    tbl.__applyManagedState = function () { applyManagedTableState(tbl); };
-    applyManagedTableState(tbl);
-  });
-
-  applyTableCellClamp(document);
-
-  document.querySelectorAll('.table-filter-input[data-target-table]').forEach(function (input) {
-    input.addEventListener('input', function () {
-      const tableId = input.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      applyManagedTableState(tbl);
-    });
-  });
-
-  document.querySelectorAll('.table-show-all-btn[data-target-table]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      const tableId = btn.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      if (!tbl) return;
-      tbl.dataset.showAll = tbl.dataset.showAll === '1' ? '0' : '1';
-      applyManagedTableState(tbl);
-    });
-  });
-
-  // Sortable tables
-  document.querySelectorAll('table').forEach(function (tbl) {
-    const parseSortableNumber = function (cell) {
-      if (!cell) return NaN;
-
-      const raw = cell.dataset && cell.dataset.value;
-      if (raw !== undefined && raw !== null && raw !== '') {
-        const n = Number(String(raw).replace(/,/g, '').trim());
-        if (!Number.isNaN(n)) return n;
-      }
-
-      const text = (cell.textContent || '').trim();
-
-      // Parse byte values like "1.2 GB", "850 KB", or "42 B".
-      const bytesMatch = text.match(/^([+-]?\d[\d,]*(?:\.\d+)?)\s*(B|KB|MB|GB|TB|PB|EB)$/i);
-      if (bytesMatch) {
-        const value = Number(bytesMatch[1].replace(/,/g, ''));
-        if (!Number.isNaN(value)) {
-          const unit = bytesMatch[2].toUpperCase();
-          const power = unit === 'B' ? 0 :
-            unit === 'KB' ? 1 :
-            unit === 'MB' ? 2 :
-            unit === 'GB' ? 3 :
-            unit === 'TB' ? 4 :
-            unit === 'PB' ? 5 : 6;
-          return value * Math.pow(1024, power);
-        }
-      }
-
-      // Parse plain numeric text like "12,345", "-10", "42.5", or "87%".
-      if (/^[+-]?\d[\d,]*(?:\.\d+)?%?$/.test(text)) {
-        const n = Number(text.replace(/,/g, '').replace(/%$/, ''));
-        if (!Number.isNaN(n)) return n;
-      }
-
-      return NaN;
-    };
-
-    const ths = tbl.querySelectorAll('thead th'); ths.forEach(function (th, col) { th.classList.add('sortable'); th.setAttribute('tabindex', '0'); let dir = 0; function doSort() { const tb = tbl.querySelector('tbody'); if (!tb) return; const rows = Array.from(tb.querySelectorAll('tr')); if (dir === 0) { let numericColumn = false; for (let i = 0; i < rows.length; i++) { const n = parseSortableNumber(rows[i].cells[col]); if (!isNaN(n)) { numericColumn = true; break; } } dir = numericColumn ? -1 : 1; } rows.sort(function (a, b) { const ac = a.cells[col], bc = b.cells[col]; const av = parseSortableNumber(ac); const bv = parseSortableNumber(bc); if (!isNaN(av) && !isNaN(bv)) return dir * (av - bv); const at = (ac ? ac.textContent : '').toLowerCase(); const bt = (bc ? bc.textContent : '').toLowerCase(); return dir * (at < bt ? -1 : at > bt ? 1 : 0); }); rows.forEach(function (r) { tb.appendChild(r); }); if (typeof tbl.__applyManagedState === 'function') tbl.__applyManagedState(); ths.forEach(function (h) { h.removeAttribute('aria-sort'); }); th.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending'); dir = -dir; }
-      th.addEventListener('click', doSort); th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doSort(); } });
-    });
-  });
+  // Detail table controls: filter, show all/limited, cell clamping, and sortable tables
+  setupDetailTables();
 
   // Initial sparkline rendering
   renderSparklines();

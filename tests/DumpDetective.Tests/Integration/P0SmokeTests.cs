@@ -32,8 +32,8 @@ public sealed class P0SmokeTests
         new HtmlReportRenderer(),
     ],
     new DefaultSectionBuilderFactory(),
-    new CanonicalReportDocumentFactory(new ReportSerializer()),
-    new TrendReportComposer(new CanonicalReportDocumentFactory(new ReportSerializer())));
+    new ReportSerializer(),
+    new TrendReportComposer(new ReportSerializer()));
 
     private static AnalyzerRunResult MakeRun(string name, FindingSeverity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
     {
@@ -259,7 +259,7 @@ public sealed class P0SmokeTests
             Timeline: [], ScopedTimeline: [], Snapshots: [baseline, current],
             NewFindings: [finding], PersistentFindings: [], ResolvedFindings: []);
 
-        TrendReportComposer composer = new(new CanonicalReportDocumentFactory(new ReportSerializer()));
+        TrendReportComposer composer = new(new ReportSerializer());
         AnalysisReportDocument trendDoc = composer.ComposeCanonicalTrendReport(
             [run], TimeSpan.FromSeconds(2),
             null, new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),

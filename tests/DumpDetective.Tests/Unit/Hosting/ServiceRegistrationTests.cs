@@ -46,7 +46,6 @@ public sealed class ServiceRegistrationTests
         services.GetRequiredService<IAnalyzerFactory>().Should().NotBeNull();
         services.GetRequiredService<ISectionBuilderFactory>().Should().NotBeNull();
         services.GetRequiredService<FindingGenerationPipeline>().Should().NotBeNull();
-        services.GetRequiredService<CanonicalReportDocumentFactory>().Should().NotBeNull();
         services.GetRequiredService<TrendAnalyzer>().Should().NotBeNull();
         services.GetRequiredService<TrendReportComposer>().Should().NotBeNull();
         services.GetRequiredService<ExecutiveSummaryProjector>().Should().NotBeNull();

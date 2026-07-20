@@ -184,6 +184,12 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.sections.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.toc.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.integrity.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.motion.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.filters.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.search.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.keyboard.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.actions.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.tables.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.js")));
 
             string main = StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.main.js"));

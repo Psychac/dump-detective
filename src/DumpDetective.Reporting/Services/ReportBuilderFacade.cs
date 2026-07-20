@@ -10,13 +10,13 @@ namespace DumpDetective.Reporting.Services;
 internal sealed class ReportBuilderFacade(
     IEnumerable<IReportFormatter> formatters,
     ISectionBuilderFactory builderFactory,
-    CanonicalReportDocumentFactory documentFactory,
+    ReportSerializer serializer,
     TrendReportComposer trendReportComposer)
 {
     private readonly IReadOnlyList<IReportFormatter> _formatters = formatters.ToArray();
     private readonly IReadOnlyList<IAnalyzerSectionBuilder> _analyzerBuilders = builderFactory.CreateAnalyzerBuilders();
     private readonly IReadOnlyList<IReportSectionBuilder> _reportBuilders = builderFactory.CreateReportBuilders();
-    private readonly CanonicalReportDocumentFactory _documentFactory = documentFactory;
+    private readonly ReportSerializer _serializer = serializer;
     private readonly TrendReportComposer _trendComposer = trendReportComposer;
 
     public string BuildRenderedReport(
@@ -37,15 +37,8 @@ internal sealed class ReportBuilderFacade(
     {
         cancellationToken.ThrowIfCancellationRequested();
         AnalysisReportDocument doc = BuildReportDocument(dumpPath, runs, elapsed, incidentContext);
-        IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
-            ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
         cancellationToken.ThrowIfCancellationRequested();
-        if (formatter is HtmlReportRenderer htmlFormatter)
-        {
-            // Trend reports respect the v2 visual style per TV2-1 plan (use v2 token)
-            return htmlFormatter.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
-        }
-        return formatter.Render(doc);
+        return RenderDocument(doc, format);
     }
 
     public string BuildRenderedTrendReport(
@@ -65,16 +58,9 @@ internal sealed class ReportBuilderFacade(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AnalysisReportDocument doc = BuildTrendReportDocument(
-            currentRuns,
-            elapsed,
-            incidentContext,
-            trendData);
-
-        IReportFormatter formatter = _formatters.FirstOrDefault(f => f.Format == format)
-            ?? throw new InvalidOperationException($"No formatter registered for '{format}'.");
+        AnalysisReportDocument doc = BuildTrendReportDocument(currentRuns, elapsed, incidentContext, trendData);
         cancellationToken.ThrowIfCancellationRequested();
-        return formatter.Render(doc);
+        return RenderDocument(doc, format);
     }
 
     public AnalysisReportDocument BuildTrendReportDocument(
@@ -91,9 +77,7 @@ internal sealed class ReportBuilderFacade(
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<InsightFinding>? additionalFindings = null)
-    {
-        return _documentFactory.BuildDocument(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings);
-    }
+        => _serializer.Serialize(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings);
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format, HtmlRenderSettings? htmlRenderSettings = null)
     {

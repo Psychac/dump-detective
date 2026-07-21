@@ -8,6 +8,16 @@
 > architectural cost estimate, not a profiled benchmark — costs are stated as order-of-magnitude
 > multipliers to be confirmed empirically in Deliverable 8.
 
+> **Correction (2026-07-21)**: the "26 of 36" / "~26x" figures in this section were verified
+> against the actual `IAnalyzer` implementations and found to overstate the on-disk index-scan
+> count. See the
+> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count)
+> for the verified breakdown: **9 of 35** analyzers stream the on-disk index (not 26 of 36); a
+> further 5 perform a full `ClrHeap.EnumerateObjects()` sweep that this section's numbers
+> conflate with index streaming but which a shared index dispatcher cannot address. The
+> qualitative finding below (this is real, uncoordinated duplication) still holds — only the
+> multiplier is corrected.
+
 ## 1. Heap scans — the dominant cost
 
 `IAnalyzer.AnalyzeAsync(AnalysisContext, CancellationToken)` is invoked once per registered
@@ -22,7 +32,8 @@ Heap Scan Mode column:
 - **3 analyzers** use `Direct ClrMD` (segment/JIT/thread APIs — cheap, bounded by segment/thread
   count, not object count)
 
-**26 of 36 analyzers independently open and fully stream the on-disk object index**, unless the
+**9 of 35 analyzers independently open and fully stream the on-disk object index** (verified
+count; originally estimated as "26 of 36" — see 2026-07-21 correction above), unless the
 orchestration pipeline does single-pass fan-out (worth confirming explicitly in Deliverable 7 —
 nothing in the catalog or `IAnalyzer` shape suggests it does, since each `AnalyzeAsync` is an
 independent, self-contained call).
@@ -72,8 +83,8 @@ places instead of one.
 No significant duplication found. `StringAnalyzer` is the sole owner of full string-content
 enumeration and fingerprinting. Other analyzers that read individual string field values (e.g.
 connection-state field names) do targeted field reads, not heap-wide string enumeration — a
-different, cheap operation. Note that `StringAnalyzer`'s own full pass is still one of the 26
-index scans counted in §1.
+different, cheap operation. Note that `StringAnalyzer`'s own full pass is still one of the 9
+verified index scans counted in §1.
 
 ## 5. Statistics
 
@@ -82,8 +93,8 @@ recomputed independently by at least `MemoryAnalyzer`, `ModuleAnalyzer`, `AppDom
 `ObjectShapeAnalyzer` — each folds this reduction into its own index scan rather than consuming a
 shared result.
 
-**Estimated cost**: this is a second-order cost on top of §1 — even if the 26 redundant index
-scans were collapsed into one shared pass, each of these 4 analyzers would still independently
+**Estimated cost**: this is a second-order cost on top of §1 — even if the 9 verified redundant
+index scans were collapsed into one shared pass, each of these 4 analyzers would still independently
 re-run the same `TypeId → (count, bytes)` reduction over the shared data unless that reduction
 itself is promoted to a single computed artifact. Given `TypeIndexBuilder` already exists as part
 of the Phase 1 index build (per [architecture.md](../architecture.md)), per-type count/bytes is a

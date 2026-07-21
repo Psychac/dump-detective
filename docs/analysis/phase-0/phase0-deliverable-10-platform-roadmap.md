@@ -8,6 +8,76 @@
 
 ---
 
+## Correction — 2026-07-21: verified heap-scan analyzer count
+
+The "**Up to 26 of 36 analyzers**" figure used throughout this doc (Weaknesses, Biggest Risks
+item 1, Success Criteria Q5/Q6/Q7) and in
+[phase0-deliverable-5-shared-infrastructure.md](phase0-deliverable-5-shared-infrastructure.md)
+item 1 / [phase0-deliverable-8-performance-architecture-review.md](phase0-deliverable-8-performance-architecture-review.md) §1
+was self-flagged in Deliverable 8 as architectural/estimated, not measured. Direct
+verification (grepping all `IAnalyzer` implementations under
+`src/DumpDetective.Analysis/Analyzers/`) found a materially different, smaller number:
+
+- **9 analyzers** stream the on-disk `HeapEntry` object index via
+  `HeapAnalysisCache.EnumerateIndexedEntries()` / `EnumerateIndexedEntriesAsTuples()`:
+  `DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer` (two call sites),
+  `AsyncTaskAnalyzer`, `HangAnalyzer`, `EventLeakAnalyzer` (two call sites),
+  `MemoryLeakAnalyzer`, `WcfChannelAnalyzer`, `StringAnalyzer`.
+- **5 more analyzers** perform a full `ClrHeap.EnumerateObjects()` sweep with no index path at
+  all: `TimerLeakAnalyzer`, `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`, plus
+  `LohFragmentationAnalyzer`/`HeapTopologyAnalyzer` (per-segment, not whole-heap). These are
+  architecturally distinct from the index-scan problem — a live ClrMD walk, not a read of the
+  on-disk index — so a dispatcher built around `HeapAnalysisCache.EnumerateIndexedEntries()`
+  cannot help them without a second, separate mechanism.
+
+So **14 of 35** analyzers do some form of full/broad heap traversal, not 26 of 36, and only
+**9 of 35** are addressable by a single shared index-scan dispatcher in one pass. This changes
+the priority calculus without eliminating it:
+
+- The single-pass dispatcher (P0, Performance track) remains correctly prioritized in kind —
+  9 sequential full-index reads on a 10GB+ dump is still a direct threat to the "reasonable
+  runtime" bar, and the dispatcher is still the highest-leverage single fix available. But the
+  claimed blast radius (~26x) was roughly **3x smaller** than stated (~9x for the index path),
+  so this item should be re-scored as high-value-but-not-uniquely-dominant rather than the
+  runaway biggest risk on the roadmap — worth weighing against the Correctness track (evidence
+  bus / leak-scoring fragmentation) with fresher eyes rather than assuming Performance
+  automatically outranks it.
+- The 5 `EnumerateObjects()`-based analyzers are **not** addressed by the planned dispatcher
+  shape at all. If they matter for the 10GB+ goal, they need to be tracked as a distinct,
+  currently-unscoped follow-up (a second dispatcher variant wrapping live
+  `ClrHeap.EnumerateObjects()` fan-out, or migrating each onto the on-disk index first) —
+  this roadmap did not previously call that out as a separate risk.
+
+See [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) for
+the implementation plan built on this verified breakdown, including a proof-of-concept scoped
+to `DbConnectionAnalyzer` only pending re-prioritization.
+
+## Re-prioritization — 2026-07-21: dispatcher demoted from P0 to P1
+
+Following the verified count above, the single-pass index scan dispatcher is reclassified from
+Immediate Priorities (P0) to Near-term (P1), and the Correctness track (evidence bus /
+leak-scoring fragmentation) now leads P0 alone. Three reasons:
+
+1. **Blast radius is 3x smaller than originally estimated** (9x, not 26x) — a real cost on
+   10GB+ dumps, but no longer plausibly the platform's single largest architectural risk without
+   re-weighing against fragmented leak evidence (Biggest Risk #2).
+2. **Implementation review surfaced a real, unbudgeted blocker**: `DbConnectionAnalyzerDiscrepancyTests.cs`
+   and likely other call sites invoke `analyzer.AnalyzeAsync()` directly, bypassing
+   `AnalysisPipeline` — the mechanism that would prime dispatcher-participant state before
+   `AnalyzeAsync` runs. Difficulty was already rated High before this was found; see
+   [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)'s
+   "Open design problem" section.
+3. **Fragmented leak evidence is a product-credibility risk, not just a code-quality one**
+   (Deliverable 9) — independent of and non-blocking relative to the dispatcher, and a closer
+   match to what actually differentiates DumpDetective from dotMemory today.
+
+The dispatcher is not deprioritized to "someday" — it stays P1, ahead of the other P1 items, and
+should be revisited once either the direct-`AnalyzeAsync`-call blocker has a clear resolution, or
+a profiling run (Deliverable 8's own open item) confirms the 9x scan cost is significant on a
+representative 10GB+ dump, whichever comes first.
+
+---
+
 ## Current Architecture Assessment
 
 ### Strengths
@@ -34,9 +104,13 @@
 
 ### Weaknesses
 
-- **Up to 26 of 36 analyzers independently perform a full heap-index scan**, with no shared
-  single-pass dispatcher (Deliverable 4 §1, Deliverable 8 §1) — the single largest weakness in the
-  platform.
+- **9 of 35 analyzers independently stream the full on-disk object index**, with no shared
+  single-pass dispatcher (Deliverable 4 §1, Deliverable 8 §1) — see the
+  [Correction](#correction--2026-07-21-verified-heap-scan-analyzer-count) above; originally
+  estimated at "up to 26 of 36," verified smaller. A further 5 analyzers do a full live
+  `ClrHeap.EnumerateObjects()` sweep, which this dispatcher cannot address. Still the single
+  largest weakness in the platform in kind, though its blast radius is ~3x smaller than
+  originally stated.
 - **Leak/retention evidence is fragmented across 6 analyzers** with no unified scoring or
   confidence model (Deliverable 3, 5, 7, 9) — the platform's weakest point relative to the
   industry benchmark specifically.
@@ -53,10 +127,12 @@
 
 ### Biggest Risks
 
-1. **The ~26x heap-scan multiplier is the most direct threat to the project's own definition of
-   done** ("works on 10GB+ dumps... reasonable runtime," CLAUDE.md). This is not a theoretical
-   concern — it's a structural mismatch between the platform's stated performance goal and its
-   current execution model.
+1. **The ~9x on-disk index-scan multiplier (verified; originally estimated at ~26x — see
+   Correction above) is a direct threat to the project's own definition of done** ("works on
+   10GB+ dumps... reasonable runtime," CLAUDE.md). This is not a theoretical concern — it's a
+   structural mismatch between the platform's stated performance goal and its current execution
+   model, though smaller in magnitude than first estimated and no longer unambiguously the
+   single biggest risk on this list without re-weighing against risk #2.
 2. **Fragmented leak evidence threatens the product's credibility**, not just its code quality —
    Deliverable 9 showed this is the one gap that actually undermines DumpDetective's core value
    proposition against the tool it's most philosophically similar to (dotMemory).
@@ -71,14 +147,9 @@
 
 ## Immediate Priorities (P0)
 
-Two independent tracks, neither blocking the other (Deliverable 5) — both must outrank every P1/P2
-item below:
-
-**Performance track**
-- Single-pass index scan dispatcher (Deliverable 5 item 1, Deliverable 8 §1) — the highest-leverage
-  change available; unblocks the 10GB+ dump performance goal.
-- Per-type statistics computed once inside that same pass (Deliverable 5 item 2) — cheap once the
-  dispatcher exists, removes a correctness risk (disagreeing "total bytes" numbers across reports).
+Per the [2026-07-21 re-prioritization](#re-prioritization--2026-07-21-dispatcher-demoted-from-p0-to-p1)
+above, the index scan dispatcher (formerly this section's Performance track) has moved to
+[Near-term (P1)](#near-term-p1). The Correctness track below is now the sole P0 track.
 
 **Correctness track**
 - Inter-analyzer result bus (Deliverable 5 item 11) — confirm first whether `AnalysisContext`
@@ -97,6 +168,16 @@ item below:
 
 ## Near-term (P1)
 
+- **Single-pass index scan dispatcher** (Deliverable 5 item 1, Deliverable 8 §1; demoted from P0
+  — see [2026-07-21 re-prioritization](#re-prioritization--2026-07-21-dispatcher-demoted-from-p0-to-p1)
+  above) — addresses 9 of 35 analyzers (verified), not 26 of 36 as originally estimated. Still a
+  real fix for 10GB+ dump performance, but sequence after the P0 Correctness track and after the
+  direct-`AnalyzeAsync`-call blocker documented in
+  [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) has a
+  resolution, or a profiling run confirms the 9x scan cost is significant on a representative
+  10GB+ dump.
+- Per-type statistics computed once inside that same pass (Deliverable 5 item 2) — cheap once the
+  dispatcher exists, removes a correctness risk (disagreeing "total bytes" numbers across reports).
 - Root/retention graph service: route `RetentionAnalyzer`(→merged into `DominatorAnalyzer`),
   `StaticRootLeakDetector`, `EventLeakAnalyzer` through the shared `Traversal` primitive
   (Deliverable 5 item 3, Deliverable 8 §3).
@@ -193,21 +274,28 @@ excluded as non-goals: allocation call-stack hotspots and live ETW timelines (ar
 impossible from a static dump) and a full interactive GUI (strategically premature).
 
 **5. Which expensive operations should become shared infrastructure?**
-In priority order (Deliverable 5, 8): the object-index scan itself (dispatcher), per-type
-statistics reduction, root/static enumeration, the handle-table walk, the thread-stack walk, type
-classification, reflection field-layout caching, and the typed-resource sampler.
+In priority order (Deliverable 5, 8): the object-index scan itself (dispatcher — addresses 9 of
+35 analyzers per the verified Correction above, not all of them), per-type statistics reduction,
+root/static enumeration, the handle-table walk, the thread-stack walk, type classification,
+reflection field-layout caching, and the typed-resource sampler.
 
 **6. What architectural changes would most improve correctness, scalability, and maintainability?**
-Scalability: the single-pass index dispatcher, by a wide margin — nothing else on this roadmap
-matters at 10GB+ scale if this isn't fixed. Correctness: the inter-analyzer result bus feeding a
-shared evidence/ranking/confidence engine, which turns 6 independently-scored leak signals into
-one credible answer. Maintainability: enforcing the dependency direction from Deliverable 7 (no
-analyzer depends on Pipeline or Reporting) and reducing the 4x registration fan-out before the
-analyzer count grows further.
+Scalability: the single-pass index dispatcher — high-leverage for the 9 index-scanning analyzers
+it covers (verified breakdown above), though "nothing else matters at 10GB+ scale if this isn't
+fixed" overstates it now that the multiplier is known to be ~9x, not ~26x, and 5 analyzers
+(`EnumerateObjects()`-based) sit outside its reach entirely. Correctness: the inter-analyzer
+result bus feeding a shared evidence/ranking/confidence engine, which turns 6
+independently-scored leak signals into one credible answer — this is worth weighing as
+co-equal with, not automatically subordinate to, the dispatcher now that the latter's blast
+radius is verified smaller. Maintainability: enforcing the dependency direction from
+Deliverable 7 (no analyzer depends on Pipeline or Reporting) and reducing the 4x registration
+fan-out before the analyzer count grows further.
 
 **7. If DumpDetective were redesigned today, what would its analyzer architecture look like?**
-Roughly 33 analyzers (post-merge), each exposing a per-object visitor callback consumed by one
-shared dispatcher instead of independently streaming the index. A per-type statistics artifact and
+Roughly 33 analyzers (post-merge); of those, the 9 verified index-scanning analyzers (Correction
+above) would each expose a per-object visitor callback consumed by one shared dispatcher instead
+of independently streaming the index — the 5 `EnumerateObjects()`-based analyzers would need an
+analogous but distinct live-heap fan-out mechanism, not this same dispatcher. A per-type statistics artifact and
 per-object generation/segment classification computed once per run and handed to every analyzer,
 rather than re-derived. A single canonical root/retention graph service (built on the existing
 `Traversal` primitive) that every leak-adjacent analyzer depends on instead of implementing its own

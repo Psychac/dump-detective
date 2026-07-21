@@ -11,14 +11,26 @@
 
 ## 1. Number of Full Heap Scans
 
-Restated at the global level: **26 of 36 analyzers** independently stream the full on-disk object
-index per run (`Index` or `Index+Container` mode, Deliverable 1). This is a direct violation, at
-the architecture level, of CLAUDE.md's own hot-path guidance — not because any single analyzer
-uses `.ToList()` or builds a full graph eagerly (nothing observed suggests that), but because the
-platform as a whole performs the equivalent of ~26 full heap enumerations where its own design
-intent (Phase 1 single-pass streaming index build, Phase 2 *scoped* analysis on subsets) clearly
-assumes far fewer. For a 10GB+ dump, this is the difference between the project meeting its own
-"reasonable runtime" bar and not.
+> **Correction (2026-07-21)**: the "26 of 36" figure below was self-flagged in this doc's own
+> closing section as architectural/estimated, not measured. Direct verification against the
+> actual `IAnalyzer` implementations found a smaller, more precise number — see the
+> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count).
+> **9 of 35** analyzers stream the on-disk `HeapEntry` index; a separate **5** perform a full
+> live `ClrHeap.EnumerateObjects()` sweep with no index path at all (architecturally distinct —
+> not addressable by an index-scan dispatcher). The qualitative argument below still holds; only
+> the multiplier changes from ~26x to ~9x for the index-scan population.
+
+Restated at the global level: **9 of 35 analyzers** (verified; originally estimated as "26 of
+36") independently stream the full on-disk object index per run (`Index` or `Index+Container`
+mode, Deliverable 1). This is a direct violation, at the architecture level, of CLAUDE.md's own
+hot-path guidance — not because any single analyzer uses `.ToList()` or builds a full graph
+eagerly (nothing observed suggests that), but because the platform as a whole performs the
+equivalent of ~9 full index reads where its own design intent (Phase 1 single-pass streaming
+index build, Phase 2 *scoped* analysis on subsets) clearly assumes one. For a 10GB+ dump, this
+remains a real risk to the project's own "reasonable runtime" bar, though smaller than
+originally estimated. A further 5 analyzers independently walk the live heap via
+`ClrHeap.EnumerateObjects()` — a distinct cost this section previously conflated with the
+index-scan figure.
 
 ## 2. Repeated Index Construction
 
@@ -28,11 +40,12 @@ Two distinct things can be meant by "index construction," and they should not be
   `architecture.md`'s single-pass design — no evidence found of the disk-level index being
   rebuilt redundantly.
 - **In-memory secondary indexes built by each analyzer while consuming that stream** — this is
-  where the duplication actually lives. Every one of the 26 index-scanning analyzers builds its
-  own working structure (typically a `Dictionary` keyed by type id or address) while streaming,
-  then discards it at the end of `AnalyzeAsync`. There is no shared in-memory intermediate result
-  passed between analyzers, so the same reduction (e.g. `TypeId → (count, bytes)`, Deliverable 4
-  §5) is constructed from scratch up to 26 times per run.
+  where the duplication actually lives. Every one of the 9 index-scanning analyzers (verified
+  count; see 2026-07-21 correction above) builds its own working structure (typically a
+  `Dictionary` keyed by type id or address) while streaming, then discards it at the end of
+  `AnalyzeAsync`. There is no shared in-memory intermediate result passed between analyzers, so
+  the same reduction (e.g. `TypeId → (count, bytes)`, Deliverable 4 §5) is constructed from
+  scratch up to 9 times per run.
 - **Container/satellite indexes** (`Indexing.Container` for arrays/LOH/tasks, `Indexing.Satellite`
   for weak references) — whether these are built once during Phase 1 alongside the main index, or
   lazily constructed the first time a consuming analyzer runs, could not be confirmed from the
@@ -87,14 +100,14 @@ caches can drift (e.g., two different classifications of the same type in two re
 
 Architectural risk vectors, not profiled measurements:
 
-- **Per-analyzer aggregation structures.** Each of the ~26 index-scanning analyzers allocates its
-  own `Dictionary`/list sized proportional to type count or object count for its own reduction.
-  With potentially thousands of distinct types in a large application heap, this is on the order
-  of 26x the dictionary allocation volume that a single shared reduction (Deliverable 5 item 2)
-  would require.
+- **Per-analyzer aggregation structures.** Each of the ~9 index-scanning analyzers (verified
+  count; see 2026-07-21 correction above) allocates its own `Dictionary`/list sized proportional
+  to type count or object count for its own reduction. With potentially thousands of distinct
+  types in a large application heap, this is on the order of 9x the dictionary allocation volume
+  that a single shared reduction (Deliverable 5 item 2) would require.
 - **Redundant `ArrayPool` rent/return cycles.** Each analyzer's own `ObjectIndexReader` instance
   rents and returns its own buffers independently. Because they go through the shared pool, this
-  isn't a leak, but it is 26x the rent/return churn and, more importantly, 26x the CPU cost of
+  isn't a leak, but it is 9x the rent/return churn and, more importantly, 9x the CPU cost of
   re-deserializing the same on-disk bytes into `HeapEntry` structs — pure redundant work, not just
   redundant allocation.
 - **Sample-buffer duplication.** The resource-sampler quartet (`DbConnectionAnalyzer`/
@@ -123,7 +136,7 @@ Architectural risk vectors, not profiled measurements:
 This was a static, architecture-level pass — the following require empirical confirmation before
 prioritizing fix work with confidence:
 
-- Actual wall-clock/I/O cost of the ~26x index-scan multiplier on a representative 10GB+ dump.
+- Actual wall-clock/I/O cost of the ~9x index-scan multiplier (verified count; originally estimated ~26x — see 2026-07-21 correction above) on a representative 10GB+ dump.
 - Whether container/satellite indexes are truly rebuilt per-analyzer-invocation or already cached
   across a session (item 3 above).
 - Actual peak memory usage contribution from duplicate per-analyzer aggregation structures on a

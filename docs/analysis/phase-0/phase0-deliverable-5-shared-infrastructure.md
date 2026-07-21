@@ -13,12 +13,23 @@ and priority (P0 = foundational/highest value, P2 = polish).
 
 ## 1. Heap Index Single-Pass Dispatcher
 
-**Current duplication**: 26 of 36 analyzers independently open and fully stream the on-disk
-object index (Deliverable 4 §1) — the single largest cost in the platform.
+> **Correction (2026-07-21)**: verified against actual `IAnalyzer` implementations — see the
+> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count).
+> The real count is **9 of 35** analyzers streaming the on-disk index, not 26 of 36. This item
+> still stands on its own merits (9 sequential full-index reads is still real waste on a 10GB+
+> dump) but should be re-weighed against the correctness-track items below rather than assumed
+> automatically dominant now that its blast radius is ~3x smaller than originally stated.
 
-**Estimated impact**: Very High. Collapsing ~26 redundant sequential reads into 1 is the highest
-leverage change available; it directly serves the project's stated 10GB+ dump performance goal
-and nothing else on this list matters as much at scale.
+**Current duplication**: 9 of 35 analyzers independently open and fully stream the on-disk
+object index (Deliverable 4 §1, corrected) — still the single largest *coordinated* cost in the
+platform among analyzers that share this access pattern, though a further 5 analyzers do a full
+live `ClrHeap.EnumerateObjects()` sweep that this dispatcher shape cannot address.
+
+**Estimated impact**: High (revised down from "Very High"). Collapsing ~9 redundant sequential
+reads into 1 is still a high-leverage change and directly serves the project's stated 10GB+ dump
+performance goal, but it no longer dwarfs everything else on this list at scale — the
+correctness-track items (evidence bus, confidence scoring) are worth prioritizing on their own
+merits now rather than by default deferring to this item.
 
 **Difficulty**: High. This isn't a helper-extraction — it requires rethinking the
 `IAnalyzer.AnalyzeAsync(AnalysisContext, CancellationToken)` execution model. Two shapes are

@@ -11,14 +11,12 @@
 
 ## 1. Number of Full Heap Scans
 
-> **Correction (2026-07-21)**: the "26 of 36" figure below was self-flagged in this doc's own
-> closing section as architectural/estimated, not measured. Direct verification against the
-> actual `IAnalyzer` implementations found a smaller, more precise number — see the
-> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count).
-> **9 of 35** analyzers stream the on-disk `HeapEntry` index; a separate **5** perform a full
-> live `ClrHeap.EnumerateObjects()` sweep with no index path at all (architecturally distinct —
-> not addressable by an index-scan dispatcher). The qualitative argument below still holds; only
-> the multiplier changes from ~26x to ~9x for the index-scan population.
+Direct verification against the actual `IAnalyzer` implementations (see
+[Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state)) found:
+**9 of 35** analyzers stream the on-disk `HeapEntry` index; a separate **5** perform a full live
+`ClrHeap.EnumerateObjects()` sweep with no index path at all (architecturally distinct — not
+addressable by an index-scan dispatcher). The qualitative argument below holds at a ~9x multiplier
+for the index-scan population.
 
 Restated at the global level: **9 of 35 analyzers** (verified; originally estimated as "26 of
 36") independently stream the full on-disk object index per run (`Index` or `Index+Container`
@@ -41,7 +39,7 @@ Two distinct things can be meant by "index construction," and they should not be
   rebuilt redundantly.
 - **In-memory secondary indexes built by each analyzer while consuming that stream** — this is
   where the duplication actually lives. Every one of the 9 index-scanning analyzers (verified
-  count; see 2026-07-21 correction above) builds its own working structure (typically a
+  count) builds its own working structure (typically a
   `Dictionary` keyed by type id or address) while streaming, then discards it at the end of
   `AnalyzeAsync`. There is no shared in-memory intermediate result passed between analyzers, so
   the same reduction (e.g. `TypeId → (count, bytes)`, Deliverable 4 §5) is constructed from
@@ -136,7 +134,7 @@ Architectural risk vectors, not profiled measurements:
 This was a static, architecture-level pass — the following require empirical confirmation before
 prioritizing fix work with confidence:
 
-- Actual wall-clock/I/O cost of the ~9x index-scan multiplier (verified count; originally estimated ~26x — see 2026-07-21 correction above) on a representative 10GB+ dump.
+- Actual wall-clock/I/O cost of the ~9x index-scan multiplier (verified count) on a representative 10GB+ dump.
 - Whether container/satellite indexes are truly rebuilt per-analyzer-invocation or already cached
   across a session (item 3 above).
 - Actual peak memory usage contribution from duplicate per-analyzer aggregation structures on a

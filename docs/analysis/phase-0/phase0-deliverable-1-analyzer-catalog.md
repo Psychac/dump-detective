@@ -9,18 +9,14 @@ Reviewed as a static architecture pass over `src/DumpDetective.Analysis/Analyzer
 `DefaultAnalyzerFeatureModuleCatalog`. Implementations were not deep-reviewed line by line —
 per Phase 0 instructions, this is an architectural pass, not an implementation review.
 
-> **Correction (2026-07-21)**: because this catalog's `Heap Scan Mode` column was not verified
-> line-by-line against actual code, the derived "26 of 36 analyzers use Index/Index+Container"
-> figure (repeated in Deliverables 4, 5, 8, 10) overstated the true on-disk-index-scan count.
-> Direct grep verification against `HeapAnalysisCache.EnumerateIndexedEntries()` /
-> `EnumerateIndexedEntriesAsTuples()` call sites found only **9** analyzers actually stream the
-> object index this way — see the
-> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count)
-> for the verified list and the 5 additional `ClrHeap.EnumerateObjects()`-based analyzers this
-> catalog's Index/Index+Container labels did not distinguish from index streaming. The
-> `Heap Scan Mode` column values below have **not** been individually re-audited row-by-row
-> against this correction — treat any given row's `Index`/`Index+Container` label as indicative,
-> not verified, until cross-checked against source.
+This catalog's `Heap Scan Mode` column has not been individually re-audited row-by-row against
+source — treat any given row's `Index`/`Index+Container` label as indicative, not verified, until
+cross-checked against code. Direct grep verification against
+`HeapAnalysisCache.EnumerateIndexedEntries()` / `EnumerateIndexedEntriesAsTuples()` call sites
+(see [Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state))
+found that only **9** analyzers actually stream the on-disk object index this way; a further 5
+perform a full `ClrHeap.EnumerateObjects()` sweep that this catalog's Index/Index+Container labels
+do not distinguish from index streaming.
 
 ## Legend — Heap Scan Mode
 

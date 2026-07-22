@@ -8,15 +8,12 @@
 > architectural cost estimate, not a profiled benchmark — costs are stated as order-of-magnitude
 > multipliers to be confirmed empirically in Deliverable 8.
 
-> **Correction (2026-07-21)**: the "26 of 36" / "~26x" figures in this section were verified
-> against the actual `IAnalyzer` implementations and found to overstate the on-disk index-scan
-> count. See the
-> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count)
-> for the verified breakdown: **9 of 35** analyzers stream the on-disk index (not 26 of 36); a
-> further 5 perform a full `ClrHeap.EnumerateObjects()` sweep that this section's numbers
-> conflate with index streaming but which a shared index dispatcher cannot address. The
-> qualitative finding below (this is real, uncoordinated duplication) still holds — only the
-> multiplier is corrected.
+The verified breakdown (see
+[Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state)):
+**9 of 35** analyzers stream the on-disk index; a further 5 perform a full
+`ClrHeap.EnumerateObjects()` sweep that this section's numbers conflate with index streaming but
+which a shared index dispatcher cannot address. The qualitative finding below — this is real,
+uncoordinated duplication — holds at this corrected multiplier.
 
 ## 1. Heap scans — the dominant cost
 
@@ -33,8 +30,7 @@ Heap Scan Mode column:
   count, not object count)
 
 **9 of 35 analyzers independently open and fully stream the on-disk object index** (verified
-count; originally estimated as "26 of 36" — see 2026-07-21 correction above), unless the
-orchestration pipeline does single-pass fan-out (worth confirming explicitly in Deliverable 7 —
+count), unless the orchestration pipeline does single-pass fan-out (worth confirming explicitly in Deliverable 7 —
 nothing in the catalog or `IAnalyzer` shape suggests it does, since each `AnalyzeAsync` is an
 independent, self-contained call).
 

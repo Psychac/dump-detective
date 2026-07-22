@@ -1,21 +1,18 @@
 # Heap-Index Single-Pass Scan Dispatcher — Implementation Plan
 
-> Status: **Not started (implementation paused pending re-prioritization)**, 2026-07-21.
-> Persisted from an approved plan-mode design so the plan survives context resets. See the
-> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count)
-> for why this was paused: verification shows the dispatcher addresses **9 of 35** analyzers
-> (not 26 of 36 as originally estimated), which changes this item's priority relative to the
-> Correctness track (evidence bus / leak-scoring fragmentation) and warrants a fresh call before
-> committing implementation effort.
+> Status: **Not started.** Designed but not implemented — see
+> [Deliverable 10, Near-term (P1)](phase0-deliverable-10-platform-roadmap.md#near-term-p1) for
+> current sequencing relative to the Correctness track (evidence bus / leak-scoring
+> fragmentation) and the unresolved `AnalyzeAsync` test-bypass problem this plan depends on
+> resolving first.
+> Persisted from an approved plan-mode design so the plan survives context resets.
 
 ## Context
 
-`phase0-deliverable-10-platform-roadmap.md` (and its supporting `phase0-deliverable-5-shared-infrastructure.md`
-item 1 / `phase0-deliverable-8-performance-architecture-review.md` §1) originally cited "26 of 36
-analyzers independently stream the full on-disk object index." That figure was explicitly
-self-flagged as architectural/estimated, not measured. Verifying it directly by grepping all 35
-`IAnalyzer` implementations under `src/DumpDetective.Analysis/Analyzers/` turned up a materially
-different, smaller number:
+The dispatcher addresses **9 of 35** analyzers that stream the on-disk object index (see
+[Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state)),
+verified directly by grepping all 35 `IAnalyzer` implementations under
+`src/DumpDetective.Analysis/Analyzers/`:
 
 - **9 analyzers** stream the on-disk `HeapEntry` index via `EnumerateIndexedEntries()` /
   `EnumerateIndexedEntriesAsTuples()`: `DbConnectionAnalyzer`, `CrashAnalyzer`,
@@ -217,7 +214,7 @@ what's currently asserted before changing event shapes.
 
 ## Next step
 
-Re-evaluate priority against the Correctness track (evidence bus, Deliverable 5 item 11 / item 6)
-now that the dispatcher's verified blast radius (9 of 35, not 26 of 36) is known — see the
-[Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count).
-If still prioritized, resolve the standalone-call design problem above before writing any code.
+Weighed against the Correctness track (evidence bus, Deliverable 5 item 11 / item 6) — see
+[Deliverable 10, Near-term (P1)](phase0-deliverable-10-platform-roadmap.md#near-term-p1) — given
+the dispatcher's verified blast radius of 9 of 35 analyzers. Resolve the standalone-call design
+problem above before writing any code.

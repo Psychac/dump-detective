@@ -5,109 +5,45 @@
 > Consolidates [Deliverable 1](phase0-deliverable-1-analyzer-catalog.md) through
 > [Deliverable 9](phase0-deliverable-9-industry-benchmark.md) into a roadmap, and closes by
 > explicitly answering the review's seven Success Criteria questions.
+>
+> This document describes **current state and remaining work only**. It does not track dated
+> history of how these conclusions were reached — see individual Deliverable docs and git history
+> for that.
 
 ---
 
-## Correction — 2026-07-21: verified heap-scan analyzer count
+## Current State
 
-The "**Up to 26 of 36 analyzers**" figure used throughout this doc (Weaknesses, Biggest Risks
-item 1, Success Criteria Q5/Q6/Q7) and in
-[phase0-deliverable-5-shared-infrastructure.md](phase0-deliverable-5-shared-infrastructure.md)
-item 1 / [phase0-deliverable-8-performance-architecture-review.md](phase0-deliverable-8-performance-architecture-review.md) §1
-was self-flagged in Deliverable 8 as architectural/estimated, not measured. Direct
-verification (grepping all `IAnalyzer` implementations under
-`src/DumpDetective.Analysis/Analyzers/`) found a materially different, smaller number:
-
-- **9 analyzers** stream the on-disk `HeapEntry` object index via
-  `HeapAnalysisCache.EnumerateIndexedEntries()` / `EnumerateIndexedEntriesAsTuples()`:
-  `DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer` (two call sites),
-  `AsyncTaskAnalyzer`, `HangAnalyzer`, `EventLeakAnalyzer` (two call sites),
-  `MemoryLeakAnalyzer`, `WcfChannelAnalyzer`, `StringAnalyzer`.
-- **5 more analyzers** perform a full `ClrHeap.EnumerateObjects()` sweep with no index path at
-  all: `TimerLeakAnalyzer`, `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`, plus
-  `LohFragmentationAnalyzer`/`HeapTopologyAnalyzer` (per-segment, not whole-heap). These are
-  architecturally distinct from the index-scan problem — a live ClrMD walk, not a read of the
-  on-disk index — so a dispatcher built around `HeapAnalysisCache.EnumerateIndexedEntries()`
-  cannot help them without a second, separate mechanism.
-
-So **14 of 35** analyzers do some form of full/broad heap traversal, not 26 of 36, and only
-**9 of 35** are addressable by a single shared index-scan dispatcher in one pass. This changes
-the priority calculus without eliminating it:
-
-- The single-pass dispatcher (P0, Performance track) remains correctly prioritized in kind —
-  9 sequential full-index reads on a 10GB+ dump is still a direct threat to the "reasonable
-  runtime" bar, and the dispatcher is still the highest-leverage single fix available. But the
-  claimed blast radius (~26x) was roughly **3x smaller** than stated (~9x for the index path),
-  so this item should be re-scored as high-value-but-not-uniquely-dominant rather than the
-  runaway biggest risk on the roadmap — worth weighing against the Correctness track (evidence
-  bus / leak-scoring fragmentation) with fresher eyes rather than assuming Performance
-  automatically outranks it.
-- The 5 `EnumerateObjects()`-based analyzers are **not** addressed by the planned dispatcher
-  shape at all. If they matter for the 10GB+ goal, they need to be tracked as a distinct,
-  currently-unscoped follow-up (a second dispatcher variant wrapping live
-  `ClrHeap.EnumerateObjects()` fan-out, or migrating each onto the on-disk index first) —
-  this roadmap did not previously call that out as a separate risk.
-
-See [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) for
-the implementation plan built on this verified breakdown, including a proof-of-concept scoped
-to `DbConnectionAnalyzer` only pending re-prioritization.
-
-## Re-prioritization — 2026-07-21: dispatcher demoted from P0 to P1
-
-Following the verified count above, the single-pass index scan dispatcher is reclassified from
-Immediate Priorities (P0) to Near-term (P1), and the Correctness track (evidence bus /
-leak-scoring fragmentation) now leads P0 alone. Three reasons:
-
-1. **Blast radius is 3x smaller than originally estimated** (9x, not 26x) — a real cost on
-   10GB+ dumps, but no longer plausibly the platform's single largest architectural risk without
-   re-weighing against fragmented leak evidence (Biggest Risk #2).
-2. **Implementation review surfaced a real, unbudgeted blocker**: `DbConnectionAnalyzerDiscrepancyTests.cs`
-   and likely other call sites invoke `analyzer.AnalyzeAsync()` directly, bypassing
-   `AnalysisPipeline` — the mechanism that would prime dispatcher-participant state before
-   `AnalyzeAsync` runs. Difficulty was already rated High before this was found; see
-   [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)'s
-   "Open design problem" section.
-3. **Fragmented leak evidence is a product-credibility risk, not just a code-quality one**
-   (Deliverable 9) — independent of and non-blocking relative to the dispatcher, and a closer
-   match to what actually differentiates DumpDetective from dotMemory today.
-
-The dispatcher is not deprioritized to "someday" — it stays P1, ahead of the other P1 items, and
-should be revisited once either the direct-`AnalyzeAsync`-call blocker has a clear resolution, or
-a profiling run (Deliverable 8's own open item) confirms the 9x scan cost is significant on a
-representative 10GB+ dump, whichever comes first.
-
-## Correction — 2026-07-21: inter-analyzer result bus confirmed as new work, not `Order`-derived
-
-Deliverable 5 item 11 previously flagged the `Order` field as a plausible existing implementation
-of the inter-analyzer result bus, pending confirmation. Direct verification found it is not:
-
-- `IAnalyzer.Order` is consumed in exactly one place, `AnalyzerFilterService.Order()`
-  (`src/DumpDetective.Cli/Execution/AnalyzerFilterService.cs:53`), which sorts analyzers purely to
-  determine execution and report-section sequence.
-- `AnalysisContext` carries only `Runtime`, `Heap`, `Cache`, `AnalysisOptions`, `Diagnostics`,
-  `DiagnosticsSink`, `Progress` — no field through which one analyzer could read another's result.
-- `AnalysisPipeline.ExecuteAsync` (`src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs:24`)
-  runs analyzers sequentially but never threads a running results collection back into the context
-  mid-loop; each `AnalyzerRunResult` is only appended to a local list.
-- A working precedent for the *shape* the bus should take already exists, though:
-  `InsightEngine.FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs)`
-  (`src/DumpDetective.Analysis/Insight/InsightEngine.cs:1574`) already performs the typed
-  cross-analyzer lookup the bus needs, but only post-hoc — called from `InsightEngine.Analyze`
-  after the full run completes (`AnalysisPipeline.cs:257`) — and is currently `private` to
-  `InsightEngine`.
-
-**Recommended shape**: a **post-hoc** bus (generalizing `FindResult<T>` into a public post-run
-query surface), not a live/mid-run one keyed off `Order`. A live bus would make correctness depend
-on execution order staying stable as analyzers are added/reordered — the same "precedent" risk
-already flagged for `HeapTopologyAnalyzer → Pipeline` (Biggest Risk #3) — and would fight
-`IsThreadSafe`/future parallel-execution work. This does not change item 11's priority or its
-position blocking items 6/8/9 — it only resolves the previously-open question of whether it's new
-work (it is) and specifies the implementation shape.
-
-See [phase0-deliverable-5-shared-infrastructure.md](phase0-deliverable-5-shared-infrastructure.md)
-item 11 for the full analysis.
-
-**Update — 2026-07-21: implemented.** See the Correctness track entry below for the shipped shape.
+- **Heap-scan footprint (verified against source, not estimated)**: of 35 `IAnalyzer`
+  implementations, **9** stream the on-disk `HeapEntry` object index via
+  `HeapAnalysisCache.EnumerateIndexedEntries()` / `EnumerateIndexedEntriesAsTuples()`
+  (`DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer`, `AsyncTaskAnalyzer`,
+  `HangAnalyzer`, `EventLeakAnalyzer`, `MemoryLeakAnalyzer`, `WcfChannelAnalyzer`,
+  `StringAnalyzer`), and a further **5** perform a full live `ClrHeap.EnumerateObjects()` sweep with
+  no index path at all (`TimerLeakAnalyzer`, `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`,
+  `LohFragmentationAnalyzer`, `HeapTopologyAnalyzer` — the last two per-segment, not whole-heap).
+  **14 of 35** analyzers do some form of full/broad heap traversal; only the **9** index-scanning
+  ones are addressable by a single shared index-scan dispatcher — the 5
+  `EnumerateObjects()`-based analyzers are architecturally distinct and need a separate mechanism
+  if they're ever addressed (see [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)).
+- **Inter-analyzer result bus (Deliverable 5 item 11): implemented.** A post-hoc bus:
+  `AnalyzerRunResultsExtensions.GetResult<T>(this IReadOnlyList<AnalyzerRunResult> runs)`
+  (`src/DumpDetective.Core/Models/AnalyzerRunResult.cs`), `internal` and usable from any assembly
+  with `InternalsVisibleTo` on `DumpDetective.Core` (Analysis, Reporting, Cli, Tests,
+  BenchmarkSuite1). `InsightEngine.FindResult<T>` (`InsightEngine.cs:1574`) delegates to it instead
+  of duplicating the scan. No live/mid-run channel exists or is planned — `AnalysisContext` is
+  unchanged; consumers call this only after the pipeline finishes, same as `InsightEngine.Analyze`
+  already did. A live, mid-run bus keyed off `Order` was considered and rejected: it would make
+  correctness depend on execution order staying stable as analyzers are added/reordered, the same
+  risk as the `HeapTopologyAnalyzer → Pipeline` violation below. This is the unlocking prerequisite
+  for the Evidence builder / Ranking engine / Confidence scoring chain in [P0](#immediate-priorities-p0).
+- **Heap index single-pass dispatcher (Deliverable 5 item 1): designed, not started.** Full design
+  in [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) — an
+  opt-in `IHeapIndexScanParticipant` interface plus a shared dispatcher, proof-of-concept scoped to
+  `DbConnectionAnalyzer`. Blocked on a real, unbudgeted design problem: discrepancy/unit tests
+  (e.g. `DbConnectionAnalyzerDiscrepancyTests.cs`) call `analyzer.AnalyzeAsync()` directly,
+  bypassing `AnalysisPipeline` — the mechanism that would prime dispatcher-participant state before
+  `AnalyzeAsync` runs. See [Near-term (P1)](#near-term-p1) for the resolution options.
 
 ---
 
@@ -138,12 +74,10 @@ item 11 for the full analysis.
 ### Weaknesses
 
 - **9 of 35 analyzers independently stream the full on-disk object index**, with no shared
-  single-pass dispatcher (Deliverable 4 §1, Deliverable 8 §1) — see the
-  [Correction](#correction--2026-07-21-verified-heap-scan-analyzer-count) above; originally
-  estimated at "up to 26 of 36," verified smaller. A further 5 analyzers do a full live
-  `ClrHeap.EnumerateObjects()` sweep, which this dispatcher cannot address. Still the single
-  largest weakness in the platform in kind, though its blast radius is ~3x smaller than
-  originally stated.
+  single-pass dispatcher (Deliverable 4 §1, Deliverable 8 §1). A further 5 analyzers do a full
+  live `ClrHeap.EnumerateObjects()` sweep, which this dispatcher cannot address. Still the single
+  largest weakness in the platform in kind, though the blast radius is smaller than the platform's
+  original architectural estimate of "up to 26 of 36."
 - **Leak/retention evidence is fragmented across 6 analyzers** with no unified scoring or
   confidence model (Deliverable 3, 5, 7, 9) — the platform's weakest point relative to the
   industry benchmark specifically.
@@ -160,12 +94,12 @@ item 11 for the full analysis.
 
 ### Biggest Risks
 
-1. **The ~9x on-disk index-scan multiplier (verified; originally estimated at ~26x — see
-   Correction above) is a direct threat to the project's own definition of done** ("works on
-   10GB+ dumps... reasonable runtime," CLAUDE.md). This is not a theoretical concern — it's a
-   structural mismatch between the platform's stated performance goal and its current execution
-   model, though smaller in magnitude than first estimated and no longer unambiguously the
-   single biggest risk on this list without re-weighing against risk #2.
+1. **The ~9x on-disk index-scan multiplier is a direct threat to the project's own definition of
+   done** ("works on 10GB+ dumps... reasonable runtime," CLAUDE.md). This is not a theoretical
+   concern — it's a structural mismatch between the platform's stated performance goal and its
+   current execution model. It is smaller in magnitude than the platform's original architectural
+   estimate (~26x) and is not unambiguously the single biggest risk on this list without weighing
+   it against risk #2.
 2. **Fragmented leak evidence threatens the product's credibility**, not just its code quality —
    Deliverable 9 showed this is the one gap that actually undermines DumpDetective's core value
    proposition against the tool it's most philosophically similar to (dotMemory).
@@ -178,104 +112,173 @@ item 11 for the full analysis.
 
 ---
 
-## Immediate Priorities (P0)
+## Priority ordering rationale
 
-Per the [2026-07-21 re-prioritization](#re-prioritization--2026-07-21-dispatcher-demoted-from-p0-to-p1)
-above, the index scan dispatcher (formerly this section's Performance track) has moved to
-[Near-term (P1)](#near-term-p1). The Correctness track below is now the sole P0 track.
-
-**Correctness track**
-- Inter-analyzer result bus (Deliverable 5 item 11) — **done 2026-07-21.** Implemented as a
-  post-hoc bus: `AnalyzerRunResultsExtensions.GetResult<T>(this IReadOnlyList<AnalyzerRunResult>
-  runs)` (`src/DumpDetective.Core/Models/AnalyzerRunResult.cs`), an `internal` extension usable
-  from any assembly with `InternalsVisibleTo` on `DumpDetective.Core` (Analysis, Reporting, Cli,
-  Tests, BenchmarkSuite1). `InsightEngine.FindResult<T>` (`InsightEngine.cs:1574`) now delegates
-  to it instead of duplicating the scan. Confirmed no live/mid-run channel was added —
-  `AnalysisContext` is unchanged; consumers call this only after the pipeline finishes, same as
-  `InsightEngine.Analyze` already did. See Deliverable 5 item 11 for the full analysis.
-- Evidence builder (Deliverable 5 item 6) and replace `LeakCandidateAnalyzer`'s scanning strategy
-  with an aggregation strategy over it (Deliverable 6) — unblocked; can consume
-  `AnalyzerRunResultsExtensions.GetResult<T>` directly.
-- Confidence scoring wired to the existing `ConfidenceSectionBuilder` (Deliverable 5 item 9) —
-  design together with the ranking engine, not after it.
-
-**Both tracks**
-- Fix the `HeapTopologyAnalyzer` → `Pipeline` dependency (Deliverable 7) — cheap now, and doing it
-  before the dispatcher work establishes the dependency-direction discipline the dispatcher itself
-  needs to respect.
+Two independent P0 tracks exist — the **Correctness track** (inter-analyzer bus → root graph
+service → evidence builder → ranking engine → confidence scoring) and the **Performance track**
+(heap-index dispatcher and what pairs with it). Neither blocks the other. The Correctness track
+leads because its risk (#2 above) is a product-credibility issue undiminished by any measurement,
+while the Performance track's risk (#1 above) was found to be ~3x smaller in blast radius than
+originally estimated and carries an additional, currently-unresolved implementation blocker (the
+direct-`AnalyzeAsync`-call test bypass — see [P1](#near-term-p1)). Within each track, items below
+are ordered by dependency, not just by value, so **build top-to-bottom within a track**.
 
 ---
 
-## Near-term (P1)
+## Immediate Priorities (P0) — Correctness track
 
-- **Single-pass index scan dispatcher** (Deliverable 5 item 1, Deliverable 8 §1; demoted from P0
-  — see [2026-07-21 re-prioritization](#re-prioritization--2026-07-21-dispatcher-demoted-from-p0-to-p1)
-  above) — addresses 9 of 35 analyzers (verified), not 26 of 36 as originally estimated. Still a
-  real fix for 10GB+ dump performance, but sequence after the P0 Correctness track and after the
-  direct-`AnalyzeAsync`-call blocker documented in
-  [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) has a
-  resolution, or a profiling run confirms the 9x scan cost is significant on a representative
-  10GB+ dump.
-- Per-type statistics computed once inside that same pass (Deliverable 5 item 2) — cheap once the
-  dispatcher exists, removes a correctness risk (disagreeing "total bytes" numbers across reports).
-- Root/retention graph service: route `RetentionAnalyzer`(→merged into `DominatorAnalyzer`),
-  `StaticRootLeakDetector`, `EventLeakAnalyzer` through the shared `Traversal` primitive
-  (Deliverable 5 item 3, Deliverable 8 §3).
-- Shared type-classification layer for the 8 analyzers currently rolling their own type-name
-  pattern matching (Deliverable 5 item 4).
-- Object metadata classification (generation/segment bucket) computed once, sequenced after the P0
-  dispatcher (Deliverable 5 item 5).
-- Shared typed-resource sampler for the Db/Wcf/Http/Timer quartet (Deliverable 5 item 7).
-- Execute the three Deliverable 6 merges: `AppDomainAnalyzer` into `ModuleAnalyzer`,
-  `RetentionAnalyzer` into `DominatorAnalyzer`, `DependentHandleAnalyzer` into `GCHandleAnalyzer`.
-- Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`; resolve
-  `CollectionAnalyzer`'s logging dependency one way or the other (Deliverable 7).
-- Introduce shared contracts for the resource-sampler and thread-domain quartets so they're
-  coupled by compiler-checked interface, not copy-paste convention (Deliverable 7).
-- Close the crash-triage gap: confirm and, if needed, add minidump exception-stream parsing to
-  `CrashAnalyzer` (Deliverable 2, 3, 9 — validated as a real, closeable gap against WinDbg's
-  `!analyze -v`, not a case of chasing parity blindly).
-- Add runtime-configuration reporting (GC mode, heap count, TieredCompilation) — cheap, high value,
-  currently unowned by any analyzer (Deliverable 2).
-- Verify the actual depth of `QueryEngine` (ad hoc object inspection) and `Analysis.Trend.Comparers`
-  (snapshot diffing) before scoping any related capability as new work (Deliverable 9).
+1. **Fix the `HeapTopologyAnalyzer` → `Pipeline` dependency** (Deliverable 3, 7) — no dependencies,
+   cheap. Do this first: it establishes the dependency-direction discipline that both this track's
+   later work and the Performance track's dispatcher need to respect, before either touches
+   `Pipeline` further.
+2. **Root/retention graph service** (Deliverable 5 item 3) — not blocked by anything else, but
+   itself blocks item 4 below. Routes `RetentionAnalyzer`, `StaticRootLeakDetector`,
+   `EventLeakAnalyzer`, `DominatorAnalyzer` onto the shared `Traversal` BFS primitive (already used
+   by `GCRootAnalyzer`, `AsyncTaskAnalyzer`, `ReferenceChainAnalyzer`); builds one shared
+   "retained subgraph" walk-and-summarize API (size, count, sample paths) on top of `Traversal`;
+   and builds a canonical root-set artifact from `GCRootAnalyzer` for `DominatorAnalyzer`,
+   `StaticRootLeakDetector`, and `EventLeakAnalyzer` to consume instead of each independently
+   re-enumerating stack/static/handle roots (Deliverable 8 §3 — root enumeration scales with
+   thread/static-field count, not object count, but is currently repeated 4-5 times per run for no
+   reason, since the root set doesn't change during a single analysis run).
+3. **Execute two of the three Deliverable 6 merges alongside item 2**: `RetentionAnalyzer` into
+   `DominatorAnalyzer` (folds the high-fan-in signal into the canonical retained-size provider,
+   resolving the `MemoryLeakAnalyzer.cs`/`RetentionAnalyzer` file/class-name mismatch as part of the
+   merge), and `DependentHandleAnalyzer` into `GCHandleAnalyzer` (a `DependentHandle` is one
+   `HandleKind`, not a separate data source — no technical reason for a standalone handle-table
+   walk). Both touch the same graph-walk/traversal code item 2 is already rewiring, so batch them
+   in the same pass rather than as separate follow-up work. (The third merge, `AppDomainAnalyzer`
+   into `ModuleAnalyzer`, is independent of this chain — see [P1](#near-term-p1).)
+4. **Evidence builder** (Deliverable 5 item 6) — depends on item 2 above ("depends on item 3 [root
+   graph service] to be well-founded" per Deliverable 5). Designs and wires a shared
+   `Evidence`/proof model (retained size, sample root paths, contributing signals) that
+   `DominatorAnalyzer` (post-merge), `StaticRootLeakDetector`, and `EventLeakAnalyzer` emit instead
+   of their own ad hoc DTOs.
+5. **Ranking / leak-scoring engine — replace `LeakCandidateAnalyzer`'s scanning strategy with an
+   aggregation strategy** (Deliverable 5 item 8; Deliverable 6's Replace Recommendation) — depends
+   on item 4 above for its input shape (the Evidence model) and on the bus (done, see
+   [Current State](#current-state)) for reading other analyzers' results via
+   `AnalyzerRunResultsExtensions.GetResult<T>`. This is the item Deliverable 6 verdicts as
+   **Replaced**: `LeakCandidateAnalyzer`'s job (rank/score leak candidates) is correct and
+   necessary; its strategy (independently re-scanning the index for its own signals) is not.
+6. **Confidence scoring wired to the existing `ConfidenceSectionBuilder`** (Deliverable 5 item 9) —
+   design together with item 5, not sequenced strictly after it: a ranking engine without a shared
+   confidence formula just moves the inconsistency rather than removing it. Whether
+   `ConfidenceSectionBuilder` already consumes a structured per-finding confidence value or
+   re-derives it per section needs to be confirmed directly against its implementation.
+
+---
+
+## Near-term (P1) — Performance track and independent infra
+
+**Performance track (dependency order)**
+
+1. **Resolve the direct-`AnalyzeAsync`-call test-bypass design problem** — blocks item 2 below.
+   `DbConnectionAnalyzerDiscrepancyTests.cs` (and likely other call sites) invoke
+   `analyzer.AnalyzeAsync()` directly, bypassing `AnalysisPipeline`, the mechanism that would prime
+   dispatcher-participant state first. Three options are on the table (see
+   [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)'s "Open
+   design problem" section): (a) a per-call "primed" flag with fallback to today's self-contained
+   scan when not primed, (b) migrate direct-call tests to drive analyzers through a
+   pipeline/dispatcher invocation, or (c) leave `DbConnectionAnalyzer` unmigrated and prove the
+   dispatcher with a synthetic participant only. Needs a decision before any dispatcher code is
+   written for a real analyzer.
+2. **Heap index single-pass dispatcher** (Deliverable 5 item 1, Deliverable 8 §1) — depends on
+   item 1 above being resolved, and should also wait for either a profiling run confirming the ~9x
+   scan cost is significant on a representative 10GB+ dump (Deliverable 8's own open item), or a
+   decision to proceed without that confirmation. Addresses 9 of 35 analyzers (verified); proof of
+   concept scoped to `DbConnectionAnalyzer` only.
+3. **Per-type statistics engine** (Deliverable 5 item 2) — depends on item 2 above (the dispatcher)
+   existing; the per-type reduction is designed to run as an accumulator inside the same single
+   pass, so it is cheap once the dispatcher exists and removes a correctness risk (disagreeing
+   "total bytes" numbers across report sections).
+4. **Object metadata classification** (generation/segment bucket, Deliverable 5 item 5) — sequenced
+   after item 2 above (the dispatcher); most of its value is only realized once objects are
+   classified once per object inside the shared single pass and handed to every visitor.
+5. **Confirm container/satellite index build-once-vs-per-invocation behavior** (Deliverable 8
+   §2/consolidation #3) — a verification task, independent of the dispatcher chain above. If
+   `Indexing.Container`/`Indexing.Satellite` indexes are lazily rebuilt per analyzer invocation
+   rather than cached across a session, this is a second, distinct instance of "repeated index
+   construction" that would need its own fix, separate from the object-index dispatcher.
+
+**Independent infra (no blocking dependencies — can start any time)**
+
+6. **Shared type-classification layer** for the 8 analyzers currently rolling their own type-name
+   pattern matching (Deliverable 5 item 4) — cheap, and directly reduces the cost of the Deliverable
+   2 capability gaps in [P2](#medium-term-p2) that need the same classification (EF Core, DI,
+   Channels).
+7. **Shared typed-resource sampler** for the `DbConnectionAnalyzer`/`WcfChannelAnalyzer`/
+   `HttpObjectAnalyzer`/`TimerLeakAnalyzer` quartet (Deliverable 5 item 7) — self-contained
+   extraction, four existing call sites to migrate.
+8. **Shared contracts (compiler-checked interfaces, not conventions) for the resource-sampler and
+   thread-domain quartets** (Deliverable 7) — the resource-sampler contract naturally pairs with
+   item 7 above (same quartet); the thread-domain contract is independent and is what lets
+   `ThreadAnalyzer` become the canonical stack-walk provider that `HangAnalyzer`,
+   `ThreadStackClusterAnalyzer`, and `LockGraphAnalyzer` consume instead of each independently
+   walking stacks and re-deriving wait state (Deliverable 3, 4, 6).
+9. **Merge `AppDomainAnalyzer` into `ModuleAnalyzer`** (Deliverable 6) — independent of the
+   Retention/DependentHandle merges in [P0](#immediate-priorities-p0-—-correctness-track); no
+   shared blocker.
+10. **Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`**;
+    separately, **resolve `CollectionAnalyzer`'s logging dependency** one way or the other
+    (Deliverable 7) — two independent fixes with no dependency on each other or on anything above.
+11. **Close the crash-triage gap**: confirm and, if needed, add minidump exception-stream parsing
+    to `CrashAnalyzer` (Deliverable 2, 3, 9) — validated as a real, closeable gap against WinDbg's
+    `!analyze -v`, not a case of chasing parity blindly. Independent, no blocking dependency.
+12. **Add runtime-configuration reporting** (GC mode, heap count, TieredCompilation) — cheap, high
+    value, currently unowned by any analyzer (Deliverable 2). Independent, no blocking dependency.
+13. **Verify the actual depth of `QueryEngine`** (ad hoc object inspection) **and
+    `Analysis.Trend.Comparers`** (snapshot diffing) (Deliverable 9) — a verification task, independent
+    of everything above. Its result determines whether the [P3](#long-term-p3) "deepen `QueryEngine`"
+    item is real work or already done.
 
 ---
 
 ## Medium-term (P2)
 
-- Dependency-injection scoped-service leak detection — highest-value missing capability from
-  Deliverable 2, but real engineering effort (walking `IServiceProvider` internals); sequence
-  after the P0/P1 infrastructure exists to build it on.
-- EF Core–aware diagnostics and cache-health analysis (`IMemoryCache`/static caches) — both
-  naturally reuse the P1 sampling framework and type-classification layer, so are cheaper once
-  those land (Deliverable 2, 5).
-- Native/unmanaged memory and COM interop (RCW/CCW) tracking (Deliverable 2, 9).
-- Confirm whether container/satellite indexes are truly rebuilt per analyzer invocation or already
-  cached across a session — open question from Deliverable 8 §2/consolidation item 3.
-- Reporting-helper consolidation: collapse the resource-sampler quartet's near-identical
-  `SectionBuilder`s, and confirm whether per-analyzer "top types" sections are redundant against
-  the global `TypeSystemSectionBuilder` (Deliverable 4 §6, Deliverable 9 Better UX).
-- Resolve `FinalizableObjectAnalyzer`'s scope ambiguity — confirm whether "has finalizer,
-  undisposed" and "on the finalization queue" are being conflated (Deliverable 3, 6).
-- Simplify the 4x analyzer-registration fan-out (sensible defaults for
-  generator/comparer/section-builder types) before the analyzer count grows materially past 36
-  (Deliverable 7, 9).
+1. **Dependency-injection scoped-service leak detection** (Deliverable 2) — highest-value missing
+   capability, but real engineering effort (walking `IServiceProvider` internals). Sequence after
+   the [P0](#immediate-priorities-p0-—-correctness-track) ranking engine and
+   [P1](#near-term-p1) type-classification layer exist, so DI-leak signals feed the same shared
+   ranking/evidence model rather than becoming a 7th independently-scored leak source.
+2. **EF Core–aware diagnostics and cache-health analysis** (`IMemoryCache`/static caches)
+   (Deliverable 2, 5) — depends on the P1 shared type-classification layer (item 6) and sampling
+   framework (item 7) landing first; both naturally reuse that shape, so are cheaper once those
+   land.
+3. **Native/unmanaged memory and COM interop (RCW/CCW) tracking** (Deliverable 2, 9) — independent
+   net-new capability, no blocking dependency.
+4. **Reporting-helper consolidation**: collapse the resource-sampler quartet's near-identical
+   `SectionBuilder`s — depends on the P1 typed-resource sampler (item 7) landing first, since the
+   sampler quartet's sections can't be collapsed until the sampler itself is unified. Separately,
+   confirm whether per-analyzer "top types" sections are redundant against the global
+   `TypeSystemSectionBuilder` (Deliverable 4 §6, Deliverable 9) — independent verification, no
+   blocker.
+5. **Resolve `FinalizableObjectAnalyzer`'s scope ambiguity** — confirm whether "has finalizer,
+   undisposed" and "on the finalization queue" are being conflated (Deliverable 3, 6). Independent
+   clarification task.
+6. **Simplify the 4x analyzer-registration fan-out** (sensible defaults for
+   generator/comparer/section-builder types) before the analyzer count grows materially past 36
+   (Deliverable 7, 9) — independent of the three Deliverable 6 merges already executed in
+   P0/P1 (those pay the current 4x cost once each regardless); this item is about reducing the cost
+   of *future* analyzer additions, not making the already-completed merges cheaper.
 
 ---
 
 ## Long-term (P3)
 
-- ASP.NET-specific diagnostics, `System.Threading.Channels` support, reflection-cache growth
-  detection, resurrection detection, native (non-managed) thread enumeration, general
-  object-ownership / non-string duplicate-object detection — all real Deliverable 2 gaps, but
-  lowest urgency and/or novel engineering (Deliverable 2, 9).
-- Pinned-object/POH-specific reporting (Deliverable 2).
-- A future interactive visualization layer for retention-path evidence — explicitly deferred, not
-  rejected, by Deliverable 9: worth revisiting only once report evidence quality (P0 correctness
-  track) is solid, so it complements rather than competes with that work.
-- Deepen `QueryEngine` into a full ad hoc exploration capability, if Deliverable 9's verification
-  step finds today's version shallow relative to WinDbg's manual exploration power.
+1. ASP.NET-specific diagnostics, `System.Threading.Channels` support, reflection-cache growth
+   detection, resurrection detection, native (non-managed) thread enumeration, general
+   object-ownership / non-string duplicate-object detection — all real Deliverable 2 gaps, but
+   lowest urgency and/or novel engineering (Deliverable 2, 9). No blocking dependencies.
+2. Pinned-object/POH-specific reporting (Deliverable 2). No blocking dependencies.
+3. **A future interactive visualization layer for retention-path evidence** — explicitly deferred,
+   not rejected, by Deliverable 9. This has a real sequencing dependency, not just low urgency:
+   worth building only once the P0 Correctness track (evidence/ranking/confidence quality) is
+   solid, so it complements rather than competes with that work.
+4. **Deepen `QueryEngine` into a full ad hoc exploration capability** — contingent on the P1
+   verification item (`QueryEngine`/`Trend.Comparers` depth) finding today's version shallow
+   relative to WinDbg's manual exploration power. If that verification finds it already adequate,
+   this item drops out.
 
 ---
 
@@ -315,27 +318,25 @@ impossible from a static dump) and a full interactive GUI (strategically prematu
 
 **5. Which expensive operations should become shared infrastructure?**
 In priority order (Deliverable 5, 8): the object-index scan itself (dispatcher — addresses 9 of
-35 analyzers per the verified Correction above, not all of them), per-type statistics reduction,
-root/static enumeration, the handle-table walk, the thread-stack walk, type classification,
-reflection field-layout caching, and the typed-resource sampler.
+35 analyzers, not all of them), per-type statistics reduction, root/static enumeration, the handle-
+table walk, the thread-stack walk, type classification, reflection field-layout caching, and the
+typed-resource sampler.
 
 **6. What architectural changes would most improve correctness, scalability, and maintainability?**
 Scalability: the single-pass index dispatcher — high-leverage for the 9 index-scanning analyzers
-it covers (verified breakdown above), though "nothing else matters at 10GB+ scale if this isn't
-fixed" overstates it now that the multiplier is known to be ~9x, not ~26x, and 5 analyzers
-(`EnumerateObjects()`-based) sit outside its reach entirely. Correctness: the inter-analyzer
-result bus feeding a shared evidence/ranking/confidence engine, which turns 6
-independently-scored leak signals into one credible answer — this is worth weighing as
-co-equal with, not automatically subordinate to, the dispatcher now that the latter's blast
-radius is verified smaller. Maintainability: enforcing the dependency direction from
-Deliverable 7 (no analyzer depends on Pipeline or Reporting) and reducing the 4x registration
-fan-out before the analyzer count grows further.
+it covers, though 5 analyzers (`EnumerateObjects()`-based) sit outside its reach entirely.
+Correctness: the inter-analyzer result bus (done) feeding a shared evidence/ranking/confidence
+engine, which turns 6 independently-scored leak signals into one credible answer — this is worth
+weighing as co-equal with, not automatically subordinate to, the dispatcher, given the dispatcher's
+verified blast radius is smaller than originally estimated. Maintainability: enforcing the
+dependency direction from Deliverable 7 (no analyzer depends on Pipeline or Reporting) and reducing
+the 4x registration fan-out before the analyzer count grows further.
 
 **7. If DumpDetective were redesigned today, what would its analyzer architecture look like?**
-Roughly 33 analyzers (post-merge); of those, the 9 verified index-scanning analyzers (Correction
-above) would each expose a per-object visitor callback consumed by one shared dispatcher instead
-of independently streaming the index — the 5 `EnumerateObjects()`-based analyzers would need an
-analogous but distinct live-heap fan-out mechanism, not this same dispatcher. A per-type statistics artifact and
+Roughly 33 analyzers (post-merge); of those, the 9 verified index-scanning analyzers would each
+expose a per-object visitor callback consumed by one shared dispatcher instead of independently
+streaming the index — the 5 `EnumerateObjects()`-based analyzers would need an analogous but
+distinct live-heap fan-out mechanism, not this same dispatcher. A per-type statistics artifact and
 per-object generation/segment classification computed once per run and handed to every analyzer,
 rather than re-derived. A single canonical root/retention graph service (built on the existing
 `Traversal` primitive) that every leak-adjacent analyzer depends on instead of implementing its own
@@ -348,5 +349,5 @@ kind `HeapTopologyAnalyzer` currently represents. Notably, this is an evolution 
 design, not a rewrite: every piece of it already exists in some form in today's codebase
 (`Traversal`, `HeapAnalysisCache`, `TypeIndexBuilder`, `InsightEngine.FindResult<T>` as the
 post-hoc-bus precedent, `ConfidenceSectionBuilder`) — the work is consolidation and enforcement,
-not reinvention. (`Order` itself is not part of this list — confirmed 2026-07-21 to be
-execution/report sequencing only, not a data channel between analyzers.)
+not reinvention. `Order` itself is not part of this list — it is execution/report sequencing only,
+not a data channel between analyzers.

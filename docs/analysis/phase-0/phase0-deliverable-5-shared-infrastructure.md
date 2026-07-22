@@ -13,12 +13,12 @@ and priority (P0 = foundational/highest value, P2 = polish).
 
 ## 1. Heap Index Single-Pass Dispatcher
 
-> **Correction (2026-07-21)**: verified against actual `IAnalyzer` implementations — see the
-> [Deliverable 10 correction note](phase0-deliverable-10-platform-roadmap.md#correction--2026-07-21-verified-heap-scan-analyzer-count).
-> The real count is **9 of 35** analyzers streaming the on-disk index, not 26 of 36. This item
-> still stands on its own merits (9 sequential full-index reads is still real waste on a 10GB+
-> dump) but should be re-weighed against the correctness-track items below rather than assumed
-> automatically dominant now that its blast radius is ~3x smaller than originally stated.
+Verified against actual `IAnalyzer` implementations (see
+[Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state)): the
+real count is **9 of 35** analyzers streaming the on-disk index. This item still stands on its own
+merits (9 sequential full-index reads is still real waste on a 10GB+ dump) but is weighed against
+the correctness-track items below rather than assumed automatically dominant, since its blast
+radius is ~3x smaller than the catalog's original Index/Index+Container labels implied.
 
 **Current duplication**: 9 of 35 analyzers independently open and fully stream the on-disk
 object index (Deliverable 4 §1, corrected) — still the single largest *coordinated* cost in the

@@ -1571,15 +1571,10 @@ internal sealed class InsightEngine
 
     // ── Utilities (last block) ────────────────────────────────────────────────
 
+    // Delegates to the shared post-run bus (AnalyzerRunResultsExtensions.GetResult<T>) so other
+    // post-hoc consumers (evidence building, leak ranking) can reuse the same typed lookup.
     private static T? FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs) where T : AnalyzerDomainResult
-    {
-        for (int i = 0; i < runs.Count; i++)
-        {
-            if (runs[i].Result is T typed)
-                return typed;
-        }
-        return null;
-    }
+        => runs.GetResult<T>();
 
     private static string FormatBytes(ulong bytes)
     {

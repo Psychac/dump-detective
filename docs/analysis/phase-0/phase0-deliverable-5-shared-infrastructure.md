@@ -200,12 +200,31 @@ inconsistency in report UX and real duplicated maintenance effort.
 ## 11. Inter-Analyzer Result Bus *(added — not in the doc's suggested list, but a prerequisite for items 8–9)*
 
 **Why this belongs here**: Items 6, 8, and 9 all assume analyzers can consume *other analyzers'*
-results within the same run rather than each re-deriving signals independently. Every registered
-module has an `Order` field (100–450), which suggests the pipeline already executes analyzers
-sequentially — but nothing observed in the catalog or `IAnalyzer` shape confirms that
-`AnalysisContext` actually exposes prior analyzers' `AnalyzerDomainResult`s to later ones. If it
-doesn't, `LeakCandidateAnalyzer`'s independent re-scanning isn't a mistake by that analyzer — it's
-the only option the current architecture gives it.
+results within the same run rather than each re-deriving signals independently.
+`LeakCandidateAnalyzer`'s independent re-scanning isn't a mistake by that analyzer — it's the only
+option the current architecture gives it.
+
+**Confirmed — 2026-07-21**: `Order` does **not** provide this. It is consumed in exactly one place,
+`AnalyzerFilterService.Order()` (`src/DumpDetective.Cli/Execution/AnalyzerFilterService.cs:53`),
+purely to sort execution/report sequence. `AnalysisContext` carries no field holding prior
+analyzers' results, and `AnalysisPipeline.ExecuteAsync`
+(`src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs:24`) never threads a running
+`AnalyzerRunResult` collection back into the context for later analyzers to read. This is confirmed
+new work, not a repurposing of an existing field.
+
+A **post-hoc** bus (not a live/mid-run one) is the right shape, and there's already a working
+precedent for it: `InsightEngine.FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs)`
+(`src/DumpDetective.Analysis/Insight/InsightEngine.cs:1574`) already did the exact typed lookup —
+scanning the completed run list and type-matching on `AnalyzerDomainResult` — that the bus needs.
+It's invoked from `InsightEngine.Analyze`, which the orchestrator calls only after the full
+pipeline finishes (`SingleDumpOrchestrationService.ExecuteAsync`,
+`src/DumpDetective.Cli/Execution/SingleDumpOrchestrationService.cs:52`, after
+`StagedPipelineRunner.RunAsync` returns — not via `AnalyzerResultPostProcessor.Enrich`, which only
+runs `FindingGenerationPipeline.Generate`). A post-hoc bus gives every analyzer/evidence-builder
+symmetric access to all other analyzers' results regardless of run order, and keeps analyzers
+independent and safely parallelizable during their own `AnalyzeAsync` — a live, mid-run bus keyed
+off `Order` would instead make correctness depend on execution order staying stable, which is the
+same "precedent" risk flagged for `HeapTopologyAnalyzer → Pipeline` (Biggest Risk #3).
 
 **Current duplication**: N/A — this is a missing capability, not a duplicated one, but it's the
 root cause enabling items 6/8/9's duplication to exist in the first place.
@@ -213,13 +232,18 @@ root cause enabling items 6/8/9's duplication to exist in the first place.
 **Estimated impact**: Very High — unlocks the entire "evidence builder / ranking engine /
 confidence scoring" cluster, which is otherwise architecturally impossible to fix cleanly.
 
-**Difficulty**: Medium — depends on what's already there. If `AnalysisContext` already accumulates
-prior results (plausible given `Order` exists), this may just mean *using* an existing capability
-correctly. If not, it requires a small, well-scoped addition (a results dictionary keyed by module
-key, populated as each analyzer completes, exposed read-only to later ones by `Order`). **Confirm
-directly in Deliverable 7 before scoping this as new work.**
+**Difficulty**: Medium — smallest-diff path is generalizing/promoting `FindResult<T>` (or
+extracting an equivalent typed-lookup helper onto a shared `AnalyzerRunResults` query object) into
+a public post-run query surface analyzers and the Evidence builder can call, rather than adding a
+`PriorResults` field to `AnalysisContext`.
 
-**Priority**: **P0** — sequence before items 6, 8, 9.
+**Priority**: **Done — 2026-07-21.** Implemented as `AnalyzerRunResultsExtensions.GetResult<T>(this
+IReadOnlyList<AnalyzerRunResult> runs)` in `src/DumpDetective.Core/Models/AnalyzerRunResult.cs`, an
+`internal` extension visible to `DumpDetective.Analysis`, `.Reporting`, `.Cli`, `.Tests`, and
+`BenchmarkSuite1` (all already have `InternalsVisibleTo` on `DumpDetective.Core`).
+`InsightEngine.FindResult<T>` now delegates to it (`InsightEngine.cs:1574`). `AnalysisContext` was
+left unchanged — no live/mid-run channel was added. Items 6, 8, 9 can now consume
+`AnalyzerRunResultsExtensions.GetResult<T>` directly.
 
 ---
 

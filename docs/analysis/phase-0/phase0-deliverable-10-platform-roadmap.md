@@ -76,6 +76,39 @@ should be revisited once either the direct-`AnalyzeAsync`-call blocker has a cle
 a profiling run (Deliverable 8's own open item) confirms the 9x scan cost is significant on a
 representative 10GB+ dump, whichever comes first.
 
+## Correction — 2026-07-21: inter-analyzer result bus confirmed as new work, not `Order`-derived
+
+Deliverable 5 item 11 previously flagged the `Order` field as a plausible existing implementation
+of the inter-analyzer result bus, pending confirmation. Direct verification found it is not:
+
+- `IAnalyzer.Order` is consumed in exactly one place, `AnalyzerFilterService.Order()`
+  (`src/DumpDetective.Cli/Execution/AnalyzerFilterService.cs:53`), which sorts analyzers purely to
+  determine execution and report-section sequence.
+- `AnalysisContext` carries only `Runtime`, `Heap`, `Cache`, `AnalysisOptions`, `Diagnostics`,
+  `DiagnosticsSink`, `Progress` — no field through which one analyzer could read another's result.
+- `AnalysisPipeline.ExecuteAsync` (`src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs:24`)
+  runs analyzers sequentially but never threads a running results collection back into the context
+  mid-loop; each `AnalyzerRunResult` is only appended to a local list.
+- A working precedent for the *shape* the bus should take already exists, though:
+  `InsightEngine.FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs)`
+  (`src/DumpDetective.Analysis/Insight/InsightEngine.cs:1574`) already performs the typed
+  cross-analyzer lookup the bus needs, but only post-hoc — called from `InsightEngine.Analyze`
+  after the full run completes (`AnalysisPipeline.cs:257`) — and is currently `private` to
+  `InsightEngine`.
+
+**Recommended shape**: a **post-hoc** bus (generalizing `FindResult<T>` into a public post-run
+query surface), not a live/mid-run one keyed off `Order`. A live bus would make correctness depend
+on execution order staying stable as analyzers are added/reordered — the same "precedent" risk
+already flagged for `HeapTopologyAnalyzer → Pipeline` (Biggest Risk #3) — and would fight
+`IsThreadSafe`/future parallel-execution work. This does not change item 11's priority or its
+position blocking items 6/8/9 — it only resolves the previously-open question of whether it's new
+work (it is) and specifies the implementation shape.
+
+See [phase0-deliverable-5-shared-infrastructure.md](phase0-deliverable-5-shared-infrastructure.md)
+item 11 for the full analysis.
+
+**Update — 2026-07-21: implemented.** See the Correctness track entry below for the shipped shape.
+
 ---
 
 ## Current Architecture Assessment
@@ -152,10 +185,17 @@ above, the index scan dispatcher (formerly this section's Performance track) has
 [Near-term (P1)](#near-term-p1). The Correctness track below is now the sole P0 track.
 
 **Correctness track**
-- Inter-analyzer result bus (Deliverable 5 item 11) — confirm first whether `AnalysisContext`
-  already supports this via the existing `Order` field before treating it as new work.
+- Inter-analyzer result bus (Deliverable 5 item 11) — **done 2026-07-21.** Implemented as a
+  post-hoc bus: `AnalyzerRunResultsExtensions.GetResult<T>(this IReadOnlyList<AnalyzerRunResult>
+  runs)` (`src/DumpDetective.Core/Models/AnalyzerRunResult.cs`), an `internal` extension usable
+  from any assembly with `InternalsVisibleTo` on `DumpDetective.Core` (Analysis, Reporting, Cli,
+  Tests, BenchmarkSuite1). `InsightEngine.FindResult<T>` (`InsightEngine.cs:1574`) now delegates
+  to it instead of duplicating the scan. Confirmed no live/mid-run channel was added —
+  `AnalysisContext` is unchanged; consumers call this only after the pipeline finishes, same as
+  `InsightEngine.Analyze` already did. See Deliverable 5 item 11 for the full analysis.
 - Evidence builder (Deliverable 5 item 6) and replace `LeakCandidateAnalyzer`'s scanning strategy
-  with an aggregation strategy over it (Deliverable 6) — contingent on the result bus.
+  with an aggregation strategy over it (Deliverable 6) — unblocked; can consume
+  `AnalyzerRunResultsExtensions.GetResult<T>` directly.
 - Confidence scoring wired to the existing `ConfidenceSectionBuilder` (Deliverable 5 item 9) —
   design together with the ranking engine, not after it.
 
@@ -305,6 +345,8 @@ severity. Analyzer registration carries sensible defaults so adding a new analyz
 necessarily require four coordinated types. And a strictly enforced dependency direction — Core →
 shared infra → analyzers → trend comparers → reporting → orchestration — with no exceptions of the
 kind `HeapTopologyAnalyzer` currently represents. Notably, this is an evolution of the current
-design, not a rewrite: every piece of it already exists in some form in today's codebase (`Traversal`,
-`HeapAnalysisCache`, `TypeIndexBuilder`, the `Order` field, `ConfidenceSectionBuilder`) — the work
-is consolidation and enforcement, not reinvention.
+design, not a rewrite: every piece of it already exists in some form in today's codebase
+(`Traversal`, `HeapAnalysisCache`, `TypeIndexBuilder`, `InsightEngine.FindResult<T>` as the
+post-hoc-bus precedent, `ConfidenceSectionBuilder`) — the work is consolidation and enforcement,
+not reinvention. (`Order` itself is not part of this list — confirmed 2026-07-21 to be
+execution/report sequencing only, not a data channel between analyzers.)

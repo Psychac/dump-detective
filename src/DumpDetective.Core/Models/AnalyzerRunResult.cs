@@ -64,3 +64,23 @@ internal sealed record AnalyzerRunResult(
     public long CacheHits => Diagnostics?.CacheHits ?? 0;
     public long CacheMisses => Diagnostics?.CacheMisses ?? 0;
 }
+
+/// <summary>
+/// Post-hoc inter-analyzer result bus: a typed lookup over a completed run list.
+/// Deliberately not exposed mid-run (via <see cref="DumpDetective.Core.Abstractions.AnalysisContext"/>) —
+/// analyzers stay independent and order-agnostic during their own execution. Consumers (insight
+/// correlation, evidence building, ranking) query this only after the full pipeline finishes.
+/// </summary>
+internal static class AnalyzerRunResultsExtensions
+{
+    /// <summary>Returns the first domain result of type <typeparamref name="T"/> in the run list, or null if none ran or produced one.</summary>
+    public static T? GetResult<T>(this IReadOnlyList<AnalyzerRunResult> runs) where T : AnalyzerDomainResult
+    {
+        for (int i = 0; i < runs.Count; i++)
+        {
+            if (runs[i].Result is T typed)
+                return typed;
+        }
+        return null;
+    }
+}

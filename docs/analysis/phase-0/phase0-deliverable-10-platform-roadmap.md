@@ -37,6 +37,11 @@
   correctness depend on execution order staying stable as analyzers are added/reordered, the same
   risk as the `HeapTopologyAnalyzer → Pipeline` violation below. This is the unlocking prerequisite
   for the Evidence builder / Ranking engine / Confidence scoring chain in [P0](#immediate-priorities-p0).
+- **`HeapTopologyAnalyzer` → `Pipeline` dependency (P0 item 1): fixed.** Verified directly against
+  source: the `using DumpDetective.Analysis.Pipeline;` import in `HeapTopologyAnalyzer.cs`
+  referenced no symbol from that namespace — it was dead code, not a real structural coupling. It
+  has been removed; no other analyzer carried the same leftover import
+  ([phase0-deliverable-7-dependency-graph-review.md](phase0-deliverable-7-dependency-graph-review.md#cycles)).
 - **Heap index single-pass dispatcher (Deliverable 5 item 1): designed, not started.** Full design
   in [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) — an
   opt-in `IHeapIndexScanParticipant` interface plus a shared dispatcher, proof-of-concept scoped to
@@ -87,8 +92,9 @@
 - **One analyzer boundary is simply wrong**: `ModuleAnalyzer`/`AppDomainAnalyzer` overlap, compounded
   by `AppDomain` being a largely vestigial concept in modern .NET (Deliverable 6).
 - **A handful of infrastructure-leakage outliers**: `CollectionAnalyzer`'s lone logging dependency,
-  `AsyncTaskAnalyzer`'s private on-disk index format, `HeapTopologyAnalyzer`'s dependency on the
-  orchestration layer (Deliverable 3, 7, 8).
+  `AsyncTaskAnalyzer`'s private on-disk index format (Deliverable 3, 7, 8). (`HeapTopologyAnalyzer`'s
+  dependency on the orchestration layer was resolved as P0 item 1 — see
+  [Current State](#current-state).)
 - **Real capability gaps remain**, most notably DI-container leak detection, EF Core awareness,
   and crash minidump exception-stream triage (Deliverable 2, 9).
 
@@ -103,9 +109,9 @@
 2. **Fragmented leak evidence threatens the product's credibility**, not just its code quality —
    Deliverable 9 showed this is the one gap that actually undermines DumpDetective's core value
    proposition against the tool it's most philosophically similar to (dotMemory).
-3. **The `HeapTopologyAnalyzer` → `Pipeline` dependency is a small violation today that risks
-   metastasizing** as more analyzers are added without an enforced dependency direction
-   (Deliverable 7) — cheap to fix now, more expensive the longer it's the "precedent."
+3. ~~The `HeapTopologyAnalyzer` → `Pipeline` dependency is a small violation today that risks
+   metastasizing~~ — **resolved** (P0 item 1): the import was confirmed dead and removed, so the
+   dependency-direction precedent this risk warned about no longer exists.
 4. **The 4x registration fan-out compounds every future analyzer addition and every Deliverable 6
    merge/split**, and nothing currently prevents it from growing unchecked as the analyzer count
    increases past 36 (Deliverable 7, 9).
@@ -127,10 +133,10 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
 
 ## Immediate Priorities (P0) — Correctness track
 
-1. **Fix the `HeapTopologyAnalyzer` → `Pipeline` dependency** (Deliverable 3, 7) — no dependencies,
-   cheap. Do this first: it establishes the dependency-direction discipline that both this track's
-   later work and the Performance track's dispatcher need to respect, before either touches
-   `Pipeline` further.
+1. ~~Fix the `HeapTopologyAnalyzer` → `Pipeline` dependency~~ (Deliverable 3, 7) — **done.** The
+   import was confirmed dead (no symbol from `Pipeline` was consumed) and removed; see
+   [Current State](#current-state). The dependency-direction discipline this established should
+   still be respected by item 2 below and the Performance track's dispatcher.
 2. **Root/retention graph service** (Deliverable 5 item 3) — not blocked by anything else, but
    itself blocks item 4 below. Routes `RetentionAnalyzer`, `StaticRootLeakDetector`,
    `EventLeakAnalyzer`, `DominatorAnalyzer` onto the shared `Traversal` BFS primitive (already used
@@ -328,9 +334,10 @@ it covers, though 5 analyzers (`EnumerateObjects()`-based) sit outside its reach
 Correctness: the inter-analyzer result bus (done) feeding a shared evidence/ranking/confidence
 engine, which turns 6 independently-scored leak signals into one credible answer — this is worth
 weighing as co-equal with, not automatically subordinate to, the dispatcher, given the dispatcher's
-verified blast radius is smaller than originally estimated. Maintainability: enforcing the
-dependency direction from Deliverable 7 (no analyzer depends on Pipeline or Reporting) and reducing
-the 4x registration fan-out before the analyzer count grows further.
+verified blast radius is smaller than originally estimated. Maintainability: the sole confirmed
+Deliverable 7 dependency-direction violation (`HeapTopologyAnalyzer` → `Pipeline`) is fixed; what
+remains is holding that direction (no analyzer depends on Pipeline or Reporting) as new analyzers
+are added, and reducing the 4x registration fan-out before the analyzer count grows further.
 
 **7. If DumpDetective were redesigned today, what would its analyzer architecture look like?**
 Roughly 33 analyzers (post-merge); of those, the 9 verified index-scanning analyzers would each

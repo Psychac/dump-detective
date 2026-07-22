@@ -35,16 +35,12 @@ opposite direction.
 
 ## Cycles
 
-**One confirmed point-violation, not a namespace-wide cycle**: `HeapTopologyAnalyzer` (in the
-Analyzers layer) imports a `Pipeline` namespace (Deliverable 1/3) — the layer that *executes*
-analyzers. If `Pipeline` needs to reference `HeapTopologyAnalyzer` at all (directly, or
-transitively through the catalog which lives above it), this is a real cycle at the
-architectural level even if it doesn't trip a compiler circular-project-reference error (plausible
-if both live in the same assembly). Concretely: `Pipeline` executes `HeapTopologyAnalyzer` →
-`HeapTopologyAnalyzer` depends on `Pipeline`. This is the one item in this review that should be
-verified directly against the source (`HeapTopologyAnalyzer.cs`'s actual `using` list and what
-symbols it consumes from `Pipeline`) before scheduling a fix, since the cost of breaking a real
-cycle is very different from the cost of a same-assembly namespace import.
+**Resolved.** `HeapTopologyAnalyzer` imported a `Pipeline` namespace (Deliverable 1/3) — the layer
+that *executes* analyzers. Verified directly against source (`HeapTopologyAnalyzer.cs`'s `using`
+list and the symbols it actually consumed): the import was dead — no symbol from `Pipeline` was
+referenced anywhere in the file. It has been removed
+([P0 item 1](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0-—-correctness-track)),
+so there was no real circular-reference risk to unwind, just a stale `using`.
 
 No other cross-analyzer or cross-namespace cycles were identified from the available import data.
 
@@ -79,17 +75,17 @@ No other cross-analyzer or cross-namespace cycles were identified from the avail
 - **`AsyncTaskAnalyzer`'s bespoke index format** (see Tight Coupling above) is also, from a
   layering perspective, storage infrastructure leaking upward into analyzer logic — it should sit
   entirely behind `Indexing`, with the analyzer only ever seeing typed records.
-- **`HeapTopologyAnalyzer` → `Pipeline`** (see Cycles above) is orchestration infrastructure
-  leaking downward into an analyzer.
+- ~~`HeapTopologyAnalyzer` → `Pipeline`~~ — resolved (see Cycles above).
 
 ## Cross-Layer Violations
 
-`HeapTopologyAnalyzer` → `Pipeline` is the one concrete cross-layer violation identified: an
-analyzer (a leaf, execution-time participant) depending on the layer that orchestrates execution
-(a root, composition-time participant) inverts the intended dependency direction described below.
-No other analyzer in the catalog exhibits an equivalent upward dependency — every other analyzer's
-imports stay within `Core.Abstractions` and the `Analysis.*` infra namespaces, which is the
-correct direction.
+**Resolved.** `HeapTopologyAnalyzer` → `Pipeline` was the one concrete cross-layer violation
+identified: an analyzer (a leaf, execution-time participant) depending on the layer that
+orchestrates execution (a root, composition-time participant) inverted the intended dependency
+direction described below. The import was confirmed dead and removed (see Cycles above). No other
+analyzer in the catalog exhibits an equivalent upward dependency — every other analyzer's imports
+stay within `Core.Abstractions` and the `Analysis.*` infra namespaces, which is the correct
+direction.
 
 ## Feature Entanglement
 
@@ -145,10 +141,8 @@ analyzer types simultaneously with generator/comparer/section-builder types.
 
 **Concrete actions this implies**:
 
-1. Remove `HeapTopologyAnalyzer`'s dependency on `Pipeline` — whatever it currently gets from
-   that namespace belongs in `Core.Abstractions` or `Analysis` infra instead, since analyzers must
-   never depend on the orchestration layer that runs them (confirm the exact symbol first, per the
-   caveat in Cycles).
+1. ~~Remove `HeapTopologyAnalyzer`'s dependency on `Pipeline`~~ — **done.** Confirmed the import
+   was unused (no symbol from `Pipeline` was consumed) and deleted it.
 2. Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`, so the
    analyzer depends only on the abstraction, not on the format's constants.
 3. Remove or formally justify `CollectionAnalyzer`'s `Microsoft.Extensions.Logging` dependency —

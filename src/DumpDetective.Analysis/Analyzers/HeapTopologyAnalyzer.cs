@@ -3,7 +3,6 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Pipeline;
 
 namespace DumpDetective.Analysis.Analyzers;
 

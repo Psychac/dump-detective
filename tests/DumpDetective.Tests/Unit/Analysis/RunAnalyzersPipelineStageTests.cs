@@ -118,7 +118,6 @@ public class RunAnalyzersPipelineStageTests
         public HashSet<ulong> GetStaticRootedAddresses(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
         public Dictionary<string, DumpDetective.Core.Models.CachedTypeStatistics> GetOrBuildTypeStatistics(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
         public ulong? GetSampleInstanceAddress(string typeName) => null;
-        public HashSet<ulong> GetRetainedObjects(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong rootAddress, int maxObjects = 10000) => new();
         public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(Microsoft.Diagnostics.Runtime.ClrHeap heap) => Array.Empty<(string, ulong)>();
         public int GetOrCountThreadStackRoots(Microsoft.Diagnostics.Runtime.ClrThread thread, int maxStackRootsToCount) => 0;
         public bool MethodTableHasOutgoingRefs(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong methodTable) => false;

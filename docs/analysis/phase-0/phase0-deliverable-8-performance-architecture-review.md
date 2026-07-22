@@ -61,12 +61,15 @@ be independently repeated by:
 
 - `StaticRootLeakDetector` — enumerates static-field roots on its own
 - `EventLeakAnalyzer` — enumerates static-field roots again, for its publisher sweep
-- `DominatorAnalyzer` (and `RetentionAnalyzer`, pre-merge) — a dominator tree is rooted at the GC
-  root set by construction; computing one without consuming `GCRootAnalyzer`'s already-enumerated
-  roots means re-deriving the same root set a third and fourth time
+- `DominatorAnalyzer` — a dominator tree is rooted at the GC root set by construction; computing
+  one without consuming `GCRootAnalyzer`'s already-enumerated roots means re-deriving the same
+  root set a third time. (`RetentionAnalyzer` was a fourth independent invocation before it was
+  merged into `DominatorAnalyzer` — see
+  [Deliverable 10 P0 item 3](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0) —
+  so that particular duplicate is now gone.)
 
 **Estimated cost**: root enumeration scales with thread count and static-field count, not object
-count, so it's cheaper per-invocation than a full index scan — but at up to 4-5 independent
+count, so it's cheaper per-invocation than a full index scan — but at up to 3-4 independent
 invocations per run, and given static-field enumeration in particular requires walking every
 loaded type's statics (which can be thousands of types in a large application), this is not
 negligible, and it's pure waste: the root set does not change during a single analysis run.
@@ -84,9 +87,10 @@ layered on top of it is where duplication reappears:
   `HeapAnalysisCache`, for a data shape (`ClrType` → field layout) that overlaps with what a
   well-factored `HeapAnalysisCache` extension could already provide, and that `EventLeakAnalyzer`
   likely needs an equivalent of for its own field probing (Deliverable 4 §7).
-- **Handle target resolution** — `GCHandleAnalyzer`, `DependentHandleAnalyzer`, and
-  `WeakReferenceAnalyzer` each independently resolve and plausibly cache handle-target addresses
-  while walking overlapping parts of the same handle table (Deliverable 1/3/6 handle-trio finding).
+- **Handle target resolution** — `GCHandleAnalyzer` (now also owning the merged
+  `DependentHandleAnalyzer`'s target resolution) and `WeakReferenceAnalyzer` each independently
+  resolve and plausibly cache handle-target addresses while walking overlapping parts of the same
+  handle table (Deliverable 1/3/6 handle-cluster finding, now a pair rather than a trio).
 
 **Cost note**: caching duplication is a smaller memory-pressure concern than the heap-scan
 duplication above (these caches are bounded by type/handle count, not object count), but it works

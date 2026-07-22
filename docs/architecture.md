@@ -59,6 +59,20 @@ Graph and traversal
 - Forward refs computed lazily from object fields
 - Reverse indexes built selectively and disk-backed when needed
 - Root-path BFS: depth limits, visited set, and time budget
+- `RootSetCache` (`DumpDetective.Analysis.Cache`) is the single canonical root-set service: builds
+  `RootRecord` (`TargetAddr`, `RootAddr`, `Kind`) once per run from the Phase-1 disk index, falling
+  back to a live `heap.EnumerateRoots()` walk when no index is present. `GCRootAnalyzer`,
+  `StaticRootLeakDetector`, and `EventLeakAnalyzer` all read roots through it instead of
+  independently re-enumerating stack/static/handle roots.
+- `BoundedGraphWalk` (`DumpDetective.Analysis.Traversal`) is the single canonical forward-BFS
+  primitive, enforcing a hard 20-depth cap inside the walk itself (not left to caller discipline).
+  It replaces the formerly-separate `HeapTypePathTraversal`, `BoundedRetainedSizeBfs`, and
+  `HeapAnalysisCache.GetRetainedObjects` implementations; `GCRootAnalyzer`, `RetentionAnalyzer`,
+  `DominatorAnalyzer`, and `StaticRootLeakDetector` all call into it. Callers still own their
+  `visited` set's lifetime — `RetentionAnalyzer` shares one set across a batch (exclusive-retained,
+  no double counting), while `DominatorAnalyzer` intentionally allocates a fresh set per candidate
+  (unchanged, deferred design decision — see `RootPathFinder`, below, for the unrelated
+  bidirectional shortest-path search `ReferenceChainAnalyzer` uses instead).
 
 Reporting and fault handling
 - Finding generator failures are captured on `AnalyzerRunResult.FindingGeneratorError` and surfaced as warnings in console and report
@@ -217,6 +231,11 @@ The chosen directory is resolved once per dump (keyed by the dump's full path) a
 - Uses bounded BFS:
   - Depth-limited
   - Early termination
+- Distinct from `BoundedGraphWalk`: solves shortest-path-to-any-root via a bidirectional
+  candidate-set search (forward-expand from root-frontier and target-frontier, then BFS with
+  reverse-index backpointers); used only by `ReferenceChainAnalyzer`. Not migrated onto
+  `BoundedGraphWalk` — different problem shape, out of scope for the root/retention graph
+  service below.
 
 ---
 
@@ -224,8 +243,12 @@ The chosen directory is resolved once per dump (keyed by the dump's full path) a
 
 ### RetentionAnalyzer (+ StaticRootLeakDetector)
 Together implement the `LeakDetector` role described in guidelines:
-- `RetentionAnalyzer` — retained-reference / highly-referenced object analysis
-- `StaticRootLeakDetector` — identifies large object graphs retained by static roots
+- `RetentionAnalyzer` (in `MemoryLeakAnalyzer.cs`) — retained-reference / highly-referenced object
+  analysis; computes exclusive retained bytes via `BoundedGraphWalk.ComputeExclusiveRetained` with
+  one `visited` set shared across its batch
+- `StaticRootLeakDetector` — identifies large object graphs retained by static roots; reads roots
+  from `RootSetCache` (byte-kind filter on `RootRecord.IsStatic`, not string matching) and walks
+  retained objects via `BoundedGraphWalk.CollectRetainedObjects` (depth-capped at 20)
 - Uses heuristic scoring: retained size, root type, object lifetime
 
 ### ThreadAnalyzer
@@ -241,6 +264,9 @@ Together implement the `LeakDetector` role described in guidelines:
 
 ### GCRootAnalyzer
 - Builds bounded GC root paths and retention summaries from indexed roots
+- Reads roots via `RootSetCache.GetOrBuildRoots(heap)` (disk index, falling back to a live
+  `heap.EnumerateRoots()` walk when no index is present) and traces top-N root paths via
+  `BoundedGraphWalk.CollectForwardTypeNames`
 
 ### GCHandleAnalyzer
 - Analyzes GC handles: Strong, Weak, Pinned, Dependent
@@ -460,8 +486,14 @@ Example factors:
 Read-only contract used by all analyzers:
 - `GetOrBuildTypeStatistics(heap)` — type name → `CachedTypeStatistics`
 - `EnumerateIndexedEntriesAsTuples()` — stream `(Address, MT, Size)` tuples
-- `GetStaticRootedAddresses(heap)` — addresses reachable from static roots
-- `GetOrBuildValidRoots(heap)` — named GC roots
+- `GetStaticRootedAddresses(heap)` — addresses reachable from static roots (derived from `RootSetCache`, byte-kind filtered)
+- `GetOrBuildValidRoots(heap)` — named GC roots (string-projected compatibility shape over `RootSetCache`)
+
+`HeapAnalysisCache` (the concrete `IHeapAnalysisCache` implementation, `DumpDetective.Analysis.Cache`)
+additionally exposes `GetOrBuildRoots(heap) -> IReadOnlyList<RootRecord>` for same-assembly
+consumers that need the richer `(TargetAddr, RootAddr, Kind)` shape (`RootRecord` can't be exposed
+on the public interface — it lives in `DumpDetective.Analysis`, a different assembly than
+`DumpDetective.Core.Abstractions`). Internally this is backed by `RootSetCache`, memoized per run.
 
 ## IHeapIndexBuilder (`DumpDetective.Analysis.Cache`)
 Build-time contract (same `HeapAnalysisCache` instance, different interface):

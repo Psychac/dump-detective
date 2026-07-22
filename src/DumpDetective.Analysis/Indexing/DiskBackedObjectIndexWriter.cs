@@ -89,7 +89,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Scratch files are concatenated in segment order after the scan instead of writing
         // directly to a shared stream under a lock — a shared-stream write order depends on
         // whichever thread's chunk finishes first, which is non-deterministic and made capped
-        // scans (e.g. RetentionAnalyzer's MaxLeakScanObjects) see a different subset of objects
+        // scans (e.g. DominatorAnalyzer's MaxLeakScanObjects) see a different subset of objects
         // — and therefore different results — on every disk-mode run.
         //
         // Each segment writes three columnar scratch files (Address/MethodTable/Size) instead

@@ -1,4 +1,4 @@
-﻿using Microsoft.Diagnostics.Runtime;
+using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
@@ -34,14 +34,20 @@ namespace DumpDetective.Analysis.Analyzers
             var allTargetTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             ulong totalPinnedRetainedBytes = 0;
             // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
-            // for handles whose target type has already been resolved. Collapses N handles of the
-            // same type to a single heap dereference — same pattern as stringMethodTables in RetentionAnalyzer.
+            // for handles whose target type has already been resolved. Collapses N handles of
+            // the same type into a single lookup. Also reused for dependent-handle target resolution.
             var methodTableNameCache = new Dictionary<ulong, string>(capacity: 128);
-            // use passed-in cache when available
 
             int totalHandles = 0;
             int strongLikeHandles = 0;
             int weakLikeHandles = 0;
+
+            int dependentHandleCount = 0;
+            int dependentResolvedEdgeCount = 0;
+            int dependentUnresolvedTargetCount = 0;
+            var dependentSourceTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var dependentTargetTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var dependentSourceTargetPairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
             // TODO: Prefer consuming a shared handle snapshot provider (HeapIndexBuildResult.InMemoryHandleSnapshot
             // or IHandleSnapshotReader) when available to avoid repeated calls to runtime.EnumerateHandles().
@@ -65,7 +71,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     // Fast-path: resolve type name via methodTableNameCache keyed on MT.
                     // heap.GetObject is still needed to get the address + size, but we avoid
-                    // the extra sample-address lookup since the MT is already known.
+                    // an extra sample-address lookup since the MT is already known.
                     ClrObject targetObject = heap.GetObject(targetAddress);
                     if (targetObject.IsValid)
                     {
@@ -98,11 +104,39 @@ namespace DumpDetective.Analysis.Analyzers
                             pinnedBytesByType[typeName] = resolvedSize;
                     }
                 }
+
+                if (kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase) && heap is not null)
+                {
+                    dependentHandleCount++;
+
+                    if (!TryGetHandleAddress(handle.Object, out ulong sourceAddress)
+                        || !TryResolveTypeNameStrict(heap, sourceAddress, methodTableNameCache, out string sourceType))
+                    {
+                        dependentUnresolvedTargetCount++;
+                        continue;
+                    }
+
+                    Increment(dependentSourceTypeCounts, sourceType);
+
+                    if (!TryGetDependentTargetAddress(handle, out ulong dependentTargetAddress)
+                        || !TryResolveTypeNameStrict(heap, dependentTargetAddress, methodTableNameCache, out string dependentTargetType))
+                    {
+                        dependentUnresolvedTargetCount++;
+                        continue;
+                    }
+
+                    dependentResolvedEdgeCount++;
+                    Increment(dependentTargetTypeCounts, dependentTargetType);
+                    Increment(dependentSourceTargetPairCounts, $"{sourceType} -> {dependentTargetType}");
+                }
             }
 
             scanCounter.Complete();
 
             int pinnedHandleTargets = pinnedTypes.Values.Sum();
+            double dependentUnresolvedPercent = dependentHandleCount == 0 ? 0
+                : dependentUnresolvedTargetCount * 100.0 / dependentHandleCount;
+
             static List<NameCountEntry> ToTopEntries(Dictionary<string, int> source, int take)
             {
                 var list = new List<NameCountEntry>(Math.Min(source.Count, take));
@@ -119,15 +153,22 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return new GCHandleDomainResult(
-                    totalHandles,
-                    strongLikeHandles,
-                    weakLikeHandles,
-                    pinnedHandleTargets,
-                    ToTopEntries(byKind, options.TopTypeCount),
-                    ToTopEntries(allTargetTypes, options.TopTypeCount),
-                    ToTopEntries(pinnedTypes, options.TopTypeCount),
-                    totalPinnedRetainedBytes,
-                    ToTopByteEntries(pinnedBytesByType, options.TopTypeCount));
+                totalHandles,
+                strongLikeHandles,
+                weakLikeHandles,
+                pinnedHandleTargets,
+                ToTopEntries(byKind, options.TopTypeCount),
+                ToTopEntries(allTargetTypes, options.TopTypeCount),
+                ToTopEntries(pinnedTypes, options.TopTypeCount),
+                totalPinnedRetainedBytes,
+                ToTopByteEntries(pinnedBytesByType, options.TopTypeCount),
+                dependentHandleCount,
+                dependentResolvedEdgeCount,
+                dependentUnresolvedTargetCount,
+                dependentUnresolvedPercent,
+                ToTopEntries(dependentSourceTypeCounts, options.TopTypeCount),
+                ToTopEntries(dependentTargetTypeCounts, options.TopTypeCount),
+                ToTopEntries(dependentSourceTargetPairCounts, options.TopTypeCount));
         }
 
         public void Dispose() { }
@@ -163,6 +204,84 @@ namespace DumpDetective.Analysis.Analyzers
             return 0;
         }
 
+        private static bool TryGetHandleAddress(object value, out ulong address)
+        {
+            address = 0;
+
+            if (value is ClrObject clrObject)
+            {
+                if (!clrObject.IsValid)
+                    return false;
+
+                address = clrObject.Address;
+                return true;
+            }
+
+            if (value is ulong targetAddress && targetAddress != 0)
+            {
+                address = targetAddress;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetDependentTargetAddress(ClrHandle handle, out ulong targetAddress)
+        {
+            targetAddress = 0;
+
+            string[] propertyCandidates =
+            [
+                "DependentTarget",
+                "Target",
+                "Secondary",
+                "DependentObject",
+                "Dependent"
+            ];
+
+            Type handleType = handle.GetType();
+            foreach (string propertyName in propertyCandidates)
+            {
+                System.Reflection.PropertyInfo? property = handleType.GetProperty(propertyName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                if (property == null)
+                    continue;
+
+                object? value = property.GetValue(handle);
+                if (value == null)
+                    continue;
+
+                if (TryGetHandleAddress(value, out targetAddress))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryResolveTypeNameStrict(ClrHeap heap, ulong address, Dictionary<ulong, string> methodTableNameCache, out string typeName)
+        {
+            typeName = StringConstants.UnknownType;
+
+            if (address == 0)
+                return false;
+
+            ClrObject obj = heap.GetObject(address);
+            if (!obj.IsValid || obj.Type == null)
+                return false;
+
+            ulong methodTable = obj.Type.MethodTable;
+            if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cached))
+            {
+                typeName = cached;
+                return true;
+            }
+
+            typeName = obj.Type.Name ?? StringConstants.UnknownType;
+            if (methodTable != 0)
+                methodTableNameCache[methodTable] = typeName;
+
+            return true;
+        }
+
         private static string? ResolveTargetTypeName(ClrHeap? heap, ulong targetAddress, Dictionary<ulong, string> methodTableNameCache)
         {
             if (targetAddress == 0)
@@ -187,5 +306,3 @@ namespace DumpDetective.Analysis.Analyzers
         }
     }
 }
-
-

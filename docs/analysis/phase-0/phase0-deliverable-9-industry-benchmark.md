@@ -58,10 +58,11 @@ Two further advantages, both **conditional on verification**:
 **This is currently DumpDetective's weakest category relative to the benchmark, and the review
 should be direct about that.** dotMemory's automatic inspections and key-retention-path grouping
 produce one consistent, ranked, explained answer per problem. Deliverables 3, 5, and 7 already
-established that DumpDetective instead produces leak signals from up to 6 independently-scored
-analyzers (`RetentionAnalyzer`, `LeakCandidateAnalyzer`, `DominatorAnalyzer`,
-`StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer`) with no unified confidence
-model. Benchmarked against dotMemory specifically, this is not a minor inconsistency — it's the
+established that DumpDetective instead produces leak signals from up to 5 independently-scored
+analyzers (`DominatorAnalyzer` — now also owning the merged `RetentionAnalyzer`'s signal —
+`LeakCandidateAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer`) with
+no unified confidence model. Benchmarked against dotMemory specifically, this is not a minor
+inconsistency — it's the
 gap between DumpDetective and matching the core "tell me what's actually wrong" value
 proposition that the comparison tool is built around. This finding, arrived at independently in
 Deliverable 5, is reinforced rather than superseded here: closing it (Deliverable 5 items 6/8/9/11

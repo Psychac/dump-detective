@@ -75,7 +75,7 @@ internal sealed class InsightEngine
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
         AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
-        RetentionDomainResult? leak = FindResult<RetentionDomainResult>(runs);
+        DominatorDomainResult? leak = FindResult<DominatorDomainResult>(runs);
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
         CollectionDomainResult? collections = FindResult<CollectionDomainResult>(runs);
@@ -150,7 +150,7 @@ internal sealed class InsightEngine
         ThreadDomainResult? Threads,
         HangDomainResult? Hang,
         AsyncTaskDomainResult? AsyncTasks,
-        RetentionDomainResult? Leak,
+        DominatorDomainResult? Leak,
         GCHandleDomainResult? Handles,
         CrashDomainResult? Crash,
         CollectionDomainResult? Collections,
@@ -373,7 +373,7 @@ internal sealed class InsightEngine
     private static void DetectFinalizerQueueBacklog(
         List<InsightFinding> findings,
         ThreadDomainResult? threads,
-        RetentionDomainResult? leak,
+        DominatorDomainResult? leak,
         FinalizableObjectDomainResult? finalizable)
     {
         int queueCount = finalizable?.FinalizerQueueCount ?? 0;
@@ -475,7 +475,7 @@ internal sealed class InsightEngine
 
     private static void DetectLeakSuspicion(
         List<InsightFinding> findings,
-        RetentionDomainResult? leak,
+        DominatorDomainResult? leak,
         StringDomainResult? strings)
     {
         if (leak is not null && leak.HighlyReferencedObjectCount > 0)

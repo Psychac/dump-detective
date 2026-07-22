@@ -86,29 +86,33 @@ public sealed class TrendAnalyzerTests
     [Fact]
     public void CompareAll_PopulatesNewLeakSignals_WhenTypeAppearsInCurrent()
     {
-        RetentionDomainResult baselineResult = new(
-            FinalizerQueueCount: 0,
+        DominatorDomainResult baselineResult = new(
+            CandidateCount: 0,
+            AnalyzedCount: 0,
+            TotalEstimatedRetainedBytes: 0,
+            TopDominatorTypes: [],
             HighlyReferencedObjectCount: 0,
-            SkippedReferenceAddresses: 0,
             TopHighlyReferencedObjects: []);
 
-        RetentionDomainResult currentResult = new(
-            FinalizerQueueCount: 0,
+        DominatorDomainResult currentResult = new(
+            CandidateCount: 0,
+            AnalyzedCount: 0,
+            TotalEstimatedRetainedBytes: 0,
+            TopDominatorTypes: [],
             HighlyReferencedObjectCount: 1,
-            SkippedReferenceAddresses: 0,
             TopHighlyReferencedObjects:
             [
                 new HighlyReferencedObjectSnapshot(0x1000, "MyApp.CachedService", 512_000, 50)
             ]);
 
-        var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
-        var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
+        var baselineSnap = MakeSnapshot(0, "Dominator Analysis", baselineResult);
+        var currentSnap = MakeSnapshot(1, "Dominator Analysis", currentResult);
 
-        TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
+        TrendAnalyzer analyzer = new([new DominatorTrendComparer()]);
         var signals = analyzer.ComputeNewLeakSignals(baselineSnap, currentSnap);
 
-        signals.Should().ContainKey("Retention Analysis");
-        signals["Retention Analysis"].Should().ContainSingle(s => s.TypeName == "MyApp.CachedService");
+        signals.Should().ContainKey("Dominator Analysis");
+        signals["Dominator Analysis"].Should().ContainSingle(s => s.TypeName == "MyApp.CachedService");
     }
 
     [Fact]
@@ -116,23 +120,25 @@ public sealed class TrendAnalyzerTests
     {
         var existing = new HighlyReferencedObjectSnapshot(0x1000, "System.String", 100_000, 5);
 
-        RetentionDomainResult baselineResult = new(0, 1, 0,
+        DominatorDomainResult baselineResult = new(0, 0, 0, [],
+            HighlyReferencedObjectCount: 1,
             TopHighlyReferencedObjects: [existing]);
 
         // current has same type with only a tiny increase — not a new signal
-        RetentionDomainResult currentResult = new(0, 1, 0,
+        DominatorDomainResult currentResult = new(0, 0, 0, [],
+            HighlyReferencedObjectCount: 1,
             TopHighlyReferencedObjects:
             [
                 new HighlyReferencedObjectSnapshot(0x1000, "System.String", 101_000, 5)
             ]);
 
-        var baselineSnap = MakeSnapshot(0, "Retention Analysis", baselineResult);
-        var currentSnap = MakeSnapshot(1, "Retention Analysis", currentResult);
+        var baselineSnap = MakeSnapshot(0, "Dominator Analysis", baselineResult);
+        var currentSnap = MakeSnapshot(1, "Dominator Analysis", currentResult);
 
-        TrendAnalyzer analyzer = new([new RetentionTrendComparer()]);
+        TrendAnalyzer analyzer = new([new DominatorTrendComparer()]);
         var signals = analyzer.ComputeNewLeakSignals(baselineSnap, currentSnap);
 
-        signals.Should().NotContainKey("Retention Analysis");
+        signals.Should().NotContainKey("Dominator Analysis");
     }
 
     [Fact]
@@ -242,30 +248,6 @@ public sealed class TrendAnalyzerTests
                 [analyzerName] = domainResult
             },
             GeneratedAtUtc: DateTime.UtcNow);
-    }
-
-    // Minimal comparer stub so TrendAnalyzer can find the "Retention Analysis" entry
-    private sealed class RetentionTrendComparer : IAnalyzerTrendComparer
-    {
-        public string AnalyzerName => "Retention Analysis";
-
-        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
-        {
-            if (result is not RetentionDomainResult r) return [];
-            return [new AnalyzerMetric("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse)];
-        }
-
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not RetentionDomainResult b || current is not RetentionDomainResult c)
-                return [];
-            double delta = c.HighlyReferencedObjectCount - b.HighlyReferencedObjectCount;
-            double? pct = Math.Abs(b.HighlyReferencedObjectCount) > double.Epsilon
-                ? delta * 100.0 / b.HighlyReferencedObjectCount : null;
-            return [new MetricDelta("leak.highly.referenced", null,
-                b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount,
-                delta, pct, "objects", MetricTrendDirection.HigherIsWorse)];
-        }
     }
 
     private sealed record ScopedTestDomainResult(double Total, double EntityA, double EntityB) : AnalyzerDomainResult;

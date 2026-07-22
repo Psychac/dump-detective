@@ -16,11 +16,9 @@ namespace DumpDetective.Analysis.Analyzers
     /// (Stack, Static/StrongHandle, Finalizer, Pinned, etc.), retention estimates,
     /// and bounded BFS path tracing for top suspects.
     ///
-    /// Root data is sourced entirely from Phase 1:
-    /// Memory mode — <see cref="HeapIndexBuildResult.InMemoryRootCandidates"/>
-    /// Disk mode — reads <c>RootIndex.bin</c> from the dump index directory
-    ///
-    /// No direct <c>heap.EnumerateRoots()</c> call is made in Phase 2.
+    /// Root data is sourced from <see cref="RootSetCache"/>: the Phase-1 disk index
+    /// (<c>RootIndex.bin</c>) when available, falling back to a live
+    /// <c>heap.EnumerateRoots()</c> walk otherwise.
     /// </summary>
     public sealed class GCRootAnalyzer : IAnalyzer
     {
@@ -46,10 +44,16 @@ namespace DumpDetective.Analysis.Analyzers
                 return EmptyResult();
             }
 
-            // ── Step 1: Read all roots from the Phase 1 index ──────────────────
-            var roots = ReadRoots(idx, cancellationToken);
-            if (roots.Count == 0)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // ── Step 1: Read all roots via the shared root-set cache ───────────
+            IReadOnlyList<RootRecord> rootRecords = heapCache.GetOrBuildRoots(heap);
+            if (rootRecords.Count == 0)
                 return EmptyResult();
+
+            var roots = new List<(ulong TargetAddr, ulong RootAddr, byte Kind)>(rootRecords.Count);
+            foreach (RootRecord record in rootRecords)
+                roots.Add((record.TargetAddr, record.RootAddr, record.Kind));
 
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
@@ -72,7 +76,7 @@ namespace DumpDetective.Analysis.Analyzers
                 cancellationToken.ThrowIfCancellationRequested();
                 RootFinding f = findings[i];
 
-                var pathTypes = HeapTypePathTraversal.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped);
+                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped);
 
                 if (wasCapped)
                     pathCappedCount++;
@@ -93,15 +97,6 @@ namespace DumpDetective.Analysis.Analyzers
                 RootPaths: pathFindings,
                 PathSearchCapped: pathCappedCount > 0,
                 PathSearchCappedCount: pathCappedCount);
-        }
-
-        // ── Root reading ─────────────────────────────────────────────────────
-
-        private static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRoots(
-            HeapIndexBuildResult idx,
-            CancellationToken cancellationToken)
-        {
-            return RootIndexReader.ReadRootCandidates(idx, cancellationToken);
         }
 
         private static GCRootDomainResult EmptyResult() =>

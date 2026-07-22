@@ -43,20 +43,18 @@ directly at odds with the project's own "10GB+ dumps, reasonable runtime" defini
 
 **This is the #1 finding of Deliverable 4.**
 
-## 2. Root traversals
+## 2. Root traversals — **done**
 
-Three analyzers correctly share the `DumpDetective.Analysis.Traversal` BFS primitive:
-`GCRootAnalyzer`, `AsyncTaskAnalyzer`, `ReferenceChainAnalyzer`.
-
-Four analyzers perform graph-walk-like work (retained-subgraph size, dominance, static-field
-reachability) **without** importing `Traversal` (per Deliverable 1's Dependencies column):
-`RetentionAnalyzer`, `DominatorAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`. Each has
-grown its own ad hoc graph-walk logic instead.
-
-**Estimated cost**: each of these 4 does an independent O(V+E) walk over overlapping subgraphs
-(static roots and their retained objects are exactly the subgraphs `StaticRootLeakDetector` and
-`EventLeakAnalyzer` both walk). Smaller in absolute terms than the index-scan cost above, but
-still a 4x multiplier on graph-walk work that is largely the same traversal over the same nodes.
+`GCRootAnalyzer`, `DominatorAnalyzer` (now also owning the merged `RetentionAnalyzer`'s
+retained-subgraph logic), and `StaticRootLeakDetector` now share `BoundedGraphWalk`
+(`DumpDetective.Analysis.Traversal`), the single canonical forward-BFS primitive, resolving the ad
+hoc graph-walk duplication originally flagged across these analyzers. `ReferenceChainAnalyzer`'s
+bidirectional shortest-root-path search (`RootPathFinder`) remains a deliberately separate
+implementation — a different problem shape, not consolidated into `BoundedGraphWalk`. See
+[Deliverable 5 § Root / Retention Graph Service](phase0-deliverable-5-shared-infrastructure.md#3-root--retention-graph-service---done)
+and [Deliverable 10 P0 item 2](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0)
+for the implementation. `EventLeakAnalyzer`'s static-field sweep duplication with
+`StaticRootLeakDetector` is a separate, still-open item tracked in Deliverable 5.
 
 ## 3. Type lookups
 

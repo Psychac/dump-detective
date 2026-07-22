@@ -22,15 +22,13 @@
 | `CrashAnalyzer` | Exception/crash evidence (active exceptions, chains, crash-thread identification) | Full thread-stack analysis beyond identifying the crash thread; exception-pressure trending | Thread stack detail → `ThreadAnalyzer`; trending → `TrendComparer` | Verify (per Deliverable 2) whether it reads the minidump exception stream or only heap-resident exception objects — these solve different problems and both may be needed |
 | `HangAnalyzer` | Threadpool starvation/hang health scoring | Per-thread categorization; lock ownership graph; deep continuation chains | Categorization → `ThreadAnalyzer`; lock graph → `LockGraphAnalyzer`; continuations → `AsyncTaskAnalyzer` | Reimplements `DetectWaitPattern` instead of consuming `ThreadAnalyzer`'s output |
 | `AsyncTaskAnalyzer` | Task status/continuation/faulted-task inventory | Exception detail formatting; owning a bespoke on-disk index format | Exception detail → `CrashAnalyzer` | **Hidden coupling**: private "task index" binary format bypasses the shared `Indexing` layer entirely |
-| `RetentionAnalyzer` (file `MemoryLeakAnalyzer.cs`) | High-fan-in / highly-referenced object detection as a leak *signal* | Leak scoring/ranking; retained-size computation | Scoring → `LeakCandidateAnalyzer`; retained size → `DominatorAnalyzer` | Currently computes its own retained-size-like heuristic instead of consuming `DominatorAnalyzer` |
-| `LeakCandidateAnalyzer` | Rank/score leak candidates from multiple signals | Independently re-collecting the underlying signals via its own heap scan | Signal collection → `RetentionAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer` | **Major finding**: per Deliverable 1's Heap Scan Mode column, this analyzer scans the index itself rather than composing over other analyzers' `AnalyzerDomainResult`s — it should be a pure aggregator, not a peer scanner |
-| `DominatorAnalyzer` | Dominator-tree / retained-size computation (canonical source of "retained bytes") | Leak scoring/ranking | Scoring → `LeakCandidateAnalyzer` | Should be the sole retained-size provider; currently duplicated by `RetentionAnalyzer` |
+| `LeakCandidateAnalyzer` | Rank/score leak candidates from multiple signals | Independently re-collecting the underlying signals via its own heap scan | Signal collection → `DominatorAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer` | **Major finding**: per Deliverable 1's Heap Scan Mode column, this analyzer scans the index itself rather than composing over other analyzers' `AnalyzerDomainResult`s — it should be a pure aggregator, not a peer scanner |
+| `DominatorAnalyzer` | Dominator-tree / retained-size computation (canonical source of "retained bytes"), plus high-fan-in / highly-referenced object detection (absorbed from the merged `RetentionAnalyzer`) | Leak scoring/ranking | Scoring → `LeakCandidateAnalyzer` | Is now the sole retained-size provider — the former duplication with `RetentionAnalyzer` is resolved |
 | `StringAnalyzer` | String duplication/waste | General (non-string) object duplication | Non-string duplicate detection → future analyzer (Deliverable 2 gap) | Correctly scoped; resist generalizing |
 | `CollectionAnalyzer` | BCL collection fill-rate/waste, all kinds | Logging/telemetry concerns; owning a bespoke reflection field-layout cache | Shared field-layout reflection cache → shared infra (also needed by `EventLeakAnalyzer`) | **Hidden coupling**: only analyzer with a `Microsoft.Extensions.Logging` dependency — inconsistent with every other analyzer being logging-free |
 | `StaticRootLeakDetector` | Generic static-field root sweep for large retained subgraphs | Event/delegate-specific leak classification | Delegate/event classification → `EventLeakAnalyzer` | Should expose its static-field sweep as shared infra rather than have `EventLeakAnalyzer` reimplement it |
 | `ReferenceChainAnalyzer` | On-demand root-path evidence for one object/type (shared `Traversal` BFS) | Aggregate root categorization; leak scoring | Categorization → `GCRootAnalyzer`; scoring → `LeakCandidateAnalyzer` | Should be the canonical path-finding provider; several leak/retention analyzers do **not** depend on the shared `Traversal` namespace and appear to implement their own graph walks instead (see Hidden Coupling) |
-| `GCHandleAnalyzer` | Handle-table enumeration across all kinds | Dependent-handle pair resolution; weak-reference wrapper semantics | — (see boundary question below) | Whether 3 separate handle analyzers are justified vs. one analyzer with per-kind sub-reports is a Deliverable 6 question |
-| `DependentHandleAnalyzer` | `DependentHandle` target/dependent pair resolution | General handle counting | General counts → `GCHandleAnalyzer` | Candidate to fold into `GCHandleAnalyzer` as a sub-report |
+| `GCHandleAnalyzer` | Handle-table enumeration across all kinds, including `DependentHandle` target/dependent pair resolution (absorbed from the merged `DependentHandleAnalyzer`) | Weak-reference wrapper semantics | — (see boundary question below) | Whether the remaining 2-analyzer handle cluster (`GCHandleAnalyzer` + `WeakReferenceAnalyzer`) is justified is a Deliverable 6 question — `DependentHandleAnalyzer` merge already resolved |
 | `LohFragmentationAnalyzer` | LOH free-block/fragmentation measurement | Coarse allocation-behavior classification; VM reservation waste | Classification → `AllocationPatternAnalyzer`; VM waste → `SegmentReservationAnalyzer` | Clean 3-way boundary as long as each stays scoped |
 | `ThreadStackClusterAnalyzer` | Cluster/dedupe similar thread stacks (storm detection) | Per-thread categorization; hang scoring | Categorization → `ThreadAnalyzer`; scoring → `HangAnalyzer` | Independent stack walk instead of reusing `ThreadAnalyzer`'s pass |
 | `ThreadAnalyzer` | Canonical per-thread inventory/categorization | Threadpool health scoring; lock ownership graph; stack clustering | Health → `HangAnalyzer`; lock graph → `LockGraphAnalyzer`; clustering → `ThreadStackClusterAnalyzer` | Should be the single stack-walk source of truth for the other three thread analyzers — currently isn't |
@@ -41,7 +39,7 @@
 | `ArrayAnalyzer` | Array size/shape stats, large-array detection | LOH fragmentation analysis for large arrays | Fragmentation → `LohFragmentationAnalyzer` | Should hand off, not compute |
 | `AppDomainAnalyzer` | Per-domain/module type & object stats | Module/assembly version-conflict detection | Version conflicts → `ModuleAnalyzer` | Overlaps `ModuleAnalyzer` — see Overlap section |
 | `SegmentReservationAnalyzer` | Reserved vs. committed VM per GC segment | Fragmentation measurement; per-type segment topology | Fragmentation → `LohFragmentationAnalyzer`; topology → `HeapTopologyAnalyzer` | Correctly isolated — reference example for the rest of the catalog |
-| `WeakReferenceAnalyzer` | `WeakReference`/`WeakReference<T>` inventory | Raw handle counting; dependent-handle pairing | Handle counts → `GCHandleAnalyzer`; pairs → `DependentHandleAnalyzer` | Same 3-way boundary question as the handle cluster |
+| `WeakReferenceAnalyzer` | `WeakReference`/`WeakReference<T>` inventory | Raw handle counting; dependent-handle pairing | Handle counts and pairs → `GCHandleAnalyzer` | Same boundary question as the (now 2-analyzer) handle cluster |
 | `BoxingAnalyzer` | Boxed value-type detection & waste | General type/object stats | — | Clean boundary |
 | `JitAnalyzer` | JIT-compiled method code-size inventory | Object-heap statistics | — | Correctly isolated — reference example |
 | `DbConnectionAnalyzer` | `DbConnection` object state sampling | EF Core–specific diagnostics (DbContext, change tracker) | EF Core → future analyzer (Deliverable 2 gap) | Shares "resource state sampler" shape with the next 3 rows — see Overlap section |
@@ -59,13 +57,12 @@ Grouped by cluster (individual analyzer rows above cross-reference back to these
    per-module/type/object statistics; nothing distinguishes their outputs. Should merge, or split
    along a hard line (e.g., `ModuleAnalyzer` owns *assembly identity/version*, `AppDomainAnalyzer`
    owns *per-domain object ownership*) — see Deliverable 6.
-2. **Leak/retention scoring** — `RetentionAnalyzer`, `LeakCandidateAnalyzer`, `DominatorAnalyzer`
-   each independently estimate "how much does this retain" / "is this a leak." Only one of them
-   (`DominatorAnalyzer`) should own retained-size math; only one (`LeakCandidateAnalyzer`) should
-   own scoring; the others should supply signals, not compute both independently.
-3. **Handle-table trio** — `GCHandleAnalyzer`, `DependentHandleAnalyzer`, `WeakReferenceAnalyzer`
-   all walk overlapping parts of the handle table. No documented ownership boundary exists between
-   "kind of handle" and "which analyzer reports it."
+2. **Leak/retention scoring** — **Resolved**: `RetentionAnalyzer` was merged into
+   `DominatorAnalyzer`, which is now the sole retained-size/high-fan-in provider.
+   `LeakCandidateAnalyzer` remains the sole scorer/ranker.
+3. **Handle-table pair** — **Partially resolved**: `DependentHandleAnalyzer` was merged into
+   `GCHandleAnalyzer`. `GCHandleAnalyzer` and `WeakReferenceAnalyzer` still walk overlapping parts
+   of the handle table with no documented ownership boundary between them.
 4. **Thread-domain quartet** — `ThreadAnalyzer`, `HangAnalyzer`, `ThreadStackClusterAnalyzer`,
    `LockGraphAnalyzer` each perform an independent thread/stack walk and partially re-derive wait
    state. `ThreadAnalyzer` should be upstream of the other three.
@@ -84,9 +81,8 @@ Grouped by cluster (individual analyzer rows above cross-reference back to these
 - No analyzer owns **DI container / scoped-service leak detection**, **EF Core diagnostics**,
   **cache health**, **native/COM interop**, **runtime configuration reporting**, or
   **AssemblyLoadContext-specific unload-leak detection** — all currently unowned.
-- No analyzer is the **canonical retained-size provider** in practice, even though
-  `DominatorAnalyzer` should be — `RetentionAnalyzer` computes a competing heuristic instead of
-  depending on it. This is a gap in *enforced* ownership, not raw capability.
+- **Resolved**: `DominatorAnalyzer` is now the canonical retained-size provider — the former
+  competing `RetentionAnalyzer` heuristic was merged into it rather than left as a separate signal.
 - No analyzer is the **canonical thread stack-walk provider** — despite `ThreadAnalyzer` being
   the obvious candidate, three other analyzers independently walk stacks rather than consuming it.
 
@@ -101,12 +97,11 @@ Grouped by cluster (individual analyzer rows above cross-reference back to these
 - `CollectionAnalyzer` → `Microsoft.Extensions.Logging`: the only analyzer with a
   logging dependency. Either every analyzer should have a consistent diagnostics/tracing story, or
   this one dependency is accidental scope creep that should be removed.
-- Analyzers that **should** depend on the shared `DumpDetective.Analysis.Traversal` primitive but
-  (per Deliverable 1's dependency columns) apparently don't — `StaticRootLeakDetector`,
-  `EventLeakAnalyzer`, `DominatorAnalyzer`, `RetentionAnalyzer` all perform graph-walk-like work
-  without importing `Traversal`. This is coupling *avoided* where it should exist: each has grown
-  its own ad hoc traversal logic instead of sharing the one BFS implementation used by
-  `GCRootAnalyzer`, `AsyncTaskAnalyzer`, and `ReferenceChainAnalyzer`.
+- Analyzers that **should** depend on the shared `DumpDetective.Analysis.Traversal` primitive —
+  `StaticRootLeakDetector`, `EventLeakAnalyzer`, `DominatorAnalyzer` (now also owning the merged
+  `RetentionAnalyzer` logic) — now do, via `BoundedGraphWalk` (see
+  [Deliverable 5](phase0-deliverable-5-shared-infrastructure.md#3-root--retention-graph-service---done)),
+  resolving the ad hoc traversal duplication flagged here.
 - The "resource state sampler" quartet (`DbConnectionAnalyzer`/`WcfChannelAnalyzer`/
   `HttpObjectAnalyzer`/`TimerLeakAnalyzer`) has no shared base or helper at all — the coupling
   that *should* exist (one sampler, four configurations) is absent, and each analyzer instead

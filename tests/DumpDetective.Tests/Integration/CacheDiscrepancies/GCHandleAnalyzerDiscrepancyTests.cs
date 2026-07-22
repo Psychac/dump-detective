@@ -46,6 +46,13 @@ public sealed class GCHandleAnalyzerDiscrepancyTests
             (diskResult.TopTargetTypes?.Count ?? 0).Should().Be(memResult.TopTargetTypes?.Count ?? 0);
             (diskResult.TopPinnedTargetTypes?.Count ?? 0).Should().Be(memResult.TopPinnedTargetTypes?.Count ?? 0);
             (diskResult.TopPinnedObjectsBySize?.Count ?? 0).Should().Be(memResult.TopPinnedObjectsBySize?.Count ?? 0);
+            diskResult.DependentHandleCount.Should().Be(memResult.DependentHandleCount);
+            diskResult.DependentResolvedEdgeCount.Should().Be(memResult.DependentResolvedEdgeCount);
+            diskResult.DependentUnresolvedTargetCount.Should().Be(memResult.DependentUnresolvedTargetCount);
+            diskResult.DependentUnresolvedPercent.Should().Be(memResult.DependentUnresolvedPercent);
+            (diskResult.DependentTopSourceTypes?.Count ?? 0).Should().Be(memResult.DependentTopSourceTypes?.Count ?? 0);
+            (diskResult.DependentTopTargetTypes?.Count ?? 0).Should().Be(memResult.DependentTopTargetTypes?.Count ?? 0);
+            (diskResult.DependentTopSourceTargetEdges?.Count ?? 0).Should().Be(memResult.DependentTopSourceTargetEdges?.Count ?? 0);
         }
         finally
         {

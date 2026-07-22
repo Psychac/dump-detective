@@ -45,19 +45,19 @@ dotMemory's native/COM tracking) and surfaced clear gaps.
 | Root analysis | Yes | `GCRootAnalyzer` | Good | None | — |
 | Root categorization | Yes | `GCRootAnalyzer` | Good | None | — |
 | Reference chains | Yes | `ReferenceChainAnalyzer` | Good | On-demand only, not part of batch report | — |
-| Dominators | Yes | `DominatorAnalyzer` | Partial | Overlaps with `RetentionAnalyzer`'s retained-size heuristic | Verify true dominator-tree vs. approximation in Deliverable 3 |
-| Retention graphs (exportable/visualizable) | Partial | Scattered: `DominatorAnalyzer`, `RetentionAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer` | Partial | Yes — 4 analyzers each compute a partial retention view | Unify into a single retention/evidence service (Deliverable 5) |
-| Largest retainers | Yes | `RetentionAnalyzer`, `DominatorAnalyzer` | Partial | Yes — duplicated, not unified | Consolidate |
+| Dominators | Yes | `DominatorAnalyzer` | Partial | None — `RetentionAnalyzer` merged in | Verify true dominator-tree vs. approximation in Deliverable 3 |
+| Retention graphs (exportable/visualizable) | Partial | Scattered: `DominatorAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer` | Partial | Yes — 3 analyzers each compute a partial retention view | Unify into a single retention/evidence service (Deliverable 5) |
+| Largest retainers | Yes | `DominatorAnalyzer` | Good | None — was duplicated with `RetentionAnalyzer`, now merged | — |
 | Object ownership graph | No | — | Missing | — | Same gap as Memory > Object ownership |
 
 ## GC
 
 | Capability | Covered | Owning Analyzer(s) | Quality | Overlap | Future Candidate |
 |---|---|---|---|---|---|
-| Handles (general) | Yes | `GCHandleAnalyzer` | Excellent | Partial (`DependentHandleAnalyzer`, `WeakReferenceAnalyzer` cover subsets) | — |
+| Handles (general) | Yes | `GCHandleAnalyzer` (includes former `DependentHandleAnalyzer`) | Excellent | Partial (`WeakReferenceAnalyzer` covers a subset) | — |
 | Finalizer queue (objects pending finalization) | Partial | `FinalizableObjectAnalyzer` | Partial | None | Confirm in Deliverable 3 whether the F-reachable/finalization queue itself (vs. "has a finalizer, not disposed") is actually enumerated |
 | Pinned objects | Partial | `GCHandleAnalyzer` (pinned handle kind only) | Partial | None | Dedicated pinning report (GCHandle.Alloc(Pinned), interop `fixed`, buffer pinning) — a common GC-fragmentation root cause |
-| Weak references | Yes | `WeakReferenceAnalyzer`, `DependentHandleAnalyzer`, `GCHandleAnalyzer` | Good, but fragmented | Yes — 3 analyzers, unclear boundary (flagged in Deliverable 1) | Consolidate ownership |
+| Weak references | Yes | `WeakReferenceAnalyzer`, `GCHandleAnalyzer` (includes former `DependentHandleAnalyzer`) | Good, still fragmented | Yes — 2 analyzers, unclear boundary (flagged in Deliverable 1) | Consolidate ownership |
 | Resurrection | No | — | Missing | — | Yes — no analyzer detects finalizer-resurrection patterns |
 | Finalizable objects | Yes | `FinalizableObjectAnalyzer` | Good | None | — |
 
@@ -116,7 +116,7 @@ further.)*
 | Memory pressure | Yes | `MemoryAnalyzer`, `AllocationPatternAnalyzer` | Good | None | — |
 | Allocation hotspots | Partial | `AllocationPatternAnalyzer` | Partial | None | Inherent snapshot limitation — true call-site hotspots need ETW, not a dump; document this boundary explicitly rather than treating it as a gap to close |
 | Cache health (`IMemoryCache`, static caches, etc.) | No | — | Missing | — | Yes — distinct from `CollectionAnalyzer`'s generic waste detection; common leak/bloat source |
-| Leak indicators (unified) | Partial | `RetentionAnalyzer`, `LeakCandidateAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer` | Good individually, poor in aggregate | Yes — 5 analyzers, no unified scoring (Deliverable 1 flag) | Shared confidence-scoring engine (Deliverable 5) |
+| Leak indicators (unified) | Partial | `DominatorAnalyzer`, `LeakCandidateAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer` | Good individually, poor in aggregate | Yes — 5 analyzers, no unified scoring (Deliverable 1 flag) | Shared confidence-scoring engine (Deliverable 5) |
 | Runtime configuration (GC mode, heap count, TieredCompilation, env vars) | No | — | Missing | — | Yes — cheap to surface directly from `ClrRuntime`/`DacInfo`, high diagnostic value, currently not reported anywhere |
 
 ## Native / Interop *(added — not in the doc's suggested list)*
@@ -156,7 +156,6 @@ further.)*
 consolidation rather than net-new work — see Deliverable 1 findings and Deliverable 5):
 
 - Leak indicators (5 analyzers)
-- Retention/largest-retainer estimation (`RetentionAnalyzer` + `DominatorAnalyzer`)
-- Weak/dependent handle coverage (3 analyzers)
+- Weak/dependent handle coverage (2 analyzers, was 3 before `DependentHandleAnalyzer` merged into `GCHandleAnalyzer`)
 - Thread blocking/wait-pattern analysis (`HangAnalyzer` + `ThreadAnalyzer` + `LockGraphAnalyzer`)
 - Module/assembly inventory (`ModuleAnalyzer` + `AppDomainAnalyzer`)

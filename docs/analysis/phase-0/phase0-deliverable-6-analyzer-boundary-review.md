@@ -29,6 +29,8 @@ rather than mislabeled onto the old AppDomain analyzer.
 
 ### `RetentionAnalyzer` (file `MemoryLeakAnalyzer.cs`) → merge into `DominatorAnalyzer`
 
+**Status: done** — see [phase0-deliverable-10-platform-roadmap.md P0 item 3](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0).
+
 "Highly-referenced object" (incoming-ref fan-in) and "retained size" (dominator tree) are two
 angles on the same question: how much does this object anchor in memory. Deliverable 3 flagged
 these as computing overlapping heuristics independently; Deliverable 5 named `DominatorAnalyzer`
@@ -38,6 +40,8 @@ the merge rather than as a separate fix — there's no reason to preserve a diff
 standalone analyzer for a signal that belongs inside the canonical retention analyzer.
 
 ### `DependentHandleAnalyzer` → merge into `GCHandleAnalyzer`
+
+**Status: done** — see [phase0-deliverable-10-platform-roadmap.md P0 item 3](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0).
 
 A `DependentHandle` is literally one `HandleKind` in ClrMD's handle enumeration
 (`HandleKind.Dependent`), not a conceptually separate data source. `DependentHandleAnalyzer` reads

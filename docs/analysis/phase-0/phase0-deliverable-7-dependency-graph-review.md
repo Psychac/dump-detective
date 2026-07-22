@@ -93,18 +93,21 @@ direction.
   four types per module: `AnalyzerType`, `FindingGeneratorType`, `TrendComparerType`,
   `AnalyzerSectionBuilderType`. Every boundary decision from
   [Deliverable 6](phase0-deliverable-6-analyzer-boundary-review.md) (merge/split/replace) has a
-  **4x blast radius** — merging `RetentionAnalyzer` into `DominatorAnalyzer`, for instance, means
-  reconciling two `FindingGenerator`s, two `TrendComparer`s, and two `SectionBuilder`s, not just
-  two analyzer classes. This isn't a defect by itself (it's a reasonable composition pattern), but
-  it means the true cost of every Deliverable 6 recommendation is roughly 4x the analyzer-level
-  description — worth pricing in explicitly for Deliverable 10's roadmap.
-- **Leak/retention feature is entangled across 6 analyzer modules** (`RetentionAnalyzer`,
-  `LeakCandidateAnalyzer`, `DominatorAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`,
-  `TimerLeakAnalyzer`), each with its own 4x fan-out — meaning "what counts as a leak" is
-  currently expressed independently in up to ~24 places across the codebase (6 analyzers × 4
-  registered types each) rather than one shared policy. This is the most severe entanglement found
-  in the review and is precisely what Deliverable 5's evidence builder / ranking engine / inter-
-  analyzer result bus are meant to collapse.
+  **4x blast radius** — confirmed by actually merging `RetentionAnalyzer` into `DominatorAnalyzer`
+  (and `DependentHandleAnalyzer` into `GCHandleAnalyzer`), which required reconciling each pair's
+  `FindingGenerator`s, `TrendComparer`s, and `SectionBuilder`s, not just the two analyzer classes
+  (see [Deliverable 10 P0 item 3](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0)).
+  This isn't a defect by itself (it's a reasonable composition pattern), but it means the true cost
+  of every Deliverable 6 recommendation is roughly 4x the analyzer-level description — worth
+  pricing in explicitly for Deliverable 10's roadmap.
+- **Leak/retention feature is entangled across 5 analyzer modules** (`DominatorAnalyzer` — now
+  also owning the merged `RetentionAnalyzer`'s signal — `LeakCandidateAnalyzer`,
+  `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer`), each with its own 4x
+  fan-out — meaning "what counts as a leak" is currently expressed independently in up to ~20
+  places across the codebase (5 analyzers × 4 registered types each) rather than one shared
+  policy. This is the most severe entanglement found in the review and is precisely what
+  Deliverable 5's evidence builder / ranking engine / inter-analyzer result bus are meant to
+  collapse.
 - **Thread-domain feature entangled across 4 modules** (`ThreadAnalyzer`, `HangAnalyzer`,
   `ThreadStackClusterAnalyzer`, `LockGraphAnalyzer`) with the same 4x multiplier — ~16 places
   expressing overlapping thread/wait-state logic.

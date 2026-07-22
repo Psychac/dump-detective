@@ -31,7 +31,7 @@ namespace DumpDetective.Analysis.Cache
         // is preferred by `TryGetHeapIndex`.
         private HeapIndexBuildResult? _heapIndex;
         private readonly StatisticsCache _statisticsCache;
-        private readonly RootCache _rootCache;
+        private readonly RootSetCache _rootSetCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -44,7 +44,7 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             });
-            _rootCache = new RootCache(() =>
+            _rootSetCache = new RootSetCache(() =>
             {
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
@@ -66,7 +66,7 @@ namespace DumpDetective.Analysis.Cache
         {
             yield return _heapIndexCache.GetMetrics();
             yield return _statisticsCache.GetMetrics();
-            yield return _rootCache.GetMetrics();
+            yield return _rootSetCache.GetMetrics();
             yield return _threadCache.GetMetrics();
             yield return _methodTableCache.GetMetrics();
             yield return _typeMetadataCache.GetMetrics();
@@ -108,7 +108,7 @@ namespace DumpDetective.Analysis.Cache
             _progress = progress;
             _heapIndexCache.SetProgress(progress);
             _statisticsCache.SetProgress(progress);
-            _rootCache.SetProgress(progress);
+            _rootSetCache.SetProgress(progress);
         }
 
         public HeapIndexBuildResult PrebuildHeapIndex(
@@ -136,7 +136,7 @@ namespace DumpDetective.Analysis.Cache
 
         public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)
         {
-            return _rootCache.GetStaticRootedAddresses(heap);
+            return _rootSetCache.GetStaticRootedAddresses(heap);
         }
 
         public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
@@ -229,47 +229,17 @@ namespace DumpDetective.Analysis.Cache
             return _statisticsCache.GetSampleInstanceAddress(typeName);
         }
 
-        public HashSet<ulong> GetRetainedObjects(ClrHeap heap, ulong rootAddress, int maxObjects = 10000)
-        {
-            // Not cached: each root address is visited exactly once per analyzer run (StaticRootLeakDetector),
-            // so a cache would only ever miss — storing up to maxObjects×8 bytes per root address for no benefit.
-            Interlocked.Increment(ref _objectScanCount);
-
-            var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
-            var queue = new Queue<ulong>(capacity: 256);
-            var scanCounter = new ObjectScanCounter("tracing retained objects", _progress, reportEveryObjects: 500);
-
-            queue.Enqueue(rootAddress);
-            retained.Add(rootAddress);
-
-            while (queue.Count > 0 && retained.Count < maxObjects)
-            {
-                var current = queue.Dequeue();
-                scanCounter.Tick();
-                Interlocked.Increment(ref _objectScanCount);
-                var obj = heap.GetObject(current);
-
-                if (!obj.IsValid)
-                    continue;
-
-                foreach (var reference in obj.EnumerateReferences(carefully: true))
-                {
-                    if (reference.IsValid && retained.Add(reference.Address))
-                    {
-                        queue.Enqueue(reference.Address);
-                    }
-                }
-            }
-
-            return retained;
-        }
-
         public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap)
         {
-            return _rootCache.GetOrBuildValidRoots(heap);
+            return _rootSetCache.GetOrBuildValidRoots(heap);
         }
 
-        // Root enumeration moved into RootCache
+        public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap)
+        {
+            return _rootSetCache.GetOrBuildRoots(heap);
+        }
+
+        // Root enumeration moved into RootSetCache
 
         private void ReportProgress(string phase, long totalScans)
         {

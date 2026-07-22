@@ -17,8 +17,6 @@ internal static class SectionIdDomainMap
         ["Memory Analysis"]            = ("Memory",     "A2"),
         ["DominatorAnalyzer"]          = ("Memory",     "A3"),
         ["Dominator Analysis"]         = ("Memory",     "A3"),
-        ["MemoryLeakAnalyzer"]         = ("Memory",     "A4"),   // RetentionAnalyzer in the plan; actual class is MemoryLeakAnalyzer
-        ["Retention Analysis"]         = ("Memory",     "A4"),
         ["GCRootAnalyzer"]             = ("Memory",     "A5"),
         ["GC Root Analysis"]           = ("Memory",     "A5"),
         ["StaticRootLeakDetector"]     = ("Memory",     "A6"),
@@ -43,8 +41,6 @@ internal static class SectionIdDomainMap
         ["GC Handle Analysis"]         = ("GC",         "B7"),
         ["WeakReferenceAnalyzer"]      = ("GC",         "B7"),
         ["Weak Reference Analysis"]    = ("GC",         "B7"),
-        ["DependentHandleAnalyzer"]    = ("GC",         "B7"),
-        ["Dependent Handle Analysis"]  = ("GC",         "B7"),
 
         // Domain C — Type System
         ["ObjectShapeAnalyzer"]        = ("TypeSystem", "C2"),
@@ -96,17 +92,12 @@ internal static class SectionIdDomainMap
         ["Heap Topology"]              = ("GC",         "B3"),   // HeapTopologySectionBuilder display title
         ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
 
-        // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder
-        ["GC Handles, Weak References & Dependent Handles"] = ("GC", "B7"),
-
-        // Individual B7/B8/B9 — split builders
+        // Individual B7/B8 — split builders
         ["GCHandleAnalyzer"]            = ("GC",      "B7"),
         ["GC Handle Analysis"]          = ("GC",      "B7"),
         ["GC Handles"]                  = ("GC",      "B7"),
         ["WeakReferenceAnalyzer"]       = ("GC",      "B8"),
         ["Weak Reference Analysis"]     = ("GC",      "B8"),
-        ["DependentHandleAnalyzer"]     = ("GC",      "B9"),
-        ["Dependent Handle Analysis"]   = ("GC",      "B9"),
 
         // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
         ["Reference Chain Analysis"]   = ("Memory",     ""),

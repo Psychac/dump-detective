@@ -60,7 +60,24 @@ inside the same single pass).
 
 **Priority**: **P0** — pairs with item 1, low incremental cost once item 1 exists.
 
-## 3. Root / Retention Graph Service
+## 3. Root / Retention Graph Service — **done**
+
+`RootSetCache` (`src/DumpDetective.Analysis/Cache/RootSetCache.cs`) replaces `RootCache` as the
+single canonical root-set service, and `BoundedGraphWalk`
+(`src/DumpDetective.Analysis/Traversal/BoundedGraphWalk.cs`) replaces `HeapTypePathTraversal`,
+`BoundedRetainedSizeBfs`, and `HeapAnalysisCache.GetRetainedObjects` as the single canonical
+forward-BFS primitive, enforcing the 20-depth cap internally regardless of caller-requested depth.
+`GCRootAnalyzer`, `RetentionAnalyzer`, `DominatorAnalyzer`, `StaticRootLeakDetector`, and
+`EventLeakAnalyzer` all consume these shared services instead of independently re-enumerating
+roots or re-implementing BFS. `RootPathFinder`/`ReferenceChainAnalyzer`'s bidirectional
+shortest-root-path search was intentionally left untouched — a different problem shape, out of
+scope for this item. See
+[docs/architecture.md § Graph and traversal](../../architecture.md#graph-and-traversal) and
+[phase0-deliverable-10-platform-roadmap.md P0 item 2](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0)
+for the full design and status.
+
+<details>
+<summary>Original analysis (superseded)</summary>
 
 **Current duplication**: `GCRootAnalyzer`, `AsyncTaskAnalyzer`, `ReferenceChainAnalyzer` already
 share the `Traversal` BFS primitive. `RetentionAnalyzer`, `DominatorAnalyzer`,
@@ -77,7 +94,9 @@ depend on it and, more usefully, building one shared "retained subgraph" API lay
 `Traversal` (walk-and-summarize: size, count, sample paths) that all four can call instead of each
 owning their own summarization logic too.
 
-**Priority**: **P1**.
+**Priority**: was **P1**.
+
+</details>
 
 ## 4. Type Metadata Classification Layer
 
@@ -256,7 +275,7 @@ P0 foundation:  [1] Index dispatcher ──┬─→ [2] Statistics engine
 P0 foundation:  [11] Inter-analyzer result bus ─→ [6] Evidence builder ─→ [8] Ranking engine
                                                                         └─→ [9] Confidence scoring
 
-P1 independent: [3] Root graph service, [4] Type classification, [7] Sampling framework
+P1 independent: [3] Root graph service (done), [4] Type classification, [7] Sampling framework
                 (no blocking dependencies — can start any time, feed item 6 when ready)
 
 P2 last:        [10] Reporting helpers (depends on 7, benefits from 2)

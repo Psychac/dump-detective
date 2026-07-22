@@ -5,6 +5,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Analyzers
@@ -67,7 +68,7 @@ namespace DumpDetective.Analysis.Analyzers
                 try
                 {
                     ClrObject root = heap.GetObject(sampleAddress);
-                    return BoundedRetainedSizeBfs.ComputeExclusiveRetained(root, heap, claimedAddresses);
+                    return BoundedGraphWalk.ComputeExclusiveRetained(root, heap, claimedAddresses);
                 }
                 catch
                 {

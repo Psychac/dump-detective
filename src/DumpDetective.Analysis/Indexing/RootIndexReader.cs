@@ -70,6 +70,8 @@ internal static class RootIndexReader
         return roots;
     }
 
+    // Byte values match Microsoft.Diagnostics.Runtime.ClrRootKind (ClrMD 4) exactly;
+    // value 6 is unused/skipped in that enum.
     public static string KindToString(byte kind)
         => kind switch
         {
@@ -79,8 +81,10 @@ internal static class RootIndexReader
             3 => "PinnedHandle",
             4 => "Stack",
             5 => "RefCountedHandle",
-            6 => "AsyncPinnedHandle",
-            7 => "SizedRefHandle",
+            7 => "AsyncPinnedHandle",
+            8 => "SizedRefHandle",
+            9 => "ThreadStaticVar",
+            10 => "StaticVar",
             _ => $"Unknown({kind})"
         };
 }

@@ -19,7 +19,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldMergeDuplicateFindings_AndPreserveEvidenceAndRemediation()
     {
         InsightFinding findingA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Duplicate strings detected",
@@ -29,7 +29,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "dup-key");
 
         InsightFinding findingB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "Duplicate strings detected",
@@ -38,8 +38,8 @@ public sealed class ReportingCompositionTests
             Tags: ["memory", "string"],
             Fingerprint: "dup-key");
 
-        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", findingA);
-        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", findingB);
+        AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", findingA);
+        AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", findingB);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/test.dmp",
@@ -58,7 +58,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldClusterNearDuplicateTopActions()
     {
         InsightFinding leakA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "Event handler retention pressure",
@@ -68,7 +68,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "cluster-a");
 
         InsightFinding leakB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Event handler retention pressure",
@@ -90,8 +90,8 @@ public sealed class ReportingCompositionTests
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/cluster.dmp",
             runs: [
-                CreateRun("RetentionAnalyzer", leakA),
-                CreateRun("RetentionAnalyzer", leakB),
+                CreateRun("DominatorAnalyzer", leakA),
+                CreateRun("DominatorAnalyzer", leakB),
                 CreateRun("ThreadAnalyzer", threadFinding)
             ],
             elapsed: TimeSpan.FromSeconds(1),
@@ -432,7 +432,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldExcludeInfoConfidenceAndDiagnostics_FromDomainInsights()
     {
         InsightFinding analyzerSignal = new(
-            Analyzer: "Retention Analysis",
+            Analyzer: "Dominator Analysis",
             Category: "Retention",
             Severity: FindingSeverity.Warning,
             Title: "Retention hotspot",
@@ -452,7 +452,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "conf-cap");
 
         InsightFinding diagnosticsInfo = new(
-            Analyzer: "Retention Analysis",
+            Analyzer: "Dominator Analysis",
             Category: "Diagnostics",
             Severity: FindingSeverity.Info,
             Title: "Reference tracking was capped",
@@ -461,9 +461,9 @@ public sealed class ReportingCompositionTests
             Tags: ["analysis-quality"],
             Fingerprint: "diag-cap");
 
-        AnalyzerRunResult run = CreateRun("RetentionAnalyzer", analyzerSignal);
+        AnalyzerRunResult run = CreateRun("DominatorAnalyzer", analyzerSignal);
         AnalyzerRunResult gcRun = CreateRun("GCRootAnalyzer", confidenceInfo);
-        AnalyzerRunResult diagRun = CreateRun("RetentionAnalyzer", diagnosticsInfo);
+        AnalyzerRunResult diagRun = CreateRun("DominatorAnalyzer", diagnosticsInfo);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/info-filter.dmp",
@@ -471,7 +471,7 @@ public sealed class ReportingCompositionTests
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders:
             [
-                new StubAnalyzerSectionBuilder("RetentionAnalyzer", "Retention"),
+                new StubAnalyzerSectionBuilder("DominatorAnalyzer", "Retention"),
                 new StubAnalyzerSectionBuilder("GCRootAnalyzer", "GC Roots")
             ],
             reportBuilders: []);
@@ -492,7 +492,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldEmitDeterministicTopActions_WithFactorBreakdown()
     {
         InsightFinding warningA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk alpha",
@@ -502,7 +502,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "same-priority-a");
 
         InsightFinding warningB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk beta",
@@ -511,8 +511,8 @@ public sealed class ReportingCompositionTests
             Tags: ["memory", "runtime"],
             Fingerprint: "same-priority-b");
 
-        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", warningA);
-        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", warningB);
+        AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", warningA);
+        AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", warningB);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/top-actions.dmp",
@@ -544,7 +544,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldEmitTopLevelScoringModelVersionMetadata()
     {
         InsightFinding warning = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk",
@@ -555,7 +555,7 @@ public sealed class ReportingCompositionTests
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/score-meta.dmp",
-            runs: [CreateRun("RetentionAnalyzer", warning)],
+            runs: [CreateRun("DominatorAnalyzer", warning)],
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders: [],
             reportBuilders: []);
@@ -668,7 +668,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldPropagateConfidenceCaveats_InTopActions()
     {
         InsightFinding warning = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Heuristic retention signature",
@@ -681,7 +681,7 @@ public sealed class ReportingCompositionTests
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/warn-caveat.dmp",
-            runs: [CreateRun("RetentionAnalyzer", warning)],
+            runs: [CreateRun("DominatorAnalyzer", warning)],
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders: [],
             reportBuilders: []);

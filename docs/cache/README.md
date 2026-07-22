@@ -53,11 +53,16 @@ Analyzers primarily operate on HeapEntry but graph-oriented analyzers still repe
 HeapAnalysisCache (Facade) — **built**, matches code
  ├── HeapIndex
  ├── StatisticsCache
- ├── RootCache
+ ├── RootSetCache — canonical root-set (`RootRecord`), replaced `RootCache`; see
+ │   [docs/architecture.md § Graph and traversal](../architecture.md)
  ├── TypeMetadataCache
  ├── ThreadCache
  ├── ReferenceGraphCache (lazy) — **not built, not on current roadmap**
  └── Future DiskGraphCache — **not built, not on current roadmap**
+
+Forward-BFS is likewise unified: `BoundedGraphWalk` (`DumpDetective.Analysis.Traversal`) replaced
+the formerly-separate `HeapTypePathTraversal`, `BoundedRetainedSizeBfs`, and
+`HeapAnalysisCache.GetRetainedObjects`, enforcing the 20-depth cap inside the primitive itself.
 
 Heap scanners continue using HeapIndex.
 Graph analyzers would consume ReferenceGraphCache, if it existed — see

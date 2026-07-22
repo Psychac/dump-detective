@@ -44,6 +44,13 @@ public sealed class DominatorAnalyzerDiscrepancyTests
             diskResult.MaxBreadth.Should().Be(memResult.MaxBreadth);
             diskResult.MaxDepth.Should().Be(memResult.MaxDepth);
             diskResult.TopDominatorTypes.Count.Should().Be(memResult.TopDominatorTypes.Count);
+            diskResult.HighlyReferencedObjectCount.Should().Be(memResult.HighlyReferencedObjectCount);
+            diskResult.SkippedReferenceAddresses.Should().Be(memResult.SkippedReferenceAddresses);
+            diskResult.ObjectScanCapped.Should().Be(memResult.ObjectScanCapped);
+            diskResult.ReferenceCountingSkipped.Should().Be(memResult.ReferenceCountingSkipped);
+            diskResult.TopHighlyReferencedTotalBytes.Should().Be(memResult.TopHighlyReferencedTotalBytes);
+            (diskResult.TopHighlyReferencedObjects?.Count ?? 0).Should().Be(memResult.TopHighlyReferencedObjects?.Count ?? 0);
+            (diskResult.TopRetentionTypes?.Count ?? 0).Should().Be(memResult.TopRetentionTypes?.Count ?? 0);
         }
         finally
         {

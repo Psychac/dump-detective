@@ -5,9 +5,13 @@
 > Other deliverables (capability matrix, dependency graph, roadmap, etc.) are out of scope here.
 
 Reviewed as a static architecture pass over `src/DumpDetective.Analysis/Analyzers/`
-(36 `IAnalyzer` implementations) and their registration in
-`DefaultAnalyzerFeatureModuleCatalog`. Implementations were not deep-reviewed line by line —
-per Phase 0 instructions, this is an architectural pass, not an implementation review.
+(34 `IAnalyzer` implementations, down from the original 36 — `RetentionAnalyzer` was merged into
+`DominatorAnalyzer` and `DependentHandleAnalyzer` was merged into `GCHandleAnalyzer`, per
+[Deliverable 6](phase0-deliverable-6-analyzer-boundary-review.md) and
+[Deliverable 10 P0 item 3](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0))
+and their registration in `DefaultAnalyzerFeatureModuleCatalog`. Implementations were not
+deep-reviewed line by line — per Phase 0 instructions, this is an architectural pass, not an
+implementation review.
 
 This catalog's `Heap Scan Mode` column has not been individually re-audited row-by-row against
 source — treat any given row's `Index`/`Index+Container` label as indicative, not verified, until
@@ -41,15 +45,13 @@ do not distinguish from index streaming.
 | 170 | `CrashAnalyzer` | exceptions | Active/historical exception analysis, crash-thread snapshots, stack traces | Exception chains, crash threads | Indexing, Cache, Utilities | Index | Clear, but large (898 lines) |
 | 180 | `HangAnalyzer` | threads | Threadpool health/hang detection: wait-pattern, lock-holding, continuation backlog | Health score, wait threads, threadpool stats | Indexing, Cache, Utilities | Index | ⚠ Duplicates wait-pattern logic with `ThreadAnalyzer` |
 | 190 | `AsyncTaskAnalyzer` | async | `Task`/`Task<T>` status, continuation chains, faulted-task exception extraction | Task status breakdown, top faulted tasks | Indexing, **Container**, Traversal, Utilities | Index+Container | ⚠ Owns a private on-disk "task index" format; overlaps `HangAnalyzer`/`CrashAnalyzer` exception extraction |
-| 200 | `RetentionAnalyzer` (file `MemoryLeakAnalyzer.cs`) | memory, retention | Highly-referenced-object detection via incoming-ref counting as a leak signal | Top retention types, high-fan-in objects | Indexing, Cache, Utilities | Index | ⚠ Class/file name mismatch; overlaps `LeakCandidateAnalyzer`/`DominatorAnalyzer` |
 | 210 | `LeakCandidateAnalyzer` | leaks | Scores/ranks leak candidates from heap+handle+retention signals | Ranked leak candidates w/ severity | Cache, Indexing, Utilities, Enums | Index | ⚠ No single owner of "leak" scoring — see cross-analyzer flag below |
-| 220 | `DominatorAnalyzer` | retention, dominator | Dominator/retained-size estimation | Dominator stats | Cache, Indexing, Utilities | Index | ⚠ Overlaps retention estimation done elsewhere |
+| 220 | `DominatorAnalyzer` | retention, dominator | Dominator/retained-size estimation, plus highly-referenced-object detection via incoming-ref counting (absorbed from the merged `RetentionAnalyzer`) | Dominator stats, top retention types, high-fan-in objects | Cache, Indexing, Utilities | Index | Clear — sole retained-size/high-fan-in provider after the merge |
 | 230 | `StringAnalyzer` | memory, string | String duplication/waste analysis (fingerprinting, FOH detection, top duplicates) | Duplicate groups, wasted bytes | Cache, Indexing, Utilities | Index | Clear — large (991 lines) but single-purpose, not scope creep |
 | 240 | `CollectionAnalyzer` | collections | BCL collection introspection (Dictionary/List/Queue/HashSet…), fill-rate/waste analysis | Wasteful collections, waste-by-kind | Cache, Indexing, Utilities, **Logging** | Index | 🚩 Largest analyzer (1702 lines/107 symbols); only analyzer taking a logging dependency; owns its own reflection field-layout cache |
 | 250 | `StaticRootLeakDetector` | roots, leaks | Static-field root scan for large retained subgraphs | Retained subgraph size, contains-collections/events flags | Cache, Utilities, Enums | Cache-only | ⚠ Near-duplicate static-field sweep vs `EventLeakAnalyzer.SweepModuleStaticFields` |
 | 260 | `ReferenceChainAnalyzer` | roots | On-demand root-path finding for a given object/type (bidirectional BFS) | Root path(s), telemetry counters | Cache, Traversal, Utilities | Cache-only (BFS over index-backed cache) | ⚠ Should arguably be the sole root-path evidence provider — see flag below |
-| 270 | `GCHandleAnalyzer` | handles | GC handle table enumeration by kind, target resolution | Handle counts by kind, targets | Cache, Utilities | Cache-only | ⚠ Overlaps `DependentHandleAnalyzer`/`WeakReferenceAnalyzer` |
-| 280 | `DependentHandleAnalyzer` | handles | `DependentHandle` (conditional weak table) enumeration | Dependent-handle pairs | Cache, Utilities, Enums | Cache-only | ⚠ Overlaps `GCHandleAnalyzer`/`WeakReferenceAnalyzer` — unclear boundary |
+| 270 | `GCHandleAnalyzer` | handles | GC handle table enumeration by kind, target resolution, plus `DependentHandle` (conditional weak table) target resolution (absorbed from the merged `DependentHandleAnalyzer`) | Handle counts by kind, targets, dependent-handle pairs | Cache, Utilities, Enums | Cache-only | ⚠ Still overlaps `WeakReferenceAnalyzer` |
 | 290 | `LohFragmentationAnalyzer` | gc, loh | LOH segment fragmentation: free-block histogram, largest objects | Fragmentation %, free-gap histogram | Cache, Indexing, **Container** | Index+Container | Clear |
 | 300 | `ThreadStackClusterAnalyzer` | threads | Clusters threads by stack signature (dedupe similar stacks) | Stack clusters, sample addresses | Cache, Utilities | Cache-only | ⚠ Duplicate stack-walk work vs `ThreadAnalyzer`/`HangAnalyzer` |
 | 310 | `ThreadAnalyzer` | threads | Full thread inventory: state, wait reason, exceptions, stack-root counts, hotspots | Thread categorization, distributions | Cache, Utilities, Enums | Cache-only | ⚠ Duplicates `DetectWaitPattern` from `HangAnalyzer` |
@@ -93,20 +95,20 @@ do not distinguish from index streaming.
 - **Static-field sweep** — `StaticRootLeakDetector.AnalyzeStaticRoots` and
   `EventLeakAnalyzer.SweepModuleStaticFields` cover overlapping ground (static fields retaining
   large subgraphs / delegates) with separate implementations.
-- **Handle/weak-reference space** — `GCHandleAnalyzer`, `DependentHandleAnalyzer`,
-  `WeakReferenceAnalyzer` all enumerate overlapping parts of the GC handle table with no
-  documented boundary between them.
-- **Retention/leak scoring** — `RetentionAnalyzer`, `LeakCandidateAnalyzer`, `DominatorAnalyzer`,
-  and `ReferenceChainAnalyzer` each compute their own notion of "how much does this object
-  retain" / "is this a leak" rather than sharing one retained-size or confidence-scoring service.
+- **Handle/weak-reference space** — `GCHandleAnalyzer` (now including the former
+  `DependentHandleAnalyzer`'s dependent-handle resolution) and `WeakReferenceAnalyzer` still
+  enumerate overlapping parts of the GC handle table with no documented boundary between them.
+- **Retention/leak scoring** — `DominatorAnalyzer` (now including the former `RetentionAnalyzer`'s
+  high-fan-in signal), `LeakCandidateAnalyzer`, and `ReferenceChainAnalyzer` each compute their own
+  notion of "how much does this object retain" / "is this a leak" rather than sharing one
+  retained-size or confidence-scoring service.
 
 ### 3. Unclear ownership / naming
 
-- `MemoryLeakAnalyzer.cs` defines a class called **`RetentionAnalyzer`**, registered in the
-  catalog as `"retention"`. The file name, class name, and catalog key all disagree — this makes
-  the analyzer hard to find and easy to confuse with `LeakCandidateAnalyzer` or
-  `StaticRootLeakDetector`, which sound like they'd own "retention"/"leak" but don't.
-- Given the module keys `retention`, `leak-candidate`, `static-root`, and `dominator` all exist
+- **Resolved**: the former `MemoryLeakAnalyzer.cs` file/`RetentionAnalyzer` class/`"retention"`
+  catalog-key mismatch no longer exists — that file was deleted and its logic merged into
+  `DominatorAnalyzer` (module key `"dominator"`).
+- Given the module keys `leak-candidate`, `static-root`, and `dominator` all still exist
   as separate registrations, a newcomer has no way to tell from names alone which one to consult
   for "why is this object still alive" — that job is architecturally closest to
   `ReferenceChainAnalyzer`, but it isn't positioned as the canonical entry point.

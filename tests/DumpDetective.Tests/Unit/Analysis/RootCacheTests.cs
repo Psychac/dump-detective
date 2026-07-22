@@ -3,19 +3,19 @@ using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
-public class RootCacheTests
+public class RootSetCacheTests
 {
     [Fact]
     public void GetOrBuildValidRoots_ThrowsOnNullHeap()
     {
-        var cache = new RootCache(() => null);
+        var cache = new RootSetCache(() => null);
         Assert.Throws<ArgumentNullException>(() => cache.GetOrBuildValidRoots(null!));
     }
 
     [Fact]
     public void GetStaticRootedAddresses_ThrowsOnNullHeap()
     {
-        var cache = new RootCache(() => null);
+        var cache = new RootSetCache(() => null);
         Assert.Throws<ArgumentNullException>(() => cache.GetStaticRootedAddresses(null!));
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
@@ -93,10 +94,11 @@ namespace DumpDetective.Analysis.Analyzers
             // GetStaticRootedAddresses and GetOrBuildValidRoots). Filter to static roots inline.
             progress?.Report(new(0, "resolving static roots"));
             IReadOnlyList<(string RootKind, ulong Address)> allRoots = cache.GetOrBuildValidRoots(heap);
+            HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
 
             foreach ((string rootKind, ulong rootAddress) in allRoots)
             {
-                if (!rootKind.Contains(StringConstants.StaticPattern, StringComparison.OrdinalIgnoreCase))
+                if (!staticRootedAddresses.Contains(rootAddress))
                     continue;
 
                 if (rootAddress == 0 || !processedRoots.Add(rootAddress))
@@ -110,7 +112,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!rootMetadata.IsValid)
                     continue;
 
-                var retainedObjects = cache.GetRetainedObjects(heap, rootAddress, options.MaxRetainedObjectsToScan);
+                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, options.MaxRetainedObjectsToScan);
 
                 var typeStats = new Dictionary<string, RetainedTypeInfo>();
                 var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);

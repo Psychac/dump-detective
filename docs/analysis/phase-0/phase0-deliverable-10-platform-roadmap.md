@@ -137,24 +137,32 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    import was confirmed dead (no symbol from `Pipeline` was consumed) and removed; see
    [Current State](#current-state). The dependency-direction discipline this established should
    still be respected by item 2 below and the Performance track's dispatcher.
-2. **Root/retention graph service** (Deliverable 5 item 3) — not blocked by anything else, but
-   itself blocks item 4 below. Routes `RetentionAnalyzer`, `StaticRootLeakDetector`,
-   `EventLeakAnalyzer`, `DominatorAnalyzer` onto the shared `Traversal` BFS primitive (already used
-   by `GCRootAnalyzer`, `AsyncTaskAnalyzer`, `ReferenceChainAnalyzer`); builds one shared
-   "retained subgraph" walk-and-summarize API (size, count, sample paths) on top of `Traversal`;
-   and builds a canonical root-set artifact from `GCRootAnalyzer` for `DominatorAnalyzer`,
-   `StaticRootLeakDetector`, and `EventLeakAnalyzer` to consume instead of each independently
-   re-enumerating stack/static/handle roots (Deliverable 8 §3 — root enumeration scales with
-   thread/static-field count, not object count, but is currently repeated 4-5 times per run for no
-   reason, since the root set doesn't change during a single analysis run).
-3. **Execute two of the three Deliverable 6 merges alongside item 2**: `RetentionAnalyzer` into
-   `DominatorAnalyzer` (folds the high-fan-in signal into the canonical retained-size provider,
-   resolving the `MemoryLeakAnalyzer.cs`/`RetentionAnalyzer` file/class-name mismatch as part of the
-   merge), and `DependentHandleAnalyzer` into `GCHandleAnalyzer` (a `DependentHandle` is one
+2. ~~**Root/retention graph service**~~ (Deliverable 5 item 3) — **done.** `RootSetCache`
+   (`src/DumpDetective.Analysis/Cache/RootSetCache.cs`) replaces `RootCache` as the single
+   canonical root-set service: builds `RootRecord` (`TargetAddr`, `RootAddr`, `Kind`) once per run
+   from the Phase-1 disk index, falling back to a live `heap.EnumerateRoots()` walk when no index
+   is present. `GCRootAnalyzer`, `StaticRootLeakDetector`, and `EventLeakAnalyzer` all read roots
+   through it instead of each independently re-enumerating stack/static/handle roots.
+   `BoundedGraphWalk` (`src/DumpDetective.Analysis/Traversal/BoundedGraphWalk.cs`) replaces
+   `HeapTypePathTraversal`, `BoundedRetainedSizeBfs`, and `HeapAnalysisCache.GetRetainedObjects`
+   (all deleted) as the single canonical forward-BFS primitive, enforcing the 20-depth cap
+   internally; `GCRootAnalyzer`, `RetentionAnalyzer`, `DominatorAnalyzer`, and
+   `StaticRootLeakDetector` all call into it. `RootPathFinder`/`ReferenceChainAnalyzer`'s
+   bidirectional shortest-root-path search was intentionally left untouched — a different problem
+   shape, out of scope here. See
+   [docs/architecture.md § Graph and traversal](../../architecture.md#graph-and-traversal) for the
+   full design.
+3. ~~**Execute two of the three Deliverable 6 merges alongside item 2**~~ — **done.**
+   `RetentionAnalyzer` merged into `DominatorAnalyzer` (folds the high-fan-in signal into the
+   canonical retained-size provider, resolving the `MemoryLeakAnalyzer.cs`/`RetentionAnalyzer`
+   file/class-name mismatch as part of the merge; `MemoryLeakAnalyzer.cs` deleted), and
+   `DependentHandleAnalyzer` merged into `GCHandleAnalyzer` (a `DependentHandle` is one
    `HandleKind`, not a separate data source — no technical reason for a standalone handle-table
-   walk). Both touch the same graph-walk/traversal code item 2 is already rewiring, so batch them
-   in the same pass rather than as separate follow-up work. (The third merge, `AppDomainAnalyzer`
-   into `ModuleAnalyzer`, is independent of this chain — see [P1](#near-term-p1).)
+   walk; `DependentHandleAnalyzer.cs` deleted). Each merge folds the domain result, finding
+   generator, trend comparer, and section builder into the surviving analyzer's files, with the
+   catalog and `SectionIdDomainMap` registrations for the removed analyzers deleted. (The third
+   merge, `AppDomainAnalyzer` into `ModuleAnalyzer`, is independent of this chain — see
+   [P1](#near-term-p1).)
 4. **Evidence builder** (Deliverable 5 item 6) — depends on item 2 above ("depends on item 3 [root
    graph service] to be well-founded" per Deliverable 5). Designs and wires a shared
    `Evidence`/proof model (retained size, sample root paths, contributing signals) that

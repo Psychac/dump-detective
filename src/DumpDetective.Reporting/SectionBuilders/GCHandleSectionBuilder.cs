@@ -33,6 +33,10 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
             ["weak_like_handles_pct"] = new NumericMetricValue(weakPct, MetricUnit.Percent),
             ["pinned_handle_targets"] = new NumericMetricValue(d.PinnedHandleTargets, MetricUnit.Count),
             ["pinned_handle_targets_pct"] = new NumericMetricValue(pinnedPct, MetricUnit.Percent),
+            ["dependent_handles"] = new NumericMetricValue(d.DependentHandleCount, MetricUnit.Count),
+            ["dependent_resolved_edges"] = new NumericMetricValue(d.DependentResolvedEdgeCount, MetricUnit.Count),
+            ["dependent_unresolved_targets"] = new NumericMetricValue(d.DependentUnresolvedTargetCount, MetricUnit.Count),
+            ["dependent_unresolved_targets_pct"] = new NumericMetricValue(d.DependentUnresolvedPercent, MetricUnit.Percent),
         };
         if (d.PinnedRetainedBytes > 0)
             keyMetrics["pinned_retained_bytes"] = new NumericMetricValue((double)d.PinnedRetainedBytes, MetricUnit.Bytes);
@@ -86,6 +90,33 @@ internal sealed class GCHandleSectionBuilder : SectionBuilderBase, IAnalyzerSect
                     Cell($"{pct:F1}%")]));
             }
             compactTables.Add(STCompact("Pinned types by retained bytes", new[] { CH("Type"), CH("Retained Bytes","bytes"), CH("% Pinned", "number", "percent") }, pbRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        var dependentSourceTypes = d.DependentTopSourceTypes ?? [];
+        if (dependentSourceTypes.Count > 0)
+        {
+            var stRows = new List<TableRow>(dependentSourceTypes.Count);
+            for (int i = 0; i < dependentSourceTypes.Count; i++)
+                stRows.Add(new TableRow([Cell(dependentSourceTypes[i].Name), Cell($"{dependentSourceTypes[i].Count:N0}", dependentSourceTypes[i].Count)]));
+            compactTables.Add(STCompact("Dependent handle source type distribution", new[] { CH("Type"), CH("Count","number") }, stRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        var dependentTargetTypes = d.DependentTopTargetTypes ?? [];
+        if (dependentTargetTypes.Count > 0)
+        {
+            var dttRows = new List<TableRow>(dependentTargetTypes.Count);
+            for (int i = 0; i < dependentTargetTypes.Count; i++)
+                dttRows.Add(new TableRow([Cell(dependentTargetTypes[i].Name), Cell($"{dependentTargetTypes[i].Count:N0}", dependentTargetTypes[i].Count)]));
+            compactTables.Add(STCompact("Dependent handle target type distribution", new[] { CH("Type"), CH("Count","number") }, dttRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        var dependentEdges = d.DependentTopSourceTargetEdges;
+        if (dependentEdges != null && dependentEdges.Count > 0)
+        {
+            var edgeRows = new List<TableRow>(dependentEdges.Count);
+            for (int i = 0; i < dependentEdges.Count; i++)
+                edgeRows.Add(new TableRow(new[] { Cell(dependentEdges[i].Name), Cell(dependentEdges[i].Count.ToString("N0"), dependentEdges[i].Count) }));
+            compactTables.Add(STCompact("Dependent handle source to target pairs", new[] { CH("Pair"), CH("Count","number") }, edgeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

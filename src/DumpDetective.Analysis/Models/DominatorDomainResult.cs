@@ -37,7 +37,7 @@ internal sealed record DominatorDomainResult(
     /// </summary>
     ulong TopHighlyReferencedTotalBytes = 0) : AnalyzerDomainResult;
 
-internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0);
+internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 
 internal sealed record RetentionTypeSnapshot(
     string TypeName,

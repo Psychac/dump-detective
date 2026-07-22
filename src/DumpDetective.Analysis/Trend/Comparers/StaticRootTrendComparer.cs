@@ -15,8 +15,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("static.root.retained.bytes", null, r.TotalRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse)
             };
 
-            foreach (NameBytesEntry root in r.TopRootsByRetainedBytes ?? [])
-                metrics.Add(new("static.root.byname.bytes", root.Name, root.Bytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            foreach (StaticRootSnapshot root in r.TopRootsByRetainedBytes ?? [])
+                metrics.Add(new("static.root.byname.bytes", root.RootDescription, root.TotalMemoryImpact, "bytes", MetricTrendDirection.HigherIsWorse));
 
             return metrics;
         }

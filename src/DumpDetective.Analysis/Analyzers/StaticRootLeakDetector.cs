@@ -35,10 +35,11 @@ namespace DumpDetective.Analysis.Analyzers
                 .Where(a => IsSignificant(a, options))
                 .ToArray();
 
+            IReadOnlyList<(string RootKind, ulong Address)> validRoots = cache.GetOrBuildValidRoots(heap);
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
                 .Take(options.MaxRootsToReport)
-                .Select(r => new NameBytesEntry(FormatHelper.TruncateString(r.RootDescription, 90), r.TotalMemoryImpact))
+                .Select(r => BuildSnapshot(heap, validRoots, r))
                 .ToArray();
 
             if (significantStaticRoots.Length == 0)
@@ -51,6 +52,22 @@ namespace DumpDetective.Analysis.Analyzers
                 totalImpact += item.TotalMemoryImpact;
 
             return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots);
+        }
+
+        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IReadOnlyList<(string RootKind, ulong Address)> validRoots, StaticRootAnalysis analysis)
+        {
+            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, validRoots, analysis.DirectObjectAddress);
+            var evidence = new Evidence(
+                analysis.TotalMemoryImpact,
+                rootPath.Path,
+                rootPath.Truncated,
+                [new EvidenceSignal("ObjectsKeptAlive", "Objects kept alive by this root", analysis.ObjectsKeptAlive)]);
+
+            return new StaticRootSnapshot(
+                FormatHelper.TruncateString(analysis.RootDescription, 90),
+                analysis.TotalMemoryImpact,
+                analysis.ObjectsKeptAlive,
+                evidence);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)

@@ -60,4 +60,5 @@ internal sealed record EventLeakInstanceSnapshot(
     int DuplicateSubscriptionCount = 0,
     int OrphanedSubscriberCount = 0,
     bool HasLifetimeMismatch = false,
-    IReadOnlyList<SubscriberDetail>? SubscriberDetails = null);
+    IReadOnlyList<SubscriberDetail>? SubscriberDetails = null,
+    Evidence? Evidence = null);

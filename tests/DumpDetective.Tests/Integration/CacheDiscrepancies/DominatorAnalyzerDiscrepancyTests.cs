@@ -51,6 +51,12 @@ public sealed class DominatorAnalyzerDiscrepancyTests
             diskResult.TopHighlyReferencedTotalBytes.Should().Be(memResult.TopHighlyReferencedTotalBytes);
             (diskResult.TopHighlyReferencedObjects?.Count ?? 0).Should().Be(memResult.TopHighlyReferencedObjects?.Count ?? 0);
             (diskResult.TopRetentionTypes?.Count ?? 0).Should().Be(memResult.TopRetentionTypes?.Count ?? 0);
+
+            foreach (HighlyReferencedObjectSnapshot obj in memResult.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
+            {
+                obj.Evidence.Should().NotBeNull();
+                obj.Evidence!.ContributingSignals.Should().NotBeEmpty();
+            }
         }
         finally
         {

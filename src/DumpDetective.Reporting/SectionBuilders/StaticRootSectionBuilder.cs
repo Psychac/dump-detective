@@ -38,8 +38,8 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
             {
                 var r = roots[i];
                 rootRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(r.Name, 90)),
-                    Cell(FormatHelper.FormatBytes(r.Bytes), (long)r.Bytes)]));
+                    Cell(FormatHelper.TruncateString(r.RootDescription, 90)),
+                    Cell(FormatHelper.FormatBytes(r.TotalMemoryImpact), (long)r.TotalMemoryImpact)]));
             }
                 compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Roots Count","number") }, rootRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }

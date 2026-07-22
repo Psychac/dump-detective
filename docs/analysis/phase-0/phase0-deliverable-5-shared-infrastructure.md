@@ -133,7 +133,23 @@ exists; before that, extracting the classifier alone only fixes the maintenance 
 
 **Priority**: **P1**, sequenced after item 1.
 
-## 6. Evidence Builder
+## 6. Evidence Builder — **done**
+
+`Evidence`/`EvidenceSignal` (`src/DumpDetective.Analysis/Models/Evidence.cs`) is the shared
+"why alive / why matter" model — estimated retained bytes, a formatted sample root path with a
+truncation flag, and a list of contributing signals. `DominatorAnalyzer` (post-merge with
+`RetentionAnalyzer`), `StaticRootLeakDetector`, and `EventLeakAnalyzer` all populate it for their
+top-K items instead of their own ad hoc DTOs. Sample root paths come from the new
+`SampleRootPathFinder` (`src/DumpDetective.Analysis/Traversal/SampleRootPathFinder.cs`), a per-root
+BFS extracted from `ReferenceChainAnalyzer`'s cheap Fast-mode path search — not the heavier
+`RootPathFinder`/`BoundedGraphWalk` machinery — with the shared 20-depth cap enforced internally.
+`LeakCandidateAnalyzer` was intentionally left out of scope; it gets evidence via item 8 (ranking
+engine) instead. See
+[phase0-deliverable-10-platform-roadmap.md P0 item 4](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0)
+for the full design and status.
+
+<details>
+<summary>Original analysis (superseded)</summary>
 
 **Current duplication**: `RetentionAnalyzer`, `DominatorAnalyzer`, `LeakCandidateAnalyzer`,
 `StaticRootLeakDetector`, `EventLeakAnalyzer` each produce their own flavor of "why is this
@@ -148,7 +164,9 @@ evidence). Inconsistent evidence shapes across 5 analyzers directly undermines t
 sample root paths, contributing signals) and rewiring five analyzers to emit it instead of their
 own ad hoc DTOs. Depends on item 3 (root graph service) to be well-founded.
 
-**Priority**: **P1**.
+**Priority**: was **P1**.
+
+</details>
 
 ## 7. Sampling Framework (typed resource sampler)
 

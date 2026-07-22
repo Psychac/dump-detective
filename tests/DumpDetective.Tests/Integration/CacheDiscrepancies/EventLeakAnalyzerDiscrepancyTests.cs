@@ -47,6 +47,12 @@ public sealed class EventLeakAnalyzerDiscrepancyTests
             (diskResult.TopLeakGroups?.Count ?? 0).Should().Be(memResult.TopLeakGroups?.Count ?? 0);
             (diskResult.TopLeakInstances?.Count ?? 0).Should().Be(memResult.TopLeakInstances?.Count ?? 0);
             (diskResult.TopPublisherEvents?.Count ?? 0).Should().Be(memResult.TopPublisherEvents?.Count ?? 0);
+
+            foreach (EventLeakInstanceSnapshot instance in memResult.TopLeakInstances ?? Array.Empty<EventLeakInstanceSnapshot>())
+            {
+                instance.Evidence.Should().NotBeNull();
+                instance.Evidence!.ContributingSignals.Should().NotBeEmpty();
+            }
         }
         finally
         {

@@ -91,16 +91,16 @@ namespace DumpDetective.Analysis.Trend
                 bStaticRaw is StaticRootDomainResult bStatic && cStaticRaw is StaticRootDomainResult cStatic)
             {
                 var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
-                    baselineByName[entry.Name] = entry.Bytes;
+                foreach (StaticRootSnapshot entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
+                    baselineByName[entry.RootDescription] = entry.TotalMemoryImpact;
 
                 var signals = new List<NewLeakSignal>();
-                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
+                foreach (StaticRootSnapshot entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
                 {
-                    double currentBytes = entry.Bytes;
-                    baselineByName.TryGetValue(entry.Name, out double baseBytes);
+                    double currentBytes = entry.TotalMemoryImpact;
+                    baselineByName.TryGetValue(entry.RootDescription, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(entry.Name, baseBytes, currentBytes, "StaticRootLeakDetector"));
+                        signals.Add(new NewLeakSignal(entry.RootDescription, baseBytes, currentBytes, "StaticRootLeakDetector"));
                 }
 
                 if (signals.Count > 0)

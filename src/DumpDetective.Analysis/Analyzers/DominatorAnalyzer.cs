@@ -80,6 +80,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
         PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
+        PopulateEvidence(heap, cache, topHighlyReferencedObjects);
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
 
@@ -456,6 +457,28 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
             ulong retained = BoundedGraphWalk.ComputeExclusiveRetained(root, heap, visited, maxBreadth: options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000, maxDepth: 20);
             objects[i] = snapshot with { EstimatedRetainedBytes = retained };
+        }
+    }
+
+    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects)
+    {
+        if (objects.Count == 0)
+            return;
+
+        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+        for (int i = 0; i < objects.Count; i++)
+        {
+            HighlyReferencedObjectSnapshot snapshot = objects[i];
+            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, snapshot.Address);
+
+            objects[i] = snapshot with
+            {
+                Evidence = new Evidence(
+                    snapshot.EstimatedRetainedBytes,
+                    rootPath.Path,
+                    rootPath.Truncated,
+                    [new EvidenceSignal("IncomingReferences", "Incoming reference count", snapshot.IncomingReferences)])
+            };
         }
     }
 

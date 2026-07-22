@@ -1,6 +1,7 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -191,6 +192,8 @@ namespace DumpDetective.Analysis.Analyzers
                 return cmp != 0 ? cmp : b.SubscriberCount.CompareTo(a.SubscriberCount);
             });
 
+            PopulateEvidence(heap, cache, topLeakInstances);
+
             return new EventLeakDomainResult(
                 groupedLeaks.Count,
                 totalSubscribers,
@@ -202,6 +205,40 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalEventsScanned: eventsScanned,
                 TotalPublisherInstances: publisherInstances,
                 TopPublisherEvents: topPublisherEventsFull);
+        }
+
+        private const int MaxEvidenceInstances = 25;
+
+        private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<EventLeakInstanceSnapshot> topLeakInstances)
+        {
+            if (cache is null || topLeakInstances.Count == 0)
+                return;
+
+            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+            int limit = Math.Min(MaxEvidenceInstances, topLeakInstances.Count);
+
+            for (int i = 0; i < limit; i++)
+            {
+                EventLeakInstanceSnapshot inst = topLeakInstances[i];
+                SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, inst.PublisherAddress);
+
+                var signals = new List<EvidenceSignal>
+                {
+                    new("SeverityScore", "Composite leak severity score", inst.SeverityScore)
+                };
+                if (inst.DuplicateSubscriptionCount > 0)
+                    signals.Add(new EvidenceSignal("DuplicateSubscriptionCount", "Subscribers registered more than once", inst.DuplicateSubscriptionCount));
+                if (inst.OrphanedSubscriberCount > 0)
+                    signals.Add(new EvidenceSignal("OrphanedSubscriberCount", "Subscribers with no other apparent owner", inst.OrphanedSubscriberCount));
+                if (inst.HasLifetimeMismatch)
+                    signals.Add(new EvidenceSignal("HasLifetimeMismatch", "Subscribers appear shorter-lived than the publisher", 1));
+
+                string? sampleRootPath = rootPath.Path ?? inst.RootHint;
+                topLeakInstances[i] = inst with
+                {
+                    Evidence = new Evidence(0, sampleRootPath, rootPath.Truncated, signals)
+                };
+            }
         }
 
         private static Dictionary<string, ulong> BuildTypeSizeMap(ClrHeap heap, IHeapAnalysisCache? cache)

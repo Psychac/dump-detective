@@ -163,11 +163,18 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    catalog and `SectionIdDomainMap` registrations for the removed analyzers deleted. (The third
    merge, `AppDomainAnalyzer` into `ModuleAnalyzer`, is independent of this chain — see
    [P1](#near-term-p1).)
-4. **Evidence builder** (Deliverable 5 item 6) — depends on item 2 above ("depends on item 3 [root
-   graph service] to be well-founded" per Deliverable 5). Designs and wires a shared
-   `Evidence`/proof model (retained size, sample root paths, contributing signals) that
-   `DominatorAnalyzer` (post-merge), `StaticRootLeakDetector`, and `EventLeakAnalyzer` emit instead
-   of their own ad hoc DTOs.
+4. ~~**Evidence builder**~~ (Deliverable 5 item 6) — **done.** `Evidence`/`EvidenceSignal`
+   (`src/DumpDetective.Analysis/Models/Evidence.cs`) is the shared "why alive / why matter" shape:
+   estimated retained bytes, a formatted sample root path (with a truncation flag), and a list of
+   contributing signals. `DominatorAnalyzer` (post-merge), `StaticRootLeakDetector`, and
+   `EventLeakAnalyzer` all populate it for their top-K items instead of their own ad hoc DTOs
+   (`StaticRootLeakDetector`'s generic `NameBytesEntry` rows were replaced by a proper
+   `StaticRootSnapshot` type; `EventLeakAnalyzer`'s raw `RootHint` string is now backed by
+   `Evidence.SampleRootPath`). Sample root paths are found via the new
+   `SampleRootPathFinder` (`src/DumpDetective.Analysis/Traversal/SampleRootPathFinder.cs`), a
+   per-root BFS extracted from `ReferenceChainAnalyzer`'s cheap Fast-mode path search (not the
+   heavier `RootPathFinder`/`BoundedGraphWalk` machinery) and shared 20-depth cap enforced
+   internally.
 5. **Ranking / leak-scoring engine — replace `LeakCandidateAnalyzer`'s scanning strategy with an
    aggregation strategy** (Deliverable 5 item 8; Deliverable 6's Replace Recommendation) — depends
    on item 4 above for its input shape (the Evidence model) and on the bus (done, see

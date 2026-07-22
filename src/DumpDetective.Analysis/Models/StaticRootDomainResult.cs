@@ -7,4 +7,10 @@ namespace DumpDetective.Analysis.Models;
 internal sealed record StaticRootDomainResult(
     int RootCount,
     ulong TotalRetainedBytes,
-    IReadOnlyList<NameBytesEntry>? TopRootsByRetainedBytes = null) : AnalyzerDomainResult;
+    IReadOnlyList<StaticRootSnapshot>? TopRootsByRetainedBytes = null) : AnalyzerDomainResult;
+
+internal sealed record StaticRootSnapshot(
+    string RootDescription,
+    ulong TotalMemoryImpact,
+    int ObjectsKeptAlive,
+    Evidence? Evidence = null);

@@ -13,4 +13,5 @@ internal sealed record StaticRootSnapshot(
     string RootDescription,
     ulong TotalMemoryImpact,
     int ObjectsKeptAlive,
+    string TypeName = "",
     Evidence? Evidence = null);

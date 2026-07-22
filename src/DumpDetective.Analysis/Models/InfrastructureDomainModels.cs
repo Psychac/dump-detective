@@ -105,7 +105,8 @@ internal sealed record HttpObjectDomainResult(
 internal sealed record TimerObjectTypeSummary(
     string TypeName,
     int Count,
-    ulong TotalBytes);
+    ulong TotalBytes,
+    Evidence? Evidence = null);
 
 /// <summary>
 /// Domain result produced by <c>TimerLeakAnalyzer</c>.

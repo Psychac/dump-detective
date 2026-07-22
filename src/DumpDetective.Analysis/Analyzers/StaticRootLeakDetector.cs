@@ -67,6 +67,7 @@ namespace DumpDetective.Analysis.Analyzers
                 FormatHelper.TruncateString(analysis.RootDescription, 90),
                 analysis.TotalMemoryImpact,
                 analysis.ObjectsKeptAlive,
+                analysis.DirectObjectType,
                 evidence);
         }
 

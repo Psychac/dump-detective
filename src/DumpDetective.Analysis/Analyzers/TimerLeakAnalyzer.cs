@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -149,6 +150,8 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
 
         byType.Sort(static (a, b) => b.Count.CompareTo(a.Count));
 
+        PopulateEvidence(heap, cache, byType);
+
         int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + otherTimerCount;
 
         return new TimerLeakDomainResult(
@@ -161,6 +164,36 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
             OtherTimerCount: otherTimerCount,
             TotalBytes: totalBytes,
             ByType: byType);
+    }
+
+    private const int MaxEvidenceTypes = 10;
+
+    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<TimerObjectTypeSummary> byType)
+    {
+        if (cache is null || byType.Count == 0)
+            return;
+
+        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+        int limit = Math.Min(MaxEvidenceTypes, byType.Count);
+
+        for (int i = 0; i < limit; i++)
+        {
+            TimerObjectTypeSummary summary = byType[i];
+            ulong? sampleAddress = cache.GetSampleInstanceAddress(summary.TypeName);
+            if (sampleAddress is null)
+                continue;
+
+            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, sampleAddress.Value);
+
+            byType[i] = summary with
+            {
+                Evidence = new Evidence(
+                    summary.TotalBytes,
+                    rootPath.Path,
+                    rootPath.Truncated,
+                    [new EvidenceSignal("InstanceCount", "Instances of this timer type", summary.Count)])
+            };
+        }
     }
 
     private static TimerLeakDomainResult Empty() =>

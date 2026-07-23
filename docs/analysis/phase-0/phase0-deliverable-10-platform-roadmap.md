@@ -175,13 +175,17 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    per-root BFS extracted from `ReferenceChainAnalyzer`'s cheap Fast-mode path search (not the
    heavier `RootPathFinder`/`BoundedGraphWalk` machinery) and shared 20-depth cap enforced
    internally.
-5. **Ranking / leak-scoring engine — replace `LeakCandidateAnalyzer`'s scanning strategy with an
-   aggregation strategy** (Deliverable 5 item 8; Deliverable 6's Replace Recommendation) — depends
-   on item 4 above for its input shape (the Evidence model) and on the bus (done, see
-   [Current State](#current-state)) for reading other analyzers' results via
-   `AnalyzerRunResultsExtensions.GetResult<T>`. This is the item Deliverable 6 verdicts as
-   **Replaced**: `LeakCandidateAnalyzer`'s job (rank/score leak candidates) is correct and
-   necessary; its strategy (independently re-scanning the index for its own signals) is not.
+5. ~~**Ranking / leak-scoring engine — replace `LeakCandidateAnalyzer`'s scanning strategy with an
+   aggregation strategy**~~ (Deliverable 5 item 8; Deliverable 6's Replace Recommendation) —
+   **done.** `LeakCandidateAnalyzer` no longer independently walks `runtime.EnumerateHandles()`;
+   it now implements the new `IDeferredAnalyzer` marker interface
+   (`src/DumpDetective.Core/Abstractions/IDeferredAnalyzer.cs`) and reads the already-completed
+   `GCHandleDomainResult` via `AnalyzerRunResultsExtensions.GetResult<T>` against
+   `AnalysisContext.CompletedRunResults`. `AnalysisPipeline` runs `IDeferredAnalyzer`
+   implementations in a second pass after every non-deferred analyzer has finished, populating
+   `CompletedRunResults` in between — so the result is order-independent by construction rather
+   than depending on `IAnalyzer.Order`, matching the constraint called out in
+   [Current State](#current-state) against a live, `Order`-keyed bus.
 6. **Confidence scoring wired to the existing `ConfidenceSectionBuilder`** (Deliverable 5 item 9) —
    design together with item 5, not sequenced strictly after it: a ranking engine without a shared
    confidence formula just moves the inconsistency rather than removing it. Whether

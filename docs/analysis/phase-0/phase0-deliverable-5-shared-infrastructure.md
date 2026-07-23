@@ -182,23 +182,23 @@ resource, sample a field, bucket by state" shape.
 
 **Priority**: **P1** — cheap win, high leverage for future capability additions.
 
-## 8. Ranking / Leak-Scoring Engine
+## 8. Ranking / Leak-Scoring Engine — **done**
 
-**Current duplication**: `LeakCandidateAnalyzer` computes its own leak score while *also*
-apparently independently re-scanning for signals rather than consuming the other leak-adjacent
-analyzers' output (Deliverable 3's major finding). `TimerLeakAnalyzer`, `EventLeakAnalyzer`,
-`StaticRootLeakDetector`, `RetentionAnalyzer` each compute their own severity too.
+**Was**: `LeakCandidateAnalyzer` computed its own leak score while *also* independently
+re-scanning `runtime.EnumerateHandles()` for GC-handle signals rather than consuming the other
+leak-adjacent analyzers' output (Deliverable 3's major finding). `TimerLeakAnalyzer`,
+`EventLeakAnalyzer`, `StaticRootLeakDetector`, `RetentionAnalyzer` still each compute their own
+severity — this item only covers `LeakCandidateAnalyzer`'s scanning strategy, not a unified
+severity formula across all five (see item 9 below, still open).
 
-**Estimated impact**: Very High — "is this actually a leak, and how confident are we" is
-arguably the platform's core deliverable to a user. Five independently-computed, inconsistent
-severities directly undermines the credibility of the "leak candidates" report.
-
-**Difficulty**: High. This requires more than extraction — it requires `LeakCandidateAnalyzer` to
-change from an independent scanner into an aggregator over other analyzers' `AnalyzerDomainResult`
-outputs, which in turn requires the platform to support **inter-analyzer result consumption within
-a single run**. See item 11 below — this is a prerequisite, not a detail.
-
-**Priority**: **P0** on value, but **blocked on item 11** — sequence accordingly.
+**Now**: `LeakCandidateAnalyzer` implements the new `IDeferredAnalyzer` marker interface
+(`src/DumpDetective.Core/Abstractions/IDeferredAnalyzer.cs`) instead of `IAnalyzer` directly, and
+reads `GCHandleDomainResult` off `AnalysisContext.CompletedRunResults` via
+`AnalyzerRunResultsExtensions.GetResult<T>` (item 11's bus) rather than re-walking handles itself.
+`AnalysisPipeline.ExecuteAsync` runs `IDeferredAnalyzer` implementations in a second pass, after
+every non-deferred analyzer has completed and `CompletedRunResults` has been populated — so
+correctness does not depend on `IAnalyzer.Order` or pipeline registration order, per the standing
+constraint in item 11 above.
 
 ## 9. Confidence Scoring
 

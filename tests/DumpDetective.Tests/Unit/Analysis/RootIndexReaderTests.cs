@@ -58,7 +58,7 @@ public sealed class RootIndexReaderTests
             roots.Should().ContainInOrder(
                 ("FinalizerQueue", 0x10UL),
                 ("StrongHandle", 0x11UL),
-                ("SizedRefHandle", 0x12UL),
+                ("AsyncPinnedHandle", 0x12UL),
                 ("Unknown(99)", 0x13UL));
         }
         finally

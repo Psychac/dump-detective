@@ -25,4 +25,12 @@ public class AnalysisContext
     /// Null when running outside the pipeline (e.g. tests or direct <c>Analyze(heap)</c> calls).
     /// </summary>
     public IProgress<AnalyzerProgressReport>? Progress { get; set; }
+
+    /// <summary>
+    /// Completed run results from every non-deferred analyzer, populated by the pipeline before
+    /// running <see cref="IDeferredAnalyzer"/> analyzers. Lets deferred analyzers consume finished
+    /// results post-hoc via <c>AnalyzerRunResultsExtensions.GetResult&lt;T&gt;</c> without depending
+    /// on pipeline execution order. Null when running outside the pipeline.
+    /// </summary>
+    internal IReadOnlyList<AnalyzerRunResult>? CompletedRunResults { get; set; }
 }

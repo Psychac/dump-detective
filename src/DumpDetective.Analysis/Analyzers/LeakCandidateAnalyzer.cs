@@ -1,17 +1,15 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 
 using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-internal sealed class LeakCandidateAnalyzer : IAnalyzer
+internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
 {
     public string Name => "Leak Candidate Analysis";
     public string Category => "Memory";
@@ -20,12 +18,12 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.Runtime, context.Cache, context.Progress, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.CompletedRunResults, context.Cache, context.Progress, cancellationToken).Stamp(this));
     }
 
     private static AnalyzerDomainResult Analyze(
         ClrHeap heap,
-        ClrRuntime runtime,
+        IReadOnlyList<AnalyzerRunResult>? completedRunResults,
         IHeapAnalysisCache cache,
         IProgress<AnalyzerProgressReport>? progress,
         CancellationToken cancellationToken)
@@ -43,32 +41,19 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
         IReadOnlyDictionary<ulong, TypeShapeEntry>? shapes = heapIndex.TypeShapeCache;
 
         HashSet<ulong> staticRoots = cache.GetStaticRootedAddresses(heap);
-        Dictionary<string, int> pinnedTargetCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> dependentTargetCounts = new(StringComparer.Ordinal);
-        Dictionary<ulong, string> methodTableNameCache = new(capacity: 128);
 
-        int scannedHandles = 0;
-        foreach (ClrHandle handle in runtime.EnumerateHandles())
+        // Sourced from the already-completed gc-handle analyzer run rather than re-walking
+        // runtime.EnumerateHandles() here — avoids a second full handle scan for the same signal.
+        GCHandleDomainResult? gcHandleResult = completedRunResults?.GetResult<GCHandleDomainResult>();
+        HashSet<string> pinnedTargetTypes = new(StringComparer.Ordinal);
+        HashSet<string> dependentTargetTypes = new(StringComparer.Ordinal);
+        if (gcHandleResult is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            scannedHandles++;
-
-            string kind = handle.HandleKind.ToString();
-            ulong targetAddress = GetTargetAddress(handle);
-            if (targetAddress == 0)
-                continue;
-
-            string? typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-            if (typeName is null)
-                continue;
-
-            if (kind.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
-                Increment(pinnedTargetCounts, typeName);
-            else if (kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase))
-                Increment(dependentTargetCounts, typeName);
+            foreach (NameCountEntry entry in gcHandleResult.TopPinnedTargetTypes ?? [])
+                pinnedTargetTypes.Add(entry.Name);
+            foreach (NameCountEntry entry in gcHandleResult.DependentTopTargetTypes ?? [])
+                dependentTargetTypes.Add(entry.Name);
         }
-
-        progress?.Report(new(scannedHandles, "building leak candidates", $"{scannedHandles:N0} handles scanned"));
 
         var candidates = new List<LeakCandidateRecord>(Math.Min(typeStats.Count, 128));
         Dictionary<LeakClass, int> byClass = new();
@@ -112,8 +97,8 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
                 typeName,
                 sampleAddress,
                 staticRoots,
-                pinnedTargetCounts,
-                dependentTargetCounts,
+                pinnedTargetTypes,
+                dependentTargetTypes,
                 isFinalizable,
                 isDelegate,
                 isContainer,
@@ -124,8 +109,8 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
                 gen2Pct,
                 isFinalizable,
                 staticRoots.Contains(sampleAddress),
-                pinnedTargetCounts.ContainsKey(typeName),
-                dependentTargetCounts.ContainsKey(typeName),
+                pinnedTargetTypes.Contains(typeName),
+                dependentTargetTypes.Contains(typeName),
                 isContainer,
                 referenceFieldRatio);
             FindingSeverity severity = GetSeverity(score);
@@ -183,8 +168,8 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
         string typeName,
         ulong sampleAddress,
         HashSet<ulong> staticRoots,
-        Dictionary<string, int> pinnedTargetCounts,
-        Dictionary<string, int> dependentTargetCounts,
+        HashSet<string> pinnedTargetTypes,
+        HashSet<string> dependentTargetTypes,
         bool isFinalizable,
         bool isDelegate,
         bool isContainer,
@@ -193,10 +178,10 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
         if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
             return LeakClass.ThreadLocalLeak;
 
-        if (dependentTargetCounts.ContainsKey(typeName))
+        if (dependentTargetTypes.Contains(typeName))
             return LeakClass.DependentHandleLeak;
 
-        if (pinnedTargetCounts.ContainsKey(typeName))
+        if (pinnedTargetTypes.Contains(typeName))
             return LeakClass.GCHandleRetention;
 
         if (staticRoots.Contains(sampleAddress))
@@ -261,45 +246,5 @@ internal sealed class LeakCandidateAnalyzer : IAnalyzer
             counts[classification] = value + 1;
         else
             counts[classification] = 1;
-    }
-
-    private static void Increment(Dictionary<string, int> counts, string key)
-    {
-        if (counts.TryGetValue(key, out int value))
-            counts[key] = value + 1;
-        else
-            counts[key] = 1;
-    }
-
-    private static ulong GetTargetAddress(ClrHandle handle)
-    {
-        object boxedTarget = handle.Object;
-        if (boxedTarget is ClrObject clrObject)
-            return clrObject.IsValid ? clrObject.Address : 0;
-
-        if (boxedTarget is ulong address)
-            return address;
-
-        return 0;
-    }
-
-    private static string? ResolveTargetTypeName(ClrHeap heap, ulong targetAddress, Dictionary<ulong, string> methodTableNameCache)
-    {
-        if (targetAddress == 0)
-            return null;
-
-        ClrObject targetObject = heap.GetObject(targetAddress);
-        if (!targetObject.IsValid)
-            return null;
-
-        ulong methodTable = targetObject.Type?.MethodTable ?? 0;
-        if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cached))
-            return cached;
-
-        string name = targetObject.Type?.Name ?? StringConstants.UnknownType;
-        if (methodTable != 0)
-            methodTableNameCache[methodTable] = name;
-
-        return name;
     }
 }

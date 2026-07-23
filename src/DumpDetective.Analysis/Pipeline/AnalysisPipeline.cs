@@ -13,7 +13,10 @@ internal sealed class AnalysisPipeline(
     AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
     AnalyzerResultPostProcessor? resultPostProcessor = null)
 {
-    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToArray();
+    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.Where(a => a is not IDeferredAnalyzer).ToArray();
+    // Analyzers that must observe the full completed run list (post-hoc, order-agnostic
+    // inter-analyzer result bus) run here, after every mid-loop analyzer has finished.
+    private readonly IReadOnlyList<IAnalyzer> _deferredAnalyzers = analyzers.OfType<IDeferredAnalyzer>().ToArray();
     private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
     private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
     private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
@@ -25,7 +28,7 @@ internal sealed class AnalysisPipeline(
     {
         Guid runId = Guid.NewGuid();
         Stopwatch runStopwatch = Stopwatch.StartNew();
-        List<AnalyzerRunResult> runResults = new(_analyzers.Count);
+        List<AnalyzerRunResult> runResults = new(_analyzers.Count + _deferredAnalyzers.Count);
 
         _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
@@ -41,7 +44,40 @@ internal sealed class AnalysisPipeline(
             ExceptionType: null,
             ExceptionMessage: null));
 
-        foreach (IAnalyzer analyzer in _analyzers)
+        await RunAnalyzerBatchAsync(_analyzers, context, runId, runResults, cancellationToken);
+
+        context.CompletedRunResults = runResults.ToArray();
+        await RunAnalyzerBatchAsync(_deferredAnalyzers, context, runId, runResults, cancellationToken);
+
+        runStopwatch.Stop();
+
+        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
+
+        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+            RunId: runId,
+            EventType: AnalysisDiagnosticsEventType.RunCompleted,
+            TimestampUtc: DateTime.UtcNow,
+            AnalyzerName: null,
+            Category: "Run",
+            DurationMs: runStopwatch.Elapsed.TotalMilliseconds,
+            ObjectScanCount: finalResults.Sum(r => r.ObjectScanCount),
+            CacheHits: finalResults.Sum(r => r.CacheHits),
+            CacheMisses: finalResults.Sum(r => r.CacheMisses),
+            Message: $"Run completed. Success={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
+            ExceptionType: null,
+            ExceptionMessage: null));
+
+        return finalResults;
+    }
+
+    private async Task RunAnalyzerBatchAsync(
+        IReadOnlyList<IAnalyzer> analyzersToRun,
+        RuntimeAnalysisContext context,
+        Guid runId,
+        List<AnalyzerRunResult> runResults,
+        CancellationToken cancellationToken)
+    {
+        foreach (IAnalyzer analyzer in analyzersToRun)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -251,26 +287,6 @@ internal sealed class AnalysisPipeline(
 
             _cleanupPolicy.CleanupAfterAnalyzer(context, analyzer, runResults.Count, wsBefore, trackWorkingSet);
         }
-
-        runStopwatch.Stop();
-
-        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
-
-        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-            RunId: runId,
-            EventType: AnalysisDiagnosticsEventType.RunCompleted,
-            TimestampUtc: DateTime.UtcNow,
-            AnalyzerName: null,
-            Category: "Run",
-            DurationMs: runStopwatch.Elapsed.TotalMilliseconds,
-            ObjectScanCount: finalResults.Sum(r => r.ObjectScanCount),
-            CacheHits: finalResults.Sum(r => r.CacheHits),
-            CacheMisses: finalResults.Sum(r => r.CacheMisses),
-            Message: $"Run completed. Success={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
-            ExceptionType: null,
-            ExceptionMessage: null));
-
-        return finalResults;
     }
 }
 

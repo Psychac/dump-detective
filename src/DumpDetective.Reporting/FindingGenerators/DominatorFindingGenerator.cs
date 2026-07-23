@@ -50,7 +50,8 @@ internal sealed class DominatorFindingGenerator : IFindingGenerator
                 Recommendation: "Inspect root paths and long-lived graphs retaining these objects.",
                 Tags: ["retention", "references", "memory-leak"],
                 MetricValue: r.HighlyReferencedObjectCount,
-                MetricUnit: "objects"));
+                MetricUnit: "objects",
+                ConfidenceScore: EvidenceConfidence.Compute(r.TopHighlyReferencedObjects?.Count > 0 ? r.TopHighlyReferencedObjects[0].Evidence : null)));
         }
 
         var topTypes = r.TopRetentionTypes ?? [];

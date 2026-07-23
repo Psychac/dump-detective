@@ -3,6 +3,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -21,11 +22,15 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
     {
         var leak = (LeakCandidateDomainResult)result;
 
+        var (confidenceScore, leakCaveats) = ConfidenceScoring.Compute(0.75,
+            ConfidenceScoring.F(leak.HeuristicOnly, 0.15, "Heuristic-only leak analysis; no full retention scan."));
+        string confidenceSymbol = confidenceScore >= 0.85 ? "●●●●" : confidenceScore >= 0.65 ? "●●●○" : confidenceScore >= 0.45 ? "●●○○" : "●○○○";
+
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(leak.HeuristicOnly ? 0.55 : 0.70, leak.HeuristicOnly
-                ? new[] { "Heuristic-only leak analysis; no full retention scan." }
+            BuildConfidenceBand(confidenceScore, leakCaveats.Count > 0
+                ? leakCaveats
                 : new[] { "Leak analysis is heuristic-guided; confirm with root-path review." }),
         };
 
@@ -40,9 +45,9 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
                     Summary: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
                     Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
-                    ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
-                    ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,
-                    Caveats: leak.HeuristicOnly ? new[] { "Heuristic-only analysis; confirm with root-path review." } : Array.Empty<string>());
+                    ConfidenceSymbol: confidenceSymbol,
+                    ConfidenceScore: confidenceScore,
+                    Caveats: leakCaveats);
             }
         }
 

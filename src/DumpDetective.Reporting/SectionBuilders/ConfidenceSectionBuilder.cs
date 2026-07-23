@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -108,7 +109,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (limitationRows.Count > 0)
         {
             compactTables.Add(STCompact("Current bounded-scan signals",
-                new[] { CH("Area"), CH("Flagged"), CH("What it means") },
+                new[] { CH("Area"), CH("Flagged"), CH("Confidence", "number"), CH("What it means") },
                 limitationRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -130,9 +131,12 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (!flagged)
             return;
 
+        (double score, _) = ConfidenceScoring.Compute(0.8, ConfidenceScoring.F(flagged, 0.3, text));
+
         rows.Add(Row(
             Cell(area),
             Cell("Yes"),
+            Cell(score.ToString("F2"), score),
             Cell(text)));
     }
 

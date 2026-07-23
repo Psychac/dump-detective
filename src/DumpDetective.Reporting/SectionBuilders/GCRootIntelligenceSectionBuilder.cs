@@ -3,6 +3,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -19,10 +20,14 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
     {
         var roots = (GCRootDomainResult)result;
 
+        var (confidenceScore, capCaveats) = ConfidenceScoring.Compute(0.75,
+            ConfidenceScoring.F(roots.PathSearchCapped, 0.20, $"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated)."));
+
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(0.55, ["Average retained bytes are heuristic estimates."]),
+            BuildConfidenceBand(confidenceScore,
+                new[] { "Average retained bytes are heuristic estimates." }.Concat(capCaveats).ToArray()),
             T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."),
         };
 

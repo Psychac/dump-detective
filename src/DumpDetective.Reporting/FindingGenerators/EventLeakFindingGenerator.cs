@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -31,10 +32,11 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
         }
 
         IReadOnlyList<EventLeakGroupSnapshot> groups = r.TopLeakGroups ?? [];
+        IReadOnlyList<EventLeakInstanceSnapshot> instances = r.TopLeakInstances ?? [];
         var findings = new List<InsightFinding>(capacity: 2);
 
-        AddAggregateFinding(findings, groups, isStatic: false, r.InstanceEventLeakCount);
-        AddAggregateFinding(findings, groups, isStatic: true, r.StaticEventLeakCount);
+        AddAggregateFinding(findings, groups, instances, isStatic: false, r.InstanceEventLeakCount);
+        AddAggregateFinding(findings, groups, instances, isStatic: true, r.StaticEventLeakCount);
 
         return findings;
     }
@@ -42,6 +44,7 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
     private static void AddAggregateFinding(
         List<InsightFinding> findings,
         IReadOnlyList<EventLeakGroupSnapshot> groups,
+        IReadOnlyList<EventLeakInstanceSnapshot> instances,
         bool isStatic,
         int fallbackGroupCount)
     {
@@ -117,6 +120,19 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             evidence += ".";
         }
 
+        Evidence? topEvidence = null;
+        int topSubscriberCount = -1;
+        for (int i = 0; i < instances.Count; i++)
+        {
+            EventLeakInstanceSnapshot instance = instances[i];
+            if (instance.IsStatic != isStatic) continue;
+            if (instance.SubscriberCount > topSubscriberCount)
+            {
+                topSubscriberCount = instance.SubscriberCount;
+                topEvidence = instance.Evidence;
+            }
+        }
+
         findings.Add(new InsightFinding(
             Analyzer: "Event Leak Analysis",
             Category: "Leak",
@@ -128,6 +144,7 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
                 ? ["event-leak", "static-event", "retention"]
                 : ["event-leak", "instance-event", "retention"],
             MetricValue: totalSubscribers,
-            MetricUnit: "subscribers"));
+            MetricUnit: "subscribers",
+            ConfidenceScore: EvidenceConfidence.Compute(topEvidence)));
     }
 }

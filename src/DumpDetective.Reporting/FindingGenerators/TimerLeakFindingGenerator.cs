@@ -21,6 +21,18 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
         {
             FindingSeverity severity = r.TotalTimers >= 250 ? FindingSeverity.Critical : FindingSeverity.Warning;
 
+            Evidence? topEvidence = null;
+            int topCount = -1;
+            for (int i = 0; i < r.ByType.Count; i++)
+            {
+                TimerObjectTypeSummary type = r.ByType[i];
+                if (type.Count > topCount)
+                {
+                    topCount = type.Count;
+                    topEvidence = type.Evidence;
+                }
+            }
+
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Infrastructure",
@@ -32,7 +44,8 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
                                 "Avoid creating per-request or per-entity timers; use shared scheduling services where possible.",
                 Tags: ["infrastructure", "timer", "leak", "dispose"],
                 MetricValue: r.TotalTimers,
-                MetricUnit: "timers"));
+                MetricUnit: "timers",
+                ConfidenceScore: EvidenceConfidence.Compute(topEvidence)));
         }
 
         int queuePressure = r.TimerHolderCount + r.TimerQueueTimerCount;

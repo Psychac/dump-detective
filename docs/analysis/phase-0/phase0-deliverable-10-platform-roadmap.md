@@ -186,11 +186,25 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    `CompletedRunResults` in between — so the result is order-independent by construction rather
    than depending on `IAnalyzer.Order`, matching the constraint called out in
    [Current State](#current-state) against a live, `Order`-keyed bus.
-6. **Confidence scoring wired to the existing `ConfidenceSectionBuilder`** (Deliverable 5 item 9) —
-   design together with item 5, not sequenced strictly after it: a ranking engine without a shared
-   confidence formula just moves the inconsistency rather than removing it. Whether
-   `ConfidenceSectionBuilder` already consumes a structured per-finding confidence value or
-   re-derives it per section needs to be confirmed directly against its implementation.
+6. ~~**Confidence scoring wired to the existing `ConfidenceSectionBuilder`**~~ (Deliverable 5 item 9)
+   — **done.** Confirmed against the implementation that `ConfidenceSectionBuilder` neither consumed
+   a structured per-finding confidence value nor re-derived one — its "Measured/Heuristic/Partial/
+   Speculative" legend was decorative text with no number ever produced against it, and three section
+   builders (`DominatorSectionBuilder`, `GCRootIntelligenceSectionBuilder`,
+   `LeakAnalysisSectionBuilder`) called `BuildConfidenceBand` with hardcoded literal scores instead of
+   their already-computed scan-quality caveats. Fixed with two shared helpers: `ConfidenceScoring`
+   (`src/DumpDetective.Reporting/Services/ConfidenceScoring.cs`) computes a section-level score from a
+   base tier minus penalties for active scan-quality flags, wired into those three section builders
+   and into `ConfidenceSectionBuilder`'s Z3 "Known Limitations" table (now renders a real numeric
+   confidence column per flagged limitation instead of just the legend line); `EvidenceConfidence`
+   (`src/DumpDetective.Analysis/Models/Evidence.cs`) computes a finding-level score directly from an
+   `Evidence` record's resolved/truncated sample root path and contributing-signal count, wired into
+   `InsightFinding.ConfidenceScore` for `DominatorFindingGenerator`, `StaticRootFindingGenerator`,
+   `EventLeakFindingGenerator`, and `TimerLeakFindingGenerator` (replacing the severity-only default
+   for those findings). `LeakCandidateFindingGenerator` has no per-finding `Evidence` to draw on today
+   (per item 5, it reads `GCHandleDomainResult` directly) and stays on the section-level
+   `LeakAnalysisSectionBuilder` score. `dotnet build`/`dotnet test` pass with no regressions; no golden
+   file updates were needed since the fixture-based golden tests don't exercise the newly-wired paths.
 
 ---
 

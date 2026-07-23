@@ -3,6 +3,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -19,21 +20,20 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DominatorDomainResult)result;
+        var (confidenceScore, caveats) = ConfidenceScoring.Compute(0.75,
+            ConfidenceScoring.F(d.ObjectScanCapped, 0.15, "Object scan was capped; retention counts may be partial."),
+            ConfidenceScoring.F(d.ReferenceCountingSkipped, 0.20, "Reference counting was skipped; results are estimated."),
+            ConfidenceScoring.F(d.SkippedReferenceAddresses > 0, 0.10, $"{d.SkippedReferenceAddresses:N0} reference addresses were skipped."),
+            ConfidenceScoring.F(d.HeuristicOnly, 0.10, "HeuristicOnly flag is set — results may be further imprecise."));
+
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(0.55,
-            [
-                "Retained bytes are bounded BFS estimates, not true Lengauer-Tarjan dominator tree.",
-                d.HeuristicOnly ? "HeuristicOnly flag is set — results may be further imprecise." : string.Empty,
-            ]),
+            BuildConfidenceBand(confidenceScore,
+                new[] { "Retained bytes are bounded BFS estimates, not a true Lengauer-Tarjan dominator tree." }
+                    .Concat(caveats)
+                    .ToArray()),
         };
-
-        var caveats = new List<string>();
-        if (d.ObjectScanCapped) caveats.Add("Object scan was capped; retention counts may be partial.");
-        if (d.ReferenceCountingSkipped) caveats.Add("Reference counting was skipped; results are estimated.");
-        if (d.SkippedReferenceAddresses > 0)
-            caveats.Add($"{d.SkippedReferenceAddresses:N0} reference addresses were skipped.");
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {

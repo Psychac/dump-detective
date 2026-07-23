@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -32,6 +33,7 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
         }
 
         FindingSeverity severity = r.RootCount >= 10 ? FindingSeverity.Critical : FindingSeverity.Warning;
+        Evidence? topEvidence = r.TopRootsByRetainedBytes?.Count > 0 ? r.TopRootsByRetainedBytes[0].Evidence : null;
 
         return
         [
@@ -44,7 +46,8 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
                 Recommendation: "Audit static ownership and clear or weaken references for expired object graphs.",
                 Tags: ["static-root", "retention", "memory-leak"],
                 MetricValue: r.TotalRetainedBytes,
-                MetricUnit: "retained-bytes")
+                MetricUnit: "retained-bytes",
+                ConfidenceScore: EvidenceConfidence.Compute(topEvidence))
         ];
     }
 }

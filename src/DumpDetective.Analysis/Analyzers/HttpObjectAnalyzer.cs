@@ -1,6 +1,4 @@
 using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -62,43 +60,12 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
         if (heap is null)
             return Empty();
 
-        // ── Step 1: Identify matching MTs from TypeAggregates ─────────────────
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-        if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out HeapIndexBuildResult? idx))
-            typeAggregates = idx?.TypeAggregates;
+        // ── Step 1: Identify matching MTs via the shared candidate-type scanner ──
+        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidates =
+            TypedResourceCandidateScanner.DiscoverCandidates(
+                heap, cache, t => ClassifyType(t) != HttpObjectCategory.None, cancellationToken);
 
-        // MT → (TypeName, Category, count, bytes) — populated from TypeAggregates
-        var candidateMts = new Dictionary<ulong, (string TypeName, HttpObjectCategory Category, long Count, ulong Bytes)>(16);
-
-        if (typeAggregates is not null)
-        {
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                string fullName = TypeAggregateNameResolver.ResolveTypeName(heap, kv.Key, kv.Value.SampleAddress);
-                HttpObjectCategory cat = ClassifyType(fullName);
-                if (cat == HttpObjectCategory.None) continue;
-                candidateMts[kv.Key] = (fullName, cat, kv.Value.Count, kv.Value.TotalSize);
-            }
-        }
-        else
-        {
-            // Fallback: full heap scan to discover types
-            var seenMts = new HashSet<ulong>();
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!obj.IsValid || obj.Type is null) continue;
-                ulong mt = obj.Type.MethodTable;
-                if (!seenMts.Add(mt)) continue; // only check each MT once
-                string typeName = obj.Type.Name ?? string.Empty;
-                HttpObjectCategory cat = ClassifyType(typeName);
-                if (cat == HttpObjectCategory.None) continue;
-                candidateMts[mt] = (typeName, cat, 0, 0);
-            }
-        }
-
-        if (candidateMts.Count == 0)
+        if (candidates.Count == 0)
             return Empty();
 
         // ── Step 2: Build per-category and per-type summaries ─────────────────
@@ -106,14 +73,15 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
         int httpMessageHandlerCount = 0, servicePointCount = 0;
         ulong totalBytes = 0;
 
-        var byType = new List<HttpObjectTypeSummary>(candidateMts.Count);
+        var byType = new List<HttpObjectTypeSummary>(candidates.Count);
 
-        foreach (KeyValuePair<ulong, (string TypeName, HttpObjectCategory Category, long Count, ulong Bytes)> kv in candidateMts)
+        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int count = (int)Math.Min(kv.Value.Count, int.MaxValue);
             ulong bytes = kv.Value.Bytes;
 
-            switch (kv.Value.Category)
+            switch (ClassifyType(kv.Value.TypeName))
             {
                 case HttpObjectCategory.HttpClient:        httpClientCount        += count; break;
                 case HttpObjectCategory.HttpWebRequest:    httpWebRequestCount    += count; break;

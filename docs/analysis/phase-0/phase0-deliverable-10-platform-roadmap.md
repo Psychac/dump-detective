@@ -410,9 +410,29 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    green (346 passed / 0 failed, 39 skipped) after the change; no golden-file or discrepancy-test
    regressions, since classification behavior is unchanged — only the implementation moved. Item 6
    is now fully closed.
-7. **Shared typed-resource sampler** for the `DbConnectionAnalyzer`/`WcfChannelAnalyzer`/
+7. ~~**Shared typed-resource sampler**~~ for the `DbConnectionAnalyzer`/`WcfChannelAnalyzer`/
    `HttpObjectAnalyzer`/`TimerLeakAnalyzer` quartet (Deliverable 5 item 7) — self-contained
-   extraction, four existing call sites to migrate.
+   extraction, four existing call sites to migrate. **Done.**
+
+   **(Done) Shared typed-resource sampler.** Added `TypedResourceSampler.cs`
+   (`Analyzers/TypedResourceSampler.cs`) containing two independent helpers, since the
+   duplication across the quartet splits into two layers of different scope: `internal static
+   class TypedResourceCandidateScanner` (`DiscoverCandidates`) for the candidate-MT discovery
+   logic shared by all four analyzers — TypeAggregates-primed lookup (now uniformly resolving
+   names via `TypeAggregateNameResolver`, fixing a pre-existing inconsistency where
+   `DbConnectionAnalyzer`/`WcfChannelAnalyzer` used a plainer `heap.GetTypeByMethodTable(mt)?.Name`
+   lookup with no sample-instance fallback) with an `EnumerateObjects()` fallback when no index is
+   present — and `internal sealed class InstanceStateSampler<TSnapshot>` for the per-type-capped
+   instance state-field sampling shared only by `DbConnectionAnalyzer`/`WcfChannelAnalyzer` (the
+   two quartet members with a runtime state field to read), covering per-type read caps, the
+   `ScanCapped` flag, and the bounded top-N "interesting instance" list. `HttpObjectAnalyzer` and
+   `TimerLeakAnalyzer` only needed the candidate-scanner half (layer A); `TimerLeakAnalyzer`'s
+   root-path evidence population was left untouched, as scoped. No domain-result or
+   finding-generator changes — output shape is unchanged. Added
+   `InstanceStateSamplerTests.cs` covering per-type cap boundaries, independent per-MT tracking,
+   and top-N cap boundaries. Full build clean, full test suite green (350 passed / 0 failed, 39
+   skipped) after the change; no golden-file or discrepancy-test regressions. Item 7 is now fully
+   closed.
 8. **Shared contracts (compiler-checked interfaces, not conventions) for the resource-sampler and
    thread-domain quartets** (Deliverable 7) — the resource-sampler contract naturally pairs with
    item 7 above (same quartet); the thread-domain contract is independent and is what lets

@@ -1,5 +1,4 @@
 using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
@@ -26,6 +25,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 
     // Max per-object state reads to cap ClrMD field access cost on large heaps.
     private const int MaxStateSamples = 500;
+    private const int TopOpenCap = 50;
 
     // ADO.NET ConnectionState enum values
     private const int StateOpen      = 1;
@@ -56,12 +56,9 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
     // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
     private ClrHeap? _heap;
-    private Dictionary<ulong, (string TypeName, TypeAggregateIndexEntry Entry)>? _candidateMts;
+    private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Other, ulong Bytes)>? _typeStats;
-    private List<DbConnectionSnapshot>? _topOpen;
-    private Dictionary<ulong, int>? _perTypeSamples;
-    private int _stateSamples;
-    private bool _stateScanCapped;
+    private InstanceStateSampler<DbConnectionSnapshot>? _sampler;
 
     /// <summary>
     /// Resolves candidate connection-type MethodTables and pre-seeds per-type counters from
@@ -72,52 +69,20 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         ClrHeap heap = context.Heap;
         _heap = heap;
 
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-        if (context.Cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out HeapIndexBuildResult? idx))
-            typeAggregates = idx?.TypeAggregates;
-
-        var candidateMts = new Dictionary<ulong, (string TypeName, TypeAggregateIndexEntry Entry)>(8);
-
-        if (typeAggregates is not null)
-        {
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
-            {
-                ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
-                if (clrType?.Name is not string fullName) continue;
-                if (IsConnectionType(fullName))
-                    candidateMts[kv.Key] = (fullName, kv.Value);
-            }
-        }
-        else
-        {
-            // Fallback: discover types by scanning live heap (slower on large dumps)
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type is null) continue;
-                string typeName = obj.Type.Name ?? string.Empty;
-                if (!IsConnectionType(typeName)) continue;
-                ulong mt = obj.Type.MethodTable;
-                if (!candidateMts.ContainsKey(mt))
-                    candidateMts[mt] = (typeName, default);
-            }
-        }
-
+        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
+            TypedResourceCandidateScanner.DiscoverCandidates(heap, context.Cache, IsConnectionType);
         _candidateMts = candidateMts;
 
         var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
-        foreach (KeyValuePair<ulong, (string TypeName, TypeAggregateIndexEntry Entry)> kv in candidateMts)
+        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
         {
             // Pre-seed from TypeAggregates when available (no heap access needed for counts)
-            int total = (int)Math.Min(kv.Value.Entry.Count, int.MaxValue);
-            ulong bytes = kv.Value.Entry.TotalSize;
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, bytes);
+            int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
+            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, kv.Value.Bytes);
         }
 
         _typeStats = typeStats;
-        _topOpen = new List<DbConnectionSnapshot>(16);
-        _perTypeSamples = new Dictionary<ulong, int>(candidateMts.Count);
-        _stateSamples = 0;
-        _stateScanCapped = false;
+        _sampler = new InstanceStateSampler<DbConnectionSnapshot>(MaxStateSamples, TopOpenCap);
     }
 
     /// <summary>
@@ -132,26 +97,16 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     {
         var candidateMts = _candidateMts!;
         var typeStats = _typeStats!;
-        var perTypeSamples = _perTypeSamples!;
-        var topOpen = _topOpen!;
+        var sampler = _sampler!;
 
         if (!candidateMts.ContainsKey(entry.MethodTable)) return;
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
         string typeName = ts.Name;
 
-        // Read state field (capped per type and globally)
+        // Read state field (capped per type)
         int stateVal = -1;
-        perTypeSamples.TryGetValue(entry.MethodTable, out int typeSampleCount);
-        if (typeSampleCount < MaxStateSamples && _stateSamples < MaxStateSamples * candidateMts.Count)
-        {
-            stateVal = TryReadConnectionState(_heap!, entry.Address);
-            perTypeSamples[entry.MethodTable] = typeSampleCount + 1;
-            _stateSamples++;
-        }
-        else
-        {
-            _stateScanCapped = true;
-        }
+        if (sampler.TryReserveSample(entry.MethodTable))
+            stateVal = InstanceStateSampler<DbConnectionSnapshot>.TryReadIntField(_heap!, entry.Address, StateFieldNames);
 
         // Tally state
         int open = ts.Open; int closed = ts.Closed; int other = ts.Other;
@@ -161,8 +116,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, other, ts.Bytes);
 
         // Capture top-N open connections for the detail table
-        if (stateVal == StateOpen && topOpen.Count < 50)
-            topOpen.Add(new DbConnectionSnapshot(typeName, entry.Address, "Open", stateVal));
+        if (stateVal == StateOpen)
+            sampler.AddTopSample(new DbConnectionSnapshot(typeName, entry.Address, "Open", stateVal));
     }
 
     // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
@@ -201,26 +156,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
             ClosedConnections:   totalClosed,
             OtherConnections:    totalOther,
             ByType:              byType,
-            TopOpenConnections:  _topOpen ?? [],
-            StateScanCapped:     _stateScanCapped);
-    }
-
-    private static int TryReadConnectionState(ClrHeap heap, ulong address)
-    {
-        try
-        {
-            ClrObject obj = heap.GetObject(address);
-            if (!obj.IsValid || obj.Type is null) return -1;
-
-            for (int i = 0; i < StateFieldNames.Length; i++)
-            {
-                ClrInstanceField? field = obj.Type.GetFieldByName(StateFieldNames[i]);
-                if (field is null || field.ElementType != ClrElementType.Int32) continue;
-                return field.Read<int>(obj.Address, interior: false);
-            }
-        }
-        catch { /* ClrMD can throw on corrupt/unloaded objects */ }
-        return -1;
+            TopOpenConnections:  _sampler?.TopSamples ?? [],
+            StateScanCapped:     _sampler?.ScanCapped ?? false);
     }
 
     private static DbConnectionDomainResult Empty() =>

@@ -1,6 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
@@ -62,49 +61,11 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
         if (heap is null)
             return Empty();
 
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-        if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out HeapIndexBuildResult? idx))
-            typeAggregates = idx?.TypeAggregates;
+        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidates =
+            TypedResourceCandidateScanner.DiscoverCandidates(
+                heap, cache, t => ClassifyType(t) != TimerObjectCategory.None, cancellationToken);
 
-        var candidateMts = new Dictionary<ulong, (string TypeName, TimerObjectCategory Category, long Count, ulong Bytes)>(16);
-
-        if (typeAggregates is not null)
-        {
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                string fullName = TypeAggregateNameResolver.ResolveTypeName(heap, kv.Key, kv.Value.SampleAddress);
-
-                TimerObjectCategory category = ClassifyType(fullName);
-                if (category == TimerObjectCategory.None)
-                    continue;
-
-                candidateMts[kv.Key] = (fullName, category, kv.Value.Count, kv.Value.TotalSize);
-            }
-        }
-        else
-        {
-            var seenMts = new HashSet<ulong>();
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong mt = obj.Type.MethodTable;
-                if (!seenMts.Add(mt))
-                    continue;
-
-                string typeName = obj.Type.Name ?? string.Empty;
-                TimerObjectCategory category = ClassifyType(typeName);
-                if (category == TimerObjectCategory.None)
-                    continue;
-
-                candidateMts[mt] = (typeName, category, 0, 0);
-            }
-        }
-
-        if (candidateMts.Count == 0)
+        if (candidates.Count == 0)
             return Empty();
 
         int threadingTimerCount = 0;
@@ -114,14 +75,15 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
         int otherTimerCount = 0;
         ulong totalBytes = 0;
 
-        var byType = new List<TimerObjectTypeSummary>(candidateMts.Count);
+        var byType = new List<TimerObjectTypeSummary>(candidates.Count);
 
-        foreach (KeyValuePair<ulong, (string TypeName, TimerObjectCategory Category, long Count, ulong Bytes)> kv in candidateMts)
+        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int count = (int)Math.Min(kv.Value.Count, int.MaxValue);
             ulong bytes = kv.Value.Bytes;
 
-            switch (kv.Value.Category)
+            switch (ClassifyType(kv.Value.TypeName))
             {
                 case TimerObjectCategory.ThreadingTimer:
                     threadingTimerCount += count;

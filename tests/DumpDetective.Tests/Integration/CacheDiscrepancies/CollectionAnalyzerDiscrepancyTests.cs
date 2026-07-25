@@ -4,8 +4,9 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
+using DumpDetective.Core.Models;
 using FluentAssertions;
 using Xunit;
 
@@ -23,20 +24,16 @@ public sealed class CollectionAnalyzerDiscrepancyTests
         using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         ClrHeap heap = runtime.Heap;
-        AnalysisOptions analysisOptions = new();
-        CollectionAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        CollectionDomainResult memResult = (CollectionDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        CollectionDomainResult memResult = await RunThroughPipelineAsync(runtime, memCache);
         string freshDumpPath = dumpPath + ".freshdiskcheck.CollectionAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
-            AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            CollectionDomainResult diskResult = (CollectionDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            CollectionDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache);
             diskResult.TotalCollections.Should().Be(memResult.TotalCollections);
             diskResult.Dictionaries.Should().Be(memResult.Dictionaries);
             diskResult.Lists.Should().Be(memResult.Lists);
@@ -57,5 +54,15 @@ public sealed class CollectionAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    // Drives the analyzer through AnalysisPipeline/HeapIndexScanDispatcher instead of calling
+    // AnalyzeAsync directly, so this test exercises the same priming path production uses.
+    private static async Task<CollectionDomainResult> RunThroughPipelineAsync(ClrRuntime runtime, HeapAnalysisCache cache)
+    {
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = cache };
+        AnalysisPipeline pipeline = new([new CollectionAnalyzer()], new FindingGenerationPipeline([]));
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+        return results.GetResult<CollectionDomainResult>()!;
     }
 }

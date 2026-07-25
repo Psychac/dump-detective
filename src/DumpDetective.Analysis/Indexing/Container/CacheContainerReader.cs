@@ -142,4 +142,68 @@ internal sealed class CacheContainerReader
 
         return hasher.GetCurrentHashAsUInt32() == expected;
     }
+
+    // Largest chunk handed to a single XxHash32.Append/ReadOnlySpan<byte> call — Span length is
+    // int-bound, so multi-GB sections (heap object columns on large dumps) must be hashed in slices.
+    private const int MaxZeroCopyChunkBytes = 1 << 30;
+
+    /// <summary>
+    /// Same contract as <see cref="TryOpenSection"/> (checksum verified before the caller sees any
+    /// data, corruption treated as a missing section) but hands back a
+    /// <see cref="MemoryMappedViewAccessor"/> instead of a <see cref="Stream"/> so callers on
+    /// heap-scaled hot paths (see <see cref="DumpDetective.Analysis.Indexing.ObjectIndexReader"/>)
+    /// can read directly off the mapped pages via <see cref="MemoryMappedViewAccessor.SafeMemoryMappedViewHandle"/>
+    /// instead of copying through a managed buffer. Callers own the returned accessor and must
+    /// dispose it.
+    /// </summary>
+    public bool TryOpenSectionAccessor(CacheSectionId id, out MemoryMappedViewAccessor? accessor, out long length)
+    {
+        accessor = null;
+        length = 0;
+        if (!_sections.TryGetValue(id, out CacheTocEntry entry))
+            return false;
+
+        if (entry.Length == 0)
+            return true;
+
+        using MemoryMappedFile mmf = MemoryMappedFile.CreateFromFile(_containerPath, FileMode.Open,
+            mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
+        MemoryMappedViewAccessor view = mmf.CreateViewAccessor(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
+
+        if (!VerifyChecksumZeroCopy(view, entry.Length, entry.Checksum))
+        {
+            view.Dispose();
+            return false;
+        }
+
+        accessor = view;
+        length = entry.Length;
+        return true;
+    }
+
+    private static unsafe bool VerifyChecksumZeroCopy(MemoryMappedViewAccessor view, long length, uint expected)
+    {
+        var hasher = new XxHash32();
+        byte* basePtr = null;
+        view.SafeMemoryMappedViewHandle.AcquirePointer(ref basePtr);
+        try
+        {
+            byte* dataPtr = basePtr + view.PointerOffset;
+            long remaining = length;
+            long offset = 0;
+            while (remaining > 0)
+            {
+                int chunk = (int)Math.Min(MaxZeroCopyChunkBytes, remaining);
+                hasher.Append(new ReadOnlySpan<byte>(dataPtr + offset, chunk));
+                offset += chunk;
+                remaining -= chunk;
+            }
+        }
+        finally
+        {
+            view.SafeMemoryMappedViewHandle.ReleasePointer();
+        }
+
+        return hasher.GetCurrentHashAsUInt32() == expected;
+    }
 }

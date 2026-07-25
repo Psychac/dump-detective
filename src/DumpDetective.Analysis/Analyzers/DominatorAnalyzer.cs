@@ -10,11 +10,102 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-public sealed class DominatorAnalyzer : IAnalyzer
+public sealed class DominatorAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 {
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
     public int Order => 110;
+
+    // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+    // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+    // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
+    private ClrHeap? _heap;
+    private IHeapAnalysisCache? _cache;
+    private Dictionary<ulong, int>? _referenceCount;
+    private long _skippedReferenceAddresses;
+    private bool _objectScanCapped;
+    private long _objectsTraced;
+    private int _maxScan;
+    private int _maxReferenceAddresses;
+    private ObjectScanCounter? _scanCounter;
+    private IProgress<AnalyzerProgressReport>? _progress;
+    // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+    // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+    // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsync.
+    private bool _participantScanSucceeded;
+
+    /// <summary>
+    /// Resets the leak-signal reference-counting accumulator ahead of the shared heap-index scan.
+    /// The candidate-scoring / bounded-graph-walk section of <see cref="Analyze"/> is unaffected —
+    /// it never scans the full index and stays a self-contained, on-demand pass.
+    /// </summary>
+    public void BeforeHeapIndexScan(AnalysisContext context)
+    {
+        _heap = context.Heap;
+        _cache = context.Cache;
+
+        ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
+        _maxScan = policy.MaxLeakScanObjects;
+        _maxReferenceAddresses = policy.MaxReferenceAddresses;
+        _progress = context.Progress;
+
+        _referenceCount = new Dictionary<ulong, int>(capacity: 4096);
+        _skippedReferenceAddresses = 0;
+        _objectScanCapped = false;
+        _objectsTraced = 0;
+        _scanCounter = new ObjectScanCounter("scanning heap objects", context.Progress);
+    }
+
+    /// <summary>
+    /// Called once per disk-backed index entry, in address order, during the shared heap-index
+    /// scan pass. Ports the former index-tuple fast-path loop body (see the no-index fallback
+    /// still in <see cref="AnalyzeObjectsPass"/> for the case the dispatcher didn't run).
+    /// Explicit interface implementation because <see cref="HeapEntry"/> is internal and this
+    /// class is public — an implicit implementation would leak the internal type as public API.
+    /// </summary>
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+    public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+    private void OnHeapEntry(in HeapEntry entry)
+    {
+        _scanCounter!.Tick();
+
+        if (_objectScanCapped) return;
+
+        ulong objectAddress = entry.Address;
+        if (objectAddress == 0) return;
+
+        if (!_cache!.MethodTableHasOutgoingRefs(_heap!, entry.MethodTable))
+            return;
+
+        if (_maxScan > 0 && _objectsTraced >= _maxScan)
+        {
+            _objectScanCapped = true;
+            return;
+        }
+
+        CountIncomingReferencesByAddress(_heap!, objectAddress, _referenceCount!, _maxReferenceAddresses, ref _skippedReferenceAddresses);
+        _objectsTraced++;
+    }
+
+    // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
+    // for this context (when an on-disk heap index exists) before AnalyzeAsync runs.
+    private LeakSignals BuildLeakSignalsFromParticipantState(ClrHeap heap, RetentionOptions options)
+    {
+        _scanCounter!.Complete();
+        _progress?.Report(new(_scanCounter.Scanned, "building leak signals"));
+
+        Dictionary<ulong, int> referenceCount = _referenceCount!;
+        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);
+        int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
+
+        return new LeakSignals(
+            highlyReferencedCount,
+            _skippedReferenceAddresses,
+            topHighlyReferencedObjects,
+            _objectScanCapped);
+    }
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
@@ -22,18 +113,31 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
         ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, policy, context.Progress, cancellationToken).Stamp(this));
+
+        var __sw = System.Diagnostics.Stopwatch.StartNew();
+        LeakSignals signals = _participantScanSucceeded
+            ? BuildLeakSignalsFromParticipantState(context.Heap, options)
+            : AnalyzeObjectsPass(context.Heap, context.Cache, options, policy, context.Progress);
+        Console.Error.WriteLine($"[PERF] DominatorAnalyzer.LeakSignals ({(_participantScanSucceeded ? "participant-state" : "no-index-fallback")}): {__sw.Elapsed.TotalSeconds:F2}s");
+        __sw.Restart();
+
+        AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
+        Console.Error.WriteLine($"[PERF] DominatorAnalyzer.Analyze (post-scan): {__sw.Elapsed.TotalSeconds:F2}s");
+
+        return ValueTask.FromResult(result);
     }
 
     private static DominatorDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache cache,
         RetentionOptions options,
-        ExecutionPolicy policy,
-        IProgress<AnalyzerProgressReport>? progress,
+        LeakSignals signals,
         CancellationToken cancellationToken)
     {
+        var __sw = System.Diagnostics.Stopwatch.StartNew();
         Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
+        Console.Error.WriteLine($"[PERF]   Analyze.GetOrBuildTypeStatistics: {__sw.Elapsed.TotalSeconds:F2}s, {typeStats.Count} types");
+        __sw.Restart();
         if (typeStats.Count == 0)
             return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>());
 
@@ -75,14 +179,21 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
             candidates.Add((kv.Key, sampleAddress, count, totalSize, lohSize, gen2Count, score));
         }
+        Console.Error.WriteLine($"[PERF]   Analyze.CandidateBuildLoop: {__sw.Elapsed.TotalSeconds:F2}s, {candidates.Count} candidates");
+        __sw.Restart();
 
-        LeakSignals signals = AnalyzeObjectsPass(heap, cache, options, policy, progress);
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
         PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
+        Console.Error.WriteLine($"[PERF]   Analyze.PopulateRetainedBytes: {__sw.Elapsed.TotalSeconds:F2}s, {topHighlyReferencedObjects.Count} objects");
+        __sw.Restart();
         PopulateEvidence(heap, cache, topHighlyReferencedObjects);
+        Console.Error.WriteLine($"[PERF]   Analyze.PopulateEvidence: {__sw.Elapsed.TotalSeconds:F2}s");
+        __sw.Restart();
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
+        Console.Error.WriteLine($"[PERF]   Analyze.BuildTopRetentionTypes+Sum: {__sw.Elapsed.TotalSeconds:F2}s");
+        __sw.Restart();
 
         if (candidates.Count == 0)
         {
@@ -143,6 +254,9 @@ public sealed class DominatorAnalyzer : IAnalyzer
                 SampleAddress: sampleAddress));
         }
 
+        Console.Error.WriteLine($"[PERF]   Analyze.TopKBoundedGraphWalk: {__sw.Elapsed.TotalSeconds:F2}s, {topTypes.Count} types walked");
+        __sw.Restart();
+
         topTypes.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
         return new DominatorDomainResult(
@@ -161,10 +275,11 @@ public sealed class DominatorAnalyzer : IAnalyzer
             TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes);
     }
 
+    // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when
+    // an on-disk heap index exists (see HeapIndexScanDispatcher.Run). When it doesn't, this method
+    // runs the same reference-counting pass directly over the live heap (or an in-memory index).
     private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
     {
-        // Single-pass: enumerate the index (or heap) once, counting incoming references.
-        // String analysis is handled by StringAnalyzer.
         Dictionary<ulong, bool>? methodTableHasRefs = cache is not null
             ? null
             : new Dictionary<ulong, bool>(capacity: 64);
@@ -181,59 +296,32 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
         var scanCounter = new ObjectScanCounter("scanning heap objects", progress);
 
-        // Use heap index tuples when available for slightly cheaper enumeration path.
-        if (cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out _))
+        foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
         {
-            foreach (var tuple in concreteCache.EnumerateIndexedEntriesAsTuples())
+            scanCounter.Tick();
+
+            ulong objectAddress = entry.Address;
+            if (objectAddress == 0) continue;
+
+            if (cache is not null)
             {
-                scanCounter.Tick();
-
-                ulong objectAddress = tuple.Address;
-                if (objectAddress == 0) continue;
-
-                bool hasRefs = cache.MethodTableHasOutgoingRefs(heap, tuple.MethodTable);
-                if (!hasRefs)
+                if (!cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
                     continue;
-
-                if (maxScan > 0 && objectsTraced >= maxScan)
-                {
-                    objectScanCapped = true;
-                    break;
-                }
-
-                CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
-                objectsTraced++;
             }
-        }
-        else
-        {
-            foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
+            else
             {
-                scanCounter.Tick();
-
-                ulong objectAddress = entry.Address;
-                if (objectAddress == 0) continue;
-
-                if (cache is not null)
-                {
-                    if (!cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
-                        continue;
-                }
-                else
-                {
-                    if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs!))
-                        continue;
-                }
-
-                if (maxScan > 0 && objectsTraced >= maxScan)
-                {
-                    objectScanCapped = true;
-                    break;
-                }
-
-                CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
-                objectsTraced++;
+                if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs!))
+                    continue;
             }
+
+            if (maxScan > 0 && objectsTraced >= maxScan)
+            {
+                objectScanCapped = true;
+                break;
+            }
+
+            CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
+            objectsTraced++;
         }
 
         scanCounter.Complete();
@@ -466,17 +554,29 @@ public sealed class DominatorAnalyzer : IAnalyzer
             return;
 
         IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+
+        var provider = new ReferenceGraph(heap);
+        var limits = new RootPathSearchLimits
+        {
+            MaxCandidateNodes = 5_000,
+            MaxCandidateDepth = 8,
+            MaxRootExpansionDepth = 12,
+            LargeFanoutThreshold = 100,
+        };
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+
         for (int i = 0; i < objects.Count; i++)
         {
             HighlyReferencedObjectSnapshot snapshot = objects[i];
-            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, snapshot.Address);
+            bool found = finder.TryFindAnyRootPath(snapshot.Address, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
 
             objects[i] = snapshot with
             {
                 Evidence = new Evidence(
                     snapshot.EstimatedRetainedBytes,
-                    rootPath.Path,
-                    rootPath.Truncated,
+                    rootPath,
+                    searchTruncated,
                     [new EvidenceSignal("IncomingReferences", "Incoming reference count", snapshot.IncomingReferences)])
             };
         }

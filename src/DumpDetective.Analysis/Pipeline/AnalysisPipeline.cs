@@ -44,6 +44,12 @@ internal sealed class AnalysisPipeline(
             ExceptionType: null,
             ExceptionMessage: null));
 
+        IReadOnlyList<IHeapIndexScanParticipant> heapIndexScanParticipants = _analyzers.OfType<IHeapIndexScanParticipant>().ToArray();
+        if (heapIndexScanParticipants.Count > 0 && context.Cache is HeapAnalysisCache heapIndexCache)
+        {
+            new HeapIndexScanDispatcher().Run(heapIndexCache, context, heapIndexScanParticipants, cancellationToken);
+        }
+
         await RunAnalyzerBatchAsync(_analyzers, context, runId, runResults, cancellationToken);
 
         context.CompletedRunResults = runResults.ToArray();

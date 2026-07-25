@@ -4,7 +4,9 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
@@ -24,19 +26,16 @@ public sealed class StringAnalyzerDiscrepancyTests
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         ClrHeap heap = runtime.Heap;
         AnalysisOptions analysisOptions = new();
-        StringAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        StringDomainResult memResult = (StringDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        StringDomainResult memResult = await RunThroughPipelineAsync(runtime, memCache, analysisOptions);
         string freshDumpPath = dumpPath + ".freshdiskcheck.StringAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
-            AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            StringDomainResult diskResult = (StringDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            StringDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache, analysisOptions);
             diskResult.TotalStrings.Should().Be(memResult.TotalStrings);
             diskResult.TotalStringMemoryBytes.Should().Be(memResult.TotalStringMemoryBytes);
             diskResult.UniqueStrings.Should().Be(memResult.UniqueStrings);
@@ -64,5 +63,15 @@ public sealed class StringAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    // Drives the analyzer through AnalysisPipeline/HeapIndexScanDispatcher instead of calling
+    // AnalyzeAsync directly, so this test exercises the same priming path production uses.
+    private static async Task<StringDomainResult> RunThroughPipelineAsync(ClrRuntime runtime, HeapAnalysisCache cache, AnalysisOptions analysisOptions)
+    {
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+        AnalysisPipeline pipeline = new([new StringAnalyzer()], new FindingGenerationPipeline([]));
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+        return results.GetResult<StringDomainResult>()!;
     }
 }

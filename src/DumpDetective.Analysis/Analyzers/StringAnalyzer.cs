@@ -5,6 +5,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -16,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Analyze managed string usage: counts, sizes, LOH/FOH stats and duplicate patterns.
 /// Prefers pre-built string dedup index when available to avoid random dump I/O.
 /// </summary>
-internal sealed class StringAnalyzer : IAnalyzer
+internal sealed class StringAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 {
     // File-level constants removed. Use StringAnalysisOptions for configurable thresholds.
     /// <inheritdoc/>
@@ -24,6 +25,126 @@ internal sealed class StringAnalyzer : IAnalyzer
 
     /// <inheritdoc/>
     public string Category => "Memory";
+
+    // Instance accumulator state for the index-scan dedup branch of the
+    // IHeapIndexScanParticipant path. Populated by BeforeHeapIndexScan (called by the
+    // pipeline dispatcher) and mutated per-entry by OnHeapEntry; consumed by AnalyzeAsync
+    // once the shared index scan has completed. Every other branch of Analyze (prebuilt
+    // dedup, FOH interned scan, no-index fallbacks) is untouched by this state.
+    private ClrHeap? _heap;
+    private StringAnalysisOptions? _indexScanStringOptions;
+    private HashSet<ulong>? _indexScanStringMts;
+    private bool _indexScanDedupActive;
+    private int _indexScanMaxToDedup;
+    private int _indexScanMaxUnique;
+    private Dictionary<StringFingerprint, StringLeakInfo>? _indexScanStringStats;
+    private Dictionary<ulong, int>? _indexScanMethodTableDupCounts;
+    private List<int>? _indexScanLengthSamples;
+    private Dictionary<string, int>? _indexScanLengthBuckets;
+    private List<LongStringEntry>? _indexScanVeryLongStrings;
+    private int _indexScanStringsRead;
+
+    /// <summary>
+    /// Resolves whether the index-scan dedup branch will run this pass (mirroring the
+    /// same DeduplicationMode/prebuilt-availability decision made inline in
+    /// <see cref="Analyze"/>) and, if so, seeds the accumulator fields consumed by
+    /// <see cref="OnHeapEntry"/> and read back in <see cref="Analyze"/>.
+    /// </summary>
+    public void BeforeHeapIndexScan(AnalysisContext context)
+    {
+        ClrHeap heap = context.Heap;
+        _heap = heap;
+        StringAnalysisOptions stringOptions = context.AnalysisOptions.StringAnalysis;
+        _indexScanStringOptions = stringOptions;
+
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
+        HeapIndexBuildResult? heapIndex = null;
+        var stringMts = new HashSet<ulong>(capacity: 4);
+        int totalStrings = 0;
+
+        if (context.Cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out heapIndex))
+        {
+            typeAggregates = heapIndex.TypeAggregates;
+            foreach (var kvp in heapIndex.TypeAggregates)
+            {
+                if ((kvp.Value.Flags & TypeAggregateFlags.IsStringType) == 0) continue;
+                stringMts.Add(kvp.Key);
+                totalStrings += (int)Math.Min(kvp.Value.Count, int.MaxValue);
+            }
+        }
+
+        _indexScanStringMts = stringMts;
+
+        bool runDedup = stringOptions.EnableDeduplication
+            && stringOptions.DeduplicationMode != DeduplicationMode.Disabled
+            && totalStrings <= stringOptions.DeduplicationStringCountThreshold;
+
+        var prebuilt = heapIndex?.StringDedupIndex;
+        bool active = runDedup
+            && stringOptions.DeduplicationMode == DeduplicationMode.FallbackToHeapScan
+            && (prebuilt is null || prebuilt.Count == 0)
+            && typeAggregates is not null;
+
+        _indexScanDedupActive = active;
+        if (!active)
+        {
+            _indexScanStringStats = null;
+            _indexScanMethodTableDupCounts = null;
+            _indexScanLengthSamples = null;
+            _indexScanLengthBuckets = null;
+            _indexScanVeryLongStrings = null;
+            _indexScanStringsRead = 0;
+            return;
+        }
+
+        (int maxToDedup, int maxUnique) = ComputeEffectiveCaps(stringOptions, stringOptions.MaxStringsToDedup, stringOptions.MaxUniqueStringTracking);
+        _indexScanMaxToDedup = maxToDedup;
+        _indexScanMaxUnique = maxUnique;
+        _indexScanStringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
+        _indexScanMethodTableDupCounts = new Dictionary<ulong, int>(capacity: 64);
+        _indexScanLengthSamples = new List<int>(capacity: 100_000);
+        _indexScanLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["0-15"] = 0,
+            ["16-31"] = 0,
+            ["32-63"] = 0,
+            ["64-127"] = 0,
+            ["128-255"] = 0,
+            ["256-511"] = 0,
+            ["512-1023"] = 0,
+            ["1024-4095"] = 0,
+            ["4096-16383"] = 0,
+            ["16384-65535"] = 0,
+            ["65536+"] = 0
+        };
+        _indexScanVeryLongStrings = new List<LongStringEntry>(capacity: 16);
+        _indexScanStringsRead = 0;
+    }
+
+    /// <summary>
+    /// Called once per disk-backed index entry, in address order, during the shared
+    /// heap-index scan pass. Mirrors the historical index-scan dedup loop body, operating
+    /// on instance fields. No explicit-interface forwarder needed: both this class and
+    /// <see cref="HeapEntry"/> are internal.
+    /// </summary>
+    public void OnHeapEntry(in HeapEntry entry)
+    {
+        if (!_indexScanDedupActive) return;
+
+        StringAnalysisOptions stringOptions = _indexScanStringOptions!;
+        if (!IsStringMt(_heap!, entry.MethodTable, _indexScanStringMts!)) return;
+
+        if (entry.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
+        {
+            int ecl = (int)Math.Min((entry.Size - 26) / 2, int.MaxValue);
+            _indexScanVeryLongStrings!.Add(new LongStringEntry(entry.Address, ecl, entry.Size));
+        }
+
+        if (_indexScanStringsRead >= _indexScanMaxToDedup) return;
+        if (!IsStringSizeInBounds(entry.Size, stringOptions)) return;
+        _indexScanStringsRead++;
+        FingerprintAddress(_heap!, entry.Address, entry.Size, stringOptions, _indexScanStringStats!, _indexScanMaxUnique, _indexScanMethodTableDupCounts!, _indexScanLengthSamples!, _indexScanLengthBuckets!, samplingSource: "IndexScan");
+    }
 
     /// <summary>
     /// Analyze the provided <see cref="AnalysisContext"/> and return a <see cref="AnalyzerDomainResult"/>.
@@ -44,7 +165,7 @@ internal sealed class StringAnalyzer : IAnalyzer
     /// Core analysis implementation. Separated for easier unit testing and to keep
     /// the public entry point small.
     /// </summary>
-    private static AnalyzerDomainResult Analyze(
+    private AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         StringAnalysisOptions stringOptions,
@@ -241,28 +362,21 @@ internal sealed class StringAnalyzer : IAnalyzer
                 }
                 else if (typeAggregates is not null)
                 {
-                    // Index available but no pre-built dedup (e.g. disk-backed with cached index).
-                    // Fall back to capped AsString() scan.
-                    int stringsRead = 0;
-                    var sc = new ObjectScanCounter("string dedup (index scan)", progress);
-                    foreach (var (address, mt, size) in cache!.EnumerateIndexedEntriesAsTuples())
+                    // Index available but no pre-built dedup (e.g. disk-backed with cached
+                    // index). The dedup scan itself already happened as this analyzer's
+                    // IHeapIndexScanParticipant.OnHeapEntry during the shared dispatcher
+                    // pass (see AnalysisPipeline.ExecuteAsync) — just read the results back.
+                    if (_indexScanDedupActive)
                     {
-                        sc.Tick();
-                        if (!IsStringMt(heap, mt, stringMts)) continue;
-                        if (size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
-                        {
-                            int ecl = (int)Math.Min((size - 26) / 2, int.MaxValue);
-                            veryLongStrings.Add(new LongStringEntry(address, ecl, size));
-                        }
-                        if (stringsRead >= maxToDedup) continue;
-                        if (!IsStringSizeInBounds(size, stringOptions)) continue;
-                        stringsRead++;
-                        FingerprintAddress(heap, address, size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "IndexScan");
+                        veryLongStrings = _indexScanVeryLongStrings!;
+                        stringStats = _indexScanStringStats!;
+                        methodTableDupCounts = _indexScanMethodTableDupCounts!;
+                        lengthSamples = _indexScanLengthSamples!;
+                        lengthBuckets = _indexScanLengthBuckets!;
+                        stringsSampled = _indexScanStringsRead;
+                        progress?.Report(new(totalStrings, "string dedup complete",
+                            $"{_indexScanStringsRead:N0} strings sampled from {totalStrings:N0} total"));
                     }
-                    sc.Complete();
-                    progress?.Report(new(totalStrings, "string dedup complete",
-                        $"{stringsRead:N0} strings sampled from {totalStrings:N0} total"));
-                    stringsSampled = stringsRead;
                 }
                 else
                 {

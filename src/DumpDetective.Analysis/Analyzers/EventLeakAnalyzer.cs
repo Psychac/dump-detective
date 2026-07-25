@@ -1,6 +1,7 @@
 ﻿using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
@@ -11,11 +12,29 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class EventLeakAnalyzer : IAnalyzer
+    public class EventLeakAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     {
         // Presentation and severity tuning moved to EventLeakOptions
 
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, HashSet<string>> _eventNameCache = new();
+
+        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+        // OnHeapEntry; consumed by FindEventLeaks once the shared index scan has completed.
+        private EventLeakFastScanner? _participantFastScanner;
+        private Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>? _participantGroupAcc;
+        private Dictionary<ulong, string>? _participantRootHints;
+        private IReadOnlyList<ClrAppDomain>? _participantAppDomains;
+        private HashSet<ulong>? _participantProcessedStaticMTs;
+        private HashSet<ulong>? _participantProcessedStaticDelegates;
+        private List<(ulong addr, ulong mt, ulong delegateAddr)>? _participantBuf;
+        private EventLeakOptions? _participantOptions;
+        private int _participantEventsScanned;
+        private int _participantPublisherInstances;
+        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+        // shared scan run" from a second cache.TryGetHeapIndex call in FindEventLeaks.
+        private bool _participantScanSucceeded;
 
         public string Name => "Event Leak Analysis";
         public string Category => "Events";
@@ -32,6 +51,49 @@ namespace DumpDetective.Analysis.Analyzers
         public AnalyzerDomainResult Analyze(ClrHeap heap, EventLeakOptions options)
         {
             return Analyze(heap, cache: null, options, progress: null);
+        }
+
+        // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
+        // Explicit interface implementations: EventLeakAnalyzer is public but HeapEntry is
+        // internal, so these members must not be exposed on the public API surface.
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(AnalysisContext context)
+        {
+            _participantScanSucceeded = false;
+            _participantOptions = context.AnalysisOptions.EventLeak;
+            _participantGroupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
+            _participantProcessedStaticMTs = new HashSet<ulong>(capacity: 64);
+            _participantProcessedStaticDelegates = new HashSet<ulong>(capacity: 64);
+            _participantAppDomains = context.Heap.Runtime.AppDomains;
+            var __rootHintSw = System.Diagnostics.Stopwatch.StartNew();
+            _participantRootHints = BuildRootHintMap(context.Heap, context.Cache);
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.BuildRootHintMap: {__rootHintSw.Elapsed.TotalSeconds:F2}s");
+            var __fastScannerSw = System.Diagnostics.Stopwatch.StartNew();
+            _participantFastScanner = new EventLeakFastScanner(context.Heap, GetEventNames, context.Progress);
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.new EventLeakFastScanner (DiscoverDelegateLayoutFromModules): {__fastScannerSw.Elapsed.TotalSeconds:F2}s");
+            _participantBuf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
+            _participantEventsScanned = 0;
+            _participantPublisherInstances = 0;
+        }
+
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry)
+        {
+            if (_participantFastScanner is null)
+                return;
+
+            _participantFastScanner.ScanEntry(
+                in entry, _participantBuf!, _participantGroupAcc!, _participantRootHints!,
+                _participantAppDomains!, _participantProcessedStaticMTs!, _participantProcessedStaticDelegates!,
+                _participantOptions!, ref _participantEventsScanned, ref _participantPublisherInstances);
+        }
+
+        void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded)
+        {
+            _participantScanSucceeded = succeeded;
+            if (_participantFastScanner is not null)
+            {
+                (double buildMs, double processMs) = _participantFastScanner.GetScanTimings();
+                Console.Error.WriteLine($"[PERF] EventLeakFastScanner.BuildFieldLayouts (per-unique-MT): {buildMs / 1000.0:F2}s, ProcessPublisherEntry (per-object): {processMs / 1000.0:F2}s");
+            }
         }
 
         // internal so EventLeakFastScanner can reference the type without reflection.
@@ -51,8 +113,10 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
+            var __sw = System.Diagnostics.Stopwatch.StartNew();
             var groupedLeaks = FindEventLeaks(heap, cache, options, progress,
                 out int eventsScanned, out int publisherInstances);
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.FindEventLeaks: {__sw.Elapsed.TotalSeconds:F2}s");
 
             if (groupedLeaks.Count == 0)
             {
@@ -62,7 +126,10 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Build type-size map once for EstimatedSubscriberRetainedBytes computation.
+            __sw.Restart();
             Dictionary<string, ulong> typeSizeMap = BuildTypeSizeMap(heap, cache);
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.BuildTypeSizeMap: {__sw.Elapsed.TotalSeconds:F2}s");
+            __sw.Restart();
 
             // Back-fill SubscriberSize on stored instances now that typeSizeMap is available.
             for (int i = 0; i < groupedLeaks.Count; i++)
@@ -192,7 +259,10 @@ namespace DumpDetective.Analysis.Analyzers
                 return cmp != 0 ? cmp : b.SubscriberCount.CompareTo(a.SubscriberCount);
             });
 
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.BuildSnapshots: {__sw.Elapsed.TotalSeconds:F2}s");
+            __sw.Restart();
             PopulateEvidence(heap, cache, topLeakInstances);
+            Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.PopulateEvidence: {__sw.Elapsed.TotalSeconds:F2}s");
 
             return new EventLeakDomainResult(
                 groupedLeaks.Count,
@@ -207,20 +277,28 @@ namespace DumpDetective.Analysis.Analyzers
                 TopPublisherEvents: topPublisherEventsFull);
         }
 
-        private const int MaxEvidenceInstances = 25;
-
         private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<EventLeakInstanceSnapshot> topLeakInstances)
         {
             if (cache is null || topLeakInstances.Count == 0)
                 return;
 
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-            int limit = Math.Min(MaxEvidenceInstances, topLeakInstances.Count);
 
-            for (int i = 0; i < limit; i++)
+            var provider = new ReferenceGraph(heap);
+            var limits = new RootPathSearchLimits
+            {
+                MaxCandidateNodes = 5_000,
+                MaxCandidateDepth = 8,
+                MaxRootExpansionDepth = 12,
+                LargeFanoutThreshold = 100,
+            };
+            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+
+            for (int i = 0; i < topLeakInstances.Count; i++)
             {
                 EventLeakInstanceSnapshot inst = topLeakInstances[i];
-                SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, inst.PublisherAddress);
+                bool found = finder.TryFindAnyRootPath(inst.PublisherAddress, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
+                string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
 
                 var signals = new List<EvidenceSignal>
                 {
@@ -233,10 +311,10 @@ namespace DumpDetective.Analysis.Analyzers
                 if (inst.HasLifetimeMismatch)
                     signals.Add(new EvidenceSignal("HasLifetimeMismatch", "Subscribers appear shorter-lived than the publisher", 1));
 
-                string? sampleRootPath = rootPath.Path ?? inst.RootHint;
+                string? sampleRootPath = rootPath ?? inst.RootHint;
                 topLeakInstances[i] = inst with
                 {
-                    Evidence = new Evidence(0, sampleRootPath, rootPath.Truncated, signals)
+                    Evidence = new Evidence(0, sampleRootPath, searchTruncated, signals)
                 };
             }
         }
@@ -434,42 +512,47 @@ namespace DumpDetective.Analysis.Analyzers
         {
             eventsScanned = 0;
             publisherInstances = 0;
-            var groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
-
-            var processedStaticMethodTables = new HashSet<ulong>(capacity: 64);
-            var processedStaticDelegates = new HashSet<ulong>(capacity: 64);
             var appDomains = heap.Runtime.AppDomains;
-            var rootHints = BuildRootHintMap(heap, cache);
             var scanCounter = new ObjectScanCounter("scanning event handlers", progress);
 
-            // ── Fast scanner: direct IMemoryReader.ReadPointer — no heap.GetObject ────
-            var fastScanner = new EventLeakFastScanner(heap, GetEventNames, progress);
+            Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator> groupAcc;
+            HashSet<ulong> processedStaticMethodTables;
+            HashSet<ulong> processedStaticDelegates;
+            Dictionary<ulong, string> rootHints;
 
-            HeapEntry[]? inMemoryArray = null;
-            int objectCount = 0;
-            IEnumerable<HeapEntry>? streamingEntries = null;
-
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
+            // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's
+            // HeapIndexScanDispatcher before AnalyzeAsync executes when a disk-backed heap
+            // index exists. Reuse that participant-accumulated state instead of re-scanning
+            // the index. If the shared scan failed partway (isolated by the dispatcher),
+            // fall back to a fresh scan instead of trusting partial state.
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _)
+                && _participantScanSucceeded && _participantGroupAcc is not null)
             {
-                if (heapIdx.InMemoryEntries is { } arr)
-                {
-                    inMemoryArray = arr;
-                    objectCount = (int)Math.Min(heapIdx.ObjectCount, (long)arr.Length);
-                }
-                else
-                {
-                    streamingEntries = heapCache.EnumerateIndexedEntries();
-                }
+                groupAcc = _participantGroupAcc;
+                processedStaticMethodTables = _participantProcessedStaticMTs!;
+                processedStaticDelegates = _participantProcessedStaticDelegates!;
+                rootHints = _participantRootHints!;
+                eventsScanned = _participantEventsScanned;
+                publisherInstances = _participantPublisherInstances;
             }
             else
             {
-                streamingEntries = StreamObjectsAsEntries(heap);
-            }
+                groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
+                processedStaticMethodTables = new HashSet<ulong>(capacity: 64);
+                processedStaticDelegates = new HashSet<ulong>(capacity: 64);
+                rootHints = BuildRootHintMap(heap, cache);
 
-            fastScanner.Scan(streamingEntries, inMemoryArray, objectCount,
-                groupAcc, rootHints, appDomains,
-                processedStaticMethodTables, processedStaticDelegates, options,
-                ref eventsScanned, ref publisherInstances);
+                // ── Fast scanner: direct IMemoryReader.ReadPointer — no heap.GetObject ────
+                var fastScanner = new EventLeakFastScanner(heap, GetEventNames, progress);
+
+                IEnumerable<HeapEntry> streamingEntries = cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _)
+                    ? hc.EnumerateIndexedEntries()
+                    : StreamObjectsAsEntries(heap);
+
+                fastScanner.Scan(streamingEntries, groupAcc, rootHints, appDomains,
+                    processedStaticMethodTables, processedStaticDelegates, options,
+                    ref eventsScanned, ref publisherInstances);
+            }
 
             // Cover static-only publisher types (types with no heap instances) by sweeping
             // all types known to the runtime via modules. ProcessPublisherEntry already handles

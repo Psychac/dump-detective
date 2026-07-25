@@ -4,8 +4,8 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
 using DumpDetective.Core.Models;
@@ -24,20 +24,16 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
         using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         ClrHeap heap = runtime.Heap;
-        AnalysisOptions analysisOptions = new();
-        WcfChannelAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        WcfChannelDomainResult memResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        WcfChannelDomainResult memResult = await RunThroughPipelineAsync(runtime, memCache);
         string freshDumpPath = dumpPath + ".freshdiskcheck.WcfChannelAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
-            AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            WcfChannelDomainResult diskResult = (WcfChannelDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            WcfChannelDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache);
             diskResult.WcfPresent.Should().Be(memResult.WcfPresent);
             diskResult.TotalChannels.Should().Be(memResult.TotalChannels);
             diskResult.OpenedChannels.Should().Be(memResult.OpenedChannels);
@@ -53,5 +49,15 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    // Drives the analyzer through AnalysisPipeline/HeapIndexScanDispatcher instead of calling
+    // AnalyzeAsync directly, so this test exercises the same priming path production uses.
+    private static async Task<WcfChannelDomainResult> RunThroughPipelineAsync(ClrRuntime runtime, HeapAnalysisCache cache)
+    {
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = cache };
+        AnalysisPipeline pipeline = new([new WcfChannelAnalyzer()], new FindingGenerationPipeline([]));
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+        return results.GetResult<WcfChannelDomainResult>()!;
     }
 }

@@ -9,11 +9,23 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Analysis.Pipeline;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-internal sealed class AsyncTaskAnalyzer : IAnalyzer
+internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 {
+    // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+    // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+    // OnHeapEntry; consumed by LoadTaskEntries once the shared index scan has completed.
+    private HashSet<ulong>? _taskMts;
+    private List<(ulong Address, ulong Mt, int StateFlags)>? _participantEntries;
+    private int _participantMaxTasksToScan;
+    // Set by OnHeapIndexScanCompleted — the single source of truth for whether
+    // _participantEntries is trustworthy. Avoids re-deriving "did the shared scan run"
+    // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
+    private bool _participantScanSucceeded;
+
     // Task index record layout (20 bytes, little-endian):
     //   Address (8) | MT (8) | StateFlags (4)
     private const int TaskIndexMagic = 0x58494B54; // "TKIX"
@@ -51,7 +63,36 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(
+    // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
+    public void BeforeHeapIndexScan(AnalysisContext context)
+    {
+        _participantMaxTasksToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTasksToScan;
+        _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
+        _taskMts = null;
+
+        if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
+        {
+            _taskMts = new HashSet<ulong>(capacity: 32);
+            foreach (var kvp in heapIndex.TypeAggregates)
+            {
+                if ((kvp.Value.Flags & TypeAggregateFlags.IsTaskType) != 0)
+                    _taskMts.Add(kvp.Key);
+            }
+        }
+    }
+
+    public void OnHeapEntry(in HeapEntry entry)
+    {
+        if (_taskMts is null || _participantEntries!.Count >= _participantMaxTasksToScan)
+            return;
+
+        if (_taskMts.Contains(entry.MethodTable))
+            _participantEntries.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
+    }
+
+    public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+    private AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
@@ -274,7 +315,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
     /// a filtered heap scan using <see cref="TypeAggregateFlags.IsTaskType"/>.
     /// Returns at most <see cref="MaxTasksToScan"/> entries (scan-limit respected).
     /// </summary>
-    private static List<(ulong Address, ulong Mt, int StateFlags)> LoadTaskEntries(
+    private List<(ulong Address, ulong Mt, int StateFlags)> LoadTaskEntries(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
@@ -293,8 +334,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
             if (entries != null)
                 return entries;
 
-            // Fall back to typed scan via TypeAggregates flags
-            return ScanHeapIndexForTasks(heap, heapCache, heapIndex, progress, options.MaxTasksToScan, ct);
+            // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's
+            // HeapIndexScanDispatcher before AnalyzeAsync executes; read back
+            // participant-accumulated state instead of re-scanning the index. If the shared
+            // scan failed partway (isolated by the dispatcher), _participantEntries may be
+            // incomplete, so fall back to a raw heap scan instead of trusting it.
+            return _participantScanSucceeded ? (_participantEntries ?? []) : ScanRawHeapForTasks(heap, progress, options.MaxTasksToScan, ct);
         }
 
         // No cache — full heap scan
@@ -360,42 +405,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer
         {
             return null;
         }
-    }
-
-    private static List<(ulong, ulong, int)> ScanHeapIndexForTasks(
-        ClrHeap heap,
-        HeapAnalysisCache heapCache,
-        HeapIndexBuildResult heapIndex,
-        IProgress<AnalyzerProgressReport>? progress,
-        int maxTasksToScan,
-        CancellationToken ct)
-    {
-        // Build IsTaskType MT set from TypeAggregates flags (O(1) per lookup)
-        var taskMts = new HashSet<ulong>(capacity: 32);
-        foreach (var kvp in heapIndex.TypeAggregates)
-        {
-            if ((kvp.Value.Flags & TypeAggregateFlags.IsTaskType) != 0)
-                taskMts.Add(kvp.Key);
-        }
-
-        var result = new List<(ulong, ulong, int)>(capacity: 1024);
-        var scanCounter = new ObjectScanCounter("scanning task objects (indexed)", progress);
-
-        foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-        {
-            ct.ThrowIfCancellationRequested();
-            scanCounter.Tick();
-
-            if (!taskMts.Contains(entry.MethodTable))
-                continue;
-
-            result.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
-            if (result.Count >= maxTasksToScan)
-                break;
-        }
-
-        scanCounter.Complete();
-        return result;
     }
 
     private static List<(ulong, ulong, int)> ScanRawHeapForTasks(

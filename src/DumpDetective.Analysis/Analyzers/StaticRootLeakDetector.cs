@@ -36,10 +36,21 @@ namespace DumpDetective.Analysis.Analyzers
                 .ToArray();
 
             IReadOnlyList<(string RootKind, ulong Address)> validRoots = cache.GetOrBuildValidRoots(heap);
+
+            var provider = new ReferenceGraph(heap);
+            var limits = new RootPathSearchLimits
+            {
+                MaxCandidateNodes = 5_000,
+                MaxCandidateDepth = 8,
+                MaxRootExpansionDepth = 12,
+                LargeFanoutThreshold = 100,
+            };
+            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
                 .Take(options.MaxRootsToReport)
-                .Select(r => BuildSnapshot(heap, validRoots, r))
+                .Select(r => BuildSnapshot(heap, validRoots, finder, r))
                 .ToArray();
 
             if (significantStaticRoots.Length == 0)
@@ -54,13 +65,14 @@ namespace DumpDetective.Analysis.Analyzers
             return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots);
         }
 
-        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IReadOnlyList<(string RootKind, ulong Address)> validRoots, StaticRootAnalysis analysis)
+        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IReadOnlyList<(string RootKind, ulong Address)> validRoots, RootPathFinder finder, StaticRootAnalysis analysis)
         {
-            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, validRoots, analysis.DirectObjectAddress);
+            bool found = finder.TryFindAnyRootPath(analysis.DirectObjectAddress, validRoots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
             var evidence = new Evidence(
                 analysis.TotalMemoryImpact,
-                rootPath.Path,
-                rootPath.Truncated,
+                rootPath,
+                searchTruncated,
                 [new EvidenceSignal("ObjectsKeptAlive", "Objects kept alive by this root", analysis.ObjectsKeptAlive)]);
 
             return new StaticRootSnapshot(

@@ -29,17 +29,20 @@ internal class StatisticsCache
         if (_typeStats != null)
             return _typeStats;
 
+        var __sw = System.Diagnostics.Stopwatch.StartNew();
         var heapIndex = _getHeapIndex();
         if (heapIndex is not null)
         {
             if (TryHydrateTypeStatisticsFromIndex(heap, heapIndex.TypeAggregates, out var hydratedStats, out var hydratedSamples))
             {
+                Console.Error.WriteLine($"[PERF] StatisticsCache: hydrated from index, {heapIndex.TypeAggregates.Count} unique MTs, {__sw.Elapsed.TotalSeconds:F2}s");
                 _typeStats = hydratedStats;
                 _sampleInstances = hydratedSamples;
                 return _typeStats;
             }
         }
 
+        Console.Error.WriteLine($"[PERF] StatisticsCache: FALLING BACK to full heap walk (hydration failed or no index)");
         _typeStats = new Dictionary<string, CachedTypeStatistics>(capacity: 1024);
         _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
 

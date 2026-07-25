@@ -12,6 +12,7 @@ using DumpDetective.Analysis.Cache;
 using Microsoft.Extensions.Logging;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Enums;
+using DumpDetective.Analysis.Pipeline;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -20,7 +21,7 @@ namespace DumpDetective.Analysis.Analyzers
     // This would impact the root hints shown for wasteful collections that are rooted in stacks.
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
     // Need to revisit the logic once again.
-    public class CollectionAnalyzer : IAnalyzer
+    public class CollectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     {
         // Cache of resolved interesting instance fields per MethodTable to avoid
         // repeatedly enumerating ClrType.Fields for every object of the same type.
@@ -57,6 +58,28 @@ namespace DumpDetective.Analysis.Analyzers
         }
         private CollectionAnalysisOptions _options;
         private readonly ILogger<CollectionAnalyzer>? _logger;
+
+        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+        // OnHeapEntry; consumed by BuildStatsFromParticipantState once the shared index scan
+        // has completed. Mirrors the locals of the old AnalyzeCollectionsSequentialDisk.
+        private ClrHeap? _heap;
+        private IHeapAnalysisCache? _cache;
+        private CollectionStatistics? _stats;
+        private List<WastefulCollection>? _wasteful;
+        private Dictionary<ulong, CollectionKind>? _methodTableKinds;
+        private Dictionary<CollectionKind, int[]>? _generationCounts;
+        private PropertyInfo? _generationProperty;
+        private MethodInfo? _getGenerationMethod;
+        private ObjectScanCounter? _scanCounter;
+        private IProgress<AnalyzerProgressReport>? _progress;
+        private int _topCapacity;
+        private int _wastefulCount;
+        private ulong _totalWasted;
+        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeCollections.
+        private bool _participantScanSucceeded;
 
         public string Name => "Collection Analysis";
         public string Category => "Memory";
@@ -143,16 +166,293 @@ namespace DumpDetective.Analysis.Analyzers
 
         private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
-            {
-                // In-memory index: parallel over the flat entry array
+            if (_participantScanSucceeded)
+                return BuildStatsFromParticipantState(heap, cache);
 
-                // Disk-backed index: sequential (I/O bound; parallel won't help)
-                return AnalyzeCollectionsSequentialDisk(heap, heapCache, progress, cancellationToken);
+            // No cache, or shared scan unavailable/failed: parallel over GC segments
+            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null, progress: progress, cancellationToken: cancellationToken, cache: cache);
+        }
+
+        /// <summary>
+        /// Resets the accumulator state for the shared heap-index scan pass, mirroring the setup
+        /// AnalyzeCollectionsSequentialDisk used to do before its loop.
+        /// </summary>
+        public void BeforeHeapIndexScan(AnalysisContext context)
+        {
+            _options = context.AnalysisOptions.Collection;
+            _heap = context.Heap;
+            _cache = context.Cache;
+            _progress = context.Progress;
+
+            _stats = new CollectionStatistics();
+            _topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
+            _wasteful = new List<WastefulCollection>(_topCapacity);
+            _methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
+            _generationProperty = typeof(ClrObject).GetProperty("Generation");
+            _getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
+
+            _generationCounts = new Dictionary<CollectionKind, int[]>(capacity: 16);
+            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
+                _generationCounts[k] = new int[4];
+
+            _scanCounter = new ObjectScanCounter("scanning collections", _progress);
+            _wastefulCount = 0;
+            _totalWasted = 0;
+        }
+
+        /// <summary>
+        /// Called once per disk-backed index entry, in address order, during the shared heap-index
+        /// scan pass. Mirrors the old AnalyzeCollectionsSequentialDisk loop body, operating on
+        /// instance fields. Per-entry cancellation checks and heap-access locking are dropped: the
+        /// dispatcher already throws on cancellation per entry, and the shared pass is single-threaded.
+        /// </summary>
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        private void OnHeapEntry(in HeapEntry entry)
+        {
+            ClrHeap heap = _heap!;
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+            Dictionary<ulong, CollectionKind> methodTableKinds = _methodTableKinds!;
+            Dictionary<CollectionKind, int[]> generationCounts = _generationCounts!;
+
+            if (_scanCounter!.ShouldReport())
+                _scanCounter.Report(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
+
+            ulong objectAddress = entry.Address;
+            if (objectAddress == 0)
+                return;
+
+            CollectionKind kind = ResolveCollectionKind(heap, entry, methodTableKinds);
+
+            if (kind == CollectionKind.Dictionary)
+            {
+                stats.TotalCollections++;
+                stats.Dictionaries++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.Dictionary][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeDictionary(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = CollectionKind.Dictionary;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.List)
+            {
+                stats.TotalCollections++;
+                stats.Lists++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.List][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeList(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = CollectionKind.List;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.HashSet)
+            {
+                stats.TotalCollections++;
+                stats.HashSets++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.HashSet][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeHashSet(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = CollectionKind.HashSet;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.Queue)
+            {
+                stats.TotalCollections++;
+                stats.Queues++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.Queue][idx]++;
+                }
+                catch { }
+                var qWaste = AnalyzeQueue(heap, objectAddress);
+                if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    qWaste.Kind = CollectionKind.Queue;
+                    _wastefulCount++;
+                    _totalWasted += qWaste.WastedMemory;
+                    AddToTopWasteful(wasteful, qWaste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.ArrayList)
+            {
+                stats.TotalCollections++;
+                stats.ArrayLists++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.ArrayList][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = kind;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.Stack)
+            {
+                stats.TotalCollections++;
+                stats.Stacks++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.Stack][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = kind;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.SortedList)
+            {
+                stats.TotalCollections++;
+                stats.SortedLists++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.SortedList][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = kind;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+            else if (kind == CollectionKind.SortedSet)
+            {
+                stats.TotalCollections++;
+                stats.SortedSets++;
+                try
+                {
+                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
+                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
+                    generationCounts[CollectionKind.SortedSet][idx]++;
+                }
+                catch { }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    waste.Kind = kind;
+                    _wastefulCount++;
+                    _totalWasted += waste.WastedMemory;
+                    AddToTopWasteful(wasteful, waste, _topCapacity);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reads back the accumulator state populated by BeforeHeapIndexScan/OnHeapEntry once the
+        /// shared dispatcher pass has completed. Replaces the tail of the old
+        /// AnalyzeCollectionsSequentialDisk (everything after its loop).
+        /// </summary>
+        private CollectionStatistics BuildStatsFromParticipantState(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+
+            _scanCounter!.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
+            _progress?.Report(new(_scanCounter.Scanned, "aggregating results"));
+
+            wasteful.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
+
+            stats.WastefulCollections = wasteful;
+            stats.WastefulCollectionCount = _wastefulCount;
+            stats.TotalWastedMemory = _totalWasted;
+
+            // populate generation breakdown for disk path
+            try
+            {
+                var genList = new List<CollectionGenerationStats>();
+                foreach (var kv in _generationCounts!)
+                {
+                    var a = kv.Value;
+                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
+                }
+                stats.GenerationBreakdown = genList;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
             }
 
-            // No cache: parallel over GC segments
-            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null, progress: progress, cancellationToken: cancellationToken, cache: cache);
+            // Aggregate a typed per-kind breakdown for reporting.
+            try
+            {
+                int wasteCount = stats.WastefulCollectionCount;
+                if (wasteCount > 0)
+                {
+                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
+                    {
+                        [CollectionKind.Dictionary] = stats.Dictionaries,
+                        [CollectionKind.List] = stats.Lists,
+                        [CollectionKind.ArrayList] = stats.ArrayLists,
+                        [CollectionKind.Stack] = stats.Stacks,
+                        [CollectionKind.SortedList] = stats.SortedLists,
+                        [CollectionKind.SortedSet] = stats.SortedSets,
+                        [CollectionKind.HashSet] = stats.HashSets,
+                        [CollectionKind.Queue] = stats.Queues,
+                    };
+                    stats.WasteCountsByKind = wasteCountsByKind;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing waste metrics (disk path)");
+            }
+
+            // Post-scan root descriptions for top-N — never per-item during the scan.
+            PopulateRootDescriptions(heap, cache, stats.WastefulCollections, _options);
+
+            return stats;
         }
 
         // Unified parallel analysis — drives either a flat in-memory HeapEntry[] (cache path)
@@ -538,291 +838,7 @@ namespace DumpDetective.Analysis.Analyzers
             return stats;
         }
 
-        private CollectionStatistics AnalyzeCollectionsSequentialDisk(ClrHeap heap, HeapAnalysisCache heapCache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
-        {
-            var stats = new CollectionStatistics();
-            int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
-            var wasteful = new List<WastefulCollection>(topCapacity);
-            var methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
-            // generation resolution helpers (reflection-safe)
-            PropertyInfo? generationProperty = typeof(ClrObject).GetProperty("Generation");
-            MethodInfo? getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
-
-            var generationCounts = new Dictionary<CollectionKind, int[]>(capacity: 16);
-            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
-                generationCounts[k] = new int[4];
-            var scanCounter = new ObjectScanCounter("scanning collections", progress);
-            var heapLock = _options.SerializeHeapAccess ? new object() : null;
-            int wastefulCount = 0;
-            ulong totalWasted = 0;
-
-            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    _logger?.LogInformation("Collection analysis cancelled (disk-backed path).");
-                    break;
-                }
-                scanCounter.Tick(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
-
-                ulong objectAddress = entry.Address;
-                if (objectAddress == 0)
-                    continue;
-
-                CollectionKind kind;
-                if (heapLock is object)
-                {
-                    lock (heapLock)
-                        kind = ResolveCollectionKind(heap, entry, methodTableKinds);
-                }
-                else
-                {
-                    kind = ResolveCollectionKind(heap, entry, methodTableKinds);
-                }
-
-                if (kind == CollectionKind.Dictionary)
-                {
-                    stats.TotalCollections++;
-                    stats.Dictionaries++;
-                    // increment generation count
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.Dictionary][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeDictionary(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = CollectionKind.Dictionary;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.List)
-                {
-                    stats.TotalCollections++;
-                    stats.Lists++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.List][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeList(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = CollectionKind.List;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.HashSet)
-                {
-                    stats.TotalCollections++;
-                    stats.HashSets++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.HashSet][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeHashSet(heap, objectAddress);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = CollectionKind.HashSet;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.Queue)
-                {
-                    stats.TotalCollections++;
-                    stats.Queues++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.Queue][idx]++;
-                    }
-                    catch { }
-                    var qWaste = AnalyzeQueue(heap, objectAddress);
-                    if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        qWaste.Kind = CollectionKind.Queue;
-                        wastefulCount++;
-                        totalWasted += qWaste.WastedMemory;
-                        AddToTopWasteful(wasteful, qWaste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.ArrayList)
-                {
-                    stats.TotalCollections++;
-                    stats.ArrayLists++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.ArrayList][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = kind;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.Stack)
-                {
-                    stats.TotalCollections++;
-                    stats.Stacks++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.Stack][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = kind;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.SortedList)
-                {
-                    stats.TotalCollections++;
-                    stats.SortedLists++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.SortedList][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = kind;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-                else if (kind == CollectionKind.SortedSet)
-                {
-                    stats.TotalCollections++;
-                    stats.SortedSets++;
-                    try
-                    {
-                        int gen = ResolveGeneration(heap, objectAddress, generationProperty, getGenerationMethod);
-                        int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                        generationCounts[CollectionKind.SortedSet][idx]++;
-                    }
-                    catch { }
-                    var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
-                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                    {
-                        waste.Kind = kind;
-                        wastefulCount++;
-                        totalWasted += waste.WastedMemory;
-                        AddToTopWasteful(wasteful, waste, topCapacity);
-                    }
-                }
-            }
-
-            scanCounter.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
-            progress?.Report(new(scanCounter.Scanned, "aggregating results"));
-
-            wasteful.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
-
-            stats.WastefulCollections = wasteful;
-            stats.WastefulCollectionCount = wastefulCount;
-            stats.TotalWastedMemory = totalWasted;
-
-            // populate generation breakdown for disk path
-            try
-            {
-                var genList = new List<CollectionGenerationStats>();
-                foreach (var kv in generationCounts)
-                {
-                    var a = kv.Value;
-                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
-                }
-                stats.GenerationBreakdown = genList;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
-            }
-
-            // Aggregate a typed per-kind breakdown for reporting.
-            try
-            {
-                int wasteCount = stats.WastefulCollectionCount;
-                if (wasteCount > 0)
-                {
-                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
-                    {
-                        [CollectionKind.Dictionary] = stats.Dictionaries,
-                        [CollectionKind.List] = stats.Lists,
-                        [CollectionKind.ArrayList] = stats.ArrayLists,
-                        [CollectionKind.Stack] = stats.Stacks,
-                        [CollectionKind.SortedList] = stats.SortedLists,
-                        [CollectionKind.SortedSet] = stats.SortedSets,
-                        [CollectionKind.HashSet] = stats.HashSets,
-                        [CollectionKind.Queue] = stats.Queues,
-                    };
-                    stats.WasteCountsByKind = wasteCountsByKind;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error computing waste metrics (disk path)");
-            }
-
-            // Post-scan root descriptions for top-N — never per-item during the scan.
-            PopulateRootDescriptions(heap, heapCache, stats.WastefulCollections, _options);
-
-            return stats;
-        }
-
         public void Dispose() { }
-
-        private static IEnumerable<HeapEntry> EnumerateCollectionEntries(ClrHeap heap, IHeapAnalysisCache? cache)
-        {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-            {
-                foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                    yield return entry;
-
-                yield break;
-            }
-
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong methodTable = obj.Type.MethodTable;
-                if (methodTable == 0)
-                    continue;
-
-                yield return new HeapEntry(obj.Address, methodTable, obj.Size);
-            }
-        }
 
         private static CollectionKind ResolveCollectionKind(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, CollectionKind> methodTableKinds)
         {

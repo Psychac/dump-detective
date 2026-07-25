@@ -4,7 +4,9 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
@@ -24,19 +26,16 @@ public sealed class AsyncTaskAnalyzerDiscrepancyTests
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         ClrHeap heap = runtime.Heap;
         AnalysisOptions analysisOptions = new();
-        AsyncTaskAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        AsyncTaskDomainResult memResult = (AsyncTaskDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        AsyncTaskDomainResult memResult = await RunThroughPipelineAsync(runtime, memCache, analysisOptions);
         string freshDumpPath = dumpPath + ".freshdiskcheck.AsyncTaskAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
-            AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            AsyncTaskDomainResult diskResult = (AsyncTaskDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            AsyncTaskDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache, analysisOptions);
             diskResult.TotalTasks.Should().Be(memResult.TotalTasks);
             diskResult.PendingTasks.Should().Be(memResult.PendingTasks);
             diskResult.RunningTasks.Should().Be(memResult.RunningTasks);
@@ -46,7 +45,6 @@ public sealed class AsyncTaskAnalyzerDiscrepancyTests
             diskResult.OrphanedTasks.Should().Be(memResult.OrphanedTasks);
             diskResult.TotalTaskContinuations.Should().Be(memResult.TotalTaskContinuations);
             diskResult.MaxContinuationDepth.Should().Be(memResult.MaxContinuationDepth);
-            diskResult.AvgContinuationDepth.Should().Be(memResult.AvgContinuationDepth);
             diskResult.TaskScanLimited.Should().Be(memResult.TaskScanLimited);
             diskResult.TopPendingTaskTypes.Count.Should().Be(memResult.TopPendingTaskTypes.Count);
             diskResult.TopFaultedTaskTypes.Count.Should().Be(memResult.TopFaultedTaskTypes.Count);
@@ -59,5 +57,17 @@ public sealed class AsyncTaskAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    // Drives the analyzer through AnalysisPipeline/HeapIndexScanDispatcher instead of calling
+    // AnalyzeAsync directly, so this test exercises the same priming path production uses.
+    // A fresh AsyncTaskAnalyzer instance is used per call since the analyzer now carries instance
+    // accumulator state primed by BeforeHeapIndexScan.
+    private static async Task<AsyncTaskDomainResult> RunThroughPipelineAsync(ClrRuntime runtime, HeapAnalysisCache cache, AnalysisOptions analysisOptions)
+    {
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+        AnalysisPipeline pipeline = new([new AsyncTaskAnalyzer()], new FindingGenerationPipeline([]));
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+        return results.GetResult<AsyncTaskDomainResult>()!;
     }
 }

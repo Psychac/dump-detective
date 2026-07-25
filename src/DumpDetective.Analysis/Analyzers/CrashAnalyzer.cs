@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -10,12 +11,31 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class CrashAnalyzer : IAnalyzer
+    public class CrashAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     {
         private CrashAnalysisOptions _options = CrashAnalysisOptions.Default;
 
         public string Name => "Crash Analysis";
         public string Category => "Crash";
+
+        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+        // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
+        private ClrHeap? _heap;
+        private Dictionary<ulong, ActiveExceptionContext>? _activeExceptions;
+        private Dictionary<string, List<ExceptionInstance>>? _exceptionsByType;
+        private Dictionary<string, int>? _exceptionTypeCounts;
+        private Dictionary<string, int>? _activeExceptionTypeCounts;
+        private Dictionary<ulong, bool>? _exceptionMethodTables;
+        private Dictionary<ulong, string>? _methodTableNameCache;
+        private Dictionary<uint, CrashThreadCandidate>? _crashThreadCandidates;
+        private int _totalExceptions;
+        private int _activeExceptionsCount;
+        private ObjectScanCounter? _scanCounter;
+        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsync.
+        private bool _participantScanSucceeded;
 
         public CrashAnalyzer()
         {
@@ -26,22 +46,151 @@ namespace DumpDetective.Analysis.Analyzers
             _options = options ?? CrashAnalysisOptions.Default;
         }
 
+        /// <summary>
+        /// Builds the active-exception lookup from live thread state and resets the per-entry
+        /// accumulator fields ahead of the shared heap-index scan pass.
+        /// </summary>
+        public void BeforeHeapIndexScan(AnalysisContext context)
+        {
+            _options = context.AnalysisOptions.Crash;
+            _heap = context.Heap;
+            _activeExceptions = BuildActiveExceptionLookup(context.Runtime);
+
+            _exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
+            _exceptionTypeCounts = new Dictionary<string, int>();
+            _activeExceptionTypeCounts = new Dictionary<string, int>();
+            _exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
+            _methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
+            _crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
+            _totalExceptions = 0;
+            _activeExceptionsCount = 0;
+            _scanCounter = new ObjectScanCounter("scanning for exceptions", context.Progress);
+        }
+
+        /// <summary>
+        /// Called once per disk-backed index entry, in address order, during the shared heap-index
+        /// scan pass. Mirrors the historical <c>RunSequentialExceptionScan</c> loop body, operating
+        /// on instance fields. Explicit interface implementation because <see cref="HeapEntry"/> is
+        /// internal and this class is public — an implicit implementation would leak the internal
+        /// type as public API.
+        /// </summary>
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        private void OnHeapEntry(in HeapEntry entry)
+        {
+            _scanCounter!.Tick();
+
+            ulong exceptionAddress = entry.Address;
+            if (exceptionAddress == 0)
+                return;
+
+            if (!IsExceptionEntry(_heap!, entry, _exceptionMethodTables!))
+                return;
+
+            ulong mt = entry.MethodTable;
+            var (isException, typeName) = ResolveExceptionType(_heap!, exceptionAddress, mt, _exceptionMethodTables!, _methodTableNameCache!, null);
+            if (!isException)
+                return;
+
+            string key = typeName ?? StringConstants.UnknownType;
+            _totalExceptions++;
+            _exceptionTypeCounts!.TryGetValue(key, out int typeCount);
+            _exceptionTypeCounts[key] = typeCount + 1;
+
+            bool isActive = _activeExceptions!.TryGetValue(exceptionAddress, out var activeExceptionContext);
+            if (isActive)
+            {
+                _activeExceptionsCount++;
+                _activeExceptionTypeCounts!.TryGetValue(key, out int activeTypeCount);
+                _activeExceptionTypeCounts[key] = activeTypeCount + 1;
+
+                if (!_crashThreadCandidates!.TryGetValue(activeExceptionContext.ThreadId, out var candidate))
+                {
+                    candidate = new CrashThreadCandidate
+                    {
+                        ThreadId = activeExceptionContext.ThreadId,
+                        OSThreadId = activeExceptionContext.OSThreadId,
+                        CurrentThreadStack = activeExceptionContext.CurrentThreadStack,
+                        PrimaryExceptionType = typeName
+                    };
+                    _crashThreadCandidates[activeExceptionContext.ThreadId] = candidate;
+                }
+                candidate.ActiveExceptionCount++;
+            }
+
+            if (!_exceptionsByType!.TryGetValue(key, out var list))
+            {
+                list = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
+                _exceptionsByType[key] = list;
+            }
+            if (list.Count < _options.MaxExceptionsPerType || isActive)
+            {
+                var exceptionInstance = ExtractExceptionInfo(_heap!, exceptionAddress, isActive ? activeExceptionContext : null);
+                if (isActive && exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
+                {
+                    // store original stack on the candidate so UI can show the trace back to original call site
+                    _crashThreadCandidates![activeExceptionContext.ThreadId].OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
+                }
+                if (isActive)
+                {
+                    var candidate = _crashThreadCandidates![activeExceptionContext.ThreadId];
+                    if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
+                        candidate.SampleMessage = exceptionInstance.Message;
+                    candidate.SampleHResult = exceptionInstance.HResult;
+                    if (candidate.SampleInnerExceptionType == null)
+                        candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;
+                }
+                list.Add(exceptionInstance);
+            }
+        }
+
+        // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
+        // for this context before AnalyzeAsync runs (see AnalysisPipeline.ExecuteAsync).
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _options = context.AnalysisOptions.Crash;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress).Stamp(this));
+
+            ExceptionAnalysis exceptionInfo = _participantScanSucceeded
+                ? BuildAnalysisFromParticipantState()
+                : AnalyzeExceptions(context.Heap, context.Runtime, context.Progress);
+
+            return ValueTask.FromResult(BuildDomainResult(exceptionInfo).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, cache: null, progress: null);
+            return BuildDomainResult(AnalyzeExceptions(heap, runtime, progress: null));
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        private ExceptionAnalysis BuildAnalysisFromParticipantState()
         {
-            var exceptionInfo = AnalyzeExceptions(heap, runtime, cache, progress);
+            _scanCounter?.Complete();
 
+            var sortedTypeNames = _exceptionTypeCounts!.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key);
+            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(_exceptionsByType!.Count);
+            foreach (string typeName in sortedTypeNames)
+            {
+                if (_exceptionsByType.TryGetValue(typeName, out var list))
+                    sortedExceptionsByType[typeName] = list;
+            }
+
+            return new ExceptionAnalysis
+            {
+                TotalExceptions = _totalExceptions,
+                ActiveExceptions = _activeExceptionsCount,
+                ExceptionTypeCounts = _exceptionTypeCounts,
+                ActiveExceptionTypeCounts = _activeExceptionTypeCounts!,
+                ExceptionsByType = sortedExceptionsByType,
+                CrashThreadCandidates = _crashThreadCandidates!.Values
+                    .OrderByDescending(c => c.ActiveExceptionCount)
+                    .ToList()
+            };
+        }
+
+        private AnalyzerDomainResult BuildDomainResult(ExceptionAnalysis exceptionInfo)
+        {
             var candidateSnapshots = BuildCrashThreadSnapshots(exceptionInfo);
 
             // Respect payload options: by default include all types in payload. When disabled,
@@ -396,28 +545,18 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "active-exceptions");
         }
 
-        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
+        // No-index fallback path only: used when there's no on-disk/in-memory heap index to drive
+        // the shared IHeapIndexScanParticipant dispatcher pass (e.g. the public Analyze(runtime, heap)
+        // overload, or AnalyzeAsync when the context's cache has no prebuilt index).
+        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
         {
             var activeExceptions = BuildActiveExceptionLookup(runtime);
-
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
-            {
-                // In-memory index: parallel over the flat entry array
-
-                // Disk-backed index: sequential (I/O bound)
-                return RunSequentialExceptionScan(heap, heapCache, cache, activeExceptions, progress);
-            }
-
-            // No cache: parallel over GC segments
-            return RunParallelExceptionScan(heap, inMemoryEntries: null, heapIdx: null, activeExceptions: activeExceptions, progress: progress);
+            return RunParallelExceptionScan(heap, activeExceptions, progress);
         }
 
-        // Unified parallel exception scanner — drives either a flat in-memory HeapEntry[]
-        // or a per-segment ClrObject walk using the same concurrent accumulation logic.
+        // Parallel exception scanner over GC segments — the no-index fallback.
         private ExceptionAnalysis RunParallelExceptionScan(
             ClrHeap heap,
-            HeapEntry[]? inMemoryEntries,
-            HeapIndexBuildResult? heapIdx,
             Dictionary<ulong, ActiveExceptionContext> activeExceptions,
             IProgress<AnalyzerProgressReport>? progress)
         {
@@ -437,7 +576,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (exceptionAddress == 0)
                     return;
-                var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, heapIdx);
+                var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, null);
                 if (!isException)
                     return;
 
@@ -487,30 +626,18 @@ namespace DumpDetective.Analysis.Analyzers
                 exceptionInstances.Add((key, exceptionInstance, isActive));
             }
 
-            if (inMemoryEntries != null)
+            Parallel.ForEach(heap.Segments, segment =>
             {
-                Parallel.ForEach(inMemoryEntries, entry =>
+                foreach (ClrObject obj in segment.EnumerateObjects())
                 {
-                    if (entry.Address == 0 || entry.MethodTable == 0)
-                        return;
-                    ProcessEntry(entry.Address, entry.MethodTable);
-                });
-            }
-            else
-            {
-                Parallel.ForEach(heap.Segments, segment =>
-                {
-                    foreach (ClrObject obj in segment.EnumerateObjects())
-                    {
-                        if (!obj.IsValid || obj.Type is null)
-                            continue;
-                        ulong mt = obj.Type.MethodTable;
-                        if (mt == 0)
-                            continue;
-                        ProcessEntry(obj.Address, mt);
-                    }
-                });
-            }
+                    if (!obj.IsValid || obj.Type is null)
+                        continue;
+                    ulong mt = obj.Type.MethodTable;
+                    if (mt == 0)
+                        continue;
+                    ProcessEntry(obj.Address, mt);
+                }
+            });
 
             // Sequential post-processing: build per-type exception list with cap enforcement.
             // exceptionInstances came off a ConcurrentBag whose order depends on thread scheduling;
@@ -551,107 +678,6 @@ namespace DumpDetective.Analysis.Analyzers
                     .OrderByDescending(c => c.ActiveExceptionCount)
                     .ToList()
             };
-        }
-
-        private ExceptionAnalysis RunSequentialExceptionScan(
-            ClrHeap heap, HeapAnalysisCache heapCache, IHeapAnalysisCache? cache,
-            Dictionary<ulong, ActiveExceptionContext> activeExceptions,
-            IProgress<AnalyzerProgressReport>? progress)
-        {
-            var analysis = new ExceptionAnalysis();
-            var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
-            var exceptionTypeCounts = new Dictionary<string, int>();
-            var activeExceptionTypeCounts = new Dictionary<string, int>();
-            var exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
-            var methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
-            var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
-            var scanCounter = new ObjectScanCounter("scanning for exceptions", progress);
-
-            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-            {
-                scanCounter.Tick();
-
-                ulong exceptionAddress = entry.Address;
-                if (exceptionAddress == 0)
-                    continue;
-
-                if (!IsExceptionEntry(heap, entry, exceptionMethodTables))
-                    continue;
-
-                ulong mt = entry.MethodTable;
-                    var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, null);
-                if (isException)
-                {
-                    string key = typeName ?? StringConstants.UnknownType;
-                    analysis.TotalExceptions++;
-                    exceptionTypeCounts.TryGetValue(key, out int typeCount);
-                    exceptionTypeCounts[key] = typeCount + 1;
-
-                    bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeExceptionContext);
-                    if (isActive)
-                    {
-                        analysis.ActiveExceptions++;
-                        activeExceptionTypeCounts.TryGetValue(key, out int activeTypeCount);
-                        activeExceptionTypeCounts[key] = activeTypeCount + 1;
-
-                        if (!crashThreadCandidates.TryGetValue(activeExceptionContext.ThreadId, out var candidate))
-                        {
-                            candidate = new CrashThreadCandidate
-                            {
-                                ThreadId = activeExceptionContext.ThreadId,
-                                OSThreadId = activeExceptionContext.OSThreadId,
-                                CurrentThreadStack = activeExceptionContext.CurrentThreadStack,
-                                PrimaryExceptionType = typeName
-                            };
-                            crashThreadCandidates[activeExceptionContext.ThreadId] = candidate;
-                        }
-                        candidate.ActiveExceptionCount++;
-                    }
-
-                    if (!exceptionsByType.TryGetValue(key, out var list))
-                    {
-                        list = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
-                        exceptionsByType[key] = list;
-                    }
-                    if (list.Count < _options.MaxExceptionsPerType || isActive)
-                    {
-                        var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeExceptionContext : null);
-                        if (isActive && exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
-                        {
-                            // store original stack on the candidate so UI can show the trace back to original call site
-                            crashThreadCandidates[activeExceptionContext.ThreadId].OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
-                        }
-                        if (isActive)
-                        {
-                            var candidate = crashThreadCandidates[activeExceptionContext.ThreadId];
-                            if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
-                                candidate.SampleMessage = exceptionInstance.Message;
-                            candidate.SampleHResult = exceptionInstance.HResult;
-                            if (candidate.SampleInnerExceptionType == null)
-                                candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;
-                        }
-                        list.Add(exceptionInstance);
-                    }
-                }
-            }
-
-            scanCounter.Complete();
-
-            var sortedTypeNames = exceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key);
-            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(exceptionsByType.Count);
-            foreach (string typeName in sortedTypeNames)
-            {
-                if (exceptionsByType.TryGetValue(typeName, out var list))
-                    sortedExceptionsByType[typeName] = list;
-            }
-
-            analysis.ExceptionTypeCounts = exceptionTypeCounts;
-            analysis.ActiveExceptionTypeCounts = activeExceptionTypeCounts;
-            analysis.ExceptionsByType = sortedExceptionsByType;
-            analysis.CrashThreadCandidates = crashThreadCandidates.Values
-                .OrderByDescending(c => c.ActiveExceptionCount)
-                .ToList();
-            return analysis;
         }
 
         private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)

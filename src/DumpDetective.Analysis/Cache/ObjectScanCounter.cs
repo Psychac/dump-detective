@@ -39,6 +39,18 @@ namespace DumpDetective.Analysis.Cache
 
         public void Tick(string? detail = null)
         {
+            if (ShouldReport())
+                Report(detail);
+        }
+
+        /// <summary>
+        /// Advances the scan count and returns whether a report is due on this cadence, without
+        /// building any report payload. Lets hot per-entry callers skip constructing an expensive
+        /// <c>detail</c> string (e.g. via interpolation) on every call — only pay for it on the
+        /// throttled subset of calls where <see cref="Report"/> will actually be invoked.
+        /// </summary>
+        public bool ShouldReport()
+        {
             _scanned++;
 
             TimeSpan elapsed = _stopwatch.Elapsed;
@@ -46,15 +58,18 @@ namespace DumpDetective.Analysis.Cache
             bool reportByTime = elapsed - _lastElapsedReport >= _reportEveryElapsed;
 
             if (!reportByCount && !reportByTime)
-                return;
+                return false;
 
             _lastElapsedReport = elapsed;
 
             while (_nextCountReport <= _scanned)
                 _nextCountReport += _reportEveryObjects;
 
-            _progress?.Report(new AnalyzerProgressReport(_scanned, _phase, detail));
+            return true;
         }
+
+        public void Report(string? detail = null) =>
+            _progress?.Report(new AnalyzerProgressReport(_scanned, _phase, detail));
 
         public void Complete(string? detail = null)
         {

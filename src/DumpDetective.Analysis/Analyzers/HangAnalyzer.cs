@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
@@ -10,16 +11,86 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class HangAnalyzer : IAnalyzer
+    public class HangAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     {
         public string Name => "Hang Analysis";
         public string Category => "Hang";
+
+        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+        // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
+        private ClrHeap? _heap;
+        private HangAnalysisOptions? _options;
+        private Dictionary<ulong, AsyncTypeProfile>? _profileByMethodTable;
+        private Dictionary<string, int>? _taskContinuations;
+        private ThreadPoolAnalysis? _threadPoolInfo;
+        private int _tasksScanned;
+        private int _totalContinuations;
+        private ObjectScanCounter? _scanCounter;
+        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsyncWork.
+        private bool _participantScanSucceeded;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             HangAnalysisOptions options = context.AnalysisOptions.HangAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
+        }
+
+        // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
+        public void BeforeHeapIndexScan(AnalysisContext context)
+        {
+            _options = context.AnalysisOptions.HangAnalysis;
+            _heap = context.Heap;
+            _profileByMethodTable = new Dictionary<ulong, AsyncTypeProfile>(capacity: 64);
+            _taskContinuations = new Dictionary<string, int>();
+            _threadPoolInfo = new ThreadPoolAnalysis();
+            _tasksScanned = 0;
+            _totalContinuations = 0;
+            _scanCounter = new ObjectScanCounter("Hang async object scan");
+        }
+
+        // Ports RunSequentialAsyncScan's loop body onto the disk-backed heap-index scan driven
+        // by HeapIndexScanDispatcher, so this analyzer shares one pass over the index instead of
+        // enumerating it independently via the ClrMD API.
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+        private void OnHeapEntry(in HeapEntry entry)
+        {
+            _scanCounter!.Tick();
+
+            if (entry.Address == 0 || _threadPoolInfo!.TaskScanLimited)
+                return;
+
+            AsyncTypeProfile profile = ResolveAsyncTypeProfile(_heap!, entry, _profileByMethodTable!);
+            if (!profile.IsPotentiallyRelevant)
+                return;
+
+            AnalyzeHeapObjectByAddress(
+                _heap!,
+                entry.Address,
+                profile,
+                _threadPoolInfo,
+                _taskContinuations!,
+                ref _tasksScanned,
+                ref _totalContinuations,
+                _options!.MaxTasksToScan);
+
+            if (_tasksScanned > _options.MaxTasksToScan && _threadPoolInfo.QueuedWorkItems > 1000)
+                _threadPoolInfo.TaskScanLimited = true;
+        }
+
+        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        private void BuildAsyncAnalysisFromParticipantState(HangAnalysis analysis)
+        {
+            _scanCounter?.Complete();
+
+            analysis.ThreadPoolInfo = _threadPoolInfo!;
+            analysis.TaskContinuations = _taskContinuations!;
+            analysis.TotalContinuations = _totalContinuations;
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
@@ -313,16 +384,17 @@ namespace DumpDetective.Analysis.Analyzers
 
         private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis, HangAnalysisOptions options)
         {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var heapIdx))
+            // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's HeapIndexScanDispatcher
+            // before AnalyzeAsync executes when a heap index was available; read back the
+            // participant-accumulated state instead of re-scanning the index. If the shared scan
+            // failed partway (isolated by the dispatcher) or never ran, fall back to a full scan.
+            if (_participantScanSucceeded)
             {
-                // In-memory index: parallel over the flat entry array
-                
-                // Disk-backed index: sequential (I/O bound)
-                RunSequentialAsyncScan(heap, heapCache, analysis, options);
+                BuildAsyncAnalysisFromParticipantState(analysis);
                 return;
             }
 
-            // No cache: parallel over GC segments
+            // No cache, or shared scan unavailable/failed: parallel over GC segments
             RunParallelAsyncScan(heap, inMemoryEntries: null, analysis, options);
         }
 
@@ -430,51 +502,6 @@ namespace DumpDetective.Analysis.Analyzers
                 TaskScanLimited = taskScanLimited
             };
             analysis.TaskContinuations = new Dictionary<string, int>(taskContinuations, StringComparer.Ordinal);
-            analysis.TotalContinuations = totalContinuations;
-        }
-
-        private void RunSequentialAsyncScan(ClrHeap heap, HeapAnalysisCache heapCache, HangAnalysis analysis, HangAnalysisOptions options)
-        {
-            var threadPool = new ThreadPoolAnalysis();
-            var taskContinuations = new Dictionary<string, int>();
-            var profileByMethodTable = new Dictionary<ulong, AsyncTypeProfile>(capacity: 64);
-            int tasksScanned = 0;
-            int totalContinuations = 0;
-            var objectScanCounter = new ObjectScanCounter("Hang async object scan");
-
-            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-            {
-                objectScanCounter.Tick();
-
-                ulong objectAddress = entry.Address;
-                if (objectAddress == 0)
-                    continue;
-
-                AsyncTypeProfile profile = ResolveAsyncTypeProfile(heap, entry, profileByMethodTable);
-                if (!profile.IsPotentiallyRelevant)
-                    continue;
-
-                AnalyzeHeapObjectByAddress(
-                    heap,
-                    objectAddress,
-                    profile,
-                    threadPool,
-                    taskContinuations,
-                    ref tasksScanned,
-                    ref totalContinuations,
-                    options.MaxTasksToScan);
-
-                if (tasksScanned > options.MaxTasksToScan && threadPool.QueuedWorkItems > 1000)
-                {
-                    threadPool.TaskScanLimited = true;
-                    break;
-                }
-            }
-
-            objectScanCounter.Complete();
-
-            analysis.ThreadPoolInfo = threadPool;
-            analysis.TaskContinuations = taskContinuations;
             analysis.TotalContinuations = totalContinuations;
         }
 

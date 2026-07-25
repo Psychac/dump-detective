@@ -166,31 +166,39 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
             ByType: byType);
     }
 
-    private const int MaxEvidenceTypes = 10;
-
     private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<TimerObjectTypeSummary> byType)
     {
         if (cache is null || byType.Count == 0)
             return;
 
         IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-        int limit = Math.Min(MaxEvidenceTypes, byType.Count);
 
-        for (int i = 0; i < limit; i++)
+        var provider = new ReferenceGraph(heap);
+        var limits = new RootPathSearchLimits
+        {
+            MaxCandidateNodes = 5_000,
+            MaxCandidateDepth = 8,
+            MaxRootExpansionDepth = 12,
+            LargeFanoutThreshold = 100,
+        };
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+
+        for (int i = 0; i < byType.Count; i++)
         {
             TimerObjectTypeSummary summary = byType[i];
             ulong? sampleAddress = cache.GetSampleInstanceAddress(summary.TypeName);
             if (sampleAddress is null)
                 continue;
 
-            SampleRootPathFinder.Result rootPath = SampleRootPathFinder.TryFindSampleRootPath(heap, roots, sampleAddress.Value);
+            bool found = finder.TryFindAnyRootPath(sampleAddress.Value, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
 
             byType[i] = summary with
             {
                 Evidence = new Evidence(
                     summary.TotalBytes,
-                    rootPath.Path,
-                    rootPath.Truncated,
+                    rootPath,
+                    searchTruncated,
                     [new EvidenceSignal("InstanceCount", "Instances of this timer type", summary.Count)])
             };
         }

@@ -163,55 +163,15 @@ namespace DumpDetective.Analysis.Analyzers
             if (!TryGetValidObject(heap, objectAddress, out _))
                 return false;
 
-            if (options.SearchMode == ReferenceChainSearchMode.Fast)
-                return TryFindAnyRootPath_Fast(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
-
+            // All modes route through the bounded bidirectional search — Fast mode differs only
+            // in its (smaller) resolved candidate-set/depth limits, set via ReferenceChainOptions.
+            // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
+            // with GC root count instead of a shared bounded budget (see
+            // docs/analysis/root-path-search-blast-radius.md).
             return TryFindAnyRootPath_Bidirectional(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
         }
 
-        // ── Fast mode ─────────────────────────────────────────────────────────
-        private bool TryFindAnyRootPath_Fast(
-            ClrHeap heap,
-            IReadOnlyList<(string RootKind, ulong Address)> roots,
-            ulong objectAddress,
-            ReferenceChainOptions options,
-            ExecutionPolicy policy,
-            TelemetryCounters telemetry,
-            out string? path,
-            out bool searchTruncated)
-        {
-            path = null;
-            searchTruncated = false;
-
-            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0 ? policy.ReferenceChainMaxPathSearchObjects : options.FallbackMaxPathSearchObjects;
-
-            // Preallocate once and reuse across all root iterations.
-            var visited = new HashSet<ulong>(capacity: 1024);
-            var previous = new Dictionary<ulong, ulong>(capacity: 1024);
-            var queue = new Queue<(ulong Address, int Depth)>(capacity: 256);
-
-            var scanCounter = new ObjectScanCounter("Reference chain root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-            foreach ((string rootKind, ulong rootAddress) in roots)
-            {
-                scanCounter.Tick();
-                if (TryBuildPath(heap, rootAddress, objectAddress, maxPathSearchObjects, visited, previous, queue,
-                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, policy.ReferenceChainMaxPathDepth, telemetry,
-                    out List<ulong>? addresses, out bool pathSearchLimited))
-                {
-                    scanCounter.Complete();
-                    path = FormatPath(heap, rootKind, addresses);
-                    return true;
-                }
-
-                if (pathSearchLimited)
-                    searchTruncated = true;
-            }
-
-            scanCounter.Complete();
-            return false;
-        }
-
-        // ── Balanced / Deep mode ──────────────────────────────────────────────
+        // ── Bidirectional bounded search (all modes) ────────────────────────────
         private bool TryFindAnyRootPath_Bidirectional(
             ClrHeap heap,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
@@ -310,92 +270,6 @@ namespace DumpDetective.Analysis.Analyzers
                 MetricUnit: "% retained-samples");
         }
 
-        private static bool TryBuildPath(
-            ClrHeap heap,
-            ulong startAddress,
-            ulong targetAddress,
-            int maxPathSearchObjects,
-            HashSet<ulong> visited,
-            Dictionary<ulong, ulong> previous,
-            Queue<(ulong Address, int Depth)> queue,
-            bool skipArrays,
-            int largeFanoutThreshold,
-            IReadOnlyList<string> knownLeakPatterns,
-            int maxPathDepth,
-            TelemetryCounters telemetry,
-            out List<ulong>? path,
-            out bool searchLimitReached)
-        {
-            path = null;
-            searchLimitReached = false;
-
-            if (startAddress == targetAddress)
-            {
-                path = new List<ulong> { startAddress };
-                return true;
-            }
-
-            if (startAddress == 0 || targetAddress == 0)
-                return false;
-
-            visited.Clear();
-            visited.Add(startAddress);
-            previous.Clear();
-            queue.Clear();
-            queue.Enqueue((startAddress, 0));
-
-            int searched = 0;
-
-            while (queue.Count > 0 && searched++ < maxPathSearchObjects)
-            {
-                (ulong current, int depth) = queue.Dequeue();
-
-                if (depth >= maxPathDepth)
-                    continue;
-
-                foreach (ulong refAddress in EnumerateReferenceAddresses(heap, current, skipArrays, largeFanoutThreshold, knownLeakPatterns, telemetry))
-                {
-                    if (refAddress == targetAddress)
-                    {
-                        path = ReconstructPath(previous, startAddress, targetAddress, current);
-                        return true;
-                    }
-
-                    if (visited.Add(refAddress))
-                    {
-                        // increment telemetry if we detect a pruned node marker? (EnumerateReferenceAddresses will maintain counts via telemetry callbacks)
-                        previous[refAddress] = current;
-                        queue.Enqueue((refAddress, depth + 1));
-                    }
-                }
-            }
-
-            searchLimitReached = queue.Count > 0 && searched >= maxPathSearchObjects;
-
-            return false;
-        }
-
-        private static List<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress, ulong? targetParent = null)
-        {
-            var reversed = new List<ulong>(capacity: 16) { targetAddress };
-
-            ulong cursor = targetAddress;
-            if (targetParent.HasValue)
-            {
-                reversed.Add(targetParent.Value);
-                cursor = targetParent.Value;
-            }
-
-            while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
-            {
-                reversed.Add(parent);
-                cursor = parent;
-            }
-
-            reversed.Reverse();
-            return reversed;
-        }
-
         private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses)
         {
             if (addresses is null || addresses.Count == 0)
@@ -416,45 +290,6 @@ namespace DumpDetective.Analysis.Analyzers
                 return new ObjectMetadata(false, null, 0);
 
             return new ObjectMetadata(true, obj.Type?.Name, obj.Size);
-        }
-
-        private static IEnumerable<ulong> EnumerateReferenceAddresses(ClrHeap heap, ulong sourceAddress, bool skipArrays, int largeFanoutThreshold, IReadOnlyList<string> knownLeakPatterns, TelemetryCounters telemetry)
-        {
-            if (!TryGetValidObject(heap, sourceAddress, out ClrObject sourceObject))
-                yield break;
-
-            var sourceType = sourceObject.Type;
-            // If the source type looks noisy, skip expanding it.
-            if (IsNoisyType(sourceType, skipArrays))
-            {
-                telemetry.PrunedNodes++;
-                yield break;
-            }
-
-            // Enumerate and enforce a large-fanout threshold; if exceeded, treat node as noisy.
-            int counted = 0;
-            bool forceExpand = IsKnownLeakType(sourceType, knownLeakPatterns);
-
-            foreach (ClrObject reference in sourceObject.EnumerateReferences(carefully: true))
-            {
-                // count for fanout detection
-                counted++;
-                if (!forceExpand && counted > largeFanoutThreshold)
-                {
-                    // Too many children: skip expanding this node (pruning).
-                    telemetry.LargeFanoutNodesSkipped++;
-                    yield break;
-                }
-
-                if (!reference.IsValid)
-                    continue;
-
-                ulong referenceAddress = reference.Address;
-                if (referenceAddress == 0)
-                    continue;
-
-                yield return referenceAddress;
-            }
         }
 
         private static bool IsNoisyType(ClrType? type, bool skipArrays)

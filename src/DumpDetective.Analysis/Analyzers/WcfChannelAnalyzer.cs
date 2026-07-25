@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -17,7 +18,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// A faulted channel must be Abort()ed, not Close()d. Faulted channels on the heap are a
 /// strong signal of missing error-handling in WCF proxy usage.
 /// </summary>
-public sealed class WcfChannelAnalyzer : IAnalyzer
+public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 {
     public string Name => "WCF Channel Analysis";
     public string Category => "Infrastructure";
@@ -43,33 +44,30 @@ public sealed class WcfChannelAnalyzer : IAnalyzer
 
     private static readonly string[] StateFieldNames = ["_state", "state", "communicationState"];
 
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(
-            Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
-    }
+    private ClrHeap? _heap;
+    private Dictionary<ulong, (string Name, int Total, int Opened, int Faulted, int Closed, int Other, ulong Bytes)>? _typeStats;
+    private List<WcfChannelSnapshot>? _topFaulted;
+    private Dictionary<ulong, int>? _perTypeSamples;
+    private bool _stateScanCapped;
 
-    private static AnalyzerDomainResult Analyze(
-        ClrHeap? heap,
-        IHeapAnalysisCache? cache,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Resolves candidate WCF-type MethodTables and pre-seeds per-type counters from
+    /// TypeAggregates, exactly mirroring the historical single-shot "Step 1 + pre-seed" logic.
+    /// </summary>
+    public void BeforeHeapIndexScan(AnalysisContext context)
     {
-        if (heap is null)
-            return Empty();
+        ClrHeap heap = context.Heap;
+        _heap = heap;
 
-        // ── Step 1: Find matching MTs ─────────────────────────────────────────
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-        if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out HeapIndexBuildResult? idx))
+        if (context.Cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out HeapIndexBuildResult? idx))
             typeAggregates = idx?.TypeAggregates;
 
         var candidateMts = new Dictionary<ulong, (string TypeName, TypeAggregateIndexEntry Entry)>(16);
-
         if (typeAggregates is not null)
         {
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
                 if (clrType?.Name is not string fullName) continue;
                 if (IsWcfChannelType(fullName))
@@ -78,9 +76,11 @@ public sealed class WcfChannelAnalyzer : IAnalyzer
         }
 
         if (candidateMts.Count == 0)
-            return Empty();
+        {
+            _typeStats = null;
+            return;
+        }
 
-        // ── Step 2: Aggregate per-type counters + sample state reading ────────
         var typeStats = new Dictionary<ulong, (string Name, int Total, int Opened, int Faulted, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, TypeAggregateIndexEntry Entry)> kv in candidateMts)
         {
@@ -88,78 +88,67 @@ public sealed class WcfChannelAnalyzer : IAnalyzer
             typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, kv.Value.Entry.TotalSize);
         }
 
-        var topFaulted = new List<WcfChannelSnapshot>(32);
-        int stateSamples = 0;
-        bool stateScanCapped = false;
-        var perTypeSamples = new Dictionary<ulong, int>(candidateMts.Count);
+        _typeStats = typeStats;
+        _topFaulted = new List<WcfChannelSnapshot>(32);
+        _perTypeSamples = new Dictionary<ulong, int>(candidateMts.Count);
+        _stateScanCapped = false;
+    }
 
-        if (cache is HeapAnalysisCache heapCache2 && heapCache2.TryGetHeapIndex(out HeapIndexBuildResult? idx2))
+    /// <summary>
+    /// Explicit interface forwarder - keeps HeapEntry's internal-ness from leaking into
+    /// this analyzer's public API.
+    /// </summary>
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+    private void OnHeapEntry(in HeapEntry entry)
+    {
+        var typeStats = _typeStats;
+        if (typeStats is null) return;
+        if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
+
+        var perTypeSamples = _perTypeSamples!;
+        var topFaulted = _topFaulted!;
+
+        int stateVal = -1;
+        perTypeSamples.TryGetValue(entry.MethodTable, out int typeSampleCount);
+        if (typeSampleCount < MaxStateSamples)
         {
-            foreach (HeapEntry entry in heapCache2.EnumerateIndexedEntries())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) continue;
-
-                int stateVal = -1;
-                perTypeSamples.TryGetValue(entry.MethodTable, out int typeSampleCount);
-                if (typeSampleCount < MaxStateSamples)
-                {
-                    stateVal = TryReadCommunicationState(heap, entry.Address);
-                    perTypeSamples[entry.MethodTable] = typeSampleCount + 1;
-                    stateSamples++;
-                }
-                else stateScanCapped = true;
-
-                int opened = ts.Opened; int faulted = ts.Faulted; int closed = ts.Closed; int other = ts.Other;
-                string stateLabel = MapCommunicationState(stateVal);
-                if (stateVal == StateOpened)       opened++;
-                else if (stateVal == StateFaulted) faulted++;
-                else if (stateVal == StateClosed)  closed++;
-                else if (stateVal >= 0)            other++;
-
-                typeStats[entry.MethodTable] = (ts.Name, ts.Total, opened, faulted, closed, other, ts.Bytes);
-
-                if (stateVal == StateFaulted && topFaulted.Count < 50)
-                    topFaulted.Add(new WcfChannelSnapshot(ts.Name, entry.Address, stateLabel, stateVal));
-            }
+            stateVal = TryReadCommunicationState(_heap!, entry.Address);
+            perTypeSamples[entry.MethodTable] = typeSampleCount + 1;
         }
-        else
-        {
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!obj.IsValid || obj.Type is null) continue;
-                ulong mt = obj.Type.MethodTable;
-                if (!typeStats.TryGetValue(mt, out var ts)) continue;
+        else _stateScanCapped = true;
 
-                int stateVal = -1;
-                perTypeSamples.TryGetValue(mt, out int typeSampleCount);
-                if (typeSampleCount < MaxStateSamples)
-                {
-                    stateVal = TryReadCommunicationState(heap, obj.Address);
-                    perTypeSamples[mt] = typeSampleCount + 1;
-                }
-                else stateScanCapped = true;
+        int opened = ts.Opened; int faulted = ts.Faulted; int closed = ts.Closed; int other = ts.Other;
+        string stateLabel = MapCommunicationState(stateVal);
+        if (stateVal == StateOpened)       opened++;
+        else if (stateVal == StateFaulted) faulted++;
+        else if (stateVal == StateClosed)  closed++;
+        else if (stateVal >= 0)            other++;
 
-                string stateLabel = MapCommunicationState(stateVal);
-                int opened = ts.Opened; int faulted = ts.Faulted; int closed = ts.Closed; int other = ts.Other;
-                if (stateVal == StateOpened)       opened++;
-                else if (stateVal == StateFaulted) faulted++;
-                else if (stateVal == StateClosed)  closed++;
-                else if (stateVal >= 0)            other++;
+        typeStats[entry.MethodTable] = (ts.Name, ts.Total, opened, faulted, closed, other, ts.Bytes);
 
-                typeStats[mt] = (ts.Name, ts.Total + 1, opened, faulted, closed, other, ts.Bytes + (ulong)obj.Size);
+        if (stateVal == StateFaulted && topFaulted.Count < 50)
+            topFaulted.Add(new WcfChannelSnapshot(ts.Name, entry.Address, stateLabel, stateVal));
+    }
 
-                if (stateVal == StateFaulted && topFaulted.Count < 50)
-                    topFaulted.Add(new WcfChannelSnapshot(ts.Name, obj.Address, stateLabel, stateVal));
-            }
-        }
+    // Relies on the pipeline dispatcher already having called BeforeHeapIndexScan/OnHeapEntry
+    // on this context before AnalyzeAsync runs (see AnalysisPipeline.ExecuteAsync).
+    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(BuildResult().Stamp(this));
+    }
 
-        // ── Step 3: Build result ──────────────────────────────────────────────
+    private WcfChannelDomainResult BuildResult()
+    {
+        if (_typeStats is null || _typeStats.Count == 0)
+            return Empty();
+
+        // ── Build result ──────────────────────────────────────────────────────
         int totalChannels = 0, totalOpened = 0, totalFaulted = 0, totalClosed = 0, totalOther = 0;
-        var byType = new List<WcfChannelTypeSummary>(typeStats.Count);
+        var byType = new List<WcfChannelTypeSummary>(_typeStats.Count);
 
-        foreach (var kv in typeStats)
+        foreach (var kv in _typeStats)
         {
             var ts = kv.Value;
             byType.Add(new WcfChannelTypeSummary(ts.Name, ts.Total, ts.Opened, ts.Faulted, ts.Closed, ts.Other, ts.Bytes));
@@ -180,8 +169,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer
             ClosedChannels:   totalClosed,
             OtherChannels:    totalOther,
             ByType:           byType,
-            TopFaultedChannels: topFaulted,
-            StateScanCapped:  stateScanCapped);
+            TopFaultedChannels: _topFaulted ?? [],
+            StateScanCapped:  _stateScanCapped);
     }
 
     private static int TryReadCommunicationState(ClrHeap heap, ulong address)

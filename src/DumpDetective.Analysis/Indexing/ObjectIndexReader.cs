@@ -1,5 +1,5 @@
-using System.Buffers;
-using System.Buffers.Binary;
+using System.IO.MemoryMappedFiles;
+using System.Runtime.CompilerServices;
 
 using DumpDetective.Analysis.Indexing.Container;
 
@@ -12,6 +12,12 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
 
     private const int ColumnSize = sizeof(ulong);
 
+    // Records materialized per batch before yielding. Pointers can't be used directly inside
+    // this iterator (the C# compiler forbids unsafe/pointer syntax anywhere lexically inside a
+    // method containing yield), so the pointer-based read is done in ZeroCopyColumnReader, a
+    // plain (non-iterator) class, and this method just yields out of the filled batch.
+    private const int BatchRecords = 65536;
+
     public IEnumerable<HeapEntry> ReadEntries(string containerPath)
     {
         return ReadDiskEntries(containerPath);
@@ -23,80 +29,108 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
             yield break;
 
-        if (!reader.TryOpenSection(CacheSectionId.ObjectAddresses, out Stream? addrStream) || addrStream is null)
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen))
             yield break;
-        if (!reader.TryOpenSection(CacheSectionId.ObjectMethodTables, out Stream? mtStream) || mtStream is null)
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectMethodTables, out MemoryMappedViewAccessor? mtAcc, out long mtLen))
         {
-            addrStream.Dispose();
+            addrAcc?.Dispose();
             yield break;
         }
-        if (!reader.TryOpenSection(CacheSectionId.ObjectSizes, out Stream? sizeStream) || sizeStream is null)
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out MemoryMappedViewAccessor? sizeAcc, out long sizeLen))
         {
-            addrStream.Dispose();
-            mtStream.Dispose();
+            addrAcc?.Dispose();
+            mtAcc?.Dispose();
             yield break;
         }
 
-        using Stream addr = addrStream;
-        using Stream mt = mtStream;
-        using Stream size = sizeStream;
+        using MemoryMappedViewAccessor? addr = addrAcc;
+        using MemoryMappedViewAccessor? mt = mtAcc;
+        using MemoryMappedViewAccessor? size = sizeAcc;
 
-        long recordCount = addr.Length / ColumnSize;
-        if (recordCount == 0 || mt.Length / ColumnSize != recordCount || size.Length / ColumnSize != recordCount)
+        long recordCount = addrLen / ColumnSize;
+        if (recordCount == 0 || addr is null || mt is null || size is null ||
+            mtLen / ColumnSize != recordCount || sizeLen / ColumnSize != recordCount)
             yield break;
 
-        // Choose a batch size (in records) relative to the index size for efficient reads —
-        // each record costs 3x ColumnSize bytes total across the three column streams.
-        long indexBytes = addr.Length + mt.Length + size.Length;
-        int batchBytes = indexBytes > 4L * 1024 * 1024 * 1024 ? 8 * 1024 * 1024 :
-                        indexBytes > 512L * 1024 * 1024 ? 2 * 1024 * 1024 :
-                        256 * 1024;
-        int batchRecords = Math.Max(batchBytes / (ColumnSize * 3), 1);
-
-        byte[] addrBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
-        byte[] mtBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
-        byte[] sizeBuf = ArrayPool<byte>.Shared.Rent(batchRecords * ColumnSize);
+        HeapEntry[] batch = System.Buffers.ArrayPool<HeapEntry>.Shared.Rent(BatchRecords);
         try
         {
+            using var columnReader = new ZeroCopyColumnReader(addr, mt, size);
             long remaining = recordCount;
+            long start = 0;
             while (remaining > 0)
             {
-                int chunkRecords = (int)Math.Min(batchRecords, remaining);
-                int chunkBytes = chunkRecords * ColumnSize;
+                int chunk = (int)Math.Min(BatchRecords, remaining);
+                columnReader.FillBatch(start, batch, chunk);
+                for (int i = 0; i < chunk; i++)
+                    yield return batch[i];
 
-                ReadColumnFully(addr, addrBuf, chunkBytes);
-                ReadColumnFully(mt, mtBuf, chunkBytes);
-                ReadColumnFully(size, sizeBuf, chunkBytes);
-
-                for (int i = 0; i < chunkRecords; i++)
-                {
-                    int off = i * ColumnSize;
-                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(addrBuf.AsSpan(off, 8));
-                    ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(mtBuf.AsSpan(off, 8));
-                    ulong objSize = BinaryPrimitives.ReadUInt64LittleEndian(sizeBuf.AsSpan(off, 8));
-                    yield return new HeapEntry(address, methodTable, objSize);
-                }
-
-                remaining -= chunkRecords;
+                start += chunk;
+                remaining -= chunk;
             }
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(addrBuf);
-            ArrayPool<byte>.Shared.Return(mtBuf);
-            ArrayPool<byte>.Shared.Return(sizeBuf);
+            System.Buffers.ArrayPool<HeapEntry>.Shared.Return(batch);
         }
     }
 
-    private static void ReadColumnFully(Stream stream, byte[] buffer, int byteCount)
+    // Holds raw pointers into the three mapped columns for the lifetime of a scan. Isolated in
+    // its own (non-iterator) class because pointer types can't appear anywhere lexically inside
+    // ReadDiskEntries above. Reading via Unsafe.ReadUnaligned in a tight batch loop avoids the
+    // per-call bounds/alignment safety overhead that MemoryMappedViewAccessor.ReadUInt64 pays on
+    // every single call — significant at the hundreds-of-millions-of-records scale this hits on
+    // large dumps. This assumes a little-endian host (x64/ARM64), which is the only platform
+    // this app targets.
+    private sealed unsafe class ZeroCopyColumnReader : IDisposable
     {
-        int total = 0;
-        while (total < byteCount)
+        private readonly MemoryMappedViewAccessor _addr;
+        private readonly MemoryMappedViewAccessor _mt;
+        private readonly MemoryMappedViewAccessor _size;
+        private readonly byte* _addrPtr;
+        private readonly byte* _mtPtr;
+        private readonly byte* _sizePtr;
+
+        public ZeroCopyColumnReader(MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size)
         {
-            int read = stream.Read(buffer, total, byteCount - total);
-            if (read <= 0)
-                throw new EndOfStreamException("Columnar object index section ended before expected record count.");
-            total += read;
+            _addr = addr;
+            _mt = mt;
+            _size = size;
+
+            byte* p = null;
+            _addr.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _addrPtr = p + _addr.PointerOffset;
+
+            p = null;
+            _mt.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _mtPtr = p + _mt.PointerOffset;
+
+            p = null;
+            _size.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _sizePtr = p + _size.PointerOffset;
+        }
+
+        public void FillBatch(long startIndex, HeapEntry[] destination, int count)
+        {
+            byte* addrBase = _addrPtr + startIndex * ColumnSize;
+            byte* mtBase = _mtPtr + startIndex * ColumnSize;
+            byte* sizeBase = _sizePtr + startIndex * ColumnSize;
+
+            for (int i = 0; i < count; i++)
+            {
+                int off = i * ColumnSize;
+                ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + off);
+                ulong methodTable = Unsafe.ReadUnaligned<ulong>(mtBase + off);
+                ulong objSize = Unsafe.ReadUnaligned<ulong>(sizeBase + off);
+                destination[i] = new HeapEntry(address, methodTable, objSize);
+            }
+        }
+
+        public void Dispose()
+        {
+            _addr.SafeMemoryMappedViewHandle.ReleasePointer();
+            _mt.SafeMemoryMappedViewHandle.ReleasePointer();
+            _size.SafeMemoryMappedViewHandle.ReleasePointer();
         }
     }
 }

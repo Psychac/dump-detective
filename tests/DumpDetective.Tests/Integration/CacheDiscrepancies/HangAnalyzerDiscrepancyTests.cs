@@ -4,7 +4,9 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
@@ -24,19 +26,16 @@ public sealed class HangAnalyzerDiscrepancyTests
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         ClrHeap heap = runtime.Heap;
         AnalysisOptions analysisOptions = new();
-        HangAnalyzer analyzer = new();
         HeapAnalysisCache memCache = new();
         memCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        AnalysisContext memContext = new() { Runtime = runtime, Cache = memCache, AnalysisOptions = analysisOptions };
-        HangDomainResult memResult = (HangDomainResult)await analyzer.AnalyzeAsync(memContext, CancellationToken.None);
+        HangDomainResult memResult = await RunThroughPipelineAsync(runtime, memCache, analysisOptions);
         string freshDumpPath = dumpPath + ".freshdiskcheck.HangAnalyzerDiscrepancyTests";
         string freshIndexDir = DumpIndexPaths.EnsureDirectory(freshDumpPath);
         try
         {
             HeapAnalysisCache diskCache = new();
             diskCache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null);
-            AnalysisContext diskContext = new() { Runtime = runtime, Cache = diskCache, AnalysisOptions = analysisOptions };
-            HangDomainResult diskResult = (HangDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
+            HangDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache, analysisOptions);
             diskResult.TotalAliveThreads.Should().Be(memResult.TotalAliveThreads);
             diskResult.WaitingThreadCount.Should().Be(memResult.WaitingThreadCount);
             diskResult.ThreadsHoldingLocks.Should().Be(memResult.ThreadsHoldingLocks);
@@ -67,5 +66,17 @@ public sealed class HangAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    // Drives the analyzer through AnalysisPipeline/HeapIndexScanDispatcher instead of calling
+    // AnalyzeAsync directly, so this test exercises the same priming path production uses.
+    // A fresh HangAnalyzer instance is used per call since the analyzer now carries instance
+    // accumulator state primed by BeforeHeapIndexScan.
+    private static async Task<HangDomainResult> RunThroughPipelineAsync(ClrRuntime runtime, HeapAnalysisCache cache, AnalysisOptions analysisOptions)
+    {
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+        AnalysisPipeline pipeline = new([new HangAnalyzer()], new FindingGenerationPipeline([]));
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+        return results.GetResult<HangDomainResult>()!;
     }
 }

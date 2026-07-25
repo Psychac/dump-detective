@@ -42,13 +42,18 @@
   referenced no symbol from that namespace — it was dead code, not a real structural coupling. It
   has been removed; no other analyzer carried the same leftover import
   ([phase0-deliverable-7-dependency-graph-review.md](phase0-deliverable-7-dependency-graph-review.md#cycles)).
-- **Heap index single-pass dispatcher (Deliverable 5 item 1): designed, not started.** Full design
-  in [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) — an
-  opt-in `IHeapIndexScanParticipant` interface plus a shared dispatcher, proof-of-concept scoped to
-  `DbConnectionAnalyzer`. Blocked on a real, unbudgeted design problem: discrepancy/unit tests
-  (e.g. `DbConnectionAnalyzerDiscrepancyTests.cs`) call `analyzer.AnalyzeAsync()` directly,
-  bypassing `AnalysisPipeline` — the mechanism that would prime dispatcher-participant state before
-  `AnalyzeAsync` runs. See [Near-term (P1)](#near-term-p1) for the resolution options.
+- **Heap index single-pass dispatcher (Deliverable 5 item 1): proof-of-concept implemented for
+  `DbConnectionAnalyzer`.** Full design in
+  [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md) — an
+  opt-in `IHeapIndexScanParticipant` interface plus `HeapIndexScanDispatcher`, wired into
+  `AnalysisPipeline.ExecuteAsync`. The former test-bypass design problem is resolved via option
+  (b): `DbConnectionAnalyzerDiscrepancyTests.cs` now drives the analyzer through a real
+  `AnalysisPipeline` instance instead of calling `analyzer.AnalyzeAsync()` directly, and
+  `DbConnectionAnalyzer.AnalyzeAsync` no longer carries a per-call "primed" self-scan fallback — it
+  trusts the pipeline dispatcher to have already run `BeforeHeapIndexScan`/`OnHeapEntry`. See
+  [Near-term (P1)](#near-term-p1) item 1 for details. **All 9 disk-index-streaming analyzers have
+  now been migrated** to the same pattern — see [P1](#near-term-p1) item 2 for the full list and
+  the open architectural findings from the migration.
 
 ---
 
@@ -125,8 +130,8 @@ service → evidence builder → ranking engine → confidence scoring) and the 
 (heap-index dispatcher and what pairs with it). Neither blocks the other. The Correctness track
 leads because its risk (#2 above) is a product-credibility issue undiminished by any measurement,
 while the Performance track's risk (#1 above) was found to be ~3x smaller in blast radius than
-originally estimated and carries an additional, currently-unresolved implementation blocker (the
-direct-`AnalyzeAsync`-call test bypass — see [P1](#near-term-p1)). Within each track, items below
+originally estimated and had an additional implementation blocker (the direct-`AnalyzeAsync`-call
+test bypass) that has since been resolved — see [P1](#near-term-p1) item 1. Within each track, items below
 are ordered by dependency, not just by value, so **build top-to-bottom within a track**.
 
 ---
@@ -212,21 +217,94 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
 
 **Performance track (dependency order)**
 
-1. **Resolve the direct-`AnalyzeAsync`-call test-bypass design problem** — blocks item 2 below.
-   `DbConnectionAnalyzerDiscrepancyTests.cs` (and likely other call sites) invoke
+1. **Resolve the direct-`AnalyzeAsync`-call test-bypass design problem — done, option (b)
+   implemented.** `DbConnectionAnalyzerDiscrepancyTests.cs` previously invoked
    `analyzer.AnalyzeAsync()` directly, bypassing `AnalysisPipeline`, the mechanism that would prime
-   dispatcher-participant state first. Three options are on the table (see
+   dispatcher-participant state first. Of the three options that were on the table (see
    [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)'s "Open
-   design problem" section): (a) a per-call "primed" flag with fallback to today's self-contained
-   scan when not primed, (b) migrate direct-call tests to drive analyzers through a
+   design problem" section): (a) a per-call "primed" flag with fallback to a self-contained scan
+   when not primed, (b) migrate direct-call tests to drive analyzers through a
    pipeline/dispatcher invocation, or (c) leave `DbConnectionAnalyzer` unmigrated and prove the
-   dispatcher with a synthetic participant only. Needs a decision before any dispatcher code is
-   written for a real analyzer.
-2. **Heap index single-pass dispatcher** (Deliverable 5 item 1, Deliverable 8 §1) — depends on
-   item 1 above being resolved, and should also wait for either a profiling run confirming the ~9x
+   dispatcher with a synthetic participant only — **(b) is what was implemented**:
+   `DbConnectionAnalyzer.AnalyzeAsync` no longer carries a `_primedContext`/self-priming dual-mode
+   branch (the now-dead `ScanFullHeapFallback` was deleted too), and
+   `DbConnectionAnalyzerDiscrepancyTests.cs` now builds a real `AnalysisPipeline` (via a
+   `RunThroughPipelineAsync` helper, one fresh analyzer instance per pipeline run) to drive the
+   analyzer through `HeapIndexScanDispatcher` for both the in-memory and disk-backed cache cases.
+   Verified: `dotnet build DumpDetective.slnx` (0 errors) and a filtered `dotnet test` run covering
+   `DbConnectionAnalyzer`, `AnalysisPipelineTests`, and `HeapIndexScanDispatcherTests` (7 passed, 1
+   skipped — the discrepancy test still skips without a real dump via `DD_BENCHMARK_DUMP`,
+   unchanged from before this change). No other production or test call site invokes
+   `DbConnectionAnalyzer.AnalyzeAsync` directly; the only other `src/` references are the domain
+   model, the report section-ID map, and `DefaultAnalyzerFeatureModuleCatalog`'s
+   `typeof(DbConnectionAnalyzer)` registration entry (used by `DefaultAnalyzerFactory` to construct
+   analyzer instances that are fed into `AnalysisPipeline` — not a bypass).
+2. **Heap index single-pass dispatcher** (Deliverable 5 item 1, Deliverable 8 §1) — item 1 above is
+   resolved, and should also wait for either a profiling run confirming the ~9x
    scan cost is significant on a representative 10GB+ dump (Deliverable 8's own open item), or a
    decision to proceed without that confirmation. Addresses 9 of 35 analyzers (verified); proof of
-   concept scoped to `DbConnectionAnalyzer` only.
+   concept scoped to `DbConnectionAnalyzer` initially. **Migration status: complete.**
+   `DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer`, `HangAnalyzer`,
+   `WcfChannelAnalyzer`, `StringAnalyzer`, `DominatorAnalyzer` (post-merge, formerly
+   `MemoryLeakAnalyzer`), `AsyncTaskAnalyzer`, and `EventLeakAnalyzer` — all 9 verified
+   disk-index-streaming analyzers — are now migrated to `IHeapIndexScanParticipant`.
+   `EventLeakAnalyzer` was originally flagged as an architectural mismatch (its scanner uses
+   internal `Parallel.For` chunking), but turned out not to need a dispatcher design change: its
+   `EventLeakFastScanner` gained a single-entry `ScanEntry(...)` method factored out of the
+   existing per-object loop body, which both the dispatcher's serial callback and the scanner's
+   own internal chunked loop now call — see
+   [phase0-analyzer-heap-scan-migration-status.md](phase0-analyzer-heap-scan-migration-status.md)
+   for the per-analyzer detail. **(Fixed) No progress-reporting hook.**
+   `HeapIndexScanDispatcher.Run` previously had no progress-reporting hook, so the per-object
+   `ObjectScanCounter` progress messages (e.g. "scanning heap objects") that a migrated analyzer's
+   scan loop used to report were lost for the dispatcher path. Fixed: the dispatcher now drives its
+   own `ObjectScanCounter` over the shared scan and publishes `AnalyzerStarted` /
+   `AnalyzerProgress` / `AnalyzerCompleted` events to `context.DiagnosticsSink` under a synthetic
+   `"Shared heap index scan"` name (via `AnalysisDiagnosticsPublisher`, the same mechanism
+   `AnalyzerExecutionRunner` uses for individually-run analyzers), so the CLI console and verbose
+   diagnostics log both show live progress during the shared pass without per-analyzer plumbing
+   changes. `Run`'s public signature is unchanged.
+
+   **Architect review findings (dispatcher + all migrated analyzers):** a scrutiny pass against
+   `HeapIndexScanDispatcher.cs`, `IHeapIndexScanParticipant.cs`, `AnalysisPipeline.cs`, and the
+   migrated analyzers surfaced five open issues, two of them blocking. **Both blocking issues are
+   now fixed:**
+   - **(Fixed) No failure isolation around the shared scan.** `HeapIndexScanDispatcher.Run` now
+     wraps each participant's `BeforeHeapIndexScan` and `OnHeapEntry` call in its own try/catch
+     (`HeapIndexScanDispatcher.cs`), tracking a per-participant `failed` flag rather than letting an
+     exception propagate out of the shared loop. One participant throwing (e.g. a null ClrMD field
+     read on a corrupt object) no longer fails every other analyzer in the run — it degrades only
+     the offending participant, which then observes `OnHeapIndexScanCompleted(succeeded: false)` and
+     falls back to its own self-contained scan path.
+   - **(Fixed) The "was the shared scan actually primed" gate is no longer duplicated.**
+     `IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded)` is now the single source of
+     truth the dispatcher hands each participant after the shared pass finishes (or fails), instead
+     of every migrated analyzer independently re-deriving `cache.TryGetHeapIndex(out _)` a second
+     time in `AnalyzeAsync`. Analyzers store the callback's `succeeded` value (e.g.
+     `AsyncTaskAnalyzer._participantScanSucceeded`) and gate on it directly — closing the same bug
+     class as the direct-`AnalyzeAsync`-call test bypass already fixed once for `DbConnectionAnalyzer`
+     (item 1 above).
+   - **Concrete-type coupling silently disables the optimization.** `AnalysisPipeline` only wires up
+     the dispatcher when `context.Cache is HeapAnalysisCache`, not the `IHeapAnalysisCache`
+     interface every analyzer otherwise programs against. Any other `IHeapAnalysisCache`
+     implementation silently skips the shared scan with no error or diagnostics event — every
+     participant just falls back to its own scan. Correctness-preserving today, but an invisible
+     perf cliff and a sign the "single-pass" architecture only exists for one concrete class.
+   - **The "one shared pass beats N independent scans" premise is unverified.** The dispatcher path
+     is a single-threaded `foreach` over `EnumerateIndexedEntries()` fanning out to every
+     participant per entry. It replaced fallback paths like `CrashAnalyzer`'s
+     `Parallel.ForEach(heap.Segments, ...)`, which used full core parallelism. Trading N parallel
+     full scans for one sequential shared scan is only a net win if the disk-index read, not CPU,
+     is the bottleneck — plausible, but not demonstrated against a `BenchmarkSuite1` run on a
+     representative large dump. Given CLAUDE.md's "reasonable runtime on 10GB+ dumps" as a
+     definition-of-done criterion, this should be measured, not assumed, before broader rollout.
+   - **Each migrated analyzer now carries three parallel implementations of the same logic**:
+     the participant path, a parallel-segment no-index fallback, and (for `AsyncTaskAnalyzer`) a
+     third raw-heap fallback. The `*DiscrepancyTests` suite exists specifically to catch these
+     paths disagreeing — structural duplication the dispatcher was meant to remove, not add to.
+     Worth exploring whether the no-index fallback could drive the same `OnHeapEntry` logic over a
+     live `ClrHeap.EnumerateObjects()` loop (one behavior, two drivers) instead of a fourth
+     hand-duplicated code path per analyzer.
 3. **Per-type statistics engine** (Deliverable 5 item 2) — depends on item 2 above (the dispatcher)
    existing; the per-type reduction is designed to run as an accumulator inside the same single
    pass, so it is cheap once the dispatcher exists and removes a correctness risk (disagreeing

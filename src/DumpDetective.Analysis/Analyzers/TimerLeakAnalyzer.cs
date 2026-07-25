@@ -42,16 +42,14 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
         if (typeName.Equals("System.Threading.TimerHolder", StringComparison.Ordinal))
             return TimerObjectCategory.TimerHolder;
 
-        if (typeName.StartsWith("System.Threading.", StringComparison.Ordinal)
-            && typeName.Contains("Timer", StringComparison.Ordinal))
-            return TimerObjectCategory.OtherTimer;
-
-        if (typeName.StartsWith("System.Timers.", StringComparison.Ordinal)
-            && typeName.Contains("Timer", StringComparison.Ordinal))
+        if (TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, OtherTimerNamespacePrefixes, null, OtherTimerTokens))
             return TimerObjectCategory.OtherTimer;
 
         return TimerObjectCategory.None;
     }
+
+    private static readonly string[] OtherTimerNamespacePrefixes = ["System.Threading.", "System.Timers."];
+    private static readonly string[] OtherTimerTokens = ["Timer"];
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

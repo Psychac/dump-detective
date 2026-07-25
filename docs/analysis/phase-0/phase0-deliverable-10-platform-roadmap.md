@@ -388,10 +388,28 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
 
 **Independent infra (no blocking dependencies — can start any time)**
 
-6. **Shared type-classification layer** for the 8 analyzers currently rolling their own type-name
+6. ~~**Shared type-classification layer**~~ for the 8 analyzers currently rolling their own type-name
    pattern matching (Deliverable 5 item 4) — cheap, and directly reduces the cost of the Deliverable
    2 capability gaps in [P2](#medium-term-p2) that need the same classification (EF Core, DI,
-   Channels).
+   Channels). **Done.**
+
+   **(Done) Shared type-classification layer.** Added `TypeNamePatternMatcher`
+   (`Analyzers/TypeNamePatternMatcher.cs`) as the single home for the namespace-prefix / suffix /
+   contains-token / short-name-extraction shape shared across the 8 analyzers, exposing four
+   ordinal-comparison primitives (`HasAnyPrefix`, `ContainsAny`, `HasPrefixAndSuffixOrContains`,
+   `GetShortName`) with no LINQ, no `Regex`, and no universal "classify into one enum" API — each
+   caller keeps its own literal pattern lists and category enum, only the matching boilerplate
+   moved. Migrated `DbConnectionAnalyzer.IsConnectionType`, `WcfChannelAnalyzer.IsWcfChannelType`,
+   `HttpObjectAnalyzer.IsHttpMessageHandler`, `TimerLeakAnalyzer.ClassifyType`'s `OtherTimer`
+   fallback, and both of `CollectionAnalyzer`'s BCL-namespace-check/short-name-extraction call
+   sites (removing its duplicated inline copy and dead `s_typeNameCutChars` field), and
+   `AsyncTaskAnalyzer`'s task-type prefix check. `WeakReferenceAnalyzer` (single `StartsWith` call)
+   and `AsyncStateMachineAnalyzer` (genuinely dynamic `<...>d__N` `Regex` suffix, not shared by
+   anything else) were left untouched, as scoped. Added
+   `TypeNamePatternMatcherTests.cs` covering all four primitives. Full build clean, full test suite
+   green (346 passed / 0 failed, 39 skipped) after the change; no golden-file or discrepancy-test
+   regressions, since classification behavior is unchanged — only the implementation moved. Item 6
+   is now fully closed.
 7. **Shared typed-resource sampler** for the `DbConnectionAnalyzer`/`WcfChannelAnalyzer`/
    `HttpObjectAnalyzer`/`TimerLeakAnalyzer` quartet (Deliverable 5 item 7) — self-contained
    extraction, four existing call sites to migrate.

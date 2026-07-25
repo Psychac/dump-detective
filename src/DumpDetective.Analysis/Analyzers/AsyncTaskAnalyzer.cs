@@ -40,6 +40,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 
     // Sentinel continuation type — no-op callback; indicates orphan
     private const string NoOpContinuationType = "System.Threading.Tasks.Task+<>c";
+    private static readonly string[] TaskNamespacePrefixes = ["System.Threading.Tasks.Task"];
     private static readonly string[] ExceptionRelatedFields =
     [
         "m_exceptionsHolder",
@@ -425,7 +426,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
                 continue;
 
             string? typeName = obj.Type.Name;
-            if (typeName is null || !typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
+            if (typeName is null || !TypeNamePatternMatcher.HasAnyPrefix(typeName, TaskNamespacePrefixes))
                 continue;
 
             result.Add((obj.Address, obj.Type.MethodTable, 0));

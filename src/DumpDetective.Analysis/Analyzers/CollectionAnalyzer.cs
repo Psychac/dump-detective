@@ -858,6 +858,13 @@ namespace DumpDetective.Analysis.Analyzers
 
         public void Dispose() { }
 
+        private static readonly string[] BclCollectionNamespacePrefixes =
+        [
+            "System.Collections.",
+            "System.Collections.Generic.",
+            "System.Collections.Concurrent.",
+        ];
+
         private static CollectionKind ResolveCollectionKind(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, CollectionKind> methodTableKinds)
         {
             if (entry.MethodTable == 0)
@@ -888,18 +895,12 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Match only well-known BCL collection namespaces to avoid false positives
             // from arbitrary application types whose names happen to contain these words.
-            bool isBcl = typeName.StartsWith("System.Collections.", StringComparison.Ordinal)
-                      || typeName.StartsWith("System.Collections.Generic.", StringComparison.Ordinal)
-                      || typeName.StartsWith("System.Collections.Concurrent.", StringComparison.Ordinal);
+            bool isBcl = TypeNamePatternMatcher.HasAnyPrefix(typeName, BclCollectionNamespacePrefixes);
 
             if (isBcl)
             {
                 // normalize to the outer (non-generic) type name to avoid matching nested generic args
-                string outer = typeName;
-                int cut = outer.IndexOfAny(new char[] { '`', '[', '<', '+' });
-                if (cut >= 0) outer = outer.Substring(0, cut);
-                int lastDot = outer.LastIndexOf('.');
-                string shortName = lastDot >= 0 ? outer.Substring(lastDot + 1) : outer;
+                string shortName = TypeNamePatternMatcher.GetShortName(typeName);
 
                 // Exclude concurrent/non-array-backed variants explicitly
                 if (shortName.StartsWith("Concurrent", StringComparison.OrdinalIgnoreCase) ||
@@ -1110,8 +1111,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private static readonly char[] s_typeNameCutChars = ['`', '[', '<', '+'];
-
         private static CollectionKind ResolveCollectionKindConcurrent(
             ClrHeap heap, ulong address, ulong methodTable,
             ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
@@ -1129,17 +1128,11 @@ namespace DumpDetective.Analysis.Analyzers
                 if (typeName.Contains('+'))
                     return CollectionKind.None;
 
-                bool isBcl = typeName.StartsWith("System.Collections.", StringComparison.Ordinal)
-                          || typeName.StartsWith("System.Collections.Generic.", StringComparison.Ordinal)
-                          || typeName.StartsWith("System.Collections.Concurrent.", StringComparison.Ordinal);
+                bool isBcl = TypeNamePatternMatcher.HasAnyPrefix(typeName, BclCollectionNamespacePrefixes);
 
                 if (!isBcl) return CollectionKind.None;
 
-                string outer = typeName;
-                int cut = outer.IndexOfAny(s_typeNameCutChars);
-                if (cut >= 0) outer = outer.Substring(0, cut);
-                int lastDot = outer.LastIndexOf('.');
-                string shortName = lastDot >= 0 ? outer.Substring(lastDot + 1) : outer;
+                string shortName = TypeNamePatternMatcher.GetShortName(typeName);
 
                 // Exclude concurrent/non-array-backed variants explicitly
                 if (shortName.StartsWith("Concurrent", StringComparison.OrdinalIgnoreCase) ||

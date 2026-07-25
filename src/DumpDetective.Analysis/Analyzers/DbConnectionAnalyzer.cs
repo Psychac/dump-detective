@@ -46,16 +46,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     ];
 
     // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
-    private static bool IsConnectionType(string typeName)
-    {
-        if (!typeName.EndsWith("Connection", StringComparison.Ordinal)) return false;
-        for (int i = 0; i < ConnectionNamespacePrefixes.Length; i++)
-        {
-            if (typeName.StartsWith(ConnectionNamespacePrefixes[i], StringComparison.Ordinal))
-                return true;
-        }
-        return false;
-    }
+    private static bool IsConnectionType(string typeName) =>
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
 
     // Field names to try in order when reading connection state
     private static readonly string[] StateFieldNames = ["_connectionState", "_state", "m_connectionState"];

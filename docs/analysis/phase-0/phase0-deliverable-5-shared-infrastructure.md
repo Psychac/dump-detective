@@ -100,6 +100,9 @@ owning their own summarization logic too.
 
 ## 4. Type Metadata Classification Layer
 
+**Status**: Done — see [P1 item 6](phase0-deliverable-10-platform-roadmap.md#near-term-p1) in the
+platform roadmap for the shipped `TypeNamePatternMatcher` and migration details.
+
 **Current duplication**: Raw `MethodTable → ClrType` resolution is already correctly shared via
 `HeapAnalysisCache`. What's duplicated is the *classification* layer on top — 8 analyzers
 (`CollectionAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `WeakReferenceAnalyzer`,

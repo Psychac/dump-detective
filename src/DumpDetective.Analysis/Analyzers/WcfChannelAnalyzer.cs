@@ -32,15 +32,11 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
 
     // Types to match: in System.ServiceModel namespace, ending with "Channel" or
     // well-known base/proxy types.
-    private static bool IsWcfChannelType(string typeName)
-    {
-        if (!typeName.StartsWith("System.ServiceModel.", StringComparison.Ordinal)) return false;
-        // Accept any channel or service-model communication object
-        return typeName.Contains("Channel", StringComparison.Ordinal)
-            || typeName.EndsWith(".ServiceChannel", StringComparison.Ordinal)
-            || typeName.Contains("ClientBase", StringComparison.Ordinal)
-            || typeName.Contains("CommunicationObject", StringComparison.Ordinal);
-    }
+    private static readonly string[] WcfNamespacePrefixes = ["System.ServiceModel."];
+    private static readonly string[] WcfContainsTokens = ["Channel", "ClientBase", "CommunicationObject"];
+
+    private static bool IsWcfChannelType(string typeName) =>
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, WcfNamespacePrefixes, ".ServiceChannel", WcfContainsTokens);
 
     private static readonly string[] StateFieldNames = ["_state", "state", "communicationState"];
 

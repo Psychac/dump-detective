@@ -38,13 +38,12 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
         return HttpObjectCategory.None;
     }
 
-    private static bool IsHttpMessageHandler(string typeName)
-    {
+    private static readonly string[] HttpNamespacePrefixes = ["System.Net.Http."];
+    private static readonly string[] HttpMessageHandlerTokens = ["HttpMessageHandler"];
+
+    private static bool IsHttpMessageHandler(string typeName) =>
         // Direct or subclass of HttpMessageHandler in System.Net.Http
-        return typeName.StartsWith("System.Net.Http.", StringComparison.Ordinal)
-            && (typeName.EndsWith("Handler", StringComparison.Ordinal)
-                || typeName.Contains("HttpMessageHandler", StringComparison.Ordinal));
-    }
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, HttpNamespacePrefixes, "Handler", HttpMessageHandlerTokens);
 
     private enum HttpObjectCategory { None, HttpClient, HttpWebRequest, HttpWebResponse, HttpMessageHandler, ServicePoint }
 

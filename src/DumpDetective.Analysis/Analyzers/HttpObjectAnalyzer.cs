@@ -76,8 +76,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
-                if (clrType?.Name is not string fullName) continue;
+                string fullName = TypeAggregateNameResolver.ResolveTypeName(heap, kv.Key, kv.Value.SampleAddress);
                 HttpObjectCategory cat = ClassifyType(fullName);
                 if (cat == HttpObjectCategory.None) continue;
                 candidateMts[kv.Key] = (fullName, cat, kv.Value.Count, kv.Value.TotalSize);

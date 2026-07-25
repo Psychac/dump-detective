@@ -181,37 +181,11 @@ internal class StatisticsCache
         return hydratedStats.Count > 0;
     }
 
-    private static string ResolveTypeNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
-    {
-        ClrType? type = heap.GetTypeByMethodTable(methodTable);
-        if (type?.Name is string name)
-            return name;
+    private static string ResolveTypeNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable) =>
+        TypeAggregateNameResolver.ResolveTypeName(heap, methodTable, sampleAddress);
 
-        if (sampleAddress != 0)
-        {
-            ClrObject sample = heap.GetObject(sampleAddress);
-            if (sample.IsValid && sample.Type?.Name is string sampleName)
-                return sampleName;
-        }
-
-        return $"MethodTable@0x{methodTable:X}";
-    }
-
-    private static string ResolveModuleNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable)
-    {
-        ClrType? type = heap.GetTypeByMethodTable(methodTable);
-        if (type?.Module?.Name is string moduleName && !string.IsNullOrWhiteSpace(moduleName))
-            return System.IO.Path.GetFileName(moduleName);
-
-        if (sampleAddress != 0)
-        {
-            ClrObject sample = heap.GetObject(sampleAddress);
-            if (sample.IsValid && sample.Type?.Module?.Name is string sampleModuleName && !string.IsNullOrWhiteSpace(sampleModuleName))
-                return System.IO.Path.GetFileName(sampleModuleName);
-        }
-
-        return "N/A";
-    }
+    private static string ResolveModuleNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable) =>
+        TypeAggregateNameResolver.ResolveModuleName(heap, methodTable, sampleAddress);
 
     private static int AddClamped(int existing, long delta)
     {

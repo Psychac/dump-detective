@@ -90,7 +90,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 (ulong mt, TypeAggregateIndexEntry e) = finalizableTypes[i];
-                string typeName = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:X}";
+                string typeName = TypeAggregateNameResolver.ResolveTypeName(heap, mt, e.SampleAddress);
                 topTypesByGen2.Add(new TypeGenerationProfile(
                     TypeName: typeName,
                     Gen0Count: e.Gen0Count,

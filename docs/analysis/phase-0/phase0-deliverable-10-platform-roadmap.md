@@ -305,10 +305,36 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
      Worth exploring whether the no-index fallback could drive the same `OnHeapEntry` logic over a
      live `ClrHeap.EnumerateObjects()` loop (one behavior, two drivers) instead of a fourth
      hand-duplicated code path per analyzer.
-3. **Per-type statistics engine** (Deliverable 5 item 2) — depends on item 2 above (the dispatcher)
-   existing; the per-type reduction is designed to run as an accumulator inside the same single
-   pass, so it is cheap once the dispatcher exists and removes a correctness risk (disagreeing
-   "total bytes" numbers across report sections).
+3. ~~**Per-type statistics engine**~~ (Deliverable 5 item 2) — **premise already satisfied, no longer
+   blocked on the dispatcher.** This item assumed the 9x-duplicated per-type reduction (deliverable-8
+   review §5) would need to be computed once as a `HeapIndexScanDispatcher` participant. In practice
+   it's already solved one layer earlier, at Phase 1: `TypeIndexBuilder` (`Indexing/TypeIndexBuilder.cs`)
+   accumulates count/size/LOH/gen-bucket per `MethodTable` during the single-pass index build and
+   persists it as `TypeAggregateIndexEntry`; `StatisticsCache.GetOrBuildTypeStatistics` hydrates a
+   name-keyed view from that persisted data in O(distinct types), memoized once per pipeline run
+   because `HeapAnalysisCache`/`StatisticsCache` is a single shared instance across all analyzers in
+   an `AnalysisPipeline.ExecuteAsync` call. An audit of the analyzers still calling
+   `heap.EnumerateObjects()` outside the dispatcher-migrated 9 (`FinalizableObjectAnalyzer`,
+   `HttpObjectAnalyzer`, `TimerLeakAnalyzer`) found no genuine duplication: all three already read
+   `TypeAggregates` as their primary path, with `EnumerateObjects()` only as the same
+   index-absent-fallback pattern already accepted for the migrated analyzers (finding #5 above).
+   **What remains is narrower than originally scoped**: `TypeAggregates` (MT-keyed) and
+   `StatisticsCache`'s `CachedTypeStatistics` (name-keyed) are two independently-maintained
+   representations of the same data, and `HttpObjectAnalyzer`/`TimerLeakAnalyzer`/
+   `FinalizableObjectAnalyzer`/`StatisticsCache` each separately call `heap.GetTypeByMethodTable(mt)`
+   to resolve a type name per aggregate entry — redundant resolution work and two shapes that could
+   in principle drift apart. Tracked as a smaller consolidation task, not the original "run per-type
+   stats as a dispatcher participant" item.
+
+   **(Done) Type-name-resolution consolidation.** Added `TypeAggregateNameResolver`
+   (`Cache/TypeAggregateNameResolver.cs`) as the single MT→name/module resolution point
+   (MethodTable lookup → sample-instance fallback → placeholder). `StatisticsCache`,
+   `HttpObjectAnalyzer`, `TimerLeakAnalyzer`, and `FinalizableObjectAnalyzer` now all call it
+   instead of independently reimplementing the fallback chain. Full test suite green (328
+   passed / 0 failed) after the change; no behavior change to the resolution order, only
+   `FinalizableObjectAnalyzer`'s no-match placeholder text changed from `MT:0x...` to
+   `MethodTable@0x...` to match the shared format (no test asserted the old string). Item 3 is
+   now fully closed.
 4. **Object metadata classification** (generation/segment bucket, Deliverable 5 item 5) — sequenced
    after item 2 above (the dispatcher); most of its value is only realized once objects are
    classified once per object inside the shared single pass and handed to every visitor.

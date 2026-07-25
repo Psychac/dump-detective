@@ -1437,16 +1437,6 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Heuristic helpers ──────────────────────────────────────────────────────
 
-        /// <summary>Returns the GC generation (0/1/2) of an object, or -1 if unknown/invalid.</summary>
-        private static int GetObjectGeneration(ClrHeap heap, ulong address)
-        {
-            if (address == 0) return -1;
-            ClrSegment? seg = heap.GetSegmentByAddress(address);
-            if (seg == null) return -1;
-            try { return (int)seg.GetGeneration(address); }
-            catch { return -1; }
-        }
-
         /// <summary>
         /// Counts the number of <em>extra</em> occurrences of any subscriber address beyond the
         /// first. A count > 0 means the same subscriber object was registered more than once.
@@ -1504,7 +1494,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 ulong addr = subscribers[i].Address;
                 if (addr == 0 || subscribers[i].Type == StringConstants.StaticMethodSubscriber) continue;
-                int gen = GetObjectGeneration(heap, addr);
+                int gen = SegmentKindMapper.ResolveGeneration(heap,addr);
                 if (gen == 0 || gen == 1) gen01Count++;
                 probed++;
             }
@@ -1518,8 +1508,8 @@ namespace DumpDetective.Analysis.Analyzers
         /// </summary>
         internal static bool IsLifetimeMismatch(ClrHeap heap, ulong publisherAddress, ulong subscriberAddress)
         {
-            int p = GetObjectGeneration(heap, publisherAddress);
-            int s = GetObjectGeneration(heap, subscriberAddress);
+            int p = SegmentKindMapper.ResolveGeneration(heap,publisherAddress);
+            int s = SegmentKindMapper.ResolveGeneration(heap,subscriberAddress);
             return IsLifetimeMismatch(p, s);
         }
 

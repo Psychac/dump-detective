@@ -75,7 +75,7 @@ namespace DumpDetective.Analysis.Analyzers
                         continue;
                     totalObjects++;
                     totalBytes += obj.Size;
-                    int g = ResolveGeneration(heap, obj.Address);
+                    int g = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
                     if (g == 0) gen0++;
                     else if (g == 1) gen1++;
                     else if (g == 2) gen2++;
@@ -196,16 +196,6 @@ namespace DumpDetective.Analysis.Analyzers
                     return field;
             }
             return null;
-        }
-
-        // Uses the ClrMD 3.x public API: heap.GetSegmentByAddress → segment.GetGeneration.
-        // Correctly handles Ephemeral segments where Gen0/Gen1/Gen2 share one segment.
-        private static int ResolveGeneration(ClrHeap heap, ulong address)
-        {
-            ClrSegment? seg = heap.GetSegmentByAddress(address);
-            if (seg is null) return 2;
-            try { return (int)seg.GetGeneration(address); }
-            catch { return 2; }
         }
 
         /// <summary>

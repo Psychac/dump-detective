@@ -335,14 +335,56 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    `FinalizableObjectAnalyzer`'s no-match placeholder text changed from `MT:0x...` to
    `MethodTable@0x...` to match the shared format (no test asserted the old string). Item 3 is
    now fully closed.
-4. **Object metadata classification** (generation/segment bucket, Deliverable 5 item 5) — sequenced
-   after item 2 above (the dispatcher); most of its value is only realized once objects are
-   classified once per object inside the shared single pass and handed to every visitor.
-5. **Confirm container/satellite index build-once-vs-per-invocation behavior** (Deliverable 8
-   §2/consolidation #3) — a verification task, independent of the dispatcher chain above. If
-   `Indexing.Container`/`Indexing.Satellite` indexes are lazily rebuilt per analyzer invocation
-   rather than cached across a session, this is a second, distinct instance of "repeated index
-   construction" that would need its own fix, separate from the object-index dispatcher.
+4. ~~**Object metadata classification**~~ (generation/segment bucket, Deliverable 5 item 5) — **scope
+   narrower than originally framed, now closed.** `GCGenerationAnalyzer` already consumed per-type
+   `Gen0Count/Gen1Count/Gen2Count` from `TypeAggregateIndexEntry` (built once during index scan), and
+   `AllocationPatternAnalyzer`/`LohFragmentationAnalyzer`/`SegmentReservationAnalyzer` only needed
+   segment-*kind* classification, already served by `SegmentKindMapper`. Neither needed further work.
+   The real duplication was three independent per-*address* generation resolvers (each wrapping
+   `heap.GetSegmentByAddress(address)` → `segment.GetGeneration(address)`) in
+   `FinalizableObjectAnalyzer`, `EventLeakAnalyzer`, and `CollectionAnalyzer`, differing only in their
+   unknown/failure fallback value. `heap.GetSegmentByAddress` already does its own efficient lookup
+   internally, so no new segment-boundary table was needed — no dispatcher, interface, or on-disk
+   format changes were required either; each analyzer already holds a live `ClrHeap` from
+   `BeforeHeapIndexScan`.
+
+   **(Done) Shared generation resolver.** Added `SegmentKindMapper.ResolveGeneration(ClrHeap, ulong)`
+   (`Analyzers/SegmentKindMapper.cs`) as the single per-object generation resolution point, returning
+   `-1` for unresolvable addresses (invalid address, no owning segment, or a ClrMD exception).
+   `FinalizableObjectAnalyzer` and `EventLeakAnalyzer` now call it instead of maintaining their own
+   copies. `CollectionAnalyzer`'s copy was dead/broken: it resolved generation via reflection
+   (`typeof(ClrObject).GetProperty("Generation")`, `typeof(ClrHeap).GetMethod("GetGeneration", ...)`),
+   neither of which exists on ClrMD 4's public API, so both handles were always `null` and every call
+   silently fell through to a hardcoded `return 2` — **`CollectionAnalyzer`'s generation breakdown had
+   been reporting every collection as Gen2 regardless of actual generation.** Switching to the shared
+   resolver fixed this as a side effect; the per-kind bucketing was also corrected to skip unresolvable
+   (`-1`) addresses instead of silently folding them into the Gen0 bucket. Full build clean, relevant
+   analyzer test suite green (27 passed / 0 failed, 4 skipped) after the change. Item 4 is now fully
+   closed.
+5. ~~**Confirm container/satellite index build-once-vs-per-invocation behavior**~~ (Deliverable 8
+   §2/consolidation #3) — a verification task, independent of the dispatcher chain above. **Confirmed
+   safe, no code fix required.** The index — object index and all `Indexing.Container`/
+   `Indexing.Satellite` sections — is built exactly once per unit of work (one dump, one pipeline
+   run), never per analyzer invocation.
+
+   **(Done) Verification.** `DiskBackedObjectIndexWriter` is only ever constructed inside
+   `HeapIndexCache.PrebuildHeapIndex` (`Cache/HeapIndexCache.cs`), which guards against rebuilding
+   with `if (_heapIndex is not null) return _heapIndex;`; no analyzer or satellite reader constructs
+   the writer directly. `DiskBackedObjectIndexWriter.Build` (`Indexing/DiskBackedObjectIndexWriter.cs`)
+   writes the container and all satellite sections (task/event/large-object/LOH-free-block indexes)
+   together in one call, with `TypeAggregates` written last as a completion marker — there is no
+   separate, deferred build path triggered by whichever analyzer happens to touch a satellite section
+   first. `TryLoadFromCache` additionally short-circuits to the on-disk `cache.bin` when the
+   dump-content hash matches, so even a fresh process run against the same dump skips rebuilding
+   entirely. On the caching side, `BuildHeapIndexStage` (single-dump pipeline) and
+   `PerDumpExecutionService` (trend/batch mode) each construct exactly one `HeapAnalysisCache` per
+   dump, and `RunAnalyzersPipelineStage` passes that single shared instance into
+   `AnalyzerExecutionService.BuildContext`, so every analyzer in a run shares one cache — never a
+   fresh one per analyzer. (A minor, out-of-scope observation: `EventLeakAnalyzer` and
+   `DominatorAnalyzer` still call `EnumerateIndexedEntries()` directly outside `HeapIndexScanDispatcher`,
+   but only as guarded fallback paths when the shared dispatcher scan didn't run; `QueryEngine`'s
+   direct call is its separate ad hoc query tool, covered by item 13 below.) Item 5 is now fully
+   closed.
 
 **Independent infra (no blocking dependencies — can start any time)**
 

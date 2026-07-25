@@ -31,4 +31,18 @@ internal static class SegmentKindMapper
 
         return false;
     }
+
+    /// <summary>
+    /// Resolves the GC generation (0/1/2) of the object at <paramref name="address"/>.
+    /// Returns -1 if the address is unresolvable (invalid address, no owning segment, or the
+    /// underlying ClrMD lookup throws).
+    /// </summary>
+    public static int ResolveGeneration(ClrHeap heap, ulong address)
+    {
+        if (address == 0) return -1;
+        ClrSegment? seg = heap.GetSegmentByAddress(address);
+        if (seg is null) return -1;
+        try { return (int)seg.GetGeneration(address); }
+        catch { return -1; }
+    }
 }

@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Runtime;
-using System.Reflection;
 using System;
 using System.Collections.Generic;
 using DumpDetective.Analysis.Indexing;
@@ -69,8 +68,6 @@ namespace DumpDetective.Analysis.Analyzers
         private List<WastefulCollection>? _wasteful;
         private Dictionary<ulong, CollectionKind>? _methodTableKinds;
         private Dictionary<CollectionKind, int[]>? _generationCounts;
-        private PropertyInfo? _generationProperty;
-        private MethodInfo? _getGenerationMethod;
         private ObjectScanCounter? _scanCounter;
         private IProgress<AnalyzerProgressReport>? _progress;
         private int _topCapacity;
@@ -188,8 +185,6 @@ namespace DumpDetective.Analysis.Analyzers
             _topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
             _wasteful = new List<WastefulCollection>(_topCapacity);
             _methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
-            _generationProperty = typeof(ClrObject).GetProperty("Generation");
-            _getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
 
             _generationCounts = new Dictionary<CollectionKind, int[]>(capacity: 16);
             foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
@@ -233,9 +228,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.Dictionaries++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.Dictionary][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.Dictionary][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeDictionary(heap, objectAddress);
@@ -253,9 +251,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.Lists++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.List][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.List][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeList(heap, objectAddress);
@@ -273,9 +274,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.HashSets++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.HashSet][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.HashSet][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeHashSet(heap, objectAddress);
@@ -293,9 +297,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.Queues++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.Queue][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.Queue][idx]++;
+                    }
                 }
                 catch { }
                 var qWaste = AnalyzeQueue(heap, objectAddress);
@@ -313,9 +320,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.ArrayLists++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.ArrayList][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.ArrayList][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
@@ -333,9 +343,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.Stacks++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.Stack][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.Stack][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
@@ -353,9 +366,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.SortedLists++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.SortedList][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.SortedList][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
@@ -373,9 +389,12 @@ namespace DumpDetective.Analysis.Analyzers
                 stats.SortedSets++;
                 try
                 {
-                    int gen = ResolveGeneration(heap, objectAddress, _generationProperty, _getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    generationCounts[CollectionKind.SortedSet][idx]++;
+                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        generationCounts[CollectionKind.SortedSet][idx]++;
+                    }
                 }
                 catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
@@ -459,10 +478,6 @@ namespace DumpDetective.Analysis.Analyzers
         // or a per-segment ClrObject walk (no-cache path) using the same concurrent accumulation logic.
         private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken, IHeapAnalysisCache? cache = null)
         {
-            // Cache reflection handles for generation resolution (compatible across ClrMD versions)
-            PropertyInfo? generationProperty = typeof(ClrObject).GetProperty("Generation");
-            MethodInfo? getGenerationMethod = typeof(ClrHeap).GetMethod("GetGeneration", new[] { typeof(ulong) });
-
             // Per-kind generation counts: index 0=Gen0,1=Gen1,2=Gen2,3=LOH/large
             var generationCounts = new ConcurrentDictionary<CollectionKind, int[]>(concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 16);
             foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
@@ -541,10 +556,13 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     int gen;
                     lock (heapLock)
-                        gen = ResolveGeneration(heap, address, generationProperty, getGenerationMethod);
-                    int idx = gen >= 3 ? 3 : Math.Max(0, gen);
-                    var arr = generationCounts.GetOrAdd(kind, _ => new int[4]);
-                    Interlocked.Increment(ref arr[idx]);
+                        gen = SegmentKindMapper.ResolveGeneration(heap, address);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        var arr = generationCounts.GetOrAdd(kind, _ => new int[4]);
+                        Interlocked.Increment(ref arr[idx]);
+                    }
                 }
                 catch { /* best-effort, ignore generation failures */ }
 
@@ -1622,32 +1640,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return null;
-        }
-
-        private static int ResolveGeneration(ClrHeap heap, ulong address, PropertyInfo? generationProperty, MethodInfo? getGenerationMethod)
-        {
-            try
-            {
-                if (getGenerationMethod != null)
-                {
-                    object? val = getGenerationMethod.Invoke(heap, new object[] { address });
-                    if (val is int gi) return gi;
-                    if (val is uint gu) return (int)gu;
-                }
-
-                if (generationProperty != null)
-                {
-                    ClrObject obj = heap.GetObject(address);
-                    object boxed = obj;
-                    object? value = generationProperty.GetValue(boxed);
-                    if (value is int g) return g;
-                    if (value is uint ug) return (int)ug;
-                }
-            }
-            catch { }
-
-            // Fallback to Gen2 when uncertain
-            return 2;
         }
 
         private sealed class LocalWasteAccumulator

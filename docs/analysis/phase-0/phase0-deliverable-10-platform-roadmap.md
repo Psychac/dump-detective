@@ -508,15 +508,42 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
     fallback both wire up logging. No code change needed — the pattern was already consistent. Formalized
     in [docs/architecture.md § 14 Observability](#14--observability) and [phase0-deliverable-7-dependency-graph-review.md](#infrastructure-leakage)
     as a sanctioned, not ad-hoc, practice.
-11. **Close the crash-triage gap**: confirm and, if needed, add minidump exception-stream parsing
-    to `CrashAnalyzer` (Deliverable 2, 3, 9) — validated as a real, closeable gap against WinDbg's
-    `!analyze -v`, not a case of chasing parity blindly. Independent, no blocking dependency.
+11. ~~**Close the crash-triage gap**: confirm and, if needed, add minidump exception-stream parsing
+    to `CrashAnalyzer`~~ (Deliverable 2, 3, 9) — **INVESTIGATION COMPLETE; DEFERRED TO FUTURE PHASE.**
+    Gap is validated as real and closeable against WinDbg's `!analyze -v`. ClrMD 4.0 does not expose
+    minidump exception stream APIs; direct DBGHELP P/Invoke required (same approach as WinDbg/debuggers).
+    Recommendation: implement via Windows DBGHELP for Phase 2, estimated 2–4 days. See
+    [p1-item-11-minidump-exception-stream-investigation.md](p1-item-11-minidump-exception-stream-investigation.md)
+    for full research, options analysis, and implementation roadmap. Independent, no blocking dependency.
 12. **Add runtime-configuration reporting** (GC mode, heap count, TieredCompilation) — cheap, high
     value, currently unowned by any analyzer (Deliverable 2). Independent, no blocking dependency.
-13. **Verify the actual depth of `QueryEngine`** (ad hoc object inspection) **and
-    `Analysis.Trend.Comparers`** (snapshot diffing) (Deliverable 9) — a verification task, independent
-    of everything above. Its result determines whether the [P3](#long-term-p3) "deepen `QueryEngine`"
-    item is real work or already done.
+13. ~~**Verify the actual depth of `QueryEngine`** (ad hoc object inspection) **and
+    `Analysis.Trend.Comparers`** (snapshot diffing)~~ (Deliverable 9) — **VERIFICATION COMPLETE.**
+    `QueryEngine` (`src/DumpDetective.Analysis/Query/QueryEngine.cs`) is shallow, confirmed against
+    source: exactly two methods, `TopTypesBySize` (type statistics cache lookup) and `ObjectsOfType`
+    (index stream filtered by resolved type name) — no arbitrary object/field inspection, no
+    address→object lookup, no type-hierarchy walk. `docs/architecture.md` §5.5 lists "Reference
+    paths" as an example `QueryEngine` capability; that capability does not exist on the class at all
+    — it lives entirely in `ReferenceChainAnalyzer`/`RootPathFinder`, a separate layer — so the doc is
+    inaccurate and has been left as a known gap for a future docs pass. More significant than the
+    shallowness: `RuntimeAnalysisContext.Query` (`Pipeline/RuntimeAnalysisContext.cs:30`) constructs a
+    `QueryEngine`, but no analyzer, CLI command, report, or test anywhere in `src/`/`tests/` reads
+    `context.Query` or references `IQueryEngine` — it is wired into the context but has zero
+    consumers, i.e. unreachable capability today, not just a shallow one.
+    `Analysis.Trend.Comparers` is real and wired, not shallow in the way the same critique would apply
+    to `QueryEngine`: `IAnalyzerTrendComparer.Compare` (35 registered comparers, one per analyzer) 
+    produces `MetricDelta` records (`src/DumpDetective.Core/Models/AnalyzerTrendContracts.cs`) carrying
+    delta, percent, growth-rate, and regression-severity classification between two pipeline runs —
+    genuine % growth ranking. Its ceiling is architectural, not an implementation gap: it compares
+    aggregate scalar metrics per analyzer (counts, byte totals) between two whole
+    `AnalyzerDomainResult`s, with no per-object identity tracking across snapshots (no "this object
+    survived run A → run B"), unlike VS Memory Usage/dotMemory's object-level diff. Object addresses
+    aren't stable across two separate dump captures of the same process, so closing this gap would
+    need a new matching mechanism (e.g. type+field-shape heuristics), not more comparer code — out of
+    scope for this verification task. **Net result for [P3](#long-term-p3) item 4**: "deepen
+    `QueryEngine`" is confirmed real work, and it has a prerequisite the P3 item didn't originally
+    scope — `QueryEngine` needs a consumer (e.g. a CLI query subcommand) before depth matters, since
+    today's implementation is unreachable regardless of how deep it is.
 
 ---
 

@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -26,11 +25,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
     private bool _participantScanSucceeded;
 
-    // Task index record layout (20 bytes, little-endian):
-    //   Address (8) | MT (8) | StateFlags (4)
-    private const int TaskIndexMagic = 0x58494B54; // "TKIX"
-    private const int TaskIndexVersion = 1;
-    private const int RecordSize = 20;
 
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
@@ -331,9 +325,14 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
             if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
                 return ConvertInMemoryTaskCandidates(inMemCandidates, options.MaxTasksToScan);
 
-            var entries = ReadTaskIndexFile(heapIndex.IndexPath, progress, options.MaxTasksToScan, ct);
+            var entries = TaskIndexReader.ReadTaskIndexFile(heapIndex.IndexPath, options.MaxTasksToScan, ct);
             if (entries != null)
+            {
+                if (entries.Count > 0)
+                    progress?.Report(new(entries.Count, "task index loaded",
+                        $"{entries.Count:N0} task records read"));
                 return entries;
+            }
 
             // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's
             // HeapIndexScanDispatcher before AnalyzeAsync executes; read back
@@ -354,58 +353,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         for (int i = 0; i < cap; i++)
             result.Add((candidates[i].Addr, candidates[i].Mt, 0)); // StateFlags resolved in Phase 2
         return result;
-    }
-
-    private static List<(ulong, ulong, int)>? ReadTaskIndexFile(
-        string containerPath,
-        IProgress<AnalyzerProgressReport>? progress,
-        int maxTasksToScan,
-        CancellationToken ct)
-    {
-        try
-        {
-            if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.Tasks, out Stream? stream) || stream is null)
-                return null;
-
-            using (stream)
-            {
-                if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                    return null;
-
-                if (header.Magic != TaskIndexMagic || header.Version != TaskIndexVersion)
-                    return null;
-
-                long recordCount = header.RecordCount;
-                int cap = (int)Math.Min(recordCount, maxTasksToScan);
-                var result = new List<(ulong, ulong, int)>(capacity: cap);
-
-                // Read record-by-record via ReadAtLeast: Stream.Read is not guaranteed to
-                // return record-aligned byte counts, and a hand-rolled batch buffer with
-                // manual carry-over has repeatedly gotten this wrong elsewhere. FileStream's
-                // own internal buffer makes this as cheap as batching.
-                Span<byte> rec = stackalloc byte[RecordSize];
-                for (long i = 0; i < recordCount && result.Count < maxTasksToScan; i++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false) < RecordSize)
-                        break;
-
-                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                    ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
-                    int stateFlags = BinaryPrimitives.ReadInt32LittleEndian(rec[16..]);
-
-                    result.Add((address, mt, stateFlags));
-                }
-
-                progress?.Report(new(result.Count, "task index loaded",
-                    $"{result.Count:N0} task records read"));
-                return result;
-            }
-        }
-        catch (Exception)
-        {
-            return null;
-        }
     }
 
     private static List<(ulong, ulong, int)> ScanRawHeapForTasks(

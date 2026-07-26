@@ -14,10 +14,12 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - HttpWebResponse objects: indicate responses not disposed, holding sockets.
 ///   - ServicePoint accumulation: can exhaust the system-level connection table.
 /// </summary>
-public sealed class HttpObjectAnalyzer : IAnalyzer
+public sealed class HttpObjectAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 {
     public string Name => "HTTP Object Analysis";
     public string Category => "Infrastructure";
+
+    public bool IsCandidateType(string typeName) => ClassifyType(typeName) != HttpObjectCategory.None;
 
     // Classifies a type name into one of the HTTP object categories.
     private static HttpObjectCategory ClassifyType(string typeName)
@@ -52,7 +54,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
             Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(
+    private AnalyzerDomainResult Analyze(
         ClrHeap? heap,
         IHeapAnalysisCache? cache,
         CancellationToken cancellationToken)
@@ -62,8 +64,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer
 
         // ── Step 1: Identify matching MTs via the shared candidate-type scanner ──
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidates =
-            TypedResourceCandidateScanner.DiscoverCandidates(
-                heap, cache, t => ClassifyType(t) != HttpObjectCategory.None, cancellationToken);
+            TypedResourceScanDriver.DiscoverCandidates(this, heap, cache, cancellationToken);
 
         if (candidates.Count == 0)
             return Empty();

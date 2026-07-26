@@ -15,10 +15,12 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - System.Timers.Timer
 ///   - System.Threading.TimerQueueTimer / TimerHolder
 /// </summary>
-public sealed class TimerLeakAnalyzer : IAnalyzer
+public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 {
     public string Name => "Timer Leak Analysis";
     public string Category => "Infrastructure";
+
+    public bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
 
     private enum TimerObjectCategory
     {
@@ -56,14 +58,13 @@ public sealed class TimerLeakAnalyzer : IAnalyzer
         return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap? heap, IHeapAnalysisCache? cache, CancellationToken cancellationToken)
+    private AnalyzerDomainResult Analyze(ClrHeap? heap, IHeapAnalysisCache? cache, CancellationToken cancellationToken)
     {
         if (heap is null)
             return Empty();
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidates =
-            TypedResourceCandidateScanner.DiscoverCandidates(
-                heap, cache, t => ClassifyType(t) != TimerObjectCategory.None, cancellationToken);
+            TypedResourceScanDriver.DiscoverCandidates(this, heap, cache, cancellationToken);
 
         if (candidates.Count == 0)
             return Empty();

@@ -50,6 +50,16 @@ internal sealed class AnalysisPipeline(
             new HeapIndexScanDispatcher().Run(heapIndexCache, context, heapIndexScanParticipants, cancellationToken);
         }
 
+        IReadOnlyList<IThreadStackScanParticipant> threadStackScanParticipants = _analyzers.OfType<IThreadStackScanParticipant>().ToArray();
+        if (threadStackScanParticipants.Count > 0)
+        {
+            int maxFramesPerThread = 1;
+            foreach (IThreadStackScanParticipant participant in threadStackScanParticipants)
+                maxFramesPerThread = Math.Max(maxFramesPerThread, participant.GetRequiredFrameCount(context));
+
+            new ThreadStackScanDispatcher().Run(context.Runtime, context, threadStackScanParticipants, maxFramesPerThread, cancellationToken);
+        }
+
         await RunAnalyzerBatchAsync(_analyzers, context, runId, runResults, cancellationToken);
 
         context.CompletedRunResults = runResults.ToArray();

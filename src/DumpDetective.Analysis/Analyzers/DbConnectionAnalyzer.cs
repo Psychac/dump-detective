@@ -18,7 +18,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Connection state mapping (System.Data.ConnectionState):
 ///   Closed=0, Open=1, Connecting=2, Executing=4, Fetching=8, Broken=16
 /// </summary>
-public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>
 {
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
@@ -46,11 +46,23 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     ];
 
     // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
-    private static bool IsConnectionType(string typeName) =>
+    public bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
+
+    public int MaxStateSamplesPerType => MaxStateSamples;
+    public int TopSampleCap => TopOpenCap;
 
     // Field names to try in order when reading connection state
     private static readonly string[] StateFieldNames = ["_connectionState", "_state", "m_connectionState"];
+
+    DbConnectionSnapshot? ITypedResourceInstanceSampler<DbConnectionSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
+    {
+        int stateVal = InstanceStateSampler<DbConnectionSnapshot>.TryReadIntField(heap, entry.Address, StateFieldNames);
+        if (stateVal < 0)
+            return null;
+
+        return new DbConnectionSnapshot(typeName, entry.Address, stateVal == StateOpen ? "Open" : stateVal == StateClosed ? "Closed" : "Other", stateVal);
+    }
 
     // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
     // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
@@ -70,7 +82,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         _heap = heap;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
-            TypedResourceCandidateScanner.DiscoverCandidates(heap, context.Cache, IsConnectionType);
+            TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
 
         var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
@@ -82,7 +94,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         }
 
         _typeStats = typeStats;
-        _sampler = new InstanceStateSampler<DbConnectionSnapshot>(MaxStateSamples, TopOpenCap);
+        _sampler = TypedResourceScanDriver.CreateSampler(this);
     }
 
     /// <summary>
@@ -103,21 +115,22 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
         string typeName = ts.Name;
 
-        // Read state field (capped per type)
-        int stateVal = -1;
-        if (sampler.TryReserveSample(entry.MethodTable))
-            stateVal = InstanceStateSampler<DbConnectionSnapshot>.TryReadIntField(_heap!, entry.Address, StateFieldNames);
+        // Read state field (capped per type, gated via TryGetSample's reserve-then-sample order)
+        DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, typeName);
 
         // Tally state
         int open = ts.Open; int closed = ts.Closed; int other = ts.Other;
-        if (stateVal == StateOpen)        open++;
-        else if (stateVal == StateClosed) closed++;
-        else if (stateVal >= 0)           other++;
+        if (snap is not null)
+        {
+            if (snap.StateValue == StateOpen)        open++;
+            else if (snap.StateValue == StateClosed) closed++;
+            else                                     other++;
+        }
         typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, other, ts.Bytes);
 
         // Capture top-N open connections for the detail table
-        if (stateVal == StateOpen)
-            sampler.AddTopSample(new DbConnectionSnapshot(typeName, entry.Address, "Open", stateVal));
+        if (snap is not null && snap.StateValue == StateOpen)
+            sampler.AddTopSample(snap);
     }
 
     // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry

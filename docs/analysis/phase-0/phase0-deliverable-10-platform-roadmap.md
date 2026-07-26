@@ -439,6 +439,48 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    `ThreadAnalyzer` become the canonical stack-walk provider that `HangAnalyzer`,
    `ThreadStackClusterAnalyzer`, and `LockGraphAnalyzer` consume instead of each independently
    walking stacks and re-deriving wait state (Deliverable 3, 4, 6).
+
+   **(Done) Resource-sampler quartet contract.** Added `ITypedResourceCandidateSource` and
+   `ITypedResourceInstanceSampler<TSnapshot>` (`Analyzers/ITypedResourceCandidateSource.cs`) plus
+   `TypedResourceScanDriver` (`Analyzers/TypedResourceScanDriver.cs`), which turns the item-7
+   sampler's by-convention static-helper call order into a compiler-checked one: candidate
+   discovery only runs through `ITypedResourceCandidateSource.IsCandidateType`, and
+   `ITypedResourceInstanceSampler<TSnapshot>.TrySample` is only reachable after
+   `TypedResourceScanDriver.TryGetSample` has confirmed a sample slot was reserved via
+   `InstanceStateSampler<TSnapshot>.TryReserveSample`. `DbConnectionAnalyzer` and
+   `WcfChannelAnalyzer` implement both interfaces (they have a runtime state field to sample);
+   `HttpObjectAnalyzer` and `TimerLeakAnalyzer` implement only `ITypedResourceCandidateSource`, as
+   scoped in item 7. All four quartet members now call `TypedResourceScanDriver.DiscoverCandidates`/
+   `CreateSampler`/`TryGetSample` instead of the item-7 static helpers directly; no remaining
+   direct calls to `TypedResourceCandidateScanner.DiscoverCandidates` or `new
+   InstanceStateSampler<T>(...)` outside the driver. No domain-result or finding-generator
+   changes — output shape is unchanged. Verified: `dotnet build DumpDetective.slnx` (0 errors) and
+   a filtered `dotnet test` run covering the quartet plus `TypedResourceSampler`/
+   `InstanceStateSampler` (4 passed, 4 skipped, 0 failed). The thread-domain half of item 8 is a
+   separate, independent piece of work and is not covered by this update.
+
+   **(Done) Thread-domain quartet contract.** Added `IThreadStackScanParticipant`
+   (`Pipeline/IThreadStackScanParticipant.cs`) and `ThreadStackScanDispatcher`
+   (`Pipeline/ThreadStackScanDispatcher.cs`), which run a single
+   `EnumerateStackTrace()` pass per thread and hand each participant a
+   `ThreadStackSnapshot` (`Pipeline/ThreadStackSnapshot.cs`) — a thread plus its
+   already-materialized top-N frames — instead of each of `ThreadAnalyzer`,
+   `HangAnalyzer`, `ThreadStackClusterAnalyzer`, and `LockGraphAnalyzer`
+   independently walking `runtime.Threads`/`EnumerateStackTrace()`.
+   `ThreadAnalyzer` remains the frame-count driver via
+   `GetRequiredFrameCount`/`MaxSampledStackSnapshots`; the other three only need
+   the top frame. Because `IThreadStackScanParticipant` and `ThreadStackSnapshot`
+   are `internal` but the analyzer classes are `public`, `OnThreadStack` is
+   implemented explicitly (`void IThreadStackScanParticipant.OnThreadStack(...)
+   => OnThreadStack(...)` delegating to a `private` overload) — the same pattern
+   `IHeapIndexScanParticipant.OnHeapEntry` already uses in this quartet's
+   heap-scan counterpart. Each analyzer keeps a non-participant fallback path
+   (its old independent walk) for direct invocation outside
+   `AnalysisPipeline`'s dispatcher (tests, benchmarks). No domain-result or
+   finding-generator changes — output shape is unchanged. Verified: full-solution
+   `dotnet build` (0 errors) and a filtered `dotnet test` run covering all four
+   analyzers (11 passed, 4 skipped — the skipped tests require live dump
+   fixtures, 0 failed). Item 8 is now fully closed.
 9. **Merge `AppDomainAnalyzer` into `ModuleAnalyzer`** (Deliverable 6) — independent of the
    Retention/DependentHandle merges in [P0](#immediate-priorities-p0-—-correctness-track); no
    shared blocker.

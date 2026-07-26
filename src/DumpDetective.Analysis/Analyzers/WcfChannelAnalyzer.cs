@@ -17,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// A faulted channel must be Abort()ed, not Close()d. Faulted channels on the heap are a
 /// strong signal of missing error-handling in WCF proxy usage.
 /// </summary>
-public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<WcfChannelSnapshot>
 {
     public string Name => "WCF Channel Analysis";
     public string Category => "Infrastructure";
@@ -38,10 +38,22 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     private static readonly string[] WcfNamespacePrefixes = ["System.ServiceModel."];
     private static readonly string[] WcfContainsTokens = ["Channel", "ClientBase", "CommunicationObject"];
 
-    private static bool IsWcfChannelType(string typeName) =>
+    public bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, WcfNamespacePrefixes, ".ServiceChannel", WcfContainsTokens);
 
+    public int MaxStateSamplesPerType => MaxStateSamples;
+    public int TopSampleCap => TopFaultedCap;
+
     private static readonly string[] StateFieldNames = ["_state", "state", "communicationState"];
+
+    WcfChannelSnapshot? ITypedResourceInstanceSampler<WcfChannelSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
+    {
+        int stateVal = InstanceStateSampler<WcfChannelSnapshot>.TryReadIntField(heap, entry.Address, StateFieldNames, StateElementTypes);
+        if (stateVal < 0)
+            return null;
+
+        return new WcfChannelSnapshot(typeName, entry.Address, MapCommunicationState(stateVal), stateVal);
+    }
 
     private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
@@ -58,7 +70,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         _heap = heap;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
-            TypedResourceCandidateScanner.DiscoverCandidates(heap, context.Cache, IsWcfChannelType);
+            TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
 
         var typeStats = new Dictionary<ulong, (string Name, int Total, int Opened, int Faulted, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
@@ -69,7 +81,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         }
 
         _typeStats = typeStats;
-        _sampler = new InstanceStateSampler<WcfChannelSnapshot>(MaxStateSamples, TopFaultedCap);
+        _sampler = TypedResourceScanDriver.CreateSampler(this);
     }
 
     /// <summary>
@@ -87,21 +99,21 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         if (!candidateMts.ContainsKey(entry.MethodTable)) return;
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
 
-        int stateVal = -1;
-        if (sampler.TryReserveSample(entry.MethodTable))
-            stateVal = InstanceStateSampler<WcfChannelSnapshot>.TryReadIntField(_heap!, entry.Address, StateFieldNames, StateElementTypes);
+        WcfChannelSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, ts.Name);
 
         int opened = ts.Opened; int faulted = ts.Faulted; int closed = ts.Closed; int other = ts.Other;
-        string stateLabel = MapCommunicationState(stateVal);
-        if (stateVal == StateOpened)       opened++;
-        else if (stateVal == StateFaulted) faulted++;
-        else if (stateVal == StateClosed)  closed++;
-        else if (stateVal >= 0)            other++;
+        if (snap is not null)
+        {
+            if (snap.StateValue == StateOpened)       opened++;
+            else if (snap.StateValue == StateFaulted) faulted++;
+            else if (snap.StateValue == StateClosed)  closed++;
+            else                                      other++;
+        }
 
         typeStats[entry.MethodTable] = (ts.Name, ts.Total, opened, faulted, closed, other, ts.Bytes);
 
-        if (stateVal == StateFaulted)
-            sampler.AddTopSample(new WcfChannelSnapshot(ts.Name, entry.Address, stateLabel, stateVal));
+        if (snap is not null && snap.StateValue == StateFaulted)
+            sampler.AddTopSample(snap);
     }
 
     // Relies on the pipeline dispatcher already having called BeforeHeapIndexScan/OnHeapEntry

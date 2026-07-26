@@ -8,10 +8,18 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class LockGraphAnalyzer : IAnalyzer
+    public class LockGraphAnalyzer : IAnalyzer, IThreadStackScanParticipant
     {
         public string Name => "Lock Graph Analysis";
         public string Category => "Locks";
+
+        // Instance accumulator state for the IThreadStackScanParticipant path — only the top
+        // frame is needed (deadlock-candidate detection is a single monitor.wait/monitor.enter
+        // check), so this shares ThreadStackScanDispatcher's single EnumerateStackTrace() pass
+        // with ThreadAnalyzer/HangAnalyzer/ThreadStackClusterAnalyzer instead of independently
+        // walking stacks for the (typically small) set of lock-holding threads.
+        private Dictionary<ulong, string?>? _participantTopFrameSignatureByThreadAddress;
+        private bool _participantScanSucceeded;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -19,6 +27,27 @@ namespace DumpDetective.Analysis.Analyzers
             LockGraphAnalysisOptions options = context.AnalysisOptions.LockGraphAnalysis;
             return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress, options).Stamp(this));
         }
+
+        public int GetRequiredFrameCount(AnalysisContext context) => 1;
+
+        public void BeforeThreadStackScan(AnalysisContext context)
+        {
+            _participantTopFrameSignatureByThreadAddress = new Dictionary<ulong, string?>();
+        }
+
+        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);
+
+        private void OnThreadStack(in ThreadStackSnapshot snapshot)
+        {
+            ClrThread thread = snapshot.Thread;
+            if (!thread.IsAlive || thread.LockCount == 0 || thread.Address == 0)
+                return;
+
+            _participantTopFrameSignatureByThreadAddress![thread.Address] =
+                snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0].Method?.Signature : null;
+        }
+
+        public void OnThreadStackScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
@@ -164,23 +193,38 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!thread.IsAlive || thread.LockCount == 0) continue;
                 if (!ownerManagedIds.Contains((uint)thread.ManagedThreadId)) continue;
 
-                ClrStackFrame? topFrame = null;
-                foreach (var frame in thread.EnumerateStackTrace())
+                string? topFrameSignature;
+                if (_participantScanSucceeded)
                 {
-                    topFrame = frame;
-                    break;
+                    // BeforeThreadStackScan/OnThreadStack already ran via the pipeline's
+                    // ThreadStackScanDispatcher — read back the captured top frame instead of a
+                    // second independent EnumerateStackTrace() walk.
+                    _participantTopFrameSignatureByThreadAddress!.TryGetValue(thread.Address, out topFrameSignature);
+                }
+                else
+                {
+                    // Fallback (non-participant) path: used when this analyzer is invoked
+                    // directly (tests, benchmarks) instead of through AnalysisPipeline's
+                    // dispatcher.
+                    ClrStackFrame? topFrame = null;
+                    foreach (var frame in thread.EnumerateStackTrace())
+                    {
+                        topFrame = frame;
+                        break;
+                    }
+                    topFrameSignature = topFrame?.Method?.Signature;
                 }
 
-                if (topFrame?.Method?.Signature == null) continue;
+                if (topFrameSignature == null) continue;
 
-                string sig = topFrame.Method.Signature.ToLowerInvariant();
+                string sig = topFrameSignature.ToLowerInvariant();
                 if (!sig.Contains("monitor.wait") && !sig.Contains("monitor.enter"))
                     continue;
 
                 result.DeadlockCandidates.Add(new DeadlockCandidate
                 {
                     Thread = thread,
-                    TopFrame = topFrame.Method.Signature,
+                    TopFrame = topFrameSignature,
                     LocksHeld = result.AllHeldLocks
                         .Where(l => l.OwnerThread?.ManagedThreadId == thread.ManagedThreadId)
                         .ToList()

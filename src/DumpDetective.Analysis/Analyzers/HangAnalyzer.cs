@@ -11,7 +11,7 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class HangAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+    public class HangAnalyzer : IAnalyzer, IHeapIndexScanParticipant, IThreadStackScanParticipant
     {
         public string Name => "Hang Analysis";
         public string Category => "Hang";
@@ -31,6 +31,16 @@ namespace DumpDetective.Analysis.Analyzers
         // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
         // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsyncWork.
         private bool _participantScanSucceeded;
+
+        // Instance accumulator state for the IThreadStackScanParticipant path — only the top
+        // stack frame is needed here, so GetRequiredFrameCount is pinned to 1 regardless of what
+        // other quartet members (e.g. ThreadStackClusterAnalyzer) request; the dispatcher walks
+        // max(all participants) frames but each participant only reads what it asked for.
+        private int _threadScanTotalAliveThreads;
+        private int _threadScanThreadsHoldingLocks;
+        private List<WaitingThreadInfo>? _threadScanWaitingThreads;
+        private ObjectScanCounter? _threadScanCounter;
+        private bool _threadScanSucceeded;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -83,6 +93,49 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        // IThreadStackScanParticipant — shares ThreadStackScanDispatcher's single
+        // EnumerateStackTrace() pass with ThreadAnalyzer/ThreadStackClusterAnalyzer/
+        // LockGraphAnalyzer instead of independently walking runtime.Threads.
+        public int GetRequiredFrameCount(AnalysisContext context) => 1;
+
+        public void BeforeThreadStackScan(AnalysisContext context)
+        {
+            _threadScanTotalAliveThreads = 0;
+            _threadScanThreadsHoldingLocks = 0;
+            _threadScanWaitingThreads = new List<WaitingThreadInfo>();
+            _threadScanCounter = new ObjectScanCounter("scanning threads for hang", context.Progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+        }
+
+        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);
+
+        private void OnThreadStack(in ThreadStackSnapshot snapshot)
+        {
+            _threadScanCounter!.Tick();
+
+            ClrThread thread = snapshot.Thread;
+            if (!thread.IsAlive)
+                return;
+
+            _threadScanTotalAliveThreads++;
+
+            if (snapshot.TopFrames.Count == 0)
+                return;
+
+            var waitInfo = DetectWaitPattern(thread, snapshot.TopFrames[0]);
+            if (waitInfo != null)
+                _threadScanWaitingThreads!.Add(waitInfo);
+
+            if (thread.LockCount > 0)
+                _threadScanThreadsHoldingLocks++;
+        }
+
+        public void OnThreadStackScanCompleted(bool succeeded)
+        {
+            _threadScanSucceeded = succeeded;
+            if (succeeded)
+                _threadScanCounter?.Complete();
+        }
 
         private void BuildAsyncAnalysisFromParticipantState(HangAnalysis analysis)
         {
@@ -187,47 +240,62 @@ namespace DumpDetective.Analysis.Analyzers
         private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
         {
             var analysis = new HangAnalysis();
-            var waitingThreads = new List<WaitingThreadInfo>();
-            var threadScanCounter = new ObjectScanCounter("scanning threads for hang", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-            foreach (var thread in runtime.Threads)
+            if (_threadScanSucceeded)
             {
-                threadScanCounter.Tick();
+                // BeforeThreadStackScan/OnThreadStack already ran via the pipeline's
+                // ThreadStackScanDispatcher — read back the accumulated state instead of a
+                // second independent walk of runtime.Threads.
+                analysis.TotalAliveThreads = _threadScanTotalAliveThreads;
+                analysis.ThreadsHoldingLocks = _threadScanThreadsHoldingLocks;
+                analysis.WaitingThreads = _threadScanWaitingThreads!;
+            }
+            else
+            {
+                // Fallback (non-participant) path: used when this analyzer is invoked directly
+                // (tests, benchmarks) instead of through AnalysisPipeline's dispatcher.
+                var waitingThreads = new List<WaitingThreadInfo>();
+                var threadScanCounter = new ObjectScanCounter("scanning threads for hang", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-                if (!thread.IsAlive)
-                    continue;
-
-                analysis.TotalAliveThreads++;
-
-                // Analyze thread state (top frame only to reduce allocations)
-                ClrStackFrame? topFrame = null;
-                foreach (var frame in thread.EnumerateStackTrace())
+                foreach (var thread in runtime.Threads)
                 {
-                    topFrame = frame;
-                    break;
+                    threadScanCounter.Tick();
+
+                    if (!thread.IsAlive)
+                        continue;
+
+                    analysis.TotalAliveThreads++;
+
+                    // Analyze thread state (top frame only to reduce allocations)
+                    ClrStackFrame? topFrame = null;
+                    foreach (var frame in thread.EnumerateStackTrace())
+                    {
+                        topFrame = frame;
+                        break;
+                    }
+
+                    if (topFrame == null)
+                        continue;
+
+                    var waitInfo = DetectWaitPattern(thread, topFrame);
+                    if (waitInfo != null)
+                    {
+                        waitingThreads.Add(waitInfo);
+                    }
+
+                    // Check for lock ownership
+                    if (thread.LockCount > 0)
+                    {
+                        analysis.ThreadsHoldingLocks++;
+                    }
                 }
 
-                if (topFrame == null)
-                    continue;
-
-                var waitInfo = DetectWaitPattern(thread, topFrame);
-                if (waitInfo != null)
-                {
-                    waitingThreads.Add(waitInfo);
-                }
-
-                // Check for lock ownership
-                if (thread.LockCount > 0)
-                {
-                    analysis.ThreadsHoldingLocks++;
-                }
+                threadScanCounter.Complete();
+                analysis.WaitingThreads = waitingThreads;
             }
 
-            threadScanCounter.Complete();
-
-            analysis.WaitingThreads = waitingThreads;
             ReadRuntimeThreadPool(runtime, analysis);
-            progress?.Report(new(threadScanCounter.Scanned, "analyzing async work items"));
+            progress?.Report(new(analysis.TotalAliveThreads, "analyzing async work items"));
             AnalyzeAsyncWork(heap, cache, analysis, options);
 
             analysis.HealthScore = ComputeHealthScore(analysis, options);

@@ -653,12 +653,30 @@ Parallelizable:
 ---
 
 # 14. 📊 Observability
+
+## Execution & Performance Tracking
 - Execution time tracking
 - Memory usage monitoring
-- Logging for:
-  - Phase transitions
-  - Errors
-  - Slow operations
+
+## Analyzer Logging
+
+Analyzers may take an optional `ILogger<T>? logger = null` constructor parameter for
+per-object error/debug diagnostics. The parameter is resolved automatically via
+`ActivatorUtilities` in `DefaultAnalyzerFactory` when analyzers are constructed at runtime.
+The CLI host wires up generic-host logging; the Reporting layer provides a compatibility
+fallback with `NullLoggerFactory` for direct construction (tests, benchmarks).
+
+**Use case**: Analyzers that scan large object populations and expect to encounter
+malformed/unexpected heap data — e.g., `CollectionAnalyzer` logging per-Dictionary/Queue/List/HashSet
+errors and generation-lookup failures as it walks millions of collection objects. Not intended
+for routine control-flow logging.
+
+## Diagnostics Levels
+
+Logging categories by severity:
+- **Errors** (`LogError`): genuine per-object scan failures (exceptions during field read, invalid object state)
+- **Debug** (`LogDebug`): expected/ignorable per-object issues (missing optional fields, invalid backing arrays, resolution fallbacks)
+- **Information** (`LogInformation`): user-initiated cancellation, analysis milestones
 
 ---
 

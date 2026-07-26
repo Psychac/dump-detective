@@ -488,7 +488,9 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    full-solution `dotnet build` (0 errors) and `dotnet test` (349 passed, 0 failed, 38 skipped —
    the skips require live dump fixtures).
 10. ~~**Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`**~~
-    (Deliverable 7) — **DONE (AsyncTaskAnalyzer half).** Extracted `ReadTaskIndexFile` method and
+    (Deliverable 7) — **DONE (both halves).** 
+    
+    *AsyncTaskAnalyzer half:* Extracted `ReadTaskIndexFile` method and
     `TaskIndexMagic`/`TaskIndexVersion`/`RecordSize` constants into new `TaskIndexReader.cs`
     (`internal static class`, mirroring `RootIndexReader`'s pattern), leaving `AsyncTaskAnalyzer` to
     depend only on the typed reader interface. `LoadTaskEntries` now calls `TaskIndexReader.ReadTaskIndexFile`
@@ -496,8 +498,16 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
     write/read, max-tasks limiting, error cases). Verified: full-solution `dotnet build` (0 errors)
     and full test suite (354 passed, 38 skipped, 0 failed).
     
-    Separately, **resolve `CollectionAnalyzer`'s logging dependency** (Deliverable 7) — still open,
-    independent of the AsyncTaskAnalyzer half above.
+    *CollectionAnalyzer logging half:* Investigated `CollectionAnalyzer`'s `Microsoft.Extensions.Logging`
+    dependency flagged by Deliverable 7 as an "outlier." Found it legitimate, not accidental: ~29 real
+    call sites logging per-object scan failures (Dictionary/Queue/List/HashSet parsing errors), expected
+    issues (missing optional fields, generation-lookup fallbacks), and user cancellation — real diagnostic
+    value for malformed heap data in the platform's largest/most complex analyzer. The mechanism is
+    platform-wide, not special: every analyzer can take `ILogger<T>? logger = null` constructor parameter,
+    resolved automatically via `ActivatorUtilities` in `DefaultAnalyzerFactory`; CLI host and compatibility
+    fallback both wire up logging. No code change needed — the pattern was already consistent. Formalized
+    in [docs/architecture.md § 14 Observability](#14--observability) and [phase0-deliverable-7-dependency-graph-review.md](#infrastructure-leakage)
+    as a sanctioned, not ad-hoc, practice.
 11. **Close the crash-triage gap**: confirm and, if needed, add minidump exception-stream parsing
     to `CrashAnalyzer` (Deliverable 2, 3, 9) — validated as a real, closeable gap against WinDbg's
     `!analyze -v`, not a case of chasing parity blindly. Independent, no blocking dependency.

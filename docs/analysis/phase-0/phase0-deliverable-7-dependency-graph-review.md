@@ -67,11 +67,17 @@ No other cross-analyzer or cross-namespace cycles were identified from the avail
 
 ## Infrastructure Leakage
 
-- **`CollectionAnalyzer` → `Microsoft.Extensions.Logging`.** The only analyzer with a logging
+- ~~**`CollectionAnalyzer` → `Microsoft.Extensions.Logging`.** The only analyzer with a logging
   dependency (Deliverable 1/3). Either this is an accidental leftover from debugging that should
   be removed, or the platform has an undocumented, inconsistently-applied cross-cutting logging
   story — both are infrastructure-leakage smells and worth resolving explicitly rather than
-  leaving as an outlier.
+  leaving as an outlier.~~ **Resolved (P1 item 10).** Investigated and found the dependency
+  legitimate, not accidental: `CollectionAnalyzer` has ~29 real logging call sites for per-object
+  scan failures and expected issues (missing optional fields, generation-lookup fallbacks). The
+  mechanism is platform-wide by design — any analyzer can take `ILogger<T>? logger = null` parameter,
+  resolved automatically via `ActivatorUtilities` in `DefaultAnalyzerFactory`. Formalized as a
+  sanctioned pattern in [docs/architecture.md § 14 Observability](#14--observability) for analyzers
+  scanning large populations that expect malformed data (not routine control flow).
 - **`AsyncTaskAnalyzer`'s bespoke index format** (see Tight Coupling above) is also, from a
   layering perspective, storage infrastructure leaking upward into analyzer logic — it should sit
   entirely behind `Indexing`, with the analyzer only ever seeing typed records.
@@ -148,9 +154,12 @@ analyzer types simultaneously with generator/comparer/section-builder types.
    was unused (no symbol from `Pipeline` was consumed) and deleted it.
 2. Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`, so the
    analyzer depends only on the abstraction, not on the format's constants.
-3. Remove or formally justify `CollectionAnalyzer`'s `Microsoft.Extensions.Logging` dependency —
-   either it's noise to delete, or the platform needs a deliberate, consistently-applied logging
-   layer that every analyzer can depend on the same way.
+3. ~~Remove or formally justify `CollectionAnalyzer`'s `Microsoft.Extensions.Logging` dependency~~ —
+   **done (P1 item 10).** Formally justified as option (b): the platform has a deliberate,
+   consistently-applied logging layer that every analyzer can depend on the same way. Analyzed and
+   validated the dependency is not noise — it's ~29 real call sites for per-object error/debug
+   diagnostics in the analyzer scanning the largest object population. Documented in
+   [docs/architecture.md § 14 Observability](#14--observability).
 4. Introduce shared contracts (interfaces, not just conventions) for the resource-sampler quartet
    and the thread-domain quartet, so their current "coupled by copy-paste" relationship becomes an
    enforced, compiler-checked one — this is the dependency-graph framing of Deliverable 5 items 3

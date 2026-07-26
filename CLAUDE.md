@@ -104,6 +104,11 @@ public interface IAnalyzer
 ```
 Analyzers must return a domain result and call `result.Stamp(this)`.
 
+Analyzers scanning large object populations that encounter malformed/unexpected heap data may
+optionally take `ILogger<T>? logger = null` parameter for per-object error/debug diagnostics —
+it's resolved automatically via `ActivatorUtilities` in `DefaultAnalyzerFactory`. See
+[docs/architecture.md § 14 Observability](docs/architecture.md#14--observability) for the pattern.
+
 Adding a new analyzer:
 1. Add `XxxDomainResult` in models
 2. Implement `XxxAnalyzer.cs` using streaming heap loops

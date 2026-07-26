@@ -26,7 +26,14 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["unique_module_names"] = new NumericMetricValue(d.UniqueModuleNames, MetricUnit.Count),
             ["conflict_groups"] = new NumericMetricValue(d.VersionConflictGroups, MetricUnit.Count),
             ["dynamic_modules"] = new NumericMetricValue(d.DynamicModules, MetricUnit.Count),
+            ["total_domains"] = new NumericMetricValue(d.TotalDomains, MetricUnit.Count),
+            ["anonymous_modules"] = new NumericMetricValue(d.AnonymousModuleCount, MetricUnit.Count),
+            ["appdomain_dynamic_modules"] = new NumericMetricValue(d.TotalDynamicModules, MetricUnit.Count),
         };
+        if (d.DynamicModuleBytes > 0)
+            keyMetrics["dynamic_module_bytes"] = new NumericMetricValue((double)d.DynamicModuleBytes, MetricUnit.Bytes, FormatBytes(d.DynamicModuleBytes));
+        if (d.ExcludedModuleCount > 0)
+            keyMetrics["excluded_modules"] = new NumericMetricValue(d.ExcludedModuleCount, MetricUnit.Count);
 
         var blocks = new List<SectionBlock>
         {
@@ -104,11 +111,54 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact("Type density", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (d.Domains is { Count: > 0 })
+        {
+            compactTables.Add(STCompact(
+                "AppDomain inventory",
+                new[] { CH("Domain Name"), CH("ID", "number"), CH("Address"), CH("Module Count", "number"), CH("Estimated Managed Bytes", "bytes") },
+                BuildDomainRows(d.Domains).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.TopModulesByTypeCount is { Count: > 0 })
+        {
+            var typeCountRows = new List<TableRow>(d.TopModulesByTypeCount.Count);
+            for (int i = 0; i < d.TopModulesByTypeCount.Count; i++)
+            {
+                ModuleTypeCountEntry entry = d.TopModulesByTypeCount[i];
+                typeCountRows.Add(Row(
+                    Cell(FormatHelper.TruncateString(entry.ModuleName, 55)),
+                    Cell(FormatHelper.TruncateString(entry.AssemblyName, 55)),
+                    Cell(entry.TypeCount.ToString("N0"),     entry.TypeCount),
+                    Cell(entry.LiveTypeCount.ToString("N0"), entry.LiveTypeCount),
+                    Cell(entry.ObjectCount.ToString("N0"),   entry.ObjectCount),
+                    Cell(FormatBytes(entry.TotalBytes),      (long)Math.Min(entry.TotalBytes, long.MaxValue))));
+            }
+            compactTables.Add(STCompact("Top modules by type count",
+                new[] { CH("Module"), CH("Assembly"), CH("Types", "number"), CH("Live Types", "number"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                typeCountRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder,
             Blocks: blocks.Count > 0 ? blocks : [],
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);
+    }
+
+    private static List<TableRow> BuildDomainRows(IReadOnlyList<AppDomainSnapshot> domains)
+    {
+        var rows = new List<TableRow>(domains.Count);
+        for (int i = 0; i < domains.Count; i++)
+        {
+            AppDomainSnapshot domain = domains[i];
+            rows.Add(Row(
+                Cell(FormatHelper.TruncateString(domain.Name, 60)),
+                Cell(domain.DomainId.ToString("N0"),                                                    domain.DomainId),
+                Cell($"0x{domain.Address:X}"),
+                Cell(domain.ModuleCount.ToString("N0"),                                                 domain.ModuleCount),
+                Cell(FormatBytes(domain.EstimatedManagedBytes), (long)Math.Min(domain.EstimatedManagedBytes, long.MaxValue))));
+        }
+        return rows;
     }
 
     private static string FormatBytes(ulong value)

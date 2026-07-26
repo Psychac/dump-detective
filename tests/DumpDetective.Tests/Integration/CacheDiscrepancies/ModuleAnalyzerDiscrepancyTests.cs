@@ -46,6 +46,13 @@ public sealed class ModuleAnalyzerDiscrepancyTests
             diskResult.ConflictDetails.Count.Should().Be(memResult.ConflictDetails.Count);
             (diskResult.TopModulesByHeapMemory?.Count ?? 0).Should().Be(memResult.TopModulesByHeapMemory?.Count ?? 0);
             (diskResult.HeavyTypeDensityModules?.Count ?? 0).Should().Be(memResult.HeavyTypeDensityModules?.Count ?? 0);
+            diskResult.TotalDomains.Should().Be(memResult.TotalDomains);
+            diskResult.TotalDynamicModules.Should().Be(memResult.TotalDynamicModules);
+            diskResult.DynamicModuleBytes.Should().Be(memResult.DynamicModuleBytes);
+            diskResult.AnonymousModuleCount.Should().Be(memResult.AnonymousModuleCount);
+            diskResult.ExcludedModuleCount.Should().Be(memResult.ExcludedModuleCount);
+            (diskResult.Domains?.Count ?? 0).Should().Be(memResult.Domains?.Count ?? 0);
+            (diskResult.TopModulesByTypeCount?.Count ?? 0).Should().Be(memResult.TopModulesByTypeCount?.Count ?? 0);
         }
         finally
         {

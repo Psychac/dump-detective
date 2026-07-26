@@ -21,7 +21,8 @@ namespace DumpDetective.Analysis.Analyzers
             ModuleAnalysisOptions options = context.AnalysisOptions.ModuleAnalysis;
             var modules = AnalyzeModules(context.Runtime);
             var heapStats = BuildModuleHeapStats(context.Cache, options);
-            return ValueTask.FromResult(BuildDomainResult(modules, options, heapStats).Stamp(this));
+            var appDomains = AnalyzeAppDomains(context.Runtime, context.Cache, options, cancellationToken);
+            return ValueTask.FromResult(BuildDomainResult(modules, options, heapStats, appDomains).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime)
@@ -32,12 +33,18 @@ namespace DumpDetective.Analysis.Analyzers
         private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
         {
             progress?.Report(new(0, "analyzing modules"));
+            var options = new ModuleAnalysisOptions();
             var modules = AnalyzeModules(runtime);
-            var domainResult = BuildDomainResult(modules, new ModuleAnalysisOptions(), heapStats: null);
+            var appDomains = AnalyzeAppDomains(runtime, cache: null, options, CancellationToken.None);
+            var domainResult = BuildDomainResult(modules, options, heapStats: null, appDomains);
             return domainResult;
         }
 
-        private static ModuleDomainResult BuildDomainResult(ModuleAnalysis analysis, ModuleAnalysisOptions options, (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)? heapStats)
+        private static ModuleDomainResult BuildDomainResult(
+            ModuleAnalysis analysis,
+            ModuleAnalysisOptions options,
+            (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)? heapStats,
+            AppDomainAnalysisResult appDomains)
         {
             // Top modules by size — same selection logic as PrintLoadedAssemblies.
             var candidates = new List<ModuleInfo>(analysis.ModulesByName.Count);
@@ -80,7 +87,171 @@ namespace DumpDetective.Analysis.Analyzers
                 topModules,
                 conflictDetails,
                 heapStats?.TopByMemory,
-                heapStats?.DensityAnomalies);
+                heapStats?.DensityAnomalies,
+                TotalDomains: appDomains.TotalDomains,
+                Domains: appDomains.Domains,
+                TotalDynamicModules: appDomains.TotalDynamicModules,
+                DynamicModuleBytes: appDomains.DynamicModuleBytes,
+                AnonymousModuleCount: appDomains.AnonymousModuleCount,
+                TopModulesByTypeCount: appDomains.TopModulesByTypeCount,
+                ExcludedModuleCount: appDomains.ExcludedModuleCount)
+            {
+                Warnings = appDomains.Warnings
+            };
+        }
+
+        private static AppDomainAnalysisResult AnalyzeAppDomains(
+            ClrRuntime runtime,
+            IHeapAnalysisCache? cache,
+            ModuleAnalysisOptions options,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
+            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
+                typeAggregates = heapIndex.TypeAggregates;
+
+            IReadOnlyList<ClrAppDomain> appDomains = runtime.AppDomains;
+            int totalDynamicModules = 0;
+            ulong dynamicModuleBytes = 0;
+            int anonymousModuleCount = 0;
+
+            var domainSnapshots = new List<AppDomainSnapshot>(appDomains.Count);
+            var warnings = new List<string>();
+            int totalExcludedModules = 0;
+
+            if (options.PreferIndexOnly && typeAggregates is null)
+            {
+                warnings.Add("TypeAggregates index not found; enumeration will be skipped due to PreferIndexOnly setting.");
+            }
+
+            // Per-module type-count accumulator: module address -> aggregate
+            // Using a Dictionary keyed by module address so repeated module references
+            // across domains are deduped (a module can appear in multiple domains).
+            var moduleTypeData = new Dictionary<ulong, ModuleTypeAccumulator>(capacity: 256);
+
+            foreach (ClrAppDomain domain in appDomains)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                IReadOnlyList<ClrModule> modules = domain.Modules;
+
+                int moduleCount = modules.Count;
+                ulong domainManagedBytes = 0;
+                var domainTopModules = new List<string>(capacity: Math.Min(options.ModuleEnumerationLimit, 8));
+
+                // Select modules according to selection mode. Default: TopBySize (existing behavior).
+                ClrModule[]? sortedModules = null;
+                if (options.ModuleSelectionMode == ModuleSelectionMode.TopBySize || options.ModuleSelectionMode == ModuleSelectionMode.TopByTypeCount)
+                {
+                    // Sort by size descending as a practical default ordering.
+                    sortedModules = new ClrModule[modules.Count];
+                    for (int i = 0; i < modules.Count; i++) sortedModules[i] = modules[i];
+                    Array.Sort(sortedModules, static (a, b) => b.Size.CompareTo(a.Size));
+                }
+
+                int enumerationBound = Math.Min(modules.Count, options.ModuleEnumerationLimit);
+                if (modules.Count > enumerationBound)
+                {
+                    totalExcludedModules += modules.Count - enumerationBound;
+                    if (options.EmitTruncationNotice)
+                        warnings.Add($"Domain '{domain.Name ?? "<unnamed>"}' module enumeration truncated to {enumerationBound} of {modules.Count} modules.");
+                }
+
+                for (int mi = 0; mi < enumerationBound; mi++)
+                {
+                    ClrModule module = sortedModules is not null ? sortedModules[mi] : modules[mi];
+
+                    if (module.IsDynamic) totalDynamicModules++;
+                    if (module.IsDynamic) dynamicModuleBytes += module.Size;
+                    if (string.IsNullOrEmpty(module.Name)) anonymousModuleCount++;
+
+                    if (domainTopModules.Count < 8)
+                    {
+                        string moduleDisplay = Path.GetFileName(module.Name ?? string.Empty) ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(moduleDisplay))
+                            moduleDisplay = "<anonymous>";
+                        if (module.IsDynamic)
+                            moduleDisplay += " [dynamic]";
+
+                        domainTopModules.Add(moduleDisplay);
+                    }
+
+                    if (module.Address == 0) continue;
+
+                    if (!moduleTypeData.TryGetValue(module.Address, out ModuleTypeAccumulator? acc))
+                    {
+                        string moduleName = Path.GetFileName(module.Name ?? string.Empty) ?? string.Empty;
+                        string assemblyName = module.AssemblyName ?? "Unknown";
+                        acc = new ModuleTypeAccumulator(moduleName, assemblyName);
+                        moduleTypeData[module.Address] = acc;
+                    }
+
+                    // Determine whether to enumerate types for this module.
+                    bool hasIndex = typeAggregates is not null;
+                    bool shouldEnumerate = options.TypeEnumerationMode != TypeEnumerationMode.Skip && (hasIndex || !options.PreferIndexOnly);
+                    if (!shouldEnumerate) continue;
+
+                    // Enumerate (full or sampled) — sampling bounds are conservative to keep memory/CPU bounded.
+                    const int SampleBudgetPerModule = 1024;
+                    int seen = 0;
+
+                    foreach ((ulong mt, int _) in module.EnumerateTypeDefToMethodTableMap())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (mt == 0) continue;
+
+                        acc.TypeCount++;
+
+                        if (hasIndex && typeAggregates!.TryGetValue(mt, out TypeAggregateIndexEntry entry) && entry.Count > 0)
+                        {
+                            acc.LiveTypeCount++;
+                            acc.ObjectCount += entry.Count;
+                            acc.TotalBytes += entry.TotalSize;
+                            domainManagedBytes += entry.TotalSize;
+                        }
+
+                        seen++;
+                        if (options.TypeEnumerationMode == TypeEnumerationMode.Sampled && seen >= SampleBudgetPerModule)
+                            break;
+                    }
+                }
+
+                domainSnapshots.Add(new AppDomainSnapshot(
+                    Name: domain.Name ?? "<unnamed>",
+                    Address: domain.Address,
+                    DomainId: domain.Id,
+                    ModuleCount: moduleCount,
+                    EstimatedManagedBytes: domainManagedBytes,
+                    TopModules: domainTopModules));
+            }
+
+            // Build TopModulesByTypeCount — sort by TypeCount descending, cap at limit
+            var moduleEntries = new List<ModuleTypeCountEntry>(moduleTypeData.Count);
+            foreach (ModuleTypeAccumulator acc in moduleTypeData.Values)
+            {
+                moduleEntries.Add(new ModuleTypeCountEntry(
+                    ModuleName: acc.ModuleName,
+                    AssemblyName: acc.AssemblyName,
+                    TypeCount: acc.TypeCount,
+                    LiveTypeCount: acc.LiveTypeCount,
+                    ObjectCount: acc.ObjectCount,
+                    TotalBytes: acc.TotalBytes));
+            }
+            moduleEntries.Sort(static (a, b) => b.TypeCount.CompareTo(a.TypeCount));
+
+            int topLimit = Math.Min(moduleEntries.Count, options.TopModuleTypeCountLimit);
+            var topModules = new List<ModuleTypeCountEntry>(topLimit);
+            for (int i = 0; i < topLimit; i++) topModules.Add(moduleEntries[i]);
+
+            return new AppDomainAnalysisResult(
+                appDomains.Count,
+                domainSnapshots,
+                totalDynamicModules,
+                dynamicModuleBytes,
+                anonymousModuleCount,
+                topModules,
+                totalExcludedModules,
+                warnings);
         }
 
         private static (IReadOnlyList<ModuleHeapStats> TopByMemory, IReadOnlyList<ModuleTypeDensity> DensityAnomalies)?
@@ -242,6 +413,32 @@ namespace DumpDetective.Analysis.Analyzers
         public bool IsDynamic { get; set; }
         public bool IsPEFile { get; set; }
     }
+
+    internal sealed class ModuleTypeAccumulator
+    {
+        public readonly string ModuleName;
+        public readonly string AssemblyName;
+        public int TypeCount;
+        public int LiveTypeCount;
+        public long ObjectCount;
+        public ulong TotalBytes;
+
+        public ModuleTypeAccumulator(string moduleName, string assemblyName)
+        {
+            ModuleName = moduleName;
+            AssemblyName = assemblyName;
+        }
+    }
+
+    internal sealed record AppDomainAnalysisResult(
+        int TotalDomains,
+        IReadOnlyList<AppDomainSnapshot> Domains,
+        int TotalDynamicModules,
+        ulong DynamicModuleBytes,
+        int AnonymousModuleCount,
+        IReadOnlyList<ModuleTypeCountEntry> TopModulesByTypeCount,
+        int ExcludedModuleCount,
+        IReadOnlyList<string> Warnings);
 }
 
 

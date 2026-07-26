@@ -15,7 +15,6 @@ public sealed record AnalysisOptions
     public CollectionAnalysisOptions Collection { get; init; } = new();
     public StringAnalysisOptions StringAnalysis { get; init; } = new();
     public HeapTopologyAnalysisOptions HeapTopology { get; init; } = new();
-    public AppDomainAnalysisOptions AppDomainAnalysis { get; init; } = new();
     public AllocationPatternAnalysisOptions AllocationPatternAnalysis { get; init; } = new();
     public ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis { get; init; } = new();
     public LockGraphAnalysisOptions LockGraphAnalysis { get; init; } = new();

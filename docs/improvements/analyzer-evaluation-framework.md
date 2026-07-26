@@ -18,7 +18,7 @@ ranked backlog of improvements, rather than a generic "looks fine" pass.
 
 ## Scope
 Current analyzer inventory (39 files in `Analyzers/`, one row per analyzer under audit):
-`AppDomainAnalyzer`, `AsyncStateMachineAnalyzer`, `DominatorAnalyzer`, `FinalizableObjectAnalyzer`,
+`AsyncStateMachineAnalyzer`, `DominatorAnalyzer`, `FinalizableObjectAnalyzer`,
 `GCGenerationAnalyzer`, `GCHandleAnalyzer`, `JitAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `DbConnectionAnalyzer`, `EventLeakFastScanner`, `HttpObjectAnalyzer`,
 `TimerLeakAnalyzer`, `WcfChannelAnalyzer`, `AllocationPatternAnalyzer`, `DependentHandleAnalyzer`,

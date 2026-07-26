@@ -153,7 +153,6 @@ internal static class AnalyzerFilterService
             nameof(Analysis.Analyzers.FinalizableObjectAnalyzer)
             or nameof(Analysis.Analyzers.AsyncStateMachineAnalyzer)
             or nameof(Analysis.Analyzers.ArrayAnalyzer)
-            or nameof(Analysis.Analyzers.AppDomainAnalyzer)
             or nameof(Analysis.Analyzers.SegmentReservationAnalyzer)
             or nameof(Analysis.Analyzers.WeakReferenceAnalyzer)
             or nameof(Analysis.Analyzers.BoxingAnalyzer)

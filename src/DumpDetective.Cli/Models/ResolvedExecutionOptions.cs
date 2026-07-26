@@ -20,7 +20,6 @@ internal sealed record ResolvedExecutionOptions(
     CollectionAnalysisOptions Collection,
     StringAnalysisOptions StringAnalysis,
     HeapTopologyAnalysisOptions HeapTopology,
-    AppDomainAnalysisOptions AppDomainAnalysis,
     AllocationPatternAnalysisOptions AllocationPatternAnalysis,
     ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis,
     LockGraphAnalysisOptions LockGraphAnalysis,

@@ -89,7 +89,7 @@ internal sealed class InsightEngine
         AsyncStateMachineDomainResult? stateMachines = FindResult<AsyncStateMachineDomainResult>(runs);
         WeakReferenceDomainResult? weakRef = FindResult<WeakReferenceDomainResult>(runs);
         SegmentReservationDomainResult? segReservation = FindResult<SegmentReservationDomainResult>(runs);
-        AppDomainDomainResult? appDomains = FindResult<AppDomainDomainResult>(runs);
+        ModuleDomainResult? appDomains = FindResult<ModuleDomainResult>(runs);
         JitDomainResult? jit = FindResult<JitDomainResult>(runs);
         BoxingDomainResult? boxing = FindResult<BoxingDomainResult>(runs);
         EventLeakDomainResult? eventLeaks = FindResult<EventLeakDomainResult>(runs);
@@ -162,7 +162,7 @@ internal sealed class InsightEngine
         AsyncStateMachineDomainResult? StateMachines,
         WeakReferenceDomainResult? WeakRef,
         SegmentReservationDomainResult? SegReservation,
-        AppDomainDomainResult? AppDomains,
+        ModuleDomainResult? AppDomains,
         JitDomainResult? Jit,
         BoxingDomainResult? Boxing,
         EventLeakDomainResult? EventLeaks,
@@ -954,7 +954,7 @@ internal sealed class InsightEngine
     /// </summary>
     private static void DetectDynamicAssemblyAccumulation(
         List<InsightFinding> findings,
-        AppDomainDomainResult? appDomains)
+        ModuleDomainResult? appDomains)
     {
         if (appDomains is null || appDomains.TotalDynamicModules < DynamicModuleWarning)
             return;

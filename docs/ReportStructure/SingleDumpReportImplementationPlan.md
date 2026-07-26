@@ -102,7 +102,6 @@ internal static class SectionIdDomainMap
         ["AsyncStateMachineAnalyzer"]  = ("Async",     "E2"),
         ["CrashAnalyzer"]              = ("Exceptions","F1"),
         ["ModuleAnalyzer"]             = ("Runtime",   "G1"),
-        ["AppDomainAnalyzer"]          = ("Runtime",   "G1"),
         ["JitAnalyzer"]                = ("Runtime",   "G2"),
     };
     // Type system sections C1 (type table) is a cross-analyzer section — handled by TypeSystemSectionBuilder
@@ -331,7 +330,7 @@ TableBlock("Top Source → Target Type Pairs",
     Rows: from TopSourceTargetEdges)
 ```
 
-### 3.11 `AppDomainAssemblySectionBuilder.cs` — HeavyTypeDensityModules
+### 3.11 `ModuleSectionBuilder.cs` — HeavyTypeDensityModules
 
 **Missing:** `ModuleDomainResult.HeavyTypeDensityModules` — absent from old format entirely.
 

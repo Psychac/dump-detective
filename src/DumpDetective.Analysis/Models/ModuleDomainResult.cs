@@ -34,6 +34,22 @@ public sealed record ModuleTypeDensity(
     ulong TotalBytes,
     ulong BytesPerType);
 
+internal sealed record AppDomainSnapshot(
+    string Name,
+    ulong Address,
+    int DomainId,
+    int ModuleCount,
+    ulong EstimatedManagedBytes,
+    IReadOnlyList<string>? TopModules = null);
+
+internal sealed record ModuleTypeCountEntry(
+    string ModuleName,
+    string AssemblyName,
+    int TypeCount,
+    int LiveTypeCount,
+    long ObjectCount,
+    ulong TotalBytes);
+
 internal sealed record ModuleDomainResult(
     int TotalModules,
     int DynamicModules,
@@ -43,4 +59,11 @@ internal sealed record ModuleDomainResult(
     IReadOnlyList<LoadedModuleSnapshot> TopModulesBySize,
     IReadOnlyList<ModuleConflictGroup> ConflictDetails,
     IReadOnlyList<ModuleHeapStats>? TopModulesByHeapMemory = null,
-    IReadOnlyList<ModuleTypeDensity>? HeavyTypeDensityModules = null) : AnalyzerDomainResult;
+    IReadOnlyList<ModuleTypeDensity>? HeavyTypeDensityModules = null,
+    int TotalDomains = 0,
+    IReadOnlyList<AppDomainSnapshot>? Domains = null,
+    int TotalDynamicModules = 0,
+    ulong DynamicModuleBytes = 0,
+    int AnonymousModuleCount = 0,
+    IReadOnlyList<ModuleTypeCountEntry>? TopModulesByTypeCount = null,
+    int ExcludedModuleCount = 0) : AnalyzerDomainResult;

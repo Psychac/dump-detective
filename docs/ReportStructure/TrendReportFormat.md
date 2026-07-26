@@ -248,7 +248,6 @@ Current scoped comparison coverage includes (non-exhaustive):
 - GC Root Analysis (`gcroot.kind.count`, `gcroot.top.target.*`)
 - Finalizable Object Analysis (`finalizable.type.gen2.count`, `finalizable.queue.type.retained.bytes`)
 - Array Analysis (`array.type.bytes`, `array.type.count`)
-- AppDomain Analysis (`appdomain.module.*`)
 - Module Analysis (`modules.heap.*`)
 - Retention Analysis (`leak.retention.type.*`)
 - Static Root Leak Detection (`static.root.byname.bytes`)

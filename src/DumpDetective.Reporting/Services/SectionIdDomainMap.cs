@@ -79,9 +79,6 @@ internal static class SectionIdDomainMap
         ["ModuleAnalyzer"]             = ("Runtime",    "G1"),
         ["Module Analysis"]            = ("Runtime",    "G1"),
         ["Modules & Assemblies"]       = ("Runtime",    "G1"),   // ModuleSectionBuilder display title
-        ["AppDomainAnalyzer"]          = ("Runtime",    "G2"),
-        ["AppDomain Analysis"]         = ("Runtime",    "G2"),
-        ["AppDomains"]                 = ("Runtime",    "G2"),   // AppDomainSectionBuilder display title
         ["JitAnalyzer"]                = ("Runtime",    "G3"),
         ["JIT Analysis"]               = ("Runtime",    "G3"),
 

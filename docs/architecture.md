@@ -292,6 +292,7 @@ Together implement the `LeakDetector` role described in guidelines:
 
 ### ModuleAnalyzer
 - Reports loaded modules, version conflicts, and per-module heap footprint
+- Summarizes appdomains, module distribution, and cross-domain loading
 
 ### LohFragmentationAnalyzer
 - Reports LOH free-block distribution and fragmentation percentage
@@ -326,9 +327,6 @@ Together implement the `LeakDetector` role described in guidelines:
 
 ### WeakReferenceAnalyzer
 - Analyzes weak-reference population and stale wrappers
-
-### AppDomainAnalyzer
-- Summarizes appdomains, module distribution, and cross-domain loading
 
 ### JitAnalyzer
 - Reports JIT heap usage and active method/native code hotspots
@@ -597,7 +595,6 @@ Current analyzer set in the CLI factory:
 - ReferenceChainAnalyzer
 - InsightEngine
 - TrendAnalyzer
-- AppDomainAnalyzer
 - JitAnalyzer
 - BoxingAnalyzer
 - FinalizableObjectAnalyzer

@@ -166,7 +166,7 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    walk; `DependentHandleAnalyzer.cs` deleted). Each merge folds the domain result, finding
    generator, trend comparer, and section builder into the surviving analyzer's files, with the
    catalog and `SectionIdDomainMap` registrations for the removed analyzers deleted. (The third
-   merge, `AppDomainAnalyzer` into `ModuleAnalyzer`, is independent of this chain — see
+   merge, `AppDomainAnalyzer` into `ModuleAnalyzer`, has since been completed — see
    [P1](#near-term-p1).)
 4. ~~**Evidence builder**~~ (Deliverable 5 item 6) — **done.** `Evidence`/`EvidenceSignal`
    (`src/DumpDetective.Analysis/Models/Evidence.cs`) is the shared "why alive / why matter" shape:
@@ -481,9 +481,12 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    `dotnet build` (0 errors) and a filtered `dotnet test` run covering all four
    analyzers (11 passed, 4 skipped — the skipped tests require live dump
    fixtures, 0 failed). Item 8 is now fully closed.
-9. **Merge `AppDomainAnalyzer` into `ModuleAnalyzer`** (Deliverable 6) — independent of the
-   Retention/DependentHandle merges in [P0](#immediate-priorities-p0-—-correctness-track); no
-   shared blocker.
+9. ~~**Merge `AppDomainAnalyzer` into `ModuleAnalyzer`**~~ (Deliverable 6) — DONE. Options,
+   domain-result model, analyzer logic, finding generator, trend comparer, and section builder
+   all merged into their `Module*` equivalents; `AppDomain*`-specific files deleted; CLI wiring,
+   `SectionIdDomainMap`, `InsightEngine`, and catalog registrations updated to match. Verified:
+   full-solution `dotnet build` (0 errors) and `dotnet test` (349 passed, 0 failed, 38 skipped —
+   the skips require live dump fixtures).
 10. **Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`**;
     separately, **resolve `CollectionAnalyzer`'s logging dependency** one way or the other
     (Deliverable 7) — two independent fixes with no dependency on each other or on anything above.

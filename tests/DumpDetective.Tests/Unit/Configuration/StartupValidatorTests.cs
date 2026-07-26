@@ -84,7 +84,6 @@ public sealed class StartupValidatorTests
             Collection: new CollectionAnalysisOptions(),
             StringAnalysis: new StringAnalysisOptions(),
             HeapTopology: new HeapTopologyAnalysisOptions(),
-            AppDomainAnalysis: new AppDomainAnalysisOptions(),
             AllocationPatternAnalysis: new AllocationPatternAnalysisOptions(),
             ThreadStackClusterAnalysis: new ThreadStackClusterAnalysisOptions(),
             LockGraphAnalysis: new LockGraphAnalysisOptions(),

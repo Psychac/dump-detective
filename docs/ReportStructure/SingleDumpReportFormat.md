@@ -656,7 +656,7 @@ Tables:
 ---
 
 **G2. AppDomains**  
-Source: `AppDomainDomainResult`
+Source: `ModuleDomainResult`
 
 KeyMetrics: TotalDomains, AnonymousModuleCount, TotalDynamicModules, DynamicModuleBytes, ExcludedModuleCount.
 

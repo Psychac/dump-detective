@@ -784,7 +784,7 @@ Via `ClrRuntime.AppDomains`:
 - Domain name, address, numeric ID, module count
   - ✅ `AppDomainSnapshot`: Name, Address, DomainId, ModuleCount, EstimatedManagedBytes
 - Per domain module list: assembly name, path, size (`ClrModule.Size`), `IsDynamic`, `IsPEFile`
-  - ✅ `AppDomainSnapshot.TopModules: IReadOnlyList<string>` populated by `AppDomainAnalyzer` (top module names per domain)
+  - ✅ `AppDomainSnapshot.TopModules: IReadOnlyList<string>` populated by `ModuleAnalyzer` (top module names per domain)
   - ✅ `LoadedModuleSnapshot` (in `ModuleDomainResult.TopModulesBySize`): Name, AssemblyName, FullPath, Address, Size, IsDynamic, `IsPEFile` — all fields present
   - ⚠️ `AppDomainSnapshot.TopModules` is a name-only list; full `LoadedModuleSnapshot` detail is global (not per-domain)
 - Managed memory attributable per domain (cross-ref heap index by `ClrType.Module`)
@@ -799,15 +799,15 @@ Via `ClrRuntime.AppDomains`:
 - Grouped: assembly name -> conflicting instances with paths and addresses
   - ✅ `ModuleConflictGroup.Instances` (`IReadOnlyList<LoadedModuleSnapshot>`) with FullPath and Address
 - Dynamic assemblies (`IsDynamic = true`): never unloaded; total count and size
-  - ✅ `ModuleDomainResult.DynamicModules` (count); `AppDomainDomainResult.DynamicModuleBytes` (ulong) aggregated in `AppDomainAnalyzer`
+  - ✅ `ModuleDomainResult.DynamicModules` (count); `ModuleDomainResult.DynamicModuleBytes` (ulong) aggregated in `ModuleAnalyzer`
 - Anonymous modules (no file path): in-memory code generation
-  - ✅ `AppDomainDomainResult.AnonymousModuleCount` (int) tracked in `AppDomainAnalyzer`; finding emitted by `AppDomainFindingGenerator` when count >= threshold
+  - ✅ `ModuleDomainResult.AnonymousModuleCount` (int) tracked in `ModuleAnalyzer`; finding emitted by `ModuleFindingGenerator` when count >= threshold
 
 ## 18.3 Type Density per Module
 
 Via `ClrModule.EnumerateTypes()`:
 - Type count per module (unique `MethodTable` count)
-  - ✅ `AppDomainDomainResult.TopModulesByTypeCount` (`IReadOnlyList<ModuleTypeCountEntry>`): ModuleName, TypeCount, LiveTypeCount, ObjectCount, TotalBytes
+  - ✅ `ModuleDomainResult.TopModulesByTypeCount` (`IReadOnlyList<ModuleTypeCountEntry>`): ModuleName, TypeCount, LiveTypeCount, ObjectCount, TotalBytes
   - ✅ `ModuleDomainResult.HeavyTypeDensityModules` (`IReadOnlyList<ModuleTypeDensity>`): ModuleName, UniqueTypeCount, ObjectCount, TotalBytes, BytesPerType
 - Modules with > 5000 types flagged (source generators, AOT, reflection-heavy)
   - ⚠️ Not explicitly flagged; section builder must apply threshold to `TopModulesByTypeCount.TypeCount`
@@ -1118,11 +1118,10 @@ Via `ClrSegment.CommittedMemory` / `ClrSegment.ReservedMemory`:
 | `EventLeakAnalyzer` | 4.3, 12.1-12.2 | ✅ Comprehensive; publisher gen not propagated to group level |
 | `CollectionAnalyzer` | 3.3, 4.3, 22.3 | ⚠️ Container fill-rate for section 22.3 not cross-referenced |
 | `CrashAnalyzer` | 13.1-13.2 | ✅ `ChainDepth` per exception and depth histogram; frame origin classification in section builder |
-| `ModuleAnalyzer` | 13.2, 18.1-18.3 | ✅ `IsPEFile` in `LoadedModuleSnapshot`; `DynamicModuleBytes` aggregated in `AppDomainAnalyzer` |
+| `ModuleAnalyzer` | 13.2, 18.1-18.3 | ✅ `IsPEFile` in `LoadedModuleSnapshot`; `DynamicModuleBytes` aggregated in `ModuleAnalyzer` |
 | `ReferenceChainAnalyzer` | 4.1-4.2, 5.3 | ⚠️ Root paths for §5.2 severity roots, not wired to §6.1 candidates |
 | `InsightEngine` | 16.1-16.3 | ✅ `ConfidenceScore`/`Caveats[]` on `InsightFinding`; ≥ 3 failed-analyzer Warning emitted |
 | `TrendAnalyzer` | 14.1-14.2 | ✅ Leak-candidate new-signal comparison; `TrendReportComposer` now emits explicit new-type and severity-escalation blocks; classification remains prose-only ⚠️ |
-| `AppDomainAnalyzer` | 18.1-18.3 | ✅ `TopModules` per domain; `DynamicModuleBytes`; `AnonymousModuleCount`; cross-domain types ❌ |
 | `LeakCandidateAnalyzer` | 6.1-6.4 | ✅ New; suspicion scoring, `LeakClass` classification, `LeakCandidateDomainResult` |
 | `DominatorAnalyzer` | 4.1-4.2 | ✅ New; bounded BFS exclusive retained per top-N type via `BoundedRetainedSizeBfs` |
 | `JitAnalyzer` | 19.1-19.3 | ⚠️ R2R detection ❌; >64KB flag not in model; Tier0-stub flag not stored |

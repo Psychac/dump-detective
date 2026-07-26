@@ -32,13 +32,13 @@ internal sealed class ExecutiveSummaryProjector
                 }
             }
 
-            if (run.Result is AppDomainDomainResult app)
+            if (run.Result is ModuleDomainResult app && app.Domains is { Count: > 0 } domains)
             {
                 try
                 {
                     ulong sum = 0;
-                    for (int d = 0; d < app.Domains.Count; d++)
-                        sum += app.Domains[d].EstimatedManagedBytes;
+                    for (int d = 0; d < domains.Count; d++)
+                        sum += domains[d].EstimatedManagedBytes;
 
                     totalManagedBytes = (long)Math.Min((ulong)long.MaxValue, sum);
                     break;

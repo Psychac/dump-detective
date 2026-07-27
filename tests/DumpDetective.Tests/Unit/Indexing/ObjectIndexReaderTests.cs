@@ -25,11 +25,11 @@ public class ObjectIndexReaderTests : IDisposable
             Directory.Delete(_testDir, recursive: true);
     }
 
-    private static readonly (ulong Address, ulong MethodTable, ulong Size)[] SampleRecords =
+    private static readonly (ulong Address, ulong MethodTable, ulong Size, sbyte Generation)[] SampleRecords =
     {
-        (0x1000uL, 0x2000uL, 100uL),
-        (0x1100uL, 0x2100uL, 200uL),
-        (0x1200uL, 0x2200uL, 300uL),
+        (0x1000uL, 0x2000uL, 100uL, 0),
+        (0x1100uL, 0x2100uL, 200uL, 1),
+        (0x1200uL, 0x2200uL, 300uL, 2),
     };
 
     [Fact]
@@ -46,6 +46,7 @@ public class ObjectIndexReaderTests : IDisposable
             entries[i].Address.Should().Be(SampleRecords[i].Address);
             entries[i].MethodTable.Should().Be(SampleRecords[i].MethodTable);
             entries[i].Size.Should().Be(SampleRecords[i].Size);
+            entries[i].Generation.Should().Be(SampleRecords[i].Generation);
         }
     }
 
@@ -93,12 +94,13 @@ public class ObjectIndexReaderTests : IDisposable
         ObjectIndexReader.ReadDiskEntries(containerPath).Should().BeEmpty();
     }
 
-    private static void WriteColumnarObjectSections(string containerPath, (ulong Address, ulong MethodTable, ulong Size)[] records)
+    private static void WriteColumnarObjectSections(string containerPath, (ulong Address, ulong MethodTable, ulong Size, sbyte Generation)[] records)
     {
         using var writer = new CacheContainerWriter(containerPath);
         WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, records.Select(r => r.Address).ToArray());
         WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, records.Select(r => r.MethodTable).ToArray());
         WriteUlongColumn(writer, CacheSectionId.ObjectSizes, records.Select(r => r.Size).ToArray());
+        WriteSbyteColumn(writer, CacheSectionId.ObjectGenerations, records.Select(r => r.Generation).ToArray());
         writer.Finish();
     }
 
@@ -111,6 +113,14 @@ public class ObjectIndexReaderTests : IDisposable
             BinaryPrimitives.WriteUInt64LittleEndian(buf, value);
             writer.Stream.Write(buf, 0, buf.Length);
         }
+        writer.EndSection(recordCount: values.Length);
+    }
+
+    private static void WriteSbyteColumn(CacheContainerWriter writer, CacheSectionId id, sbyte[] values)
+    {
+        writer.BeginSection(id);
+        foreach (sbyte value in values)
+            writer.Stream.WriteByte(unchecked((byte)value));
         writer.EndSection(recordCount: values.Length);
     }
 }

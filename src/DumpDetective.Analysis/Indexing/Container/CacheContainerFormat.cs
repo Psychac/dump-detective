@@ -26,6 +26,8 @@ internal enum CacheSectionId
     ObjectMethodTables = 11,
     /// <summary>Columnar <c>ulong[]</c> of object sizes, aligned with <see cref="ObjectAddresses"/>.</summary>
     ObjectSizes = 12,
+    /// <summary>Columnar <c>sbyte[]</c> of per-object GC generations, aligned with <see cref="ObjectAddresses"/>.</summary>
+    ObjectGenerations = 13,
 }
 
 /// <summary>
@@ -45,11 +47,13 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 2 when the Objects section moved from an interleaved array-of-structs
-    /// layout to columnar ObjectAddresses/ObjectMethodTables/ObjectSizes sections — old
-    /// cache.bin files fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
+    /// Bumped to 3 when the columnar ObjectGenerations section (per-object GC generation,
+    /// 1 byte/sbyte) was added alongside ObjectAddresses/ObjectMethodTables/ObjectSizes —
+    /// old cache.bin files fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
+    /// Previously bumped to 2 when the Objects section moved from an interleaved
+    /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

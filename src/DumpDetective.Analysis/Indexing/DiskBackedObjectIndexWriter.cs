@@ -18,6 +18,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // Columnar Object* sections store one ulong per object per section — no per-section
     // header, since the container's TOC already carries each section's RecordCount.
     private const int ColumnSize = sizeof(ulong);
+    // ObjectGenerations is a separate, narrower column (1 byte/sbyte vs. 8 bytes/ulong).
+    private const int GenColumnSize = sizeof(sbyte);
     private const int ProgressReportEveryObjects = 100_000;
 
     public HeapIndexBuildResult Build(
@@ -73,6 +75,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
+        // OPT: global module-id cache — moduleRegistry.GetOrAdd takes a lock, so it must only be
+        // reached once per unique MT globally, never once per object (module is a type-level property).
+        var globalModuleIdCache = new ConcurrentDictionary<ulong, int>();
         var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
@@ -102,11 +107,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         string[] segAddrScratchFiles = new string[segments.Length];
         string[] segMtScratchFiles = new string[segments.Length];
         string[] segSizeScratchFiles = new string[segments.Length];
+        string[] segGenScratchFiles = new string[segments.Length];
         for (int i = 0; i < segments.Length; i++)
         {
             segAddrScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.addr.tmp");
             segMtScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.mt.tmp");
             segSizeScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.size.tmp");
+            segGenScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.gen.tmp");
         }
 
         using var containerWriter = new CacheContainerWriter(containerPath, dumpPath);
@@ -124,7 +131,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
             (segIdx, _, state) =>
             {
                 ClrSegment segment = segments[segIdx];
@@ -167,8 +174,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         segBuf = bigger;
                     }
 
-                    // Compute type flags + shape once per unique MT.
+                    // Compute type flags + module id + shape once per unique MT. moduleRegistry.GetOrAdd
+                    // takes a lock, so it must be reached at most once per unique MT globally — never
+                    // once per object, or the lock serializes the entire parallel scan.
                     TypeAggregateFlags flags;
+                    int moduleId;
                     if (!state.FlagsCache.TryGetValue(mt, out flags))
                     {
                         if (!globalFlagsCache.TryGetValue(mt, out flags))
@@ -178,11 +188,19 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                             shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
                         }
                         state.FlagsCache[mt] = flags;
+                        // GetOrAdd (not TryGetValue+TryAdd) — the factory may race and run more than
+                        // once, but that's cheap and idempotent, unlike leaving a window where this
+                        // entry can be observed missing after globalFlagsCache already has it.
+                        moduleId = globalModuleIdCache.GetOrAdd(mt, _ => moduleRegistry.GetOrAdd(obj.Type.Module));
+                        state.ModuleIdCache[mt] = moduleId;
+                    }
+                    else
+                    {
+                        moduleId = state.ModuleIdCache[mt];
                     }
 
-                    var entry = new HeapEntry(obj.Address, mt, obj.Size);
-                    int moduleId = moduleRegistry.GetOrAdd(obj.Type.Module);
                     int objGen = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
+                    var entry = new HeapEntry(obj.Address, mt, obj.Size, (sbyte)objGen);
                     segBuf[segCount++] = entry;
                     state.Builder.Add(entry, moduleId, flags, objGen);
 
@@ -249,6 +267,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     byte[] addrBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
                     byte[] mtBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
                     byte[] sizeBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
+                    byte[] genBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * GenColumnSize);
                     try
                     {
                         using FileStream addrStream = new(segAddrScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
@@ -256,6 +275,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         using FileStream mtStream = new(segMtScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
                             FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
                         using FileStream sizeStream = new(segSizeScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
+                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
+                        using FileStream genStream = new(segGenScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
                             FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
                         int srcIdx = 0;
                         while (srcIdx < segCount)
@@ -269,10 +290,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                                 BinaryPrimitives.WriteUInt64LittleEndian(addrBuf.AsSpan(off), e.Address);
                                 BinaryPrimitives.WriteUInt64LittleEndian(mtBuf.AsSpan(off), e.MethodTable);
                                 BinaryPrimitives.WriteUInt64LittleEndian(sizeBuf.AsSpan(off), e.Size);
+                                genBuf[ci] = unchecked((byte)e.Generation);
                             }
                             addrStream.Write(addrBuf, 0, chunkBytes);
                             mtStream.Write(mtBuf, 0, chunkBytes);
                             sizeStream.Write(sizeBuf, 0, chunkBytes);
+                            genStream.Write(genBuf, 0, chunkEntries * GenColumnSize);
                             srcIdx += chunkEntries;
                         }
                     }
@@ -281,6 +304,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         ArrayPool<byte>.Shared.Return(addrBuf);
                         ArrayPool<byte>.Shared.Return(mtBuf);
                         ArrayPool<byte>.Shared.Return(sizeBuf);
+                        ArrayPool<byte>.Shared.Return(genBuf);
                         ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
                     }
                 }
@@ -343,6 +367,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             DeleteScratchFiles(segAddrScratchFiles);
             DeleteScratchFiles(segMtScratchFiles);
             DeleteScratchFiles(segSizeScratchFiles);
+            DeleteScratchFiles(segGenScratchFiles);
             throw;
         }
 
@@ -361,6 +386,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
         ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount);
+
+        containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
+        ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
         containerWriter.EndSection(objectCount);
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.

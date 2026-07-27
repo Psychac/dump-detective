@@ -28,17 +28,17 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 | Section | Size | Description |
 |---------|------|-------------|
 | FileHeader | 64 bytes | Magic, version, TOC offset, section count |
-| TOC (Table of Contents) | ~384 bytes | 12 entries × 32 bytes each (ObjectAddresses, ObjectMethodTables, ObjectSizes, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
-| Section Data | Variable | Concatenated payload sections (ObjectAddresses, ObjectMethodTables, ObjectSizes, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| TOC (Table of Contents) | ~416 bytes | 13 entries × 32 bytes each (ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| Section Data | Variable | Concatenated payload sections (ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
 
 ## FileHeader (64 bytes)
 
 | Field | Size | Type | Value |
 |-------|------|------|-------|
 | Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
-| FormatVersion | 4 bytes | int | 2 (bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt) |
+| FormatVersion | 4 bytes | int | 3 (bumped from 2 when the ObjectGenerations column was added; previously bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt) |
 | DumpContentHash | 32 bytes | bytes | Content-addressed cache key: dump file length (8 bytes) + XxHash64 over sampled start/middle/end 1MB windows (8 bytes), remaining 16 bytes reserved/zero. Zero-filled if unknown (predates this field, or hashing failed at build time); an all-zero stored hash is treated as "unknown" and accepted rather than a mismatch. See `DumpContentHasher`. |
-| SectionCount | 4 bytes | int | Number of sections in TOC (typically 12) |
+| SectionCount | 4 bytes | int | Number of sections in TOC (typically 13) |
 | TocOffset | 8 bytes | long | Offset to TOC = 64 |
 | Reserved | 8 bytes | bytes | Zero-filled |
 
@@ -46,7 +46,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
-| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects [unused since v2], 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta, 10=ObjectAddresses, 11=ObjectMethodTables, 12=ObjectSizes) |
+| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects [unused since v2], 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta, 10=ObjectAddresses, 11=ObjectMethodTables, 12=ObjectSizes, 13=ObjectGenerations) |
 | Offset | 8 bytes | long | Absolute byte offset of section payload in `cache.bin` |
 | Length | 8 bytes | long | Byte length of section payload |
 | RecordCount | 8 bytes | long | Number of records in section |
@@ -56,7 +56,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 
 Each section's payload is **exactly the bytes that would have been in the pre-migration per-file format**, unchanged, except the object index, which moved from an interleaved array-of-structs layout to three parallel columnar sections (see below). This preserves all other existing reader logic:
 
-- **ObjectAddresses / ObjectMethodTables / ObjectSizes sections** (format version 2+): three parallel `ulong[]` columns — struct-of-arrays layout — one entry per heap object, aligned by index across all three columns. Written by `DiskBackedObjectIndexWriter` as per-segment scratch-file columns, concatenated into the container; read back by `ObjectIndexReader`, which zips them into `HeapEntry` records via pooled buffers, batched by index size. Replaces the legacy interleaved `Objects` section (24-byte header + 24-byte `Address|MethodTable|Size` records); `RecordCount` in the TOC replaces the old per-section header.
+- **ObjectAddresses / ObjectMethodTables / ObjectSizes / ObjectGenerations sections** (format version 2+ for the first three, 3+ for ObjectGenerations): four parallel columns — struct-of-arrays layout — one entry per heap object, aligned by index across all four columns. ObjectAddresses/ObjectMethodTables/ObjectSizes are `ulong[]` (8 bytes/object); ObjectGenerations is `sbyte[]` (1 byte/object) holding the object's GC generation (0/1/2, higher for LOH/POH/Frozen depending on ClrMD's reporting, or -1 if unresolved). Written by `DiskBackedObjectIndexWriter` as per-segment scratch-file columns, concatenated into the container; read back by `ObjectIndexReader`, which zips them into `HeapEntry` records via pooled buffers, batched by index size. The generation value is computed once per object during the single-pass heap scan (segment-kind lookup for non-ephemeral segments, `segment.GetGeneration(address)` for ephemeral ones — no extra ClrMD calls beyond what the scan already pays), so Phase 2 analyzers can read `entry.Generation` directly instead of re-resolving it via `SegmentKindMapper.ResolveGeneration(heap, address)`. Replaces the legacy interleaved `Objects` section (24-byte header + 24-byte `Address|MethodTable|Size` records); `RecordCount` in the TOC replaces the old per-section header.
 - **TypeAggregates section**: TypeAggregateIndex.bin format (extended header + type records)
 - **Roots section**: RootIndex.bin format (24-byte header + 20-byte root records)
 - **Handles section**: HandleSnapshot.bin format (24-byte header + 20-byte handle records)
@@ -173,7 +173,6 @@ Stores aggregated type data (satellite file `TypeAggregateIndex.bin`):
 Reserved satellite files and header versioning enable adding:
 
 - Reference offsets
-- Generation info (Gen0/1/2/LOH/POH)
 - Flags (pinned, finalizable, etc.)
 
 ---

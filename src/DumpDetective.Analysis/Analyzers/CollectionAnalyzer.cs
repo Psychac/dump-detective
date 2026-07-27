@@ -226,16 +226,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.Dictionaries++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.Dictionary][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Dictionary][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeDictionary(heap, objectAddress);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -249,16 +245,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.Lists++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.List][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.List][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeList(heap, objectAddress);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -272,16 +264,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.HashSets++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.HashSet][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.HashSet][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeHashSet(heap, objectAddress);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -295,16 +283,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.Queues++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.Queue][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Queue][idx]++;
                 }
-                catch { }
                 var qWaste = AnalyzeQueue(heap, objectAddress);
                 if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -318,16 +302,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.ArrayLists++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.ArrayList][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.ArrayList][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -341,16 +321,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.Stacks++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.Stack][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Stack][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -364,16 +340,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.SortedLists++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.SortedList][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.SortedList][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -387,16 +359,12 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 stats.TotalCollections++;
                 stats.SortedSets++;
-                try
+                int gen = entry.Generation;
+                if (gen >= 0)
                 {
-                    int gen = SegmentKindMapper.ResolveGeneration(heap, objectAddress);
-                    if (gen >= 0)
-                    {
-                        int idx = gen >= 3 ? 3 : gen;
-                        generationCounts[CollectionKind.SortedSet][idx]++;
-                    }
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.SortedSet][idx]++;
                 }
-                catch { }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
                 {
@@ -533,7 +501,11 @@ namespace DumpDetective.Analysis.Analyzers
                 AddToTopWasteful(local.TopWasteful, waste, topCapacity);
             }
 
-            void ProcessEntry(ulong address, ulong mt)
+            // precomputedGen is the persisted HeapEntry.Generation when available (inMemoryEntries
+            // path), or int.MinValue when the caller has no disk-backed index to read it from
+            // (the raw ClrObject segment walk below) — in that case generation falls back to a
+            // live ClrMD lookup, since there is no persisted value to read.
+            void ProcessEntry(ulong address, ulong mt, int precomputedGen)
             {
                 long s = Interlocked.Increment(ref scanned);
                 if (s % progressInterval == 0)
@@ -551,12 +523,17 @@ namespace DumpDetective.Analysis.Analyzers
                 if (kind == CollectionKind.None)
                     return;
 
-                // determine generation and increment per-kind generation counter
+                // determine generation and increment per-kind generation counter. Prefer the
+                // persisted value from the disk-backed index; only fall back to a live ClrMD
+                // lookup when no persisted value exists (raw ClrObject segment walk).
                 try
                 {
                     int gen;
-                    lock (heapLock)
-                        gen = SegmentKindMapper.ResolveGeneration(heap, address);
+                    if (precomputedGen != int.MinValue)
+                        gen = precomputedGen;
+                    else
+                        lock (heapLock)
+                            gen = SegmentKindMapper.ResolveGeneration(heap, address);
                     if (gen >= 0)
                     {
                         int idx = gen >= 3 ? 3 : gen;
@@ -732,7 +709,7 @@ namespace DumpDetective.Analysis.Analyzers
                         parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                         if (entry.Address == 0 || entry.MethodTable == 0)
                             return;
-                        ProcessEntry(entry.Address, entry.MethodTable);
+                        ProcessEntry(entry.Address, entry.MethodTable, entry.Generation);
                     });
                 }
                 else
@@ -748,7 +725,7 @@ namespace DumpDetective.Analysis.Analyzers
                             ulong mt = obj.Type.MethodTable;
                             if (mt == 0)
                                 continue;
-                            ProcessEntry(obj.Address, mt);
+                            ProcessEntry(obj.Address, mt, int.MinValue);
                         }
                     });
                 }

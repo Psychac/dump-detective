@@ -537,9 +537,9 @@ internal sealed class EventLeakFastScanner
         bool hadField = false;
         int minSubs = options.MinSubscribers;
         bool includeNonLeaking = options.IncludeNonLeakingEvents;
-        // PERF: publisherGen computed lazily — most publisher objects have all-null events.
-        // GetSegmentByAddress is cheap (binary search) but not free; skip it when not needed.
-        int publisherGen = -2;  // -2 = not yet computed; -1 = computed but unknown
+        // entry is the publisher itself, so its generation is already known from the
+        // Phase 1 disk-backed index — no segment lookup needed here at all.
+        int publisherGen = entry.Generation;
 
         foreach (ref readonly DelegateFieldLayout layout in layouts.AsSpan())
         {
@@ -559,10 +559,6 @@ internal sealed class EventLeakFastScanner
             if (buf.Count == 0) continue;
             if (!includeNonLeaking && buf.Count < minSubs) continue;
 
-            // Lazy: only pay for segment lookup when we actually have non-null subscribers.
-            if (publisherGen == -2)
-                publisherGen = GetObjectGenerationDirect(entry.Address);
-
             // Filter noise/compiler-generated publisher types but do NOT require Gen2.
             // Gen2 is a useful severity signal but excluding Gen0/Gen1 publishers removes a
             // large fraction of real subscriber counts from the total.
@@ -574,10 +570,6 @@ internal sealed class EventLeakFastScanner
             List<SubscriberInfo> subscribers = ResolveSubscriberTypes(buf);
 
             bool mismatch = CheckLifetimeMismatchDirect(subscribers, options);
-
-            // Compute generation lazily (only when we have qualifying subscribers).
-            if (publisherGen == -2)
-                publisherGen = GetObjectGenerationDirect(entry.Address);
 
             EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                 publisherAddress: entry.Address,

@@ -11,6 +11,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     internal static readonly ObjectIndexReader Instance = new();
 
     private const int ColumnSize = sizeof(ulong);
+    private const int GenColumnSize = sizeof(sbyte);
 
     // Records materialized per batch before yielding. Pointers can't be used directly inside
     // this iterator (the C# compiler forbids unsafe/pointer syntax anywhere lexically inside a
@@ -42,20 +43,29 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             mtAcc?.Dispose();
             yield break;
         }
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectGenerations, out MemoryMappedViewAccessor? genAcc, out long genLen))
+        {
+            addrAcc?.Dispose();
+            mtAcc?.Dispose();
+            sizeAcc?.Dispose();
+            yield break;
+        }
 
         using MemoryMappedViewAccessor? addr = addrAcc;
         using MemoryMappedViewAccessor? mt = mtAcc;
         using MemoryMappedViewAccessor? size = sizeAcc;
+        using MemoryMappedViewAccessor? gen = genAcc;
 
         long recordCount = addrLen / ColumnSize;
-        if (recordCount == 0 || addr is null || mt is null || size is null ||
-            mtLen / ColumnSize != recordCount || sizeLen / ColumnSize != recordCount)
+        if (recordCount == 0 || addr is null || mt is null || size is null || gen is null ||
+            mtLen / ColumnSize != recordCount || sizeLen / ColumnSize != recordCount ||
+            genLen / GenColumnSize != recordCount)
             yield break;
 
         HeapEntry[] batch = System.Buffers.ArrayPool<HeapEntry>.Shared.Rent(BatchRecords);
         try
         {
-            using var columnReader = new ZeroCopyColumnReader(addr, mt, size);
+            using var columnReader = new ZeroCopyColumnReader(addr, mt, size, gen);
             long remaining = recordCount;
             long start = 0;
             while (remaining > 0)
@@ -87,15 +97,18 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         private readonly MemoryMappedViewAccessor _addr;
         private readonly MemoryMappedViewAccessor _mt;
         private readonly MemoryMappedViewAccessor _size;
+        private readonly MemoryMappedViewAccessor _gen;
         private readonly byte* _addrPtr;
         private readonly byte* _mtPtr;
         private readonly byte* _sizePtr;
+        private readonly byte* _genPtr;
 
-        public ZeroCopyColumnReader(MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size)
+        public ZeroCopyColumnReader(MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size, MemoryMappedViewAccessor gen)
         {
             _addr = addr;
             _mt = mt;
             _size = size;
+            _gen = gen;
 
             byte* p = null;
             _addr.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
@@ -108,6 +121,10 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             p = null;
             _size.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
             _sizePtr = p + _size.PointerOffset;
+
+            p = null;
+            _gen.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _genPtr = p + _gen.PointerOffset;
         }
 
         public void FillBatch(long startIndex, HeapEntry[] destination, int count)
@@ -115,6 +132,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             byte* addrBase = _addrPtr + startIndex * ColumnSize;
             byte* mtBase = _mtPtr + startIndex * ColumnSize;
             byte* sizeBase = _sizePtr + startIndex * ColumnSize;
+            byte* genBase = _genPtr + startIndex * GenColumnSize;
 
             for (int i = 0; i < count; i++)
             {
@@ -122,7 +140,8 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
                 ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + off);
                 ulong methodTable = Unsafe.ReadUnaligned<ulong>(mtBase + off);
                 ulong objSize = Unsafe.ReadUnaligned<ulong>(sizeBase + off);
-                destination[i] = new HeapEntry(address, methodTable, objSize);
+                sbyte generation = unchecked((sbyte)genBase[i]);
+                destination[i] = new HeapEntry(address, methodTable, objSize, generation);
             }
         }
 
@@ -131,6 +150,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             _addr.SafeMemoryMappedViewHandle.ReleasePointer();
             _mt.SafeMemoryMappedViewHandle.ReleasePointer();
             _size.SafeMemoryMappedViewHandle.ReleasePointer();
+            _gen.SafeMemoryMappedViewHandle.ReleasePointer();
         }
     }
 }

@@ -152,6 +152,7 @@ public sealed class AnalysisPipelineTests
         WriteColumn(writer, CacheSectionId.ObjectAddresses, entries.Select(e => e.Addr).ToArray());
         WriteColumn(writer, CacheSectionId.ObjectMethodTables, entries.Select(e => e.Mt).ToArray());
         WriteColumn(writer, CacheSectionId.ObjectSizes, entries.Select(e => e.Size).ToArray());
+        WriteGenerationColumn(writer, entries.Length);
 
         writer.Finish();
     }
@@ -168,6 +169,14 @@ public sealed class AnalysisPipelineTests
         }
 
         writer.EndSection(values.Length);
+    }
+
+    private static void WriteGenerationColumn(CacheContainerWriter writer, int recordCount)
+    {
+        writer.BeginSection(CacheSectionId.ObjectGenerations);
+        for (int i = 0; i < recordCount; i++)
+            writer.Stream.WriteByte(0);
+        writer.EndSection(recordCount);
     }
 
     private sealed class TestAnalyzer(string name, int order, Action? onExecute = null, bool throwError = false, bool throwCanceled = false) : IAnalyzer

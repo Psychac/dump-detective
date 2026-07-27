@@ -125,8 +125,10 @@ internal readonly struct HeapEntry
     public readonly ulong Address;
     public readonly ulong MethodTable;
     public readonly ulong Size;   // 8 bytes — object size in bytes (uses 64-bit to preserve full size fidelity)
+    public readonly sbyte Generation; // GC generation (0/1/2, higher for LOH/POH/Frozen), or -1 if unresolved
 
-    public HeapEntry(ulong address, ulong methodTable, ulong size) { ... }
+    public HeapEntry(ulong address, ulong methodTable, ulong size) { ... } // Generation defaults to -1
+    public HeapEntry(ulong address, ulong methodTable, ulong size, sbyte generation) { ... }
 }
 ```
 
@@ -172,7 +174,7 @@ Characteristics:
 As of **2026-07-15**, the system writes all index data into a single **`cache.bin`** container file into a per-dump `<dump>.dumpindex/` folder to accelerate Phase 2 analyzers and to avoid re-scanning the heap on subsequent runs. (Prior to this, data was written as nine separate files; the container consolidates them while preserving all binary payload formats unchanged.)
 
 The container holds these sections (see `DumpDetective.Analysis.Indexing.Container.CacheSectionId`):
-- **ObjectAddresses / ObjectMethodTables / ObjectSizes** — columnar (struct-of-arrays) object index: three parallel `ulong[]` sections, aligned by index, replacing the legacy interleaved `Objects` section as of format version 2.
+- **ObjectAddresses / ObjectMethodTables / ObjectSizes / ObjectGenerations** — columnar (struct-of-arrays) object index: three parallel `ulong[]` sections plus an `sbyte[]` GC-generation column, aligned by index, replacing the legacy interleaved `Objects` section as of format version 2 (ObjectGenerations added in format version 3).
 - **TypeAggregates** — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
 - **StringDedup** + **StringDedupMeta** — XxHash64 -> preview/count/total-size table for string deduplication and sampling (meta section holds UTF-8 JSON distribution summary).
 - **Handles** — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.

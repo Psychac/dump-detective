@@ -1502,22 +1502,6 @@ namespace DumpDetective.Analysis.Analyzers
             return (double)gen01Count / probed >= options.LifetimeMismatchGen01Threshold;
         }
 
-        /// <summary>
-        /// Simple pairwise lifetime mismatch check between a publisher and a subscriber.
-        /// Returns true when publisher is Gen2 (long-lived) and subscriber is Gen0/Gen1 (short-lived).
-        /// </summary>
-        internal static bool IsLifetimeMismatch(ClrHeap heap, ulong publisherAddress, ulong subscriberAddress)
-        {
-            int p = SegmentKindMapper.ResolveGeneration(heap,publisherAddress);
-            int s = SegmentKindMapper.ResolveGeneration(heap,subscriberAddress);
-            return IsLifetimeMismatch(p, s);
-        }
-
-        internal static bool IsLifetimeMismatch(int publisherGeneration, int subscriberGeneration)
-        {
-            return publisherGeneration == 2 && (subscriberGeneration == 0 || subscriberGeneration == 1);
-        }
-
         public void Dispose() { }
     }
 }

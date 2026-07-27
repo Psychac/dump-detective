@@ -615,71 +615,85 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
 
 ## Success Criteria
 
-Answering the review protocol's seven closing questions directly:
+Answering the review protocol's seven closing questions directly. **Re-answered against current
+state** — the original answers below were written mid-execution of the P0/P1 tracks; those tracks
+are now substantially complete (see [Current State](#current-state), [P0](#immediate-priorities-p0--correctness-track),
+and [P1](#near-term-p1) above), so the answers have moved from "planned" to "done, with named
+residuals."
 
 **1. Does every analyzer have a clearly defined owner and responsibility?**
-Not today, but close after the fixes above. Deliverable 3 found clean, unambiguous ownership for
-roughly two-thirds of the 36 analyzers. The rest fall into a small number of well-defined overlap
-clusters (module/domain, leak/retention scoring, the handle trio, the thread quartet, the
-resource-sampler quartet) rather than being scattered ambiguity — meaning the fix is scoped and
-tractable, not a sign of pervasive architectural confusion.
+Yes, now — a material change from the original answer. All three Deliverable 6 merges landed
+(`AppDomainAnalyzer`→`ModuleAnalyzer`, `RetentionAnalyzer`→`DominatorAnalyzer`,
+`DependentHandleAnalyzer`→`GCHandleAnalyzer`), removing the module/domain and handle-trio overlap
+outright rather than just documenting it. The remaining two clusters flagged originally — the
+thread quartet and the resource-sampler quartet — are no longer ownership ambiguity either: both
+now have compiler-checked shared contracts (`IThreadStackScanParticipant`,
+`ITypedResourceCandidateSource`/`ITypedResourceInstanceSampler<TSnapshot>`, P1 item 8) that make
+each member's role in the shared scan explicit rather than a convention. 33 analyzers today (32
+implementing `IAnalyzer` directly + `LeakCandidateAnalyzer` via `IDeferredAnalyzer`, verified
+against `src/DumpDetective.Analysis/Analyzers/`), each with a distinct file and a distinct entry
+in the catalog/section-ID map.
 
 **2. Are any analyzers redundant?**
-No analyzer is wholly redundant — Deliverable 6 found zero removal candidates after deliberately
-checking rather than assuming. Three pairs are duplicative enough to merge, and one
-(`LeakCandidateAnalyzer`) needs a strategy replacement, but every one of the 36 maps to a real,
-distinct diagnostic capability.
+No, and this is now enforced rather than just assessed. The three duplicative pairs identified in
+Deliverable 6 are merged, not just flagged — there's no longer a live redundancy to point to.
+`LeakCandidateAnalyzer`'s strategy replacement is also done (P0 item 5): it no longer independently
+walks handles, it reads the completed `GCHandleDomainResult` via `IDeferredAnalyzer`.
 
 **3. Which analyzers should merge or split?**
-Merge: `AppDomainAnalyzer` into `ModuleAnalyzer`, `RetentionAnalyzer` into `DominatorAnalyzer`,
-`DependentHandleAnalyzer` into `GCHandleAnalyzer` (36 → 33 analyzers). No mandatory splits;
-`CollectionAnalyzer`'s size is a scope-creep flag addressed by extracting shared infrastructure
-(reflection cache) rather than splitting the analyzer itself, with a literal split left as a
-conditional future option only if its scope keeps growing (Deliverable 6).
+Executed, not just recommended: all three planned merges landed (36 → 33 analyzers, confirmed by
+direct source count above). No splits were ever mandatory; `CollectionAnalyzer`'s scope-creep flag
+was resolved the recommended way — shared infrastructure extraction
+(`TypeNamePatternMatcher`, `TypedResourceSampler`/contracts) instead of a literal split — and that
+extraction is also done (P1 items 6–8). No merge or split work remains open from Deliverable 6.
 
 **4. Which platform capabilities are missing?**
-Ranked by validated priority (Deliverable 2, filtered through Deliverable 9's "don't chase parity
-blindly" test): DI-container leak detection, crash minidump-stream triage, runtime-configuration
-reporting, EF Core diagnostics, cache health, native/COM interop, ASL-specific leak detection
-(distinct from the legacy AppDomain framing being retired), POH reporting, ASP.NET diagnostics,
-and lowest-priority: `System.Threading.Channels`, reflection-growth detection, resurrection
-detection, native thread enumeration, general object-ownership/duplicate detection. Explicitly
-excluded as non-goals: allocation call-stack hotspots and live ETW timelines (architecturally
-impossible from a static dump) and a full interactive GUI (strategically premature).
+The ranked list itself is unchanged (Deliverable 2, filtered through Deliverable 9), but one entry
+moved from "unknown scope" to "scoped and deferred": the crash minidump-stream triage gap was
+investigated end-to-end (P1 item 11) and confirmed real and closeable, with a concrete
+implementation path (Windows DBGHELP P/Invoke, ~2–4 days) — deliberately deferred to a future
+phase rather than blocked on further research. Runtime-configuration reporting (P1 item 12) is the
+one item from the original P1 list that's still genuinely unstarted. Everything else on the list —
+DI-container leak detection, EF Core diagnostics, cache health, native/COM interop, POH reporting,
+ASP.NET diagnostics, and the P3-tier items — is still open, now living in
+[P2](#medium-term-p2)/[P3](#long-term-p3) rather than P1. Non-goals (allocation call-stack hotspots,
+live ETW timelines, a full interactive GUI) are unchanged.
 
 **5. Which expensive operations should become shared infrastructure?**
-In priority order (Deliverable 5, 8): the object-index scan itself (dispatcher — addresses 9 of
-35 analyzers, not all of them), per-type statistics reduction, root/static enumeration, the handle-
-table walk, the thread-stack walk, type classification, reflection field-layout caching, and the
-typed-resource sampler.
+All eight items from the original list have shipped: the object-index scan (dispatcher, all 9
+target analyzers migrated), per-type statistics (consolidated via `TypeAggregateNameResolver`),
+root/static enumeration (`RootSetCache`), the handle-table walk (closed by merging
+`DependentHandleAnalyzer` into `GCHandleAnalyzer` rather than sharing it), the thread-stack walk
+(`ThreadStackScanDispatcher`), type classification (`TypeNamePatternMatcher`), and the typed-resource
+sampler (`TypedResourceSampler` + contracts). Reflection field-layout caching was the one item not
+separately verified in this pass. Two residuals remain on the dispatcher specifically, not on the
+"should this be shared" question: it silently no-ops for any `IHeapAnalysisCache` implementation
+other than the concrete `HeapAnalysisCache` class, and its core premise (one shared pass beats N
+parallel scans) has a measurement harness now but hasn't been run against a real 10GB+ dump.
 
 **6. What architectural changes would most improve correctness, scalability, and maintainability?**
-Scalability: the single-pass index dispatcher — high-leverage for the 9 index-scanning analyzers
-it covers, though 5 analyzers (`EnumerateObjects()`-based) sit outside its reach entirely.
-Correctness: the inter-analyzer result bus (done) feeding a shared evidence/ranking/confidence
-engine, which turns 6 independently-scored leak signals into one credible answer — this is worth
-weighing as co-equal with, not automatically subordinate to, the dispatcher, given the dispatcher's
-verified blast radius is smaller than originally estimated. Maintainability: the sole confirmed
-Deliverable 7 dependency-direction violation (`HeapTopologyAnalyzer` → `Pipeline`) is fixed; what
-remains is holding that direction (no analyzer depends on Pipeline or Reporting) as new analyzers
-are added, and reducing the 4x registration fan-out before the analyzer count grows further.
+Scalability: the single-pass index dispatcher is built and all 9 in-scope analyzers migrated — the
+concrete-type-coupling gap and the unmeasured-on-real-dump premise (see Q5) are what's left, not
+whether it exists. The 5 `EnumerateObjects()`-based analyzers remain outside its reach by design (a
+different mechanism, not scoped here). Correctness: the inter-analyzer result bus, evidence
+builder, ranking engine, and confidence scoring are all done (P0 items 4–6) — the 6 independently-
+scored leak signals now feed one evidence/ranking/confidence model instead of computing their own
+severity. Maintainability: the `HeapTopologyAnalyzer` → `Pipeline` violation is fixed and holding;
+the 4x registration fan-out is the one architectural item from this question still open, now
+tracked as [P2 item 6](#medium-term-p2) rather than a near-term item.
 
 **7. If DumpDetective were redesigned today, what would its analyzer architecture look like?**
-Roughly 33 analyzers (post-merge); of those, the 9 verified index-scanning analyzers would each
-expose a per-object visitor callback consumed by one shared dispatcher instead of independently
-streaming the index — the 5 `EnumerateObjects()`-based analyzers would need an analogous but
-distinct live-heap fan-out mechanism, not this same dispatcher. A per-type statistics artifact and
-per-object generation/segment classification computed once per run and handed to every analyzer,
-rather than re-derived. A single canonical root/retention graph service (built on the existing
-`Traversal` primitive) that every leak-adjacent analyzer depends on instead of implementing its own
-walk. Leak-adjacent analyzers emit structured evidence into one evidence/ranking/confidence engine
-that is the platform's sole scoring authority, rather than each computing and reporting its own
-severity. Analyzer registration carries sensible defaults so adding a new analyzer doesn't
-necessarily require four coordinated types. And a strictly enforced dependency direction — Core →
-shared infra → analyzers → trend comparers → reporting → orchestration — with no exceptions of the
-kind `HeapTopologyAnalyzer` currently represents. Notably, this is an evolution of the current
-design, not a rewrite: every piece of it already exists in some form in today's codebase
-(`Traversal`, `HeapAnalysisCache`, `TypeIndexBuilder`, `InsightEngine.FindResult<T>` as the
-post-hoc-bus precedent, `ConfidenceSectionBuilder`) — the work is consolidation and enforcement,
-not reinvention. `Order` itself is not part of this list — it is execution/report sequencing only,
-not a data channel between analyzers.
+Largely describes the platform as it now exists rather than a target state. 33 analyzers
+(confirmed, post-merge); the 9 index-scanning analyzers each expose a per-object visitor consumed
+by one shared dispatcher (done, with the two residuals in Q5). A per-type statistics artifact
+computed once per run is in place (`TypeAggregateIndexEntry`/`StatisticsCache`), as is per-object
+generation/segment classification (`SegmentKindMapper.ResolveGeneration`). A canonical
+root/retention graph service (`RootSetCache` + `BoundedGraphWalk`) exists and is consumed by every
+leak-adjacent analyzer instead of each implementing its own walk. Leak-adjacent analyzers emit
+structured `Evidence` into the confidence/ranking model (done) rather than reporting independent
+severity. What's still aspirational, not built: sensible defaults for analyzer registration (still
+4x fan-out per new analyzer, P2 item 6), and a strictly enforced dependency direction as a standing
+discipline rather than a one-time fix (the `HeapTopologyAnalyzer` violation is fixed, but nothing
+prevents a new one). The 5 `EnumerateObjects()`-based analyzers still need their own distinct
+fan-out mechanism, not the dispatcher — unchanged from the original answer. `Order` remains
+execution/report sequencing only, not a data channel between analyzers.

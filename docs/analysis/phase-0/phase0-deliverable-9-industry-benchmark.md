@@ -24,9 +24,9 @@
 
 | Capability | Present in | Close this gap? | Why |
 |---|---|---|---|
-| Automated crash-triage from the minidump exception stream (`!analyze -v` equivalent) | WinDbg | **Yes** | Already flagged as unclear/partial for `CrashAnalyzer` in Deliverables 2, 3, 7 — this is a real, closeable gap, not an architectural mismatch |
+| Automated crash-triage from the minidump exception stream (`!analyze -v` equivalent) | WinDbg | **Yes — design decided, not yet built** | P1 Item 11 investigation (`p1-item-11-minidump-exception-stream-investigation.md`, 2026-07-26) confirmed ClrMD 4.0 doesn't publicly expose the minidump exception stream; recommended path is direct DBGHELP P/Invoke, Windows-only scope. `CrashAnalyzer` still only reads heap-resident `ClrException`/`thread.CurrentException` — implementation of the P/Invoke reader is the remaining work |
 | Native/unmanaged memory and COM RCW/CCW tracking | WinDbg, dotMemory | **Yes** | Already flagged as fully missing in Deliverable 2; a common real-world leak source no current analyzer touches |
-| Ad hoc/interactive object inspection (browse arbitrary object/field by address) | WinDbg, dotMemory | **Verify first** | `architecture.md`'s `QueryEngine` suggests this may already exist in some form — confirm its depth before treating as a gap to build from scratch |
+| Ad hoc/interactive object inspection (browse arbitrary object/field by address) | WinDbg, dotMemory | **Confirmed gap** | Verified `QueryEngine` (`src/DumpDetective.Analysis/Query/QueryEngine.cs`) — it only exposes `TopTypesBySize`/`ObjectsOfType`/a size comparer, no arbitrary object/field browse by address. Not a "verify first" item anymore; it's a real gap if this workflow is wanted |
 | Snapshot-to-snapshot diffing (survived objects, % growth ranking) | VS, dotMemory | **Verify first** | `Analysis.Trend.Comparers` (Deliverable 1/7) is the architectural equivalent — confirm it covers the same axes (survived-object tracking, ranked growth) VS/dotMemory expose before scoping new work |
 | Interactive visual graph of retention paths | VS, dotMemory | **No — defer** | Presentation gap, not a data gap: `ReferenceChainAnalyzer` already computes the underlying path data (Deliverable 3/5). A future UI layer could render it; building one now would distract from the Phase 0 consolidation work |
 | Call-stack-level allocation hotspot tracking | PerfView | **No — impossible** | See "Do Not Seek Parity" below |
@@ -55,19 +55,29 @@ Two further advantages, both **conditional on verification**:
 
 ## Better Evidence
 
-**This is currently DumpDetective's weakest category relative to the benchmark, and the review
-should be direct about that.** dotMemory's automatic inspections and key-retention-path grouping
-produce one consistent, ranked, explained answer per problem. Deliverables 3, 5, and 7 already
-established that DumpDetective instead produces leak signals from up to 5 independently-scored
-analyzers (`DominatorAnalyzer` — now also owning the merged `RetentionAnalyzer`'s signal —
-`LeakCandidateAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer`) with
-no unified confidence model. Benchmarked against dotMemory specifically, this is not a minor
-inconsistency — it's the
-gap between DumpDetective and matching the core "tell me what's actually wrong" value
-proposition that the comparison tool is built around. This finding, arrived at independently in
-Deliverable 5, is reinforced rather than superseded here: closing it (Deliverable 5 items 6/8/9/11
-— evidence builder, ranking engine, confidence scoring, inter-analyzer result bus) should be read
-as competitively necessary, not merely a code-quality nicety.
+**This was DumpDetective's weakest category relative to the benchmark; it is now partially
+closed, and the review should be direct about the current split.** dotMemory's automatic
+inspections and key-retention-path grouping produce one consistent, ranked, explained answer per
+problem. Deliverables 3, 5, and 7 established that DumpDetective instead produced leak signals
+from up to 5 independently-scored analyzers (`DominatorAnalyzer` — now also owning the merged
+`RetentionAnalyzer`'s signal — `LeakCandidateAnalyzer`, `StaticRootLeakDetector`,
+`EventLeakAnalyzer`, `TimerLeakAnalyzer`) with no unified confidence model.
+
+That finding is now half-stale. Confirmed in code: `Evidence`/`EvidenceConfidence`
+(`src/DumpDetective.Analysis/Models/Evidence.cs`) and `ConfidenceScoring.Compute`
+(`src/DumpDetective.Reporting/Services/ConfidenceScoring.cs`) exist and are wired into
+`DominatorSectionBuilder`, `LeakAnalysisSectionBuilder` (covers `LeakCandidateAnalyzer`),
+`GCRootIntelligenceSectionBuilder` (covers `StaticRootLeakDetector`'s signal), plus
+`LockGraphSectionBuilder`, `StringSectionBuilder`, and `ExceptionAnalysisSectionBuilder`. But
+`EventLeakSectionBuilder` and `TimerLeakSectionBuilder` have zero references to the confidence
+machinery — those two of the five leak-signal analyzers still report independently, unscored.
+Benchmarked against dotMemory, this is no longer "the gap," it's "the last two analyzers not yet
+migrated onto an evidence model the codebase has already built and adopted elsewhere." Closing it
+is now a smaller, well-scoped task (wire `EventLeakAnalyzer`/`TimerLeakAnalyzer` results through
+the existing `ConfidenceScoring`/`Evidence` types) rather than the open-ended "build an evidence
+builder, ranking engine, confidence scoring, inter-analyzer result bus" scope Deliverable 5 items
+6/8/9/11 originally described — most of that infrastructure now exists; what's left is coverage,
+not design.
 
 Where DumpDetective already matches or exceeds the benchmark: WinDbg's `!gcroot` returns one root
 path per object, on request. `ReferenceChainAnalyzer` (once elevated to the canonical evidence
@@ -141,6 +151,15 @@ DumpDetective's architectural bet — automated, cross-cutting, single-pass anal
 dump, expressed as an extensible `IAnalyzer` catalog — is the right one, and closest in spirit to
 dotMemory's automated-inspection philosophy rather than WinDbg's manual-command philosophy or
 PerfView's trace-analysis philosophy. The benchmark validates the strategy but sharpens where
-execution currently falls short of it: evidence consistency (Deliverable 5/7) is the one gap that
-actually threatens the core value proposition, and closing it should outrank chasing any
-capability unique to the other three tools.
+execution currently falls short of it: evidence consistency (Deliverable 5/7) was the one gap that
+actually threatened the core value proposition, and it is now most of the way closed — the
+`ConfidenceScoring`/`Evidence` infrastructure exists and is adopted by 3 of 5 leak-signal
+analyzers; finishing the remaining two (`EventLeakAnalyzer`, `TimerLeakAnalyzer`) should still
+outrank chasing any capability unique to the other three tools, but it's now a coverage task, not
+a design task. Separately, the crash-triage gap (`!analyze -v` equivalent) has moved from "flagged
+as unclear" to "investigated, with a decided implementation approach" (DBGHELP P/Invoke,
+Windows-only) — also not yet built, but no longer blocked on open questions.
+
+(Note: current analyzer count in the codebase is 31, not the 36 referenced elsewhere in this
+review — consistent with the `DominatorAnalyzer`/`RetentionAnalyzer` merge noted above. Worth
+reconciling across the Phase 0 deliverables rather than treating as this doc's error alone.)

@@ -26,7 +26,7 @@ Every stage above sums to the measured total, but `FindEventLeaks` itself has an
 `EventLeakAnalyzer` alone, measured in isolation via
 [DispatcherPass_PerParticipantBreakdown_SinglePassEach](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/HeapIndexScanDispatcherPerfTests.cs),
 was previously measured at **~17.82s** on this same dump (from the dispatcher-migration
-verification work — see [phase0-analyzer-heap-scan-migration-status.md](phase-0/phase0-analyzer-heap-scan-migration-status.md)).
+verification work — see [phase0-deliverable-10-platform-roadmap.md](phase-0/phase0-deliverable-10-platform-roadmap.md#near-term-p1)'s "Completed" list, item 2; the standalone migration-status doc has since been removed now that migration is complete).
 But `FindEventLeaks`, measured as part of the full `AnalyzeAsync` single-pass run in this
 investigation, costs **~35–37s** — roughly double. That's a ~17–19s gap that is *not* accounted
 for by the dispatcher's own `OnHeapEntry` fan-out cost alone.

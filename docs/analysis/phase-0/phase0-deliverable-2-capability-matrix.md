@@ -37,6 +37,9 @@ dotMemory's native/COM tracking) and surfaced clear gaps.
 | Fragmentation (general) | Partial | `LohFragmentationAnalyzer` (LOH only), `SegmentReservationAnalyzer` (VM waste) | Partial | None | SOH fragmentation is not covered at all |
 | Free objects / free-list space | No | — | Missing | — | Yes — ClrMD exposes free-space "objects"; no analyzer surfaces free-space ratio distinctly from segment reservation |
 | GC generations | Yes | `GCGenerationAnalyzer` | Excellent | None | — |
+| Boxing / value-type allocation waste | Yes | `BoxingAnalyzer` | Good | None | — |
+| Large-array allocation waste | Yes | `ArrayAnalyzer` | Good | None | — |
+| Heap segment topology (per-segment layout, committed/reserved bytes, top types per segment) | Yes | `HeapTopologyAnalyzer` | Good | Partial (`SegmentReservationAnalyzer` also computes committed/reserved bytes per segment) | — |
 
 ## Retention
 
@@ -71,13 +74,14 @@ dotMemory's native/COM tracking) and surfaced clear gaps.
 | Blocking | Yes | `HangAnalyzer`, `LockGraphAnalyzer` | Good | Yes — both analyze blocking threads independently | Consolidate stack-walk pass (Deliverable 4) |
 | ThreadPool health | Partial | `HangAnalyzer` | Partial | None | Dedicated ThreadPool trend view (worker/IO counts, queue length over time) |
 | Async state machines | Yes | `AsyncStateMachineAnalyzer` | Good | Partial (`AsyncTaskAnalyzer` overlaps on task/continuation state) | — |
+| Stack-signature clustering (grouping threads by identical/similar call stacks) | Yes | `ThreadStackClusterAnalyzer` | Good | Partial (`ThreadAnalyzer` also computes lightweight stack hotspots) | — |
 
 ## Exceptions
 
 | Capability | Covered | Owning Analyzer(s) | Quality | Overlap | Future Candidate |
 |---|---|---|---|---|---|
 | Active exceptions (heap-resident) | Yes | `CrashAnalyzer` | Good | None | — |
-| Historical crash evidence (why the process actually died) | Partial / Unclear | `CrashAnalyzer` | Partial | None | Verify in Deliverable 3 whether the minidump exception stream (faulting thread, SEH/AV record) is consumed, or only heap-scanned exception objects — these are architecturally different data sources |
+| Historical crash evidence (why the process actually died) | No | — | Missing | None | Confirmed gap (see [p1-item-11-minidump-exception-stream-investigation.md](p1-item-11-minidump-exception-stream-investigation.md)): `CrashAnalyzer` only heap-scans exception *objects*; the minidump exception stream (faulting thread, SEH/AV record) is not consumed — ClrMD 4.0 exposes no public API for it, direct DBGHELP P/Invoke would be required. Implementation deferred, tracked on the roadmap |
 | Exception pressure | Yes | `CrashAnalyzer` | Good | None | — |
 | Aggregate/grouped exceptions | Yes | `CrashAnalyzer` | Good | None | — |
 
@@ -107,7 +111,7 @@ further.)*
 | Events | Yes | `EventLeakAnalyzer` | Good | Overlaps `StaticRootLeakDetector` static sweep | — |
 | Dependency Injection (DI container leaks) | No | — | Missing | — | Yes — captured-scoped-service leaks via `IServiceProvider`/`ServiceProviderEngineScope` are one of the most common .NET leak patterns and are entirely absent |
 | Reflection (cached MethodInfo/Type growth, dynamic assemblies) | No | — | Missing | — | Yes |
-| Assembly / AssemblyLoadContext loading | Partial | `ModuleAnalyzer`, `AppDomainAnalyzer` | Partial | Yes — both overlap on module/type enumeration | Add explicit unloadable-`AssemblyLoadContext` leak detection (very common .NET Core leak pattern), not just static module listing |
+| Assembly / AssemblyLoadContext loading | Partial | `ModuleAnalyzer` (AppDomain analysis merged in — no longer a separate `AppDomainAnalyzer`) | Partial | None | Add explicit unloadable-`AssemblyLoadContext` leak detection (very common .NET Core leak pattern), not just static module listing |
 
 ## Platform Health
 
@@ -115,6 +119,7 @@ further.)*
 |---|---|---|---|---|---|
 | Memory pressure | Yes | `MemoryAnalyzer`, `AllocationPatternAnalyzer` | Good | None | — |
 | Allocation hotspots | Partial | `AllocationPatternAnalyzer` | Partial | None | Inherent snapshot limitation — true call-site hotspots need ETW, not a dump; document this boundary explicitly rather than treating it as a gap to close |
+| JIT / native code footprint (hot/cold code size, top JIT'd methods) | Yes | `JitAnalyzer` | Good | None | — |
 | Cache health (`IMemoryCache`, static caches, etc.) | No | — | Missing | — | Yes — distinct from `CollectionAnalyzer`'s generic waste detection; common leak/bloat source |
 | Leak indicators (unified) | Partial | `DominatorAnalyzer`, `LeakCandidateAnalyzer`, `StaticRootLeakDetector`, `EventLeakAnalyzer`, `TimerLeakAnalyzer` | Good individually, poor in aggregate | Yes — 5 analyzers, no unified scoring (Deliverable 1 flag) | Shared confidence-scoring engine (Deliverable 5) |
 | Runtime configuration (GC mode, heap count, TieredCompilation, env vars) | No | — | Missing | — | Yes — cheap to surface directly from `ClrRuntime`/`DacInfo`, high diagnostic value, currently not reported anywhere |
@@ -132,7 +137,7 @@ further.)*
 | Capability | Covered | Owning Analyzer(s) | Quality | Overlap | Future Candidate |
 |---|---|---|---|---|---|
 | Process/module version info, OS, architecture, uptime | Partial | `ModuleAnalyzer` (modules only) | Partial | None | Dedicated dump-metadata section (PID, command line, OS build, CLR version, dump timestamp) — usually the first thing a triager wants and currently only partially surfaced via module info |
-| Loaded modules & version conflicts | Yes | `ModuleAnalyzer` | Good | Overlaps `AppDomainAnalyzer` | — |
+| Loaded modules & version conflicts | Yes | `ModuleAnalyzer` | Good | None (AppDomain analysis already merged into `ModuleAnalyzer`) | — |
 | Environment variables / runtime config knobs | No | — | Missing | — | Same as Platform Health > Runtime configuration |
 
 ---
@@ -150,7 +155,8 @@ further.)*
 7. Pinned object / POH reporting
 8. ASP.NET-specific diagnostics
 9. Object ownership / duplicate-object (non-string) detection
-10. Resurrection detection, native thread enumeration, `System.Threading.Channels`
+10. Minidump exception-stream parsing (faulting thread, SEH/AV record) — investigated and deferred (P1 item 11); requires direct DBGHELP P/Invoke since ClrMD 4.0 exposes no public API
+11. Resurrection detection, native thread enumeration, `System.Threading.Channels`
 
 **Capabilities that are covered but fragmented across too many analyzers** (candidates for
 consolidation rather than net-new work — see Deliverable 1 findings and Deliverable 5):
@@ -158,4 +164,8 @@ consolidation rather than net-new work — see Deliverable 1 findings and Delive
 - Leak indicators (5 analyzers)
 - Weak/dependent handle coverage (2 analyzers, was 3 before `DependentHandleAnalyzer` merged into `GCHandleAnalyzer`)
 - Thread blocking/wait-pattern analysis (`HangAnalyzer` + `ThreadAnalyzer` + `LockGraphAnalyzer`)
-- Module/assembly inventory (`ModuleAnalyzer` + `AppDomainAnalyzer`)
+
+**Already resolved since the last pass:**
+
+- Module/assembly inventory — `AppDomainAnalyzer` has been merged into `ModuleAnalyzer` (no longer a separate analyzer)
+- Minidump exception-stream ambiguity — confirmed as a real gap, not merely "unclear" (see `p1-item-11-minidump-exception-stream-investigation.md`); ClrMD 4.0 has no public API for it and implementation is deferred

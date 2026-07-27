@@ -14,17 +14,25 @@
 
 ## Current State
 
-- **Heap-scan footprint (verified against source, not estimated)**: of 35 `IAnalyzer`
-  implementations, **9** stream the on-disk `HeapEntry` object index via
+- **Heap-scan footprint (re-verified against source, updated for the post-merge count)**: of
+  **33** `IAnalyzer` implementations (36 → 33 after the three Deliverable 6 merges — see
+  [P0 item 3](#immediate-priorities-p0-—-correctness-track) and
+  [P1 items 9–10](#near-term-p1)), **9** stream the on-disk `HeapEntry` object index via
   `HeapAnalysisCache.EnumerateIndexedEntries()` / `EnumerateIndexedEntriesAsTuples()`
   (`DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer`, `AsyncTaskAnalyzer`,
-  `HangAnalyzer`, `EventLeakAnalyzer`, `MemoryLeakAnalyzer`, `WcfChannelAnalyzer`,
-  `StringAnalyzer`), and a further **5** perform a full live `ClrHeap.EnumerateObjects()` sweep with
-  no index path at all (`TimerLeakAnalyzer`, `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`,
-  `LohFragmentationAnalyzer`, `HeapTopologyAnalyzer` — the last two per-segment, not whole-heap).
-  **14 of 35** analyzers do some form of full/broad heap traversal; only the **9** index-scanning
-  ones are addressable by a single shared index-scan dispatcher — the 5
-  `EnumerateObjects()`-based analyzers are architecturally distinct and need a separate mechanism
+  `HangAnalyzer`, `EventLeakAnalyzer`, `DominatorAnalyzer` — formerly `MemoryLeakAnalyzer`,
+  `WcfChannelAnalyzer`, `StringAnalyzer`) and are now confirmed migrated to
+  `IHeapIndexScanParticipant`. A further **5** analyzers (`TimerLeakAnalyzer`,
+  `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`, `LohFragmentationAnalyzer`,
+  `HeapTopologyAnalyzer`) still call `ClrHeap.EnumerateObjects()` somewhere and so remain outside
+  the reach of the index-scan dispatcher, but this bullet previously overstated that as "no index
+  path at all": per [P1 item 3](#near-term-p1), `TimerLeakAnalyzer`, `HttpObjectAnalyzer`, and
+  `FinalizableObjectAnalyzer` already read the Phase-1 `TypeAggregates` index as their *primary*
+  path today, with `EnumerateObjects()` only as the same index-absent fallback pattern the
+  migrated 9 use — only `LohFragmentationAnalyzer` and `HeapTopologyAnalyzer` genuinely have no
+  index path, and both are per-segment, not whole-heap. **14 of 33** analyzers do some form of
+  full/broad heap traversal; only the **9** index-scanning ones are addressable by a single shared
+  index-scan dispatcher — the other 5 are architecturally distinct and need a separate mechanism
   if they're ever addressed (see [phase0-heap-index-scan-dispatcher-plan.md](phase0-heap-index-scan-dispatcher-plan.md)).
 - **Inter-analyzer result bus (Deliverable 5 item 11): implemented.** A post-hoc bus:
   `AnalyzerRunResultsExtensions.GetResult<T>(this IReadOnlyList<AnalyzerRunResult> runs)`
@@ -252,9 +260,10 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
    internal `Parallel.For` chunking), but turned out not to need a dispatcher design change: its
    `EventLeakFastScanner` gained a single-entry `ScanEntry(...)` method factored out of the
    existing per-object loop body, which both the dispatcher's serial callback and the scanner's
-   own internal chunked loop now call — see
-   [phase0-analyzer-heap-scan-migration-status.md](phase0-analyzer-heap-scan-migration-status.md)
-   for the per-analyzer detail. **(Fixed) No progress-reporting hook.**
+   own internal chunked loop now call (per-analyzer migration detail previously tracked in
+   `phase0-analyzer-heap-scan-migration-status.md`; that doc has been removed now that
+   migration is complete for all 9 analyzers — see the "Completed" list above for the same
+   detail). **(Fixed) No progress-reporting hook.**
    `HeapIndexScanDispatcher.Run` previously had no progress-reporting hook, so the per-object
    `ObjectScanCounter` progress messages (e.g. "scanning heap objects") that a migrated analyzer's
    scan loop used to report were lost for the dispatcher path. Fixed: the dispatcher now drives its
@@ -290,14 +299,23 @@ are ordered by dependency, not just by value, so **build top-to-bottom within a 
      implementation silently skips the shared scan with no error or diagnostics event — every
      participant just falls back to its own scan. Correctness-preserving today, but an invisible
      perf cliff and a sign the "single-pass" architecture only exists for one concrete class.
-   - **The "one shared pass beats N independent scans" premise is unverified.** The dispatcher path
-     is a single-threaded `foreach` over `EnumerateIndexedEntries()` fanning out to every
-     participant per entry. It replaced fallback paths like `CrashAnalyzer`'s
-     `Parallel.ForEach(heap.Segments, ...)`, which used full core parallelism. Trading N parallel
-     full scans for one sequential shared scan is only a net win if the disk-index read, not CPU,
-     is the bottleneck — plausible, but not demonstrated against a `BenchmarkSuite1` run on a
-     representative large dump. Given CLAUDE.md's "reasonable runtime on 10GB+ dumps" as a
-     definition-of-done criterion, this should be measured, not assumed, before broader rollout.
+   - **The "one shared pass beats N independent scans" premise is still unconfirmed, but a
+     measurement harness for it now exists.** The dispatcher path is a single-threaded `foreach`
+     over `EnumerateIndexedEntries()` fanning out to every participant per entry. It replaced
+     fallback paths like `CrashAnalyzer`'s `Parallel.ForEach(heap.Segments, ...)`, which used full
+     core parallelism. Trading N parallel full scans for one sequential shared scan is only a net
+     win if the disk-index read, not CPU, is the bottleneck. `HeapIndexScanDispatcherPerfTests.cs`
+     (`tests/DumpDetective.Tests/Integration/CacheDiscrepancies/`, added alongside the P1 item 11
+     crash-triage work) now exists with three `[DiscrepancyFact]` timing-breakdown tests —
+     `DispatcherPass_PerParticipantBreakdown_SinglePassEach`,
+     `EventLeakAnalyzer_FullAnalyzeAsync_SinglePass_TimingBreakdown`, and
+     `DominatorAnalyzer_FullAnalyzeAsync_SinglePass_TimingBreakdown` — but like the rest of the
+     `DiscrepancyFact` suite these are skipped without a real dump via `DD_BENCHMARK_DUMP`, so no
+     confirmed numbers from a representative 10GB+ dump run are recorded anywhere yet. The premise
+     is now measurable on demand; it has not been measured. Given CLAUDE.md's "reasonable runtime
+     on 10GB+ dumps" as a definition-of-done criterion, running this harness against a
+     representative large dump — not writing more of it — is the remaining step before broader
+     rollout.
    - **Each migrated analyzer now carries three parallel implementations of the same logic**:
      the participant path, a parallel-segment no-index fallback, and (for `AsyncTaskAnalyzer`) a
      third raw-heap fallback. The `*DiscrepancyTests` suite exists specifically to catch these

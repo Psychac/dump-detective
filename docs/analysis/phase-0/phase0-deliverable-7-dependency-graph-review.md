@@ -46,24 +46,31 @@ No other cross-analyzer or cross-namespace cycles were identified from the avail
 
 ## Tight Coupling
 
-- **`AsyncTaskAnalyzer` ↔ its own on-disk task-index format.** It depends on the shared
-  `Indexing.Container` abstraction *and* appears to separately own private format constants
-  (`TaskIndexMagic`/`TaskIndexVersion`) inside the analyzer itself (Deliverable 3/4). Storage
-  format and analyzer logic should never be this inseparable — a format change requires touching
-  the analyzer, and an analyzer change risks the format, when the two should be independently
-  versionable behind the `Indexing` abstraction like every other container-index consumer
-  (`ArrayAnalyzer`, `LohFragmentationAnalyzer`, `WeakReferenceAnalyzer`).
-- **The "resource state sampler" quartet** (`DbConnectionAnalyzer`, `WcfChannelAnalyzer`,
-  `HttpObjectAnalyzer`, `TimerLeakAnalyzer`) has no shared reference between them at all — which
-  is itself the coupling problem: they're coupled by convention (identical logic, copy-pasted)
-  rather than by a shared contract. A bug fix to the sampling approach must be manually
-  propagated to 4 places with no compiler assistance to catch a missed one. Each also has its own
-  `Options` type carrying duplicate knobs (`MaxStateSamples`/`StateFieldNames`-shaped fields) — the
-  configuration surface is duplicated exactly as many times as the logic is.
+- ~~**`AsyncTaskAnalyzer` ↔ its own on-disk task-index format.**~~ **Resolved (P1 item 10).**
+  Verified directly against source: `TaskIndexMagic`/`TaskIndexVersion` no longer exist as private
+  constants on `AsyncTaskAnalyzer`. The analyzer now imports `DumpDetective.Analysis.Indexing.Container`
+  and participates in the shared heap-index scan via `IHeapIndexScanParticipant`
+  (`BeforeHeapIndexScan`/`OnHeapEntry`/`OnHeapIndexScanCompleted`), consuming typed records the same
+  way `ArrayAnalyzer`, `LohFragmentationAnalyzer`, and `WeakReferenceAnalyzer` do. No bespoke format
+  ownership remains in the analyzer.
+- ~~**The "resource state sampler" quartet**~~ (`DbConnectionAnalyzer`, `WcfChannelAnalyzer`,
+  `HttpObjectAnalyzer`, `TimerLeakAnalyzer`) — **resolved.** Verified directly against source: all
+  four now implement the shared `ITypedResourceCandidateSource` contract (`IsCandidateType`), and
+  `DbConnectionAnalyzer`/`WcfChannelAnalyzer` additionally implement
+  `ITypedResourceInstanceSampler<T>` (`MaxStateSamplesPerType`/`TopSampleCap`/`TrySample`), replacing
+  the copy-pasted-by-convention relationship with a compiler-checked one. `HttpObjectAnalyzer` and
+  `TimerLeakAnalyzer` implement only the candidate-source half of the contract — worth confirming
+  whether they should also adopt `ITypedResourceInstanceSampler<T>` for full parity, but the core
+  coupling problem (no shared reference at all) is closed.
 - **The thread-domain quartet** (`ThreadAnalyzer`, `HangAnalyzer`, `ThreadStackClusterAnalyzer`,
-  `LockGraphAnalyzer`) — same shape of problem: no shared dependency on a common thread-data
-  provider, so each independently walks stacks and each is "coupled" to the others only in the
-  sense that a change to wait-state classification in one silently doesn't apply to the rest.
+  `LockGraphAnalyzer`) — **partially resolved.** Verified against source: all four now implement
+  `IThreadStackScanParticipant` (`GetRequiredFrameCount`/`BeforeThreadStackScan`/`OnThreadStack`/
+  `OnThreadStackScanCompleted`), the same single-pass dispatcher-driven scan pattern used for the
+  heap index — so "each independently walks stacks" is closed; stack walking is now a shared
+  dependency. Still open: wait-state *classification* itself isn't shared — `ThreadAnalyzer` owns
+  its own `CategorizeThreads` with no equivalent shared classifier symbol found for
+  `HangAnalyzer`/`LockGraphAnalyzer`, so a change to wait-state classification in one still silently
+  doesn't apply to the rest.
 
 ## Infrastructure Leakage
 
@@ -78,9 +85,8 @@ No other cross-analyzer or cross-namespace cycles were identified from the avail
   resolved automatically via `ActivatorUtilities` in `DefaultAnalyzerFactory`. Formalized as a
   sanctioned pattern in [docs/architecture.md § 14 Observability](#14--observability) for analyzers
   scanning large populations that expect malformed data (not routine control flow).
-- **`AsyncTaskAnalyzer`'s bespoke index format** (see Tight Coupling above) is also, from a
-  layering perspective, storage infrastructure leaking upward into analyzer logic — it should sit
-  entirely behind `Indexing`, with the analyzer only ever seeing typed records.
+- ~~**`AsyncTaskAnalyzer`'s bespoke index format**~~ — **resolved** (see Tight Coupling above); now
+  sits entirely behind `Indexing.Container`, analyzer only sees typed records.
 - ~~`HeapTopologyAnalyzer` → `Pipeline`~~ — resolved (see Cycles above).
 
 ## Cross-Layer Violations
@@ -152,15 +158,18 @@ analyzer types simultaneously with generator/comparer/section-builder types.
 
 1. ~~Remove `HeapTopologyAnalyzer`'s dependency on `Pipeline`~~ — **done.** Confirmed the import
    was unused (no symbol from `Pipeline` was consumed) and deleted it.
-2. Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`, so the
-   analyzer depends only on the abstraction, not on the format's constants.
+2. ~~Move `AsyncTaskAnalyzer`'s private task-index format fully behind `Indexing.Container`~~ —
+   **done (P1 item 10).** Confirmed via source: no format constants remain on the analyzer; it
+   consumes the shared heap-index scan through `IHeapIndexScanParticipant` and typed records only.
 3. ~~Remove or formally justify `CollectionAnalyzer`'s `Microsoft.Extensions.Logging` dependency~~ —
    **done (P1 item 10).** Formally justified as option (b): the platform has a deliberate,
    consistently-applied logging layer that every analyzer can depend on the same way. Analyzed and
    validated the dependency is not noise — it's ~29 real call sites for per-object error/debug
    diagnostics in the analyzer scanning the largest object population. Documented in
    [docs/architecture.md § 14 Observability](#14--observability).
-4. Introduce shared contracts (interfaces, not just conventions) for the resource-sampler quartet
-   and the thread-domain quartet, so their current "coupled by copy-paste" relationship becomes an
-   enforced, compiler-checked one — this is the dependency-graph framing of Deliverable 5 items 3
-   and 7.
+4. ~~Introduce shared contracts (interfaces, not just conventions) for the resource-sampler
+   quartet~~ — **done.** `ITypedResourceCandidateSource` / `ITypedResourceInstanceSampler<T>` now
+   enforce this at compile time (see Tight Coupling above). The thread-domain quartet now shares
+   `IThreadStackScanParticipant` for stack walking, but wait-state *classification* logic is still
+   independently owned per analyzer with no shared contract — this narrower gap is the remaining
+   dependency-graph framing of Deliverable 5 item 7.

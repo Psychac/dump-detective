@@ -17,6 +17,12 @@
 
 ### `ModuleAnalyzer` + `AppDomainAnalyzer` → merge into `ModuleAnalyzer`
 
+**Status: done** — see [phase0-deliverable-10-platform-roadmap.md P1 item 9](phase0-deliverable-10-platform-roadmap.md#near-term-p1).
+Options, domain-result model, analyzer logic, finding generator, trend comparer, and section
+builder were merged into their `Module*` equivalents; `AppDomain*`-specific files deleted; CLI
+wiring, `SectionIdDomainMap`, `InsightEngine`, and catalog registrations updated to match.
+Verified against source: `AppDomainAnalyzer` no longer exists in the codebase.
+
 Both compute per-module/type/object statistics with no defensible boundary between them
 (Deliverable 1, Deliverable 3 overlap #1). Beyond the duplication: in modern .NET (Core/5+),
 `AppDomain` is largely vestigial — a process has exactly one (default) AppDomain, and the concept
@@ -64,24 +70,45 @@ collection introspection" is a single coherent capability domain (Deliverable 2 
 Lists/Concurrent/Immutable under one Collections category) — splitting by collection family (e.g.
 generic vs. concurrent vs. immutable) would trade one large analyzer for three thin ones with no
 clear boundary of their own, which is the same mistake `ModuleAnalyzer`/`AppDomainAnalyzer` made
-in the other direction. **Recommendation: Keep as one analyzer**, but treat the size as a signal
-to extract its reflection-based field-layout cache into shared infrastructure (Deliverable 5 item
-4/5) and remove the logging dependency. Revisit splitting only if a future addition (e.g. deep
-`System.Threading.Channels` support) meaningfully changes its shape.
+in the other direction (that merge has since shipped — see above). **Recommendation: Keep as one
+analyzer**, but treat the size as a signal to extract its reflection-based field-layout cache into
+shared infrastructure (Deliverable 5 item 4/5 — still outstanding). The logging-dependency flag is
+**resolved, not by removal**: investigated per
+[P1 item 10](phase0-deliverable-10-platform-roadmap.md#near-term-p1) and found legitimate — ~29
+real call sites logging per-object scan failures on malformed heap data in the platform's
+largest/most complex analyzer. The optional `ILogger<T>? logger = null` constructor pattern is now
+formalized platform-wide (see
+[docs/architecture.md § 14 Observability](../../architecture.md#14--observability) and
+[CLAUDE.md](../../../CLAUDE.md)), so `CollectionAnalyzer` is no longer an outlier — it's the first
+analyzer to use a sanctioned pattern, not scope creep. Revisit splitting only if a future addition
+(e.g. deep `System.Threading.Channels` support) meaningfully changes its shape.
 
 ## Replace Recommendation
 
 ### `LeakCandidateAnalyzer` — replace scanning strategy with aggregation strategy
 
+**Status: done, but narrower than originally scoped** — see
+[phase0-deliverable-10-platform-roadmap.md P0 item 5](phase0-deliverable-10-platform-roadmap.md#immediate-priorities-p0).
+The inter-analyzer result bus (Deliverable 5 item 11) landed as
+`AnalyzerRunResultsExtensions.GetResult<T>` plus the new `IDeferredAnalyzer` marker interface,
+which `AnalysisPipeline` runs in a second pass after every non-deferred analyzer completes.
+`LeakCandidateAnalyzer` now implements `IDeferredAnalyzer` and no longer independently walks
+`runtime.EnumerateHandles()` — it reads the already-completed `GCHandleDomainResult` off
+`AnalysisContext.CompletedRunResults` for that signal. **What did not change**: it still reads
+`TypeAggregateIndexEntry`/`TypeShapeCache` directly off the heap index for its other signals
+(Gen2%, finalizable, static-rooted, container, reference-field-ratio) rather than consuming
+`DominatorAnalyzer`/`StaticRootLeakDetector`/`EventLeakAnalyzer`/`TimerLeakAnalyzer`'s domain
+results as this section originally envisioned — it is a partial aggregator (bus-consumer for one
+signal), not the pure aggregator the original recommendation described. That gap is not tracked as
+an open item anywhere in the roadmap and should be if the platform still wants one shared
+confidence/ranking authority across all six leak-adjacent analyzers.
+
 Per Deliverable 3's central finding: this analyzer's *job* — rank/score leak candidates from
-multiple signals — is correct and necessary (Deliverable 5 item 8, P0 priority). But its current
-*strategy*, independently re-scanning the index for its own signals rather than consuming
-`RetentionAnalyzer`(→`DominatorAnalyzer`)/`StaticRootLeakDetector`/`EventLeakAnalyzer`/
-`TimerLeakAnalyzer`'s output, is architecturally wrong given the platform's stated goal of a single
-shared confidence/ranking authority. This isn't a tunable internal detail — it requires the
-Deliverable 5 item 11 (inter-analyzer result bus) to exist and `LeakCandidateAnalyzer` to be
-rebuilt against it as a pure aggregator. **Verdict: Replaced**, contingent on item 11 landing
-first.
+multiple signals — is correct and necessary (Deliverable 5 item 8, P0 priority). Its original
+*strategy*, independently re-scanning the index for its own signals rather than consuming other
+analyzers' output, was architecturally wrong given the platform's stated goal of a single shared
+confidence/ranking authority. **Verdict: Replaced** (done for the handle signal; the remaining
+signals are tracked above as follow-up, not as a reason to revert the verdict).
 
 ## No-Removal Analyzers, With Justification
 
@@ -110,46 +137,61 @@ is optimal" mandate) — candidates considered and rejected for removal:
 | `AllocationPatternAnalyzer` | **Keep** | Clean, provided it stays a coarse classifier (D3) |
 | `ObjectShapeAnalyzer` | **Keep** | Clean boundary |
 | `GCRootAnalyzer` | **Keep** | Clean; complements `ReferenceChainAnalyzer`'s per-object job |
-| `HeapTopologyAnalyzer` | **Keep** | Distinct from `SegmentReservationAnalyzer` (layout vs. waste); mandatory fix — remove its `Analysis.Pipeline` dependency (D3 hidden coupling) |
-| `ModuleAnalyzer` | **Merge target** (absorbs `AppDomainAnalyzer`) | See Merge section |
-| `CrashAnalyzer` | **Keep** | Verify minidump exception-stream coverage (D3) as an action item, not a boundary problem |
-| `HangAnalyzer` | **Keep** | Distinct capability (threadpool health scoring); must consume `ThreadAnalyzer`'s wait-state instead of re-deriving it (D3/D5) |
-| `AsyncTaskAnalyzer` | **Keep** | Distinct capability; must replace its private on-disk task-index format with the shared `Indexing` layer (D3/D4 hidden coupling) |
+| `HeapTopologyAnalyzer` | **Keep** | Distinct from `SegmentReservationAnalyzer` (layout vs. waste); `Analysis.Pipeline` dependency **fixed** — confirmed dead import, removed (P0 item 1) |
+| `ModuleAnalyzer` | **Merged** (absorbed `AppDomainAnalyzer`) | See Merge section — done |
+| `CrashAnalyzer` | **Keep** | Minidump exception-stream gap **investigated and confirmed real**; ClrMD 4.0 exposes no API for it, direct DBGHELP P/Invoke required — **deferred to a future phase**, not a boundary problem (P1 item 11) |
+| `HangAnalyzer` | **Keep** | Distinct capability (threadpool health scoring); now consumes `ThreadAnalyzer`'s stack walk via the shared `IThreadStackScanParticipant`/`ThreadStackScanDispatcher` contract instead of re-deriving it — **done** (P1 item 8) |
+| `AsyncTaskAnalyzer` | **Keep** | Distinct capability; private on-disk task-index format **moved** behind `TaskIndexReader`/`Indexing` layer — **done** (P1 item 10) |
 | `RetentionAnalyzer` (`MemoryLeakAnalyzer.cs`) | **Merged** into `DominatorAnalyzer` | See Merge section |
-| `LeakCandidateAnalyzer` | **Replaced** (strategy) | See Replace section |
+| `LeakCandidateAnalyzer` | **Replaced** (strategy) | Done for the handle signal via `IDeferredAnalyzer` + result bus; other signals still index-derived, not bus-consumed — see Replace section |
 | `DominatorAnalyzer` | **Keep**, becomes canonical retained-size provider | Absorbs `RetentionAnalyzer`'s signal |
 | `StringAnalyzer` | **Keep** | Clean, appropriately-scoped despite size |
 | `CollectionAnalyzer` | **Keep** (no split now) | See Split section |
-| `StaticRootLeakDetector` | **Keep** | Distinct capability; must expose its static-field sweep as shared infra for `EventLeakAnalyzer` to consume (D3/D5) |
-| `ReferenceChainAnalyzer` | **Keep**, elevate to canonical root-path provider | On-demand evidence engine other analyzers should depend on (D5 evidence builder) |
+| `StaticRootLeakDetector` | **Keep** | Distinct capability; roots now read through the shared `RootSetCache` (P0 item 2) alongside `GCRootAnalyzer`/`EventLeakAnalyzer` — **done** |
+| `ReferenceChainAnalyzer` | **Keep**, elevate to canonical root-path provider | On-demand evidence engine other analyzers should depend on; its bidirectional shortest-root-path search was intentionally left as its own thing, and `SampleRootPathFinder` was extracted from its cheap Fast-mode path search for the evidence builder (P0 item 4) |
 | `GCHandleAnalyzer` | **Keep**, absorbs `DependentHandleAnalyzer` | See Merge section |
 | `DependentHandleAnalyzer` | **Merged** into `GCHandleAnalyzer` | See Merge section |
 | `LohFragmentationAnalyzer` | **Keep** | Clean structural boundary vs. `AllocationPatternAnalyzer`/`SegmentReservationAnalyzer` |
-| `ThreadStackClusterAnalyzer` | **Keep** | Distinct analytical technique (signature clustering vs. per-thread state); must consume `ThreadAnalyzer`'s stack walk instead of re-walking (D3/D4) |
-| `ThreadAnalyzer` | **Keep**, elevate to canonical thread/stack-walk provider | `HangAnalyzer`/`ThreadStackClusterAnalyzer`/`LockGraphAnalyzer` should depend on it |
-| `LockGraphAnalyzer` | **Keep** | Distinct capability (lock ownership graph, deadlock candidates); must consume `ThreadAnalyzer`'s wait state (D3) |
-| `EventLeakAnalyzer` | **Keep** | Distinct, valuable capability (event/delegate leak pattern); must consume `StaticRootLeakDetector`'s sweep instead of duplicating it, and share reflection field-layout cache with `CollectionAnalyzer` (D5) |
-| `FinalizableObjectAnalyzer` | **Keep** | Real capability; action item to clarify finalizer-queue vs. has-finalizer-undisposed scope (D3) — conditionally revisit split if the two questions turn out to be conflated in implementation |
+| `ThreadStackClusterAnalyzer` | **Keep** | Distinct analytical technique (signature clustering vs. per-thread state); now consumes the shared stack walk via `IThreadStackScanParticipant` instead of re-walking — **done** (P1 item 8) |
+| `ThreadAnalyzer` | **Keep**, elevate to canonical thread/stack-walk provider | `HangAnalyzer`/`ThreadStackClusterAnalyzer`/`LockGraphAnalyzer` now depend on it via `ThreadStackScanDispatcher` — **done** (P1 item 8) |
+| `LockGraphAnalyzer` | **Keep** | Distinct capability (lock ownership graph, deadlock candidates); now consumes `ThreadAnalyzer`'s wait state via the same dispatcher — **done** (P1 item 8) |
+| `EventLeakAnalyzer` | **Keep** | Distinct, valuable capability (event/delegate leak pattern); reads roots through the shared `RootSetCache` alongside `StaticRootLeakDetector` — **done** (P0 item 2); reflection field-layout cache sharing with `CollectionAnalyzer` still outstanding (D5 item 4/5) |
+| `FinalizableObjectAnalyzer` | **Keep** | Real capability; finalizer-queue vs. has-finalizer-undisposed scope clarification still open (P2 item 5) |
 | `AsyncStateMachineAnalyzer` | **Keep** | Distinct from `AsyncTaskAnalyzer` (compiler-generated instances vs. Task status); should share classification data where continuations reference state machines (D3) |
 | `ArrayAnalyzer` | **Keep** | Clean; should hand off LOH-fragmentation detail to `LohFragmentationAnalyzer` rather than compute it (D3) |
-| `AppDomainAnalyzer` | **Merged** into `ModuleAnalyzer` | See Merge section |
+| `AppDomainAnalyzer` | **Merged** into `ModuleAnalyzer` | See Merge section — **done**; verified no longer present in the codebase |
 | `SegmentReservationAnalyzer` | **Keep** | Reference example of correct isolation, no changes needed |
 | `WeakReferenceAnalyzer` | **Keep** | Real technical justification for staying separate (satellite index for target-liveness resolution); must de-duplicate raw handle counting with `GCHandleAnalyzer` (D3) |
 | `BoxingAnalyzer` | **Keep** | Clean boundary |
 | `JitAnalyzer` | **Keep** | Reference example of correct isolation; see No-Removal justification |
-| `DbConnectionAnalyzer` | **Keep** | Distinct resource type; must migrate to the shared typed-resource sampler (D5 item 7) |
-| `WcfChannelAnalyzer` | **Keep** | Distinct resource type; same sampler migration |
-| `HttpObjectAnalyzer` | **Keep** | Distinct resource type; same sampler migration |
-| `TimerLeakAnalyzer` | **Keep** | Distinct resource type; same sampler migration; must stop computing independent leak severity once the ranking engine (D5 item 8) exists |
+| `DbConnectionAnalyzer` | **Keep** | Distinct resource type; migrated to the shared typed-resource sampler and its compiler-checked `ITypedResourceCandidateSource`/`ITypedResourceInstanceSampler` contract — **done** (P1 items 7-8) |
+| `WcfChannelAnalyzer` | **Keep** | Distinct resource type; same sampler migration — **done** |
+| `HttpObjectAnalyzer` | **Keep** | Distinct resource type; same sampler migration (candidate-source half only, no runtime state to sample) — **done** |
+| `TimerLeakAnalyzer` | **Keep** | Distinct resource type; same sampler migration — **done**; still computes its own leak severity — `LeakCandidateAnalyzer`'s ranking engine only consumes `GCHandleDomainResult` today, not `TimerLeakDomainResult`, so this action item remains open |
 
 ## Net Effect
 
-- **36 analyzers → 33** after the three merges (`AppDomainAnalyzer` into `ModuleAnalyzer`,
-  `RetentionAnalyzer` into `DominatorAnalyzer`, `DependentHandleAnalyzer` into `GCHandleAnalyzer`).
-- **1 analyzer** (`LeakCandidateAnalyzer`) requires a strategy replacement contingent on
-  Deliverable 5's inter-analyzer result bus.
+- **36 analyzers → 33 — done, verified against source.** All three merges have shipped
+  (`AppDomainAnalyzer` into `ModuleAnalyzer`, `RetentionAnalyzer` into `DominatorAnalyzer`,
+  `DependentHandleAnalyzer` into `GCHandleAnalyzer`); a direct count of `: IAnalyzer` and
+  `: IDeferredAnalyzer` classes under `src/DumpDetective.Analysis/Analyzers/` confirms 33.
+- **1 analyzer** (`LeakCandidateAnalyzer`) has its strategy replacement **done** — the inter-analyzer
+  result bus (Deliverable 5 item 11) shipped and `LeakCandidateAnalyzer` consumes it for the
+  GC-handle signal via `IDeferredAnalyzer`. It is a partial, not pure, aggregator: its other signals
+  (Gen2%, finalizable, static-rooted, container) are still read directly off the heap index rather
+  than off `DominatorAnalyzer`/`StaticRootLeakDetector`/`EventLeakAnalyzer`/`TimerLeakAnalyzer`'s
+  domain results — see Replace section.
 - **0 analyzers** recommended for removal — the architecture's problem is duplication and
-  coupling, not dead capability.
-- The remaining ~30 "Keep" verdicts each still carry a required internal-refactor action item from
-  Deliverable 4/5 — boundary correctness and implementation cleanliness are tracked separately by
-  design (see verdict discipline note above).
+  coupling, not dead capability. Still true; no removal candidates surfaced since.
+- Of the remaining "Keep" verdicts' internal-refactor action items: most have since **landed**
+  (thread-domain quartet contract, resource-sampler quartet contract, `RootSetCache`, `HeapTopologyAnalyzer`'s
+  dead `Pipeline` import, `AsyncTaskAnalyzer`'s index format, `CollectionAnalyzer`'s logging
+  dependency resolved as a sanctioned pattern). Open ones: `CollectionAnalyzer`'s reflection
+  field-layout cache extraction, `WeakReferenceAnalyzer`/`GCHandleAnalyzer` raw-count
+  de-duplication, `AsyncStateMachineAnalyzer`/`AsyncTaskAnalyzer` classification sharing,
+  `ArrayAnalyzer`/`LohFragmentationAnalyzer` LOH-detail handoff, `FinalizableObjectAnalyzer`'s
+  scope clarification, and `TimerLeakAnalyzer` joining the ranking engine. Boundary correctness and
+  implementation cleanliness are still tracked separately by design (see verdict discipline note
+  above) — see
+  [phase0-deliverable-10-platform-roadmap.md](phase0-deliverable-10-platform-roadmap.md) for the
+  authoritative, continuously-updated status of each.

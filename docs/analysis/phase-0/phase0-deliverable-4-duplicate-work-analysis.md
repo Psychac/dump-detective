@@ -8,12 +8,20 @@
 > architectural cost estimate, not a profiled benchmark — costs are stated as order-of-magnitude
 > multipliers to be confirmed empirically in Deliverable 8.
 
+> **26-07-2026 re-evaluation note**: §1's finding below is now **resolved for the 9 index-scanning
+> analyzers** — verified directly against source (see §1a). The **~26x multiplier** and "#1
+> finding" framing describe the *pre-fix* state and are kept for historical record; do not read
+> them as current cost. §5's finding is now **fully resolved** — see §5a. Everything else in this
+> document (§§2–4, 6–7) was re-checked only where noted; unmarked sections reflect the original
+> analysis and should be treated as unverified against current source.
+
 The verified breakdown (see
 [Deliverable 10, Current State](phase0-deliverable-10-platform-roadmap.md#current-state)):
 **9 of 35** analyzers stream the on-disk index; a further 5 perform a full
 `ClrHeap.EnumerateObjects()` sweep that this section's numbers conflate with index streaming but
 which a shared index dispatcher cannot address. The qualitative finding below — this is real,
-uncoordinated duplication — holds at this corrected multiplier.
+uncoordinated duplication — holds at this corrected multiplier, **for the state that predates the
+dispatcher landing (see §1a)**.
 
 ## 1. Heap scans — the dominant cost
 
@@ -41,7 +49,29 @@ Absent a shared single-pass dispatcher, actual I/O cost is closer to **~26x** th
 this is very likely the single largest architectural cost in the entire platform, and the one most
 directly at odds with the project's own "10GB+ dumps, reasonable runtime" definition of done.
 
-**This is the #1 finding of Deliverable 4.**
+**This was the #1 finding of Deliverable 4 — see §1a for its current status.**
+
+## 1a. Heap scans — **resolved for the 9 index-scanning analyzers**
+
+Verified directly against source: `HeapIndexScanDispatcher`
+(`src/DumpDetective.Analysis/Pipeline/HeapIndexScanDispatcher.cs`) is exactly the "single-pass
+index scan dispatcher" this document's §1 called for. `AnalysisPipeline` invokes it once per run
+(`AnalysisPipeline.cs:50`), running one `foreach (HeapEntry entry in cache.EnumerateIndexedEntries())`
+loop (`HeapIndexCache.cs:76`) and fanning each entry out to every registered
+`IHeapIndexScanParticipant`, with per-participant exception isolation so one analyzer's failure
+doesn't blind the others. All 9 previously-redundant index-streaming analyzers
+(`DbConnectionAnalyzer`, `CrashAnalyzer`, `CollectionAnalyzer`, `AsyncTaskAnalyzer`,
+`HangAnalyzer`, `EventLeakAnalyzer`, `MemoryLeakAnalyzer`, `WcfChannelAnalyzer`, `StringAnalyzer`)
+now implement `IHeapIndexScanParticipant` instead of independently opening the index — confirmed by
+source inspection, and matching Deliverable 10's "All 9 disk-index-streaming analyzers now
+migrated" note.
+
+**What's still open**: the **5 analyzers that call `ClrHeap.EnumerateObjects()` directly**
+(`TimerLeakAnalyzer`, `HttpObjectAnalyzer`, `FinalizableObjectAnalyzer`, `LohFragmentationAnalyzer`,
+`HeapTopologyAnalyzer`) are outside the dispatcher's scope — it fans out disk-index entries, not
+live `ClrObject`s, so it cannot address them without a parallel live-object variant. This residual
+cost was not re-estimated in this pass; treat it as the next open item, not as covered by the "26x"
+number above.
 
 ## 2. Root traversals — **done**
 
@@ -80,20 +110,51 @@ connection-state field names) do targeted field reads, not heap-wide string enum
 different, cheap operation. Note that `StringAnalyzer`'s own full pass is still one of the 9
 verified index scans counted in §1.
 
-## 5. Statistics
+## 5. Statistics — **fully resolved (§5a)**
 
-Per-type object count/byte aggregation (`sum(size)`, `count` grouped by `MethodTable`/type) is
-recomputed independently by at least `MemoryAnalyzer`, `ModuleAnalyzer`, `AppDomainAnalyzer`, and
-`ObjectShapeAnalyzer` — each folds this reduction into its own index scan rather than consuming a
-shared result.
+Per-type object count/byte aggregation (`sum(size)`, `count` grouped by `MethodTable`/type) was
+originally recomputed independently by at least `MemoryAnalyzer`, `ModuleAnalyzer`,
+`AppDomainAnalyzer`, and `ObjectShapeAnalyzer` — each folded this reduction into its own index scan
+rather than consuming a shared result. **`AppDomainAnalyzer` never existed as a separate class in
+current source** — verified via `tokensave_search`: AppDomain analysis is `ModuleAnalyzer`'s own
+`AnalyzeAppDomains` private method (`ModuleAnalyzer.cs:103`), producing `AppDomainAnalysisResult`
+as part of `ModuleDomainResult`. So the original "4 analyzers" count for this cluster was really
+**3 analyzer classes** (`MemoryAnalyzer`, `ModuleAnalyzer`, `ObjectShapeAnalyzer`), with
+module/app-domain stats sharing one class rather than two.
 
-**Estimated cost**: this is a second-order cost on top of §1 — even if the 9 verified redundant
-index scans were collapsed into one shared pass, each of these 4 analyzers would still independently
-re-run the same `TypeId → (count, bytes)` reduction over the shared data unless that reduction
-itself is promoted to a single computed artifact. Given `TypeIndexBuilder` already exists as part
-of the Phase 1 index build (per [architecture.md](../architecture.md)), per-type count/bytes is a
-natural candidate to compute **once**, during index build, and persist as a queryable artifact
-rather than being re-derived by every consumer.
+**Estimated cost** (historical): this is a second-order cost on top of §1 — even if the 9 verified
+redundant index scans were collapsed into one shared pass, each of these analyzers would still
+independently re-run the same `TypeId → (count, bytes)` reduction over the shared data unless that
+reduction itself is promoted to a single computed artifact.
+
+### 5a. Verified current state
+
+The precomputed artifact this section called for now exists. `TypeIndexBuilder` computes per-type
+`TypeAggregateIndexEntry` records (count, total size, LOH count/size, sample address) once during
+the Phase 1 index build. `StatisticsCache.GetOrBuildTypeStatistics`
+(`src/DumpDetective.Analysis/Cache/StatisticsCache.cs`) hydrates its `CachedTypeStatistics` from
+that artifact via `TryHydrateTypeStatisticsFromIndex` — an O(unique types) merge, not an O(objects)
+heap walk — and only falls back to a full parallel `heap.Segments` / `EnumerateObjects()` walk if
+hydration fails or no index is available. Consumers observed calling
+`GetOrBuildTypeStatistics` (and therefore sharing the hydrated result rather than each re-scanning):
+`MemoryLeakAnalyzer`, `EventLeakAnalyzer`, `ReferenceChainAnalyzer`, `DominatorAnalyzer`,
+`LeakCandidateAnalyzer`, `GCGenerationAnalyzer`.
+
+`ModuleAnalyzer.cs` and `ObjectShapeAnalyzer.cs` do not call `StatisticsCache`, but verified
+inspection shows they don't independently re-derive the reduction either — both read the same
+`TypeAggregateIndexEntry` artifact directly off the heap index rather than through
+`StatisticsCache`'s wrapper:
+
+- `ObjectShapeAnalyzer.Analyze` (`ObjectShapeAnalyzer.cs:31`) reads `idx.TypeAggregates` and
+  `idx.TypeShapeCache` straight from `HeapIndexBuildResult` — no heap walk at all, and returns an
+  empty result if the index/type-shape cache isn't available (no live-heap fallback).
+- `ModuleAnalyzer.AnalyzeAppDomains` (`ModuleAnalyzer.cs:103`) does the same: pulls
+  `heapIndex.TypeAggregates` when available and only warns (rather than falling back to a live
+  scan) when `PreferIndexOnly` is set and the index is missing.
+
+So all three consumers of this cluster (`MemoryAnalyzer` via `StatisticsCache`, `ModuleAnalyzer`,
+`ObjectShapeAnalyzer`) now read from the same `TypeIndexBuilder`-produced `TypeAggregateIndexEntry`
+data computed once at Phase 1 index build — **§5 is fully resolved**, not just partially.
 
 ## 6. Report sections
 
@@ -122,26 +183,38 @@ by estimated cost and fix:
 
 ## Cost Summary (ranked)
 
-1. **Redundant full object-index scans (~26x multiplier)** — by far the largest cost; directly
-   threatens the project's 10GB+ dump performance goal.
-2. **Redundant per-type statistics reduction** — second-order cost layered on #1; cheap to fix
-   once #1's shared pass exists.
+> Ranking below is the **original, pre-fix** ranking, kept for historical record. Items 1 and 2 are
+> now resolved for the analyzers/paths described in §1a and §5a — the residual cost is the 5
+> `EnumerateObjects()`-based analyzers noted in §1a, not the ~26x figure.
+
+1. ~~**Redundant full object-index scans (~26x multiplier)**~~ — **resolved** for the 9 index-
+   scanning analyzers via `HeapIndexScanDispatcher` (§1a). Residual: 5 analyzers still doing full
+   live-heap sweeps, unaddressed by the dispatcher.
+2. ~~**Redundant per-type statistics reduction**~~ — **fully resolved**: `MemoryAnalyzer` (via
+   `StatisticsCache`), `ModuleAnalyzer`, and `ObjectShapeAnalyzer` all read the same
+   `TypeIndexBuilder`-produced `TypeAggregateIndexEntry` artifact (§5a). The original "4 analyzers"
+   count was also revised to 3 — `AppDomainAnalyzer` was never a separate class from
+   `ModuleAnalyzer`.
 3. **Redundant graph traversal (4x on static/retention subgraphs)** — moderate cost, moderate fix
-   effort (route through `Traversal`).
+   effort (route through `Traversal`). *(Not re-verified in this pass; §2 already marked "done" in
+   the original document.)*
 4. **Duplicate report-section rendering** — presentation-layer cost, no correctness risk, but
-   wasted maintenance effort.
+   wasted maintenance effort. *(Not re-verified in this pass.)*
 5. **Duplicate helper logic (samplers, wait-pattern, reflection caches)** — low runtime cost, but
    the highest *bug-surface* cost, since a fix to one copy silently doesn't apply to the others.
+   *(Not re-verified in this pass.)*
 6. **Duplicate type-classification logic** — lowest cost of all, purely a maintenance concern.
+   *(Not re-verified in this pass.)*
 
 ## Recommended Shared Infrastructure (preview — expanded in Deliverable 5)
 
-- A **single-pass index scan dispatcher**: one sequential read of the object index per analysis
-  run, fanning out each record to registered per-object visitor callbacks. This is the highest-
-  priority infrastructure investment in the whole review.
-- A **precomputed per-type statistics artifact** produced once by `TypeIndexBuilder` during Phase
-  1 index build, consumed (not recomputed) by `MemoryAnalyzer`/`ModuleAnalyzer`/
-  `AppDomainAnalyzer`/`ObjectShapeAnalyzer`.
+- ~~A **single-pass index scan dispatcher**~~ — **shipped** as `HeapIndexScanDispatcher` (§1a).
+  Next infrastructure gap: an equivalent shared fan-out for the 5 remaining
+  `EnumerateObjects()`-based analyzers.
+- ~~A **precomputed per-type statistics artifact**~~ — **shipped and fully adopted**:
+  `TypeIndexBuilder`'s `TypeAggregateIndexEntry`, consumed via `StatisticsCache.GetOrBuildTypeStatistics`
+  (`MemoryAnalyzer` and other §5a-listed consumers) and read directly by `ModuleAnalyzer` /
+  `ObjectShapeAnalyzer` (§5a).
 - Mandatory use of the shared `Traversal` primitive for any analyzer doing graph-walk work.
 - A shared **typed resource sampler** for the DbConnection/Wcf/Http/Timer cluster.
 - A shared **type-name classifier** registry usable by all 8 analyzers currently rolling their own.

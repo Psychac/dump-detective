@@ -22,6 +22,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private const int GenColumnSize = sizeof(sbyte);
     private const int ProgressReportEveryObjects = 100_000;
 
+    // TEMPORARY perf A/B toggle (see docs/cache/17-DiskIndexBuildPhaseBreakdown.md option 2):
+    // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
+    // and let RootSetCache's live-heap fallback build roots on demand in Phase 2 instead.
+    // Remove once the A/B comparison picks a winner.
+    private static readonly bool SkipRootIndexBuild =
+        Environment.GetEnvironmentVariable("DD_SKIP_ROOT_INDEX_BUILD") == "1";
+
     public HeapIndexBuildResult Build(
         ClrHeap heap,
         CancellationToken cancellationToken,
@@ -604,10 +611,19 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Roots — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
         try
         {
-            progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
-            containerWriter.BeginSection(CacheSectionId.Roots);
-            long recordCount = RootIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
-            containerWriter.EndSection(recordCount);
+            if (SkipRootIndexBuild)
+            {
+                // Section intentionally omitted; RootIndexReader treats a missing Roots
+                // section as "no candidates", which triggers RootSetCache's live-heap fallback.
+                progress?.Report(new(0, "skipping GC root index (DD_SKIP_ROOT_INDEX_BUILD=1)", Detail: null, Elapsed: stopwatch.Elapsed));
+            }
+            else
+            {
+                progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
+                containerWriter.BeginSection(CacheSectionId.Roots);
+                long recordCount = RootIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
+                containerWriter.EndSection(recordCount);
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)

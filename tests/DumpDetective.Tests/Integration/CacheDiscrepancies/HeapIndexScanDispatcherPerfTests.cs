@@ -160,4 +160,68 @@ public sealed class HeapIndexScanDispatcherPerfTests(ITestOutputHelper output)
         output.WriteLine($"DominatorAnalyzer.AnalyzeAsync TOTAL: {totalSw.Elapsed.TotalSeconds:F2}s");
         output.WriteLine(captured.ToString());
     }
+
+    // Measures the full shared dispatcher pass wall-clock time with ALL participants, comparing
+    // the auto-selected parallel path against a forced sequential baseline (maxWorkers=1).
+    // Run this after promoting all analyzers to IParallelHeapIndexScanParticipant to confirm
+    // the parallel path beats sequential on a real large dump.
+    //
+    // The two runs intentionally use freshly constructed analyzer instances each time and share
+    // the same pre-built cache so the index is already memory-mapped and OS-page-cached, making
+    // the comparison fair (no cold-start I/O difference between runs).
+    [DiscrepancyFact]
+    public void DispatcherPass_ParallelVsSequential_AllParticipants()
+    {
+        string dumpPath = DumpPath;
+        if (!File.Exists(dumpPath))
+        {
+            output.WriteLine($"Dump not found, skipping: {dumpPath}");
+            return;
+        }
+
+        using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+        ClrHeap heap = runtime.Heap;
+
+        HeapAnalysisCache cache = new();
+        Stopwatch buildSw = Stopwatch.StartNew();
+        cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
+        buildSw.Stop();
+        output.WriteLine($"Index build/load: {buildSw.Elapsed.TotalSeconds:F2}s");
+
+        AnalysisOptions analysisOptions = new();
+
+        IHeapIndexScanParticipant[] BuildParticipants() =>
+        [
+            new CrashAnalyzer(),
+            new HangAnalyzer(),
+            new AsyncTaskAnalyzer(),
+            new EventLeakAnalyzer(),
+            new DominatorAnalyzer(),
+            new CollectionAnalyzer(),
+            new DbConnectionAnalyzer(),
+            new StringAnalyzer(),
+            new WcfChannelAnalyzer(),
+        ];
+
+        output.WriteLine($"ProcessorCount: {Environment.ProcessorCount}");
+
+        // ── Sequential baseline (maxWorkers=1 forces the single-threaded path) ──
+        {
+            RuntimeAnalysisContext ctx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+            var sw = Stopwatch.StartNew();
+            new HeapIndexScanDispatcher().Run(cache, ctx, BuildParticipants(), CancellationToken.None, maxWorkers: 1);
+            sw.Stop();
+            output.WriteLine($"Sequential (maxWorkers=1):  {sw.Elapsed.TotalSeconds:F2}s");
+        }
+
+        // ── Parallel (auto worker count) ──
+        {
+            RuntimeAnalysisContext ctx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+            var sw = Stopwatch.StartNew();
+            new HeapIndexScanDispatcher().Run(cache, ctx, BuildParticipants(), CancellationToken.None, maxWorkers: 0);
+            sw.Stop();
+            output.WriteLine($"Parallel   (maxWorkers=auto): {sw.Elapsed.TotalSeconds:F2}s");
+        }
+    }
 }

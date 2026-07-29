@@ -92,6 +92,9 @@ namespace DumpDetective.Analysis.Cache
 
         public IEnumerable<HeapEntry> EnumerateIndexedEntries() => _heapIndexCache.EnumerateIndexedEntries();
 
+        public IEnumerable<HeapEntry> EnumerateIndexedEntriesRange(long startRecord, long recordCount) =>
+            _heapIndexCache.EnumerateIndexedEntriesRange(startRecord, recordCount);
+
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
         {
             foreach (var t in _heapIndexCache.EnumerateIndexedEntriesAsTuples())

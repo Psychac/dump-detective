@@ -70,6 +70,7 @@ namespace DumpDetective.Analysis.Analyzers
             var __fastScannerSw = System.Diagnostics.Stopwatch.StartNew();
             _participantFastScanner = new EventLeakFastScanner(context.Heap, GetEventNames, context.Progress);
             Console.Error.WriteLine($"[PERF] EventLeakAnalyzer.new EventLeakFastScanner (DiscoverDelegateLayoutFromModules): {__fastScannerSw.Elapsed.TotalSeconds:F2}s");
+
             _participantBuf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
             _participantEventsScanned = 0;
             _participantPublisherInstances = 0;

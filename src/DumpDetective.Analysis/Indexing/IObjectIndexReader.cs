@@ -19,4 +19,13 @@ internal interface IObjectIndexReader
     /// missing, has no object sections, or contains no records.
     /// </summary>
     IEnumerable<HeapEntry> ReadEntries(string containerPath);
+
+    /// <summary>
+    /// Streams <paramref name="recordCount"/> <see cref="HeapEntry"/> records starting at
+    /// <paramref name="startRecord"/> (0-based) from the <c>cache.bin</c> container at
+    /// <paramref name="containerPath"/>. Returns an empty sequence if the container is missing,
+    /// has no object sections, or contains no records. Used to partition a shared scan pass
+    /// into disjoint contiguous ranges for concurrent reads.
+    /// </summary>
+    IEnumerable<HeapEntry> ReadEntriesRange(string containerPath, long startRecord, long recordCount);
 }

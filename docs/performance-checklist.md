@@ -173,6 +173,18 @@ Metrics:
 - [ ] Execution time
 - [ ] GC pressure
 
+## Perf Test Pattern
+
+When a feature has distinct phases or competing implementations, prefer one small opt-in perf test that:
+
+- Uses a representative real dump, not synthetic data
+- Reuses the same prebuilt index/cache across the compared runs
+- Prints per-phase timings so you can tell whether the win is in the dispatcher, the scan, or post-scan work
+- Can compare sequential vs parallel, or old vs new, under the same harness
+- Is narrow enough to run repeatedly during diagnosis without turning into a full benchmark suite
+
+This pattern is especially useful for analyzers and dispatchers, because it lets the same test answer three questions at once: is it faster, is it more memory-efficient, and which phase is responsible.
+
 ---
 
 # 🚨 Red Flags (Immediate Review Required)

@@ -82,6 +82,15 @@ internal class HeapIndexCache
             yield return entry;
     }
 
+    public IEnumerable<HeapEntry> EnumerateIndexedEntriesRange(long startRecord, long recordCount)
+    {
+        if (_heapIndex is null)
+            yield break;
+
+        foreach (HeapEntry entry in ObjectIndexReader.Instance.ReadEntriesRange(_heapIndex.IndexPath, startRecord, recordCount))
+            yield return entry;
+    }
+
     public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples()
     {
         foreach (HeapEntry entry in EnumerateIndexedEntries())

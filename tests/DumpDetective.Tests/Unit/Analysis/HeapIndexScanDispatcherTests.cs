@@ -97,6 +97,52 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
         participant.CompletedWithSuccess.Should().Be(false);
     }
 
+    [Fact]
+    public void Run_DoesNotPartition_WhenEntryCountBelowMinRecordsPerWorker()
+    {
+        // Below MinRecordsPerWorker, ComputeWorkerCount collapses to 1 — the parallel-capable
+        // participant must fall back to the same single full-range pass as everyone else, with
+        // CreateWorkerInstance/MergePartial never invoked.
+        HeapAnalysisCache cache = CreateCacheWithIndex([(0x1000, 0x2000, 100), (0x1100, 0x2100, 200)]);
+        FakeParallelParticipant participant = new();
+
+        new HeapIndexScanDispatcher().Run(cache, CreateContext(cache), [participant], CancellationToken.None);
+
+        participant.Entries.Should().HaveCount(2);
+        participant.CreatedWorkers.Should().BeEmpty();
+        participant.MergedPartials.Should().BeNull();
+        participant.CompletedWithSuccess.Should().Be(true);
+    }
+
+    [Fact]
+    public void Run_PartitionsParallelCapableParticipant_AcrossWorkers_ExactlyOnceNoGaps()
+    {
+        const int entryCount = 500_000; // >= 2 * MinRecordsPerWorker, forces workerCount > 1
+        var entries = new (ulong Addr, ulong Mt, ulong Size)[entryCount];
+        for (int i = 0; i < entryCount; i++)
+            entries[i] = ((ulong)(0x1000 + i), 0x2000, 8);
+
+        HeapAnalysisCache cache = CreateCacheWithIndex(entries);
+        FakeParallelParticipant participant = new();
+
+        new HeapIndexScanDispatcher().Run(cache, CreateContext(cache), [participant], CancellationToken.None);
+
+        participant.CompletedWithSuccess.Should().Be(true);
+        participant.Entries.Should().HaveCount(entryCount);
+        participant.Entries.Select(e => e.Address).Distinct().Should().HaveCount(entryCount);
+
+        if (Environment.ProcessorCount < 2)
+        {
+            // ComputeWorkerCount clamps to Environment.ProcessorCount, so a single-core test
+            // runner can't exercise the partitioned path — the single-worker fallback above is
+            // still correct, but there's nothing further to assert about workers/merge here.
+            return;
+        }
+
+        participant.CreatedWorkers.Should().NotBeEmpty();
+        participant.MergedPartials.Should().HaveCount(participant.CreatedWorkers.Count);
+    }
+
     private static RuntimeAnalysisContext CreateContext(HeapAnalysisCache cache)
     {
         return new RuntimeAnalysisContext
@@ -177,5 +223,38 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
         public void OnHeapEntry(in HeapEntry entry) => Entries.Add(entry);
 
         public void OnHeapIndexScanCompleted(bool succeeded) => CompletedWithSuccess = succeeded;
+    }
+
+    // Each instance (primary + every CreateWorkerInstance() clone) owns its own private Entries
+    // list, so concurrent workers never share mutable state — matching the contract
+    // IParallelHeapIndexScanParticipant documents.
+    private sealed class FakeParallelParticipant : IParallelHeapIndexScanParticipant
+    {
+        public List<HeapEntry> Entries { get; } = new();
+        public bool? CompletedWithSuccess { get; private set; }
+        public IReadOnlyList<IHeapIndexScanParticipant>? MergedPartials { get; private set; }
+        public List<FakeParallelParticipant> CreatedWorkers { get; } = new();
+
+        public void BeforeHeapIndexScan(AnalysisContext context)
+        {
+        }
+
+        public void OnHeapEntry(in HeapEntry entry) => Entries.Add(entry);
+
+        public void OnHeapIndexScanCompleted(bool succeeded) => CompletedWithSuccess = succeeded;
+
+        public IHeapIndexScanParticipant CreateWorkerInstance()
+        {
+            FakeParallelParticipant worker = new();
+            CreatedWorkers.Add(worker);
+            return worker;
+        }
+
+        public void MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            MergedPartials = partials;
+            foreach (IHeapIndexScanParticipant p in partials)
+                Entries.AddRange(((FakeParallelParticipant)p).Entries);
+        }
     }
 }

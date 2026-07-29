@@ -16,7 +16,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// A faulted channel must be Abort()ed, not Close()d. Faulted channels on the heap are a
 /// strong signal of missing error-handling in WCF proxy usage.
 /// </summary>
-public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<WcfChannelSnapshot>
+public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<WcfChannelSnapshot>
 {
     public string Name => "WCF Channel Analysis";
     public string Category => "Infrastructure";
@@ -88,6 +88,44 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
     /// this analyzer's public API.
     /// </summary>
     void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+        new WcfChannelAnalyzer();
+
+    // Merges per-type state-change counts (opened/faulted/closed/other) and top faulted
+    // samples from disjoint-range workers. Total and Bytes come from TypeAggregates
+    // (pre-seeded identically on every worker by BeforeHeapIndexScan) and are not summed.
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        var typeStats = _typeStats!;
+        var sampler = _sampler!;
+
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (WcfChannelAnalyzer)p;
+            if (other._typeStats is null) continue;
+
+            foreach (var kvp in other._typeStats)
+            {
+                if (!typeStats.TryGetValue(kvp.Key, out var self))
+                {
+                    typeStats[kvp.Key] = kvp.Value;
+                    continue;
+                }
+
+                var o = kvp.Value;
+                typeStats[kvp.Key] = (self.Name, self.Total,
+                    self.Opened + o.Opened,
+                    self.Faulted + o.Faulted,
+                    self.Closed + o.Closed,
+                    self.Other + o.Other,
+                    self.Bytes);
+            }
+
+            if (other._sampler is not null)
+                sampler.MergeFrom(other._sampler);
+        }
+    }
 
     private void OnHeapEntry(in HeapEntry entry)
     {

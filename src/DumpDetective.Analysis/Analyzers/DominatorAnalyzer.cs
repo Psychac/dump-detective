@@ -10,7 +10,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-public sealed class DominatorAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
 {
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
@@ -66,6 +66,30 @@ public sealed class DominatorAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
 
     public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new DominatorAnalyzer();
+
+    // Sums each worker's independently-capped reference-count map by address key, subject to
+    // the same _maxReferenceAddresses cap the sequential path enforces via AccumulateReference.
+    // Mirrors AsyncTaskAnalyzer.MergePartial's merge-then-trim pattern; _objectsTraced is summed
+    // for diagnostics only and doesn't gate anything after the scan completes.
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        Dictionary<ulong, int> referenceCount = _referenceCount!;
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (DominatorAnalyzer)p;
+            if (other._referenceCount is null)
+                continue;
+
+            foreach (KeyValuePair<ulong, int> kvp in other._referenceCount)
+                MergeReferenceCount(kvp.Key, kvp.Value, referenceCount, _maxReferenceAddresses, ref _skippedReferenceAddresses);
+
+            _skippedReferenceAddresses += other._skippedReferenceAddresses;
+            _objectsTraced += other._objectsTraced;
+            _objectScanCapped |= other._objectScanCapped;
+        }
+    }
 
     private void OnHeapEntry(in HeapEntry entry)
     {
@@ -667,6 +691,28 @@ public sealed class DominatorAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         }
 
         return false;
+    }
+
+    // Like AccumulateReference, but merges a worker-partial count instead of always incrementing by 1.
+    private static void MergeReferenceCount(
+        ulong address,
+        int addCount,
+        Dictionary<ulong, int> referenceCount,
+        int maxReferenceAddresses,
+        ref long skippedReferenceAddresses)
+    {
+        if (referenceCount.TryGetValue(address, out int count))
+        {
+            referenceCount[address] = count + addCount;
+        }
+        else if (referenceCount.Count < maxReferenceAddresses)
+        {
+            referenceCount[address] = addCount;
+        }
+        else
+        {
+            skippedReferenceAddresses++;
+        }
     }
 
     private readonly record struct LeakSignals(

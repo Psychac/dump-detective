@@ -10,7 +10,7 @@ using System.Collections.Concurrent;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class HangAnalyzer : IAnalyzer, IHeapIndexScanParticipant, IThreadStackScanParticipant
+    public class HangAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, IThreadStackScanParticipant
     {
         public string Name => "Hang Analysis";
         public string Category => "Hang";
@@ -92,6 +92,52 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new HangAnalyzer();
+
+        // Merges heap-scan-accumulated counters from disjoint-range workers into this instance.
+        // Thread-pool Runtime* fields (set by ReadRuntimeThreadPool in AnalyzeForHang) are not
+        // populated on workers and do not need to be merged.
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                var other = (HangAnalyzer)p;
+
+                // Profile cache: merge missing keys — same MT always resolves to the same profile.
+                if (other._profileByMethodTable != null)
+                {
+                    foreach (var kvp in other._profileByMethodTable)
+                    {
+                        if (!_profileByMethodTable!.ContainsKey(kvp.Key))
+                            _profileByMethodTable[kvp.Key] = kvp.Value;
+                    }
+                }
+
+                // Continuation-type counts: sum per type name.
+                if (other._taskContinuations != null)
+                {
+                    foreach (var kvp in other._taskContinuations)
+                    {
+                        _taskContinuations!.TryGetValue(kvp.Key, out int count);
+                        _taskContinuations[kvp.Key] = count + kvp.Value;
+                    }
+                }
+
+                // ThreadPoolAnalysis heap-scan counters.
+                ThreadPoolAnalysis tp = _threadPoolInfo!;
+                ThreadPoolAnalysis otherTp = other._threadPoolInfo!;
+                tp.QueuedWorkItems += otherTp.QueuedWorkItems;
+                tp.TotalTasks += otherTp.TotalTasks;
+                tp.PendingTasks += otherTp.PendingTasks;
+                tp.FaultedTasks += otherTp.FaultedTasks;
+                tp.CanceledTasks += otherTp.CanceledTasks;
+                tp.TaskScanLimited |= otherTp.TaskScanLimited;
+
+                _tasksScanned += other._tasksScanned;
+                _totalContinuations += other._totalContinuations;
+            }
+        }
 
         // IThreadStackScanParticipant — shares ThreadStackScanDispatcher's single
         // EnumerateStackTrace() pass with ThreadAnalyzer/ThreadStackClusterAnalyzer/

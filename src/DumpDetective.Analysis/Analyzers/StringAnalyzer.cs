@@ -16,7 +16,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Analyze managed string usage: counts, sizes, LOH/FOH stats and duplicate patterns.
 /// Prefers pre-built string dedup index when available to avoid random dump I/O.
 /// </summary>
-internal sealed class StringAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
 {
     // File-level constants removed. Use StringAnalysisOptions for configurable thresholds.
     /// <inheritdoc/>
@@ -143,6 +143,74 @@ internal sealed class StringAnalyzer : IAnalyzer, IHeapIndexScanParticipant
         if (!IsStringSizeInBounds(entry.Size, stringOptions)) return;
         _indexScanStringsRead++;
         FingerprintAddress(_heap!, entry.Address, entry.Size, stringOptions, _indexScanStringStats!, _indexScanMaxUnique, _indexScanMethodTableDupCounts!, _indexScanLengthSamples!, _indexScanLengthBuckets!, samplingSource: "IndexScan");
+    }
+
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+        new StringAnalyzer();
+
+    // Workers covered disjoint address ranges; merge their dedup state into this instance.
+    // If _indexScanDedupActive is false (dedup was skipped on this context), there's nothing
+    // to merge — workers whose dedup was also inactive contribute nothing.
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        if (!_indexScanDedupActive) return;
+
+        var stringStats = _indexScanStringStats!;
+        var mtDups = _indexScanMethodTableDupCounts!;
+        var lengthSamples = _indexScanLengthSamples!;
+        var buckets = _indexScanLengthBuckets!;
+        var longStrings = _indexScanVeryLongStrings!;
+
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (StringAnalyzer)p;
+            if (!other._indexScanDedupActive) continue;
+
+            _indexScanStringsRead += other._indexScanStringsRead;
+
+            // Fingerprint map: sum Count and TotalSize per fingerprint, respect _indexScanMaxUnique.
+            foreach (var kvp in other._indexScanStringStats!)
+            {
+                ref StringLeakInfo self = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                    stringStats, kvp.Key, out bool existed);
+                if (!existed)
+                {
+                    if (stringStats.Count > _indexScanMaxUnique)
+                    {
+                        stringStats.Remove(kvp.Key);
+                        continue;
+                    }
+                    self = kvp.Value;
+                }
+                else
+                {
+                    self.Count += kvp.Value.Count;
+                    self.TotalSize += kvp.Value.TotalSize;
+                    if (self.SampleAddresses is null)
+                        self.SampleAddresses = kvp.Value.SampleAddresses;
+                }
+            }
+
+            // Method-table dup counts: sum per key.
+            foreach (var kvp in other._indexScanMethodTableDupCounts!)
+            {
+                mtDups.TryGetValue(kvp.Key, out int existing);
+                mtDups[kvp.Key] = existing + kvp.Value;
+            }
+
+            // Length samples: just concat (used for statistical percentile computation).
+            lengthSamples.AddRange(other._indexScanLengthSamples!);
+
+            // Bucket counts: sum per bucket label.
+            foreach (var kvp in other._indexScanLengthBuckets!)
+            {
+                buckets.TryGetValue(kvp.Key, out int existing);
+                buckets[kvp.Key] = existing + kvp.Value;
+            }
+
+            // Very-long-string list: concat (no ordering required).
+            longStrings.AddRange(other._indexScanVeryLongStrings!);
+        }
     }
 
     /// <summary>

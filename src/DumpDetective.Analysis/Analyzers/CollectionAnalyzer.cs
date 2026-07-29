@@ -17,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers
     // This would impact the root hints shown for wasteful collections that are rooted in stacks.
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
     // Need to revisit the logic once again.
-    public class CollectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+    public class CollectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
     {
         // Cache of resolved interesting instance fields per MethodTable to avoid
         // repeatedly enumerating ClrType.Fields for every object of the same type.
@@ -201,6 +201,65 @@ namespace DumpDetective.Analysis.Analyzers
         void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+            new CollectionAnalyzer(_options, _logger);
+
+        // Each worker processed a disjoint address range, so merging is purely additive:
+        // sum the per-kind counters, combine + re-trim the wasteful lists, union the MT-kind
+        // cache (same key always maps to the same value), and sum generation arrays.
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                var other = (CollectionAnalyzer)p;
+                CollectionStatistics os = other._stats!;
+
+                stats.TotalCollections += os.TotalCollections;
+                stats.Dictionaries += os.Dictionaries;
+                stats.Lists += os.Lists;
+                stats.ArrayLists += os.ArrayLists;
+                stats.Stacks += os.Stacks;
+                stats.SortedLists += os.SortedLists;
+                stats.SortedSets += os.SortedSets;
+                stats.HashSets += os.HashSets;
+                stats.Queues += os.Queues;
+
+                _wastefulCount += other._wastefulCount;
+                _totalWasted += other._totalWasted;
+
+                // Merge wasteful collections: drain other's list via AddToTopWasteful so the
+                // combined set is trimmed to _topCapacity as we go — avoids allocating a
+                // temporary merged list just to re-trim.
+                foreach (WastefulCollection w in other._wasteful!)
+                    AddToTopWasteful(wasteful, w, _topCapacity);
+
+                // MT-kind cache: same key always resolves to the same CollectionKind.
+                foreach (var kvp in other._methodTableKinds!)
+                {
+                    if (!_methodTableKinds!.ContainsKey(kvp.Key))
+                        _methodTableKinds[kvp.Key] = kvp.Value;
+                }
+
+                // Generation counts: sum per kind per generation bucket.
+                foreach (var kvp in other._generationCounts!)
+                {
+                    if (_generationCounts!.TryGetValue(kvp.Key, out int[]? dest))
+                    {
+                        int[] src = kvp.Value;
+                        for (int i = 0; i < dest.Length && i < src.Length; i++)
+                            dest[i] += src[i];
+                    }
+                    else
+                    {
+                        _generationCounts[kvp.Key] = (int[])kvp.Value.Clone();
+                    }
+                }
+            }
+        }
 
         private void OnHeapEntry(in HeapEntry entry)
         {

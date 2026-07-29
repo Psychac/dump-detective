@@ -24,50 +24,118 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         return ReadDiskEntries(containerPath);
     }
 
+    public IEnumerable<HeapEntry> ReadEntriesRange(string containerPath, long startRecord, long recordCount)
+    {
+        return ReadDiskEntriesRange(containerPath, startRecord, recordCount);
+    }
+
     // Internal static helper kept for call sites that don't need DI.
     internal static IEnumerable<HeapEntry> ReadDiskEntries(string containerPath)
     {
-        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
+        if (!TryOpenColumns(containerPath, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
+                out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen, out long recordCount))
             yield break;
 
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen))
+        using MemoryMappedViewAccessor? addrDisp = addr;
+        using MemoryMappedViewAccessor? mtDisp = mt;
+        using MemoryMappedViewAccessor? sizeDisp = size;
+        using MemoryMappedViewAccessor? genDisp = gen;
+
+        foreach (HeapEntry entry in ReadColumnRange(addr!, mt!, size!, gen!, 0, recordCount))
+            yield return entry;
+    }
+
+    // Internal static helper kept for call sites that don't need DI.
+    internal static IEnumerable<HeapEntry> ReadDiskEntriesRange(string containerPath, long startRecord, long recordCount)
+    {
+        if (startRecord < 0 || recordCount <= 0)
             yield break;
+
+        if (!TryOpenColumns(containerPath, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
+                out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen, out long totalRecordCount))
+            yield break;
+
+        using MemoryMappedViewAccessor? addrDisp = addr;
+        using MemoryMappedViewAccessor? mtDisp = mt;
+        using MemoryMappedViewAccessor? sizeDisp = size;
+        using MemoryMappedViewAccessor? genDisp = gen;
+
+        long clampedCount = Math.Min(recordCount, totalRecordCount - startRecord);
+        if (clampedCount <= 0)
+            yield break;
+
+        foreach (HeapEntry entry in ReadColumnRange(addr!, mt!, size!, gen!, startRecord, clampedCount))
+            yield return entry;
+    }
+
+    private static bool TryOpenColumns(
+        string containerPath,
+        out MemoryMappedViewAccessor? addr,
+        out MemoryMappedViewAccessor? mt,
+        out MemoryMappedViewAccessor? size,
+        out MemoryMappedViewAccessor? gen,
+        out long recordCount)
+    {
+        addr = null;
+        mt = null;
+        size = null;
+        gen = null;
+        recordCount = 0;
+
+        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
+            return false;
+
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen))
+            return false;
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectMethodTables, out MemoryMappedViewAccessor? mtAcc, out long mtLen))
         {
             addrAcc?.Dispose();
-            yield break;
+            return false;
         }
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out MemoryMappedViewAccessor? sizeAcc, out long sizeLen))
         {
             addrAcc?.Dispose();
             mtAcc?.Dispose();
-            yield break;
+            return false;
         }
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectGenerations, out MemoryMappedViewAccessor? genAcc, out long genLen))
         {
             addrAcc?.Dispose();
             mtAcc?.Dispose();
             sizeAcc?.Dispose();
-            yield break;
+            return false;
         }
 
-        using MemoryMappedViewAccessor? addr = addrAcc;
-        using MemoryMappedViewAccessor? mt = mtAcc;
-        using MemoryMappedViewAccessor? size = sizeAcc;
-        using MemoryMappedViewAccessor? gen = genAcc;
+        long candidateRecordCount = addrLen / ColumnSize;
+        if (candidateRecordCount == 0 ||
+            mtLen / ColumnSize != candidateRecordCount || sizeLen / ColumnSize != candidateRecordCount ||
+            genLen / GenColumnSize != candidateRecordCount)
+        {
+            addrAcc.Dispose();
+            mtAcc.Dispose();
+            sizeAcc.Dispose();
+            genAcc.Dispose();
+            return false;
+        }
 
-        long recordCount = addrLen / ColumnSize;
-        if (recordCount == 0 || addr is null || mt is null || size is null || gen is null ||
-            mtLen / ColumnSize != recordCount || sizeLen / ColumnSize != recordCount ||
-            genLen / GenColumnSize != recordCount)
-            yield break;
+        addr = addrAcc;
+        mt = mtAcc;
+        size = sizeAcc;
+        gen = genAcc;
+        recordCount = candidateRecordCount;
+        return true;
+    }
 
+    private static IEnumerable<HeapEntry> ReadColumnRange(
+        MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size, MemoryMappedViewAccessor gen,
+        long startRecord, long recordCount)
+    {
         HeapEntry[] batch = System.Buffers.ArrayPool<HeapEntry>.Shared.Rent(BatchRecords);
         try
         {
             using var columnReader = new ZeroCopyColumnReader(addr, mt, size, gen);
             long remaining = recordCount;
-            long start = 0;
+            long start = startRecord;
             while (remaining > 0)
             {
                 int chunk = (int)Math.Min(BatchRecords, remaining);

@@ -71,6 +71,18 @@ namespace DumpDetective.Analysis.Cache
         public void Report(string? detail = null) =>
             _progress?.Report(new AnalyzerProgressReport(_scanned, _phase, detail));
 
+        /// <summary>
+        /// Bumps the scanned count by <paramref name="count"/> and reports immediately. For
+        /// callers (e.g. a parallel scan pass) that track their own entry count across worker
+        /// threads and only need one coarse report after the fact, instead of a per-entry
+        /// <see cref="Tick"/> call from every thread.
+        /// </summary>
+        public void Advance(long count, string? detail = null)
+        {
+            _scanned += count;
+            Report(detail);
+        }
+
         public void Complete(string? detail = null)
         {
             _stopwatch.Stop();

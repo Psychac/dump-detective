@@ -9,7 +9,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
 {
     // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
     // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
@@ -83,6 +83,28 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IHeapIndexScanParticipant
     }
 
     public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+    public IHeapIndexScanParticipant CreateWorkerInstance() => new AsyncTaskAnalyzer();
+
+    // Each worker (including this instance, which owns range 0) scans its own range uncapped
+    // relative to the others — OnHeapEntry's _participantMaxTasksToScan guard already caps
+    // every worker at the full limit, not a divided share, so no worker starves itself if
+    // matches cluster in one address range. Re-sort the union by address and trim to the
+    // true global cap here, once, after every worker has finished.
+    public void MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (AsyncTaskAnalyzer)p;
+            if (other._participantEntries is not null)
+                _participantEntries!.AddRange(other._participantEntries);
+        }
+
+        _participantEntries = _participantEntries!
+            .OrderBy(e => e.Address)
+            .Take(_participantMaxTasksToScan)
+            .ToList();
+    }
 
     private AnalyzerDomainResult Analyze(
         ClrHeap heap,

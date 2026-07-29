@@ -49,6 +49,31 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         entries.Should().HaveCount(2);
     }
 
+    [Fact]
+    public void MergePartial_MergesWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    {
+        // maxTasksToScan caps each worker individually (uncapped relative to the others), so
+        // simulate two workers whose own local order is not address-sorted relative to each
+        // other — the merge's re-sort, not either worker's own order, is what must make the
+        // final trim to the global cap correct.
+        AsyncTaskAnalyzer primary = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 3);
+
+        primary.BeforeHeapIndexScan(context);
+        primary.OnHeapEntry(new HeapEntry(0x3000, TaskMt, 100));
+        primary.OnHeapEntry(new HeapEntry(0x1000, TaskMt, 100));
+
+        AsyncTaskAnalyzer worker = new();
+        worker.BeforeHeapIndexScan(context);
+        worker.OnHeapEntry(new HeapEntry(0x2000, TaskMt, 100));
+        worker.OnHeapEntry(new HeapEntry(0x4000, TaskMt, 100));
+
+        primary.MergePartial([worker]);
+
+        var merged = GetParticipantEntries(primary);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+    }
+
     private static AnalysisContext CreateContext(int maxTasksToScan)
     {
         HeapAnalysisCache cache = new();

@@ -12,7 +12,7 @@ using System.Collections.Concurrent;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class CrashAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+    public class CrashAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
     {
         private CrashAnalysisOptions _options = CrashAnalysisOptions.Default;
 
@@ -78,6 +78,108 @@ namespace DumpDetective.Analysis.Analyzers
         void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CrashAnalyzer(_options);
+
+        // Workers cover disjoint, ascending-address record ranges (see HeapIndexScanDispatcher.
+        // RunParallelPass), and `partials` arrives in that same ascending order with `this`
+        // covering the lowest range. Merging in that order lets each per-type exception list be
+        // recapped exactly as the sequential pass would have: concatenate in address order, then
+        // replay the same "active always kept, non-active capped at MaxExceptionsPerType" rule.
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            var others = new List<CrashAnalyzer>(partials.Count);
+            foreach (IHeapIndexScanParticipant p in partials)
+                others.Add((CrashAnalyzer)p);
+
+            _totalExceptions += others.Sum(o => o._totalExceptions);
+            _activeExceptionsCount += others.Sum(o => o._activeExceptionsCount);
+
+            foreach (CrashAnalyzer other in others)
+            {
+                foreach (var kvp in other._exceptionTypeCounts!)
+                {
+                    _exceptionTypeCounts!.TryGetValue(kvp.Key, out int count);
+                    _exceptionTypeCounts[kvp.Key] = count + kvp.Value;
+                }
+
+                foreach (var kvp in other._activeExceptionTypeCounts!)
+                {
+                    _activeExceptionTypeCounts!.TryGetValue(kvp.Key, out int count);
+                    _activeExceptionTypeCounts[kvp.Key] = count + kvp.Value;
+                }
+            }
+
+            var typeKeys = new HashSet<string>(_exceptionsByType!.Keys, StringComparer.Ordinal);
+            foreach (CrashAnalyzer other in others)
+                typeKeys.UnionWith(other._exceptionsByType!.Keys);
+
+            foreach (string typeKey in typeKeys)
+            {
+                var merged = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
+                int nonActiveKept = 0;
+
+                if (_exceptionsByType!.TryGetValue(typeKey, out var selfList))
+                    AppendCapped(selfList, merged, ref nonActiveKept, _options.MaxExceptionsPerType);
+
+                foreach (CrashAnalyzer other in others)
+                {
+                    if (other._exceptionsByType!.TryGetValue(typeKey, out var otherList))
+                        AppendCapped(otherList, merged, ref nonActiveKept, _options.MaxExceptionsPerType);
+                }
+
+                _exceptionsByType[typeKey] = merged;
+            }
+
+            // Re-sort keys by merged total count so BuildAnalysisFromParticipantState's ordering
+            // (which iterates _exceptionTypeCounts, not _exceptionsByType, for ordering) stays correct;
+            // _exceptionTypeCounts was already updated above, no further action needed there.
+
+            foreach (CrashAnalyzer other in others)
+            {
+                foreach (var kvp in other._crashThreadCandidates!)
+                {
+                    if (!_crashThreadCandidates!.TryGetValue(kvp.Key, out var existing))
+                    {
+                        _crashThreadCandidates[kvp.Key] = kvp.Value;
+                        continue;
+                    }
+
+                    CrashThreadCandidate incoming = kvp.Value;
+                    existing.ActiveExceptionCount += incoming.ActiveExceptionCount;
+                    if (incoming.OriginalExceptionStack != null)
+                        existing.OriginalExceptionStack = incoming.OriginalExceptionStack;
+                    if (!string.IsNullOrWhiteSpace(incoming.SampleMessage))
+                        existing.SampleMessage = incoming.SampleMessage;
+                    if (incoming.SampleHResult != 0)
+                        existing.SampleHResult = incoming.SampleHResult;
+                    if (existing.SampleInnerExceptionType == null)
+                        existing.SampleInnerExceptionType = incoming.SampleInnerExceptionType;
+                }
+            }
+        }
+
+        // Appends entries from a worker-local (already Max-capped) instance list into the merged
+        // list, keeping active instances unconditionally and non-active ones until the shared
+        // running count reaches MaxExceptionsPerType — mirrors OnHeapEntry's per-entry admission rule.
+        private static void AppendCapped(List<ExceptionInstance> source, List<ExceptionInstance> destination, ref int nonActiveKept, int maxExceptionsPerType)
+        {
+            foreach (ExceptionInstance instance in source)
+            {
+                bool isActive = instance.ThreadId.HasValue;
+                if (isActive)
+                {
+                    destination.Add(instance);
+                    continue;
+                }
+
+                if (nonActiveKept < maxExceptionsPerType)
+                {
+                    destination.Add(instance);
+                    nonActiveKept++;
+                }
+            }
+        }
 
         private void OnHeapEntry(in HeapEntry entry)
         {

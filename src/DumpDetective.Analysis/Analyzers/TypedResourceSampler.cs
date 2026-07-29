@@ -107,6 +107,27 @@ internal sealed class InstanceStateSampler<TSnapshot>
     }
 
     /// <summary>
+    /// Merges top samples and per-type counts from <paramref name="other"/> into this instance.
+    /// Called once per worker partial after a parallel heap-index scan completes.
+    /// Appends samples until <c>_topNCap</c> is reached (all samples are equal priority for
+    /// WcfChannel/DbConnection — the cap merely limits report verbosity).
+    /// </summary>
+    internal void MergeFrom(InstanceStateSampler<TSnapshot> other)
+    {
+        _capped |= other._capped;
+
+        foreach (TSnapshot sample in other._topSamples)
+            if (_topSamples.Count < _topNCap)
+                _topSamples.Add(sample);
+
+        foreach (var kvp in other._perTypeSamples)
+        {
+            _perTypeSamples.TryGetValue(kvp.Key, out int existing);
+            _perTypeSamples[kvp.Key] = existing + kvp.Value;
+        }
+    }
+
+    /// <summary>
     /// Reads the first matching <c>int</c>-backed field (tried in order) off the object at
     /// <paramref name="address"/>. Returns -1 if the object is invalid, no field name matches,
     /// or ClrMD throws on a corrupt/unloaded object. When <paramref name="acceptedElementTypes"/>

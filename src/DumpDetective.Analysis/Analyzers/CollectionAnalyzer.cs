@@ -1,17 +1,14 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.Diagnostics.Runtime;
-using System;
-using System.Collections.Generic;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
-using Microsoft.Extensions.Logging;
-using DumpDetective.Core.Options;
 using DumpDetective.Core.Enums;
-using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
+
+using System.Collections.Concurrent;
 
 namespace DumpDetective.Analysis.Analyzers
 {

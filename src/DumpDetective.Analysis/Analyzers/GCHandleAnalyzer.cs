@@ -1,9 +1,10 @@
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {

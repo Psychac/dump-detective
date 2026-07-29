@@ -1,9 +1,8 @@
-using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 

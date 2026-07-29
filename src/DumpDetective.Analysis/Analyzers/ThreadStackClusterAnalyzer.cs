@@ -1,12 +1,12 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using System.IO;
+﻿using DumpDetective.Analysis.Cache;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
+
 using System.IO.Compression;
 using System.Text.Json;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
-using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Analyzers
 {

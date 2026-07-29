@@ -1,15 +1,14 @@
-using System.IO.Hashing;
-using System.Runtime.InteropServices;
-using System.Diagnostics;
-using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
+
+using System.Diagnostics;
+using System.IO.Hashing;
+using System.Runtime.InteropServices;
 
 namespace DumpDetective.Analysis.Analyzers;
 

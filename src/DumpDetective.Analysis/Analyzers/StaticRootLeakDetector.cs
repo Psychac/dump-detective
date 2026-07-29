@@ -1,11 +1,10 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Traversal;
+﻿using DumpDetective.Analysis.Traversal;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Enums;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -87,30 +86,6 @@ namespace DumpDetective.Analysis.Analyzers
         {
             return analysis.TotalMemoryImpact > options.SignificantMemoryThresholdBytes
                 || analysis.ObjectsKeptAlive > options.SignificantObjectCountThreshold;
-        }
-
-        private static InsightFinding CreateFinding(List<StaticRootAnalysis> staticRootAnalysis)
-        {
-            ulong totalImpact = 0;
-            foreach (var item in staticRootAnalysis)
-            {
-                totalImpact += item.TotalMemoryImpact;
-            }
-
-            FindingSeverity severity = staticRootAnalysis.Count >= 10
-                ? FindingSeverity.Critical
-                : FindingSeverity.Warning;
-
-            return new InsightFinding(
-                Analyzer: nameof(StaticRootLeakDetector),
-                Category: "Leak",
-                Severity: severity,
-                Title: "Static-root retention candidates detected",
-                Evidence: $"{staticRootAnalysis.Count:N0} root(s) retain ~{FormatHelper.FormatBytes(totalImpact)} cumulative memory.",
-                Recommendation: "Audit static ownership and clear or weaken references for expired object graphs.",
-                Tags: ["static-root", "retention", "memory-leak"],
-                MetricValue: totalImpact,
-                MetricUnit: "retained-bytes");
         }
 
         private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)

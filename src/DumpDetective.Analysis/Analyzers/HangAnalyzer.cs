@@ -1,13 +1,12 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.Diagnostics.Runtime;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Utilities;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Enums;
+
+using Microsoft.Diagnostics.Runtime;
+
+using System.Collections.Concurrent;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -209,32 +208,6 @@ namespace DumpDetective.Analysis.Analyzers
                         .Take(options.TopContinuationTypesToShow)
                         .Select(k => new NameCountEntry(k.Key, k.Value))
                         .ToList());
-        }
-
-        private static InsightFinding CreateFinding(HangAnalysis analysis, HangAnalysisOptions options)
-        {
-            double waitingPct = analysis.TotalAliveThreads == 0
-                ? 0
-                : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
-
-            FindingSeverity severity = waitingPct >= 80
-                ? FindingSeverity.Critical
-                : waitingPct >= 50 || analysis.ThreadPoolInfo.QueuedWorkItems > options.HighThreadPoolThreshold
-                    ? FindingSeverity.Warning
-                    : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(HangAnalyzer),
-                Category: "Hang",
-                Severity: severity,
-                Title: "Hang-risk assessment",
-                Evidence: $"Waiting threads: {analysis.WaitingThreads.Count:N0}/{analysis.TotalAliveThreads:N0} ({waitingPct:F1}%); queued work items: {analysis.ThreadPoolInfo.QueuedWorkItems:N0}; health score: {analysis.HealthScore}/100.",
-                Recommendation: severity == FindingSeverity.Critical
-                    ? "Investigate wait groups and lock owners immediately for deadlock/contention storms."
-                    : "Review waiting-thread categories and thread-pool saturation indicators.",
-                Tags: ["hang", "deadlock", "threadpool", "waits"],
-                MetricValue: waitingPct,
-                MetricUnit: "% waiting threads");
         }
 
         private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)

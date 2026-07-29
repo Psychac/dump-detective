@@ -1,12 +1,13 @@
-﻿using Microsoft.Diagnostics.Runtime;
+﻿using DumpDetective.Analysis.Cache;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
+
 using System.Runtime.InteropServices;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Analyzers
 {

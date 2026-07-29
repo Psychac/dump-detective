@@ -1,11 +1,10 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
+﻿using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Enums;
+using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -223,51 +222,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return false;
-        }
-
-        private static InsightFinding CreateTraversalLimitFinding(int analyzedSamples, int traversalLimitedSamples)
-        {
-            double limitedPct = analyzedSamples == 0 ? 0 : traversalLimitedSamples * 100.0 / analyzedSamples;
-            return new InsightFinding(
-                Analyzer: nameof(ReferenceChainAnalyzer),
-                Category: "Retention",
-                Severity: limitedPct >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Reference-chain traversal limit reached",
-                Evidence: $"{traversalLimitedSamples:N0}/{analyzedSamples:N0} sampled type(s) hit traversal limits before a conclusive root-path result ({limitedPct:F1}%).",
-                Recommendation: "Increase sampling depth/path budget for inconclusive types and validate with targeted object tracing.",
-                Tags: ["reference-chain", "traversal-limit", "retention"],
-                MetricValue: limitedPct,
-                MetricUnit: "% traversal-limited-samples");
-        }
-
-        private static InsightFinding CreateFinding(int analyzedSamples, int retainedSamples)
-        {
-            if (analyzedSamples == 0)
-            {
-                return new InsightFinding(
-                    Analyzer: nameof(ReferenceChainAnalyzer),
-                    Category: "Retention",
-                    Severity: FindingSeverity.Info,
-                    Title: "No sample instances available for reference-chain tracing",
-                    Evidence: "Reference-chain analyzer could not obtain valid sample objects for configured top types.",
-                    Recommendation: "Review type statistics and dump integrity; re-run with broader type coverage if needed.",
-                    Tags: ["reference-chain", "roots", "retention"],
-                    MetricValue: 0,
-                    MetricUnit: "% retained-samples");
-            }
-
-            double retainedPct = retainedSamples * 100.0 / analyzedSamples;
-            FindingSeverity severity = retainedPct >= 70 ? FindingSeverity.Warning : FindingSeverity.Info;
-            return new InsightFinding(
-                Analyzer: nameof(ReferenceChainAnalyzer),
-                Category: "Retention",
-                Severity: severity,
-                Title: "Reference-chain retention coverage",
-                Evidence: $"{retainedSamples:N0}/{analyzedSamples:N0} sampled top types had at least one GC-root path ({retainedPct:F1}%).",
-                Recommendation: "Focus on root paths for retained top types to identify ownership leaks.",
-                Tags: ["reference-chain", "gc-roots", "retention"],
-                MetricValue: retainedPct,
-                MetricUnit: "% retained-samples");
         }
 
         private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses)

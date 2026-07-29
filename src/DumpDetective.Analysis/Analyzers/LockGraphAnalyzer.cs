@@ -1,10 +1,10 @@
-using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Enums;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
+using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -111,30 +111,6 @@ namespace DumpDetective.Analysis.Analyzers
                     topContestedTypes,
                     deadlockDetails,
                     contestedLockDetails);
-        }
-
-        private static InsightFinding CreateFinding(LockGraphAnalysis graph)
-        {
-            FindingSeverity severity = graph.DeadlockCandidates.Count >= 2
-                ? FindingSeverity.Critical
-                : graph.ContestedLocks.Count > 0
-                    ? FindingSeverity.Warning
-                    : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(LockGraphAnalyzer),
-                Category: "Threading",
-                Severity: severity,
-                Title: "Lock contention and deadlock graph",
-                Evidence: $"{graph.AllHeldLocks.Count} inflated monitor lock(s) held; {graph.ContestedLocks.Count} contested; {graph.DeadlockCandidates.Count} deadlock candidate(s).",
-                Recommendation: severity == FindingSeverity.Critical
-                    ? "Deadlock candidates detected. Review lock acquisition order and confirm circular-wait cycle."
-                    : graph.ContestedLocks.Count > 0
-                        ? "Reduce lock scope on contested objects or switch to lock-free patterns."
-                        : "No lock contention detected in this snapshot.",
-                Tags: ["locks", "deadlock", "contention", "monitor"],
-                MetricValue: graph.DeadlockCandidates.Count,
-                MetricUnit: "deadlock-candidates");
         }
 
         private LockGraphAnalysis BuildLockGraph(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)

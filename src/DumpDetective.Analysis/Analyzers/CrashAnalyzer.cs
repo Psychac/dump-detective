@@ -1,13 +1,14 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.Diagnostics.Runtime;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Options;
 using DumpDetective.Core.Enums;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
+using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
+
+using System.Collections.Concurrent;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -521,28 +522,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return snapshots;
-        }
-
-        private static InsightFinding CreateFinding(ExceptionAnalysis analysis)
-        {
-            FindingSeverity severity = analysis.ActiveExceptions > 0
-                ? FindingSeverity.Critical
-                : analysis.TotalExceptions > 0
-                    ? FindingSeverity.Warning
-                    : FindingSeverity.Info;
-
-            return new InsightFinding(
-                Analyzer: nameof(CrashAnalyzer),
-                Category: "Stability",
-                Severity: severity,
-                Title: "Exception pressure in crash dump",
-                Evidence: $"Total exceptions: {analysis.TotalExceptions:N0}; active thread exceptions: {analysis.ActiveExceptions:N0}; unique types: {analysis.ExceptionTypeCounts.Count:N0}.",
-                Recommendation: analysis.ActiveExceptions > 0
-                    ? "Prioritize active exception threads and top exception types for root-cause isolation."
-                    : "Review top exception families for recurring fault paths.",
-                Tags: ["crash", "exceptions", "threads"],
-                MetricValue: analysis.ActiveExceptions,
-                MetricUnit: "active-exceptions");
         }
 
         // No-index fallback path only: used when there's no on-disk/in-memory heap index to drive

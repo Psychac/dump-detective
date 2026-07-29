@@ -12,15 +12,10 @@ namespace DumpDetective.Analysis.Cache
     {
         private const int ProgressReportEveryScans = 25_000;
 
-        private HashSet<ulong>? _staticRootedAddresses;
-        private IReadOnlyList<(string RootKind, ulong Address)>? _validRoots;
-
         private long _objectScanCount;
         private long _cacheHits;
         private long _cacheMisses;
         private IProgress<AnalyzerProgressReport>? _progress;
-        private DumpSizeTier _sizeTier = DumpSizeTier.Medium;
-        private Dictionary<ulong, bool>? _methodTableHasRefs;
         private readonly MethodTableCache _methodTableCache;
         private readonly TypeMetadataCache _typeMetadataCache;
         private readonly ThreadCache _threadCache;

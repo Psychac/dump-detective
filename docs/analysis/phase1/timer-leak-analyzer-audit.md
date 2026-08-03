@@ -1,0 +1,385 @@
+# TimerLeakAnalyzer — Phase 1 Audit
+
+**Analyzer:** `TimerLeakAnalyzer`
+**File:** `src/DumpDetective.Analysis/Analyzers/TimerLeakAnalyzer.cs`
+**Audit date:** 2026-08-03
+**Protocol:** [phase1-analyzer-architecture-review.md](phase1-analyzer-architecture-review.md)
+
+---
+
+## Audit Area 1 — Role & Opportunity Assessment
+
+### Current role
+
+`TimerLeakAnalyzer` scans the managed heap for framework timer objects that accumulate when callers
+fail to dispose them. It produces per-type counts, byte totals, and a root-path evidence sample for
+each type. The finding generator raises `Warning` / `Critical` at total-count thresholds and a
+separate `Info` / `Warning` for timer-queue pressure based on `TimerHolder + TimerQueueTimer`.
+
+The analyzer's cohesion is good: it stays narrowly focused on timer object accumulation and does not
+reach into unrelated domains.
+
+### Coverage gaps
+
+| Missing type | Significance |
+|---|---|
+| `System.Threading.PeriodicTimer` | Ships with .NET 6+; the idiomatic replacement for `Timer` in async loops — entirely absent from the candidate list |
+| `System.Threading.ITimer` (.NET 8) | The new interface type; any host-injectable timer that leaks goes undetected |
+| Third-party schedulers (`Quartz.IScheduler`, `Hangfire.BackgroundJobServer`) | Common in enterprise dumps; not in scope, but noted as an adjacent opportunity |
+| Timer callback delegate | Which method is being called is not extracted, making "who owns this timer?" unanswerable from the report alone |
+| Timer state (`_period`, `_dueTime`, `_enabled`) | Cannot distinguish a recurring-every-100ms timer from a one-shot already-fired timer |
+
+### Double-counting structural issue
+
+`System.Timers.Timer` is a thin wrapper around `System.Threading.Timer`. Both coexist on the
+managed heap. A single `System.Timers.Timer` instance contributes to both `TimersTimerCount` and
+`ThreadingTimerCount`. Similarly, `TimerHolder` is the CLR's internal wrapper for
+`TimerQueueTimer`: one logical timer produces two heap objects, each counted separately. The current
+`TotalTimers = threading + timers + queue + holder + other` therefore over-counts logical timers by
+up to 2× and inflates severity.
+
+### Expansion opportunities
+
+- Read `_period` / `_dueTime` to classify timers as *recurring*, *one-shot pending*, or
+  *already-fired / infinite-delay suspended* (see Area 4 for detail).
+- Extract callback delegate method name/type to attribute ownership.
+- Cover `PeriodicTimer` (Area 3 has implementation notes).
+- Feed `TotalTimers` (de-duplicated) into the `LeakCandidateAnalyzer` ranking engine as noted in
+  the Phase 0 boundary review — this action item remains open.
+
+### Architectural observations
+
+The `IAnalyzer` interface exposes `Tags` and `Order` with default implementations. `TimerLeakAnalyzer`
+uses neither — `Tags` is empty and `Order` is 0. This is consistent with `HttpObjectAnalyzer` (same
+quartet), so not a defect, but modules relying on tag-based filtering lose the granularity.
+
+---
+
+## Audit Area 2 — Diagnostic & Report Quality
+
+### Strengths
+
+- Per-type breakdown in `ByType` is sorted by count descending — highest-volume type is immediately
+  visible.
+- Dual findings (aggregate count + queue pressure) target distinct failure modes.
+- Severity escalation from `Warning` → `Critical` at 250 is deterministic.
+- `EvidenceConfidence` is attached to the aggregate finding (via top-type evidence).
+
+### Weaknesses
+
+**Evidence is populated but not rendered.**
+`TimerObjectTypeSummary.Evidence` carries a root path and a `searchTruncated` flag.
+`TimerLeakSectionBuilder` never reads `Evidence`; the section table shows only `TypeName`, `Count`,
+and `Heap Size`. An engineer looking at the report cannot see the retention chain without running the
+analyzer in a debugger.
+
+**Queue-pressure heuristic threshold is hardcoded to ≥ 50.**
+The threshold does not scale with heap size, total managed thread count, or timer fire rate. A
+system with 10 000 objects and only 55 holders is below `Warning` but likely has a real problem;
+a test harness with 300 synthetic timers hits `Critical` immediately.
+
+**No timer category is shown in the finding title.**
+"1 234 timer-related objects on managed heap" does not indicate which framework type dominates.
+An engineer must open the section table to correlate.
+
+**`searchTruncated` is silently dropped.**
+When root-path search is truncated (candidate-set limit hit), the section and findings report nothing;
+confidence is silently degraded.
+
+**`OtherTimerCount` contributes to severity but the finding evidence string omits it.**
+The evidence string lists four named categories but uses the label `Other=N` only; when the spike is
+in a third-party timer matched via the prefix/token heuristic, the type name is invisible.
+
+**Section builder imports `System.Linq` for a single `.Select` on table rows.**
+`SectionBuilderBase` helper methods exist for building compact tables; the inline LINQ chain (line 53)
+conflicts with the project's LINQ-in-hot-paths prohibition and should use a manual loop.
+
+### Missing diagnostics
+
+- Root-path chain per type in the section output.
+- "Callback owner" (type name of the timer callback delegate target).
+- Timer interval / due-time for sampled instances.
+- Trend delta in the section (current count vs prior snapshot, if available).
+- `searchTruncated` warning banner in the section.
+
+---
+
+## Audit Area 3 — ClrMD & Platform Utilization
+
+### What is used well
+
+- `TypedResourceScanDriver.DiscoverCandidates` routes through the shared cache/index, avoiding a
+  second full heap scan.
+- `cache.GetOrBuildValidRoots` is used correctly — roots are not re-enumerated per type.
+- `ReferenceGraph` and `RootPathFinder` are instantiated once in `PopulateEvidence` and reused
+  across all type iterations.
+- `cache.GetSampleInstanceAddress` provides a single representative address per type without
+  iterating all instances.
+
+### Missing ClrMD utilization
+
+**`PeriodicTimer` is absent from `ClassifyType`.**
+`System.Threading.PeriodicTimer` has been in .NET since 6.0. Adding it requires one `Equals` branch
+and a new `PeriodicTimer` category enum value.
+
+**Timer state fields are never read.**
+ClrMD field access:
+```csharp
+// System.Threading.TimerQueueTimer fields (internal CLR type)
+ClrInstanceField? periodField = type.GetFieldByName("_period");
+ClrInstanceField? dueTimeField = type.GetFieldByName("_dueTime");
+// System.Timers.Timer
+ClrInstanceField? enabledField = type.GetFieldByName("enabled");
+```
+These are not secret — they are stable runtime implementation details used by WinDbg SOS and
+PerfView for years. Reading them unlocks active vs. inactive classification without a second heap
+pass.
+
+**Callback delegate is never inspected.**
+`TimerQueueTimer._timerCallback` (a `TimerCallback` delegate) holds a `_target` field pointing to
+the subscriber object. Reading `_target.Type.Name` produces the owning type name, which is the most
+actionable output possible for a leaked timer.
+
+**`ITypedResourceInstanceSampler<T>` is not implemented.**
+`DbConnectionAnalyzer` and `WcfChannelAnalyzer` implement `ITypedResourceInstanceSampler` to read
+per-instance state within the shared scan pass, avoiding a second traversal. `TimerLeakAnalyzer`
+does not implement this interface; its `PopulateEvidence` re-traverses objects post-scan using only
+one sample address per type (no state fields). Implementing the sampler interface would allow the
+shared pass to capture `_period` and callback target for up to N samples per type in O(1) per
+object.
+
+**`cancellationToken` is not passed to `PopulateEvidence`.**
+The method signature is `private static void PopulateEvidence(ClrHeap, IHeapAnalysisCache?,
+List<TimerObjectTypeSummary>)`. Root-path searches on a large heap can run for several seconds.
+No cancellation path exists; the only escape is the internal `MaxCandidateNodes` limit.
+
+---
+
+## Audit Area 4 — Diagnostic Opportunity Analysis
+
+### High-value opportunities (priority ordered)
+
+**1. Per-instance timer state sampling (High value, Low difficulty)**
+
+Read `_period` and `_dueTime` from `TimerQueueTimer` instances during or after the scan. Categorize
+each sample as:
+
+| Class | Condition |
+|---|---|
+| Recurring | `_period != Timeout.Infinite && _period != 0` |
+| One-shot pending | `_period == 0 || _period == Timeout.Infinite` and `_dueTime` in future |
+| Suspended / infinite | `_dueTime == Timeout.Infinite` |
+
+Reporting "450 recurring timers firing every ~100 ms" is far more actionable than "450 timer
+objects".
+
+**2. Callback owner attribution (High value, Medium difficulty)**
+
+For each `TimerQueueTimer` sample, walk:
+```
+_timerCallback → _target → Type.Name
+```
+Group the resulting type names and include the top-3 callback owners in the finding evidence. This
+immediately answers "which component is not disposing its timers?"
+
+**3. `PeriodicTimer` coverage (High value, Very Low difficulty)**
+
+Add `System.Threading.PeriodicTimer` to `ClassifyType`. A single enum member and one `Equals`
+branch. In .NET 6+ async workloads `PeriodicTimer` is the canonical timer; missing it produces a
+false negative for a whole class of modern applications.
+
+**4. De-duplicate logical timer count (Medium value, Low difficulty)**
+
+Logical timer count = `TimerQueueTimerCount` (each logical `System.Threading.Timer` maps to exactly
+one `TimerQueueTimer`). Using `TimerQueueTimerCount` as the authoritative metric eliminates the 2×
+inflation from `TimerHolder` and the `System.Timers.Timer` → `System.Threading.Timer` wrapping.
+Expose both: raw object count (current) and logical timer count (new).
+
+**5. Enabled/disabled breakdown for `System.Timers.Timer` (Medium value, Low difficulty)**
+
+`System.Timers.Timer.enabled` is a `bool` field. Distinguishing enabled vs. disabled instances
+separates active leaks from stopped-but-not-disposed timers, reducing false urgency.
+
+**6. Timer interval histogram (Low value, Medium difficulty)**
+
+Group `TimerQueueTimer` instances by `_period` bucket (< 100 ms, 100–1000 ms, > 1 s, infinite).
+High-frequency-interval groups correlate with CPU burn from timer flood; this is a separate problem
+category from pure object accumulation.
+
+---
+
+## Audit Area 5 — Performance, Memory & Scalability
+
+### Heap scan
+
+`TypedResourceScanDriver.DiscoverCandidates` uses the cache/index path; it does not re-scan the
+heap when the index is available. This is correct.
+
+### `PopulateEvidence` cost
+
+The method constructs `ReferenceGraph` and `RootPathFinder` once and calls
+`TryFindAnyRootPath` once per distinct timer type. In practice there are 4–6 distinct types. The
+per-call cost is bounded by `MaxCandidateNodes = 5 000`, keeping it predictable even on large heaps.
+No scalability concern in the current design.
+
+### Missing cancellation
+
+`PopulateEvidence` has no `CancellationToken` parameter. On a 20 GB dump with a pathological
+reference graph, the candidate-set builder could saturate the budget and still loop over all roots
+(Phase 3 of `RootPathFinder`). The effect is a delay of several seconds with no escape hatch short
+of process kill. This is a correctness/robustness gap, not a hot-path concern.
+
+### Allocation
+
+- `new List<TimerObjectTypeSummary>(candidates.Count)` is appropriately sized.
+- `byType.Sort` is in-place — no additional allocation.
+- No `StringBuilder`/string interning issues in the hot path.
+
+### Expected behavior at scale
+
+| Dump size | Heap scan | Evidence |
+|---|---|---|
+| 1 GB | Fast — cache-backed, MethodTable filter | < 1 s for 4–6 type root searches |
+| 10 GB | Fast — same path | < 5 s; well within acceptable range |
+| 100 GB | Fast — same path | Root search still bounded by `MaxCandidateNodes`; no regression |
+
+No scalability bottleneck identified. The analyzer does not enumerate all timer instances for
+evidence — only one sample per type.
+
+---
+
+## Audit Area 6 — Correctness & Confidence
+
+### Double-counting (P0 correctness risk)
+
+As described in Area 1:
+
+- `System.Timers.Timer` wraps `System.Threading.Timer`. Both appear on the heap simultaneously.
+  `TotalTimers` counts both, inflating the number by up to `TimersTimerCount`.
+- `TimerHolder` is a CLR internal wrapper for `TimerQueueTimer`. Both appear simultaneously.
+  `TotalTimers` counts both, inflating by up to `min(TimerHolderCount, TimerQueueTimerCount)`.
+
+**Observed consequence:** severity thresholds (100/250) are applied to an inflated metric. A
+system with 130 `TimerQueueTimer` objects also has ~130 `TimerHolder` objects → `TotalTimers ≈ 260`
+→ triggers `Critical` when the true logical timer count is 130 (which might warrant only `Warning`).
+
+**Fix:** use `TimerQueueTimerCount` as the authoritative logical count for severity evaluation;
+expose raw object count separately for investigative use.
+
+### `OtherTimerCategory` false positives
+
+The catch-all matches any type whose name contains "Timer" under `System.Threading.` or
+`System.Timers.` namespaces. CLR internal types (e.g. `System.Threading.TimerQueue`) that are not
+user-created timer objects could be captured and inflate `OtherTimerCount`. These types should be
+explicitly excluded or the category narrowed.
+
+### Confidence score gap
+
+`EvidenceConfidence.Compute(topEvidence)` is used for the aggregate timer finding. If the
+top-type's root search was truncated (`searchTruncated = true`), confidence is reduced, but there is
+no separate finding or note to the engineer about why confidence is degraded.
+
+### Missing `IsValid` / null guard in evidence population
+
+`PopulateEvidence` calls `cache.GetSampleInstanceAddress(summary.TypeName)` and immediately passes
+the result to `TryFindAnyRootPath`. If the cached address refers to an object that was already
+collected (corrupt or partial dump edge case), the root search operates on an invalid address. The
+`RootPathFinder` likely handles this gracefully via `ClrObject.IsValid` checks internally, but the
+path is not explicitly guarded here.
+
+---
+
+## Audit Area 7 — Industry Benchmark
+
+### WinDbg + SOS
+
+`!dumpheap -type Timer -stat` provides instance count and bytes by type. It does not classify
+severity, does not detect double-counting, and requires manual field inspection to determine
+intervals or callbacks. DumpDetective's automatic classification and root-path evidence are stronger.
+Gap: WinDbg `!do <addr>` on a `TimerQueueTimer` shows `_period`, `_dueTime`, and `_timerCallback`
+immediately — DumpDetective does not expose this.
+
+### PerfView
+
+No dedicated timer-leak view. Timer accumulation appears indirectly in GC heap snapshots under type
+diffing. DumpDetective is ahead.
+
+### Visual Studio Memory Usage / dotMemory
+
+Both tools show type instance counts including timer types but do not produce actionable severity
+findings or root retention paths. DumpDetective's `InsightFinding` with `Recommendation` text is
+ahead for incident response.
+
+### Competitive gap
+
+The one capability that WinDbg + SOS provides which DumpDetective does not:
+**callback method identification and timer interval**. A developer using WinDbg can in two commands
+determine which component owns the leaked timers and how frequently they fire. DumpDetective requires
+the engineer to cross-reference the heap address with source code manually. This is the highest-ROI
+gap to close.
+
+---
+
+## Final Executive Summary
+
+### Overall Assessment
+
+**Score: 62 / 100**
+
+The analyzer detects the right objects, uses shared infrastructure correctly, and produces
+deterministic findings. The implementation is clean and maintainable. However it has a structural
+double-counting defect that mis-classifies severity, does not extract available timer state fields
+that would make findings actionable, does not cover `PeriodicTimer`, and populates evidence that
+is never shown to the engineer.
+
+**Production readiness:** Conditionally. Findings are directionally correct but severity is
+unreliable due to double-counting. The analyzer is not harmful; it will not produce false negatives
+for genuine leaks. The false-positive-severity risk is real.
+
+**Major strengths:**
+- Clean type classification with exact-match fast paths
+- Correct use of `TypedResourceScanDriver`, cache, and `RootPathFinder`
+- Dual-finding design separates aggregate accumulation from queue pressure
+- Trend comparer covers all key metrics
+
+**Major weaknesses:**
+- `TotalTimers` double-counts implementation detail types; severity thresholds applied to inflated metric
+- `PeriodicTimer` (.NET 6+) entirely absent
+- Evidence (root path) is populated but never rendered in the section
+- Timer state fields (`_period`, `_dueTime`, callback target) not read despite being available
+
+---
+
+### Priority Roadmap
+
+| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|
+| **P0** | Fix double-counting: use `TimerQueueTimerCount` as the logical-timer count for severity thresholds; expose raw object count separately | High — current severity is unreliable | Low | High | Improvement |
+| **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement |
+| **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement |
+| **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement |
+| **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement |
+| **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement |
+| **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement |
+| **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement |
+| **P3** | Add timer interval histogram (group `_period` into < 100 ms / 100 ms–1 s / > 1 s / infinite) | Medium — separates accumulation leak from timer flood CPU issue | Medium | Medium | Improvement |
+| **P3** | Feed de-duplicated logical timer count into `LeakCandidateAnalyzer` ranking (open Phase 0 action item) | Medium — cross-analyzer correlation | Medium | High | Evolution |
+
+### Final Verdict
+
+1. **Production-ready?** Conditionally — directionally correct but severity is unreliable due to
+   double-counting. The P0 count-deduplication fix is a prerequisite for trusted severity.
+
+2. **Highest-impact improvements:** (1) deduplicate `TotalTimers` to logical count, (2) add
+   `PeriodicTimer`, (3) render the already-populated evidence in the section builder, (4) read
+   `_period` and callback target per sample.
+
+3. **Platform evolution opportunities:** Timer state sampling is a natural fit for
+   `ITypedResourceInstanceSampler` — the pattern already exists in `DbConnectionAnalyzer` and
+   `WcfChannelAnalyzer`. No new infrastructure is needed; it is a matter of applying the pattern.
+   The `LeakCandidateAnalyzer` integration (Phase 0 open action) would give timers cross-analyzer
+   severity ranking.
+
+4. **Highest engineering return:** The combination of P0 deduplication + P0 `PeriodicTimer` + P1
+   evidence rendering is approximately 4 hours of work and produces a qualitatively different report
+   — severity becomes reliable and the retention chain is visible.

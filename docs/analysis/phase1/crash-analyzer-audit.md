@@ -531,3 +531,5 @@ Migrating to `ClrException` (I-3) is the single highest-leverage change: it subs
 broken `_stackTrace` fix (I-2), eliminates all brittle field-name string lookups, simplifies
 `ExtractExceptionInfo` substantially, and makes the implementation resilient to CLR internals
 layout changes. It yields correctness, simplicity, and maintainability in one refactor.
+
+---

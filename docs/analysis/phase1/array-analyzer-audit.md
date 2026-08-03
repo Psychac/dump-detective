@@ -224,24 +224,24 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 
 ### Priority Roadmap
 
-| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| **P0** | Fix `StaticSize` → `IntPtr.Size` for reference-type array element slot size in wasted-bytes calculation | High — all sparse findings show inflated numbers | Low | High | Improvement |
-| **P0** | Change `typeMap` count accumulator from `int` to `long` to prevent silent overflow | High — wrong aggregate count on large heaps | Low | High | Improvement |
-| **P1** | Add per-type GC generation breakdown (% Gen2 + LOH) using existing `TypeAggregateIndexEntry` fields | High — distinguishes transient vs retained array pressure | Low | High | Improvement |
-| **P1** | Remove hard `break` in `ArrayFindingGenerator` sparse loop; emit top-N distinct findings | Medium — suppresses valid warnings | Low | High | Improvement |
-| **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
-| **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass | Medium — eliminates redundant O(T) scan | Low | High | Improvement |
-| **P1** | Add `% of total heap` column to the type table | Medium — matches standard tooling readability | Low | High | Improvement |
-| **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
-| **P2** | Add average instance size column (`TotalBytes / Count`) to type table | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
-| **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` | Medium — removes copy-paste binary reader | Medium | High | Evolution |
-| **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` | Medium — directs ownership to responsible team | Low | Medium | Improvement |
-| **P2** | Add aggregate total wasted bytes summary metric for sparse section | Low-Medium — headline number for the section | Low | High | Improvement |
-| **P3** | Value-type sparse array detection for numeric types (`int[]`, `float[]`) | Medium — closes dotMemory gap | Medium | Medium | Improvement |
-| **P3** | Pinned array detection via GC handle root index | Medium — identifies SOH fragmentation risk | Medium | High | Improvement |
-| **P3** | `ArrayPool<T>` unreturned buffer heuristic (`byte[]` LOH at power-of-two sizes ≥ 128 KB) | Low-Medium — common production anti-pattern | Low | Low | Improvement |
-| **P3** | `sparseCandidates` initial capacity tuned to `Math.Min(typeAggregates.Count / 4, 512)` | Low — avoids list growth copies | Low | High | Improvement |
+| Priority | Recommendation | Status | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|---|
+| ~~**P0**~~ | ~~Fix `StaticSize` → `IntPtr.Size` for reference-type array element slot size in wasted-bytes calculation~~ | ✓ DONE | High — all sparse findings show inflated numbers | Low | High | Improvement |
+| ~~**P0**~~ | ~~Change `typeMap` count accumulator from `int` to `long` to prevent silent overflow~~ | ✓ DONE | High — wrong aggregate count on large heaps | Low | High | Improvement |
+| **P1** | Add per-type GC generation breakdown (% Gen2 + LOH) using existing `TypeAggregateIndexEntry` fields |   | High — distinguishes transient vs retained array pressure | Low | High | Improvement |
+| **P1** | Remove hard `break` in `ArrayFindingGenerator` sparse loop; emit top-N distinct findings |   | Medium — suppresses valid warnings | Low | High | Improvement |
+| **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` |   | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
+| **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass |   | Medium — eliminates redundant O(T) scan | Low | High | Improvement |
+| **P1** | Add `% of total heap` column to the type table |   | Medium — matches standard tooling readability | Low | High | Improvement |
+| **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone |   | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
+| **P2** | Add average instance size column (`TotalBytes / Count`) to type table |   | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
+| **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` |   | Medium — removes copy-paste binary reader | Medium | High | Evolution |
+| **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` |   | Medium — directs ownership to responsible team | Low | Medium | Improvement |
+| **P2** | Add aggregate total wasted bytes summary metric for sparse section |   | Low-Medium — headline number for the section | Low | High | Improvement |
+| **P3** | Value-type sparse array detection for numeric types (`int[]`, `float[]`) |   | Medium — closes dotMemory gap | Medium | Medium | Improvement |
+| **P3** | Pinned array detection via GC handle root index |   | Medium — identifies SOH fragmentation risk | Medium | High | Improvement |
+| **P3** | `ArrayPool<T>` unreturned buffer heuristic (`byte[]` LOH at power-of-two sizes ≥ 128 KB) |   | Low-Medium — common production anti-pattern | Low | Low | Improvement |
+| **P3** | `sparseCandidates` initial capacity tuned to `Math.Min(typeAggregates.Count / 4, 512)` |   | Low — avoids list growth copies | Low | High | Improvement |
 
 ### Final Verdict
 

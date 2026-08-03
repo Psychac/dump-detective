@@ -62,7 +62,7 @@ namespace DumpDetective.Analysis.Analyzers
             // Build set of array MTs for fast lookup
             var arrayMtSet = new HashSet<ulong>(capacity: 512);
             // Map: elementTypeName+rank key → (count, totalBytes, isMultiDim)
-            var typeMap = new Dictionary<string, (int Count, ulong Bytes, bool IsMultiDim, int Rank)>(256);
+            var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank)>(256);
 
             long totalObjects = 0;
             ulong totalBytes = 0;
@@ -118,10 +118,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                 string key = $"{elemName}[rank={rank}]";
                 if (typeMap.TryGetValue(key, out var existing))
-                    typeMap[key] = (existing.Count + (int)Math.Min(e.Count, int.MaxValue),
+                    typeMap[key] = (existing.Count + e.Count,
                                     existing.Bytes + e.TotalSize, isMultiDim, rank);
                 else
-                    typeMap[key] = ((int)Math.Min(e.Count, int.MaxValue), e.TotalSize, isMultiDim, rank);
+                    typeMap[key] = (e.Count, e.TotalSize, isMultiDim, rank);
 
                 // Sparse candidate: only 1-D ref-type arrays with a sample address.
                 // GetObjectValue is only valid for reference-type elements — value-type arrays
@@ -136,12 +136,12 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 2: Top array types by total bytes ────────────────────────────
             var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim)>(typeMap.Count);
-            foreach (KeyValuePair<string, (int Count, ulong Bytes, bool IsMultiDim, int Rank)> kv in typeMap)
+            foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank)> kv in typeMap)
             {
                 // Extract element name from key (strip "[rank=N]" suffix)
                 int rankSep = kv.Key.LastIndexOf("[rank=", StringComparison.Ordinal);
                 string elemName = rankSep > 0 ? kv.Key[..rankSep] : kv.Key;
-                typeList.Add((elemName, kv.Value.Rank, kv.Value.Count, kv.Value.Bytes, kv.Value.IsMultiDim));
+                typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim));
             }
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
@@ -229,7 +229,7 @@ namespace DumpDetective.Analysis.Analyzers
                 double sparseRatio = (double)nullCount / sampleLen;
                 if (sparseRatio < 0.5) continue;
 
-                ulong elemSize = (ulong)(obj.Type.ComponentType?.StaticSize ?? 8);
+                ulong elemSize = (ulong)IntPtr.Size;
                 ulong wastedBytes = (ulong)(arr.Length * sparseRatio * (double)elemSize);
 
                 topSparseArrays.Add(new SparseArrayEntry(

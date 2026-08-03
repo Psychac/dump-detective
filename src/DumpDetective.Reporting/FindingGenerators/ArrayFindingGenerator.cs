@@ -12,6 +12,7 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
     private const int MultiDimWarningCount = 1_000;
     private const double SparseRatioThreshold = 0.70;
     private const ulong SparseWastedWarningBytes = 10_000_000UL; // 10 MB
+    private const int MaxSparseFindings = 3;
 
     public string AnalyzerName => "Array Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is ArrayDomainResult;
@@ -69,10 +70,12 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
         }
 
         // ── Sparse / wasteful arrays ──────────────────────────────────────────
+        int sparseFindingCount = 0;
         foreach (SparseArrayEntry sparse in r.TopSparseArrays)
         {
             if (sparse.SparseRatio < SparseRatioThreshold) continue;
             if (sparse.WastedBytes < SparseWastedWarningBytes) continue;
+            if (sparseFindingCount >= MaxSparseFindings) break;
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
@@ -88,7 +91,7 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
                 MetricValue: sparse.WastedBytes,
                 MetricUnit: "bytes"));
 
-            break; // report at most one sparse finding per run to avoid noise
+            sparseFindingCount++;
         }
 
         return findings;

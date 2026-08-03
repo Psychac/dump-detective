@@ -229,10 +229,10 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 | ~~**P0**~~ | ~~Fix `StaticSize` → `IntPtr.Size` for reference-type array element slot size in wasted-bytes calculation~~ | ✓ DONE | High — all sparse findings show inflated numbers | Low | High | Improvement |
 | ~~**P0**~~ | ~~Change `typeMap` count accumulator from `int` to `long` to prevent silent overflow~~ | ✓ DONE | High — wrong aggregate count on large heaps | Low | High | Improvement |
 | **P1** | Add per-type GC generation breakdown (% Gen2 + LOH) using existing `TypeAggregateIndexEntry` fields | ✓ DONE | High — distinguishes transient vs retained array pressure | Low | High | Improvement |
-| **P1** | Remove hard `break` in `ArrayFindingGenerator` sparse loop; emit top-N distinct findings |   | Medium — suppresses valid warnings | Low | High | Improvement |
-| **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` |   | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
-| **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass |   | Medium — eliminates redundant O(T) scan | Low | High | Improvement |
-| **P1** | Add `% of total heap` column to the type table |   | Medium — matches standard tooling readability | Low | High | Improvement |
+| **P1** | Remove hard `break` in `ArrayFindingGenerator` sparse loop; emit top-N distinct findings | ✓ DONE | Medium — suppresses valid warnings | Low | High | Improvement |
+| **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` | ✓ DONE | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
+| **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass | ✓ DONE | Medium — eliminates redundant O(T) scan | Low | High | Improvement |
+| **P1** | Add `% of total heap` column to the type table | ✓ DONE | Medium — matches standard tooling readability | Low | High | Improvement |
 | **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone |   | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
 | **P2** | Add average instance size column (`TotalBytes / Count`) to type table |   | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
 | **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` |   | Medium — removes copy-paste binary reader | Medium | High | Evolution |

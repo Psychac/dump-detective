@@ -307,7 +307,7 @@ dotMemory's "Async/Await" view (available in newer versions) shows async method 
 
 | ID | Recommendation | Classification | Impact | Difficulty | Confidence | Status |
 |---|---|---|---|---|---|---|
-| P0-1 | Add `IsAsyncStateMachineType` flag to `TypeAggregateFlags` (bit 5); set in `DiskBackedObjectIndexWriter.ComputeTypeFlags` using name pattern + `EnumerateInterfaces` | Evolution | High — eliminates full-type scan; enables O(matching types) Phase 2 | Medium | High |
+| P0-1 | Add `IsAsyncStateMachineType` flag to `TypeAggregateFlags` (bit 5); set in `DiskBackedObjectIndexWriter.ComputeTypeFlags` using name pattern + `EnumerateInterfaces` | Evolution | High — eliminates full-type scan; enables O(matching types) Phase 2 | Medium | High | DONE |
 | P0-2 | Add `Gen2Count` and `Gen2Fraction` to `StateMachineTypeProfile`; expose in section table | Improvement | High — enables leak vs. throughput distinction | Low | High | DONE |
 | P0-3 | Rename `AvgStateValue` → `SampleStateValue` (or replace with distribution); update domain model, section builder column header, and any downstream consumers | Improvement | High — removes actively misleading column | Low | High | DONE |
 | P1-1 | Move `heap.GetTypeByMethodTable(kv.Key)` after name pre-check (or after flag check once P0-1 lands); avoids ClrMD resolution for non-candidate types | Improvement | Medium — reduces Phase 2 latency on large dumps | Low | High |

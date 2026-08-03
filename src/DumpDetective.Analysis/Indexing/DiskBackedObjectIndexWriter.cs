@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
@@ -718,6 +719,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
     }
 
+    private static readonly Regex StateMachinePattern = 
+        new(@"<(.+?)>d__\d+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
+
     private static TypeAggregateFlags ComputeTypeFlags(ClrType type)
     {
         TypeAggregateFlags flags = TypeAggregateFlags.None;
@@ -741,6 +745,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (IsDelegateType(type))
             flags |= TypeAggregateFlags.IsDelegateType;
 
+        if (IsAsyncStateMachineType(type))
+            flags |= TypeAggregateFlags.IsAsyncStateMachineType;
+
         return flags;
     }
 
@@ -754,6 +761,21 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             if (baseName is "System.MulticastDelegate" or "System.Delegate")
                 return true;
             current = current.BaseType;
+        }
+        return false;
+    }
+    private static bool IsAsyncStateMachineType(ClrType type)
+    {
+        // Check if type name matches async state machine pattern: <MethodName>d__N
+        string? name = type.Name;
+        if (name is null || !StateMachinePattern.IsMatch(name))
+            return false;
+
+        // Confirm it implements IAsyncStateMachine interface
+        foreach (ClrInterface iface in type.EnumerateInterfaces())
+        {
+            if (iface.Name is "System.Runtime.CompilerServices.IAsyncStateMachine")
+                return true;
         }
         return false;
     }

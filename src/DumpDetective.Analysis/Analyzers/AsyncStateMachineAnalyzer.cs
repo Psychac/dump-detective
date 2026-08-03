@@ -63,21 +63,19 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Fast filter: check phase-1 flag instead of expensive pattern matching
+                if ((kv.Value.Flags & TypeAggregateFlags.IsAsyncStateMachineType) == 0)
+                    continue;
+
                 ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
                 if (clrType?.Name is not string fullName) continue;
 
-                // Quick pre-check before invoking regex: must contain '<' followed by '>d__'
+                // Extract method name from <MethodName>d__N pattern
                 int angleOpen = fullName.LastIndexOf('<');
                 if (angleOpen < 0) continue;
 
-                ReadOnlySpan<char> suffix = fullName.AsSpan(angleOpen);
-                if (!suffix.Contains(">d__", StringComparison.Ordinal)) continue;
-
                 Match m = StateMachinePattern.Match(fullName, angleOpen);
                 if (!m.Success) continue;
-
-                // Confirm it implements IAsyncStateMachine
-                if (!ImplementsIAsyncStateMachine(clrType)) continue;
 
                 string methodName = m.Groups[1].Value;
                 string declaringType = angleOpen > 0 ? fullName[..(angleOpen - 1)] : string.Empty;

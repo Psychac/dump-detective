@@ -57,10 +57,15 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
         {
             if (entry.SuspendedCount >= FireAndForgetThreshold)
             {
+                // Escalate severity based on suspended count
+                FindingSeverity sev = entry.SuspendedCount >= HighCountCritical
+                    ? FindingSeverity.Critical
+                    : FindingSeverity.Warning;
+
                 findings.Add(new InsightFinding(
                     Analyzer: AnalyzerName,
                     Category: "Memory",
-                    Severity: FindingSeverity.Warning,
+                    Severity: sev,
                     Title: $"Potential fire-and-forget leak: '{entry.MethodName}' has {entry.SuspendedCount:N0} suspended instances",
                     Evidence: $"{entry.SuspendedCount:N0} suspended instances of async method '{entry.MethodName}' " +
                               $"declared on '{entry.DeclaringType}' found on heap " +

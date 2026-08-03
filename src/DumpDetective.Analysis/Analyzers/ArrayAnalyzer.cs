@@ -63,7 +63,7 @@ namespace DumpDetective.Analysis.Analyzers
             // Build set of array MTs for fast lookup
             var arrayMtSet = new HashSet<ulong>(capacity: 512);
             // Map: elementTypeName+rank key → (count, totalBytes, isMultiDim)
-            var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount)>(256);
+            var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, string ModuleName)>(256);
 
             long totalObjects = 0;
             ulong totalBytes = 0;
@@ -97,6 +97,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (clrType is null) continue;
 
                 string elemName = clrType.ComponentType?.Name ?? clrType.Name ?? $"MT:0x{kv.Key:X}";
+                string moduleName = clrType.Module?.Name ?? "Unknown";
                 int rank = 1;
                 bool isMultiDim = false;
 
@@ -132,9 +133,9 @@ namespace DumpDetective.Analysis.Analyzers
                 if (typeMap.TryGetValue(key, out var existing))
                     typeMap[key] = (existing.Count + e.Count,
                                     existing.Bytes + e.TotalSize, isMultiDim, rank,
-                                    existing.Gen2Count + e.Gen2Count, existing.LohCount + e.LohCount);
+                                    existing.Gen2Count + e.Gen2Count, existing.LohCount + e.LohCount, existing.ModuleName);
                 else
-                    typeMap[key] = (e.Count, e.TotalSize, isMultiDim, rank, e.Gen2Count, e.LohCount);
+                    typeMap[key] = (e.Count, e.TotalSize, isMultiDim, rank, e.Gen2Count, e.LohCount, moduleName);
 
                 // Sparse candidate: only 1-D ref-type arrays with a sample address.
                 // GetObjectValue is only valid for reference-type elements — value-type arrays
@@ -148,13 +149,13 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // ── Step 2: Top array types by total bytes ────────────────────────────
-            var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim, long Gen2Count, long LohCount)>(typeMap.Count);
-            foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount)> kv in typeMap)
+            var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim, long Gen2Count, long LohCount, string ModuleName)>(typeMap.Count);
+            foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, string ModuleName)> kv in typeMap)
             {
                 // Extract element name from key (strip "[rank=N]" suffix)
                 int rankSep = kv.Key.LastIndexOf("[rank=", StringComparison.Ordinal);
                 string elemName = rankSep > 0 ? kv.Key[..rankSep] : kv.Key;
-                typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim, kv.Value.Gen2Count, kv.Value.LohCount));
+                typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim, kv.Value.Gen2Count, kv.Value.LohCount, kv.Value.ModuleName));
             }
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
@@ -166,7 +167,7 @@ namespace DumpDetective.Analysis.Analyzers
                 double percentOfHeap = totalHeapBytes > 0 ? t.Bytes * 100.0 / totalHeapBytes : 0.0;
                 double gen2PlusLohPct = t.Count > 0 ? (t.Gen2Count + t.LohCount) * 100.0 / t.Count : 0.0;
                 double avgSize = t.Count > 0 ? t.Bytes / (double)t.Count : 0.0;
-                topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize));
+                topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize, t.ModuleName));
             }
 
 

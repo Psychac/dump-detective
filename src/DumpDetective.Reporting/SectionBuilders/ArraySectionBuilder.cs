@@ -43,7 +43,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             int limit = Math.Min(d.TopArrayTypesBySize.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                new[] { CH("Element Type"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
+                new[] { CH("Element Type"), CH("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
                 BuildTypeRows(d.TopArrayTypesBySize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopArrayTypesBySize.Count > limit)
                 blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
@@ -95,6 +95,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             ArrayTypeProfile t = types[i];
             rows.Add(new TableRow([
                 Cell(FormatHelper.TruncateString(t.ElementTypeName, 70)),
+                Cell(FormatHelper.TruncateString(t.ModuleName, 50)),
                 Cell($"{t.Rank:N0}",                        t.Rank),
                 Cell($"{t.Count:N0}",                       t.Count),
                 Cell(FormatHelper.FormatBytes(t.TotalBytes)),

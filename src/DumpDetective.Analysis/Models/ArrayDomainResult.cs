@@ -12,7 +12,8 @@ internal sealed record ArrayTypeProfile(
     bool IsMultiDimensional,
     double PercentOfTotalHeapBytes = 0,
     double Gen2PlusLohPercent = 0,
-    double AverageInstanceSize = 0);
+    double AverageInstanceSize = 0,
+    string ModuleName = "Unknown");
 
 internal sealed record LargeArrayEntry(
     ulong Address,

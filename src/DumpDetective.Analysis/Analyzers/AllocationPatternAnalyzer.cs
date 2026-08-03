@@ -75,7 +75,7 @@ namespace DumpDetective.Analysis.Analyzers
             double gen2SizePct = totalSize > 0 ? Math.Round(gen2Bytes * 100.0 / (double)totalSize, 2) : 0.0;
             double lohSizePct = totalSize > 0 ? Math.Round(lohBytes * 100.0 / (double)totalSize, 2) : 0.0;
 
-            AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct);
+            AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct, options.TransientClassificationThreshold);
             // Pressure uses count% for gen0/2 (reflects GC collection frequency) and
             // size% for LOH (LOH count% is near-zero on typical heaps, size% is meaningful).
             double pressureScore = (gen0CountPct * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
@@ -292,9 +292,9 @@ namespace DumpDetective.Analysis.Analyzers
                 transient, shortish, longLived);
         }
 
-        private static AllocationProfile ClassifyProfile(double gen0Pct, double gen2Pct)
+        private static AllocationProfile ClassifyProfile(double gen0Pct, double gen2Pct, double transientThreshold)
         {
-            if (gen0Pct > 70.0) return AllocationProfile.Transient;
+            if (gen0Pct > transientThreshold) return AllocationProfile.Transient;
             if (gen2Pct > 50.0) return AllocationProfile.Retained;
             if (gen0Pct > 50.0) return AllocationProfile.Steady;
             return AllocationProfile.Mixed;

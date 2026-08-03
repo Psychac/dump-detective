@@ -21,10 +21,10 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             AllocationPatternAnalysisOptions options = context.AnalysisOptions.AllocationPatternAnalysis;
-            return ValueTask.FromResult(Analyze(context, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context, options, context.Progress, cancellationToken).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(AnalysisContext context, AllocationPatternAnalysisOptions options, CancellationToken cancellationToken)
+        private static AnalyzerDomainResult Analyze(AnalysisContext context, AllocationPatternAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             if (context.Cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
@@ -131,6 +131,8 @@ namespace DumpDetective.Analysis.Analyzers
             else
                 scanLimit = Math.Min(metrics.Count, options.TopTypeLimit * options.ScanMultiplier);
 
+            progress?.Report(new AnalyzerProgressReport(0, $"scanning {scanLimit} types for allocation patterns"));
+
             if (options.Priority == AllocationPatternAnalysisOptions.SelectionPriority.ClassificationFirst
                 || options.Priority == AllocationPatternAnalysisOptions.SelectionPriority.Mixed)
             {
@@ -141,6 +143,8 @@ namespace DumpDetective.Analysis.Analyzers
                 for (int i = 0; i < scanLimit; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (i % 100 == 0)
+                        progress?.Report(new AnalyzerProgressReport(i * 100 / scanLimit, $"scanned {i}/{scanLimit} types"));
                     var item = metrics[i];
                     ulong mt = item.Mt;
                     TypeAggregateIndexEntry e = item.Entry;
@@ -245,6 +249,8 @@ namespace DumpDetective.Analysis.Analyzers
                 for (int i = 0; i < scanLimit; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (i % 100 == 0)
+                        progress?.Report(new AnalyzerProgressReport(i * 100 / scanLimit, $"scanned {i}/{scanLimit} types"));
                     var item = metrics[i];
                     ulong mt = item.Mt;
                     TypeAggregateIndexEntry e = item.Entry;
@@ -306,6 +312,8 @@ namespace DumpDetective.Analysis.Analyzers
                 .Take(options.TopTypeLimit)
                 .Select(x => x.Profile)
                 .ToList();
+
+            progress?.Report(new AnalyzerProgressReport(100, "allocation pattern analysis complete"));
 
             return new AllocationPatternDomainResult(
                 gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,

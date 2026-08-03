@@ -21,10 +21,10 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             AllocationPatternAnalysisOptions options = context.AnalysisOptions.AllocationPatternAnalysis;
-            return ValueTask.FromResult(Analyze(context, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context, options, cancellationToken).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(AnalysisContext context, AllocationPatternAnalysisOptions options)
+        private static AnalyzerDomainResult Analyze(AnalysisContext context, AllocationPatternAnalysisOptions options, CancellationToken cancellationToken)
         {
             if (context.Cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
@@ -85,6 +85,7 @@ namespace DumpDetective.Analysis.Analyzers
             var metrics = new List<(ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore)>(aggregates.Count);
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var e = kv.Value;
                 if (e.Count == 0) continue;
 
@@ -139,6 +140,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 for (int i = 0; i < scanLimit; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var item = metrics[i];
                     ulong mt = item.Mt;
                     TypeAggregateIndexEntry e = item.Entry;
@@ -242,6 +244,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 for (int i = 0; i < scanLimit; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var item = metrics[i];
                     ulong mt = item.Mt;
                     TypeAggregateIndexEntry e = item.Entry;

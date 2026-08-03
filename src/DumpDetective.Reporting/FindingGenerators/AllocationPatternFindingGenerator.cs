@@ -14,6 +14,9 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
     {
         if (result is not AllocationPatternDomainResult r) return [];
 
+        // Suppress findings at Low pressure (reduces noise)
+        if (r.GCPressure == GCPressureLevel.Low) return [];
+
         FindingSeverity severity = r.GCPressure switch
         {
             GCPressureLevel.Critical => FindingSeverity.Critical,
@@ -21,11 +24,16 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
             _ => FindingSeverity.Info
         };
 
+        // Embed top long-lived type name in evidence for actionability
+        string topLongLivedType = r.TopLongLivedTypes is { Count: > 0 }
+            ? $" Top long-lived type: {r.TopLongLivedTypes[0].TypeName}."
+            : "";
+
         string evidence = $"Allocation profile: {r.Profile}. " +
             $"Gen0: {r.Gen0CountPct:F1}% obj / {r.Gen0SizePct:F1}% bytes, " +
             $"Gen2: {r.Gen2CountPct:F1}% obj / {r.Gen2SizePct:F1}% bytes, " +
             $"LOH: {r.LohSizePct:F1}% bytes. " +
-            $"GC pressure: {r.GCPressure} (score: {r.PromotionPressureScore:F1}).";
+            $"GC pressure: {r.GCPressure} (score: {r.PromotionPressureScore:F1}).{topLongLivedType}";
 
         string recommendation = r.GCPressure switch
         {

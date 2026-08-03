@@ -78,6 +78,13 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 BuildRows(d.TopLongLivedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (d.TopHighGen1SurvivorTypes is { Count: > 0 })
+        {
+            compactTables.Add(STCompact("Types with high Gen1 survival rate",
+                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen1 Survival Rate", "number", "percent"), CH("Total Size", "number") },
+                BuildGen1SurvivorRows(d.TopHighGen1SurvivorTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         return new AnalyzerDetailSection(
             AnalyzerName: "Allocation Pattern Analysis",
             DisplayTitle: DisplayTitle,
@@ -101,6 +108,22 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Cell(p.LongLivedRatio.ToString("P1"), p.LongLivedRatio),
                 Cell(FormatBytes(p.TotalSize), p.TotalSize),
                 Cell(p.Profile.ToString())));
+        }
+        return rows;
+    }
+
+    private static List<TableRow> BuildGen1SurvivorRows(IReadOnlyList<TypeAllocationProfile> types)
+    {
+        var rows = new List<TableRow>(types.Count);
+        for (int i = 0; i < types.Count; i++)
+        {
+            TypeAllocationProfile p = types[i];
+            rows.Add(Row(
+                Cell(p.TypeName),
+                Cell(p.Gen0Count.ToString("N0"), p.Gen0Count),
+                Cell(p.Gen1Count.ToString("N0"), p.Gen1Count),
+                Cell(p.Gen1SurvivalRate.ToString("P1"), p.Gen1SurvivalRate),
+                Cell(FormatBytes(p.TotalSize), p.TotalSize)));
         }
         return rows;
     }

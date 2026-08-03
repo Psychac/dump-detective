@@ -14,7 +14,8 @@ public sealed record TypeAllocationProfile(
     int Gen2Count,
     double LongLivedRatio,
     AllocationProfile Profile,
-    ulong TotalSize);
+    ulong TotalSize,
+    double Gen1SurvivalRate);
 
 internal sealed record AllocationPatternDomainResult(
     // Object-count percentages (objects in generation / total objects)
@@ -38,4 +39,5 @@ internal sealed record AllocationPatternDomainResult(
     double PromotionPressureScore,
     IReadOnlyList<TypeAllocationProfile> TopTransientTypes,
     IReadOnlyList<TypeAllocationProfile> TopShortishTypes,
-    IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes) : AnalyzerDomainResult;
+    IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes,
+    IReadOnlyList<TypeAllocationProfile> TopHighGen1SurvivorTypes) : AnalyzerDomainResult;

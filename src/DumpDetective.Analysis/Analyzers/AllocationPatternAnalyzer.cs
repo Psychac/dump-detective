@@ -38,7 +38,8 @@ namespace DumpDetective.Analysis.Analyzers
                     PromotionPressureScore: 0,
                     TopTransientTypes: [],
                     TopShortishTypes: [],
-                    TopLongLivedTypes: []);
+                    TopLongLivedTypes: [],
+                    TopHighGen1SurvivorTypes: []);
             }
 
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
@@ -121,6 +122,7 @@ namespace DumpDetective.Analysis.Analyzers
             var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
             var shortish = new List<TypeAllocationProfile>(options.TopTypeLimit);
             var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var highGen1Survivors = new List<(double Gen1SurvivalRate, TypeAllocationProfile Profile)>();
 
             int scanLimit;
             if (options.Strategy == AllocationPatternAnalysisOptions.ScanStrategy.FullScan)
@@ -147,6 +149,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                     double longLivedRatio = item.Gen2Ratio;
                     double typeGen0Pct = item.Gen0Pct;
+                    double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
                     AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
                         ? AllocationProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
@@ -162,7 +165,11 @@ namespace DumpDetective.Analysis.Analyzers
                         (int)Math.Min(int.MaxValue, mtGen2),
                         longLivedRatio,
                         typeProfile,
-                        e.TotalSize);
+                        e.TotalSize,
+                        gen1SurvivalRate);
+
+                    if (gen1SurvivalRate > 0.5)
+                        highGen1Survivors.Add((gen1SurvivalRate, entry));
 
                     if (longLivedRatio > options.LongLivedSelectionThreshold)
                         longCandidates.Add((item, entry));
@@ -245,6 +252,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                     double longLivedRatio = item.Gen2Ratio;
                     double typeGen0Pct = item.Gen0Pct;
+                    double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
                     AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
                         ? AllocationProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
@@ -260,7 +268,11 @@ namespace DumpDetective.Analysis.Analyzers
                         (int)Math.Min(int.MaxValue, mtGen2),
                         longLivedRatio,
                         typeProfile,
-                        e.TotalSize);
+                        e.TotalSize,
+                        gen1SurvivalRate);
+
+                    if (gen1SurvivalRate > 0.5)
+                        highGen1Survivors.Add((gen1SurvivalRate, entry));
 
                     if (longLivedRatio > options.LongLivedSelectionThreshold)
                     {
@@ -285,12 +297,19 @@ namespace DumpDetective.Analysis.Analyzers
             if (!options.EmitShortish) shortish.Clear();
             if (!options.EmitLongLived) longLived.Clear();
 
+            // Sort high Gen1 survivors by survival rate (descending) and take top N
+            highGen1Survivors.Sort((a, b) => b.Gen1SurvivalRate.CompareTo(a.Gen1SurvivalRate));
+            var topGen1Survivors = highGen1Survivors
+                .Take(options.TopTypeLimit)
+                .Select(x => x.Profile)
+                .ToList();
+
             return new AllocationPatternDomainResult(
                 gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,
                 gen0SizePct, gen1SizePct, gen2SizePct, lohSizePct,
                 TotalManagedBytes: totalSize, Gen0Bytes: gen0Bytes, Gen1Bytes: gen1Bytes, Gen2Bytes: gen2Bytes, LohBytes: lohBytes,
                 profile, pressure, promotionScore,
-                transient, shortish, longLived);
+                transient, shortish, longLived, topGen1Survivors);
         }
 
         private static AllocationProfile ClassifyProfile(double gen0Pct, double gen2Pct, double transientThreshold)

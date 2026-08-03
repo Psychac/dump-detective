@@ -233,8 +233,8 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 | **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` | ✓ DONE | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
 | **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass | ✓ DONE | Medium — eliminates redundant O(T) scan | Low | High | Improvement |
 | **P1** | Add `% of total heap` column to the type table | ✓ DONE | Medium — matches standard tooling readability | Low | High | Improvement |
-| **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone |   | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
-| **P2** | Add average instance size column (`TotalBytes / Count`) to type table |   | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
+| **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone | ✓ DONE | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
+| **P2** | Add average instance size column (`TotalBytes / Count`) to type table | ✓ DONE | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
 | **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` |   | Medium — removes copy-paste binary reader | Medium | High | Evolution |
 | **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` |   | Medium — directs ownership to responsible team | Low | Medium | Improvement |
 | **P2** | Add aggregate total wasted bytes summary metric for sparse section |   | Low-Medium — headline number for the section | Low | High | Improvement |

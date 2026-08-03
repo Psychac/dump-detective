@@ -27,14 +27,19 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
             ["gc_pressure"] = new EnumMetricValue(d.GCPressure.ToString(), nameof(GCPressureLevel)),
             ["promotion_pressure"] = new NumericMetricValue(d.PromotionPressureScore, MetricUnit.Custom, $"{d.PromotionPressureScore:F1}"),
             ["profile"] = new EnumMetricValue(d.Profile.ToString(), nameof(AllocationProfile)),
+            ["total_managed_bytes"] = new NumericMetricValue(d.TotalManagedBytes, MetricUnit.Bytes, FormatBytes(d.TotalManagedBytes)),
             ["gen0_count_pct"] = new NumericMetricValue(d.Gen0CountPct, MetricUnit.Percent, $"{d.Gen0CountPct:F1}%"),
             ["gen1_count_pct"] = new NumericMetricValue(d.Gen1CountPct, MetricUnit.Percent, $"{d.Gen1CountPct:F1}%"),
             ["gen2_count_pct"] = new NumericMetricValue(d.Gen2CountPct, MetricUnit.Percent, $"{d.Gen2CountPct:F1}%"),
             ["loh_count_pct"] = new NumericMetricValue(d.LohCountPct, MetricUnit.Percent, $"{d.LohCountPct:F1}%"),
             ["gen0_size_pct"] = new NumericMetricValue(d.Gen0SizePct, MetricUnit.Percent, $"{d.Gen0SizePct:F1}%"),
+            ["gen0_bytes"] = new NumericMetricValue(d.Gen0Bytes, MetricUnit.Bytes, FormatBytes(d.Gen0Bytes)),
             ["gen1_size_pct"] = new NumericMetricValue(d.Gen1SizePct, MetricUnit.Percent, $"{d.Gen1SizePct:F1}%"),
+            ["gen1_bytes"] = new NumericMetricValue(d.Gen1Bytes, MetricUnit.Bytes, FormatBytes(d.Gen1Bytes)),
             ["gen2_size_pct"] = new NumericMetricValue(d.Gen2SizePct, MetricUnit.Percent, $"{d.Gen2SizePct:F1}%"),
+            ["gen2_bytes"] = new NumericMetricValue(d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
             ["loh_size_pct"] = new NumericMetricValue(d.LohSizePct, MetricUnit.Percent, $"{d.LohSizePct:F1}%"),
+            ["loh_bytes"] = new NumericMetricValue(d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
         };
 
         blocks.Add(T(d.GCPressure switch
@@ -98,4 +103,19 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         }
         return rows;
     }
+
+    private static string FormatBytes(ulong bytes)
+    {
+        if (bytes == 0) return "0 B";
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:F2} {sizes[order]}";
+    }
+
 }

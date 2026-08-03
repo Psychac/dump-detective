@@ -94,7 +94,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             for (int i = 0; i < limit; i++)
             {
                 TypeGenerationProfile p = d.PerTypeGenerationProfiles[i];
-                int total = p.Gen0Count + p.Gen1Count + p.Gen2Count + p.LohCount;
+                long total = p.Gen0Count + p.Gen1Count + p.Gen2Count + p.LohCount;
                 double gen2Pct   = total == 0 ? 0.0 : p.Gen2Count  * 100.0 / total;
                 double survivalR = total == 0 ? 0.0 : (p.Gen2Count + p.LohCount) * 1.0 / total;
                 rows.Add(Row(

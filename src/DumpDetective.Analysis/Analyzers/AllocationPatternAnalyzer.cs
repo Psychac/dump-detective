@@ -32,6 +32,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return new AllocationPatternDomainResult(
                     Gen0CountPct: 0, Gen1CountPct: 0, Gen2CountPct: 0, LohCountPct: 0,
                     Gen0SizePct: 0, Gen1SizePct: 0, Gen2SizePct: 0, LohSizePct: 0,
+                    TotalManagedBytes: 0, Gen0Bytes: 0, Gen1Bytes: 0, Gen2Bytes: 0, LohBytes: 0,
                     Profile: AllocationProfile.Mixed,
                     GCPressure: GCPressureLevel.Low,
                     PromotionPressureScore: 0,
@@ -288,6 +289,7 @@ namespace DumpDetective.Analysis.Analyzers
             return new AllocationPatternDomainResult(
                 gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,
                 gen0SizePct, gen1SizePct, gen2SizePct, lohSizePct,
+                TotalManagedBytes: totalSize, Gen0Bytes: gen0Bytes, Gen1Bytes: gen1Bytes, Gen2Bytes: gen2Bytes, LohBytes: lohBytes,
                 profile, pressure, promotionScore,
                 transient, shortish, longLived);
         }

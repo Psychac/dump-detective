@@ -26,6 +26,12 @@ internal sealed record AllocationPatternDomainResult(
     double Gen1SizePct,
     double Gen2SizePct,
     double LohSizePct,
+    // Absolute byte totals (enables severity assessment without percentages alone)
+    ulong TotalManagedBytes,
+    ulong Gen0Bytes,
+    ulong Gen1Bytes,
+    ulong Gen2Bytes,
+    ulong LohBytes,
     AllocationProfile Profile,
     GCPressureLevel GCPressure,
     double PromotionPressureScore,

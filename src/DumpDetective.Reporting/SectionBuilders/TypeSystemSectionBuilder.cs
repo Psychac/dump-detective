@@ -76,7 +76,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
             if (gen is not null && gen.IsFinalizable)
             {
-                int totalCount = gen.Gen0Count + gen.Gen1Count + gen.Gen2Count + gen.LohCount;
+                long totalCount = gen.Gen0Count + gen.Gen1Count + gen.Gen2Count + gen.LohCount;
                 if (totalCount > 0 && gen.TotalBytes > 0)
                 {
                     ulong avgSize = gen.TotalBytes / (ulong)totalCount;
@@ -250,7 +250,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
     private static double GenRatioValue(TypeGenerationProfile profile)
     {
-        int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count;
+        long total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count;
         if (total == 0)
             return 0.0;
 
@@ -262,10 +262,10 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
     private static double GenPctValue(TypeGenerationProfile profile, int gen)
     {
-        int total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
+        long total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
         if (total == 0)
             return 0.0;
-        int count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
+        long count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
         return count * 100.0 / total;
     }
 
@@ -284,7 +284,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
     private sealed record FinalizableOverheadCandidate(
         string TypeName,
-        int Gen2Count,
+        long Gen2Count,
         ulong AverageSize,
         ulong EstimatedGen2Bytes,
         string ModuleName);

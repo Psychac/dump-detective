@@ -177,7 +177,7 @@ namespace DumpDetective.Analysis.Analyzers
                         DeclaringType: declaringType,
                         Count: (int)Math.Min(entry.Count, int.MaxValue),
                         TotalBytes: entry.TotalSize,
-                        AvgStateValue: avgStateValue,
+                        SampleStateValue: avgStateValue,
                         ReferenceFieldCount: refFieldCount,
                         Gen2Count: entry.Gen2Count,
                         Gen2Fraction: gen2Fraction));

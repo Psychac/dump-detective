@@ -10,7 +10,7 @@ internal sealed record StateMachineTypeProfile(
     string DeclaringType,
     int Count,
     ulong TotalBytes,
-    int AvgStateValue,
+    int SampleStateValue,
     int ReferenceFieldCount,
     long Gen2Count,
     double Gen2Fraction);

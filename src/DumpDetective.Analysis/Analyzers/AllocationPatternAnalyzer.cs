@@ -164,7 +164,8 @@ namespace DumpDetective.Analysis.Analyzers
                         (int)Math.Min(int.MaxValue, mtGen1),
                         (int)Math.Min(int.MaxValue, mtGen2),
                         longLivedRatio,
-                        typeProfile);
+                        typeProfile,
+                        e.TotalSize);
 
                     if (longLivedRatio > options.LongLivedSelectionThreshold)
                         longCandidates.Add((item, entry));
@@ -261,7 +262,8 @@ namespace DumpDetective.Analysis.Analyzers
                         (int)Math.Min(int.MaxValue, mtGen1),
                         (int)Math.Min(int.MaxValue, mtGen2),
                         longLivedRatio,
-                        typeProfile);
+                        typeProfile,
+                        e.TotalSize);
 
                     if (longLivedRatio > options.LongLivedSelectionThreshold)
                     {

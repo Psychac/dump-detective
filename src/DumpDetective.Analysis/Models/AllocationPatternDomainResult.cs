@@ -13,7 +13,8 @@ public sealed record TypeAllocationProfile(
     int Gen1Count,
     int Gen2Count,
     double LongLivedRatio,
-    AllocationProfile Profile);
+    AllocationProfile Profile,
+    ulong TotalSize);
 
 internal sealed record AllocationPatternDomainResult(
     // Object-count percentages (objects in generation / total objects)

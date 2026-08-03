@@ -168,6 +168,7 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
 
+                double gen2Fraction = entry.Count > 0 ? entry.Gen2Count / (double)entry.Count : 0.0;
                 if (i < typeLimit)
                 {
                     topTypes.Add(new StateMachineTypeProfile(
@@ -177,7 +178,9 @@ namespace DumpDetective.Analysis.Analyzers
                         Count: (int)Math.Min(entry.Count, int.MaxValue),
                         TotalBytes: entry.TotalSize,
                         AvgStateValue: avgStateValue,
-                        ReferenceFieldCount: refFieldCount));
+                        ReferenceFieldCount: refFieldCount,
+                        Gen2Count: entry.Gen2Count,
+                        Gen2Fraction: gen2Fraction));
                 }
             }
 

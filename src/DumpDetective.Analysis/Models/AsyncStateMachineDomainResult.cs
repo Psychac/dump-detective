@@ -11,7 +11,9 @@ internal sealed record StateMachineTypeProfile(
     int Count,
     ulong TotalBytes,
     int AvgStateValue,
-    int ReferenceFieldCount);
+    int ReferenceFieldCount,
+    long Gen2Count,
+    double Gen2Fraction);
 
 internal sealed record HighCaptureStateMachine(
     ulong Address,

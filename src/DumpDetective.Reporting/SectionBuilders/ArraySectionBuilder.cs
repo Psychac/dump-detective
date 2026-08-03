@@ -75,6 +75,12 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));
         }
 
+        ulong totalWastedBytes = 0;
+        foreach (SparseArrayEntry sparse in d.TopSparseArrays)
+            totalWastedBytes += sparse.WastedBytes;
+
+        keyMetrics["sparse_wasted_bytes"] = new NumericMetricValue((double)totalWastedBytes, MetricUnit.Bytes);
+
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,

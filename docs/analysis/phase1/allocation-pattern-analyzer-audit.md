@@ -230,8 +230,8 @@ DumpDetective's generation distribution analysis is on par with or better than S
 
 | ID | Recommendation | Area | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|---|
-| P0-1 | Promote `Gen0Count/Gen1Count/Gen2Count` in `TypeAggregateIndexEntry` from `int` to `long`; add overflow guard in `ComputeApproxGenBytes` | 6 | Critical — prevents data corruption on large heaps | Medium | High | Improvement |
-| P0-2 | Fix `ClassifyProfile` to read `TransientClassificationThreshold` from options instead of hard-coding 70.0 | 6 | High — option is documented and exposed but ignored | Low | High | Improvement |
+| P0-1 | Promote `Gen0Count/Gen1Count/Gen2Count` in `TypeAggregateIndexEntry` from `int` to `long`; add overflow guard in `ComputeApproxGenBytes` | 6 | Critical — prevents data corruption on large heaps | Medium | High | ✓ DONE (commit 65c836d) |
+| P0-2 | Fix `ClassifyProfile` to read `TransientClassificationThreshold` from options instead of hard-coding 70.0 | 6 | High — option is documented and exposed but ignored | Low | High | ✓ DONE (commit 1b88e40) |
 | P1-1 | Use `TypeMetadataCache` for type name resolution; add `TryGetTypeName(ulong mt)` helper to `HeapAnalysisCache` | 3, 5 | High — eliminates 10K live ClrMD calls in FullScan; enables faster name resolution | Low | High | Improvement |
 | P1-2 | Add absolute byte totals (`totalManagedBytes`, per-gen bytes) to `AllocationPatternDomainResult` and surface in section builder | 2, 4 | High — required for severity assessment | Low | High | Improvement |
 | P1-3 | Add `TotalSize` to `TypeAllocationProfile`; render in per-type tables | 2, 4 | High — enables ranking types by retained bytes | Low | High | Improvement |

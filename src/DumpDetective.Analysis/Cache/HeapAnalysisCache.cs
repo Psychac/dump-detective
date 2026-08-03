@@ -227,6 +227,43 @@ namespace DumpDetective.Analysis.Cache
             return _statisticsCache.GetSampleInstanceAddress(typeName);
         }
 
+        public bool TryGetTypeName(ClrHeap heap, ulong methodTable, out string? typeName)
+        {
+            typeName = null;
+            
+            // Try TypeMetadataCache first to see if we've already extracted this type's metadata
+            if (_typeMetadataCache.TryGet(methodTable, out _))
+            {
+                // We have metadata, so the type is known. Use GetTypeByMethodTable (it will be fast, already in CLR metadata cache)
+                ClrType? type = heap.GetTypeByMethodTable(methodTable);
+                if (type?.Name is string name)
+                {
+                    typeName = name;
+                    return true;
+                }
+            }
+            else
+            {
+                // No metadata cached yet, call GetTypeByMethodTable (may be expensive on first call)
+                ClrType? type = heap.GetTypeByMethodTable(methodTable);
+                if (type?.Name is string name)
+                {
+                    typeName = name;
+                    // Populate the metadata cache for future lookups
+                    _ = GetOrCreate(heap, methodTable);
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        public TypeMetadata GetOrCreate(ClrHeap heap, ulong methodTable)
+        {
+            return _typeMetadataCache.GetOrCreate(heap, methodTable);
+        }
+
+
         public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap)
         {
             return _rootSetCache.GetOrBuildValidRoots(heap);

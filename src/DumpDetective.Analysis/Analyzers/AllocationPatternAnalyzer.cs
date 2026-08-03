@@ -155,7 +155,7 @@ namespace DumpDetective.Analysis.Analyzers
                             ? AllocationProfile.Retained
                             : AllocationProfile.Mixed;
 
-                    string typeName = context.Runtime?.Heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
+                    string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
 
                     var entry = new TypeAllocationProfile(
                         typeName,
@@ -252,7 +252,7 @@ namespace DumpDetective.Analysis.Analyzers
                             ? AllocationProfile.Retained
                             : AllocationProfile.Mixed;
 
-                    string typeName = context.Runtime?.Heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
+                    string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
 
                     var entry = new TypeAllocationProfile(
                         typeName,

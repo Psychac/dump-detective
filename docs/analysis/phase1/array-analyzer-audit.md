@@ -228,7 +228,7 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 |---|---|---|---|---|---|---|
 | ~~**P0**~~ | ~~Fix `StaticSize` → `IntPtr.Size` for reference-type array element slot size in wasted-bytes calculation~~ | ✓ DONE | High — all sparse findings show inflated numbers | Low | High | Improvement |
 | ~~**P0**~~ | ~~Change `typeMap` count accumulator from `int` to `long` to prevent silent overflow~~ | ✓ DONE | High — wrong aggregate count on large heaps | Low | High | Improvement |
-| **P1** | Add per-type GC generation breakdown (% Gen2 + LOH) using existing `TypeAggregateIndexEntry` fields |   | High — distinguishes transient vs retained array pressure | Low | High | Improvement |
+| **P1** | Add per-type GC generation breakdown (% Gen2 + LOH) using existing `TypeAggregateIndexEntry` fields | ✓ DONE | High — distinguishes transient vs retained array pressure | Low | High | Improvement |
 | **P1** | Remove hard `break` in `ArrayFindingGenerator` sparse loop; emit top-N distinct findings |   | Medium — suppresses valid warnings | Low | High | Improvement |
 | **P1** | Sort LOH fallback candidates by `LohSize` before taking `TopLargeLimit` |   | Medium — ensures "top" arrays are actually the largest | Low | High | Improvement |
 | **P1** | Accumulate LOH fallback candidates in Step 1 to eliminate second `typeAggregates` pass |   | Medium — eliminates redundant O(T) scan | Low | High | Improvement |

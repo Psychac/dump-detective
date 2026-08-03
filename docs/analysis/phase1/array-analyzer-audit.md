@@ -236,7 +236,7 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 | **P2** | Multi-dim finding: weight by memory (`TotalBytes`) not count alone | ✓ DONE | Medium — avoids false alarms on tiny multi-dim arrays | Low | High | Improvement |
 | **P2** | Add average instance size column (`TotalBytes / Count`) to type table | ✓ DONE | Medium — distinguishes "few huge" from "many small" | Low | High | Improvement |
 | **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` | ✓ DONE | Medium — removes copy-paste binary reader | Medium | High | Evolution |
-| **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` |   | Medium — directs ownership to responsible team | Low | Medium | Improvement |
+| **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` | ✓ DONE | Medium — directs ownership to responsible team | Low | Medium | Improvement |
 | **P2** | Add aggregate total wasted bytes summary metric for sparse section | ✓ DONE | Low-Medium — headline number for the section | Low | High | Improvement |
 | **P3** | Value-type sparse array detection for numeric types (`int[]`, `float[]`) |   | Medium — closes dotMemory gap | Medium | Medium | Improvement |
 | **P3** | Pinned array detection via GC handle root index |   | Medium — identifies SOH fragmentation risk | Medium | High | Improvement |

@@ -45,6 +45,9 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 "Top async state machine types by instance count",
                 new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Sample State"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent") },
                 BuildTypeRows(d.TopStateMachineTypes, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            
+            blocks.Add(T("Sample State values indicate the suspend position in the async method: " +
+                         "-2 = completed, -1 = not started, 0 = suspended at first await, 1 = suspended at second await, and so on."));
         }
 
         if (d.TopByCapturedSize.Count > 0)

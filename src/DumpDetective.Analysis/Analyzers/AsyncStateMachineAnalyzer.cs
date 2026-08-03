@@ -109,7 +109,17 @@ namespace DumpDetective.Analysis.Analyzers
                 int angleOpen = fullName.LastIndexOf('<');
                 if (angleOpen < 0) continue;
 
-                Match m = StateMachinePattern.Match(fullName, angleOpen);
+                Match m;
+                try
+                {
+                    m = StateMachinePattern.Match(fullName, angleOpen);
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    // Regex timeout on this type name; skip it
+                    continue;
+                }
+
                 if (!m.Success) continue;
 
                 string methodName = m.Groups[1].Value;

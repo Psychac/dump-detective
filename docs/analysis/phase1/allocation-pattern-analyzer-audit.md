@@ -241,7 +241,7 @@ DumpDetective's generation distribution analysis is on par with or better than S
 | P2-2 | Add cancellation checks inside inner loops (especially FullScan path) | 5 | Medium — prevents uninterruptible long pauses | Low | High | ✓ DONE (commit 897c909) |
 | P2-3 | Add progress reporting via `IProgress<AnalyzerProgressReport>` for FullScan | 5 | Medium — improves operator visibility on large dumps | Low | Medium | ✓ DONE (commit 042e9be) |
 | P2-4 | Replace full `metrics.Sort` + scan-limit pattern with partial sort for `FullScan` strategy | 5 | Medium — reduces wasted sort work on large type sets | Medium | High | ✓ DONE (commit 8a2e14e) |
-| P2-5 | Embed top long-lived type name in `InsightFinding.Evidence`; suppress finding at `Low` pressure | 2 | Medium — reduces noise, improves actionability | Low | High | Improvement |
+| P2-5 | Embed top long-lived type name in `InsightFinding.Evidence`; suppress finding at `Low` pressure | 2 | Medium — reduces noise, improves actionability | Low | High | ✓ DONE (commit 52263dc) |
 | P2-6 | Document pressure score thresholds in section builder (footnote or legend) | 2 | Medium — without scale context the numeric score is uninterpretable | Low | High | Improvement |
 | P3-1 | Surface `AllocationProfile.Steady` at type level or remove from `TypeAllocationProfile.Profile` enum | 1 | Low — cleanup | Low | High | Improvement |
 | P3-2 | Add runtime guard (exception or assertion) when `HeapIndexBuildResult` is absent at analysis time | 1 | Low — improves debuggability when factory order regresses | Low | High | Improvement |

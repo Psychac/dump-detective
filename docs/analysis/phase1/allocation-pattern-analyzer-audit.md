@@ -238,7 +238,7 @@ DumpDetective's generation distribution analysis is on par with or better than S
 | P1-4 | Revise GC pressure formula — remove or invert Gen0% term; Gen0 dominance should reduce pressure, not increase it | 2, 6 | High — eliminates false-positive "Moderate" findings on healthy transient heaps | Medium | High | ✓ DONE (commit cb48c75) |
 | P1-5 | Remove dead variables `accountedGen` and `nonLohTotal`; either implement their intended use or delete them | 6 | Medium — correctness signal; may indicate incomplete analysis | Low | High | ✓ DONE (commit 899970b) |
 | P2-1 | Add Gen1 survivor rate heuristic (Gen1Count / Gen0Count by type); surface as a separate type table or dedicated finding | 1, 4 | High — identifies types that survive first collection | Medium | High | ✓ DONE (commit 5491475) |
-| P2-2 | Add cancellation checks inside inner loops (especially FullScan path) | 5 | Medium — prevents uninterruptible long pauses | Low | High | Improvement |
+| P2-2 | Add cancellation checks inside inner loops (especially FullScan path) | 5 | Medium — prevents uninterruptible long pauses | Low | High | ✓ DONE (commit 897c909) |
 | P2-3 | Add progress reporting via `IProgress<AnalyzerProgressReport>` for FullScan | 5 | Medium — improves operator visibility on large dumps | Low | Medium | Improvement |
 | P2-4 | Replace full `metrics.Sort` + scan-limit pattern with partial sort for `FullScan` strategy | 5 | Medium — reduces wasted sort work on large type sets | Medium | High | Improvement |
 | P2-5 | Embed top long-lived type name in `InsightFinding.Evidence`; suppress finding at `Low` pressure | 2 | Medium — reduces noise, improves actionability | Low | High | Improvement |

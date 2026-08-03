@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Core.Utilities;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -158,7 +159,7 @@ namespace DumpDetective.Analysis.Analyzers
                                 ulong sz = refObj.Size;
                                 capturedBytes += sz;
                                 if (sz >= options.LargeCaptureThresholdBytes)
-                                    largeCaptures.Add($"{f.Name} ({refObj.Type?.Name ?? "?"}, {FormatBytes(sz)})");
+                                    largeCaptures.Add($"{f.Name} ({refObj.Type?.Name ?? "?"}, {FormatHelper.FormatBytes(sz)})");
                             }
                             catch { /* field unreadable */ }
                         }
@@ -243,12 +244,5 @@ namespace DumpDetective.Analysis.Analyzers
             return false;
         }
 
-        private static string FormatBytes(ulong bytes) => bytes switch
-        {
-            >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-            >= 1_024 => $"{bytes / 1_024.0:F1} KB",
-            _ => $"{bytes} B"
-        };
     }
 }

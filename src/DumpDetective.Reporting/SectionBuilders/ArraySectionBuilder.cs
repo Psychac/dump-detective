@@ -33,6 +33,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             ["loh_arrays"] = new NumericMetricValue(d.LohArrayCount, MetricUnit.Count),
             ["loh_array_bytes"] = new NumericMetricValue((double)d.LohArrayBytes, MetricUnit.Bytes),
             ["multi_dimensional_arrays"] = new NumericMetricValue(d.MultiDimArrayCount, MetricUnit.Count),
+            ["multi_dimensional_array_bytes"] = new NumericMetricValue((double)d.MultiDimArrayBytes, MetricUnit.Bytes),
         };
         if (d.ScanLimited)
             keyMetrics["scan_limit_reached"] = new TextMetricValue("Yes — sparse sampling cap hit; results may be partial");
@@ -42,7 +43,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             int limit = Math.Min(d.TopArrayTypesBySize.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                new[] { CH("Element Type"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim") },
+                new[] { CH("Element Type"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
                 BuildTypeRows(d.TopArrayTypesBySize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (d.TopArrayTypesBySize.Count > limit)
                 blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
@@ -92,6 +93,9 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 Cell($"{t.Count:N0}",                       t.Count),
                 Cell(FormatHelper.FormatBytes(t.TotalBytes)),
                 Cell(t.IsMultiDimensional ? "Yes" : "No"),
+                Cell(FormatHelper.FormatBytes((ulong)t.AverageInstanceSize), t.AverageInstanceSize),
+                Cell($"{t.PercentOfTotalHeapBytes:F1}%",    t.PercentOfTotalHeapBytes),
+                Cell($"{t.Gen2PlusLohPercent:F1}%",         t.Gen2PlusLohPercent),
             ]));
         }
         return rows;

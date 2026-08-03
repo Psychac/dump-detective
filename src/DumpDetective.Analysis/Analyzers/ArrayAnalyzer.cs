@@ -54,7 +54,7 @@ namespace DumpDetective.Analysis.Analyzers
                 typeAggregates = heapIndex.TypeAggregates;
 
             if (typeAggregates is null)
-                return new ArrayDomainResult(0, 0, 0, 0, 0, [], [], [], false);
+                return new ArrayDomainResult(0, 0, 0, 0, 0, 0, [], [], [], false);
 
             // ── Step 1: Aggregate population from TypeAggregates ─────────────────
             progress?.Report(new(0, "scanning array type aggregates"));
@@ -62,22 +62,31 @@ namespace DumpDetective.Analysis.Analyzers
             // Build set of array MTs for fast lookup
             var arrayMtSet = new HashSet<ulong>(capacity: 512);
             // Map: elementTypeName+rank key → (count, totalBytes, isMultiDim)
-            var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank)>(256);
+            var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount)>(256);
 
             long totalObjects = 0;
             ulong totalBytes = 0;
+            ulong totalHeapBytes = 0;
             int multiDimCount = 0;
             int lohCount = 0;
             ulong lohBytes = 0;
+            ulong multiDimBytes = 0;
 
             // Sparse candidates collected in a single pass to avoid a second typeAggregates scan.
             // Only 1-D reference-type arrays with a valid SampleAddress are eligible.
             // Sorted by TotalSize descending before sampling so the largest arrays are probed first.
             var sparseCandidates = new List<(ulong SampleAddress, string ElemName, ulong TotalSize)>(64);
 
+            // LOH fallback candidates collected in the same pass to avoid a second typeAggregates
+            // scan in Step 3 when the disk-based LargeObjectIndex isn't available. Sorted by
+            // LohSize descending before use so the fallback matches the index-based path's ordering.
+            var lohFallbackCandidates = new List<(ulong SampleAddress, ulong LohSize)>(64);
+
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
                 TypeAggregateIndexEntry e = kv.Value;
+                totalHeapBytes += e.TotalSize;
+
                 if ((e.Flags & TypeAggregateFlags.IsArrayType) == 0)
                     continue;
 
@@ -109,19 +118,22 @@ namespace DumpDetective.Analysis.Analyzers
 
                 totalObjects += e.Count;
                 totalBytes += e.TotalSize;
-                if (isMultiDim) multiDimCount += (int)Math.Min(e.Count, int.MaxValue);
+                if (isMultiDim) { multiDimCount += (int)Math.Min(e.Count, int.MaxValue); multiDimBytes += e.TotalSize; }
                 if (e.LohCount > 0)
                 {
                     lohCount += (int)Math.Min(e.LohCount, int.MaxValue);
                     lohBytes += e.LohSize;
+                    if (e.SampleAddress != 0)
+                        lohFallbackCandidates.Add((e.SampleAddress, e.LohSize));
                 }
 
                 string key = $"{elemName}[rank={rank}]";
                 if (typeMap.TryGetValue(key, out var existing))
                     typeMap[key] = (existing.Count + e.Count,
-                                    existing.Bytes + e.TotalSize, isMultiDim, rank);
+                                    existing.Bytes + e.TotalSize, isMultiDim, rank,
+                                    existing.Gen2Count + e.Gen2Count, existing.LohCount + e.LohCount);
                 else
-                    typeMap[key] = (e.Count, e.TotalSize, isMultiDim, rank);
+                    typeMap[key] = (e.Count, e.TotalSize, isMultiDim, rank, e.Gen2Count, e.LohCount);
 
                 // Sparse candidate: only 1-D ref-type arrays with a sample address.
                 // GetObjectValue is only valid for reference-type elements — value-type arrays
@@ -135,13 +147,13 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // ── Step 2: Top array types by total bytes ────────────────────────────
-            var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim)>(typeMap.Count);
-            foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank)> kv in typeMap)
+            var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim, long Gen2Count, long LohCount)>(typeMap.Count);
+            foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount)> kv in typeMap)
             {
                 // Extract element name from key (strip "[rank=N]" suffix)
                 int rankSep = kv.Key.LastIndexOf("[rank=", StringComparison.Ordinal);
                 string elemName = rankSep > 0 ? kv.Key[..rankSep] : kv.Key;
-                typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim));
+                typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim, kv.Value.Gen2Count, kv.Value.LohCount));
             }
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
@@ -150,7 +162,10 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < typeListLimit; i++)
             {
                 var t = typeList[i];
-                topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim));
+                double percentOfHeap = totalHeapBytes > 0 ? t.Bytes * 100.0 / totalHeapBytes : 0.0;
+                double gen2PlusLohPct = t.Count > 0 ? (t.Gen2Count + t.LohCount) * 100.0 / t.Count : 0.0;
+                double avgSize = t.Count > 0 ? t.Bytes / (double)t.Count : 0.0;
+                topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize));
             }
 
             // ── Step 3: Large array analysis ──────────────────────────────────────
@@ -164,27 +179,27 @@ namespace DumpDetective.Analysis.Analyzers
                 ReadLargeArraysFromIndex(heap, heapIndex.IndexPath, arrayMtSet, topLargeArrays, options.TopLargeLimit, cancellationToken);
             }
 
-            // If index wasn't available, use SampleAddress from TypeAggregates for top LOH array types
-            if (topLargeArrays.Count == 0)
+            // If index wasn't available, use the LOH fallback candidates collected in Step 1
+            // (no second typeAggregates pass). Sort by LohSize descending first so the top N
+            // taken here are actually the largest LOH arrays, matching the index-based path.
+            if (topLargeArrays.Count == 0 && lohFallbackCandidates.Count > 0)
             {
-                foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
+                lohFallbackCandidates.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
+                int fallbackLimit = Math.Min(lohFallbackCandidates.Count, options.TopLargeLimit);
+                for (int i = 0; i < fallbackLimit; i++)
                 {
-                    if ((kv.Value.Flags & TypeAggregateFlags.IsArrayType) == 0) continue;
-                    if (kv.Value.LohCount == 0 || kv.Value.SampleAddress == 0) continue;
-
-                    ClrObject obj = heap.GetObject(kv.Value.SampleAddress);
+                    ulong sampleAddress = lohFallbackCandidates[i].SampleAddress;
+                    ClrObject obj = heap.GetObject(sampleAddress);
                     if (!obj.IsValid || obj.Type is null) continue;
 
                     string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
                     ClrArray arr = obj.AsArray();
                     topLargeArrays.Add(new LargeArrayEntry(
-                        Address: kv.Value.SampleAddress,
+                        Address: sampleAddress,
                         ElementTypeName: elemName,
                         Length: arr.Length,
                         Rank: arr.Rank,
                         Size: obj.Size));
-
-                    if (topLargeArrays.Count >= options.TopLargeLimit) break;
                 }
             }
 
@@ -247,6 +262,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalArrayObjects: (int)Math.Min(totalObjects, int.MaxValue),
                 TotalArrayBytes: totalBytes,
                 MultiDimArrayCount: multiDimCount,
+                MultiDimArrayBytes: multiDimBytes,
                 LohArrayCount: lohCount,
                 LohArrayBytes: lohBytes,
                 TopArrayTypesBySize: topArrayTypes,

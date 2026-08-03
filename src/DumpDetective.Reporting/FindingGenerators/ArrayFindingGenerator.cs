@@ -10,6 +10,7 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
     private const ulong LohWarningBytes = 500_000_000UL; // 500 MB
     private const ulong LohCriticalBytes = 2_000_000_000UL; // 2 GB
     private const int MultiDimWarningCount = 1_000;
+    private const ulong MultiDimWarningBytes = 100_000_000UL; // 100 MB
     private const double SparseRatioThreshold = 0.70;
     private const ulong SparseWastedWarningBytes = 10_000_000UL; // 10 MB
     private const int MaxSparseFindings = 3;
@@ -51,22 +52,23 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
         }
 
         // ── Multi-dimensional array anti-pattern ──────────────────────────────
-        if (r.MultiDimArrayCount >= MultiDimWarningCount)
+        if (r.MultiDimArrayCount >= MultiDimWarningCount || r.MultiDimArrayBytes >= MultiDimWarningBytes)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: FindingSeverity.Warning,
-                Title: $"High multi-dimensional array count: {r.MultiDimArrayCount:N0}",
-                Evidence: $"{r.MultiDimArrayCount:N0} multi-dimensional (rank ≥ 2) arrays found. " +
+                Title: $"Multi-dimensional arrays: {r.MultiDimArrayCount:N0} arrays ({FormatBytes(r.MultiDimArrayBytes)})",
+                Evidence: $"{r.MultiDimArrayCount:N0} multi-dimensional (rank ≥ 2) arrays found, " +
+                          $"consuming {FormatBytes(r.MultiDimArrayBytes)} of heap memory. " +
                           "Multi-dimensional arrays are significantly slower to access than jagged arrays " +
                           "due to bounds-checking overhead on every access.",
                 Recommendation: "Replace multi-dimensional arrays (T[,]) with jagged arrays (T[][]) where " +
                                 "performance is critical. Jagged arrays have better cache locality and avoid " +
                                 "the CLR's multi-dimensional index calculation overhead.",
                 Tags: ["array", "multidim", "performance"],
-                MetricValue: r.MultiDimArrayCount,
-                MetricUnit: "arrays"));
+                MetricValue: r.MultiDimArrayBytes,
+                MetricUnit: "bytes"));
         }
 
         // ── Sparse / wasteful arrays ──────────────────────────────────────────

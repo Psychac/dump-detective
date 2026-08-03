@@ -59,9 +59,6 @@ namespace DumpDetective.Analysis.Analyzers
                 lohBytes += e.LohSize;
             }
 
-            long accountedGen = gen0Objects + gen1Objects + gen2Objects;
-            long nonLohTotal = totalObjects - lohObjects;
-
             // Approximate gen bytes using average non-LOH size × per-MT gen count.
             AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 

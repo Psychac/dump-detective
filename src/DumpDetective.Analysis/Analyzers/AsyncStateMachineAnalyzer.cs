@@ -56,31 +56,18 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 1: Identify async state machine types from TypeAggregates ─────
             // Pattern: <MethodName>d__N in the type name (last component of full name)
-            var candidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry, string MethodName, string DeclaringType)>(32);
+            var candidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(32);
             bool scanLimited = false;
 
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Fast filter: check phase-1 flag instead of expensive pattern matching
+                // Phase 1 flag already verified pattern match; skip expensive ClrMD call here
                 if ((kv.Value.Flags & TypeAggregateFlags.IsAsyncStateMachineType) == 0)
                     continue;
 
-                ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
-                if (clrType?.Name is not string fullName) continue;
-
-                // Extract method name from <MethodName>d__N pattern
-                int angleOpen = fullName.LastIndexOf('<');
-                if (angleOpen < 0) continue;
-
-                Match m = StateMachinePattern.Match(fullName, angleOpen);
-                if (!m.Success) continue;
-
-                string methodName = m.Groups[1].Value;
-                string declaringType = angleOpen > 0 ? fullName[..(angleOpen - 1)] : string.Empty;
-
-                candidates.Add((kv.Key, kv.Value, methodName, declaringType));
+                candidates.Add((kv.Key, kv.Value));
 
                 if (candidates.Count >= options.TypeCandidateLimit)
                 {
@@ -113,10 +100,20 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < candidates.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                (ulong mt, TypeAggregateIndexEntry entry, string methodName, string declaringType) = candidates[i];
+                (ulong mt, TypeAggregateIndexEntry entry) = candidates[i];
 
                 ClrType? clrType = heap.GetTypeByMethodTable(mt);
-                if (clrType is null) continue;
+                if (clrType?.Name is not string fullName) continue;
+
+                // Extract method name from <MethodName>d__N pattern
+                int angleOpen = fullName.LastIndexOf('<');
+                if (angleOpen < 0) continue;
+
+                Match m = StateMachinePattern.Match(fullName, angleOpen);
+                if (!m.Success) continue;
+
+                string methodName = m.Groups[1].Value;
+                string declaringType = angleOpen > 0 ? fullName[..(angleOpen - 1)] : string.Empty;
 
                 // Count reference fields and locate <>1__state
                 ClrInstanceField? stateField = null;
@@ -201,14 +198,15 @@ namespace DumpDetective.Analysis.Analyzers
             // Group by (DeclaringType, MethodName) — same method can produce multiple
             // compiler-generated state machine types for different overloads or MoveNext versions.
             var methodMap = new Dictionary<(string DeclaringType, string Method), (long Count, ulong Bytes)>(16);
-            for (int i = 0; i < candidates.Count; i++)
+            
+            // Build from topTypes which have methodName and declaringType already extracted
+            foreach (StateMachineTypeProfile profile in topTypes)
             {
-                (ulong _, TypeAggregateIndexEntry e, string methodName, string declaringType) = candidates[i];
-                var key = (declaringType, methodName);
+                var key = (profile.DeclaringType, profile.OriginatingMethod);
                 if (methodMap.TryGetValue(key, out (long Count, ulong Bytes) existing))
-                    methodMap[key] = (existing.Count + e.Count, existing.Bytes + e.TotalSize);
+                    methodMap[key] = (existing.Count + profile.Count, existing.Bytes + profile.TotalBytes);
                 else
-                    methodMap[key] = (e.Count, e.TotalSize);
+                    methodMap[key] = (profile.Count, profile.TotalBytes);
             }
 
             var suspendedMap = new List<SuspendedMethodEntry>(methodMap.Count);

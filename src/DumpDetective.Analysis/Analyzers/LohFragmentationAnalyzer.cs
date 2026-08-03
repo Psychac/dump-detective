@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Analysis.Indexing.Satellite;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -304,7 +305,14 @@ namespace DumpDetective.Analysis.Analyzers
             // Step 5: Read LargeObjectIndex.bin and resolve type names (≤ 100 objects).
             List<LargeObjectSnapshot> topLargeObjects = [];
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
-            topLargeObjects = ReadTopLargeObjects(heap, heapIndex.IndexPath, options.TopLargeObjectsCount, cancellationToken);
+            LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
+                if (topLargeObjects.Count >= options.TopLargeObjectsCount) return;
+                ClrObject obj = heap.GetObject(address);
+                if (!obj.IsValid) return;
+                string typeName = obj.Type?.Name ?? "Unknown";
+                if (string.Equals(typeName, "Free", StringComparison.Ordinal)) return;
+                topLargeObjects.Add(new LargeObjectSnapshot(address, typeName, size));
+            }, cancellationToken);
 
             return new LohFragmentationDomainResult(
                 segmentTotalBytes.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
@@ -364,55 +372,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private static List<LargeObjectSnapshot> ReadTopLargeObjects(
-            ClrHeap heap,
-            string containerPath,
-                int topLargeObjectsCount,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LargeObjects, out Stream? stream) || stream is null)
-                    return [];
-
-                using (stream)
-                {
-                    if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                        return [];
-
-                    int cap = (int)Math.Min(header.RecordCount, topLargeObjectsCount);
-                    var result = new List<LargeObjectSnapshot>(cap);
-
-                    const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
-                    Span<byte> rec = stackalloc byte[RecordSize];
-                    for (long i = 0; i < header.RecordCount; i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                        if (read < RecordSize) break;
-
-                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                        // MT field (rec[8..]) unused — resolve via heap
-                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
-
-                        ClrObject obj = heap.GetObject(address);
-                        if (!obj.IsValid) continue;
-
-                        string typeName = obj.Type?.Name ?? "Unknown";
-                        if (string.Equals(typeName, "Free", StringComparison.Ordinal)) continue;
-
-                        result.Add(new LargeObjectSnapshot(address, typeName, size));
-                        if (result.Count >= topLargeObjectsCount) break;
-                    }
-
-                    return result;
-                }
-            }
-            catch (Exception)
-            {
-                return [];
-            }
-        }
 
         // ── Free-gap histogram ────────────────────────────────────────────────────
 

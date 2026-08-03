@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Indexing.Container;
 using System.Buffers.Binary;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
@@ -59,6 +60,48 @@ internal sealed class LargeObjectTracker
             BinaryPrimitives.WriteUInt64LittleEndian(rec[8..], mt);
             BinaryPrimitives.WriteUInt64LittleEndian(rec[16..], size);
             stream.Write(rec);
+        }
+    }
+
+    /// <summary>
+    /// Reads LargeObjectIndex.bin and invokes a processor for each record.
+    /// The processor receives address, MT, size and returns whether to continue reading.
+    /// </summary>
+    internal static void ReadRecords(
+        string containerPath,
+        Action<ulong, ulong, ulong> processor,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LargeObjects, out Stream? stream) || stream is null)
+                return;
+
+            using (stream)
+            {
+                if (!IndexHeader.TryRead(stream, out IndexHeader header))
+                    return;
+
+                Span<byte> rec = stackalloc byte[RecordSize];
+                for (long i = 0; i < header.RecordCount; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
+                    if (read < RecordSize)
+                        break;
+
+                    ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
+                    ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
+                    ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+
+                    processor(address, methodTable, size);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Section not found or read failed; caller continues without index.
         }
     }
 }

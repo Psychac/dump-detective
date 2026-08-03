@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -168,6 +169,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize));
             }
 
+
             // ── Step 3: Large array analysis ──────────────────────────────────────
             // Try LargeObjectIndex.bin (disk mode) first; fall back to TypeAggregates LohSize
             progress?.Report(new(0, "analysing large arrays"));
@@ -176,7 +178,30 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk)
             {
-                ReadLargeArraysFromIndex(heap, heapIndex.IndexPath, arrayMtSet, topLargeArrays, options.TopLargeLimit, cancellationToken);
+                LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) =>
+                {
+                    if (topLargeArrays.Count >= options.TopLargeLimit)
+                        return;
+
+                    if (!arrayMtSet.Contains(mt))
+                        return;
+
+                    ClrObject obj = heap.GetObject(address);
+                    if (!obj.IsValid || obj.Type is null)
+                        return;
+
+                    string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
+                    if (string.Equals(elemName, "Free", StringComparison.Ordinal))
+                        return;
+
+                    ClrArray arr = obj.AsArray();
+                    topLargeArrays.Add(new LargeArrayEntry(
+                        Address: address,
+                        ElementTypeName: elemName,
+                        Length: arr.Length,
+                        Rank: arr.Rank,
+                        Size: size));
+                }, cancellationToken);
             }
 
             // If index wasn't available, use the LOH fallback candidates collected in Step 1
@@ -202,8 +227,6 @@ namespace DumpDetective.Analysis.Analyzers
                         Size: obj.Size));
                 }
             }
-
-            // ── Step 4: Sparse sampling ───────────────────────────────────────────
             // Use pre-collected ref-type candidates from Step 1 — no second typeAggregates scan.
             // Sort by TotalSize descending so the most impactful arrays are probed first.
             // Cap at SparseSampleLimit before opening any objects.

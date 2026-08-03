@@ -10,6 +10,7 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
     private const int FireAndForgetThreshold = 100;
     private const int HighCountWarning = 1_000;
     private const int HighCountCritical = 10_000;
+    private const int MaxFireAndForgetFindings = 3;
     private const ulong LargeCaptureWarning = 50_000_000UL;  // 50 MB
     private const ulong LargeCaptureCritical = 200_000_000UL;  // 200 MB
 
@@ -50,6 +51,7 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
         }
 
         // ── Fire-and-forget detection (same method suspended > threshold) ──────
+        int fireAndForgetCount = 0;
         foreach (SuspendedMethodEntry entry in r.SuspendedMethodMap)
         {
             if (entry.SuspendedCount >= FireAndForgetThreshold)
@@ -69,7 +71,9 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
                     Tags: ["async", "fire-and-forget", "leak", "state-machine"],
                     MetricValue: entry.SuspendedCount,
                     MetricUnit: "objects"));
-                break; // One finding for the worst offender is enough
+                
+                if (++fireAndForgetCount >= MaxFireAndForgetFindings)
+                    break;
             }
         }
 

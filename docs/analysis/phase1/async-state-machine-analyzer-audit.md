@@ -312,7 +312,7 @@ dotMemory's "Async/Await" view (available in newer versions) shows async method 
 | P0-3 | Rename `AvgStateValue` → `SampleStateValue` (or replace with distribution); update domain model, section builder column header, and any downstream consumers | Improvement | High — removes actively misleading column | Low | High | DONE |
 | P1-1 | Move `heap.GetTypeByMethodTable(kv.Key)` after name pre-check (or after flag check once P0-1 lands); avoids ClrMD resolution for non-candidate types | Improvement | Medium — reduces Phase 2 latency on large dumps | Low | High |
 | P1-2 | Wrap `StateMachinePattern.Match` in try/catch for `RegexMatchTimeoutException`; log and continue | Improvement | Medium — prevents single-type failure from aborting analysis | Low | High |
-| P1-3 | Remove `break` in fire-and-forget finding loop; report top-3 offenders above threshold, not just one | Improvement | Medium — surfaces all fire-and-forget sinks | Low | High |
+| P1-3 | Remove `break` in fire-and-forget finding loop; report top-3 offenders above threshold, not just one | Improvement | Medium — surfaces all fire-and-forget sinks | Low | High | DONE |
 | P1-4 | Escalate fire-and-forget finding severity based on `SuspendedCount` (e.g. Warning ≥100, Error ≥1000, Critical ≥10000) | Improvement | Medium — accurate severity triage | Low | High |
 | P1-5 | Replace `FormatBytes` in both `AsyncStateMachineAnalyzer` and `AsyncStateMachineFindingGenerator` with `FormatHelper.FormatBytes` | Improvement | Low — removes duplication | Trivial | High |
 | P1-6 | Add state value interpretation guidance to section narrative (table footnote or prose block) | Improvement | Medium — makes state column actionable without external docs | Low | High |

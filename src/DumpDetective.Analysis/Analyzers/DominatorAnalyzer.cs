@@ -169,7 +169,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
             aggregates = heapIndex.TypeAggregates;
 
-        var candidates = new List<(string TypeName, ulong SampleAddress, int Count, ulong TotalSize, ulong LohSize, int Gen2Count, ulong Score)>(capacity: Math.Min(32, typeStats.Count));
+        var candidates = new List<(string TypeName, ulong SampleAddress, int Count, ulong TotalSize, ulong LohSize, long Gen2Count, ulong Score)>(capacity: Math.Min(32, typeStats.Count));
 
         foreach (KeyValuePair<string, CachedTypeStatistics> kv in typeStats)
         {
@@ -182,7 +182,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             ulong totalSize = kv.Value.TotalSize;
             ulong lohSize = kv.Value.LohSize;
             int count = kv.Value.Count;
-            int gen2Count = 0;
+            long gen2Count = 0;
 
             if (aggregates is not null)
             {

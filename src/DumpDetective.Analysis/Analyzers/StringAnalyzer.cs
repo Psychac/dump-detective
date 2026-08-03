@@ -259,7 +259,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         int totalStrings = 0;
         ulong totalStringMemory = 0;
         ulong lohStringBytes = 0;
-        int gen2StringCount = 0;
+        long gen2StringCount = 0;
         ulong gen2StringBytes = 0;
         var veryLongStrings = new List<LongStringEntry>(capacity: 16);
 

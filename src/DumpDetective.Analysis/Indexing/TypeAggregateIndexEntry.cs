@@ -5,9 +5,9 @@ namespace DumpDetective.Analysis.Indexing;
 /// Stored in <see cref="HeapIndexBuildResult.TypeAggregates"/>.
 /// </summary>
 /// <remarks>
-/// Binary record layout (TypeAggregateIndex.bin, 64 bytes padded):
+/// Binary record layout (TypeAggregateIndex.bin, 80 bytes):
 ///   MT(8) | ModuleId(4) | Count(8) | TotalSize(8) | LohCount(8) | LohSize(8) |
-///   SampleAddress(8) | Gen0Count(4) | Gen1Count(4) | Gen2Count(4) | Flags(1) | Pad(3)
+///   SampleAddress(8) | Gen0Count(8) | Gen1Count(8) | Gen2Count(8) | Flags(1) | Pad(3)
 /// </remarks>
 internal readonly record struct TypeAggregateIndexEntry(
     ulong MethodTable,
@@ -17,7 +17,7 @@ internal readonly record struct TypeAggregateIndexEntry(
     long LohCount,
     ulong LohSize,
     ulong SampleAddress,
-    int Gen0Count = 0,
-    int Gen1Count = 0,
-    int Gen2Count = 0,
+    long Gen0Count = 0,
+    long Gen1Count = 0,
+    long Gen2Count = 0,
     TypeAggregateFlags Flags = TypeAggregateFlags.None);

@@ -45,7 +45,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             long totalObjects = 0;
             ulong totalBytes = 0;
-            int gen0 = 0, gen1 = 0, gen2 = 0;
+            long gen0 = 0, gen1 = 0, gen2 = 0;
 
             var finalizableTypes = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
 

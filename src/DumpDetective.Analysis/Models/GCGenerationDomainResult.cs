@@ -7,24 +7,24 @@ namespace DumpDetective.Analysis.Models;
 /// <summary>Generation distribution for a single type, built from Phase-1 TypeAggregates.</summary>
 public sealed record TypeGenerationProfile(
     string TypeName,
-    int Gen0Count,
-    int Gen1Count,
-    int Gen2Count,
-    int LohCount,
+    long Gen0Count,
+    long Gen1Count,
+    long Gen2Count,
+    long LohCount,
     ulong TotalBytes = 0,
     bool IsFinalizable = false);
 
 public sealed record GCGenerationDomainResult(
     ulong Gen0Bytes,
-    int Gen0Objects,
+    long Gen0Objects,
     ulong Gen1Bytes,
-    int Gen1Objects,
+    long Gen1Objects,
     ulong Gen2Bytes,
-    int Gen2Objects,
+    long Gen2Objects,
     ulong LohBytes,
     double LohPercent,
     int TotalObjects,
-    int LohObjects,
+    long LohObjects,
     IReadOnlyList<TypeSnapshot> TopLohTypes,
     double Gen2Pct = 0.0,
     IReadOnlyList<TypeGenerationProfile>? PerTypeGenerationProfiles = null) : AnalyzerDomainResult;

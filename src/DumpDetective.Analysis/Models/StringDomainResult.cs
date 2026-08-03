@@ -37,7 +37,7 @@ internal sealed record StringDomainResult(
     ulong LohStringBytes,
     int InternedStringCount,
     ulong InternedStringBytes,
-    int Gen2StringCount,
+    long Gen2StringCount,
     ulong Gen2StringBytes,
     bool DeduplicationSkipped,
     int StringsSampled,

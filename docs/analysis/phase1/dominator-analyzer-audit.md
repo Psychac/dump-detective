@@ -442,3 +442,5 @@ output is treated as authoritative.
    the most misleading and confusing aspects of the current output. The P2 items
    (gen2/LOH table, fan-in histogram, retention pressure ratio) would significantly improve
    diagnostic value for GC-pressure investigations with minimal implementation cost.
+
+---

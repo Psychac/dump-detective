@@ -1155,8 +1155,8 @@ internal sealed class InsightEngine
         if (finalizable is null && memory is null)
             return;
 
-        int dataColumnFinalizer = 0;
-        int dataTableFinalizer = 0;
+        long dataColumnFinalizer = 0;
+        long dataTableFinalizer = 0;
 
         if (finalizable is not null)
         {
@@ -1311,15 +1311,15 @@ internal sealed class InsightEngine
         if (finalizable is null || finalizable.TopFinalizableTypesByGen2Count.Count == 0)
             return;
 
-        int dynamicResolverCount = 0;
-        int threadCount = 0;
-        int timerHolderCount = 0;
-        int readerWriterLockCount = 0;
+        long dynamicResolverCount = 0;
+        long threadCount = 0;
+        long timerHolderCount = 0;
+        long readerWriterLockCount = 0;
 
         for (int i = 0; i < finalizable.TopFinalizableTypesByGen2Count.Count; i++)
         {
             TypeGenerationProfile p = finalizable.TopFinalizableTypesByGen2Count[i];
-            int gen2 = p.Gen2Count;
+            long gen2 = p.Gen2Count;
             if (gen2 == 0) continue;
 
             if (p.TypeName.Contains("DynamicResolver", StringComparison.OrdinalIgnoreCase))

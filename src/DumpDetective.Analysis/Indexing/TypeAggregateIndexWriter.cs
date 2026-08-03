@@ -13,7 +13,7 @@ namespace DumpDetective.Analysis.Indexing;
 /// <remarks>
 /// File layout (little-endian throughout, offsets shown assuming BucketCount=8):
 /// <code>
-///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=2, RecordCount=numTypes
+///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=3, RecordCount=numTypes
 ///   [ 24 –  31]  ObjectCount (8 B)   total objects from the scan
 ///   [ 32 –  63]  ExtraHeader (32 B)  BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+
 ///                                   Reserved(8)+Reserved(8)
@@ -32,12 +32,12 @@ internal static class TypeAggregateIndexWriter
 {
     // File magic: "TYAG" = Type Aggregate Index
     internal const int Magic = 0x47415954;
-    internal const int Version = 2;
+    internal const int Version = 3;
 
     // TypeAggregateIndexEntry binary record — must match the layout in the doc comment of
     // TypeAggregateIndexEntry.cs: MT(8)+ModuleId(4)+Count(8)+TotalSize(8)+LohCount(8)+
-    // LohSize(8)+SampleAddress(8)+Gen0Count(4)+Gen1Count(4)+Gen2Count(4)+Flags(1)+Pad(3)
-    internal const int TypeEntrySize = 68;
+    // LohSize(8)+SampleAddress(8)+Gen0Count(8)+Gen1Count(8)+Gen2Count(8)+Flags(1)+Pad(3)
+    internal const int TypeEntrySize = 80;
 
     // TypeShapeEntry binary record: MT(8)+RefFields(2)+ValFields(2)+Pad(4)
     internal const int ShapeEntrySize = 16;
@@ -198,11 +198,11 @@ internal static class TypeAggregateIndexWriter
         BinaryPrimitives.WriteInt64LittleEndian(span[28..], e.LohCount);     //  8 → total 36
         BinaryPrimitives.WriteUInt64LittleEndian(span[36..], e.LohSize);      //  8 → total 44
         BinaryPrimitives.WriteUInt64LittleEndian(span[44..], e.SampleAddress);//  8 → total 52
-        BinaryPrimitives.WriteInt32LittleEndian(span[52..], e.Gen0Count);    //  4 → total 56
-        BinaryPrimitives.WriteInt32LittleEndian(span[56..], e.Gen1Count);    //  4 → total 60
-        BinaryPrimitives.WriteInt32LittleEndian(span[60..], e.Gen2Count);    //  4 → total 64
-        span[64] = (byte)e.Flags;                                              //  1 → total 65
-        span[65] = span[66] = span[67] = 0;                                    //  3 → total 68
+        BinaryPrimitives.WriteInt64LittleEndian(span[52..], e.Gen0Count);    //  8 → total 60
+        BinaryPrimitives.WriteInt64LittleEndian(span[60..], e.Gen1Count);    //  8 → total 68
+        BinaryPrimitives.WriteInt64LittleEndian(span[68..], e.Gen2Count);    //  8 → total 76
+        span[76] = (byte)e.Flags;                                              //  1 → total 77
+        span[77] = span[78] = span[79] = 0;                                    //  3 → total 80
     }
 
     private static void WriteShapeEntry(Span<byte> span, ulong mt, TypeShapeEntry s)

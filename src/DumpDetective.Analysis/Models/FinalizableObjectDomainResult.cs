@@ -16,9 +16,9 @@ internal sealed record FinalizerQueueEntry(
 internal sealed record FinalizableObjectDomainResult(
     int TotalFinalizableObjects,
     ulong TotalFinalizableBytes,
-    int Gen0Count,
-    int Gen1Count,
-    int Gen2Count,
+    long Gen0Count,
+    long Gen1Count,
+    long Gen2Count,
     int FinalizerQueueCount,
     ulong FinalizerQueueRetainedBytes,
     bool PotentialResurrectionDetected,

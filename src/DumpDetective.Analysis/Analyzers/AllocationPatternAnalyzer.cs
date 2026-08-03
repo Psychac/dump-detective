@@ -77,9 +77,9 @@ namespace DumpDetective.Analysis.Analyzers
             double lohSizePct = totalSize > 0 ? Math.Round(lohBytes * 100.0 / (double)totalSize, 2) : 0.0;
 
             AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct, options.TransientClassificationThreshold);
-            // Pressure uses count% for gen0/2 (reflects GC collection frequency) and
-            // size% for LOH (LOH count% is near-zero on typical heaps, size% is meaningful).
-            double pressureScore = (gen0CountPct * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
+            // Pressure uses inverted gen0 (high Gen0 count = transient = low pressure), gen2 count%
+            // (reflects Gen2 collection frequency), and LOH size% (LOH count% is near-zero on typical heaps).
+            double pressureScore = ((100.0 - gen0CountPct) * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
             GCPressureLevel pressure = ClassifyPressure(pressureScore);
             double promotionScore = gen2CountPct + (lohSizePct * 2.0);
 

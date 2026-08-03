@@ -118,18 +118,27 @@ namespace DumpDetective.Analysis.Analyzers
                     break;
             }
 
-            metrics.Sort(comparator);
-
-            var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var shortish = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var highGen1Survivors = new List<(double Gen1SurvivalRate, TypeAllocationProfile Profile)>();
-
+            // Calculate scan limit before sorting to enable partial sort optimization
             int scanLimit;
             if (options.Strategy == AllocationPatternAnalysisOptions.ScanStrategy.FullScan)
                 scanLimit = Math.Min(metrics.Count, options.MaxScanItemsAbsolute);
             else
                 scanLimit = Math.Min(metrics.Count, options.TopTypeLimit * options.ScanMultiplier);
+
+            // For large FullScan operations, only sort the top items we need to reduce wasted sort work
+            if (options.Strategy == AllocationPatternAnalysisOptions.ScanStrategy.FullScan && metrics.Count > scanLimit * 2)
+            {
+                // Partial sort: only sort enough to guarantee we have good candidates
+                var sortLimit = Math.Min(metrics.Count, scanLimit * 2);
+                metrics.Sort(0, sortLimit, Comparer<(ulong, TypeAggregateIndexEntry, double, double, double, double)>.Create(comparator));
+            }
+            else
+                metrics.Sort(comparator);
+
+            var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var shortish = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var highGen1Survivors = new List<(double Gen1SurvivalRate, TypeAllocationProfile Profile)>();
 
             progress?.Report(new AnalyzerProgressReport(0, $"scanning {scanLimit} types for allocation patterns"));
 

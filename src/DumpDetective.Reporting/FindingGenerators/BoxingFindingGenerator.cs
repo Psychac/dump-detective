@@ -20,10 +20,13 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
         // Boxed enum anti-pattern — common in large codebases.
         if (r.BoxedEnumCount > 1000)
         {
+            FindingSeverity enumSeverity = r.BoxedEnumCount > 1_000_000 ? FindingSeverity.Critical
+                : r.BoxedEnumCount > 50_000 ? FindingSeverity.Warning
+                : FindingSeverity.Info;
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
-                Severity: r.BoxedEnumCount > 50_000 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Severity: enumSeverity,
                 Title: "Boxed enum anti-pattern detected",
                 Evidence: $"{r.BoxedEnumCount:N0} boxed enum instances found " +
                           $"({FormatHelper.FormatBytes(r.BoxedEnumBytes)}). " +
@@ -32,6 +35,24 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
                                 "with typed generics or enum-specific dictionaries.",
                 Tags: ["boxing", "enum", "allocation"],
                 MetricValue: r.BoxedEnumCount,
+                MetricUnit: "objects"));
+        }
+
+        // Nullable<T> boxing anti-pattern — most common source of unexpected boxing in modern C#.
+        if (r.NullableBoxedCount > 100)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: r.NullableBoxedCount > 10_000 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Nullable<T> boxing detected",
+                Evidence: $"{r.NullableBoxedCount:N0} boxed Nullable<T> instances found " +
+                          $"({FormatHelper.FormatBytes(r.NullableBoxedBytes)}). " +
+                          $"Storing Nullable<T> in object-typed fields or non-generic collections causes boxing.",
+                Recommendation: "Use typed generics (List<Nullable<T>>, Dictionary<K, Nullable<T>>) or constraint " +
+                                "APIs to avoid boxing. Alternatively, use 'default' or explicit null checks instead of Nullable<T>.",
+                Tags: ["boxing", "nullable", "allocation"],
+                MetricValue: r.NullableBoxedCount,
                 MetricUnit: "objects"));
         }
 
@@ -55,38 +76,44 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
         }
 
         // Oversized value types — risk of stack pressure / unintended copies.
-        if (r.OversizedValueTypeCount > 100)
+        if (r.OversizedValueTypeInstanceCount > 100)
         {
             string oversizedTypeList = r.TopOversizedTypes.Count > 0
                 ? string.Join(", ", r.TopOversizedTypes.Take(5).Select(t => $"{t.TypeName} ({t.StaticSize}B, {t.Count:N0}x)"))
                 : "—";
+            FindingSeverity oversizedSeverity = r.OversizedValueTypeInstanceCount > 500_000 ? FindingSeverity.Critical
+                : r.OversizedValueTypeInstanceCount > 100_000 ? FindingSeverity.Warning
+                : FindingSeverity.Info;
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
-                Severity: FindingSeverity.Info,
+                Severity: oversizedSeverity,
                 Title: "Oversized value type instances detected",
-                Evidence: $"{r.OversizedValueTypeCount:N0} instances of value types with StaticSize > 64 bytes. " +
+                Evidence: $"{r.OversizedValueTypeInstanceCount:N0} instances of value types with StaticSize > 64 bytes. " +
                           $"Large structs incur significant copy cost and stack pressure. " +
                           $"Top offenders: {oversizedTypeList}.",
                 Recommendation: "Convert large structs to classes, or use 'in'/'ref' parameters to avoid copies.",
                 Tags: ["boxing", "struct", "value-type", "performance"],
-                MetricValue: r.OversizedValueTypeCount,
+                MetricValue: r.OversizedValueTypeInstanceCount,
                 MetricUnit: "objects"));
         }
 
         // Summary finding (always).
-        string capNote = r.TypeScanCapped ? " (type scan capped at 10 000 entries)" : string.Empty;
+        string capNote = r.TypeScanCapped ? $" (type scan capped at {r.TypeScanCapUsed:N0} entries)" : string.Empty;
+        FindingSeverity overallSeverity = r.TotalBoxedObjects > 1_000_000 ? FindingSeverity.Critical
+            : r.TotalBoxedObjects > 500_000 ? FindingSeverity.Warning
+            : FindingSeverity.Info;
         findings.Add(new InsightFinding(
             Analyzer: AnalyzerName,
             Category: "Memory",
-            Severity: FindingSeverity.Info,
+            Severity: overallSeverity,
             Title: "Boxing pressure overview",
             Evidence: $"Total boxed value type instances: {r.TotalBoxedObjects:N0}{capNote} " +
                       $"({FormatHelper.FormatBytes(r.TotalBoxedBytes)}). " +
                       $"Boxed enums: {r.BoxedEnumCount:N0}. " +
-                      $"Oversized value types: {r.OversizedValueTypeCount:N0}. " +
+                      $"Oversized value types: {r.OversizedValueTypeInstanceCount:N0}. " +
                       $"Types with padding waste: {r.TopPaddingWasteTypes.Count}.",
-            Recommendation: r.BoxedEnumCount > 1000 || r.OversizedValueTypeCount > 100
+            Recommendation: r.BoxedEnumCount > 1000 || r.OversizedValueTypeInstanceCount > 100
                 ? "Review boxing-heavy paths; prefer typed generics and struct layout optimisation."
                 : "Boxing pressure is within acceptable range.",
             Tags: ["boxing", "value-type"],

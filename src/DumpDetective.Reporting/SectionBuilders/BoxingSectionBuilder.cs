@@ -30,13 +30,17 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         {
             ["total_boxed_objects"] = new NumericMetricValue(d.TotalBoxedObjects, MetricUnit.Count),
             ["total_boxed_bytes"] = new NumericMetricValue((double)d.TotalBoxedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalBoxedBytes)),
+            ["avg_boxed_instance_bytes"] = new NumericMetricValue(d.AvgBoxedInstanceBytes, MetricUnit.Bytes, FormatHelper.FormatBytes((ulong)d.AvgBoxedInstanceBytes)),
             ["boxed_enum_instances"] = new NumericMetricValue(d.BoxedEnumCount, MetricUnit.Count),
             ["boxed_enum_bytes"] = new NumericMetricValue((double)d.BoxedEnumBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.BoxedEnumBytes)),
-            ["oversized_value_types"] = new NumericMetricValue(d.OversizedValueTypeCount, MetricUnit.Count),
+            ["nullable_boxed_instances"] = new NumericMetricValue(d.NullableBoxedCount, MetricUnit.Count),
+            ["nullable_boxed_bytes"] = new NumericMetricValue((double)d.NullableBoxedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.NullableBoxedBytes)),
+            ["oversized_value_types"] = new NumericMetricValue(d.OversizedValueTypeInstanceCount, MetricUnit.Count),
+            ["aggregate_padding_waste"] = new NumericMetricValue((double)d.AggregatePaddingWasteBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.AggregatePaddingWasteBytes)),
         };
 
         if (d.TypeScanCapped)
-            blocks.Add(T("⚠ Type scan was capped at 10 000 entries — totals may be underestimated."));
+            blocks.Add(T($"⚠ Type scan was capped at {d.TypeScanCapUsed:N0} entries — totals may be underestimated."));
 
         if (d.TopBoxedTypes.Count > 0)
         {

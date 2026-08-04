@@ -52,21 +52,23 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (typeAggregates is null)
             {
-                return new BoxingDomainResult(0, 0, [], 0, 0, 0, [], [], false);
+                return new BoxingDomainResult(0, 0, [], 0, 0, 0, 0, 0, [], [], 0, 0.0, false, options.TypeScanCap);
             }
 
             // ── Boxing inventory ──────────────────────────────────────────────
-            var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum)>(
+            var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum, bool HasRefFields)>(
                 StringComparer.Ordinal);
 
             long totalBoxedObjects = 0;
             ulong totalBoxedBytes = 0;
             long boxedEnumCount = 0;
             ulong boxedEnumBytes = 0;
+            long nullableCount = 0;
+            ulong nullableBytes = 0;
             long oversizedCount = 0;
 
             // Struct padding candidates: collect during the same pass
-            var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes)>(64);
+            var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes, int Count, int WastedBytes)>(64);
 
             // Oversized value type candidates: aggregated by type name during the same pass
             var oversizedByTypeName = new Dictionary<string, (int StaticSize, int Count)>(StringComparer.Ordinal);
@@ -117,6 +119,7 @@ namespace DumpDetective.Analysis.Analyzers
                 int count = (int)Math.Min(entry.Count, int.MaxValue);
                 ulong bytes = entry.TotalSize;
                 bool isEnum = clrType.IsEnum;
+                bool isNullable = typeName.StartsWith("System.Nullable<", StringComparison.Ordinal);
 
                 totalBoxedObjects += count;
                 totalBoxedBytes += bytes;
@@ -125,6 +128,12 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     boxedEnumCount += count;
                     boxedEnumBytes += bytes;
+                }
+
+                if (isNullable)
+                {
+                    nullableCount += count;
+                    nullableBytes += bytes;
                 }
 
                 // Oversized value types — StaticSize reflects the value layout size
@@ -137,10 +146,13 @@ namespace DumpDetective.Analysis.Analyzers
                         oversizedByTypeName[typeName] = (clrType.StaticSize, count);
                 }
 
+                // Check if type has reference fields using typeShapeCache
+                bool hasRefFields = typeShapeCache?.TryGetValue(kv.Key, out var shapeEntry) == true && shapeEntry.RefFields > 0;
+
                 if (boxedByTypeName.TryGetValue(typeName, out var existing))
-                    boxedByTypeName[typeName] = (existing.Count + count, existing.Bytes + bytes, isEnum);
+                    boxedByTypeName[typeName] = (existing.Count + count, existing.Bytes + bytes, isEnum, existing.HasRefFields || hasRefFields);
                 else
-                    boxedByTypeName[typeName] = (count, bytes, isEnum);
+                    boxedByTypeName[typeName] = (count, bytes, isEnum, hasRefFields);
 
                 // ── Struct padding ────────────────────────────────────────────
                 // Compute per-type only (not per-instance). Skip enums and very small structs.
@@ -149,14 +161,17 @@ namespace DumpDetective.Analysis.Analyzers
                     int fieldBytes = ComputeTotalFieldBytes(clrType);
                     int structSize = clrType.StaticSize;
                     if (fieldBytes > 0 && structSize > fieldBytes)
-                        paddingCandidates.Add((typeName, structSize, fieldBytes));
+                    {
+                        int wasted = structSize - fieldBytes;
+                        paddingCandidates.Add((typeName, structSize, fieldBytes, count, wasted));
+                    }
                 }
             }
 
             // ── Build top boxed types ─────────────────────────────────────────
-            var typeList = new List<(string Name, int Count, ulong Bytes, bool IsEnum)>(boxedByTypeName.Count);
-            foreach (KeyValuePair<string, (int Count, ulong Bytes, bool IsEnum)> kv in boxedByTypeName)
-                typeList.Add((kv.Key, kv.Value.Count, kv.Value.Bytes, kv.Value.IsEnum));
+            var typeList = new List<(string Name, int Count, ulong Bytes, bool IsEnum, bool HasRefFields)>(boxedByTypeName.Count);
+            foreach (KeyValuePair<string, (int Count, ulong Bytes, bool IsEnum, bool HasRefFields)> kv in boxedByTypeName)
+                typeList.Add((kv.Key, kv.Value.Count, kv.Value.Bytes, kv.Value.IsEnum, kv.Value.HasRefFields));
 
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
@@ -165,30 +180,31 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topLimit; i++)
             {
                 var t = typeList[i];
-                topBoxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum));
+                topBoxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum, t.HasRefFields));
             }
 
             // ── Build top padding waste types ─────────────────────────────────
-            paddingCandidates.Sort(static (a, b) =>
-            {
-                int wastedA = a.StructSize - a.FieldBytes;
-                int wastedB = b.StructSize - b.FieldBytes;
-                return wastedB.CompareTo(wastedA);
-            });
+            paddingCandidates.Sort(static (a, b) => b.WastedBytes.CompareTo(a.WastedBytes));
 
             int padLimit = Math.Min(paddingCandidates.Count, options.TopPaddingLimit);
             var topPaddingWaste = new List<StructPaddingEntry>(padLimit);
             for (int i = 0; i < padLimit; i++)
             {
                 var c = paddingCandidates[i];
-                int wasted = c.StructSize - c.FieldBytes;
-                double ratio = c.StructSize > 0 ? (double)wasted / c.StructSize : 0.0;
+                double ratio = c.StructSize > 0 ? (double)c.WastedBytes / c.StructSize : 0.0;
                 topPaddingWaste.Add(new StructPaddingEntry(
                     TypeName: c.TypeName,
                     TotalFieldBytes: c.FieldBytes,
                     StructSize: c.StructSize,
-                    WastedPaddingBytes: wasted,
+                    WastedPaddingBytes: c.WastedBytes,
                     WasteRatio: ratio));
+            }
+
+            // Compute aggregate padding waste across ALL padding candidates (not just top)
+            ulong aggregatePaddingWaste = 0;
+            foreach (var c in paddingCandidates)
+            {
+                aggregatePaddingWaste += (ulong)(c.WastedBytes * c.Count);
             }
 
             // ── Build top oversized types ─────────────────────────────────────
@@ -203,16 +219,23 @@ namespace DumpDetective.Analysis.Analyzers
                 ? oversizedList
                 : oversizedList.GetRange(0, oversizedLimit);
 
+            double avgBoxedInstanceBytes = totalBoxedObjects > 0 ? (double)totalBoxedBytes / totalBoxedObjects : 0.0;
+
             return new BoxingDomainResult(
                 TotalBoxedObjects: totalBoxedObjects,
                 TotalBoxedBytes: totalBoxedBytes,
                 TopBoxedTypes: topBoxedTypes,
                 BoxedEnumCount: boxedEnumCount,
                 BoxedEnumBytes: boxedEnumBytes,
-                OversizedValueTypeCount: oversizedCount,
+                NullableBoxedCount: nullableCount,
+                NullableBoxedBytes: nullableBytes,
+                OversizedValueTypeInstanceCount: oversizedCount,
                 TopOversizedTypes: topOversizedTypes,
                 TopPaddingWasteTypes: topPaddingWaste,
-                TypeScanCapped: scanCapped);
+                AggregatePaddingWasteBytes: aggregatePaddingWaste,
+                AvgBoxedInstanceBytes: avgBoxedInstanceBytes,
+                TypeScanCapped: scanCapped,
+                TypeScanCapUsed: options.TypeScanCap);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

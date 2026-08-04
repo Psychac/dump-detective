@@ -39,10 +39,15 @@ public sealed class BoxingAnalyzerDiscrepancyTests
             BoxingDomainResult diskResult = (BoxingDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalBoxedObjects.Should().Be(memResult.TotalBoxedObjects);
             diskResult.TotalBoxedBytes.Should().Be(memResult.TotalBoxedBytes);
+            diskResult.AvgBoxedInstanceBytes.Should().Be(memResult.AvgBoxedInstanceBytes);
             diskResult.BoxedEnumCount.Should().Be(memResult.BoxedEnumCount);
             diskResult.BoxedEnumBytes.Should().Be(memResult.BoxedEnumBytes);
-            diskResult.OversizedValueTypeCount.Should().Be(memResult.OversizedValueTypeCount);
+            diskResult.NullableBoxedCount.Should().Be(memResult.NullableBoxedCount);
+            diskResult.NullableBoxedBytes.Should().Be(memResult.NullableBoxedBytes);
+            diskResult.OversizedValueTypeInstanceCount.Should().Be(memResult.OversizedValueTypeInstanceCount);
+            diskResult.AggregatePaddingWasteBytes.Should().Be(memResult.AggregatePaddingWasteBytes);
             diskResult.TypeScanCapped.Should().Be(memResult.TypeScanCapped);
+            diskResult.TypeScanCapUsed.Should().Be(memResult.TypeScanCapUsed);
             diskResult.TopBoxedTypes.Count.Should().Be(memResult.TopBoxedTypes.Count);
             diskResult.TopPaddingWasteTypes.Count.Should().Be(memResult.TopPaddingWasteTypes.Count);
         }

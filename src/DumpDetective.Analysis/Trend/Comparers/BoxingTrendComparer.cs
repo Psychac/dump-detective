@@ -13,9 +13,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
             {
                 new("boxing.total.objects",     null, r.TotalBoxedObjects,       "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.total.bytes",       null, r.TotalBoxedBytes,         "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("boxing.avg.instance.bytes", null, r.AvgBoxedInstanceBytes,  "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.count",        null, r.BoxedEnumCount,          "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.bytes",        null, r.BoxedEnumBytes,          "bytes",   MetricTrendDirection.HigherIsWorse),
-                new("boxing.oversized.count",   null, r.OversizedValueTypeCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.nullable.count",    null, r.NullableBoxedCount,      "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.nullable.bytes",    null, r.NullableBoxedBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("boxing.oversized.count",   null, r.OversizedValueTypeInstanceCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.padding.aggregate", null, r.AggregatePaddingWasteBytes, "bytes", MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (BoxedTypeEntry entry in r.TopBoxedTypes)
@@ -34,9 +38,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
             [
                 MetricDeltaHelper.Compute("boxing.total.objects",   null, b.TotalBoxedObjects,       c.TotalBoxedObjects,       "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.total.bytes",     null, b.TotalBoxedBytes,         c.TotalBoxedBytes,         "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.avg.instance.bytes", null, b.AvgBoxedInstanceBytes, c.AvgBoxedInstanceBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.enum.count",      null, b.BoxedEnumCount,          c.BoxedEnumCount,          "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.enum.bytes",      null, b.BoxedEnumBytes,          c.BoxedEnumBytes,          "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("boxing.oversized.count", null, b.OversizedValueTypeCount, c.OversizedValueTypeCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.nullable.count",  null, b.NullableBoxedCount,     c.NullableBoxedCount,      "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.nullable.bytes",  null, b.NullableBoxedBytes,     c.NullableBoxedBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.oversized.count", null, b.OversizedValueTypeInstanceCount, c.OversizedValueTypeInstanceCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.padding.aggregate", null, b.AggregatePaddingWasteBytes, c.AggregatePaddingWasteBytes, "bytes", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

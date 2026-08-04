@@ -13,14 +13,21 @@ internal sealed record FinalizerQueueEntry(
     bool DisposedFieldFound,
     bool DisposedFieldValue);
 
+internal sealed record QueueTypeStatistic(
+    string TypeName,
+    int QueueCount);
+
 internal sealed record FinalizableObjectDomainResult(
     int TotalFinalizableObjects,
     ulong TotalFinalizableBytes,
     long Gen0Count,
     long Gen1Count,
     long Gen2Count,
+    long LohCount,
     int FinalizerQueueCount,
     ulong FinalizerQueueRetainedBytes,
-    bool PotentialResurrectionDetected,
+    bool IsRetainedEstimatePartial,
+    bool HasUndisposedDisposableInQueue,
     IReadOnlyList<TypeGenerationProfile> TopFinalizableTypesByGen2Count,
+    IReadOnlyList<QueueTypeStatistic> TopQueueTypesByCount,
     IReadOnlyList<FinalizerQueueEntry> TopQueueEntriesByRetainedSize) : AnalyzerDomainResult;

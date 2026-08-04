@@ -894,7 +894,7 @@ All `ClrType.IsFinalizable = true` objects:
 - Total count and size
   - ✅ `FinalizableObjectDomainResult.TotalFinalizableObjects`, `TotalFinalizableBytes`
 - By generation: Gen0/1/2/LOH
-  - ✅ `Gen0Count`, `Gen1Count`, `Gen2Count`; LOH count not separately stored (Gen2 includes LOH in index)
+  - ✅ `Gen0Count`, `Gen1Count`, `Gen2Count`, `LohCount` — separately aggregated for clarity (LOH finalizable objects extend lifetime by 2+ GCs)
 - Top 20 finalizable types by Gen2 count and size
   - ✅ `TopFinalizableTypesByGen2Count` (`IReadOnlyList<TypeGenerationProfile>`) sorted by Gen2Count
 - `IsFinalizable` + `IDisposable` + `_disposed = false` -> Dispose never called (heuristic)
@@ -906,14 +906,17 @@ All `ClrType.IsFinalizable = true` objects:
 Via `heap.EnumerateFinalizableObjects()`:
 - Queue depth (total count)
   - ✅ `FinalizableObjectDomainResult.FinalizerQueueCount`
-- Top types by count and size
+- Queue type distribution (type count aggregation)
+  - ✅ `TopQueueTypesByCount` (`IReadOnlyList<QueueTypeStatistic>`): TypeName, QueueCount — answers "which types dominate the queue"
+- Top queue entries by retained size
   - ✅ `TopQueueEntriesByRetainedSize` (`IReadOnlyList<FinalizerQueueEntry>`): Address, TypeName, ShallowSize, EstimatedRetainedBytes, IsDisposableType, DisposedFieldFound, DisposedFieldValue
 - Severity: Critical > 10 000 / Warning 1000-10 000 / OK < 1000
   - ❌ Severity band not pre-computed; section builder must apply thresholds to `FinalizerQueueCount`
 - Queue objects retaining large sub-graphs (bounded BFS)
-  - ⚠️ `FinalizerQueueEntry.EstimatedRetainedBytes` is present but computed as avg-size estimate (not BFS); true BFS retained blocked by §4.1 gap
-- Resurrection detection: `GC.ReRegisterForFinalize` patterns
-  - ✅ `FinalizableObjectDomainResult.PotentialResurrectionDetected` (bool); heuristic: queued + `IDisposable` + disposed field is `false`
+  - ✅ `FinalizableObjectDomainResult.FinalizerQueueRetainedBytes` (ulong); BFS-estimated total retention (upper bound: shared sub-graphs may be double-counted across entries)
+  - ✅ `FinalizableObjectDomainResult.IsRetainedEstimatePartial` (bool); true if any BFS was capped by node/depth limits—indicates partial graph traversal
+- Undisposed IDisposable in queue
+  - ✅ `FinalizableObjectDomainResult.HasUndisposedDisposableInQueue` (bool); true if any sampled queue entry is `IDisposable` + disposed field is `false` (NOT resurrection detection; resurrection requires `GC.ReRegisterForFinalize` calls)
 
 ## 21.3 Finalizer Thread Health
 

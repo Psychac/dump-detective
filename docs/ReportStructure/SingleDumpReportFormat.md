@@ -346,12 +346,14 @@ Source: `FinalizableObjectDomainResult`
 
 LeadFinding: emit Warning when `FinalizerQueueCount > 1000`, Critical when `> 10000`.
 
-KeyMetrics: TotalFinalizableObjects, TotalFinalizableBytes, Gen0Count, Gen1Count, Gen2Count, FinalizerQueueCount, FinalizerQueueRetainedBytes, PotentialResurrectionDetected.
+KeyMetrics: TotalFinalizableObjects, TotalFinalizableBytes, Gen0Count, Gen1Count, Gen2Count, LohCount, FinalizerQueueCount, FinalizerQueueRetainedBytes, IsRetainedEstimatePartial, HasUndisposedDisposableInQueue.
 
 Tables:
 - **Finalizable types by Gen2 count** — `TopFinalizableTypesByGen2Count`  
   Columns: TypeName | Gen0Count | Gen1Count | Gen2Count | LohCount | TotalBytes | IsFinalizable
-- **Finalizer queue** — `TopQueueEntriesByRetainedSize`  
+- **Types in finalizer queue by object count** — `TopQueueTypesByCount`  
+  Columns: TypeName | QueueCount
+- **Finalizer queue entries by estimated retained size** — `TopQueueEntriesByRetainedSize`  
   Columns: Address | TypeName | ShallowSize | EstimatedRetainedBytes | IsDisposableType | DisposedFieldFound | DisposedFieldValue
 
 Cross-ref: `ThreadDomainResult.FinalizerThreadBlocked` — combine with queue depth for "confirmed starvation" lead finding.

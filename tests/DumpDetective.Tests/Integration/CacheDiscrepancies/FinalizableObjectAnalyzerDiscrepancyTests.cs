@@ -42,10 +42,13 @@ public sealed class FinalizableObjectAnalyzerDiscrepancyTests
             diskResult.Gen0Count.Should().Be(memResult.Gen0Count);
             diskResult.Gen1Count.Should().Be(memResult.Gen1Count);
             diskResult.Gen2Count.Should().Be(memResult.Gen2Count);
+            diskResult.LohCount.Should().Be(memResult.LohCount);
             diskResult.FinalizerQueueCount.Should().Be(memResult.FinalizerQueueCount);
             diskResult.FinalizerQueueRetainedBytes.Should().Be(memResult.FinalizerQueueRetainedBytes);
-            diskResult.PotentialResurrectionDetected.Should().Be(memResult.PotentialResurrectionDetected);
+            diskResult.IsRetainedEstimatePartial.Should().Be(memResult.IsRetainedEstimatePartial);
+            diskResult.HasUndisposedDisposableInQueue.Should().Be(memResult.HasUndisposedDisposableInQueue);
             diskResult.TopFinalizableTypesByGen2Count.Count.Should().Be(memResult.TopFinalizableTypesByGen2Count.Count);
+            diskResult.TopQueueTypesByCount.Count.Should().Be(memResult.TopQueueTypesByCount.Count);
             diskResult.TopQueueEntriesByRetainedSize.Count.Should().Be(memResult.TopQueueEntriesByRetainedSize.Count);
         }
         finally

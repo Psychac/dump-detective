@@ -45,7 +45,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             long totalObjects = 0;
             ulong totalBytes = 0;
-            long gen0 = 0, gen1 = 0, gen2 = 0;
+            long gen0 = 0, gen1 = 0, gen2 = 0, loh = 0;
 
             var finalizableTypes = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
 
@@ -63,6 +63,7 @@ namespace DumpDetective.Analysis.Analyzers
                     gen0 += e.Gen0Count;
                     gen1 += e.Gen1Count;
                     gen2 += e.Gen2Count;
+                    loh += e.LohCount;
                 }
             }
             else
@@ -104,14 +105,28 @@ namespace DumpDetective.Analysis.Analyzers
             // ── Step 3: Finalizer queue analysis ─────────────────────────────
             int queueCount = 0;
             var queueSamples = new List<(ulong Addr, string TypeName, ulong ShallowSize)>(Math.Min(options.QueueScanLimit, 128));
+            var queueTypeCountMap = new Dictionary<string, int>();
 
             foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 queueCount++;
+
+                string typeName = obj.IsValid && obj.Type is not null ? (obj.Type.Name ?? "<unknown>") : "<unknown>";
+                if (!queueTypeCountMap.ContainsKey(typeName))
+                    queueTypeCountMap[typeName] = 0;
+                queueTypeCountMap[typeName]++;
+
                 if (queueSamples.Count < options.QueueScanLimit && obj.IsValid && obj.Type is not null)
-                    queueSamples.Add((obj.Address, obj.Type.Name ?? "<unknown>", obj.Size));
+                    queueSamples.Add((obj.Address, typeName, obj.Size));
             }
+
+            // Build top queue types by count
+            var topQueueTypes = queueTypeCountMap
+                .OrderByDescending(x => x.Value)
+                .Take(Math.Min(queueTypeCountMap.Count, options.TopTypeLimit))
+                .Select(x => new QueueTypeStatistic(x.Key, x.Value))
+                .ToList();
 
             // Sort by shallow size descending, analyse top N
             queueSamples.Sort(static (a, b) => b.ShallowSize.CompareTo(a.ShallowSize));
@@ -119,7 +134,8 @@ namespace DumpDetective.Analysis.Analyzers
             int entryLimit = Math.Min(queueSamples.Count, options.TopQueueEntries);
             var topEntries = new List<FinalizerQueueEntry>(entryLimit);
             ulong totalQueueRetained = 0;
-            bool potentialResurrection = false;
+            bool hasUndisposedDisposable = false;
+            bool isRetainedEstimatePartial = false;
 
             for (int i = 0; i < entryLimit; i++)
             {
@@ -142,11 +158,12 @@ namespace DumpDetective.Analysis.Analyzers
                     catch { /* field unreadable */ }
                 }
 
-                // Resurrection heuristic: in queue, has IDisposable, _disposed field exists but is false
                 if (isDisposable && disposedFound && !disposedValue)
-                    potentialResurrection = true;
+                    hasUndisposedDisposable = true;
 
-                ulong retained = BfsEstimateRetained(heap, addr, options.MaxBfsNodes, options.MaxBfsDepth);
+                (ulong retained, bool wasCapped) = BfsEstimateRetained(heap, addr, options.MaxBfsNodes, options.MaxBfsDepth);
+                if (wasCapped)
+                    isRetainedEstimatePartial = true;
                 totalQueueRetained += retained;
 
                 topEntries.Add(new FinalizerQueueEntry(
@@ -168,10 +185,13 @@ namespace DumpDetective.Analysis.Analyzers
                 Gen0Count: gen0,
                 Gen1Count: gen1,
                 Gen2Count: gen2,
+                LohCount: loh,
                 FinalizerQueueCount: queueCount,
                 FinalizerQueueRetainedBytes: totalQueueRetained,
-                PotentialResurrectionDetected: potentialResurrection,
+                IsRetainedEstimatePartial: isRetainedEstimatePartial,
+                HasUndisposedDisposableInQueue: hasUndisposedDisposable,
                 TopFinalizableTypesByGen2Count: topTypesByGen2,
+                TopQueueTypesByCount: topQueueTypes,
                 TopQueueEntriesByRetainedSize: topEntries);
         }
 
@@ -200,19 +220,22 @@ namespace DumpDetective.Analysis.Analyzers
 
         /// <summary>
         /// Bounded BFS from <paramref name="startAddr"/>; returns the sum of sizes of all
-        /// reachable objects (including the start object). Capped at
-        /// <paramref name="maxNodes"/> nodes and <paramref name="maxDepth"/> depth.
+        /// reachable objects (including the start object) and a flag indicating if traversal
+        /// was capped by node limit or depth. Capped at <paramref name="maxNodes"/> nodes
+        /// and <paramref name="maxDepth"/> depth. When capped, returned size is a partial
+        /// estimate of the true sub-graph (lower bound).
         /// </summary>
-        private static ulong BfsEstimateRetained(ClrHeap heap, ulong startAddr, int maxNodes, int maxDepth)
+        private static (ulong RetainedSize, bool WasCapped) BfsEstimateRetained(ClrHeap heap, ulong startAddr, int maxNodes, int maxDepth)
         {
             if (startAddr == 0)
-                return 0;
+                return (0, false);
 
             var visited = new HashSet<ulong>(capacity: 32) { startAddr };
             var queue = new Queue<(ulong Addr, int Depth)>(capacity: 32);
             queue.Enqueue((startAddr, 0));
             ulong totalSize = 0;
             int nodesSeen = 0;
+            bool wasCapped = false;
 
             while (queue.Count > 0)
             {
@@ -220,7 +243,10 @@ namespace DumpDetective.Analysis.Analyzers
                 nodesSeen++;
 
                 if (nodesSeen > maxNodes || depth >= maxDepth)
+                {
+                    wasCapped = true;
                     break;
+                }
 
                 ClrObject obj = heap.GetObject(addr);
                 if (!obj.IsValid || obj.Type is null)
@@ -235,7 +261,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            return totalSize;
+            return (totalSize, wasCapped);
         }
 
         public void Dispose() { }

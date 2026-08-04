@@ -55,18 +55,21 @@ internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
                 ? FindingSeverity.Critical
                 : FindingSeverity.Warning;
 
+            string estimateQualifier = r.IsRetainedEstimatePartial
+                ? " (BFS capped—partial graph; true retention may be less)"
+                : " (shared sub-graphs may be counted multiple times—upper bound)";
+
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: sev,
-                Title: $"Finalizer queue retains {FormatBytes(r.FinalizerQueueRetainedBytes)} in sub-graphs",
+                Title: $"Finalizer queue retaining ~{FormatBytes(r.FinalizerQueueRetainedBytes)} in sub-graphs",
                 Evidence: $"{r.FinalizerQueueCount:N0} objects in finalizer queue. " +
                           $"Top {r.TopQueueEntriesByRetainedSize.Count} entries retain an estimated " +
-                          $"{FormatBytes(r.FinalizerQueueRetainedBytes)} via bounded BFS." +
-                          (r.PotentialResurrectionDetected ? " Potential resurrection pattern detected." : string.Empty),
-                Recommendation: "Objects retaining large sub-graphs in the finalizer queue block GC from collecting " +
-                                "those sub-graphs until finalization completes. " +
-                                "Prefer IDisposable + using; avoid keeping large references in finalizable types.",
+                          $"~{FormatBytes(r.FinalizerQueueRetainedBytes)}{estimateQualifier}." +
+                          (r.HasUndisposedDisposableInQueue ? " Sampled entries contain undisposed IDisposable types." : string.Empty),
+                Recommendation: "Objects in the finalizer queue block sub-graph collection until finalization completes. " +
+                                "Implement IDisposable and call GC.SuppressFinalize in Dispose() to prevent queuing.",
                 Tags: ["finalizer", "queue", "retention", "dispose"],
                 MetricValue: r.FinalizerQueueRetainedBytes,
                 MetricUnit: "bytes"));

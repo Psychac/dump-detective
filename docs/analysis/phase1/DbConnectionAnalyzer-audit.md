@@ -361,13 +361,13 @@ and produces actionable findings for the most common pool-exhaustion scenarios.
 
 | ID | Recommendation | Classification | Impact | Difficulty | Confidence | Priority |
 |---|---|---|---|---|---|---|
-| R1 | Implement `IParallelHeapIndexScanParticipant` (mirror `WcfChannelAnalyzer` pattern) | Improvement | High — eliminates scan bottleneck on large dumps | Low | High | **P0** |
-| R2 | Separate `Broken` (StateValue==16) from `OtherCount`; add `BrokenConnections` to domain model and report | Improvement | High — enables direct pool-recycling diagnosis | Low | High | **P0** |
-| R3 | Add caveat and confidence downgrade in finding generator when `StateScanCapped` | Improvement | Medium — prevents misleading under-reported severity | Low | High | **P1** |
-| R4 | Add `UnknownStateCount` to domain model for objects where field read failed; display in section | Improvement | Medium — closes silent gap between Total and state sum | Low | High | **P1** |
-| R5 | Add `dbconn.broken` metric to `DbConnectionTrendComparer` | Improvement | Medium — enables broken-count trend tracking | Low | High | **P1** |
+| R1 | ✅ **DONE** — Implement `IParallelHeapIndexScanParticipant` (mirror `WcfChannelAnalyzer` pattern) | Improvement | High — eliminates scan bottleneck on large dumps | Low | High | **P0** |
+| R2 | ✅ **DONE** — Separate `Broken` (StateValue==16) from `OtherCount`; add `BrokenConnections` to domain model and report | Improvement | High — enables direct pool-recycling diagnosis | Low | High | **P0** |
+| R3 | ✅ **DONE** — Add caveat and confidence downgrade in finding generator when `StateScanCapped` | Improvement | Medium — prevents misleading under-reported severity | Low | High | **P1** |
+| R4 | ✅ **DONE** — Add `UnknownStateCount` to domain model for objects where field read failed; display in section | Improvement | Medium — closes silent gap between Total and state sum | Low | High | **P1** |
+| R5 | ✅ **DONE** — Add `dbconn.broken` metric to `DbConnectionTrendComparer` | Improvement | Medium — enables broken-count trend tracking | Low | High | **P1** |
 | R6 | Read GC generation for connection objects (if `HeapEntry` exposes it); surface Gen2 open count | Improvement | High — separates leaked from in-flight | Medium | Medium | **P1** |
-| R7 | Read anonymised connection string (`_connectionString` → strip credentials) for server/pool grouping | Improvement | High — identifies which pool is exhausted | Medium | Medium | **P2** |
+| R7 | ✅ **DONE** — Read anonymised connection string (`_connectionString` → strip credentials) for server/pool grouping | Improvement | High — identifies which pool is exhausted | Medium | Medium | **P2** |
 | R8 | Scan for `SqlTransaction` / `IDbTransaction` objects and correlate with open connections | Evolution | Medium — surfaces long-held transaction anti-pattern | Medium | High | **P2** |
 | R9 | Scan for `SqlCommand` / `IDbCommand` objects with same namespace-prefix matching | Evolution | Medium — extends coverage to full resource lifecycle | Low | High | **P2** |
 | R10 | Add a synthetic in-memory heap fixture for unit-testable state-reading coverage | Improvement | Medium — replaces hard-coded dump path test | Medium | High | **P2** |

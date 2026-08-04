@@ -22,7 +22,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_NoFindings_WhenNotFound()
     {
         var gen = new DbConnectionFindingGenerator();
-        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, [], [], false);
+        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, [], [], [], false);
         gen.CanGenerate(result).Should().BeTrue();
         gen.Generate(result).Should().BeEmpty();
     }
@@ -69,7 +69,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_CanGenerate_OnlyForDbConnectionDomainResult()
     {
         var gen = new DbConnectionFindingGenerator();
-        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, [], [], false)).Should().BeTrue();
+        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, [], [], [], false)).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeFalse();
     }
 
@@ -245,20 +245,23 @@ public sealed class InfrastructureFindingGeneratorTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    private static DbConnectionDomainResult DbConnResult(int total, int open, int closed, int other = 0)
+    private static DbConnectionDomainResult DbConnResult(int total, int open, int closed, int broken = 0, int other = 0, int unknown = 0)
     {
         var summary = new List<DbConnectionTypeSummary>
         {
-            new("System.Data.SqlClient.SqlConnection", total, open, closed, other, (ulong)(total * 200))
+            new("System.Data.SqlClient.SqlConnection", total, open, closed, broken, other, unknown, (ulong)(total * 200))
         };
         return new DbConnectionDomainResult(
             ConnectionsFound: total > 0,
             TotalConnections: total,
             OpenConnections: open,
             ClosedConnections: closed,
+            BrokenConnections: broken,
             OtherConnections: other,
+            UnknownStateConnections: unknown,
             ByType: summary,
             TopOpenConnections: [],
+            TopPools: [],
             StateScanCapped: false);
     }
 

@@ -17,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Connection state mapping (System.Data.ConnectionState):
 ///   Closed=0, Open=1, Connecting=2, Executing=4, Fetching=8, Broken=16
 /// </summary>
-public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>
+public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>
 {
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
@@ -29,6 +29,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
     // ADO.NET ConnectionState enum values
     private const int StateOpen      = 1;
     private const int StateClosed    = 0;
+    private const int StateBroken    = 16;
 
     // Namespace prefixes that identify DB connection types
     private static readonly string[] ConnectionNamespacePrefixes =
@@ -54,13 +55,64 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
     // Field names to try in order when reading connection state
     private static readonly string[] StateFieldNames = ["_connectionState", "_state", "m_connectionState"];
 
+    // Field names to try when reading connection string
+    private static readonly string[] ConnectionStringFieldNames = ["_connectionString"];
+
     DbConnectionSnapshot? ITypedResourceInstanceSampler<DbConnectionSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
     {
         int stateVal = InstanceStateSampler<DbConnectionSnapshot>.TryReadIntField(heap, entry.Address, StateFieldNames);
         if (stateVal < 0)
             return null;
 
-        return new DbConnectionSnapshot(typeName, entry.Address, stateVal == StateOpen ? "Open" : stateVal == StateClosed ? "Closed" : "Other", stateVal);
+        string stateLabel = stateVal == StateOpen ? "Open" : stateVal == StateClosed ? "Closed" : stateVal == StateBroken ? "Broken" : "Other";
+
+        // Try to read anonymised connection string for server/pool identification
+        string? anonymisedConnStr = TryReadAnonymisedConnectionString(heap, entry.Address);
+
+        return new DbConnectionSnapshot(typeName, entry.Address, stateLabel, stateVal, anonymisedConnStr);
+    }
+
+    private static string? TryReadAnonymisedConnectionString(ClrHeap heap, ulong address)
+    {
+        try
+        {
+            var obj = heap.GetObject(address);
+            if (!obj.IsValid || obj.Type == null)
+                return null;
+
+            // Try to read _connectionString field
+            var connStringField = obj.Type.GetFieldByName("_connectionString");
+            if (connStringField != null)
+            {
+                var connStringObj = connStringField.ReadObject(address, interior: false);
+                if (connStringObj.IsValid && connStringObj.AsString() is string connStr)
+                {
+                    return AnonymiseConnectionString(connStr);
+                }
+            }
+
+            return null;
+        }
+        catch
+        {
+            // Silently ignore errors reading connection strings
+            return null;
+        }
+    }
+
+    private static string AnonymiseConnectionString(string connStr)
+    {
+        if (string.IsNullOrWhiteSpace(connStr))
+            return connStr;
+
+        // Remove common sensitive keywords: password, pwd, user id, uid
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            connStr,
+            @"(?i)(password|pwd|user\s?id|uid|secret)\s*=\s*[^;]*",
+            "$1=***",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        return result;
     }
 
     // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
@@ -68,7 +120,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
     // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
     private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
-    private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Other, ulong Bytes)>? _typeStats;
+    private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<DbConnectionSnapshot>? _sampler;
 
     /// <summary>
@@ -84,12 +136,12 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
 
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
+        var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
         {
             // Pre-seed from TypeAggregates when available (no heap access needed for counts)
             int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, kv.Value.Bytes);
+            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, kv.Value.Bytes);
         }
 
         _typeStats = typeStats;
@@ -103,6 +155,45 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
     /// class is public — an implicit implementation would leak the internal type as public API.
     /// </summary>
     void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+        new DbConnectionAnalyzer();
+
+    // Merges per-type state-change counts (open/closed/other) and top open samples from
+    // disjoint-range workers. Total and Bytes come from TypeAggregates (pre-seeded identically
+    // on every worker by BeforeHeapIndexScan) and are not summed.
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        var typeStats = _typeStats!;
+        var sampler = _sampler!;
+
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (DbConnectionAnalyzer)p;
+            if (other._typeStats is null) continue;
+
+            foreach (var kvp in other._typeStats)
+            {
+                if (!typeStats.TryGetValue(kvp.Key, out var self))
+                {
+                    typeStats[kvp.Key] = kvp.Value;
+                    continue;
+                }
+
+                var o = kvp.Value;
+                typeStats[kvp.Key] = (self.Name, self.Total,
+                    self.Open + o.Open,
+                    self.Closed + o.Closed,
+                    self.Broken + o.Broken,
+                    self.Other + o.Other,
+                    self.Unknown + o.Unknown,
+                    self.Bytes);
+            }
+
+            if (other._sampler is not null)
+                sampler.MergeFrom(other._sampler);
+        }
+    }
 
     private void OnHeapEntry(in HeapEntry entry)
     {
@@ -118,14 +209,20 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
         DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, typeName);
 
         // Tally state
-        int open = ts.Open; int closed = ts.Closed; int other = ts.Other;
+        int open = ts.Open; int closed = ts.Closed; int broken = ts.Broken; int other = ts.Other; int unknown = ts.Unknown;
         if (snap is not null)
         {
             if (snap.StateValue == StateOpen)        open++;
             else if (snap.StateValue == StateClosed) closed++;
+            else if (snap.StateValue == StateBroken) broken++;
             else                                     other++;
         }
-        typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, other, ts.Bytes);
+        else
+        {
+            // Field read failed; count as unknown state
+            unknown++;
+        }
+        typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, broken, other, unknown, ts.Bytes);
 
         // Capture top-N open connections for the detail table
         if (snap is not null && snap.StateValue == StateOpen)
@@ -146,32 +243,66 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IHeapIndexScanParticipant,
         if (_typeStats is null || _typeStats.Count == 0)
             return Empty();
 
-        int totalConnections = 0, totalOpen = 0, totalClosed = 0, totalOther = 0;
+        int totalConnections = 0, totalOpen = 0, totalClosed = 0, totalBroken = 0, totalOther = 0, totalUnknown = 0;
         var byType = new List<DbConnectionTypeSummary>(_typeStats.Count);
 
         foreach (var kv in _typeStats)
         {
             var ts = kv.Value;
-            byType.Add(new DbConnectionTypeSummary(ts.Name, ts.Total, ts.Open, ts.Closed, ts.Other, ts.Bytes));
+            byType.Add(new DbConnectionTypeSummary(ts.Name, ts.Total, ts.Open, ts.Closed, ts.Broken, ts.Other, ts.Unknown, ts.Bytes));
             totalConnections += ts.Total;
             totalOpen        += ts.Open;
             totalClosed      += ts.Closed;
+            totalBroken      += ts.Broken;
             totalOther       += ts.Other;
+            totalUnknown     += ts.Unknown;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
+
+        // Build top pools by server/database grouping
+        var topPools = BuildTopPools(_sampler?.TopSamples ?? []);
 
         return new DbConnectionDomainResult(
             ConnectionsFound:    totalConnections > 0,
             TotalConnections:    totalConnections,
             OpenConnections:     totalOpen,
             ClosedConnections:   totalClosed,
+            BrokenConnections:   totalBroken,
             OtherConnections:    totalOther,
+            UnknownStateConnections: totalUnknown,
             ByType:              byType,
             TopOpenConnections:  _sampler?.TopSamples ?? [],
+            TopPools:            topPools,
             StateScanCapped:     _sampler?.ScanCapped ?? false);
     }
 
+    private static List<PoolSummary> BuildTopPools(IReadOnlyList<DbConnectionSnapshot> topOpenConnections)
+    {
+        var poolGroups = new Dictionary<string, (int Open, int Total)>();
+
+        foreach (var snap in topOpenConnections)
+        {
+            string poolId = snap.AnonymisedConnectionString ?? "unknown";
+            if (poolGroups.TryGetValue(poolId, out var counts))
+            {
+                poolGroups[poolId] = (counts.Open + 1, counts.Total + 1);
+            }
+            else
+            {
+                poolGroups[poolId] = (1, 1);
+            }
+        }
+
+        var topPools = poolGroups
+            .OrderByDescending(kvp => kvp.Value.Open)
+            .Take(10)
+            .Select(kvp => new PoolSummary(kvp.Key, kvp.Value.Open, kvp.Value.Total))
+            .ToList();
+
+        return topPools;
+    }
+
     private static DbConnectionDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, [], [], [], false);
 }

@@ -10,7 +10,9 @@ internal sealed record DbConnectionTypeSummary(
     int TotalCount,
     int OpenCount,
     int ClosedCount,
+    int BrokenCount,
     int OtherCount,
+    int UnknownStateCount,
     ulong TotalBytes);
 
 /// <summary>
@@ -20,7 +22,16 @@ internal sealed record DbConnectionSnapshot(
     string TypeName,
     ulong Address,
     string StateLabel,
-    int StateValue);
+    int StateValue,
+    string? AnonymisedConnectionString = null);
+
+/// <summary>
+/// Summary of connections grouped by pool (server/database).
+/// </summary>
+internal sealed record PoolSummary(
+    string PoolIdentifier,
+    int OpenConnections,
+    int TotalConnections);
 
 /// <summary>
 /// Domain result produced by <c>DbConnectionAnalyzer</c>.
@@ -31,9 +42,72 @@ internal sealed record DbConnectionDomainResult(
     int TotalConnections,
     int OpenConnections,
     int ClosedConnections,
+    int BrokenConnections,
     int OtherConnections,
+    int UnknownStateConnections,
     IReadOnlyList<DbConnectionTypeSummary> ByType,
     IReadOnlyList<DbConnectionSnapshot> TopOpenConnections,
+    IReadOnlyList<PoolSummary> TopPools,
+    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+
+// ── SQL Transaction ───────────────────────────────────────────────────────────
+
+/// <summary>
+/// Per-type count/state summary for SQL transaction objects found on the heap.
+/// </summary>
+internal sealed record SqlTransactionTypeSummary(
+    string TypeName,
+    int TotalCount,
+    int DisposedCount,
+    int ActiveCount,
+    int OtherCount,
+    ulong TotalBytes);
+
+/// <summary>
+/// Lightweight snapshot of a single SQL transaction object.
+/// </summary>
+internal sealed record SqlTransactionSnapshot(
+    string TypeName,
+    ulong Address,
+    string StateLabel,
+    int StateValue);
+
+/// <summary>
+/// Domain result for SQL transaction analysis.
+/// Reports orphaned or long-held transactions that prevent pool return.
+/// </summary>
+internal sealed record SqlTransactionDomainResult(
+    bool TransactionsFound,
+    int TotalTransactions,
+    int DisposedCount,
+    int ActiveCount,
+    int OtherCount,
+    IReadOnlyList<SqlTransactionTypeSummary> ByType,
+    IReadOnlyList<SqlTransactionSnapshot> TopActiveTransactions,
+    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+
+// ── SQL Command ───────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Per-type count summary for SQL command objects found on the heap.
+/// </summary>
+internal sealed record SqlCommandTypeSummary(
+    string TypeName,
+    int TotalCount,
+    int DisposedCount,
+    int ActiveCount,
+    ulong TotalBytes);
+
+/// <summary>
+/// Domain result for SQL command analysis.
+/// Reports outstanding commands that may hold connection resources.
+/// </summary>
+internal sealed record SqlCommandDomainResult(
+    bool CommandsFound,
+    int TotalCommands,
+    int DisposedCount,
+    int ActiveCount,
+    IReadOnlyList<SqlCommandTypeSummary> ByType,
     bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── WCF Channel ───────────────────────────────────────────────────────────────

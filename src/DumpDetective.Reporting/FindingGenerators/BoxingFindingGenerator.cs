@@ -57,13 +57,17 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
         // Oversized value types — risk of stack pressure / unintended copies.
         if (r.OversizedValueTypeCount > 100)
         {
+            string oversizedTypeList = r.TopOversizedTypes.Count > 0
+                ? string.Join(", ", r.TopOversizedTypes.Take(5).Select(t => $"{t.TypeName} ({t.StaticSize}B, {t.Count:N0}x)"))
+                : "—";
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: FindingSeverity.Info,
                 Title: "Oversized value type instances detected",
                 Evidence: $"{r.OversizedValueTypeCount:N0} instances of value types with StaticSize > 64 bytes. " +
-                          $"Large structs incur significant copy cost and stack pressure.",
+                          $"Large structs incur significant copy cost and stack pressure. " +
+                          $"Top offenders: {oversizedTypeList}.",
                 Recommendation: "Convert large structs to classes, or use 'in'/'ref' parameters to avoid copies.",
                 Tags: ["boxing", "struct", "value-type", "performance"],
                 MetricValue: r.OversizedValueTypeCount,

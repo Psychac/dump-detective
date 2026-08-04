@@ -10,6 +10,11 @@ internal sealed record BoxedTypeEntry(
     ulong TotalBoxBytes,
     bool IsEnum);
 
+internal sealed record OversizedTypeEntry(
+    string TypeName,
+    int StaticSize,
+    int Count);
+
 internal sealed record StructPaddingEntry(
     string TypeName,
     int TotalFieldBytes,
@@ -18,11 +23,12 @@ internal sealed record StructPaddingEntry(
     double WasteRatio);
 
 internal sealed record BoxingDomainResult(
-    int TotalBoxedObjects,
+    long TotalBoxedObjects,
     ulong TotalBoxedBytes,
     IReadOnlyList<BoxedTypeEntry> TopBoxedTypes,
-    int BoxedEnumCount,
+    long BoxedEnumCount,
     ulong BoxedEnumBytes,
-    int OversizedValueTypeCount,
+    long OversizedValueTypeCount,
+    IReadOnlyList<OversizedTypeEntry> TopOversizedTypes,
     IReadOnlyList<StructPaddingEntry> TopPaddingWasteTypes,
     bool TypeScanCapped) : AnalyzerDomainResult;

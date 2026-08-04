@@ -54,6 +54,20 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
         }
 
+        if (d.TopOversizedTypes.Count > 0)
+        {
+            var oversizedRows = new List<TableRow>(d.TopOversizedTypes.Count);
+            foreach (OversizedTypeEntry e in d.TopOversizedTypes)
+            {
+                oversizedRows.Add(new TableRow([
+                    Cell(e.TypeName),
+                    Cell($"{e.StaticSize} B",  e.StaticSize),
+                    Cell($"{e.Count:N0}",      e.Count)]));
+            }
+            compactTables.Add(STCompact("Oversized value types",
+                new[] { CH("Type"), CH("StaticSize"), CH("Instance Count","number") }, oversizedRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (d.TopPaddingWasteTypes.Count > 0)
         {
             var padRows = new List<TableRow>(Math.Min(d.TopPaddingWasteTypes.Count, TopPaddingToShow));

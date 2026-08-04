@@ -52,21 +52,24 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (typeAggregates is null)
             {
-                return new BoxingDomainResult(0, 0, [], 0, 0, 0, [], false);
+                return new BoxingDomainResult(0, 0, [], 0, 0, 0, [], [], false);
             }
 
             // ── Boxing inventory ──────────────────────────────────────────────
             var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum)>(
                 StringComparer.Ordinal);
 
-            int totalBoxedObjects = 0;
+            long totalBoxedObjects = 0;
             ulong totalBoxedBytes = 0;
-            int boxedEnumCount = 0;
+            long boxedEnumCount = 0;
             ulong boxedEnumBytes = 0;
-            int oversizedCount = 0;
+            long oversizedCount = 0;
 
             // Struct padding candidates: collect during the same pass
             var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes)>(64);
+
+            // Oversized value type candidates: aggregated by type name during the same pass
+            var oversizedByTypeName = new Dictionary<string, (int StaticSize, int Count)>(StringComparer.Ordinal);
 
             // Dictionary enumeration order depends on parallel segment-merge order,
             // which differs between disk/memory index builders (and across runs of
@@ -126,7 +129,13 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Oversized value types — StaticSize reflects the value layout size
                 if (clrType.StaticSize > options.OversizedThresholdBytes)
+                {
                     oversizedCount += count;
+                    if (oversizedByTypeName.TryGetValue(typeName, out var existingOversized))
+                        oversizedByTypeName[typeName] = (existingOversized.StaticSize, existingOversized.Count + count);
+                    else
+                        oversizedByTypeName[typeName] = (clrType.StaticSize, count);
+                }
 
                 if (boxedByTypeName.TryGetValue(typeName, out var existing))
                     boxedByTypeName[typeName] = (existing.Count + count, existing.Bytes + bytes, isEnum);
@@ -182,6 +191,18 @@ namespace DumpDetective.Analysis.Analyzers
                     WasteRatio: ratio));
             }
 
+            // ── Build top oversized types ─────────────────────────────────────
+            var oversizedList = new List<OversizedTypeEntry>(oversizedByTypeName.Count);
+            foreach (KeyValuePair<string, (int StaticSize, int Count)> kv2 in oversizedByTypeName)
+                oversizedList.Add(new OversizedTypeEntry(kv2.Key, kv2.Value.StaticSize, kv2.Value.Count));
+
+            oversizedList.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+
+            int oversizedLimit = Math.Min(oversizedList.Count, options.TopOversizedTypeLimit);
+            var topOversizedTypes = oversizedLimit == oversizedList.Count
+                ? oversizedList
+                : oversizedList.GetRange(0, oversizedLimit);
+
             return new BoxingDomainResult(
                 TotalBoxedObjects: totalBoxedObjects,
                 TotalBoxedBytes: totalBoxedBytes,
@@ -189,6 +210,7 @@ namespace DumpDetective.Analysis.Analyzers
                 BoxedEnumCount: boxedEnumCount,
                 BoxedEnumBytes: boxedEnumBytes,
                 OversizedValueTypeCount: oversizedCount,
+                TopOversizedTypes: topOversizedTypes,
                 TopPaddingWasteTypes: topPaddingWaste,
                 TypeScanCapped: scanCapped);
         }

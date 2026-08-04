@@ -447,8 +447,8 @@ limit actionability.
 
 | # | Recommendation | Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P0-1 | **Add `TopOversizedTypes` list to domain result and report.** Collect `(TypeName, StaticSize)` during the existing scan loop when `StaticSize > threshold`. Emit in finding generator with type names. | High — makes the only currently non-actionable finding actionable | Low | High | Improvement |
-| P0-2 | **Fix integer overflow: change `totalBoxedObjects` and `oversizedCount` to `long`.** On heaps with hundreds of millions of small boxed primitives, the 32-bit accumulators silently overflow. | High — correctness | Low | High | Improvement |
+| P0-1 | ✓ **COMPLETE** — Added `TopOversizedTypes` list to domain result and report. `OversizedTypeEntry` record collects `(TypeName, StaticSize, Count)` during scan loop when `StaticSize > threshold`. Emitted in finding generator and section builder with type names and counts. | High — makes the only currently non-actionable finding actionable | Low | High | Improvement |
+| P0-2 | ✓ **COMPLETE** — Fixed integer overflow by promoting `totalBoxedObjects`, `oversizedCount`, and `boxedEnumCount` to `long` in analyzer. Updated `BoxingDomainResult` fields (`TotalBoxedObjects`, `BoxedEnumCount`, `OversizedValueTypeCount`) from `int` to `long`. Prevents silent overflow on heaps with hundreds of millions of small boxed primitives. | High — correctness | Low | High | Improvement |
 
 #### P1 — High
 

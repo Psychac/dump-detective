@@ -118,8 +118,10 @@ internal sealed record SqlCommandDomainResult(
 internal sealed record WcfChannelTypeSummary(
     string TypeName,
     int TotalCount,
+    int OpeningCount,
     int OpenedCount,
     int FaultedCount,
+    int ClosingCount,
     int ClosedCount,
     int OtherCount,
     ulong TotalBytes);
@@ -139,8 +141,10 @@ internal sealed record WcfChannelSnapshot(
 internal sealed record WcfChannelDomainResult(
     bool WcfPresent,
     int TotalChannels,
+    int OpeningChannels,
     int OpenedChannels,
     int FaultedChannels,
+    int ClosingChannels,
     int ClosedChannels,
     int OtherChannels,
     IReadOnlyList<WcfChannelTypeSummary> ByType,

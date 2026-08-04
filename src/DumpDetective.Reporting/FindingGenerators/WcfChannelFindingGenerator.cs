@@ -50,8 +50,8 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
                 Severity: sev,
                 Title: $"{r.TotalChannels:N0} WCF channel objects on managed heap",
                 Evidence: $"Total WCF channels: {r.TotalChannels:N0}. " +
-                          $"Opened: {r.OpenedChannels:N0}, Faulted: {r.FaultedChannels:N0}, " +
-                          $"Closed: {r.ClosedChannels:N0}, Other: {r.OtherChannels:N0}.",
+                          $"Opening: {r.OpeningChannels:N0}, Opened: {r.OpenedChannels:N0}, Faulted: {r.FaultedChannels:N0}, " +
+                          $"Closing: {r.ClosingChannels:N0}, Closed: {r.ClosedChannels:N0}, Other: {r.OtherChannels:N0}.",
                 Recommendation:
                     "Each WCF channel holds a network connection and associated buffers. " +
                     "Create a new channel per logical operation and Close/Abort it immediately after use. " +

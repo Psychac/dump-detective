@@ -11,9 +11,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (result is not WcfChannelDomainResult r) return [];
             var metrics = new List<AnalyzerMetric>
             {
-                new("wcf.total",   null, r.TotalChannels,   "channels", MetricTrendDirection.HigherIsWorse),
-                new("wcf.opened",  null, r.OpenedChannels,  "channels", MetricTrendDirection.Neutral),
-                new("wcf.faulted", null, r.FaultedChannels, "channels", MetricTrendDirection.HigherIsWorse),
+                new("wcf.total",    null, r.TotalChannels,    "channels", MetricTrendDirection.HigherIsWorse),
+                new("wcf.opening",  null, r.OpeningChannels,  "channels", MetricTrendDirection.HigherIsWorse),
+                new("wcf.opened",   null, r.OpenedChannels,   "channels", MetricTrendDirection.Neutral),
+                new("wcf.faulted",  null, r.FaultedChannels,  "channels", MetricTrendDirection.HigherIsWorse),
+                new("wcf.closing",  null, r.ClosingChannels,  "channels", MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (WcfChannelTypeSummary t in r.ByType)
@@ -30,9 +32,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not WcfChannelDomainResult b || current is not WcfChannelDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("wcf.total",   null, b.TotalChannels,   c.TotalChannels,   "channels", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("wcf.opened",  null, b.OpenedChannels,  c.OpenedChannels,  "channels", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("wcf.faulted", null, b.FaultedChannels, c.FaultedChannels, "channels", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("wcf.total",    null, b.TotalChannels,    c.TotalChannels,    "channels", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("wcf.opening",  null, b.OpeningChannels,  c.OpeningChannels,  "channels", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("wcf.opened",   null, b.OpenedChannels,   c.OpenedChannels,   "channels", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("wcf.faulted",  null, b.FaultedChannels,  c.FaultedChannels,  "channels", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("wcf.closing",  null, b.ClosingChannels,  c.ClosingChannels,  "channels", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

@@ -36,8 +36,10 @@ public sealed class WcfChannelAnalyzerDiscrepancyTests
             WcfChannelDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache);
             diskResult.WcfPresent.Should().Be(memResult.WcfPresent);
             diskResult.TotalChannels.Should().Be(memResult.TotalChannels);
+            diskResult.OpeningChannels.Should().Be(memResult.OpeningChannels);
             diskResult.OpenedChannels.Should().Be(memResult.OpenedChannels);
             diskResult.FaultedChannels.Should().Be(memResult.FaultedChannels);
+            diskResult.ClosingChannels.Should().Be(memResult.ClosingChannels);
             diskResult.ClosedChannels.Should().Be(memResult.ClosedChannels);
             diskResult.OtherChannels.Should().Be(memResult.OtherChannels);
             diskResult.StateScanCapped.Should().Be(memResult.StateScanCapped);

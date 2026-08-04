@@ -24,8 +24,10 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_channels"] = new NumericMetricValue(d.TotalChannels, MetricUnit.Count),
+            ["opening"] = new NumericMetricValue(d.OpeningChannels, MetricUnit.Count),
             ["opened"] = new NumericMetricValue(d.OpenedChannels, MetricUnit.Count),
             ["faulted"] = new NumericMetricValue(d.FaultedChannels, MetricUnit.Count),
+            ["closing"] = new NumericMetricValue(d.ClosingChannels, MetricUnit.Count),
             ["closed"] = new NumericMetricValue(d.ClosedChannels, MetricUnit.Count),
         };
 
@@ -46,14 +48,16 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 typeRows.Add(new TableRow([
                     Cell(t.TypeName),
                     Cell($"{t.TotalCount:N0}",   t.TotalCount),
+                    Cell($"{t.OpeningCount:N0}", t.OpeningCount),
                     Cell($"{t.OpenedCount:N0}",  t.OpenedCount),
                     Cell($"{t.FaultedCount:N0}", t.FaultedCount),
+                    Cell($"{t.ClosingCount:N0}", t.ClosingCount),
                     Cell($"{t.ClosedCount:N0}",  t.ClosedCount),
                     Cell($"{t.OtherCount:N0}",   t.OtherCount),
                     Cell(FormatBytes(t.TotalBytes)),
                 ]));
             }
-            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Top faulted channels

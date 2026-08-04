@@ -25,9 +25,11 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     private const int TopFaultedCap = 50;
 
     // CommunicationState enum values
+    private const int StateOpening = 1;
     private const int StateOpened  = 2;
-    private const int StateFaulted = 5;
+    private const int StateClosing = 3;
     private const int StateClosed  = 4;
+    private const int StateFaulted = 5;
 
     private static readonly ClrElementType[] StateElementTypes =
         [ClrElementType.Int32, ClrElementType.UInt32, ClrElementType.Object];
@@ -56,7 +58,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
     private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
-    private Dictionary<ulong, (string Name, int Total, int Opened, int Faulted, int Closed, int Other, ulong Bytes)>? _typeStats;
+    private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<WcfChannelSnapshot>? _sampler;
 
     /// <summary>
@@ -72,11 +74,11 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
 
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Opened, int Faulted, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
+        var typeStats = new Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
         {
             int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, kv.Value.Bytes);
+            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, 0, kv.Value.Bytes);
         }
 
         _typeStats = typeStats;
@@ -115,8 +117,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
                 var o = kvp.Value;
                 typeStats[kvp.Key] = (self.Name, self.Total,
+                    self.Opening + o.Opening,
                     self.Opened + o.Opened,
                     self.Faulted + o.Faulted,
+                    self.Closing + o.Closing,
                     self.Closed + o.Closed,
                     self.Other + o.Other,
                     self.Bytes);
@@ -138,16 +142,18 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
         WcfChannelSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, ts.Name);
 
-        int opened = ts.Opened; int faulted = ts.Faulted; int closed = ts.Closed; int other = ts.Other;
+        int opening = ts.Opening; int opened = ts.Opened; int faulted = ts.Faulted; int closing = ts.Closing; int closed = ts.Closed; int other = ts.Other;
         if (snap is not null)
         {
-            if (snap.StateValue == StateOpened)       opened++;
+            if (snap.StateValue == StateOpening)      opening++;
+            else if (snap.StateValue == StateOpened)  opened++;
             else if (snap.StateValue == StateFaulted) faulted++;
+            else if (snap.StateValue == StateClosing) closing++;
             else if (snap.StateValue == StateClosed)  closed++;
             else                                      other++;
         }
 
-        typeStats[entry.MethodTable] = (ts.Name, ts.Total, opened, faulted, closed, other, ts.Bytes);
+        typeStats[entry.MethodTable] = (ts.Name, ts.Total, opening, opened, faulted, closing, closed, other, ts.Bytes);
 
         if (snap is not null && snap.StateValue == StateFaulted)
             sampler.AddTopSample(snap);
@@ -167,16 +173,18 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             return Empty();
 
         // ── Build result ──────────────────────────────────────────────────────
-        int totalChannels = 0, totalOpened = 0, totalFaulted = 0, totalClosed = 0, totalOther = 0;
+        int totalChannels = 0, totalOpening = 0, totalOpened = 0, totalFaulted = 0, totalClosing = 0, totalClosed = 0, totalOther = 0;
         var byType = new List<WcfChannelTypeSummary>(_typeStats.Count);
 
         foreach (var kv in _typeStats)
         {
             var ts = kv.Value;
-            byType.Add(new WcfChannelTypeSummary(ts.Name, ts.Total, ts.Opened, ts.Faulted, ts.Closed, ts.Other, ts.Bytes));
+            byType.Add(new WcfChannelTypeSummary(ts.Name, ts.Total, ts.Opening, ts.Opened, ts.Faulted, ts.Closing, ts.Closed, ts.Other, ts.Bytes));
             totalChannels += ts.Total;
+            totalOpening  += ts.Opening;
             totalOpened   += ts.Opened;
             totalFaulted  += ts.Faulted;
+            totalClosing  += ts.Closing;
             totalClosed   += ts.Closed;
             totalOther    += ts.Other;
         }
@@ -186,8 +194,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         return new WcfChannelDomainResult(
             WcfPresent:       totalChannels > 0,
             TotalChannels:    totalChannels,
+            OpeningChannels:  totalOpening,
             OpenedChannels:   totalOpened,
             FaultedChannels:  totalFaulted,
+            ClosingChannels:  totalClosing,
             ClosedChannels:   totalClosed,
             OtherChannels:    totalOther,
             ByType:           byType,
@@ -207,5 +217,5 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     };
 
     private static WcfChannelDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
 }

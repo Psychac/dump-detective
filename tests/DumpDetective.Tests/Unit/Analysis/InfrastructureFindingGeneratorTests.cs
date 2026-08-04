@@ -81,7 +81,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void WcfChannel_NoFindings_WhenNotPresent()
     {
         var gen = new WcfChannelFindingGenerator();
-        var result = new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, [], [], false);
+        var result = new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -191,7 +191,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new HttpObjectFindingGenerator();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
-        gen.CanGenerate(new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
+        gen.CanGenerate(new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -265,17 +265,19 @@ public sealed class InfrastructureFindingGeneratorTests
             StateScanCapped: false);
     }
 
-    private static WcfChannelDomainResult WcfResult(int total, int opened, int faulted, int closed, int other = 0)
+    private static WcfChannelDomainResult WcfResult(int total, int opened, int faulted, int closed, int other = 0, int opening = 0, int closing = 0)
     {
         var summary = new List<WcfChannelTypeSummary>
         {
-            new("System.ServiceModel.Channels.ServiceChannel", total, opened, faulted, closed, other, (ulong)(total * 512))
+            new("System.ServiceModel.Channels.ServiceChannel", total, opening, opened, faulted, closing, closed, other, (ulong)(total * 512))
         };
         return new WcfChannelDomainResult(
             WcfPresent: total > 0,
             TotalChannels: total,
+            OpeningChannels: opening,
             OpenedChannels: opened,
             FaultedChannels: faulted,
+            ClosingChannels: closing,
             ClosedChannels: closed,
             OtherChannels: other,
             ByType: summary,

@@ -416,7 +416,7 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| P0-1 | **Add `OpeningChannels` and `ClosingChannels` to domain model and report.** Opening = stuck connecting; Closing = stuck draining. Both are actionable and currently invisible. | High | Low | High | Improvement |
+| P0-1 | **Add `OpeningChannels` and `ClosingChannels` to domain model and report.** Opening = stuck connecting; Closing = stuck draining. Both are actionable and currently invisible. | High | Low | High | ✅ Complete (commit 40da729) |
 | P0-2 | **Extract remote endpoint address into `WcfChannelSnapshot`.** Read `_remoteAddress` → `Uri` string in `TrySample`. Report in faulted-channel table and finding evidence. | Critical | Medium | High | Improvement |
 
 #### P1 — High
@@ -469,3 +469,25 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
    P0-2 → P0-1 → P1-1 in that order. These three changes, totalling approximately one day
    of implementation work, would make DumpDetective's WCF analysis definitively superior to
    any available tool including manual WinDbg + SOS workflows.
+
+---
+
+## Implementation Status
+
+### ✅ P0-1 Complete (2026-08-04)
+
+**Commit:** `40da729`  
+**Status:** Opening and Closing states now first-class in domain model
+
+**What was done:**
+- Added `OpeningChannels` and `ClosingChannels` to `WcfChannelDomainResult` and `WcfChannelTypeSummary`
+- Analyzer now tracks state transitions: Opening (1), Closing (3) counted separately from Other
+- Section builder displays Opening/Closing in key metrics and per-type table columns
+- Finding generator includes state breakdown in evidence: "Opening: N, Opened: N, Faulted: N, Closing: N, Closed: N, Other: N"
+- Trend comparer added `wcf.opening` and `wcf.closing` metrics marked as HigherIsWorse
+
+**Impact:**
+- Connection-level failures (high Opening count) now visible in reports
+- Graceful shutdown bottlenecks (high Closing count) now visible in reports
+- Trend analysis can now track Opening/Closing growth across dumps
+- Ready for P2-2: cross-correlation with timeout exceptions for automated diagnosis

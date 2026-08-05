@@ -95,12 +95,23 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         };
     }
 
+    public AnalysisPipeline CreatePipeline(IReadOnlyList<IAnalyzer> activeAnalyzers) =>
+        new(activeAnalyzers, _findingGenerationPipeline);
+
+    /// <summary>
+    /// Runs the shared heap-index/thread-stack scan passes for <paramref name="pipeline"/>.
+    /// Callers that want this work attributed to the indexing phase rather than "running
+    /// analyzers" should call this before that phase transition; safe to call again (or not at
+    /// all) before <see cref="ExecuteAsync"/> — the pipeline only runs the shared scans once.
+    /// </summary>
+    public void RunSharedScans(AnalysisPipeline pipeline, RuntimeAnalysisContext context, CancellationToken cancellationToken) =>
+        pipeline.RunSharedScans(context, cancellationToken);
+
     public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(
+        AnalysisPipeline pipeline,
         RuntimeAnalysisContext context,
-        IReadOnlyList<IAnalyzer> activeAnalyzers,
         CancellationToken cancellationToken)
     {
-        AnalysisPipeline pipeline = new(activeAnalyzers, _findingGenerationPipeline);
         return await pipeline.ExecuteAsync(context, cancellationToken);
     }
 }

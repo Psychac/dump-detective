@@ -23,6 +23,37 @@ internal sealed class AnalysisPipeline(
     private readonly AnalyzerExecutionRunner _executionRunner = executionRunner ?? new AnalyzerExecutionRunner(diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher());
     // Cached once per pipeline instance to avoid repeated OS round-trips per analyzer.
     private static readonly Process _currentProcess = Process.GetCurrentProcess();
+    private bool _sharedScansRun;
+
+    /// <summary>
+    /// Runs the shared heap-index/thread-stack scan passes (design: single pass fanned out to
+    /// every <see cref="IHeapIndexScanParticipant"/>/<see cref="IThreadStackScanParticipant"/>).
+    /// Exposed so callers that want this attributed to the indexing phase (not "running
+    /// analyzers") can call it before that phase transition; idempotent — <see cref="ExecuteAsync"/>
+    /// skips it if already run.
+    /// </summary>
+    public void RunSharedScans(RuntimeAnalysisContext context, CancellationToken cancellationToken)
+    {
+        if (_sharedScansRun)
+            return;
+        _sharedScansRun = true;
+
+        IReadOnlyList<IHeapIndexScanParticipant> heapIndexScanParticipants = _analyzers.OfType<IHeapIndexScanParticipant>().ToArray();
+        if (heapIndexScanParticipants.Count > 0 && context.Cache is HeapAnalysisCache heapIndexCache)
+        {
+            new HeapIndexScanDispatcher().Run(heapIndexCache, context, heapIndexScanParticipants, cancellationToken);
+        }
+
+        IReadOnlyList<IThreadStackScanParticipant> threadStackScanParticipants = _analyzers.OfType<IThreadStackScanParticipant>().ToArray();
+        if (threadStackScanParticipants.Count > 0)
+        {
+            int maxFramesPerThread = 1;
+            foreach (IThreadStackScanParticipant participant in threadStackScanParticipants)
+                maxFramesPerThread = Math.Max(maxFramesPerThread, participant.GetRequiredFrameCount(context));
+
+            new ThreadStackScanDispatcher().Run(context.Runtime, context, threadStackScanParticipants, maxFramesPerThread, cancellationToken);
+        }
+    }
 
     public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(RuntimeAnalysisContext context, CancellationToken cancellationToken)
     {
@@ -44,21 +75,7 @@ internal sealed class AnalysisPipeline(
             ExceptionType: null,
             ExceptionMessage: null));
 
-        IReadOnlyList<IHeapIndexScanParticipant> heapIndexScanParticipants = _analyzers.OfType<IHeapIndexScanParticipant>().ToArray();
-        if (heapIndexScanParticipants.Count > 0 && context.Cache is HeapAnalysisCache heapIndexCache)
-        {
-            new HeapIndexScanDispatcher().Run(heapIndexCache, context, heapIndexScanParticipants, cancellationToken);
-        }
-
-        IReadOnlyList<IThreadStackScanParticipant> threadStackScanParticipants = _analyzers.OfType<IThreadStackScanParticipant>().ToArray();
-        if (threadStackScanParticipants.Count > 0)
-        {
-            int maxFramesPerThread = 1;
-            foreach (IThreadStackScanParticipant participant in threadStackScanParticipants)
-                maxFramesPerThread = Math.Max(maxFramesPerThread, participant.GetRequiredFrameCount(context));
-
-            new ThreadStackScanDispatcher().Run(context.Runtime, context, threadStackScanParticipants, maxFramesPerThread, cancellationToken);
-        }
+        RunSharedScans(context, cancellationToken);
 
         await RunAnalyzerBatchAsync(_analyzers, context, runId, runResults, cancellationToken);
 

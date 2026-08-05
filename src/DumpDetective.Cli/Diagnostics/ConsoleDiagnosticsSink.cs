@@ -282,6 +282,10 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         {
             if (_currentStageIndex < 0 || _currentStageIndex >= _stages.Count)
             {
+                // Not part of any tracked analyzer group (e.g. the shared heap-index scan
+                // dispatcher) — still print an immediate start line so the console doesn't go
+                // silent between the previous stage completing and this pass's first tick.
+                ConsoleUx.AnalyzerStart(analyzerName);
                 return;
             }
 

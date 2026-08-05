@@ -70,9 +70,11 @@ namespace DumpDetective.Analysis.Analyzers
             _participantOptions = context.AnalysisOptions.EventLeak;
             _participantGroupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
             _participantAppDomains = context.Heap.Runtime.AppDomains;
+            context.ReportSubPhase?.Invoke("building root hint map");
             var __rootHintSw = System.Diagnostics.Stopwatch.StartNew();
             _participantRootHints = BuildRootHintMap(context.Heap, context.Cache);
             _logger?.LogDebug("EventLeakAnalyzer.BuildRootHintMap: {ElapsedSeconds:F2}s", __rootHintSw.Elapsed.TotalSeconds);
+            context.ReportSubPhase?.Invoke("building publisher registry");
             var __registrySw = System.Diagnostics.Stopwatch.StartNew();
             _participantRegistry = PublisherRegistry.Build(context.Heap, context.Cache);
             _logger?.LogDebug("EventLeakAnalyzer.PublisherRegistry.Build: {ElapsedSeconds:F2}s", __registrySw.Elapsed.TotalSeconds);

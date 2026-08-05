@@ -264,7 +264,9 @@ unbounded runtime but caps coverage at ~7% of a 30 M object heap.
   `maxBreadth × 15`; at most a few MB.
 - Per-worker `DominatorAnalyzer` allocations in parallel mode: each worker holds its own
   `_referenceCount` dictionary. With K workers and 1 M cap each, total memory is K × 20 MB
-  before `MergePartial` reduces to one. This can be significant at high parallelism.
+  before `MergePartial` reduces to one. This can be significant at high parallelism. See
+  [p1-item-2-parallel-dispatcher-design-sketch.md § Follow-up idea](../phase-0/p1-item-2-parallel-dispatcher-design-sketch.md#follow-up-idea-not-yet-scoped-per-worker-accumulator-memory-for-large-caps)
+  for a proposed direction (per-worker cap division or disk-spill) — not yet scoped as work.
 
 ### Scalability Bottleneck
 
@@ -421,6 +423,7 @@ output is treated as authoritative.
 | P3 | Investigate Lengauer-Tarjan dominator tree over Gen2+LOH subgraph | Very High — true retained bytes, competitive with dotMemory | Very High | High | Evolution |
 | P3 | Dominator chain detection (A → B → C with cumulative retained bytes) | High — root cause identification | High | Medium | Evolution |
 | P3 | Cross-type retained-overlap metric ("shared subgraph size") | Medium — explains why exclusive retained bytes are 0 for co-dominating types | High | Medium | Evolution |
+| P3 | Cap or disk-spill per-worker `_referenceCount` in parallel mode (see design sketch follow-up) | Medium — bounds K × 20 MB peak RSS at high parallelism | Medium | Medium | Improvement |
 
 ### Final Verdict
 

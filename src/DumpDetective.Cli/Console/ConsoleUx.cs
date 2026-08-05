@@ -97,6 +97,13 @@ internal static class ConsoleUx
         SafeMarkupLine($"{IndentAnalyzer}[deepskyblue1]◆[/]  [grey][[{current}/{total}]][/]  [bold]{Escape(analyzerName)}[/]");
     }
 
+    // Used for passes that aren't part of any tracked analyzer stage (e.g. the shared
+    // heap-index/thread-stack scan dispatchers), so no [current/total] bracket applies.
+    public static void AnalyzerStart(string analyzerName)
+    {
+        SafeMarkupLine($"{IndentAnalyzer}[deepskyblue1]◆[/]  [bold]{Escape(analyzerName)}[/]");
+    }
+
     // ── Level 4: Phase / sub-module / progress ──────────────────────────────
 
     public static void AnalyzerPhase(string phase)

@@ -23,7 +23,7 @@ internal sealed class SingleDumpStageFactory(
     public IReadOnlyList<IAnalysisStage> BuildStages() =>
     [
         new LoadDumpStage(_dumpLoader),
-        new BuildHeapIndexStage(),
+        new BuildHeapIndexStage(_analyzerExecutionService),
         new RunAnalyzersPipelineStage(_analyzerExecutionService),
         new BuildReportStage(_reportBuilderFacade),
         new WriteOutputStage(_outputWriter)

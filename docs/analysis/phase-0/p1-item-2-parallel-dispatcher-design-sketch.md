@@ -83,3 +83,34 @@ Even with B fully built, the no-index `Parallel.ForEach(heap.Segments, ...)` fal
 3. **Done (2026-07-29).** Extended to `HangAnalyzer` and `CollectionAnalyzer`, completing all five `IParallelHeapIndexScanParticipant` implementations (`AsyncTaskAnalyzer`, `CrashAnalyzer`, `DominatorAnalyzer`, `HangAnalyzer`, `CollectionAnalyzer`). Each adds `CreateWorkerInstance()` and `MergePartial()` following the same partition-and-merge shape; tests added in `HangAnalyzerHeapIndexScanTests.cs` and `CollectionAnalyzerHeapIndexScanTests.cs`. The no-index `Parallel.ForEach(heap.Segments, ...)` fallbacks in `HangAnalyzer` and `CollectionAnalyzer` remain in place (see § "What this does not solve").
 4. **Done (2026-07-29).** Remaining four participants were evaluated individually: `WcfChannelAnalyzer` (state-count sum + `InstanceStateSampler.MergeFrom`) and `StringAnalyzer` (fingerprint-count sum, bucket sum, very-long-string concat) stayed parallel-capable; `EventLeakAnalyzer` was intentionally reverted to sequential-only because its worker-local state and post-scan work made the parallel path a memory/runtime loss; `DbConnectionAnalyzer` is parallel-capable with the same shape as `WcfChannelAnalyzer`. Tests were added for the parallel-capable ones.
 5. **Measured (2026-07-29).** `DispatcherPass_ParallelVsSequential_AllParticipants` on the reference 10GB+ IIS crash dump (8-core machine, index pre-warmed, EventLeak excluded because it is sequential): **53.3s → 14.5s** (3.7× speedup) for the remaining parallel participants. `ProcessorCount: 8`, `MinRecordsPerWorker = 250 000`. The `HeapIndexScanDispatcher.Run` overload accepting `maxWorkers` was added to enable this and future perf-comparison tests without git stash.
+
+---
+
+## Follow-up idea (not yet scoped): per-worker accumulator memory for large caps
+
+Noted 2026-08-06. Shape B's per-worker private-accumulator design (§ "Two candidate shapes")
+trades shared-state contention for **K full-sized copies** of each parallel-capable
+participant's accumulator before `MergePartial` folds them back to one. For participants whose
+accumulator is bounded by a large cap and scales with *object* count rather than *type* count,
+this multiplication is not free: `DominatorAnalyzer._referenceCount` is capped at
+`MaxReferenceAddresses` (1,000,000 entries by default, ~20 MB per full instance — see
+[dominator-analyzer-audit.md § Audit Area 5, Memory Assessment](../phase1/dominator-analyzer-audit.md#audit-area-5--performance-memory--scalability)),
+so K workers can transiently hold up to `K × 20 MB` before the merge collapses it — already
+flagged in that audit as "significant at high parallelism" but without a proposed fix.
+
+Possible direction if this becomes a real constraint on wide-core machines with large caps:
+give each worker a proportionally smaller cap (`MaxReferenceAddresses / K`) so the *sum* across
+workers stays at the original bound instead of multiplying it, or — for accumulators that would
+still be large even after that division — spill the capped dictionary to a disk-backed
+structure (same column-store/mmap pattern the object index itself already uses) instead of
+holding it as a managed `Dictionary` for the duration of the pass. Not the same shape as the
+"index `PublisherRegistry` on disk" discussion for `EventLeakAnalyzer` (that one is type-scale,
+this one is object-scale) — but it's the same category of storage-layer trick applied for a
+different reason: capping *peak RSS during a parallel pass*, not amortizing repeat-run cost.
+
+This is only worth doing if peak memory during the parallel pass is actually observed to be a
+problem in practice (large dump + high `MaxReferenceAddresses` + wide core count) — not a
+pre-emptive change. `EventLeakAnalyzer`'s own sequential-only decision (step 4 above) is the
+precedent: it was reverted from parallel specifically because its worker-local state and
+post-scan cost made the parallel path a net loss, so per-participant cost/benefit should keep
+being measured rather than assumed.

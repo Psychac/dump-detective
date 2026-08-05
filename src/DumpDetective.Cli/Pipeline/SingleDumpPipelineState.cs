@@ -30,6 +30,13 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// <summary>Read-only cache interface — used by <see cref="Stages.RunAnalyzersPipelineStage"/> as the analyzer <c>Cache</c> contract.</summary>
     public IHeapAnalysisCache? HeapCache { get; set; }
     public HeapIndexBuildResult? HeapIndex { get; set; }
+    /// <summary>
+    /// Analysis context and pipeline built by <see cref="Stages.BuildHeapIndexStage"/> so the
+    /// shared heap-index/thread-stack scan passes run under that stage's header/timer instead of
+    /// under "Run analyzers"; reused as-is by <see cref="Stages.RunAnalyzersPipelineStage"/>.
+    /// </summary>
+    public Analysis.Pipeline.RuntimeAnalysisContext? Context { get; set; }
+    public Analysis.Pipeline.AnalysisPipeline? Pipeline { get; set; }
 
     // ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────
     public IReadOnlyList<AnalyzerRunResult> Runs { get; set; } = [];

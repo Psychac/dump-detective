@@ -24,6 +24,11 @@ internal sealed class HeapIndexScanDispatcher
     // pass as everyone else — this makes the whole feature a no-op on small dumps.
     private const long MinRecordsPerWorker = 250_000;
 
+    // Objects a parallel worker accumulates locally before folding the count into the shared
+    // ObjectScanCounter with one Interlocked.Add — trades a slightly coarser progress cadence
+    // for eliminating per-object cache-line contention across worker threads.
+    private const long LocalTickBatch = 4096;
+
     public void Run(HeapAnalysisCache cache, AnalysisContext context, IReadOnlyList<IHeapIndexScanParticipant> participants, CancellationToken cancellationToken)
         => Run(cache, context, participants, cancellationToken, maxWorkers: 0);
 
@@ -41,46 +46,93 @@ internal sealed class HeapIndexScanDispatcher
         // BeforeHeapIndexScan/OnHeapEntry doesn't blind every other participant sharing this pass.
         bool[] failed = new bool[participants.Count];
 
-        for (int i = 0; i < participants.Count; i++)
+        // Stopwatch/diagnostics start *before* BeforeHeapIndexScan, not after: some participants
+        // (e.g. EventLeakAnalyzer building its PublisherRegistry) do real heap/type work here that
+        // can take tens of seconds. Starting the clock afterward left that time completely
+        // unaccounted for — invisible on console and missing from the reported duration — making
+        // "Scan + Index heap" look like it had a silent multi-second gap that didn't exist anywhere
+        // else in the instrumentation.
+        var diagnosticsPublisher = new AnalysisDiagnosticsPublisher();
+        Guid runId = Guid.NewGuid();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        // `elapsedSource` lets each named sub-pass (below) report its own duration instead of
+        // the cumulative time since Run() started — otherwise every sub-pass's "duration" would
+        // actually be a timestamp relative to dispatcher start, making completed passes look
+        // far slower than they really were (and disagree with the stage's own wall-clock total).
+        void Publish(AnalysisDiagnosticsEventType eventType, long scannedCount, string message, string? analyzerName = null, Stopwatch? elapsedSource = null) =>
+            diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+                RunId: runId,
+                EventType: eventType,
+                TimestampUtc: DateTime.UtcNow,
+                AnalyzerName: analyzerName ?? ScanName,
+                Category: "SharedScan",
+                DurationMs: (elapsedSource ?? stopwatch).Elapsed.TotalMilliseconds,
+                ObjectScanCount: scannedCount,
+                CacheHits: 0,
+                CacheMisses: 0,
+                Message: message,
+                ExceptionType: null,
+                ExceptionMessage: null));
+
+        Publish(AnalysisDiagnosticsEventType.AnalyzerStarted, 0, $"{ScanName} started.");
+
+        // Participant setup (e.g. EventLeakAnalyzer's PublisherRegistry.Build) can take tens of
+        // seconds with no natural per-item progress hook. Run it on a background thread and poll
+        // it here so the console keeps ticking a heartbeat instead of appearing frozen — only this
+        // one thread ever touches the ClrHeap/ClrRuntime at a time, same as before.
+        //
+        // currentParticipantIndex/currentSubPhase are written before/during each participant's
+        // BeforeHeapIndexScan call so the heartbeat below can name both which participant is
+        // running and what it's doing internally (e.g. "building publisher registry") instead of
+        // a static message — otherwise the live status line has nothing to show but elapsed time.
+        // Both ride the "phase • detail" split other analyzers use to keep the detail portion
+        // live-updating; without a " • " separator in the message, only the once-per-change
+        // ↳ phase line gets the text, and the ticking status line stays blank.
+        int currentParticipantIndex = -1;
+        string? currentSubPhase = null;
+        context.ReportSubPhase = phase => Volatile.Write(ref currentSubPhase, phase);
+
+        Task setupTask = Task.Run(() =>
         {
-            try
+            for (int i = 0; i < participants.Count; i++)
             {
-                participants[i].BeforeHeapIndexScan(context);
+                Interlocked.Exchange(ref currentParticipantIndex, i);
+                Volatile.Write(ref currentSubPhase, null);
+                try
+                {
+                    participants[i].BeforeHeapIndexScan(context);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested is false)
+                {
+                    failed[i] = true;
+                }
             }
-            catch (Exception) when (cancellationToken.IsCancellationRequested is false)
-            {
-                failed[i] = true;
-            }
+        }, cancellationToken);
+
+        while (!setupTask.Wait(300))
+        {
+            int idx = Volatile.Read(ref currentParticipantIndex);
+            string detail = idx >= 0 && idx < participants.Count
+                ? $"{idx + 1}/{participants.Count}: {participants[idx].GetType().Name}"
+                : "starting";
+            string? subPhase = Volatile.Read(ref currentSubPhase);
+            if (!string.IsNullOrEmpty(subPhase))
+                detail += $" — {subPhase}";
+            Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0, $"{ScanName}: preparing • participant setup {detail}");
         }
+
+        setupTask.GetAwaiter().GetResult();
+
+        // Scoped to the single-threaded setup pass above: worker instances created for the
+        // parallel pass below call BeforeHeapIndexScan concurrently on separate threads, and
+        // this context is reused by later AnalyzeAsync calls in the same pipeline run — leaving
+        // the hook set past setup would let unrelated code fire submodule text against a scan
+        // that's no longer in its setup phase.
+        context.ReportSubPhase = null;
 
         if (cache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {
-            var diagnosticsPublisher = new AnalysisDiagnosticsPublisher();
-            Guid runId = Guid.NewGuid();
-            Stopwatch stopwatch = Stopwatch.StartNew();
-
-            void Publish(AnalysisDiagnosticsEventType eventType, long scannedCount, string message) =>
-                diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-                    RunId: runId,
-                    EventType: eventType,
-                    TimestampUtc: DateTime.UtcNow,
-                    AnalyzerName: ScanName,
-                    Category: "SharedScan",
-                    DurationMs: stopwatch.Elapsed.TotalMilliseconds,
-                    ObjectScanCount: scannedCount,
-                    CacheHits: 0,
-                    CacheMisses: 0,
-                    Message: message,
-                    ExceptionType: null,
-                    ExceptionMessage: null));
-
-            Publish(AnalysisDiagnosticsEventType.AnalyzerStarted, 0, $"{ScanName} started.");
-
-            var progress = new Progress<AnalyzerProgressReport>(report =>
-                Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, report.ScannedCount, report.Phase));
-
-            var scanCounter = new ObjectScanCounter(ScanName, progress, reportEveryObjects: 250_000);
-
             List<int> parallelIndices = new List<int>();
             for (int i = 0; i < participants.Count; i++)
             {
@@ -93,7 +145,23 @@ internal sealed class HeapIndexScanDispatcher
 
             if (workerCount <= 1 || parallelIndices.Count == 0)
             {
+                // SynchronousProgress, not Progress<T>: Progress<T> marshals its callback through
+                // the ThreadPool, which starves for the whole pass when the reporting thread is a
+                // ThreadPool worker inside a CPU-bound Parallel.For that occupies every worker
+                // thread (see RunParallelPass below) — the live count would stick at 0 until the
+                // pass finished, then the queued callbacks would all fire in a burst at the end.
+                var progress = new SynchronousProgress<AnalyzerProgressReport>(report =>
+                    Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, report.ScannedCount, report.Phase));
+
+                // Shorter time cadence than the default 2s so the console heartbeat feels as
+                // responsive as the surrounding index-build/per-analyzer stages (both ~300ms),
+                // instead of appearing to freeze between infrequent reports on small/medium heaps.
+                var scanCounter = new ObjectScanCounter(ScanName, progress, reportEveryObjects: 250_000, reportEveryElapsed: TimeSpan.FromMilliseconds(300));
+
                 RunSequentialPass(cache, participants, failed, mask: null, scanCounter, cancellationToken);
+
+                scanCounter.Complete();
+                Publish(AnalysisDiagnosticsEventType.AnalyzerCompleted, scanCounter.Scanned, $"{ScanName} completed.");
             }
             else
             {
@@ -105,14 +173,41 @@ internal sealed class HeapIndexScanDispatcher
                     anySequential |= sequentialMask[i];
                 }
 
+                // Both a sequential-only group and a parallel-capable group are active, so this
+                // dispatcher runs two full physical passes over the index instead of one. Report
+                // each pass under its own name with its own counter — summing them into a single
+                // combined count would silently double-report the object count (each pass alone
+                // walks every entry once).
+                Publish(AnalysisDiagnosticsEventType.AnalyzerCompleted, 0, $"{ScanName}: participant setup complete.");
+
+                const string ParallelPassName = ScanName + " (parallel)";
+                Stopwatch parallelStopwatch = Stopwatch.StartNew();
+                // SynchronousProgress: this pass runs under Parallel.For, which occupies every
+                // ThreadPool worker for its whole duration — a Progress<T> callback posted from
+                // inside it would queue behind (and only run after) the parallel work completes.
+                var parallelProgress = new SynchronousProgress<AnalyzerProgressReport>(report =>
+                    Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, report.ScannedCount, report.Phase, ParallelPassName, parallelStopwatch));
+                var parallelCounter = new ObjectScanCounter(ParallelPassName, parallelProgress, reportEveryObjects: 250_000, reportEveryElapsed: TimeSpan.FromMilliseconds(300));
+
+                Publish(AnalysisDiagnosticsEventType.AnalyzerStarted, 0, $"{ParallelPassName} started.", ParallelPassName, parallelStopwatch);
+                RunParallelPass(cache, context, participants, parallelIndices, workerCount, heapIndex.ObjectCount, failed, parallelCounter, cancellationToken);
+                parallelCounter.Complete();
+                Publish(AnalysisDiagnosticsEventType.AnalyzerCompleted, parallelCounter.Scanned, $"{ParallelPassName} completed.", ParallelPassName, parallelStopwatch);
+
                 if (anySequential)
-                    RunSequentialPass(cache, participants, failed, sequentialMask, scanCounter, cancellationToken);
+                {
+                    const string SequentialPassName = ScanName + " (sequential)";
+                    Stopwatch sequentialStopwatch = Stopwatch.StartNew();
+                    var sequentialProgress = new SynchronousProgress<AnalyzerProgressReport>(report =>
+                        Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, report.ScannedCount, report.Phase, SequentialPassName, sequentialStopwatch));
+                    var sequentialCounter = new ObjectScanCounter(SequentialPassName, sequentialProgress, reportEveryObjects: 250_000, reportEveryElapsed: TimeSpan.FromMilliseconds(300));
 
-                RunParallelPass(cache, context, participants, parallelIndices, workerCount, heapIndex.ObjectCount, failed, scanCounter, cancellationToken);
+                    Publish(AnalysisDiagnosticsEventType.AnalyzerStarted, 0, $"{SequentialPassName} started.", SequentialPassName, sequentialStopwatch);
+                    RunSequentialPass(cache, participants, failed, sequentialMask, sequentialCounter, cancellationToken);
+                    sequentialCounter.Complete();
+                    Publish(AnalysisDiagnosticsEventType.AnalyzerCompleted, sequentialCounter.Scanned, $"{SequentialPassName} completed.", SequentialPassName, sequentialStopwatch);
+                }
             }
-
-            scanCounter.Complete();
-            Publish(AnalysisDiagnosticsEventType.AnalyzerCompleted, scanCounter.Scanned, $"{ScanName} completed.");
         }
         else
         {
@@ -234,8 +329,6 @@ internal sealed class HeapIndexScanDispatcher
             cursor += count;
         }
 
-        long[] workerScanned = new long[workerCount];
-
         var parallelOptions = new ParallelOptions
         {
             CancellationToken = cancellationToken,
@@ -244,7 +337,12 @@ internal sealed class HeapIndexScanDispatcher
 
         Parallel.For(0, workerCount, parallelOptions, w =>
         {
-            long scanned = 0;
+            // Local, non-atomic tally flushed to the shared counter every LocalTickBatch objects
+            // instead of once per object — an Interlocked op per object here forces every worker
+            // thread to fight over the same cache line for the whole pass, which on wide core
+            // counts can cost more than the per-object analyzer work itself.
+            long localTicked = 0;
+
             foreach (HeapEntry entry in cache.EnumerateIndexedEntriesRange(rangeStarts[w], rangeCounts[w]))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -264,16 +362,18 @@ internal sealed class HeapIndexScanDispatcher
                     }
                 }
 
-                scanned++;
+                if (++localTicked >= LocalTickBatch)
+                {
+                    scanCounter.AddParallel(localTicked);
+                    localTicked = 0;
+                }
             }
 
-            workerScanned[w] = scanned;
+            if (localTicked > 0)
+                scanCounter.AddParallel(localTicked);
         });
 
-        long totalScanned = 0;
-        for (int w = 0; w < workerCount; w++)
-            totalScanned += workerScanned[w];
-        scanCounter.Advance(totalScanned, $"{ScanName}: merged {participantCount} parallel-capable participant(s).");
+        scanCounter.Report($"{ScanName}: merged {participantCount} parallel-capable participant(s).");
 
         for (int p = 0; p < participantCount; p++)
         {

@@ -56,6 +56,14 @@ internal sealed class PerDumpExecutionService(
             cancellationToken,
             progress: progress);
 
+        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(resolved, loadContext, heapCache, activeAnalyzers);
+        AnalysisPipeline pipeline = _analyzerExecutionService.CreatePipeline(activeAnalyzers);
+
+        // Shared heap-index/thread-stack scan passes are conceptually part of index preparation
+        // (one shared pass over the index, not an individual analyzer), so run them here — before
+        // the "running analyzers" phase marker — so their time/memory is attributed to indexing.
+        _analyzerExecutionService.RunSharedScans(pipeline, context, cancellationToken);
+
         progress?.Report(new AnalyzerProgressReport(
             heapIndex.ObjectCount,
             "running analyzers",
@@ -66,8 +74,7 @@ internal sealed class PerDumpExecutionService(
         long wsAfterIndex = currentProcess.WorkingSet64;
         long managedAfterIndex = GC.GetTotalMemory(false);
 
-        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(resolved, loadContext, heapCache, activeAnalyzers);
-        IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(context, activeAnalyzers, cancellationToken);
+        IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(pipeline, context, cancellationToken);
 
         currentProcess.Refresh();
         long wsAfterAnalyze = currentProcess.WorkingSet64;

@@ -27,6 +27,16 @@ public class AnalysisContext
     public IProgress<AnalyzerProgressReport>? Progress { get; set; }
 
     /// <summary>
+    /// Optional hook a participant can call from <c>BeforeHeapIndexScan</c> (or similar setup)
+    /// to name the inner phase it's currently doing — e.g. "building publisher registry" — while
+    /// it does slow work with no natural per-item progress hook of its own. Set by the dispatcher
+    /// running that setup, which folds the latest value into its own live progress reporting;
+    /// null when there's nowhere to render it (e.g. tests calling Analyze directly). Cheap enough
+    /// to call a handful of times per run; not for hot per-entry loops.
+    /// </summary>
+    public Action<string>? ReportSubPhase { get; set; }
+
+    /// <summary>
     /// Completed run results from every non-deferred analyzer, populated by the pipeline before
     /// running <see cref="IDeferredAnalyzer"/> analyzers. Lets deferred analyzers consume finished
     /// results post-hoc via <c>AnalyzerRunResultsExtensions.GetResult&lt;T&gt;</c> without depending

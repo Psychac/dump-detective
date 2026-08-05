@@ -1,14 +1,17 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Console;
+using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
 using System.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
 
-internal sealed class BuildHeapIndexStage : IAnalysisStage
+internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
 {
     private const int HeartbeatMs = 300;
+    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
     public string Name => "Scan + Index heap";
 
@@ -93,6 +96,21 @@ internal sealed class BuildHeapIndexStage : IAnalysisStage
         state.HeapIndexBuilder = heapBuilder;
         state.HeapCache = heapCache;
         state.HeapIndex = heapIndex;
+
+        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(
+            state.Resolved,
+            state.LoadContext!,
+            heapCache,
+            state.ActiveAnalyzers);
+        AnalysisPipeline pipeline = _analyzerExecutionService.CreatePipeline(state.ActiveAnalyzers);
+
+        // Shared heap-index/thread-stack scan passes are one pass over the index fanned out to
+        // every participating analyzer, not an individual analyzer — run them here, under this
+        // stage's header/timer, instead of letting them run inside "Run analyzers".
+        _analyzerExecutionService.RunSharedScans(pipeline, context, cancellationToken);
+
+        state.Context = context;
+        state.Pipeline = pipeline;
     }
 }
 

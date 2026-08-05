@@ -15,17 +15,20 @@ public sealed class EventLeakOptions
     public int TopDetailedInstancesPerGroup { get; init; } = 5;
 
     // Severity scoring — existing signals
-    public int SeveritySubscriberThreshold { get; init; } = 10;
-    public int SeveritySubscriberBonus { get; init; } = 5;
     public int SeverityStaticPublisherBonus { get; init; } = 10;
     public int SeverityRootHintBonus { get; init; } = 5;
 
     // Severity scoring — new heuristic signals
     public int SeverityGen2PublisherBonus { get; init; } = 5;
     public int SeverityDuplicateSubscriptionBonus { get; init; } = 8;
-    public int SeverityOrphanedSubscriberBonus { get; init; } = 10;
-    public int SeverityOrphanedSubscriberCap { get; init; } = 20;
+    public int SeverityDisposedButSubscribedBonus { get; init; } = 15;
     public int SeverityLifetimeMismatchBonus { get; init; } = 8;
+
+    // Continuous replacement (design §9) for the old subscriber-count step bonus
+    // (score += subscriberCount * log2(subscriberCount + 1) scale factor). Tuned so the
+    // AddFindings thresholds (>= 35 Critical, >= 20 Warning) land on roughly the same
+    // subscriber-count boundaries as the old step function.
+    public double SeveritySubscriberLogScale { get; init; } = 1.45;
 
     // bonus for subscribers that appear to have very few incoming references
     public int SeverityLowIncomingRefsBonus { get; init; } = 8;
@@ -46,6 +49,12 @@ public sealed class EventLeakOptions
     // Publisher qualification: minimum subscribers for an object to be considered a publisher
     public int PublisherSubscriberThreshold { get; init; } = 1;
 
+    // Bounded evidence enrichment (design §4.2): only the top-N groups by TotalSubscribers
+    // get a root-path BFS attempt; the rest keep their cheap RootHint only.
+    public int MaxGroupsToEnrich { get; init; } = 25;
+    // Wall-clock budget for the entire enrichment loop across all enriched instances.
+    public int MaxEvidenceEnrichmentMs { get; init; } = 2000;
+
     public static EventLeakOptions Preset(AnalysisProfile profile) => profile switch
     {
         AnalysisProfile.Fast => new EventLeakOptions
@@ -55,7 +64,8 @@ public sealed class EventLeakOptions
             TopSubscriberTypesToShow = 3,
             TopDetailedInstancesPerGroup = 3,
             EnableDiagnostics = false,
-            PublisherSubscriberThreshold = 2
+            PublisherSubscriberThreshold = 2,
+            MaxGroupsToEnrich = 10
         },
         AnalysisProfile.Full => new EventLeakOptions
         {
@@ -64,7 +74,8 @@ public sealed class EventLeakOptions
             TopSubscriberTypesToShow = 20,
             TopDetailedInstancesPerGroup = 20,
             EnableDiagnostics = true,
-            PublisherSubscriberThreshold = 1
+            PublisherSubscriberThreshold = 1,
+            MaxGroupsToEnrich = 100
         },
         _ => new EventLeakOptions(),
     };

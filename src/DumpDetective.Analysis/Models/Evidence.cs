@@ -28,4 +28,19 @@ internal static class EvidenceConfidence
         score += Math.Min(evidence.ContributingSignals.Count, 3) * 0.02;
         return Math.Min(score, 0.9);
     }
+
+    /// <summary>
+    /// EventLeak-specific overload for <see cref="EventLeakEvidence"/> (design §4.3).
+    /// Only <c>PublisherRootPath</c> counts as a resolved path here — <c>SampleSubscriberHint</c>
+    /// is a cheap fallback, not evidence the publisher itself is reachable from a root.
+    /// </summary>
+    internal static double Compute(EventLeakEvidence? evidence)
+    {
+        if (evidence is null || string.IsNullOrEmpty(evidence.PublisherRootPath))
+            return 0.4;
+
+        double score = evidence.SearchTruncated ? 0.6 : 0.8;
+        score += Math.Min(evidence.Signals.Count, 3) * 0.02;
+        return Math.Min(score, 0.9);
+    }
 }

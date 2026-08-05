@@ -120,7 +120,7 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             evidence += ".";
         }
 
-        Evidence? topEvidence = null;
+        EventLeakEvidence? topEvidence = null;
         int topSubscriberCount = -1;
         for (int i = 0; i < instances.Count; i++)
         {

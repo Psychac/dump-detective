@@ -105,8 +105,8 @@ but they aren't uniformly trivial — a few have real feasibility questions of t
 ## Priority-ordered implementation plan
 
 **Now (quick wins — implement first, days each, no version-drift risk):**
-1. SOH fragmentation → `HeapTopologyAnalyzer`
-2. POH/pinned-handle cross-reference → `HeapTopologyAnalyzer`
+1. SOH fragmentation → `HeapTopologyAnalyzer` (included in audit)
+2. POH/pinned-handle cross-reference → `HeapTopologyAnalyzer` (included in audit)
 3. Runtime configuration/GC mode → `ModuleAnalyzer`
 4. Channels → `AsyncTaskAnalyzer`
 5. ThreadPool-health trend → `HangAnalyzer`

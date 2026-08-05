@@ -51,7 +51,7 @@ public sealed class EventLeakAnalyzerDiscrepancyTests
             foreach (EventLeakInstanceSnapshot instance in memResult.TopLeakInstances ?? Array.Empty<EventLeakInstanceSnapshot>())
             {
                 instance.Evidence.Should().NotBeNull();
-                instance.Evidence!.ContributingSignals.Should().NotBeEmpty();
+                instance.Evidence!.Signals.Should().NotBeEmpty();
             }
         }
         finally
@@ -59,5 +59,28 @@ public sealed class EventLeakAnalyzerDiscrepancyTests
             if (Directory.Exists(freshIndexDir))
                 Directory.Delete(freshIndexDir, recursive: true);
         }
+    }
+
+    [DiscrepancyFact]
+    public async Task EventLeakAnalyzer_CancellationRequested_ThrowsPromptly()
+    {
+        string dumpPath = DumpPath;
+        if (!File.Exists(dumpPath)) return;
+        using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+        ClrHeap heap = runtime.Heap;
+        AnalysisOptions analysisOptions = new();
+        EventLeakAnalyzer analyzer = new();
+        HeapAnalysisCache cache = new();
+        cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
+        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = analysisOptions };
+
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        Func<Task> act = async () => await analyzer.AnalyzeAsync(context, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "cancellation must be honored within one check interval (8192 iterations), not deferred to wall-clock timeout");
     }
 }

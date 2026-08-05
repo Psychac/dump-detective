@@ -18,6 +18,49 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
     public bool CanHandle(AnalyzerDomainResult result) => result is EventLeakDomainResult;
 
+    // Maps RootIndexReader.KindToString's raw ClrRootKind names to human-readable labels.
+    // The domain model keeps the raw string (design §12 P2-4); translation is presentation-only.
+    private static readonly System.Collections.Generic.Dictionary<string, string> RootKindLabels = new(StringComparer.Ordinal)
+    {
+        ["None"] = "none",
+        ["FinalizerQueue"] = "finalizer queue",
+        ["StrongHandle"] = "strong GC handle",
+        ["PinnedHandle"] = "pinned GC handle",
+        ["Stack"] = "local variable",
+        ["RefCountedHandle"] = "ref-counted GC handle",
+        ["AsyncPinnedHandle"] = "async pinned handle",
+        ["SizedRefHandle"] = "sized ref handle",
+        ["ThreadStaticVar"] = "thread-static field",
+        ["StaticVar"] = "static field",
+    };
+
+    private static string TranslateRootKind(string rootKind) =>
+        RootKindLabels.TryGetValue(rootKind, out string? label) ? label : rootKind;
+
+    /// <summary>
+    /// Design §4.3: <c>PublisherRootPath</c> (BFS from the publisher) is the primary
+    /// "why is this alive" answer; <c>SampleSubscriberHint</c> is a cheaper fallback and is
+    /// always labelled as such so a reader never mistakes it for the publisher's own path.
+    /// </summary>
+    private static string? FormatRootHintDisplay(EventLeakInstanceSnapshot inst)
+    {
+        string? publisherPath = inst.Evidence?.PublisherRootPath;
+        if (!string.IsNullOrEmpty(publisherPath))
+            return publisherPath;
+
+        string? subscriberHint = inst.Evidence?.SampleSubscriberHint ?? inst.RootHint;
+        return string.IsNullOrEmpty(subscriberHint) ? null : $"{TranslateRootKind(subscriberHint)} (subscriber-derived)";
+    }
+
+    private static string FormatPublisherAddress(ulong address, bool isStatic) =>
+        address == 0 && isStatic ? "(static)" : $"0x{address:X}";
+
+    private static string FormatPublisherGeneration(int generation, bool isStatic)
+    {
+        if (generation >= 0) return $"Gen{generation}";
+        return isStatic ? "static" : "unknown";
+    }
+
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (EventLeakDomainResult)result;
@@ -35,6 +78,8 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             keyMetrics["events_scanned"] = new NumericMetricValue(d.TotalEventsScanned, MetricUnit.Count);
         if (d.TotalPublisherInstances > 0)
             keyMetrics["publisher_instances"] = new NumericMetricValue(d.TotalPublisherInstances, MetricUnit.Count);
+        if (d.TotalEstimatedRetainedBytes > 0)
+            keyMetrics["estimated_retained_bytes"] = new NumericMetricValue(d.TotalEstimatedRetainedBytes, MetricUnit.Bytes);
 
         var instancesWithGeneration = d.TopLeakInstances ?? [];
         if (instancesWithGeneration.Count > 0)
@@ -67,8 +112,30 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(p.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(p.EstimatedRetainedBytes) : "-")]));
             }
             compactTables.Add(STCompact("Publisher events by subscriber count",
-                new[] { CH("Publisher Type"), CH("Event Field"), CH("Subscribers","number"), CH("Instances","number"), CH("Est. Retained","bytes") },
+                new[] { CH("Publisher Type"), CH("Event Field"), CH("Subscribers","number"), CH("Instances","number"), CH("Estimated (type-average, all instances)","bytes") },
                 pubRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        var topSubscriberTypes = d.TopSubscriberTypesAcrossGroups ?? [];
+        if (topSubscriberTypes.Count > 0)
+        {
+            var rows = new List<CompactRow>(topSubscriberTypes.Count);
+            for (int i = 0; i < topSubscriberTypes.Count; i++)
+                rows.Add(R(FormatHelper.TruncateString(topSubscriberTypes[i].Name, 100), topSubscriberTypes[i].Count));
+            compactTables.Add(STCompact("Top subscriber types across all groups",
+                new[] { CH("Subscriber Type"), CH("Subscriptions", "number") },
+                rows));
+        }
+
+        var topHandlerMethods = d.TopHandlerMethodsAcrossGroups ?? [];
+        if (topHandlerMethods.Count > 0)
+        {
+            var rows = new List<CompactRow>(topHandlerMethods.Count);
+            for (int i = 0; i < topHandlerMethods.Count; i++)
+                rows.Add(R(FormatHelper.TruncateString(topHandlerMethods[i].Name, 100), topHandlerMethods[i].Count));
+            compactTables.Add(STCompact("Top handler methods across all leaking events",
+                new[] { CH("Subscriber Type.Method"), CH("Subscriptions", "number") },
+                rows));
         }
 
         var leakGroupsForTable = d.TopLeakGroups ?? [];
@@ -90,10 +157,10 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(g.EstimatedSubscriberRetainedBytes > 0 ? FormatHelper.FormatBytes(g.EstimatedSubscriberRetainedBytes) : "-"),
                     Cell(g.HasDuplicateSubscriptions ? "Yes" : "No"),
                     Cell(g.HasLifetimeMismatch ? "Yes" : "No"),
-                    Cell($"{g.OrphanedSubscriberInstances:N0}", g.OrphanedSubscriberInstances)]));
+                    Cell($"{g.DisposedButSubscribedInstances:N0}", g.DisposedButSubscribedInstances)]));
             }
             compactTables.Add(STCompact("Leak groups",
-                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Severity","number"), CH("Instances","number"), CH("Subscribers","number"), CH("Avg Subs"), CH("Min/Max"), CH("Est. Retained","bytes"), CH("Dup Subs"), CH("Lifetime Mismatch"), CH("Orphaned","number") },
+                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Severity","number"), CH("Instances","number"), CH("Subscribers","number"), CH("Avg Subs"), CH("Min/Max"), CH("Estimated (type-average, all instances)","bytes"), CH("Dup Subs"), CH("Lifetime Mismatch"), CH("Disposed but Subscribed","number") },
                 groupRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -108,11 +175,11 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatHelper.TruncateString(inst.PublisherType, 70)),
                     Cell(FormatHelper.TruncateString(inst.EventFieldName, 40)),
                     Cell(inst.IsStatic ? "Yes" : "No"),
-                    Cell($"0x{inst.PublisherAddress:X}"),
+                    Cell(FormatPublisherAddress(inst.PublisherAddress, inst.IsStatic)),
                     Cell($"{inst.SeverityScore:N0}", inst.SeverityScore),
                     Cell($"{inst.SubscriberCount:N0}", inst.SubscriberCount),
-                    Cell(inst.RootHint ?? "-"),
-                    Cell(inst.PublisherGeneration >= 0 ? $"Gen{inst.PublisherGeneration}" : "-"),
+                    Cell(FormatRootHintDisplay(inst) ?? "-"),
+                    Cell(FormatPublisherGeneration(inst.PublisherGeneration, inst.IsStatic)),
                     Cell($"{inst.DuplicateSubscriptionCount:N0}", inst.DuplicateSubscriptionCount)]));
             }
             compactTables.Add(STCompact("Top leak instances",
@@ -160,7 +227,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     EstimatedRetainedBytes:      group.EstimatedSubscriberRetainedBytes,
                     HasDuplicateSubscriptions:   group.HasDuplicateSubscriptions,
                     HasLifetimeMismatch:         group.HasLifetimeMismatch,
-                    OrphanedSubscriberInstances: group.OrphanedSubscriberInstances,
+                    DisposedButSubscribedInstances: group.DisposedButSubscribedInstances,
                     TopSubscriberTypes:          subTypes));
             }
             if (leakGroups.Count > groupLimit)
@@ -184,13 +251,13 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     PublisherType:            inst.PublisherType,
                     EventFieldName:           inst.EventFieldName,
                     IsStatic:                 inst.IsStatic,
-                    PublisherAddress:         $"0x{inst.PublisherAddress:X}",
+                    PublisherAddress:         FormatPublisherAddress(inst.PublisherAddress, inst.IsStatic),
                     SeverityScore:            inst.SeverityScore,
                     SubscriberCount:          inst.SubscriberCount,
-                    RootHint:                 inst.RootHint,
+                    RootHint:                 FormatRootHintDisplay(inst),
                     PublisherGeneration:      inst.PublisherGeneration,
                     DuplicateSubscriptionCount: inst.DuplicateSubscriptionCount,
-                    OrphanedSubscriberCount:  inst.OrphanedSubscriberCount,
+                    IsDisposedButSubscribed:  inst.IsDisposedButSubscribed,
                     HasLifetimeMismatch:      inst.HasLifetimeMismatch,
                     SubscriberDetails:        subDetails.Count > 0 ? subDetails : null));
             }

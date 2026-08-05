@@ -149,7 +149,7 @@ internal sealed record EventLeakGroupCard(
     ulong EstimatedRetainedBytes,
     bool HasDuplicateSubscriptions,
     bool HasLifetimeMismatch,
-    int OrphanedSubscriberInstances,
+    int DisposedButSubscribedInstances,
     IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes);
 
 /// <summary>Per-publisher instance drill-down with optional per-subscriber details.</summary>
@@ -163,7 +163,7 @@ internal sealed record EventLeakInstanceCard(
     string? RootHint,
     int PublisherGeneration,
     int DuplicateSubscriptionCount,
-    int OrphanedSubscriberCount,
+    bool IsDisposedButSubscribed,
     bool HasLifetimeMismatch,
     IReadOnlyList<SubscriberDetailEntry>? SubscriberDetails);
 

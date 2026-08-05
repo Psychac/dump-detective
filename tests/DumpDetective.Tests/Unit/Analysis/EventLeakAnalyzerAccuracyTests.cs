@@ -8,10 +8,9 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
 /// Accuracy tests for <see cref="EventLeakAnalyzer"/> pure-logic paths.
-/// Tests are scoped to the three bugs fixed and the invariants they rely on:
-///   Bug A – inherited event backing fields dropped when type declares own events.
-///   Bug B – static-method subscribers (null _target) not counted.
-///   Grouping – publisher count, subscriber totals, min/max/avg must be exact.
+/// Covers severity scoring (log-scale continuous formula, design §9) and the
+/// remaining static-analysis helpers (root-publisher parsing, event-name-set
+/// building, enrichment-group-key bounding, retained-bytes estimation).
 /// </summary>
 public sealed class EventLeakAnalyzerAccuracyTests
 {
@@ -21,190 +20,57 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
     private static EventLeakOptions DefaultOptions => new();
 
-    private static EventLeakInfo MakeLeak(
-        string publisherType,
-        string fieldName,
-        bool isStatic,
-        int subscriberCount,
-        ulong publisherAddress = 1,
-        string subscriberType = "App.Subscriber")
-    {
-        var subscribers = new List<SubscriberInfo>(subscriberCount);
-        for (int i = 0; i < subscriberCount; i++)
-            subscribers.Add(new SubscriberInfo { Address = (ulong)(100 + i), Type = subscriberType });
-
-        return new EventLeakInfo
-        {
-            PublisherAddress = publisherAddress,
-            PublisherType = publisherType,
-            EventFieldName = fieldName,
-            IsStatic = isStatic,
-            SubscriberCount = subscriberCount,
-            Subscribers = subscribers,
-            RootHint = string.Empty,
-            SeverityScore = EventLeakAnalyzer.CalculateSeverity(isStatic, subscriberCount, string.Empty, DefaultOptions)
-        };
-    }
-
-    private static EventLeakAnalyzer NewAnalyzer() => new();
-
     // -----------------------------------------------------------------------
-    // GroupEventLeaks – publisher count
+    // CalculateSeverity — continuous subscriber-count term (design §9)
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void GroupEventLeaks_TwoDistinctTypeFieldPairs_ProducesTwoGroups()
+    public void CalculateSeverity_ZeroSubscribers_NoBonusApplied()
     {
-        var leaks = new List<EventLeakInfo>
+        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, DefaultOptions);
+
+        score.Should().Be(0, "log2(0+1)=0 so no subscriber-count bonus applies at zero subscribers");
+    }
+
+    [Fact]
+    public void CalculateSeverity_SubscriberCountLogScale_MatchesFormula()
+    {
+        var opts = DefaultOptions;
+        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 7, rootHint: string.Empty, opts);
+
+        int expectedLogBonus = (int)(Math.Log2(7 + 1) * opts.SeveritySubscriberLogScale);
+        score.Should().Be(7 + expectedLogBonus);
+    }
+
+    [Fact]
+    public void CalculateSeverity_ScoreIncreasesMonotonicallyWithSubscriberCount()
+    {
+        var opts = DefaultOptions;
+        int previous = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, opts);
+        for (int n = 1; n <= 100; n++)
         {
-            MakeLeak("App.A", "Changed", isStatic: false, subscriberCount: 2),
-            MakeLeak("App.B", "Changed", isStatic: false, subscriberCount: 3),
-        };
-
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        groups.Should().HaveCount(2);
+            int current = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
+            current.Should().BeGreaterThan(previous, $"severity must strictly increase from {n - 1} to {n} subscribers");
+            previous = current;
+        }
     }
 
     [Fact]
-    public void GroupEventLeaks_SameTypeDifferentFields_ProducesTwoGroups()
+    public void CalculateSeverity_SubscriberCountIsContinuous_NoLargeJumpsBetweenAdjacentCounts()
     {
-        var leaks = new List<EventLeakInfo>
+        // Old step-function bonus produced a discontinuity at the threshold boundary;
+        // the log-scale replacement must never jump by more than a small bounded amount
+        // between adjacent subscriber counts.
+        var opts = DefaultOptions;
+        int maxJump = 0;
+        for (int n = 0; n < 200; n++)
         {
-            MakeLeak("App.A", "Opened", isStatic: false, subscriberCount: 1),
-            MakeLeak("App.A", "Closed", isStatic: false, subscriberCount: 1),
-        };
+            int a = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
+            int b = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n + 1, rootHint: string.Empty, opts);
+            maxJump = Math.Max(maxJump, b - a);
+        }
 
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        groups.Should().HaveCount(2);
-    }
-
-    [Fact]
-    public void GroupEventLeaks_SameTypeFieldStaticVsInstance_ProducesTwoGroups()
-    {
-        // static and instance are separate even if type+field match
-        var leaks = new List<EventLeakInfo>
-        {
-            MakeLeak("App.A", "Changed", isStatic: false, subscriberCount: 2),
-            MakeLeak("App.A", "Changed", isStatic: true,  subscriberCount: 3),
-        };
-
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        groups.Should().HaveCount(2);
-    }
-
-    [Fact]
-    public void GroupEventLeaks_MultipleInstancesSameGroup_PublisherCountIsCorrect()
-    {
-        // 5 separate publisher instances of the same type+field
-        var leaks = Enumerable.Range(1, 5)
-            .Select(i => MakeLeak("App.A", "Changed", isStatic: false, subscriberCount: 2, publisherAddress: (ulong)i))
-            .ToList();
-
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        groups.Should().HaveCount(1);
-        groups[0].InstanceCount.Should().Be(5, "each publisher address is a separate instance");
-    }
-
-    // -----------------------------------------------------------------------
-    // GroupEventLeaks – subscriber totals, min, max, average
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public void GroupEventLeaks_SubscriberCountsAreAggregatedExactly()
-    {
-        // Three instances with 1, 4, 7 subscribers respectively
-        var leaks = new List<EventLeakInfo>
-        {
-            MakeLeak("App.A", "E", isStatic: false, subscriberCount: 1, publisherAddress: 1),
-            MakeLeak("App.A", "E", isStatic: false, subscriberCount: 4, publisherAddress: 2),
-            MakeLeak("App.A", "E", isStatic: false, subscriberCount: 7, publisherAddress: 3),
-        };
-
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        var g = groups.Single();
-        g.TotalSubscribers.Should().Be(12);
-        g.MinSubscribers.Should().Be(1);
-        g.MaxSubscribers.Should().Be(7);
-        g.AverageSubscribers.Should().BeApproximately(4.0, precision: 0.001);
-    }
-
-    [Fact]
-    public void GroupEventLeaks_SingleInstance_MinEqualsMaxEqualsTotal()
-    {
-        var leaks = new List<EventLeakInfo>
-        {
-            MakeLeak("App.A", "E", isStatic: false, subscriberCount: 5),
-        };
-
-        var g = NewAnalyzer().GroupEventLeaks(leaks).Single();
-
-        g.MinSubscribers.Should().Be(5);
-        g.MaxSubscribers.Should().Be(5);
-        g.TotalSubscribers.Should().Be(5);
-        g.AverageSubscribers.Should().Be(5.0);
-    }
-
-    [Fact]
-    public void GroupEventLeaks_SortedByTotalSubscribersDescending()
-    {
-        var leaks = new List<EventLeakInfo>
-        {
-            MakeLeak("App.Low",  "E", isStatic: false, subscriberCount: 1),
-            MakeLeak("App.High", "E", isStatic: false, subscriberCount: 99),
-            MakeLeak("App.Mid",  "E", isStatic: false, subscriberCount: 10),
-        };
-
-        var groups = NewAnalyzer().GroupEventLeaks(leaks);
-
-        groups[0].PublisherType.Should().Be("App.High");
-        groups[1].PublisherType.Should().Be("App.Mid");
-        groups[2].PublisherType.Should().Be("App.Low");
-    }
-
-    // -----------------------------------------------------------------------
-    // GroupEventLeaks – static vs instance classification
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public void GroupEventLeaks_StaticLeak_IsStaticFlagPreserved()
-    {
-        var leaks = new List<EventLeakInfo>
-        {
-            MakeLeak("App.A", "E", isStatic: true, subscriberCount: 3),
-        };
-
-        NewAnalyzer().GroupEventLeaks(leaks).Single().IsStatic.Should().BeTrue();
-    }
-
-    [Fact]
-    public void GroupEventLeaks_EmptyInput_ReturnsEmptyList()
-    {
-        NewAnalyzer().GroupEventLeaks([]).Should().BeEmpty();
-    }
-
-    // -----------------------------------------------------------------------
-    // CalculateSeverity – bonus accumulation (tuning invariants)
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public void CalculateSeverity_BaseScoreEqualsSubscriberCount()
-    {
-        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 7, rootHint: string.Empty, DefaultOptions);
-        // 7 < threshold(10) so no bonus, no static bonus, no root hint bonus
-        score.Should().Be(7);
-    }
-
-    [Fact]
-    public void CalculateSeverity_HighSubscriberCountAppliesBonus()
-    {
-        var opts = DefaultOptions; // threshold=10, bonus=5
-        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 10, rootHint: string.Empty, opts);
-        score.Should().Be(10 + opts.SeveritySubscriberBonus);
+        maxJump.Should().BeLessThanOrEqualTo(3, "the log-scale term must not produce step-function-sized jumps between adjacent subscriber counts");
     }
 
     [Fact]
@@ -213,6 +79,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
         var opts = DefaultOptions;
         int instanceScore = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
         int staticScore = EventLeakAnalyzer.CalculateSeverity(isStatic: true, subscriberCount: 3, rootHint: string.Empty, opts);
+
         (staticScore - instanceScore).Should().Be(opts.SeverityStaticPublisherBonus);
     }
 
@@ -222,27 +89,97 @@ public sealed class EventLeakAnalyzerAccuracyTests
         var opts = DefaultOptions;
         int noHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
         int withHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: "static root", opts);
+
         (withHint - noHint).Should().Be(opts.SeverityRootHintBonus);
+    }
+
+    [Fact]
+    public void CalculateSeverity_DisposedButSubscribedAppliesBonus()
+    {
+        var opts = DefaultOptions;
+        int notDisposed = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: false);
+        int disposed = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: true);
+
+        (disposed - notDisposed).Should().Be(opts.SeverityDisposedButSubscribedBonus);
     }
 
     [Fact]
     public void CalculateSeverity_AllBonusesStack()
     {
-        var opts = DefaultOptions; // threshold=10, subscriberBonus=5, staticBonus=10, rootHintBonus=5
-        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: true, subscriberCount: 10, rootHint: "hint", opts);
-        int expected = 10 + opts.SeveritySubscriberBonus + opts.SeverityStaticPublisherBonus + opts.SeverityRootHintBonus;
+        var opts = DefaultOptions;
+        int score = EventLeakAnalyzer.CalculateSeverity(
+            isStatic: true,
+            subscriberCount: 10,
+            rootHint: "hint",
+            opts,
+            publisherGeneration: 2,
+            duplicateCount: 1,
+            isDisposedButSubscribed: true,
+            hasLifetimeMismatch: true,
+            hasLowIncomingRefs: true);
+
+        int expectedLogBonus = (int)(Math.Log2(10 + 1) * opts.SeveritySubscriberLogScale);
+        int expected = 10 + expectedLogBonus
+            + opts.SeverityStaticPublisherBonus
+            + opts.SeverityRootHintBonus
+            + opts.SeverityGen2PublisherBonus
+            + opts.SeverityDuplicateSubscriptionBonus
+            + opts.SeverityDisposedButSubscribedBonus
+            + opts.SeverityLifetimeMismatchBonus
+            + opts.SeverityLowIncomingRefsBonus;
+
         score.Should().Be(expected);
     }
 
     // -----------------------------------------------------------------------
-    // ParseRootPublisher – root description parsing
+    // EventLeakInfo — model-level flags
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void EventLeakInfo_StaticMethodSubscriber_CountedInSubscriberCount()
+    {
+        var subscribers = new List<SubscriberInfo>
+        {
+            new() { Address = 0xDEAD_0001, Type = "App.RealHandler" },
+            new() { Address = 0xDEAD_0002, Type = "<static method>" },
+        };
+
+        var leak = new EventLeakInfo
+        {
+            PublisherType = "App.Publisher",
+            EventFieldName = "DataReady",
+            IsStatic = false,
+            SubscriberCount = subscribers.Count,
+            Subscribers = subscribers,
+        };
+
+        leak.SubscriberCount.Should().Be(2, "static-method subscribers must be counted as separate subscriptions");
+        leak.Subscribers.Where(s => s.Type == "<static method>")
+            .Should().HaveCount(1, "exactly one static-method subscription registered");
+    }
+
+    [Fact]
+    public void EventLeakInfo_IsDisposedButSubscribed_FlagIsStored()
+    {
+        var leak = new EventLeakInfo
+        {
+            PublisherType = "App.Publisher",
+            EventFieldName = "DataReady",
+            IsStatic = false,
+            IsDisposedButSubscribed = true,
+        };
+
+        leak.IsDisposedButSubscribed.Should().BeTrue();
+    }
+
+    // -----------------------------------------------------------------------
+    // ParseRootPublisher
     // -----------------------------------------------------------------------
 
     [Fact]
     public void ParseRootPublisher_TypicalQualifiedName_SplitsAtLastDot()
     {
-        EventLeakAnalyzer.ParseRootPublisher("MyApp.Services.Publisher.OnDataChanged",
-            out string publisherType, out string eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("MyApp.Services.Publisher.OnDataChanged", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("MyApp.Services.Publisher");
         eventFieldName.Should().Be("OnDataChanged");
@@ -251,8 +188,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_NoDot_ReturnsDefaults()
     {
-        EventLeakAnalyzer.ParseRootPublisher("NoDotHere",
-            out string publisherType, out string eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("NoDotHere", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("StaticRoot");
         eventFieldName.Should().Be("Unknown");
@@ -261,10 +197,8 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_TrailingDot_ReturnsDefaults()
     {
-        EventLeakAnalyzer.ParseRootPublisher("MyApp.Publisher.",
-            out string publisherType, out string eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("MyApp.Publisher.", out var publisherType, out var eventFieldName);
 
-        // lastDot is at end so lastDot < length-1 is false → defaults
         publisherType.Should().Be("StaticRoot");
         eventFieldName.Should().Be("Unknown");
     }
@@ -272,15 +206,14 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_SingleDot_SplitsCorrectly()
     {
-        EventLeakAnalyzer.ParseRootPublisher("A.B",
-            out string publisherType, out string eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("A.B", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("A");
         eventFieldName.Should().Be("B");
     }
 
     // -----------------------------------------------------------------------
-    // BuildEventNameSet – the core of the Bug A fix
+    // BuildEventNameSet — Bug A fix
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -314,23 +247,20 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void BuildEventNameSet_AddOnlyNoRemove_ReturnsEmpty()
     {
-        // This validates the all-pass path: empty result → IsLikelyEventField returns true
         var result = EventLeakAnalyzer.BuildEventNameSet(["add_Something"], []);
         result.Should().BeEmpty("no paired remove_ means nothing qualifies as a real event");
     }
 
     /// <summary>
-    /// Validates the core invariant of Bug A: when a type's own events are merged
-    /// with base-class events, the inherited backing fields are no longer rejected.
+    /// Validates the core invariant of Bug A: a type's own events merged with
+    /// base-class events, so inherited backing fields are no longer rejected.
     /// </summary>
     [Fact]
     public void BuildEventNameSet_OwnPlusInheritedNames_ContainsBoth()
     {
-        // Own events
         var ownAdd = new[] { "OwnEvent" };
         var ownRemove = new[] { "OwnEvent" };
 
-        // Base-class events discovered by walking BaseType
         var baseAdd = new[] { "InheritedEvent" };
         var baseRemove = new[] { "InheritedEvent" };
 
@@ -339,128 +269,264 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         var names = EventLeakAnalyzer.BuildEventNameSet(allAdd, allRemove);
 
-        names.Should().Contain("OwnEvent", "own event must be accepted");
-        names.Should().Contain("InheritedEvent", "inherited event must also be accepted (Bug A fix)");
+        names.Should().Contain("OwnEvent");
+        names.Should().Contain("InheritedEvent");
     }
 
     // -----------------------------------------------------------------------
-    // SubscriberInfo – static method subscriber counting (Bug B)
+    // Phase 1 — bounded evidence enrichment (design §4.2)
     // -----------------------------------------------------------------------
 
+    private static EventGroupInfo MakeGroup(string publisherType, string fieldName, bool isStatic = false) =>
+        new() { PublisherType = publisherType, EventFieldName = fieldName, IsStatic = isStatic };
+
     [Fact]
-    public void EventLeakInfo_StaticMethodSubscriber_CountedInSubscriberCount()
+    public void BuildEnrichmentGroupKeys_TakesOnlyTheHeadOfTheSortedList()
     {
-        // Simulate what ExtractSingleSubscriber now emits for a null _target:
-        // a SubscriberInfo with type "<static method>" and the delegate's address.
-        var subscribers = new List<SubscriberInfo>
+        // groupedLeaks is expected to already be sorted by TotalSubscribers descending
+        // (FindEventLeaks' contract) — the bound is purely positional.
+        var groups = new List<EventGroupInfo>
         {
-            new() { Address = 0xDEAD_0001, Type = "App.RealHandler"      }, // instance
-            new() { Address = 0xDEAD_0002, Type = "<static method>"      }, // Bug B fix
+            MakeGroup("App.A", "Changed"),
+            MakeGroup("App.B", "Changed"),
+            MakeGroup("App.C", "Changed"),
         };
 
-        var leak = new EventLeakInfo
-        {
-            PublisherType = "App.Publisher",
-            EventFieldName = "DataReady",
-            IsStatic = false,
-            SubscriberCount = subscribers.Count,
-            Subscribers = subscribers,
-        };
+        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, 2);
 
-        leak.SubscriberCount.Should().Be(2,
-            "static-method subscribers must be counted as separate subscriptions");
-
-        leak.Subscribers.Where(s => s.Type == "<static method>")
-            .Should().HaveCount(1, "exactly one static-method subscription was registered");
+        keys.Should().HaveCount(2);
+        keys.Should().Contain(("App.A", "Changed", false));
+        keys.Should().Contain(("App.B", "Changed", false));
+        keys.Should().NotContain(("App.C", "Changed", false));
     }
 
     [Fact]
-    public void GroupEventLeaks_StaticMethodSubscribers_IncludedInTotal()
+    public void BuildEnrichmentGroupKeys_BoundExceedsGroupCount_ReturnsAllGroups()
     {
-        var subscribers = new List<SubscriberInfo>
-        {
-            new() { Address = 1, Type = "App.Handler"    },
-            new() { Address = 2, Type = "<static method>" },
-            new() { Address = 3, Type = "<static method>" },
-        };
+        var groups = new List<EventGroupInfo> { MakeGroup("App.A", "Changed") };
 
-        var leak = new EventLeakInfo
-        {
-            PublisherType = "App.Publisher",
-            EventFieldName = "E",
-            IsStatic = false,
-            SubscriberCount = subscribers.Count,
-            Subscribers = subscribers,
-        };
+        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, 25);
 
-        var groups = NewAnalyzer().GroupEventLeaks([leak]);
-
-        groups.Single().TotalSubscribers.Should().Be(3,
-            "two static-method subscribers plus one instance subscriber = 3 total");
-    }
-
-    // -----------------------------------------------------------------------
-    // GroupEventLeaks – multi-domain static event subscription counting (Bug C)
-    // The `seen` hashset in GetStaticEventSubscribers previously deduplicated
-    // subscriber addresses across ALL app domains. The same subscriber object
-    // subscribed in N domains is N separate GC retention paths — each must be
-    // counted. Simulated here by building EventLeakInfo with repeated addresses
-    // (as GetStaticEventSubscribers now produces when the same subscriber appears
-    // in multiple domains' delegate chains).
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public void GroupEventLeaks_SameSubscriberInMultipleDomains_CountedOncePerDomain()
-    {
-        // Simulate: static ManagerChanged event, 6 app domains.
-        // Subscriber A (address 0x100) is subscribed in every domain.
-        // Each domain contributes its own SubscriberInfo entry — no cross-domain dedup.
-        const int domainCount = 6;
-        const ulong subscriberA = 0x100;
-
-        var subscribers = new List<SubscriberInfo>(domainCount);
-        for (int i = 0; i < domainCount; i++)
-            subscribers.Add(new SubscriberInfo { Address = subscriberA, Type = "App.Subscriber" });
-
-        var leak = new EventLeakInfo
-        {
-            PublisherType = "App.Publisher",
-            EventFieldName = "ManagerChanged",
-            IsStatic = true,
-            SubscriberCount = subscribers.Count,
-            Subscribers = subscribers,
-        };
-
-        var groups = NewAnalyzer().GroupEventLeaks([leak]);
-
-        groups.Single().TotalSubscribers.Should().Be(domainCount,
-            "one subscriber registered in 6 domains = 6 separate GC retention paths, all must be counted");
+        keys.Should().ContainSingle().Which.Should().Be(("App.A", "Changed", false));
     }
 
     [Fact]
-    public void GroupEventLeaks_UniqueSubscribersAcrossDomainsAllCounted()
+    public void BuildEnrichmentGroupKeys_ZeroBound_ReturnsEmpty()
     {
-        // 6 domains, each with 2 unique subscribers (12 total subscriptions).
-        // The same subscriber A appears in all 6 domains (6 retention paths).
-        // A different subscriber B appears only in domain 1.
-        const ulong subscriberA = 0x100;
-        var subscribers = new List<SubscriberInfo>();
-        for (int i = 0; i < 6; i++)
-            subscribers.Add(new SubscriberInfo { Address = subscriberA, Type = "App.Subscriber" });
-        subscribers.Add(new SubscriberInfo { Address = 0x200, Type = "App.Other" }); // only in domain 1
+        var groups = new List<EventGroupInfo> { MakeGroup("App.A", "Changed") };
 
-        var leak = new EventLeakInfo
+        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, maxGroupsToEnrich: 0);
+
+        keys.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildEnrichmentGroupKeys_StaticAndInstanceGroupsWithSameNameAreDistinctKeys()
+    {
+        var groups = new List<EventGroupInfo>
         {
-            PublisherType = "App.Publisher",
-            EventFieldName = "ManagerChanged",
-            IsStatic = true,
-            SubscriberCount = subscribers.Count,
-            Subscribers = subscribers,
+            MakeGroup("App.A", "Changed", isStatic: false),
+            MakeGroup("App.A", "Changed", isStatic: true),
         };
 
-        var groups = NewAnalyzer().GroupEventLeaks([leak]);
+        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, maxGroupsToEnrich: 1);
 
-        groups.Single().TotalSubscribers.Should().Be(7,
-            "6 cross-domain subscriptions for A plus 1 subscription for B = 7");
+        keys.Should().ContainSingle().Which.Should().Be(("App.A", "Changed", false));
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 1 — Tier 1 retained bytes fold correctness (design §4.4, audit #3)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void EstimateGroupRetainedBytes_FoldsOverAllSubscriberTypeCounts_NotJustCappedInstances()
+    {
+        // AllSubscriberTypeCounts reflects ALL instances in the group; Instances (the
+        // capped top-N list) is left empty here to prove the estimate doesn't depend on it.
+        var group = new EventGroupInfo
+        {
+            PublisherType = "App.Publisher",
+            EventFieldName = "Changed",
+            TotalSubscribers = 30,
+            AllSubscriberTypeCounts = new Dictionary<string, int>
+            {
+                ["App.SubscriberA"] = 20,
+                ["App.SubscriberB"] = 10,
+            }
+        };
+        var typeSizeMap = new Dictionary<string, ulong>
+        {
+            ["App.SubscriberA"] = 32,
+            ["App.SubscriberB"] = 100,
+        };
+
+        ulong estimate = EventLeakAnalyzer.EstimateGroupRetainedBytes(group, typeSizeMap);
+
+        estimate.Should().Be(20 * 32UL + 10 * 100UL);
+    }
+
+    [Fact]
+    public void EstimateGroupRetainedBytes_UnknownSubscriberType_FallsBackTo64ByteEstimate()
+    {
+        var group = new EventGroupInfo
+        {
+            PublisherType = "App.Publisher",
+            EventFieldName = "Changed",
+            AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.Unknown"] = 5 }
+        };
+
+        ulong estimate = EventLeakAnalyzer.EstimateGroupRetainedBytes(group, new Dictionary<string, ulong>());
+
+        estimate.Should().Be(5 * 64UL);
+    }
+
+    [Fact]
+    public void EstimateGroupRetainedBytes_NoSubscriberTypeCounts_ReturnsZero()
+    {
+        var group = new EventGroupInfo
+        {
+            PublisherType = "App.Publisher",
+            EventFieldName = "Changed",
+            AllSubscriberTypeCounts = new Dictionary<string, int>()
+        };
+
+        EventLeakAnalyzer.EstimateGroupRetainedBytes(group, new Dictionary<string, ulong>()).Should().Be(0);
+    }
+
+    [Fact]
+    public void TotalEstimatedRetainedBytes_EqualsSumOfPerGroupEstimates()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new()
+            {
+                PublisherType = "App.A",
+                EventFieldName = "E1",
+                AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.Sub1"] = 4 }
+            },
+            new()
+            {
+                PublisherType = "App.B",
+                EventFieldName = "E2",
+                AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.Sub2"] = 6 }
+            },
+        };
+        var typeSizeMap = new Dictionary<string, ulong> { ["App.Sub1"] = 40, ["App.Sub2"] = 80 };
+
+        ulong total = 0;
+        foreach (var g in groups)
+            total += EventLeakAnalyzer.EstimateGroupRetainedBytes(g, typeSizeMap);
+
+        total.Should().Be(4 * 40UL + 6 * 80UL);
+    }
+
+    [Fact]
+    public void BuildTopSubscriberTypesAcrossGroups_FoldsCountsAcrossGroups_SortedDescending()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new()
+            {
+                PublisherType = "App.A",
+                EventFieldName = "E1",
+                AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.SubX"] = 10, ["App.SubY"] = 3 }
+            },
+            new()
+            {
+                PublisherType = "App.B",
+                EventFieldName = "E2",
+                AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.SubX"] = 15, ["App.SubZ"] = 1 }
+            },
+        };
+
+        var result = EventLeakAnalyzer.BuildTopSubscriberTypesAcrossGroups(groups, topN: 20);
+
+        result.Should().HaveCount(3);
+        result[0].Should().Be(new NameCountEntry("App.SubX", 25));
+        result[1].Should().Be(new NameCountEntry("App.SubY", 3));
+        result[2].Should().Be(new NameCountEntry("App.SubZ", 1));
+    }
+
+    [Fact]
+    public void BuildTopSubscriberTypesAcrossGroups_RespectsTopNBound()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new()
+            {
+                PublisherType = "App.A",
+                EventFieldName = "E1",
+                AllSubscriberTypeCounts = new Dictionary<string, int> { ["App.SubX"] = 10, ["App.SubY"] = 3, ["App.SubZ"] = 1 }
+            },
+        };
+
+        var result = EventLeakAnalyzer.BuildTopSubscriberTypesAcrossGroups(groups, topN: 2);
+
+        result.Should().HaveCount(2);
+        result.Should().Contain(new NameCountEntry("App.SubX", 10));
+        result.Should().Contain(new NameCountEntry("App.SubY", 3));
+    }
+
+    [Fact]
+    public void BuildTopHandlerMethodsAcrossGroups_FoldsByTypeAndMethod_AcrossGroups()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new()
+            {
+                PublisherType = "App.A",
+                EventFieldName = "E1",
+                AllSubscriberMethodCounts = new Dictionary<(string Type, string? MethodName), int>
+                {
+                    [("App.Factory", "Wire")] = 8,
+                    [("App.Other", "Handle")] = 2,
+                }
+            },
+            new()
+            {
+                PublisherType = "App.B",
+                EventFieldName = "E2",
+                AllSubscriberMethodCounts = new Dictionary<(string Type, string? MethodName), int>
+                {
+                    [("App.Factory", "Wire")] = 5,
+                }
+            },
+        };
+
+        var result = EventLeakAnalyzer.BuildTopHandlerMethodsAcrossGroups(groups, topN: 20);
+
+        result.Should().HaveCount(2);
+        result[0].Should().Be(new NameCountEntry("App.Factory.Wire", 13));
+        result[1].Should().Be(new NameCountEntry("App.Other.Handle", 2));
+    }
+
+    [Fact]
+    public void BuildTopHandlerMethodsAcrossGroups_NullMethodName_RendersAsQuestionMark()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new()
+            {
+                PublisherType = "App.A",
+                EventFieldName = "E1",
+                AllSubscriberMethodCounts = new Dictionary<(string Type, string? MethodName), int>
+                {
+                    [("App.Unresolved", null)] = 4,
+                }
+            },
+        };
+
+        var result = EventLeakAnalyzer.BuildTopHandlerMethodsAcrossGroups(groups, topN: 20);
+
+        result.Should().ContainSingle().Which.Should().Be(new NameCountEntry("App.Unresolved.?", 4));
+    }
+
+    [Fact]
+    public void BuildCorrelationViews_NoGroups_ReturnsEmpty()
+    {
+        var groups = new List<EventGroupInfo>();
+
+        EventLeakAnalyzer.BuildTopSubscriberTypesAcrossGroups(groups, topN: 20).Should().BeEmpty();
+        EventLeakAnalyzer.BuildTopHandlerMethodsAcrossGroups(groups, topN: 20).Should().BeEmpty();
     }
 }

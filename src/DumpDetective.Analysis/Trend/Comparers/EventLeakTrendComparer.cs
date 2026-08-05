@@ -22,6 +22,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not EventLeakDomainResult b || current is not EventLeakDomainResult c) return [];
+
+            // Scoring formula changed between versions (design §9) — a severity/subscriber
+            // delta computed across the boundary would be comparing apples to oranges, so
+            // refuse to diff and emit a single informational note instead.
+            if (b.ScoringVersion != c.ScoringVersion)
+            {
+                return
+                [
+                    new MetricDelta("event.leak.scoring_version_mismatch", null,
+                        b.ScoringVersion, c.ScoringVersion, c.ScoringVersion - b.ScoringVersion,
+                        null, "version", MetricTrendDirection.Neutral)
+                ];
+            }
+
             return
             [
                 MetricDeltaHelper.Compute("event.leak.instances", null, b.TotalEventLeakInstances, c.TotalEventLeakInstances, "events", MetricTrendDirection.HigherIsWorse),

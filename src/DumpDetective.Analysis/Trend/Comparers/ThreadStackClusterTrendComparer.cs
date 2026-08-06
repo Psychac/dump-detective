@@ -9,21 +9,37 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ThreadStackClusterDomainResult r) return [];
+
+            double dominantClusterPercent = 0;
+            if (r.TopClusters is { Count: > 0 } && r.AliveThreadCount > 0)
+                dominantClusterPercent = r.TopClusters[0].Count * 100.0 / r.AliveThreadCount;
+
             return
             [
                 new("cluster.alive.threads", null, r.AliveThreadCount, "threads", MetricTrendDirection.Neutral),
                 new("cluster.unique", null, r.UniqueClusters, "clusters", MetricTrendDirection.Neutral),
-                new("cluster.diversity.percent", null, r.DiversityPercent, "%", MetricTrendDirection.LowerIsWorse)
+                new("cluster.diversity.percent", null, r.DiversityPercent, "%", MetricTrendDirection.LowerIsWorse),
+                new("cluster.dominant.percent", null, dominantClusterPercent, "%", MetricTrendDirection.HigherIsWorse)
             ];
         }
 
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not ThreadStackClusterDomainResult b || current is not ThreadStackClusterDomainResult c) return [];
+
+            double bDominantPercent = 0;
+            if (b.TopClusters is { Count: > 0 } && b.AliveThreadCount > 0)
+                bDominantPercent = b.TopClusters[0].Count * 100.0 / b.AliveThreadCount;
+
+            double cDominantPercent = 0;
+            if (c.TopClusters is { Count: > 0 } && c.AliveThreadCount > 0)
+                cDominantPercent = c.TopClusters[0].Count * 100.0 / c.AliveThreadCount;
+
             return
             [
                 MetricDeltaHelper.Compute("cluster.diversity.percent", null, b.DiversityPercent, c.DiversityPercent, "%", MetricTrendDirection.LowerIsWorse),
-                MetricDeltaHelper.Compute("cluster.unique", null, b.UniqueClusters, c.UniqueClusters, "clusters", MetricTrendDirection.Neutral)
+                MetricDeltaHelper.Compute("cluster.unique", null, b.UniqueClusters, c.UniqueClusters, "clusters", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("cluster.dominant.percent", null, bDominantPercent, cDominantPercent, "%", MetricTrendDirection.HigherIsWorse)
             ];
         }
     }

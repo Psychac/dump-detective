@@ -323,10 +323,10 @@ insufficient for production use.
 
 ### Priority Roadmap
 
-| ID | Recommendation | Type | Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|---|
-| P0-1 | Reset `_participantScanSucceeded = false` in `BeforeThreadStackScan` | Improvement | High | Trivial | High | Improvement |
-| P0-2 | Add dominant-cluster finding: "N of M threads (X%) blocked in [signature]" to `FindingGenerator` | Improvement | High | Low | High | Improvement |
+| ID | Recommendation | Type | Impact | Difficulty | Confidence | Class | Status |
+|---|---|---|---|---|---|---|---|
+| P0-1 | Reset `_participantScanSucceeded = false` in `BeforeThreadStackScan` | Improvement | High | Trivial | High | Improvement | ✅ Done |
+| P0-2 | Add dominant-cluster finding: "N of M threads (X%) blocked in [signature]" to `FindingGenerator` | Improvement | High | Low | High | Improvement | ✅ Done |
 | P1-1 | Remove `SamplingMode` enum or implement it in `BuildSignature` | Improvement | Medium | Low | High | Improvement |
 | P1-2 | Align diversity thresholds: pick one value (suggest 25%) and apply consistently across `FindingGenerator` and `SectionBuilder` | Improvement | Medium | Trivial | High | Improvement |
 | P1-3 | Add per-cluster `IsThreadpoolWorker` / `IsGc` / `IsFinalizer` breakdown using ClrMD thread-type properties | Improvement | High | Low | High | Improvement |
@@ -346,10 +346,12 @@ insufficient for production use.
 
 ### Final Verdict
 
-1. **Production-ready?** Conditionally. The core algorithm is correct and efficient. The correctness
-   bug (P0-1) must be fixed before the analyzer can be considered reliable in multi-run scenarios.
-   The diagnostic output (single diversity finding) is too thin for production incident response
-   but does not produce wrong conclusions — it just omits the most important one.
+1. **Production-ready?** Yes, after P0-1 and P0-2 are complete. The core algorithm is correct and 
+   efficient. P0-1 (reset `_participantScanSucceeded`) ensures reliability in multi-run scenarios.
+   P0-2 (dominant-cluster finding) surfaces the most actionable diagnostic — the largest cluster
+   signature and its percentage of alive threads. Together, these transform the analyzer from
+   a statistical summary into an actionable incident-response tool. The analyzer is now ready
+   for production use; P1+ items are quality-of-life and performance enhancements.
 
 2. **Highest-impact improvements:** P0-2 (dominant-cluster finding) and P1-3 (thread-type
    classification). Together these transform the report from a statistical summary into an

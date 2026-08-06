@@ -103,6 +103,24 @@ Evidence root paths are now visible to engineers in the report, making retention
 
 Root path finding operations on large dumps can now be cancelled instead of blocking indefinitely. Provides graceful shutdown path for long-running evidence collection phase, improving robustness on 10GB+ dumps.
 
+### P2-3 Narrow OtherTimerCategory (2026-08-06)
+
+**Changes Made:**
+
+**Exclusion Logic:**
+- Added `ClrInternalTimerTypes` array containing known CLR-internal timer types
+- Added `IsKnownClrInternalTimerType()` method with O(n) lookup (n=2 known types)
+- Updated `ClassifyType()` to exclude known CLR-internal types before OtherTimer pattern match
+
+**Implementation Details:**
+- Excludes: System.Threading.TimerQueue, System.Threading.TimerThread
+- Prevents false positive matches for internal implementation detail types
+- Explicit types (ThreadingTimer, TimersTimer, TimerQueueTimer, TimerHolder, PeriodicTimer) still handled first
+
+### Result
+
+OtherTimerCategory no longer captures CLR-internal infrastructure types, reducing false positive contributions to OtherTimerCount. The catch-all pattern match now correctly targets only third-party or user-defined timer types.
+
 ---
 
 ## Audit Area 1 — Role & Opportunity Assessment
@@ -459,7 +477,7 @@ for genuine leaks. The false-positive-severity risk is real.
 | **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement | ✅ COMPLETE |
-| **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement |
+| **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement | ✅ COMPLETE |
 | **P3** | Add timer interval histogram (group `_period` into < 100 ms / 100 ms–1 s / > 1 s / infinite) | Medium — separates accumulation leak from timer flood CPU issue | Medium | Medium | Improvement |
 | **P3** | Feed de-duplicated logical timer count into `LeakCandidateAnalyzer` ranking (open Phase 0 action item) | Medium — cross-analyzer correlation | Medium | High | Evolution |
 

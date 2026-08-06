@@ -45,14 +45,31 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         if (typeName.Equals("System.Threading.PeriodicTimer", StringComparison.Ordinal))
             return TimerObjectCategory.PeriodicTimer;
 
+        if (IsKnownClrInternalTimerType(typeName))
+            return TimerObjectCategory.None;
+
         if (TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, OtherTimerNamespacePrefixes, null, OtherTimerTokens))
             return TimerObjectCategory.OtherTimer;
 
         return TimerObjectCategory.None;
     }
 
+    private static bool IsKnownClrInternalTimerType(string typeName)
+    {
+        for (int i = 0; i < ClrInternalTimerTypes.Length; i++)
+        {
+            if (typeName.Equals(ClrInternalTimerTypes[i], StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
     private static readonly string[] OtherTimerNamespacePrefixes = ["System.Threading.", "System.Timers."];
     private static readonly string[] OtherTimerTokens = ["Timer"];
+    private static readonly string[] ClrInternalTimerTypes = [
+        "System.Threading.TimerQueue",
+        "System.Threading.TimerThread",
+    ];
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

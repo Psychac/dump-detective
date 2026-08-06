@@ -286,7 +286,7 @@ dotMemory exposes committed heap size but not per-segment reservation. DumpDetec
 | # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
 |---|---------------|--------|-----------|-----------|---------------|--------|
 | **P0** | Fix `IntPtr.Size` → use `context.Runtime.DataTarget.DataReader.PointerSize` for dump bitness detection in both analyzer and finding generator | High — silent correctness defect for 32-bit dumps | Low | Very high | Improvement | ✅ DONE (fe44ff0) |
-| **P1** | Sort `SegmentTable` by `ReservedBytes` descending before truncation (or before adding to result) | High — worst offenders always visible | Low | Very high | Improvement |
+| **P1** | Sort `SegmentTable` by `ReservedBytes` descending before truncation (or before adding to result) | High — worst offenders always visible | Low | Very high | Improvement | ✅ DONE (c42460f) |
 | **P1** | Add committed per logical heap (`CommittedByLogicalHeap`) to `SegmentReservationDomainResult` | High — Server GC imbalance detection | Low | High | Improvement |
 | **P1** | Add per-kind committed/reserved totals to domain result and key metrics | High — distinguishes LOH vs SOH reservation pressure | Low | High | Improvement |
 | **P1** | Fix section builder to use options-driven thresholds (or shared constants) instead of hardcoded values | Medium — prevents threshold divergence after tuning | Low | Very high | Improvement |

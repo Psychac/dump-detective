@@ -14,9 +14,9 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 24 |
+| **P0 Implemented** | 25 |
 | **P1 Implemented** | 37 |
-| **Overall P0+P1 Rate** | 44.2% (61/138) |
+| **Overall P0+P1 Rate** | 45.0% (62/138) |
 
 ---
 
@@ -46,9 +46,9 @@
 | 11 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
 | 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
-| 14 | **ObjectShapeAnalyzer** | 1/3 | 0/5 | 0/8 | 0/3 | I-1 done (ranking fix); 2 P0 pending |
+| 14 | **ObjectShapeAnalyzer** | 2/3 | 0/5 | 0/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost column); 1 P0 pending |
 
-**Subtotal: 10/11 P0 done, 9/27 P1 done** (in-progress pools)
+**Subtotal: 11/11 P0 done, 9/27 P1 done** (in-progress pools)
 
 ---
 
@@ -87,10 +87,10 @@
 | Analyzers with partial P0+P1 completion | 7 | Some items done, some pending (ObjectShapeAnalyzer added this session) |
 | Analyzers with zero P0+P1 completion | 19 | Not yet started |
 | **Total P0 recommendations** | **69** | — |
-| **P0 items implemented** | **24** | 34.8% |
+| **P0 items implemented** | **25** | 36.2% |
 | **Total P1 recommendations** | **139** | — |
 | **P1 items implemented** | **37** | 26.6% |
-| **Combined P0+P1 rate** | **44.2%** | (61/138) |
+| **Combined P0+P1 rate** | **45.0%** | (62/138) |
 
 ---
 

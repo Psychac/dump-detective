@@ -98,7 +98,7 @@
 
 ### ✅ Completed Recently
 
-- ✅ FinalizableObjectAnalyzer P1 complete (Cache point + Fallback path) — commits TBD
+- ✅ FinalizableObjectAnalyzer P1 complete (Cache point + Fallback path)
   - P1 Cache: Cache `IsDisposableType` and `FindDisposedField` by MethodTable
   - P1 Fallback: Build `finalizableTypes` per-type stats in fallback heap scan path
 - ✅ TimerLeakAnalyzer P2-3 (OtherTimerCategory exclusions) — commit 2f664ec

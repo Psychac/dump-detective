@@ -38,7 +38,8 @@ namespace DumpDetective.Analysis.Analyzers
                     TopReferenceHeavyTypes: [],
                     TopValueHeavyTypes: [],
                     TotalTypesAnalyzed: 0,
-                    AvgRefFieldsPerType: 0);
+                    AvgRefFieldsPerType: 0,
+                    TotalGcScanWork: 0);
             }
 
             IReadOnlyDictionary<ulong, TypeShapeEntry> shapes = idx.TypeShapeCache;
@@ -61,6 +62,7 @@ namespace DumpDetective.Analysis.Analyzers
             var valHeavyCandidates = new List<TypeShapeProfile>();
 
             long totalRefFields = 0;
+            long totalGcScanWork = 0;
             int typesAnalyzed = 0;
 
             for (int i = 0; i < cap; i++)
@@ -73,6 +75,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 typesAnalyzed++;
                 totalRefFields += shape.RefFields;
+                totalGcScanWork += (long)(shape.RefFields * (double)Math.Max(0, count));
 
                 double refRatio = shape.TotalFields > 0
                     ? shape.RefFields * 1.0 / shape.TotalFields
@@ -128,7 +131,8 @@ namespace DumpDetective.Analysis.Analyzers
                 TopReferenceHeavyTypes: refHeavy,
                 TopValueHeavyTypes: valHeavy,
                 TotalTypesAnalyzed: typesAnalyzed,
-                AvgRefFieldsPerType: avgRefFields);
+                AvgRefFieldsPerType: avgRefFields,
+                TotalGcScanWork: totalGcScanWork);
         }
 
         private static int ComputeBaseTypeDepth(ClrType type)

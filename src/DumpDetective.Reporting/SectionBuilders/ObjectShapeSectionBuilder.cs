@@ -27,6 +27,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         {
             ["total_types_analyzed"] = new NumericMetricValue(d.TotalTypesAnalyzed, MetricUnit.Count),
             ["avg_ref_fields_per_type"] = new NumericMetricValue(d.AvgRefFieldsPerType, MetricUnit.Custom, $"{d.AvgRefFieldsPerType:F1}"),
+            ["total_gc_scan_work"] = new NumericMetricValue(d.TotalGcScanWork, MetricUnit.Custom, d.TotalGcScanWork.ToString("N0")),
             ["reference_heavy_types"] = new NumericMetricValue(d.TopReferenceHeavyTypes.Count, MetricUnit.Count),
             ["value_heavy_types"] = new NumericMetricValue(d.TopValueHeavyTypes.Count, MetricUnit.Count),
         };

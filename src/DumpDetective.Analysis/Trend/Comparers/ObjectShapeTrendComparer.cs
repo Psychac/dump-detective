@@ -13,6 +13,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             {
                 new("shape.types.analyzed",    null, r.TotalTypesAnalyzed,   "types", MetricTrendDirection.Neutral),
                 new("shape.avg.ref.fields",    null, r.AvgRefFieldsPerType,  "fields", MetricTrendDirection.HigherIsWorse),
+                new("shape.total.gc.scan.work", null, r.TotalGcScanWork,     "pointers", MetricTrendDirection.HigherIsWorse),
                 new("shape.ref.heavy.count",   null, r.TopReferenceHeavyTypes.Count, "types", MetricTrendDirection.HigherIsWorse),
                 new("shape.val.heavy.count",   null, r.TopValueHeavyTypes.Count,     "types", MetricTrendDirection.Neutral),
             };
@@ -32,6 +33,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             [
                 MetricDeltaHelper.Compute("shape.types.analyzed",  null, b.TotalTypesAnalyzed,            c.TotalTypesAnalyzed,            "types",  MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("shape.avg.ref.fields",  null, b.AvgRefFieldsPerType,           c.AvgRefFieldsPerType,           "fields", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("shape.total.gc.scan.work", null, (double)b.TotalGcScanWork,     (double)c.TotalGcScanWork,     "pointers", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("shape.ref.heavy.count", null, (double)b.TopReferenceHeavyTypes.Count, (double)c.TopReferenceHeavyTypes.Count, "types", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("shape.val.heavy.count", null, (double)b.TopValueHeavyTypes.Count,     (double)c.TopValueHeavyTypes.Count,     "types", MetricTrendDirection.Neutral),
             ];

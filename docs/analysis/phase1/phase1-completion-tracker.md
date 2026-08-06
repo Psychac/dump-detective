@@ -13,8 +13,8 @@
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 27 |
-| **P1 Implemented** | 41 |
-| **Overall P0+P1 Rate** | 49.3% (68/138) |
+| **P1 Implemented** | 42 |
+| **Overall P0+P1 Rate** | 49.9% (69/138) |
 
 ---
 
@@ -45,9 +45,9 @@
 | 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 14 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
-| 15 | **TimerLeakAnalyzer** | 2/2 | 1/3 | 1/5 | 0/3 | ✅ P0 complete (2/2); P1-1 done (evidence rendering); P2-2 done (LINQ fix); P1-2,P1-3 pending |
+| 15 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 1/5 | 0/3 | ✅ P0 complete (2/2); P1-1,P1-3 done; P2-2 done; P1-2 pending |
 
-**Subtotal: 13/13 P0 done, 13/27 P1 done, 2/10 P2 done** (in-progress pools)
+**Subtotal: 13/13 P0 done, 14/27 P1 done, 2/10 P2 done** (in-progress pools)
 
 ---
 
@@ -87,8 +87,8 @@
 | **Total P0 recommendations** | **69** | — |
 | **P0 items implemented** | **27** | 39.1% |
 | **Total P1 recommendations** | **139** | — |
-| **P1 items implemented** | **41** | 29.5% |
-| **Combined P0+P1 rate** | **49.3%** | (68/138) |
+| **P1 items implemented** | **42** | 30.2% |
+| **Combined P0+P1 rate** | **49.9%** | (69/138) |
 
 ---
 
@@ -96,6 +96,8 @@
 
 ### ✅ Completed Recently
 
+- ✅ TimerLeakAnalyzer P1-3 (Cancellation support) — commit 5b1b4be
+  - P1-3: Pass CancellationToken through PopulateEvidence for graceful shutdown
 - ✅ TimerLeakAnalyzer P1-1 (Evidence rendering) + P2-2 (LINQ fix) — commit 0fe6b1d
   - P1-1: Render Evidence.RootPath per type in section builder
   - P2-2: Remove System.Linq, replace with manual loops (hot-path fix)

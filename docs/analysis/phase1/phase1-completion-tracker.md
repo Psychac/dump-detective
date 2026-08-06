@@ -14,9 +14,9 @@
 | **Total Analyzers Analyzed** | 33 |
 | **Total P0 Recommendations Identified** | ~49 |
 | **Total P1 Recommendations Identified** | ~94 |
-| **P0 Items Implemented** | 19 |
+| **P0 Items Implemented** | 20 |
 | **P1 Items Implemented** | 31 |
-| **Overall P0+P1 Implementation Rate** | 35.9% (50/139) |
+| **Overall P0+P1 Implementation Rate** | 36.7% (51/139) |
 
 ---
 
@@ -65,7 +65,7 @@
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ObjectShapeAnalyzer | 0/3 | 0/5 | 8 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
-| **SegmentReservationAnalyzer** | **0/1** | **0/4** | **5** | **🚨 CRITICAL P0 BUG: IntPtr.Size for 32-bit detection** |
+| **SegmentReservationAnalyzer** | **1/1** | **0/4** | **5** | ✅ P0 done (commit fe44ff0); 4 P1 pending |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
 | StringAnalyzer | 0/3 | 0/5 | 8 | — |
 | ThreadAnalyzer | 0/3 | 0/4 | 7 | High-impact (hang/deadlock detection) |
@@ -77,9 +77,7 @@
 
 ### 🚨 Critical (P0) — Must Fix First
 
-| Analyzer | P0 Item | Impact | Difficulty |
-|----------|---------|--------|------------|
-| **SegmentReservationAnalyzer** | Fix `IntPtr.Size` → use `context.Runtime.DataTarget.DataReader.PointerSize` | **CRITICAL**: 32-bit dumps silently fail 32-bit pressure detection | Low |
+None currently blocking. SegmentReservationAnalyzer P0 bitness fix completed (commit fe44ff0).
 
 ### High-Priority (P1) — Next Wave (by impact × pending)
 
@@ -132,11 +130,11 @@ Focus on completing remaining P0/P1 items:
 
 **Recommended Next Steps:**
 
-1. **Fix SegmentReservationAnalyzer P0** (bitness bug) — 1-2 hours, high risk
+1. ✅ **Fix SegmentReservationAnalyzer P0** (bitness bug) — DONE (commit fe44ff0)
 2. **Complete WeakReferenceAnalyzer P1** (2 items) — 2-3 hours, medium risk
 3. **Complete WcfChannelAnalyzer P0-2 + P1** (5 items) — 4-6 hours, medium risk
-4. **Start LeakCandidateAnalyzer** (6 P0+P1 items) — 8-12 hours, high impact
-5. **Start ThreadAnalyzer** (7 P0+P1 items) — 8-12 hours, high impact
+4. **Complete SegmentReservationAnalyzer P1** (4 items: table sorting, heap/kind metrics) — 2-3 hours, low risk
+5. **Start LeakCandidateAnalyzer** (6 P0+P1 items) — 8-12 hours, high impact
 
 ---
 

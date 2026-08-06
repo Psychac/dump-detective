@@ -3,7 +3,6 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
-using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -42,16 +41,68 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (d.ByType.Count > 0)
         {
             var rows = new List<TableRow>(d.ByType.Count);
+            var hasTruncatedSearch = false;
+
             for (int i = 0; i < d.ByType.Count; i++)
             {
                 TimerObjectTypeSummary t = d.ByType[i];
+                string displayName = t.TypeName;
+
+                if (t.Evidence?.RootPathSearchTruncated == true)
+                {
+                    displayName += " ⚠";
+                    hasTruncatedSearch = true;
+                }
+
                 rows.Add(Row(
-                    Cell(t.TypeName),
+                    Cell(displayName),
                     Cell($"{t.Count:N0}", t.Count),
                     Cell(FormatBytes(t.TotalBytes))));
             }
 
-            compactTables.Add(STCompact("Timer-related objects by type", new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            var compactRows = new List<CompactRow>(rows.Count);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var cells = rows[i].Cells;
+                var values = new object?[cells.Count];
+                for (int j = 0; j < cells.Count; j++)
+                {
+                    values[j] = cells[j].RawValue ?? (object?)cells[j].Display;
+                }
+                compactRows.Add(R(values));
+            }
+
+            compactTables.Add(STCompact("Timer-related objects by type", new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") }, compactRows));
+
+            if (hasTruncatedSearch)
+            {
+                blocks.Add(T("⚠ Some timer types have truncated root path searches. Evidence confidence may be partial."));
+            }
+
+            var hasEvidence = false;
+            for (int i = 0; i < d.ByType.Count; i++)
+            {
+                if (d.ByType[i].Evidence?.SampleRootPath != null)
+                {
+                    hasEvidence = true;
+                    break;
+                }
+            }
+
+            if (hasEvidence)
+            {
+                blocks.Add(H("Retention evidence"));
+                for (int i = 0; i < d.ByType.Count; i++)
+                {
+                    TimerObjectTypeSummary t = d.ByType[i];
+                    if (t.Evidence?.SampleRootPath != null)
+                    {
+                        blocks.Add(T($"**{t.TypeName}**", 1));
+                        blocks.Add(T(t.Evidence.SampleRootPath, 2));
+                        blocks.Add(Blank());
+                    }
+                }
+            }
         }
 
         if ((d.TimerHolderCount + d.TimerQueueTimerCount) >= 50)

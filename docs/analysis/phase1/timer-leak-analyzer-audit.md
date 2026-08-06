@@ -64,6 +64,27 @@ Severity now reflects logical timer count (deduplicated), eliminating false-posi
 
 Analyzers now detect `System.Threading.PeriodicTimer` instances (shipped with .NET 6.0+), eliminating false negatives for modern async timer workloads that use the idiomatic `PeriodicTimer` API instead of legacy `System.Threading.Timer` or `System.Timers.Timer`.
 
+### P1-1 Render Evidence RootPath & P2-2 Fix LINQ (2026-08-06)
+
+**Changes Made:**
+
+**Section Builder Enhancement:**
+- Removed `using System.Linq;` import
+- Replaced LINQ `.Select()` chain with manual loop for table row construction (line 70–79)
+- Added evidence rendering section that displays root path per timer type with truncation warning indicator (⚠)
+- Integrated truncated search warning into type name column for at-a-glance visibility
+- Added "Retention evidence" section showing per-type root path chains with proper indentation
+
+**Implementation Details:**
+- Root paths from `Evidence.SampleRootPath` are now rendered in a dedicated section below the type summary table
+- Truncated searches are flagged with ⚠ symbol next to type name for visual scan
+- Added separate warning banner when any type has truncated search (reduced confidence signal)
+- Manual loop construction removes hot-path LINQ violation while maintaining readability
+
+### Result
+
+Evidence root paths are now visible to engineers in the report, making retention chains immediately actionable without requiring debugger inspection. Truncated searches are explicitly flagged, allowing engineers to assess confidence in findings. All LINQ usage in hot paths has been eliminated.
+
 ---
 
 ## Audit Area 1 — Role & Opportunity Assessment
@@ -415,11 +436,11 @@ for genuine leaks. The false-positive-severity risk is real.
 |---|---|---|---|---|---|---|
 | **P0** | Fix double-counting: use `TimerQueueTimerCount` as the logical-timer count for severity thresholds; expose raw object count separately | High — current severity is unreliable | Low | High | Improvement | ✅ COMPLETE |
 | **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement | ✅ COMPLETE |
-| **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement |
-| **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement |
-| **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement |
-| **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement |
-| **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement |
+| **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement | ✅ COMPLETE |
+| **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement | ⏳ PENDING |
+| **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement | ⏳ PENDING |
+| **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement | ✅ COMPLETE |
+| **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement |
 | **P3** | Add timer interval histogram (group `_period` into < 100 ms / 100 ms–1 s / > 1 s / infinite) | Medium — separates accumulation leak from timer flood CPU issue | Medium | Medium | Improvement |
 | **P3** | Feed de-duplicated logical timer count into `LeakCandidateAnalyzer` ranking (open Phase 0 action item) | Medium — cross-analyzer correlation | Medium | High | Evolution |

@@ -17,9 +17,9 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
 
         var findings = new List<InsightFinding>(2);
 
-        if (r.TotalTimers >= 100)
+        if (r.LogicalTimerCount >= 100)
         {
-            FindingSeverity severity = r.TotalTimers >= 250 ? FindingSeverity.Critical : FindingSeverity.Warning;
+            FindingSeverity severity = r.LogicalTimerCount >= 250 ? FindingSeverity.Critical : FindingSeverity.Warning;
 
             Evidence? topEvidence = null;
             int topCount = -1;
@@ -37,13 +37,13 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
                 Analyzer: AnalyzerName,
                 Category: "Infrastructure",
                 Severity: severity,
-                Title: $"{r.TotalTimers:N0} timer-related objects on managed heap",
-                Evidence: $"Threading.Timer={r.ThreadingTimerCount:N0}, Timers.Timer={r.TimersTimerCount:N0}, " +
-                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, Other={r.OtherTimerCount:N0}.",
+                Title: $"{r.LogicalTimerCount:N0} logical timers (undisposed) on managed heap",
+                Evidence: $"Raw object count: {r.TotalTimers:N0} (Threading.Timer={r.ThreadingTimerCount:N0}, Timers.Timer={r.TimersTimerCount:N0}, " +
+                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, Other={r.OtherTimerCount:N0}).",
                 Recommendation: "Dispose timers explicitly when they are no longer needed. " +
                                 "Avoid creating per-request or per-entity timers; use shared scheduling services where possible.",
                 Tags: ["infrastructure", "timer", "leak", "dispose"],
-                MetricValue: r.TotalTimers,
+                MetricValue: r.LogicalTimerCount,
                 MetricUnit: "timers",
                 ConfidenceScore: EvidenceConfidence.Compute(topEvidence)));
         }

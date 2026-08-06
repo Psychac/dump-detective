@@ -115,6 +115,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         return new TimerLeakDomainResult(
             TimersFound: total > 0,
             TotalTimers: total,
+            LogicalTimerCount: timerQueueTimerCount,
             ThreadingTimerCount: threadingTimerCount,
             TimersTimerCount: timersTimerCount,
             TimerQueueTimerCount: timerQueueTimerCount,
@@ -163,5 +164,5 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     }
 
     private static TimerLeakDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, []);
+        new(false, 0, 0, 0, 0, 0, 0, 0, 0, []);
 }

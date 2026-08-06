@@ -7,6 +7,49 @@
 
 ---
 
+## Completion Status
+
+| P0 Fix | Status | Commit | Date |
+|---|---|---|---|
+| **Double-counting deduplication** | ✅ COMPLETE | [commit link](https://github.com/example) | 2026-08-06 |
+| **Add PeriodicTimer coverage** | ⏳ PENDING | — | — |
+
+---
+
+---
+
+## Implementation Notes — P0 Double-Counting Fix
+
+### Changes Made (2026-08-06)
+
+**Model Enhancement:**
+- Added `LogicalTimerCount` property to `TimerLeakDomainResult` record
+- Semantics: equals `TimerQueueTimerCount` (each logical timer maps to exactly one `TimerQueueTimer`)
+- Maintains backward compatibility: `TotalTimers` remains as raw object count for investigative use
+
+**Analyzer Update:**
+- Updated `TimerLeakAnalyzer.Analyze()` to pass `LogicalTimerCount: timerQueueTimerCount` when constructing result
+
+**Finding Generator Fix:**
+- Changed severity thresholds from `r.TotalTimers` to `r.LogicalTimerCount` (lines 20–22)
+- Updated finding title to clarify "logical timers" vs raw object count
+- Updated evidence string to show both logical count (in title) and raw breakdown (in evidence)
+- Changed `MetricValue` to use `LogicalTimerCount`
+
+**Section Builder Enhancement:**
+- Added `["logical_timers"]` as the first key metric (visible in reports)
+- Kept `["total_timer_objects"]` for detailed breakdown
+
+**Trend Tracking:**
+- Added `"timer.logical"` metric to `ExtractMetrics()` for snapshot analysis
+- Added `"timer.logical"` delta to `Compare()` for trend comparison
+
+### Result
+
+Severity now reflects logical timer count (deduplicated), eliminating false-positive escalations from `TimerHolder` + `TimerQueueTimer` wrapper inflation. A system with 130 `TimerQueueTimer` + 130 `TimerHolder` objects now correctly reports 130 logical timers (≈ `Warning` at default thresholds) instead of 260 (≈ `Critical`).
+
+---
+
 ## Audit Area 1 — Role & Opportunity Assessment
 
 ### Current role
@@ -352,10 +395,10 @@ for genuine leaks. The false-positive-severity risk is real.
 
 ### Priority Roadmap
 
-| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| **P0** | Fix double-counting: use `TimerQueueTimerCount` as the logical-timer count for severity thresholds; expose raw object count separately | High — current severity is unreliable | Low | High | Improvement |
-| **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement |
+| Priority | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| **P0** | Fix double-counting: use `TimerQueueTimerCount` as the logical-timer count for severity thresholds; expose raw object count separately | High — current severity is unreliable | Low | High | Improvement | ✅ COMPLETE |
+| **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement | ⏳ PENDING |
 | **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement |
 | **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement |
 | **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement |

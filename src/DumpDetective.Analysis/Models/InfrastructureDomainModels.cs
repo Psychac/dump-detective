@@ -192,6 +192,7 @@ internal sealed record TimerObjectTypeSummary(
 internal sealed record TimerLeakDomainResult(
     bool TimersFound,
     int TotalTimers,
+    int LogicalTimerCount,
     int ThreadingTimerCount,
     int TimersTimerCount,
     int TimerQueueTimerCount,

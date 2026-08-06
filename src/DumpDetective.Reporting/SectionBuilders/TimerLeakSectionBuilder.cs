@@ -23,6 +23,7 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
+            ["logical_timers"] = new NumericMetricValue(d.LogicalTimerCount, MetricUnit.Count),
             ["total_timer_objects"] = new NumericMetricValue(d.TotalTimers, MetricUnit.Count),
             ["threading_timer"] = new NumericMetricValue(d.ThreadingTimerCount, MetricUnit.Count),
             ["timers_timer"] = new NumericMetricValue(d.TimersTimerCount, MetricUnit.Count),

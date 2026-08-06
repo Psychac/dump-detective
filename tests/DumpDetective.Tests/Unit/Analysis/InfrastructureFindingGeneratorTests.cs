@@ -211,24 +211,26 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_NoFindings_WhenNotFound()
     {
         var gen = new TimerLeakFindingGenerator();
-        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, []);
+        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, []);
         gen.Generate(result).Should().BeEmpty();
     }
 
     [Fact]
-    public void TimerLeak_Warning_AtTotalThreshold()
+    public void TimerLeak_Warning_AtLogicalCountThreshold()
     {
         var gen = new TimerLeakFindingGenerator();
-        var result = TimerResult(total: 100, threading: 80, queue: 10, holder: 10);
+        // TotalTimers=200 (threading=80 + queue=100 + holder=20), LogicalTimerCount=100 (queue only)
+        var result = TimerResult(total: 200, threading: 80, queue: 100, holder: 20);
         var findings = gen.Generate(result);
         findings.Should().Contain(f => f.Severity == FindingSeverity.Warning && f.Title.Contains("100"));
     }
 
     [Fact]
-    public void TimerLeak_Critical_AtHighTotalThreshold()
+    public void TimerLeak_Critical_AtHighLogicalCountThreshold()
     {
         var gen = new TimerLeakFindingGenerator();
-        var result = TimerResult(total: 250, threading: 200, queue: 25, holder: 25);
+        // TotalTimers=500 (threading=200 + queue=250 + holder=50), LogicalTimerCount=250 (queue only)
+        var result = TimerResult(total: 500, threading: 200, queue: 250, holder: 50);
         var findings = gen.Generate(result);
         findings.Should().Contain(f => f.Severity == FindingSeverity.Critical);
     }
@@ -246,7 +248,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_CanGenerate_OnlyForTimerLeakDomainResult()
     {
         var gen = new TimerLeakFindingGenerator();
-        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
+        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeFalse();
     }
 
@@ -333,6 +335,7 @@ public sealed class InfrastructureFindingGeneratorTests
         return new TimerLeakDomainResult(
             TimersFound: total > 0,
             TotalTimers: total,
+            LogicalTimerCount: queue,
             ThreadingTimerCount: threading,
             TimersTimerCount: timers,
             TimerQueueTimerCount: queue,

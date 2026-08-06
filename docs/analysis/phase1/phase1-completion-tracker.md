@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 33 |
+| **P0 Implemented** | 34 |
 | **P1 Implemented** | 50 |
 | **P2 Implemented** | 12 |
-| **Overall P0+P1 Rate** | 39.9% (83/208) |
+| **Overall P0+P1 Rate** | 40.4% (84/208) |
 
 ---
 
@@ -48,8 +48,9 @@
 | 14 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 15 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 16 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 17 | **JitAnalyzer** | 1/2 | 0/3 | 0/5 | 0/4 | P0-1 ✅ DONE (Fix IsTiered flag); P0-2 pending |
 
-**Subtotal: 13/13 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
+**Subtotal: 15/20 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
 
 ---
 
@@ -64,7 +65,6 @@
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
-| JitAnalyzer | 0/2 | 0/3 | 5 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 | LockGraphAnalyzer | 0/4 | 0/4 | 8 | — |
 | LohFragmentationAnalyzer | 0/2 | 0/5 | 7 | — |

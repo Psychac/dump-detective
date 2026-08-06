@@ -49,8 +49,8 @@ public sealed class JitAnalyzer : IAnalyzer
         int unmanagedFrameCount = 0;
         int activeMethodsOnStacks = 0;
 
-        // Tiered detection: token → first NativeCode address seen on stacks
-        var tokenToNativeCode = new Dictionary<int, ulong>(capacity: 1024);
+        // Tiered detection: token → set of NativeCode addresses seen on stacks
+        var tokenToNativeCodes = new Dictionary<int, HashSet<ulong>>(capacity: 1024);
         int tieredMethodCount = 0;
 
         // Largest-method candidates keyed by NativeCode (dedup same JIT compilation)
@@ -88,21 +88,18 @@ public sealed class JitAnalyzer : IAnalyzer
                     else
                         frameTypeCounts[typeName] = 1;
 
-                    // Tiered compilation detection
+                    // Tiered compilation detection: track all native codes per token
                     int token = method.MetadataToken;
                     ulong nativeCode = method.NativeCode;
 
                     if (token != 0 && nativeCode != 0)
                     {
-                        if (tokenToNativeCode.TryGetValue(token, out ulong prevCode))
+                        if (!tokenToNativeCodes.TryGetValue(token, out var codes))
                         {
-                            if (prevCode != nativeCode)
-                                tieredMethodCount++;
+                            codes = new HashSet<ulong>();
+                            tokenToNativeCodes[token] = codes;
                         }
-                        else
-                        {
-                            tokenToNativeCode[token] = nativeCode;
-                        }
+                        codes.Add(nativeCode);
                     }
 
                     // Large method tracking (deduplicated by NativeCode address)
@@ -130,8 +127,20 @@ public sealed class JitAnalyzer : IAnalyzer
             }
         }
 
+        // Identify tiered tokens (tokens with multiple distinct native codes)
+        var tieredNativeCodes = new HashSet<ulong>();
+        foreach (var kvp in tokenToNativeCodes)
+        {
+            if (kvp.Value.Count > 1)
+            {
+                tieredMethodCount++;
+                foreach (ulong code in kvp.Value)
+                    tieredNativeCodes.Add(code);
+            }
+        }
+
         // ── Build result lists ───────────────────────────────────────────────
-        var topMethods = BuildTopMethods(methodCandidates, options.TopMethodsLimit);
+        var topMethods = BuildTopMethods(methodCandidates, tieredNativeCodes, options.TopMethodsLimit);
         var topFrameTypes = BuildTopFrameTypes(frameTypeCounts, options.TopFrameTypesLimit);
 
         return new JitDomainResult(
@@ -147,7 +156,9 @@ public sealed class JitAnalyzer : IAnalyzer
     }
 
     private static IReadOnlyList<JitMethodSnapshot> BuildTopMethods(
-        Dictionary<ulong, JitMethodEntry> candidates, int limit)
+        Dictionary<ulong, JitMethodEntry> candidates,
+        HashSet<ulong> tieredNativeCodes,
+        int limit)
     {
         if (candidates.Count == 0) return [];
 
@@ -167,8 +178,9 @@ public sealed class JitAnalyzer : IAnalyzer
         for (int i = 0; i < count; i++)
         {
             JitMethodEntry e = entries[i];
+            bool isTiered = tieredNativeCodes.Contains(e.NativeCodeAddress);
             result.Add(new JitMethodSnapshot(e.Signature, e.DeclaringType,
-                e.NativeCodeAddress, e.HotSize, e.ColdSize, IsTiered: false));
+                e.NativeCodeAddress, e.HotSize, e.ColdSize, isTiered));
         }
         return result;
     }

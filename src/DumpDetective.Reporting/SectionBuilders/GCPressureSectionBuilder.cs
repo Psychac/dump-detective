@@ -37,7 +37,9 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
         };
 
-        if (d.GenBytesAreApproximate)
+        if (d.FallbackMode)
+            blocks.Add(T("⚠⚠ FALLBACK MODE: Heap index was unavailable. Gen0/Gen1 bytes are unknown (reported as 0), and all non-LOH objects were attributed to Gen2. Gen2% values are unreliable and may misrepresent actual generation distribution. Do not use these findings for critical decisions without rebuilding the index."));
+        else if (d.GenBytesAreApproximate)
             blocks.Add(T("⚠ Generation byte values are approximate and computed from per-type averages. High-variance types (arrays, strings) may show inaccurate per-generation splits."));
 
         if (d.Gen2Pct >= 40.0)

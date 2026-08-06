@@ -69,9 +69,11 @@ internal sealed class GCGenerationFindingGenerator : IFindingGenerator
                     topTypeEvidence = $" Top accumulating types: {sb}.";
             }
 
-            string approximationNote = r.GenBytesAreApproximate
-                ? " ⚠ Byte values are approximate and may not reflect exact per-generation distribution for high-variance types."
-                : "";
+            string qualityNote = r.FallbackMode
+                ? " ⚠⚠ FALLBACK MODE: Gen0/Gen1 values unknown (set to 0). Gen2% is unreliable — this finding may be a false positive."
+                : r.GenBytesAreApproximate
+                    ? " ⚠ Byte values are approximate and may not reflect exact per-generation distribution for high-variance types."
+                    : "";
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
@@ -80,7 +82,7 @@ internal sealed class GCGenerationFindingGenerator : IFindingGenerator
                 Title: $"Gen2 holds {r.Gen2Pct:F1}% of managed heap ({FormatBytes(r.Gen2Bytes)})",
                 Evidence: $"Gen2: {r.Gen2Objects:N0} objects, {FormatBytes(r.Gen2Bytes)}. " +
                           $"Gen0: {FormatBytes(r.Gen0Bytes)} | Gen1: {FormatBytes(r.Gen1Bytes)} | " +
-                          $"LOH: {FormatBytes(r.LohBytes)}.{topTypeEvidence}{approximationNote}",
+                          $"LOH: {FormatBytes(r.LohBytes)}.{topTypeEvidence}{qualityNote}",
                 Recommendation: "Run: memory-leak <dump> for full Gen2/LOH breakdown and GC root chains. " +
                                 "High Gen2 indicates chronic object promotion — review long-lived caches, " +
                                 "static collections, and event subscriptions that keep objects alive.",

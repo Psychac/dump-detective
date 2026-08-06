@@ -85,6 +85,7 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.VersionConflicts.Keys.ToArray(),
                 topModules,
                 conflictDetails,
+                options.HeavyModuleWarningThresholdBytes,
                 heapStats?.TopByMemory,
                 heapStats?.DensityAnomalies,
                 TotalDomains: appDomains.TotalDomains,
@@ -138,15 +139,10 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong domainManagedBytes = 0;
                 var domainTopModules = new List<string>(capacity: Math.Min(options.ModuleEnumerationLimit, 8));
 
-                // Select modules according to selection mode. Default: TopBySize (existing behavior).
-                ClrModule[]? sortedModules = null;
-                if (options.ModuleSelectionMode == ModuleSelectionMode.TopBySize || options.ModuleSelectionMode == ModuleSelectionMode.TopByTypeCount)
-                {
-                    // Sort by size descending as a practical default ordering.
-                    sortedModules = new ClrModule[modules.Count];
-                    for (int i = 0; i < modules.Count; i++) sortedModules[i] = modules[i];
-                    Array.Sort(sortedModules, static (a, b) => b.Size.CompareTo(a.Size));
-                }
+                // Sort modules by size descending — both selection modes benefit from processing largest modules first.
+                ClrModule[] sortedModules = new ClrModule[modules.Count];
+                for (int i = 0; i < modules.Count; i++) sortedModules[i] = modules[i];
+                Array.Sort(sortedModules, static (a, b) => b.Size.CompareTo(a.Size));
 
                 int enumerationBound = Math.Min(modules.Count, options.ModuleEnumerationLimit);
                 if (modules.Count > enumerationBound)
@@ -158,7 +154,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 for (int mi = 0; mi < enumerationBound; mi++)
                 {
-                    ClrModule module = sortedModules is not null ? sortedModules[mi] : modules[mi];
+                    ClrModule module = sortedModules[mi];
 
                     if (module.IsDynamic) totalDynamicModules++;
                     if (module.IsDynamic) dynamicModuleBytes += module.Size;

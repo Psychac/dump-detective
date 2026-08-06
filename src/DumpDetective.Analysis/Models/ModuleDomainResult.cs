@@ -58,6 +58,7 @@ internal sealed record ModuleDomainResult(
     IReadOnlyList<string> ConflictingAssemblyNames,
     IReadOnlyList<LoadedModuleSnapshot> TopModulesBySize,
     IReadOnlyList<ModuleConflictGroup> ConflictDetails,
+    ulong HeavyModuleWarningThresholdBytes,
     IReadOnlyList<ModuleHeapStats>? TopModulesByHeapMemory = null,
     IReadOnlyList<ModuleTypeDensity>? HeavyTypeDensityModules = null,
     int TotalDomains = 0,

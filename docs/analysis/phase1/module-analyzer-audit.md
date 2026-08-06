@@ -261,8 +261,8 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 
 | # | Recommendation | Area | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|---|
-| **P0** | Fix `StratifiedSample` mode or remove the enum value — silent fallthrough is a correctness bug | Area 1/6 | Medium | Low | High | Improvement |
-| **P0** | Align `HeavyModuleWarningThresholdBytes` between `ModuleAnalysisOptions` and `ModuleFindingGenerator` — diverged thresholds produce inconsistent severity | Area 2/6 | Medium | Low | High | Improvement |
+| **P0** ✅ | Fix `StratifiedSample` mode or remove the enum value — silent fallthrough is a correctness bug | Area 1/6 | Medium | Low | High | Improvement |
+| **P0** ✅ | Align `HeavyModuleWarningThresholdBytes` between `ModuleAnalysisOptions` and `ModuleFindingGenerator` — diverged thresholds produce inconsistent severity | Area 2/6 | Medium | Low | High | Improvement |
 | **P1** | Remove or formally deprecate the sync `Analyze(ClrRuntime)` overloads; they bypass options and never call `Stamp` | Area 1 | Low | Low | High | Improvement |
 | **P1** | Add version strings to `ModuleConflictGroup` instances; emit conflict versions in finding evidence | Area 2 | High | Low | High | Improvement |
 | **P1** | Emit a `Warning` finding when `ExcludedModuleCount > 0` (analysis blind-spot notification) | Area 2 | Medium | Low | High | Improvement |

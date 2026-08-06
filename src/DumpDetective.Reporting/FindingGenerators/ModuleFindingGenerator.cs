@@ -44,8 +44,7 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
         if (r.TopModulesByHeapMemory is { Count: > 0 } heapModules)
         {
             var heaviest = heapModules[0];
-            ulong thresholdBytes = 200 * 1024 * 1024;
-            FindingSeverity heavySeverity = heaviest.TotalBytes >= thresholdBytes
+            FindingSeverity heavySeverity = heaviest.TotalBytes >= r.HeavyModuleWarningThresholdBytes
                 ? FindingSeverity.Warning
                 : FindingSeverity.Info;
 
@@ -55,7 +54,7 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
                 Severity: heavySeverity,
                 Title: "Module heap memory distribution",
                 Evidence: $"Heaviest module on heap: {heaviest.ModuleName} consuming {FormatHelper.FormatBytes(heaviest.TotalBytes)} across {heaviest.ObjectCount:N0} objects ({heaviest.UniqueTypeCount} type(s)).",
-                Recommendation: heaviest.TotalBytes >= thresholdBytes
+                Recommendation: heaviest.TotalBytes >= r.HeavyModuleWarningThresholdBytes
                     ? $"Investigate why {heaviest.ModuleName} dominates heap memory. Check for unbounded caches or collections."
                     : "Module heap distribution appears normal.",
                 Tags: ["modules", "memory", "heap"],

@@ -3,8 +3,7 @@ namespace DumpDetective.Core.Options;
 public enum ModuleSelectionMode
 {
     TopBySize,
-    TopByTypeCount,
-    StratifiedSample
+    TopByTypeCount
 }
 
 public enum TypeEnumerationMode

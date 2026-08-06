@@ -100,12 +100,12 @@ public sealed class ModuleAnalysisOptions
         },
         _ => new ModuleAnalysisOptions
         {
-            // Balanced
+            // Balanced — skip expensive type enumeration without a heap index, where all results would be empty anyway
             ModuleEnumerationLimit = 50,
             TopModuleTypeCountLimit = 20,
             ModuleSelectionMode = ModuleSelectionMode.TopBySize,
             TypeEnumerationMode = TypeEnumerationMode.Full,
-            PreferIndexOnly = false,
+            PreferIndexOnly = true,
             IncludeExcludedModuleSummary = true,
             EmitTruncationNotice = true,
         },

@@ -267,7 +267,7 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 | **P1** ✅ | Add version strings to `ModuleConflictGroup` instances; emit conflict versions in finding evidence | Area 2 | High | Low | High | Improvement |
 | **P1** ✅ | Emit a `Warning` finding when `ExcludedModuleCount > 0` (analysis blind-spot notification) | Area 2 | Medium | Low | High | Improvement |
 | **P1** ✅ | Add Gen2 + LOH bytes columns to `ModuleHeapStats` and the heap-footprint table — data is in the index | Area 4 | High | Low | High | Improvement |
-| **P1** | In `Balanced` preset, set `PreferIndexOnly = true` or add a guard to skip type enumeration when no heap index exists and all results would be zero | Area 5 | Medium | Low | High | Improvement |
+| **P1** ✅ | In `Balanced` preset, set `PreferIndexOnly = true` or add a guard to skip type enumeration when no heap index exists and all results would be zero | Area 5 | Medium | Low | High | Improvement |
 | **P2** | Expose `Tags` and `Order` on `ModuleAnalyzer` (`["modules","runtime","assemblies"]`, order ~60) | Area 1 | Low | Low | High | Improvement |
 | **P2** | Replace `ModuleProbe` reflection with direct `ClrModule.MetadataImport` API once confirmed available in target ClrMD version | Area 3/6 | Medium | Medium | Medium | Improvement |
 | **P2** | Add `IsThreadSafe` declaration (currently `false` by interface default; document explicitly) | Area 1 | Low | Low | High | Improvement |

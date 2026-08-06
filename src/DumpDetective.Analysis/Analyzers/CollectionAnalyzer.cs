@@ -522,8 +522,8 @@ namespace DumpDetective.Analysis.Analyzers
             const long progressInterval = 50_000;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
             // ClrMD heap/field reads are not reliably thread-safe under this analyzer's
-            // parallel per-entry execution, so we always serialize the critical heap reads.
-            var heapLock = new object();
+            // parallel per-entry execution. Serialize if configured, otherwise allow concurrent access.
+            object? heapLock = _options.SerializeHeapAccess ? new object() : null;
 
             void TrackWasteful(WastefulCollection waste)
             {
@@ -566,7 +566,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (s % progressInterval == 0)
                     progress?.Report(new(s, "scanning collections"));
                 CollectionKind kind;
-                if (heapLock is object)
+                if (heapLock != null)
                 {
                     lock (heapLock)
                         kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
@@ -604,7 +604,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref dictionaries);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeDictionary(heap, address); }
                     }
@@ -623,7 +623,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref lists);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeList(heap, address); }
                     }
@@ -642,7 +642,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref hashSets);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeHashSet(heap, address); }
                     }
@@ -661,7 +661,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref arrayLists);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
                     }
@@ -680,7 +680,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref stacks);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
                     }
@@ -699,7 +699,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref sortedLists);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
                     }
@@ -718,7 +718,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref sortedSets);
                     WastefulCollection? waste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
                     }
@@ -737,7 +737,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Interlocked.Increment(ref queues);
                     WastefulCollection? qWaste;
-                    if (heapLock is object)
+                    if (heapLock != null)
                     {
                         lock (heapLock) { qWaste = AnalyzeQueue(heap, address); }
                     }

@@ -39,6 +39,9 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             ? T("Low signature diversity; large clusters may indicate coordinated blocking/contention.")
             : T("Signature diversity suggests varied active work."));
 
+        if (d.MaxClustersCapReached)
+            blocks.Add(T("⚠️  MaxClusters cap reached: output truncated. See full cluster exports for complete analysis."));
+
         // Typed StackClusters slot
         var stackClusters = new List<StackCluster>();
         var clusters = d.TopClusters ?? [];

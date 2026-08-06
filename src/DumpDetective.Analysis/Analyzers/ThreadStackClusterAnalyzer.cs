@@ -136,6 +136,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Apply MinClusterSize and MaxClusters before snapshot/export
             var filteredClusters = topClusters.Where(c => c.Count >= Math.Max(1, options.MinClusterSize)).ToArray();
+            bool maxClustersCapReached = filteredClusters.Length >= options.MaxClusters;
             if (filteredClusters.Length > options.MaxClusters)
                 filteredClusters = filteredClusters.Take(options.MaxClusters).ToArray();
 
@@ -210,7 +211,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports);
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, maxClustersCapReached);
         }
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)

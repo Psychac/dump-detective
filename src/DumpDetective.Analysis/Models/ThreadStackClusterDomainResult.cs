@@ -11,7 +11,8 @@ internal sealed record ThreadStackClusterDomainResult(
     double DiversityPercent,
     IReadOnlyList<string> TopClusterSignatures,
     IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
+    bool MaxClustersCapReached = false) : AnalyzerDomainResult;
 
 internal sealed record ThreadClusterSnapshot(
     int Count,

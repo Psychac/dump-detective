@@ -14,6 +14,7 @@
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 27 |
 | **P1 Implemented** | 42 |
+| **P2 Implemented** | 3 |
 | **Overall P0+P1 Rate** | 49.9% (69/138) |
 
 ---
@@ -45,9 +46,9 @@
 | 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 14 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
-| 15 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 1/5 | 0/3 | ✅ P0 complete (2/2); P1-1,P1-3 done; P2-2 done; P1-2 pending |
+| 15 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 
-**Subtotal: 13/13 P0 done, 14/27 P1 done, 2/10 P2 done** (in-progress pools)
+**Subtotal: 13/13 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
 
 ---
 
@@ -96,6 +97,8 @@
 
 ### ✅ Completed Recently
 
+- ✅ TimerLeakAnalyzer P2-3 (OtherTimerCategory exclusions) — commit 2f664ec
+  - P2-3: Exclude CLR-internal timer types (TimerQueue, TimerThread) from OtherTimer pattern
 - ✅ TimerLeakAnalyzer P1-3 (Cancellation support) — commit 5b1b4be
   - P1-3: Pass CancellationToken through PopulateEvidence for graceful shutdown
 - ✅ TimerLeakAnalyzer P1-1 (Evidence rendering) + P2-2 (LINQ fix) — commit 0fe6b1d

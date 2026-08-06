@@ -348,10 +348,10 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 | P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement | Pending |
 | P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 7ebe9bd) |
 | P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | Pending |
-| P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement | Pending |
-| P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement | Pending |
-| P2-4 | **Add `ObjectScanCounter` to Phase C reader path** for progress reporting on large dumps | Performance | Low | Low | High | Improvement | Pending |
-| P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement | Pending |
+| P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
+| P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
+| P2-4 | **Add `ObjectScanCounter` to Phase C reader path** for progress reporting on large dumps | Performance | Low | Low | High | Improvement | ✅ Done (commit f4c7461) |
+| P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
 | P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement | Pending |
 | P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution | Pending |
 | P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement | Pending |

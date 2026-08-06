@@ -132,6 +132,8 @@ namespace DumpDetective.Analysis.Analyzers
                     if (options.ProduceRawExports)
                         WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
                 }
+                try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
+                catch { }
             }
             else
             {
@@ -247,6 +249,9 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     // Sample itself is stale — approximate all as stale (conservative estimate).
                     staleWrapperCount += (int)Math.Min(entry.Count, int.MaxValue);
+                    // Record which WeakReference type holds stale wrappers.
+                    string holderTypeName = sample.Type.Name ?? "Unknown";
+                    IncrementDict(staleHolderTypeHits, holderTypeName);
                 }
             }
 
@@ -265,7 +270,11 @@ namespace DumpDetective.Analysis.Analyzers
                     if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
                     ClrObject obj = heap.GetObject(addr);
                     if (!obj.IsValid) dependentHandleDeadKeyCount++;
+                    if (options.ProduceRawExports)
+                        WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
                 }
+                try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
+                catch { }
             }
             else
             {

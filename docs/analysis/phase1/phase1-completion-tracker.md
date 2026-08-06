@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 36 |
+| **P0 Implemented** | 37 |
 | **P1 Implemented** | 53 |
 | **P2 Implemented** | 12 |
-| **Overall P0+P1 Rate** | 42.9% (89/208) |
+| **Overall P0+P1 Rate** | 43.3% (90/208) |
 
 ---
 
@@ -41,7 +41,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 9 | **CollectionAnalyzer** | 1/3 | 0/5 | 0/8 | 0/5 | P0-1 done (WasteCountsByKind fix); 2 P0, 5 P1 pending |
+| 9 | **CollectionAnalyzer** | 2/3 | 0/5 | 0/8 | 0/5 | P0-1,P0-2 done (WasteCountsByKind + cache corruption fix); 1 P0, 5 P1 pending |
 | 10 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
 | 11 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
 | 12 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
@@ -86,10 +86,10 @@
 | Analyzers with partial P0+P1 completion | 9 | Some items done, some pending (CollectionAnalyzer, ObjectShapeAnalyzer, TimerLeakAnalyzer) |
 | Analyzers with zero P0+P1 completion | 17 | Not yet started |
 | **Total P0 recommendations** | **69** | — |
-| **P0 items implemented** | **28** | 40.6% |
+| **P0 items implemented** | **29** | 42.0% |
 | **Total P1 recommendations** | **139** | — |
 | **P1 items implemented** | **42** | 30.2% |
-| **Combined P0+P1 rate** | **50.7%** | (70/138) |
+| **Combined P0+P1 rate** | **51.4%** | (71/138) |
 
 ---
 

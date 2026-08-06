@@ -1116,10 +1116,9 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (!s_fieldLayoutCache.TryGetValue(methodTable, out var existing))
                 {
-                    var newLayout = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, compType, compType != null ? compType.StaticSize : 0, computedSize);
-                    if (s_fieldLayoutCache.TryAdd(methodTable, newLayout))
-                        return;
-                    continue;
+                    // Entry doesn't exist yet; we cannot build from default value.
+                    // Return and let GetOrBuildFieldLayout handle the full initialization on next access.
+                    return;
                 }
 
                 if (existing.ComputedElementSize != 0)

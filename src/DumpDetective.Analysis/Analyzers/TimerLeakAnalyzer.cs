@@ -28,6 +28,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         TimersTimer,
         TimerQueueTimer,
         TimerHolder,
+        PeriodicTimer,
         OtherTimer
     }
 
@@ -41,6 +42,8 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             return TimerObjectCategory.TimerQueueTimer;
         if (typeName.Equals("System.Threading.TimerHolder", StringComparison.Ordinal))
             return TimerObjectCategory.TimerHolder;
+        if (typeName.Equals("System.Threading.PeriodicTimer", StringComparison.Ordinal))
+            return TimerObjectCategory.PeriodicTimer;
 
         if (TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, OtherTimerNamespacePrefixes, null, OtherTimerTokens))
             return TimerObjectCategory.OtherTimer;
@@ -72,6 +75,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         int timersTimerCount = 0;
         int timerQueueTimerCount = 0;
         int timerHolderCount = 0;
+        int periodicTimerCount = 0;
         int otherTimerCount = 0;
         ulong totalBytes = 0;
 
@@ -97,6 +101,9 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
                 case TimerObjectCategory.TimerHolder:
                     timerHolderCount += count;
                     break;
+                case TimerObjectCategory.PeriodicTimer:
+                    periodicTimerCount += count;
+                    break;
                 case TimerObjectCategory.OtherTimer:
                     otherTimerCount += count;
                     break;
@@ -110,7 +117,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 
         PopulateEvidence(heap, cache, byType);
 
-        int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + otherTimerCount;
+        int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + periodicTimerCount + otherTimerCount;
 
         return new TimerLeakDomainResult(
             TimersFound: total > 0,
@@ -120,6 +127,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             TimersTimerCount: timersTimerCount,
             TimerQueueTimerCount: timerQueueTimerCount,
             TimerHolderCount: timerHolderCount,
+            PeriodicTimerCount: periodicTimerCount,
             OtherTimerCount: otherTimerCount,
             TotalBytes: totalBytes,
             ByType: byType);
@@ -164,5 +172,5 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     }
 
     private static TimerLeakDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, 0, []);
+        new(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
 }

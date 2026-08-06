@@ -197,6 +197,7 @@ internal sealed record TimerLeakDomainResult(
     int TimersTimerCount,
     int TimerQueueTimerCount,
     int TimerHolderCount,
+    int PeriodicTimerCount,
     int OtherTimerCount,
     ulong TotalBytes,
     IReadOnlyList<TimerObjectTypeSummary> ByType) : DumpDetective.Core.Models.AnalyzerDomainResult;

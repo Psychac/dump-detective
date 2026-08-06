@@ -211,7 +211,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_NoFindings_WhenNotFound()
     {
         var gen = new TimerLeakFindingGenerator();
-        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, []);
+        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -248,7 +248,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_CanGenerate_OnlyForTimerLeakDomainResult()
     {
         var gen = new TimerLeakFindingGenerator();
-        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
+        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeFalse();
     }
 
@@ -324,6 +324,7 @@ public sealed class InfrastructureFindingGeneratorTests
         int timers = 0,
         int queue = 0,
         int holder = 0,
+        int periodic = 0,
         int other = 0)
     {
         var byType = new List<TimerObjectTypeSummary>();
@@ -331,6 +332,7 @@ public sealed class InfrastructureFindingGeneratorTests
         if (timers > 0) byType.Add(new("System.Timers.Timer", timers, (ulong)(timers * 120)));
         if (queue > 0) byType.Add(new("System.Threading.TimerQueueTimer", queue, (ulong)(queue * 96)));
         if (holder > 0) byType.Add(new("System.Threading.TimerHolder", holder, (ulong)(holder * 96)));
+        if (periodic > 0) byType.Add(new("System.Threading.PeriodicTimer", periodic, (ulong)(periodic * 88)));
 
         return new TimerLeakDomainResult(
             TimersFound: total > 0,
@@ -340,6 +342,7 @@ public sealed class InfrastructureFindingGeneratorTests
             TimersTimerCount: timers,
             TimerQueueTimerCount: queue,
             TimerHolderCount: holder,
+            PeriodicTimerCount: periodic,
             OtherTimerCount: other,
             TotalBytes: byType.Aggregate(0UL, (sum, t) => sum + t.TotalBytes),
             ByType: byType);

@@ -16,6 +16,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("timer.threading",  null, r.ThreadingTimerCount,  "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.queue",      null, r.TimerQueueTimerCount, "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.holder",     null, r.TimerHolderCount,     "objects", MetricTrendDirection.HigherIsWorse),
+                new("timer.periodic",   null, r.PeriodicTimerCount,   "objects", MetricTrendDirection.HigherIsWorse),
                 new("timer.bytes",      null, r.TotalBytes,           "bytes",   MetricTrendDirection.HigherIsWorse),
             };
 
@@ -38,6 +39,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("timer.threading", null, b.ThreadingTimerCount,  c.ThreadingTimerCount,  "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("timer.queue",     null, b.TimerQueueTimerCount, c.TimerQueueTimerCount, "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("timer.holder",    null, b.TimerHolderCount,     c.TimerHolderCount,     "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("timer.periodic",  null, b.PeriodicTimerCount,   c.PeriodicTimerCount,   "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("timer.bytes",     null, b.TotalBytes,           c.TotalBytes,           "bytes",   MetricTrendDirection.HigherIsWorse),
             ];
         }

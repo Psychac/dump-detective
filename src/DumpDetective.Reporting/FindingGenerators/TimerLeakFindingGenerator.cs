@@ -39,7 +39,7 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
                 Severity: severity,
                 Title: $"{r.LogicalTimerCount:N0} logical timers (undisposed) on managed heap",
                 Evidence: $"Raw object count: {r.TotalTimers:N0} (Threading.Timer={r.ThreadingTimerCount:N0}, Timers.Timer={r.TimersTimerCount:N0}, " +
-                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, Other={r.OtherTimerCount:N0}).",
+                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, PeriodicTimer={r.PeriodicTimerCount:N0}, Other={r.OtherTimerCount:N0}).",
                 Recommendation: "Dispose timers explicitly when they are no longer needed. " +
                                 "Avoid creating per-request or per-entity timers; use shared scheduling services where possible.",
                 Tags: ["infrastructure", "timer", "leak", "dispose"],

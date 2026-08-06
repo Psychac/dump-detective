@@ -29,6 +29,7 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["timers_timer"] = new NumericMetricValue(d.TimersTimerCount, MetricUnit.Count),
             ["timer_queue_timer"] = new NumericMetricValue(d.TimerQueueTimerCount, MetricUnit.Count),
             ["timer_holder"] = new NumericMetricValue(d.TimerHolderCount, MetricUnit.Count),
+            ["periodic_timer"] = new NumericMetricValue(d.PeriodicTimerCount, MetricUnit.Count),
             ["total_heap_size"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatBytes(d.TotalBytes)),
         };
 

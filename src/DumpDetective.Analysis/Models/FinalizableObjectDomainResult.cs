@@ -30,4 +30,9 @@ internal sealed record FinalizableObjectDomainResult(
     bool HasUndisposedDisposableInQueue,
     IReadOnlyList<TypeGenerationProfile> TopFinalizableTypesByGen2Count,
     IReadOnlyList<QueueTypeStatistic> TopQueueTypesByCount,
-    IReadOnlyList<FinalizerQueueEntry> TopQueueEntriesByRetainedSize) : AnalyzerDomainResult;
+    IReadOnlyList<FinalizerQueueEntry> TopQueueEntriesByRetainedSize) : AnalyzerDomainResult
+{
+    public double QueuePressureRatio => TotalFinalizableObjects > 0
+        ? (double)FinalizerQueueCount / TotalFinalizableObjects
+        : 0.0;
+}

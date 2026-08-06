@@ -30,7 +30,7 @@
 | 5 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
 | 6 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
 | 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 0/4 | ✅ P0+P1+P2 |
-| 8 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 0/8 | 0/3 | ✅ P0+P1 |
+| 8 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 1/8 | 0/3 | ✅ P0+P1 complete; P2 12.5% (1/8) |
 
 **Subtotal: 18/18 P0 done, 38/38 P1 done**
 

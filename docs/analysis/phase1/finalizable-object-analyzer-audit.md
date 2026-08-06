@@ -258,7 +258,7 @@ dotMemory provides:
 | ✅ DONE | Cache `IsDisposableType` and `FindDisposedField` results by MethodTable within the analysis call | Medium (perf) | Easy | High | Improvement |
 | ✅ DONE | Fix fallback path to build `finalizableTypes` list or emit an explicit caveat in the result | Medium (correctness) | Easy | High | Improvement |
 | P2 | Detect CriticalFinalizerObject / SafeHandle accumulation — check `ClrType` hierarchy or type name | High (diagnostic) | Medium | High | Improvement |
-| P2 | Add queue pressure ratio metric: `FinalizerQueueCount / TotalFinalizableObjects` | Medium (diagnostic) | Trivial | High | Improvement |
+| ✅ DONE | Add queue pressure ratio metric: `FinalizerQueueCount / TotalFinalizableObjects` | Medium (diagnostic) | Trivial | High | Improvement |
 | P2 | Move `DetectKnownFinalizerQueuePatterns` heuristics into `FinalizableObjectFindingGenerator` or expose them as section annotations | Medium (UX) | Medium | High | Improvement |
 | P2 | Reservoir-sample queue entries instead of first-N to improve retained-size coverage | Medium (correctness) | Medium | High | Improvement |
 | P2 | Eliminate double `heap.GetObject()` fetch in Step 3 — carry `ClrObject` through queue sample list | Low (perf) | Easy | High | Improvement |

@@ -37,6 +37,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             ["finalizer_queue_retained"] = new NumericMetricValue((double)d.FinalizerQueueRetainedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)),
             ["retained_estimate_partial"] = new TextMetricValue(d.IsRetainedEstimatePartial ? "Yes (capped by BFS limits)" : "No"),
             ["has_undisposed_disposable"] = new TextMetricValue(d.HasUndisposedDisposableInQueue ? "Yes" : "No"),
+            ["queue_pressure_ratio"] = new TextMetricValue($"{d.QueuePressureRatio * 100:F1}%"),
         };
 
         if (d.TopFinalizableTypesByGen2Count.Count > 0)

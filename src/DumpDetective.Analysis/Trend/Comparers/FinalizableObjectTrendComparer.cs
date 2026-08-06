@@ -16,6 +16,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("finalizable.gen2.count",       null, r.Gen2Count,               "objects", MetricTrendDirection.HigherIsWorse),
                 new("finalizable.queue.count",      null, r.FinalizerQueueCount,     "objects", MetricTrendDirection.HigherIsWorse),
                 new("finalizable.queue.retained",   null, r.FinalizerQueueRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("finalizable.queue.pressure.ratio", null, r.QueuePressureRatio,  "ratio",   MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (TypeGenerationProfile p in r.TopFinalizableTypesByGen2Count)
@@ -31,11 +32,12 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not FinalizableObjectDomainResult b || current is not FinalizableObjectDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("finalizable.total",          null, b.TotalFinalizableObjects,    c.TotalFinalizableObjects,    "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("finalizable.total.bytes",    null, b.TotalFinalizableBytes,      c.TotalFinalizableBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("finalizable.gen2.count",     null, b.Gen2Count,                  c.Gen2Count,                  "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("finalizable.queue.count",    null, b.FinalizerQueueCount,        c.FinalizerQueueCount,        "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("finalizable.queue.retained", null, b.FinalizerQueueRetainedBytes, c.FinalizerQueueRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.total",                   null, b.TotalFinalizableObjects,    c.TotalFinalizableObjects,    "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.total.bytes",             null, b.TotalFinalizableBytes,      c.TotalFinalizableBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.gen2.count",              null, b.Gen2Count,                  c.Gen2Count,                  "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.queue.count",             null, b.FinalizerQueueCount,        c.FinalizerQueueCount,        "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.queue.retained",          null, b.FinalizerQueueRetainedBytes, c.FinalizerQueueRetainedBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("finalizable.queue.pressure.ratio",    null, b.QueuePressureRatio,         c.QueuePressureRatio,         "ratio",   MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

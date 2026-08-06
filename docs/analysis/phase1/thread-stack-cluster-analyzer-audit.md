@@ -332,7 +332,7 @@ insufficient for production use.
 | P1-3 | Add per-cluster `IsThreadpoolWorker` / `IsGc` / `IsFinalizer` breakdown using ClrMD thread-type properties | Improvement | High | Low | High | Improvement | ✅ Done |
 | P1-4 | Classify `<No managed frames>` clusters by `ClrThread.IsGc`, `IsFinalizer`, `IsThreadpoolCompletionPort` instead of one sentinel | Improvement | Medium | Low | High | Improvement | ✅ Done |
 | P1-5 | Remove `runtime.Threads.ToArray()` in fallback path; use `foreach` on `runtime.Threads` directly | Improvement | Low | Trivial | High | Improvement | ✅ Done |
-| P2-1 | Add dominant-cluster %-of-alive to `ThreadStackClusterTrendComparer` | Improvement | Medium | Low | High | Improvement |
+| P2-1 | Add dominant-cluster %-of-alive to `ThreadStackClusterTrendComparer` | Improvement | Medium | Low | High | Improvement | ✅ Done |
 | P2-2 | Add `ManagedThreadId` to `ThreadClusterSnapshot` to enable per-cluster `!clrstack` correlation | Improvement | Medium | Low | High | Improvement |
 | P2-3 | Emit MaxClusters-cap-reached advisory in report when `filteredClusters.Length >= options.MaxClusters` | Improvement | Low | Trivial | High | Improvement |
 | P2-4 | Add frame-level hotspot histogram (top frames by cross-cluster frequency) | Improvement | High | Medium | High | Improvement |

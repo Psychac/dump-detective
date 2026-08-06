@@ -380,21 +380,21 @@ the standard pipeline. Silently wrong when the cache is absent.
 
 ### Priority Roadmap
 
-| # | Recommendation | Area | Type | Impact | Difficulty | Confidence |
-|---|---|---|---|---|---|---|
-| P0-1 | Fix fallback path zero-count bug in `TypedResourceCandidateScanner` or implement `IHeapIndexScanParticipant` | Correctness | Evolution | Critical | Low | High |
-| P0-2 | Add `HttpWebRequest` finding threshold (e.g. ≥ 10) | Diagnostic | Improvement | High | Low | High |
-| P1-1 | Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture | Diagnostic | Improvement | High | Medium | High |
-| P1-2 | Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas | Correctness | Improvement | Medium | Low | High |
-| P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High |
-| P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium |
-| P2-2 | Add `IHttpClientFactory` handler tracking entry detection | Diagnostic | Improvement | Medium | Medium | Medium |
-| P2-3 | Add GC generation breakdown for `HttpClient` instances | Diagnostic | Improvement | Medium | Medium | High |
-| P2-4 | Add overflow guard (use `long` accumulators) for per-category counters | Correctness | Improvement | Low | Low | High |
-| P2-5 | Add handler chain depth / handler-per-client ratio metric | Diagnostic | Improvement | Medium | Low | Medium |
-| P3-1 | `HttpMessageHandler` accumulation finding threshold | Diagnostic | Improvement | Low | Low | Medium |
-| P3-2 | `ServicePoint.m_ConnectionLimit` field read on sampled instances | Diagnostic | Improvement | Low | Medium | High |
-| P3-3 | Register `HttpObjectAnalyzer` as `IHeapIndexScanParticipant` for architectural consistency | Architecture | Evolution | Low | Medium | High |
+| # | Recommendation | Area | Type | Impact | Difficulty | Confidence | Status |
+|---|---|---|---|---|---|---|---|
+| **P0-1** | **Fix fallback path zero-count bug in `TypedResourceCandidateScanner` or implement `IHeapIndexScanParticipant`** | **Correctness** | **Evolution** | **Critical** | **Low** | **High** | ✅ **DONE** |
+| P0-2 | Add `HttpWebRequest` finding threshold (e.g. ≥ 10) | Diagnostic | Improvement | High | Low | High | |
+| P1-1 | Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture | Diagnostic | Improvement | High | Medium | High | |
+| P1-2 | Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas | Correctness | Improvement | Medium | Low | High | |
+| P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High | |
+| P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium | |
+| P2-2 | Add `IHttpClientFactory` handler tracking entry detection | Diagnostic | Improvement | Medium | Medium | Medium | |
+| P2-3 | Add GC generation breakdown for `HttpClient` instances | Diagnostic | Improvement | Medium | Medium | High | |
+| P2-4 | Add overflow guard (use `long` accumulators) for per-category counters | Correctness | Improvement | Low | Low | High | |
+| P2-5 | Add handler chain depth / handler-per-client ratio metric | Diagnostic | Improvement | Medium | Low | Medium | |
+| P3-1 | `HttpMessageHandler` accumulation finding threshold | Diagnostic | Improvement | Low | Low | Medium | |
+| P3-2 | `ServicePoint.m_ConnectionLimit` field read on sampled instances | Diagnostic | Improvement | Low | Medium | High | |
+| **P3-3** | **Register `HttpObjectAnalyzer` as `IHeapIndexScanParticipant` for architectural consistency** | **Architecture** | **Evolution** | **Low** | **Medium** | **High** | ✅ **DONE** |
 
 ### Final Verdict
 
@@ -417,3 +417,42 @@ the standard pipeline. Silently wrong when the cache is absent.
 4. **Highest engineering return:** P0-1 + P0-2 together take low effort and immediately close
    the correctness and silent-miss gaps. P1-1 provides the largest diagnostic capability jump
    per unit of effort.
+
+---
+
+## Implementation Summary (P0-1 + P3-3)
+
+**Status:** ✅ **COMPLETE** — Commit `0764203`
+
+### What Was Done
+
+1. **Implemented `IHeapIndexScanParticipant` on `HttpObjectAnalyzer`**
+   - Aligns architecture with `DbConnectionAnalyzer`, `WcfChannelAnalyzer`, and `TimerLeakAnalyzer` (the typed-resource quartet)
+   - Eliminated the fallback path entirely; analyzer now participates in the shared heap-index scan dispatch
+
+2. **Fixed P0-1 correctness bug**
+   - Previous fallback path (when HeapAnalysisCache not pre-built) always returned 0 counts
+   - Now routes through shared scan participant infrastructure, eliminating the bug completely
+   - Scan state is tracked via `_scanSucceeded` flag; `AnalyzeAsync` only consumes accumulated state when scan succeeds
+
+3. **Key Implementation Details**
+   - `BeforeHeapIndexScan`: Discovers HTTP object candidates and pre-seeds per-type counters from TypeAggregates
+   - `OnHeapEntry`: Accumulates category-specific counts (HttpClient, HttpWebRequest, HttpWebResponse, HttpMessageHandler, ServicePoint) as each index entry is processed
+   - `OnHeapIndexScanCompleted`: Sets `_scanSucceeded` flag so `AnalyzeAsync` knows whether to trust accumulated state
+   - `BuildResult`: Consumes accumulated state to generate the final domain result
+
+### Impact
+
+- **Correctness:** No-cache fallback path bug eliminated; all analysis paths now correct
+- **Performance:** Eliminates redundant fallback scan; HTTP analysis now joins the shared pass (one scan instead of separate scans)
+- **Architecture:** Achieves consistency across the typed-resource quartet; no more outliers
+- **Testing:** All 7 existing HttpObject tests pass; no regressions
+
+### Before/After
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| **Participant in shared scan?** | No (fallback only) | Yes ✅ |
+| **Fallback path bugs?** | Yes (zero counts) | No ✅ |
+| **Arch consistency** | Outlier | Aligned with peers ✅ |
+| **No-cache correctness** | Broken (silent 0s) | Correct ✅ |

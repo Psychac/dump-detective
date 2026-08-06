@@ -303,7 +303,7 @@ is retained.
 | I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement | ✅ DONE |
 | I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement | — |
 | I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | ✅ DONE |
-| I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | — |
+| I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | ✅ DONE |
 | I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | — |
 | I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | — |
 | I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement | — |
@@ -357,7 +357,7 @@ incomplete. The report is useful for quick triage but insufficient for confident
 | P1 | I-6 | Array shape table | High | Medium | High | Improvement | — |
 | P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | ✅ DONE |
 | P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | — |
-| P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | — |
+| P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | ✅ DONE |
 | P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | — |
 | P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement | — |
 | P2 | E-2 | Generation-aware shape ranking | High | High | Medium | Evolution | — |

@@ -324,7 +324,8 @@ public sealed class ReportingCompositionTests
             ],
             TotalTypesAnalyzed: 1,
             AvgRefFieldsPerType: 2,
-            TotalGcScanWork: 20);
+            TotalGcScanWork: 20,
+            InstanceCountCap: 200);
 
         AnalyzerRunResult memoryRun = new(
             AnalyzerName: "MemoryAnalyzer",

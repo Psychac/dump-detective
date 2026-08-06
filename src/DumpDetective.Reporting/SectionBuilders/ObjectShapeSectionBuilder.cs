@@ -48,7 +48,8 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
                 BuildShapeRows(d.TopValueHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation."));
+        blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation. " +
+                    $"(Avg ref fields is computed over at most {d.InstanceCountCap:N0} types by instance count.)"));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

@@ -126,7 +126,8 @@ namespace DumpDetective.Analysis.Analyzers
                 gen2Pct,
                 profiles,
                 GenBytesAreApproximate: false,
-                FallbackMode: false);
+                FallbackMode: false,
+                LohThresholdPercent: options.LohThresholdPercent);
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────
@@ -178,7 +179,8 @@ namespace DumpDetective.Analysis.Analyzers
                 gen2Pct,
                 PerTypeGenerationProfiles: [],
                 GenBytesAreApproximate: true,
-                FallbackMode: true);
+                FallbackMode: true,
+                LohThresholdPercent: options.LohThresholdPercent);
         }
 
         public void Dispose() { }

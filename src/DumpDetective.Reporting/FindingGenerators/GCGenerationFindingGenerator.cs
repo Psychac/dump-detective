@@ -17,18 +17,23 @@ internal sealed class GCGenerationFindingGenerator : IFindingGenerator
         var findings = new List<InsightFinding>(2);
 
         // ── LOH share finding ─────────────────────────────────────────────────
-        findings.Add(new InsightFinding(
-            Analyzer: AnalyzerName,
-            Category: "GC",
-            Severity: r.LohPercent >= 35 ? FindingSeverity.Warning : FindingSeverity.Info,
-            Title: "GC generation footprint snapshot",
-            Evidence: $"LOH memory share is {r.LohPercent:F1}% of managed heap.",
-            Recommendation: r.LohPercent >= 35
-                ? "Inspect large object churn and promotion patterns."
-                : "Generation split appears within expected range for this dump.",
-            Tags: ["gc", "generations", "loh"],
-            MetricValue: r.LohPercent,
-            MetricUnit: "%"));
+        // Only emit if LOH share exceeds configured threshold (default 20%).
+        // This reduces noise for healthy dumps where LOH is within expected range.
+        if (r.LohPercent >= r.LohThresholdPercent)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "GC",
+                Severity: r.LohPercent >= 35 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "GC generation footprint snapshot",
+                Evidence: $"LOH memory share is {r.LohPercent:F1}% of managed heap.",
+                Recommendation: r.LohPercent >= 35
+                    ? "Inspect large object churn and promotion patterns."
+                    : "Generation split appears within expected range for this dump.",
+                Tags: ["gc", "generations", "loh"],
+                MetricValue: r.LohPercent,
+                MetricUnit: "%"));
+        }
 
         // ── Gen2 pressure finding ─────────────────────────────────────────────
         // Gen2 > 50% indicates chronic object promotion: objects are surviving GC cycles

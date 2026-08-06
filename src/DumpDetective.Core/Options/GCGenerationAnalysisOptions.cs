@@ -4,6 +4,7 @@ public sealed class GCGenerationAnalysisOptions
 {
     public int TopLohTypeLimit { get; init; } = 15;
     public int TopGenProfileLimit { get; init; } = 20;
+    public double LohThresholdPercent { get; init; } = 20.0;
 
     public static GCGenerationAnalysisOptions Preset(AnalysisProfile profile) => profile switch
     {

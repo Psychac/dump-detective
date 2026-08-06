@@ -49,7 +49,8 @@ namespace BenchmarkSuite1
         {
             if (_runtimeNoCacheRef is null)
                 throw new InvalidOperationException("Runtime not initialized.");
-            return Analyzer.Analyze(_runtimeNoCacheRef);
+            AnalysisContext noCacheContext = new() { Runtime = _runtimeNoCacheRef, Cache = null, AnalysisOptions = new() };
+            return Analyzer.AnalyzeAsync(noCacheContext, default).GetAwaiter().GetResult();
         }
 
         /// <summary>

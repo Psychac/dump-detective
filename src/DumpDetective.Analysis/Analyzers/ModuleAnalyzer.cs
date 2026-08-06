@@ -24,21 +24,6 @@ namespace DumpDetective.Analysis.Analyzers
             return ValueTask.FromResult(BuildDomainResult(modules, options, heapStats, appDomains).Stamp(this));
         }
 
-        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
-        {
-            return Analyze(runtime, progress: null);
-        }
-
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
-        {
-            progress?.Report(new(0, "analyzing modules"));
-            var options = new ModuleAnalysisOptions();
-            var modules = AnalyzeModules(runtime);
-            var appDomains = AnalyzeAppDomains(runtime, cache: null, options, CancellationToken.None);
-            var domainResult = BuildDomainResult(modules, options, heapStats: null, appDomains);
-            return domainResult;
-        }
-
         private static ModuleDomainResult BuildDomainResult(
             ModuleAnalysis analysis,
             ModuleAnalysisOptions options,

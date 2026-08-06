@@ -16,4 +16,7 @@ internal sealed record ThreadStackClusterDomainResult(
 internal sealed record ThreadClusterSnapshot(
     int Count,
     IReadOnlyList<uint> SampleOsThreadIds,
-    string Signature);
+    string Signature,
+    int ThreadpoolWorkerCount = 0,
+    int GcCount = 0,
+    int FinalizerCount = 0);

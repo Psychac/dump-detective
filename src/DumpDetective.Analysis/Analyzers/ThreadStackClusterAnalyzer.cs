@@ -65,7 +65,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             _participantAliveThreads++;
             string signature = BuildSignature(snapshot.TopFrames, _participantOptions!.MaxFramesPerSignature);
-            AccumulateCluster(_participantClusters!, signature, thread.Address, _participantOptions.MaxThreadIdsPerCluster);
+            AccumulateCluster(_participantClusters!, signature, thread, _participantOptions.MaxThreadIdsPerCluster);
         }
 
         public void OnThreadStackScanCompleted(bool succeeded)
@@ -115,7 +115,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                     aliveThreads++;
                     string signature = BuildSignature(thread.EnumerateStackTrace(), options.MaxFramesPerSignature);
-                    AccumulateCluster(clusters, signature, thread.Address, options.MaxThreadIdsPerCluster);
+                    AccumulateCluster(clusters, signature, thread, options.MaxThreadIdsPerCluster);
                 }
 
                 scanCounter.Complete();
@@ -142,7 +142,13 @@ namespace DumpDetective.Analysis.Analyzers
 
             var topClusterSnapshots = filteredClusters
                 .Take(options.TopClustersToShow)
-                .Select(c => new ThreadClusterSnapshot(c.Count, ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress), c.Signature))
+                .Select(c => new ThreadClusterSnapshot(
+                    c.Count,
+                    ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress),
+                    c.Signature,
+                    c.ThreadpoolWorkerCount,
+                    c.GcCount,
+                    c.FinalizerCount))
                 .ToArray();
 
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
@@ -219,7 +225,7 @@ namespace DumpDetective.Analysis.Analyzers
             return sampleIds;
         }
 
-        private static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, ulong threadAddress, int maxThreadIdsPerCluster)
+        private static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, ClrThread thread, int maxThreadIdsPerCluster)
         {
             if (!clusters.TryGetValue(signature, out StackCluster? cluster))
             {
@@ -228,8 +234,15 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             cluster.Count++;
-            if (cluster.SampleThreadAddresses.Count < maxThreadIdsPerCluster && threadAddress != 0)
-                cluster.SampleThreadAddresses.Add(threadAddress);
+            if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
+                cluster.ThreadpoolWorkerCount++;
+            if (thread.IsGc)
+                cluster.GcCount++;
+            if (thread.IsFinalizer)
+                cluster.FinalizerCount++;
+
+            if (cluster.SampleThreadAddresses.Count < maxThreadIdsPerCluster && thread.Address != 0)
+                cluster.SampleThreadAddresses.Add(thread.Address);
         }
 
         private static string BuildSignature(IEnumerable<ClrStackFrame> frames, int maxFramesPerSignature)
@@ -260,6 +273,9 @@ namespace DumpDetective.Analysis.Analyzers
         {
             public string Signature { get; }
             public int Count { get; set; }
+            public int ThreadpoolWorkerCount { get; set; }
+            public int GcCount { get; set; }
+            public int FinalizerCount { get; set; }
             public List<ulong> SampleThreadAddresses { get; } = new();
 
             public StackCluster(string signature)

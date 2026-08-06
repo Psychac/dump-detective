@@ -312,7 +312,7 @@ dotMemory shows generation distribution, LOH objects, survivor counts, and fragm
 |---|---|---|---|---|---|
 | P2-1 | **Add Gen0 allocation pressure finding.** When Gen0Objects > 40% of TotalObjects, emit a Warning with top Gen0 types. This signals high allocation rate that may degrade GC throughput. | Medium — actionable for throughput investigations | Low | High | Improvement | ✅ DONE (commit 9947f2c) |
 | P2-2 | **Add `IsThreadSafe`, `Tags`, and `Order` explicitly.** Current defaults work but are inconsistent with other analyzers in the suite. | Low | Low | High | Improvement | ✅ DONE (commit ee670c5) |
-| P2-3 | **Add trend metrics for Gen0 and Gen1 bytes** to `GCGenerationTrendComparer`. Currently only Gen2 and LOH are tracked. The absence of Gen0 trend makes allocation pressure invisible in multi-dump comparisons. | Medium | Low | High | Improvement |
+| P2-3 | **Add trend metrics for Gen0 and Gen1 bytes** to `GCGenerationTrendComparer`. Currently only Gen2 and LOH are tracked. The absence of Gen0 trend makes allocation pressure invisible in multi-dump comparisons. | Medium | Low | High | Improvement | ✅ DONE (commit 732ec5e) |
 | P2-4 | **Rank TypeGenerationProfile by Gen2 bytes (not Count) when byte data is available.** Count-based ranking can over-represent small high-count types. Byte-based ranking surfaces memory-heavy accumulators first. | Medium — better actionability for memory investigations | Low | Medium | Improvement |
 | P2-5 | **Document `LohThresholdBytes` removal/implementation outcome in options class.** | Low | Low | High | Improvement |
 

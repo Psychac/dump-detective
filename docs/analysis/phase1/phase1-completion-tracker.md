@@ -3,7 +3,7 @@
 **Purpose:** Track implementation progress of audit recommendations across all Phase 1 analyzers.
 **Status:** All audits complete. This tracker monitors which recommendations have been implemented.
 
-**Last Updated:** 2026-08-06 (GCGenerationAnalyzer P2-2 complete)
+**Last Updated:** 2026-08-06 (GCGenerationAnalyzer P2-3 complete)
 
 ---
 
@@ -60,7 +60,7 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **FinalizableObjectAnalyzer** | 4 (unlabeled) | 0/2 | 2+ | **4 DONE items not P0/P1-labeled** |
-| GCGenerationAnalyzer | 3/3 | 2/4 | 0 | P0 complete; P1-1,P1-4,P2-1,P2-2 done (commits 8234499, 3bf3868, 9947f2c, ee670c5) |
+| GCGenerationAnalyzer | 3/3 | 2/4 | 0 | P0 complete; P1-1,P1-4,P2-1,P2-2,P2-3 done (commits 8234499, 3bf3868, 9947f2c, ee670c5, 732ec5e) |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | JitAnalyzer | 0/2 | 0/3 | 5 | — |
@@ -98,6 +98,7 @@
 
 ### ✅ Completed Recently
 
+- ✅ GCGenerationAnalyzer P2-3 (Gen0/Gen1 trend metrics) — commit 732ec5e
 - ✅ GCGenerationAnalyzer P2-2 (explicit Tags, Order, IsThreadSafe) — commit ee670c5
 - ✅ GCGenerationAnalyzer P2-1 (Gen0 allocation pressure finding) — commit 9947f2c
 - ✅ GCGenerationAnalyzer P1-4 (suppress LOH Info noise) — commit 3bf3868

@@ -383,7 +383,7 @@ the standard pipeline. Silently wrong when the cache is absent.
 | # | Recommendation | Area | Type | Impact | Difficulty | Confidence | Status |
 |---|---|---|---|---|---|---|---|
 | **P0-1** | **Fix fallback path zero-count bug in `TypedResourceCandidateScanner` or implement `IHeapIndexScanParticipant`** | **Correctness** | **Evolution** | **Critical** | **Low** | **High** | ✅ **DONE** |
-| P0-2 | Add `HttpWebRequest` finding threshold (e.g. ≥ 10) | Diagnostic | Improvement | High | Low | High | |
+| **P0-2** | **Add `HttpWebRequest` finding threshold (e.g. ≥ 10)** | **Diagnostic** | **Improvement** | **High** | **Low** | **High** | ✅ **DONE** |
 | P1-1 | Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture | Diagnostic | Improvement | High | Medium | High | |
 | P1-2 | Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas | Correctness | Improvement | Medium | Low | High | |
 | P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High | |
@@ -456,3 +456,33 @@ the standard pipeline. Silently wrong when the cache is absent.
 | **Fallback path bugs?** | Yes (zero counts) | No ✅ |
 | **Arch consistency** | Outlier | Aligned with peers ✅ |
 | **No-cache correctness** | Broken (silent 0s) | Correct ✅ |
+
+---
+
+## Implementation Summary (P0-2)
+
+**Status:** ✅ **COMPLETE** — Commit `81f0756`
+
+### What Was Done
+
+1. **Added HttpWebRequest finding threshold** in `HttpObjectFindingGenerator`
+   - Threshold: ≥ 10 objects (Warning severity)
+   - Detects obsolete API accumulation in .NET 6+ applications
+
+2. **Finding details**
+   - Title: "{count:N0} HttpWebRequest objects on managed heap"
+   - Evidence: Explains obsolescence and resource retention risk
+   - Recommendation: Migrate to HttpClient; investigate pending requests
+   - Tags: `["infrastructure", "http", "httpwebrequest", "obsolete"]`
+
+3. **Test updates**
+   - Lowered test baseline from 10 → 9 in `HttpObject_BelowThresholds_NoFindings` to maintain test intent
+   - Added new test: `HttpObject_Warning_WhenManyWebRequests` (covers threshold exactly at 10)
+   - All 8 finding generator tests pass (was 7, added 1)
+
+### Impact
+
+- **Diagnostic gap closed:** HttpWebRequest accumulation now generates findings instead of being silent
+- **Consistency:** Now has same threshold-based structure as HttpClient/HttpWebResponse/ServicePoint
+- **Production incident support:** Engineers investigating socket exhaustion will now see HttpWebRequest accumulation immediately
+- **Obsolescence detection:** Provides early warning of legacy API usage in modernization efforts

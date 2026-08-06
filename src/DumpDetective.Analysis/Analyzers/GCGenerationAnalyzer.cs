@@ -74,8 +74,8 @@ namespace DumpDetective.Analysis.Analyzers
             long nonLohTotal = totalObjects - lohObjects;
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
 
-            // Approximate gen bytes using average non-LOH size × per-MT gen count.
-            AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
+            // Exact gen bytes from segment metadata.
+            AnalyzerHelpers.ComputeExactGenBytes(heap, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
             double lohPct = totalManagedBytes == 0 ? 0.0 : lohBytes * 100.0 / totalManagedBytes;
@@ -125,7 +125,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topLohTypes,
                 gen2Pct,
                 profiles,
-                GenBytesAreApproximate: true,
+                GenBytesAreApproximate: false,
                 FallbackMode: false);
         }
 

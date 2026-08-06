@@ -60,8 +60,18 @@ namespace DumpDetective.Analysis.Analyzers
                 lohBytes += e.LohSize;
             }
 
-            // Approximate gen bytes using average non-LOH size × per-MT gen count.
-            AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
+            // Exact gen bytes from segment metadata if available; otherwise approximate from aggregates.
+            ulong gen0Bytes, gen1Bytes, gen2Bytes;
+            try
+            {
+                AnalyzerHelpers.ComputeExactGenBytes(context.Heap, out gen0Bytes, out gen1Bytes, out gen2Bytes);
+            }
+            catch
+            {
+#pragma warning disable CS0618
+                AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out gen0Bytes, out gen1Bytes, out gen2Bytes);
+#pragma warning restore CS0618
+            }
 
             // Count percentages (relative to total object count) — round to two decimals for clarity
             double gen0CountPct = totalObjects > 0 ? Math.Round(gen0Objects * 100.0 / totalObjects, 2) : 0.0;

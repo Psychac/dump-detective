@@ -62,7 +62,6 @@
 | CrashAnalyzer | — | — | — | No roadmap found |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
-| **FinalizableObjectAnalyzer** | 4 (unlabeled) | 0/2 | 2+ | **4 DONE items not P0/P1-labeled** |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | JitAnalyzer | 0/2 | 0/3 | 5 | — |

@@ -14,9 +14,9 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 21 |
+| **P0 Implemented** | 22 |
 | **P1 Implemented** | 35 |
-| **Overall P0+P1 Rate** | 40.6% (56/138) |
+| **Overall P0+P1 Rate** | 41.3% (57/138) |
 
 ---
 
@@ -60,7 +60,7 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **FinalizableObjectAnalyzer** | 4 (unlabeled) | 0/2 | 2+ | **4 DONE items not P0/P1-labeled** |
-| GCGenerationAnalyzer | 1/3 | 0/4 | 6 | P0-1 done (commit bc83e77) |
+| GCGenerationAnalyzer | 2/3 | 0/4 | 5 | P0-1,P0-2 done (commits bc83e77, 5b0d188) |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | JitAnalyzer | 0/2 | 0/3 | 5 | — |
@@ -98,6 +98,7 @@
 
 ### ✅ Completed Recently
 
+- ✅ GCGenerationAnalyzer P0-2 (flag fallback path result) — commit 5b0d188
 - ✅ GCGenerationAnalyzer P0-1 (label gen bytes as approximate) — commit bc83e77
 - ✅ SegmentReservationAnalyzer P0 (32-bit bitness) — commit fe44ff0
 - ✅ SegmentReservationAnalyzer P1 (4/4 items) — commits shown in roadmap

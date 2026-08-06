@@ -61,7 +61,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
         }
 
         // Summary finding (always).
-        string scanNote = r.ScanCapped ? " (scan capped at 50 000 handles)" : string.Empty;
+        string scanNote = r.ScanCapped ? $" (scan capped at {r.ScanCapUsed:N0} handles)" : string.Empty;
         FindingSeverity summarySeverity = FindingSeverity.Info;
         for (int i = 0; i < signals.Count; i++)
         {

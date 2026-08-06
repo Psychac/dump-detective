@@ -55,6 +55,7 @@ public sealed class WeakReferenceFindingGeneratorTests
             TopWeakTargetTypes: [],
             TopStaleWrapperHolderTypes: [],
             DependentHandleDeadKeyCount: dependentDeadKeys,
-            ScanCapped: false);
+            ScanCapped: false,
+            ScanCapUsed: 50000);
     }
 }

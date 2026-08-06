@@ -359,6 +359,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TopStaleWrapperHolderTypes: topStaleTypes,
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
                 ScanCapped: scanCapped,
+                ScanCapUsed: options.HandleScanCap,
                 Artifacts: rawExports);
         }
 

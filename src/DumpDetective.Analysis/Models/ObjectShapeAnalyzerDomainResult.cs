@@ -19,6 +19,7 @@ public sealed record TypeShapeProfile(
     int ValueFields,
     double ReferenceFieldRatio,
     ulong InstanceCount,
+    ulong TotalSize,
     bool IsFinalizable,
     bool IsValueType,
     bool IsArray,

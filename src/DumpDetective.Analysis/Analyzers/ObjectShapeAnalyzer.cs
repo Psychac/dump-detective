@@ -73,6 +73,9 @@ namespace DumpDetective.Analysis.Analyzers
                 if (type is null)
                     continue;
 
+                if (!aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg))
+                    continue;
+
                 typesAnalyzed++;
                 totalRefFields += shape.RefFields;
                 totalGcScanWork += (long)(shape.RefFields * (double)Math.Max(0, count));
@@ -101,6 +104,7 @@ namespace DumpDetective.Analysis.Analyzers
                     ValueFields: shape.ValFields,
                     ReferenceFieldRatio: refRatio,
                     InstanceCount: (ulong)Math.Max(0, count),
+                    TotalSize: agg.TotalSize,
                     IsFinalizable: type.IsFinalizable,
                     IsValueType: type.IsValueType,
                     IsArray: type.IsArray,
@@ -119,8 +123,9 @@ namespace DumpDetective.Analysis.Analyzers
                 (b.ReferenceFieldRatio * (double)b.InstanceCount)
                     .CompareTo(a.ReferenceFieldRatio * (double)a.InstanceCount));
 
+            // Sort value-heavy types by total heap size (more impactful types first)
             valHeavyCandidates.Sort(static (a, b) =>
-                ((double)b.InstanceCount).CompareTo((double)a.InstanceCount));
+                b.TotalSize.CompareTo(a.TotalSize));
 
             var refHeavy = refHeavyCandidates.Take(options.TopListLimit).ToList();
             var valHeavy = valHeavyCandidates.Take(options.TopListLimit).ToList();

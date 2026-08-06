@@ -36,7 +36,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         {
             compactTables.Add(STCompact(
                 "Reference-heavy types",
-                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("GC Scan Cost","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Size (bytes)","number"), CH("GC Scan Cost","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
                 BuildShapeRows(d.TopReferenceHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -44,7 +44,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         {
             compactTables.Add(STCompact(
                 "Value-heavy types",
-                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("GC Scan Cost","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Size (bytes)","number"), CH("GC Scan Cost","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
                 BuildShapeRows(d.TopValueHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -70,6 +70,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
                 Cell(p.ValueFields.ToString("N0"),             p.ValueFields),
                 Cell(p.ReferenceFieldRatio.ToString("F2")),
                 Cell(p.InstanceCount.ToString("N0"),           (long)Math.Min(p.InstanceCount, long.MaxValue)),
+                Cell(p.TotalSize.ToString("N0"),               (long)Math.Min(p.TotalSize, (ulong)long.MaxValue)),
                 Cell(gcScanCost.ToString("N0"),                gcScanCost),
                 Cell(p.IsFinalizable ? "Yes" : "No"),
                 Cell(p.IsValueType  ? "Yes" : "No"),

@@ -316,11 +316,11 @@ public sealed class ReportingCompositionTests
         ObjectShapeAnalyzerDomainResult shape = new(
             TopReferenceHeavyTypes:
             [
-                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
+                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, 1000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
             ],
             TopValueHeavyTypes:
             [
-                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
+                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, 1000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
             ],
             TotalTypesAnalyzed: 1,
             AvgRefFieldsPerType: 2,

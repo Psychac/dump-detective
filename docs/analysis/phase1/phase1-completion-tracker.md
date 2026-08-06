@@ -15,8 +15,8 @@
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 25 |
-| **P1 Implemented** | 38 |
-| **Overall P0+P1 Rate** | 45.7% (63/138) |
+| **P1 Implemented** | 39 |
+| **Overall P0+P1 Rate** | 46.4% (64/138) |
 
 ---
 
@@ -46,9 +46,9 @@
 | 11 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
 | 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
-| 14 | **ObjectShapeAnalyzer** | 2/3 | 1/5 | 0/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost column); I-3 done (aggregate metric); 1 P0, 4 P1 pending |
+| 14 | **ObjectShapeAnalyzer** | 2/3 | 2/5 | 0/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5 done (aggregate metric + TotalSize); 1 P0, 3 P1 pending |
 
-**Subtotal: 11/11 P0 done, 10/27 P1 done** (in-progress pools)
+**Subtotal: 11/11 P0 done, 11/27 P1 done** (in-progress pools)
 
 ---
 
@@ -89,8 +89,8 @@
 | **Total P0 recommendations** | **69** | — |
 | **P0 items implemented** | **25** | 36.2% |
 | **Total P1 recommendations** | **139** | — |
-| **P1 items implemented** | **38** | 27.3% |
-| **Combined P0+P1 rate** | **45.7%** | (63/138) |
+| **P1 items implemented** | **39** | 28.1% |
+| **Combined P0+P1 rate** | **46.4%** | (64/138) |
 
 ---
 

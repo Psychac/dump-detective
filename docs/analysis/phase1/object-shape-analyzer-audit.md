@@ -300,7 +300,7 @@ is retained.
 | I-2 | **Add GC scan cost score column** (`RefFields × InstanceCount`) to the section builder tables and as a sort key. | High | Low | High | Improvement | ✅ DONE |
 | I-3 | **Add aggregate GC scan work metric** (`Σ RefFields × InstanceCount`) as a key metric and trend-comparer entry. | High | Low | High | Improvement | ✅ DONE |
 | I-4 | **Add Balanced type list** (top 20 by instance count, refRatio 0.2–0.6) to the domain result and section builder. | High | Medium | High | Improvement | — |
-| I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement | — |
+| I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement | ✅ DONE |
 | I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement | — |
 | I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | — |
 | I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | — |
@@ -353,7 +353,7 @@ incomplete. The report is useful for quick triage but insufficient for confident
 | P0 | I-2 | Add GC scan cost score column | High | Low | High | Improvement | ✅ DONE |
 | P0 | I-4 | Add Balanced type list | High | Medium | High | Improvement | — |
 | P1 | I-3 | Aggregate GC scan work key metric | High | Low | High | Improvement | ✅ DONE |
-| P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement | — |
+| P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement | ✅ DONE |
 | P1 | I-6 | Array shape table | High | Medium | High | Improvement | — |
 | P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | — |
 | P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | — |

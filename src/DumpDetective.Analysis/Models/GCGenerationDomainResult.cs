@@ -30,4 +30,5 @@ public sealed record GCGenerationDomainResult(
     IReadOnlyList<TypeGenerationProfile>? PerTypeGenerationProfiles = null,
     bool GenBytesAreApproximate = true,
     bool FallbackMode = false,
-    double LohThresholdPercent = 20.0) : AnalyzerDomainResult;
+    double LohThresholdPercent = 20.0,
+    double Gen0PressureThresholdPercent = 40.0) : AnalyzerDomainResult;

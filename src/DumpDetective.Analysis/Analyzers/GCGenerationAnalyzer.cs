@@ -79,6 +79,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
             double lohPct = totalManagedBytes == 0 ? 0.0 : lohBytes * 100.0 / totalManagedBytes;
+            double gen0Pct = totalObjects == 0 ? 0.0 : gen0Objects * 100.0 / totalObjects;
             double gen2Pct = totalObjects == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
 
             // Top LOH types — resolve names only for top N.
@@ -127,7 +128,8 @@ namespace DumpDetective.Analysis.Analyzers
                 profiles,
                 GenBytesAreApproximate: false,
                 FallbackMode: false,
-                LohThresholdPercent: options.LohThresholdPercent);
+                LohThresholdPercent: options.LohThresholdPercent,
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent);
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────
@@ -180,7 +182,8 @@ namespace DumpDetective.Analysis.Analyzers
                 PerTypeGenerationProfiles: [],
                 GenBytesAreApproximate: true,
                 FallbackMode: true,
-                LohThresholdPercent: options.LohThresholdPercent);
+                LohThresholdPercent: options.LohThresholdPercent,
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent);
         }
 
         public void Dispose() { }

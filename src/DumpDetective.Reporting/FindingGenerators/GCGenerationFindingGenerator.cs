@@ -35,6 +35,59 @@ internal sealed class GCGenerationFindingGenerator : IFindingGenerator
                 MetricUnit: "%"));
         }
 
+        // ── Gen0 allocation pressure finding ──────────────────────────────────
+        // Gen0 > threshold (default 40%) indicates high allocation rate that may degrade GC throughput.
+        // High Gen0 object count signals transient pressure and frequent GC cycles.
+        double gen0Pct = r.TotalObjects == 0 ? 0.0 : r.Gen0Objects * 100.0 / r.TotalObjects;
+        if (gen0Pct >= r.Gen0PressureThresholdPercent)
+        {
+            // Build top Gen0 type evidence.
+            string topGen0Evidence = string.Empty;
+            if (r.PerTypeGenerationProfiles is { Count: > 0 })
+            {
+                var sb = new System.Text.StringBuilder();
+                int shown = 0;
+                // First pass: app-domain types (not starting with System., Microsoft., Windows.)
+                for (int i = 0; i < r.PerTypeGenerationProfiles.Count && shown < 3; i++)
+                {
+                    TypeGenerationProfile p = r.PerTypeGenerationProfiles[i];
+                    if (p.Gen0Count > 0 && !IsFrameworkType(p.TypeName))
+                    {
+                        if (shown > 0) sb.Append("; ");
+                        sb.Append($"{p.TypeName} ×{p.Gen0Count:N0}");
+                        shown++;
+                    }
+                }
+                // Second pass: fill remaining slots with framework types if no app types filled all slots
+                for (int i = 0; i < r.PerTypeGenerationProfiles.Count && shown < 3; i++)
+                {
+                    TypeGenerationProfile p = r.PerTypeGenerationProfiles[i];
+                    if (p.Gen0Count > 0 && IsFrameworkType(p.TypeName))
+                    {
+                        if (shown > 0) sb.Append("; ");
+                        sb.Append($"{p.TypeName} ×{p.Gen0Count:N0}");
+                        shown++;
+                    }
+                }
+                if (sb.Length > 0)
+                    topGen0Evidence = $" Top allocating types: {sb}.";
+            }
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "GC",
+                Severity: FindingSeverity.Warning,
+                Title: $"High Gen0 allocation pressure: {gen0Pct:F1}% of objects in Gen0",
+                Evidence: $"Gen0: {r.Gen0Objects:N0} objects, {FormatBytes(r.Gen0Bytes)}. " +
+                          $"Total objects: {r.TotalObjects:N0}.{topGen0Evidence}",
+                Recommendation: "Review allocation patterns and object lifetime. High Gen0 activity indicates frequent " +
+                                "short-lived object creation; consider object pooling, lazy initialization, or batch processing " +
+                                "to reduce allocation pressure and improve GC throughput.",
+                Tags: ["gc", "gen0", "allocation-pressure", "throughput"],
+                MetricValue: gen0Pct,
+                MetricUnit: "%"));
+        }
+
         // ── Gen2 pressure finding ─────────────────────────────────────────────
         // Gen2 > 50% indicates chronic object promotion: objects are surviving GC cycles
         // and settling into long-lived memory, often a signal of leaks or large caches.

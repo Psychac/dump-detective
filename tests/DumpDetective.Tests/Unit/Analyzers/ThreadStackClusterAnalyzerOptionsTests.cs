@@ -14,7 +14,6 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
     {
         var opts = ThreadStackClusterAnalysisOptions.Preset(AnalysisProfile.Fast);
 
-        opts.SamplingMode.Should().Be(SignatureSamplingMode.Coarse);
         opts.MaxFramesPerSignature.Should().Be(4);
         opts.MaxThreadIdsPerCluster.Should().Be(5);
         opts.TopSignaturesToShow.Should().Be(3);

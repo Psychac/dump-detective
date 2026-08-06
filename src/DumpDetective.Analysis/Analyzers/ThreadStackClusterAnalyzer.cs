@@ -64,7 +64,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return;
 
             _participantAliveThreads++;
-            string signature = BuildSignature(snapshot.TopFrames, _participantOptions!.MaxFramesPerSignature);
+            string signature = BuildSignature(snapshot.TopFrames, _participantOptions!.MaxFramesPerSignature, thread);
             AccumulateCluster(_participantClusters!, signature, thread, _participantOptions.MaxThreadIdsPerCluster);
         }
 
@@ -114,7 +114,7 @@ namespace DumpDetective.Analysis.Analyzers
                         continue;
 
                     aliveThreads++;
-                    string signature = BuildSignature(thread.EnumerateStackTrace(), options.MaxFramesPerSignature);
+                    string signature = BuildSignature(thread.EnumerateStackTrace(), options.MaxFramesPerSignature, thread);
                     AccumulateCluster(clusters, signature, thread, options.MaxThreadIdsPerCluster);
                 }
 
@@ -245,7 +245,7 @@ namespace DumpDetective.Analysis.Analyzers
                 cluster.SampleThreadAddresses.Add(thread.Address);
         }
 
-        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, int maxFramesPerSignature)
+        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, int maxFramesPerSignature, ClrThread? thread = null)
         {
             var parts = new List<string>(maxFramesPerSignature);
 
@@ -264,7 +264,18 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             if (parts.Count == 0)
+            {
+                if (thread != null)
+                {
+                    if (thread.IsGc)
+                        return "<No managed frames> (GC)";
+                    if (thread.IsFinalizer)
+                        return "<No managed frames> (Finalizer)";
+                    if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
+                        return "<No managed frames> (Threadpool)";
+                }
                 return "<No managed frames>";
+            }
 
             return string.Join(" | ", parts);
         }

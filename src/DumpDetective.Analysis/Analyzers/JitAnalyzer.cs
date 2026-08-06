@@ -146,7 +146,6 @@ public sealed class JitAnalyzer : IAnalyzer
         return new JitDomainResult(
             TotalJitHeapBytes: totalJitHeapBytes,
             JitManagerCount: jitManagerCount,
-            JitHeapPctOfTotalProcess: 0.0,               // not computable from dump alone
             ActiveMethodsOnStacks: activeMethodsOnStacks,
             TopLargestMethods: topMethods,
             TopActiveFrameTypes: topFrameTypes,

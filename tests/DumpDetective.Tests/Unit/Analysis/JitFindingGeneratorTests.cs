@@ -47,7 +47,6 @@ public sealed class JitFindingGeneratorTests
         return new JitDomainResult(
             TotalJitHeapBytes: totalJitHeapBytes,
             JitManagerCount: 3,
-            JitHeapPctOfTotalProcess: 12.5,
             ActiveMethodsOnStacks: managedFrames,
             TopLargestMethods: topMethods,
             TopActiveFrameTypes: [],

@@ -38,10 +38,6 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             ["active_method_instances_on_stacks"] = new NumericMetricValue(d.ActiveMethodsOnStacks, MetricUnit.Count),
             ["tiered_recompilations_observed"] = new NumericMetricValue(d.TieredMethodCount, MetricUnit.Count),
         };
-        if (d.JitHeapPctOfTotalProcess > 0.0)
-        {
-            keyMetrics["jit_heap_pct_of_total_process"] = new NumericMetricValue(d.JitHeapPctOfTotalProcess, MetricUnit.Percent, $"{d.JitHeapPctOfTotalProcess:P1}");
-        }
         if (totalFrames > 0)
             keyMetrics["unmanaged_frame_ratio"] = new NumericMetricValue(unmanagedRatio, MetricUnit.Percent, $"{unmanagedRatio:P1}");
 

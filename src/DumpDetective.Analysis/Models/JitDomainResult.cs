@@ -15,7 +15,6 @@ internal sealed record JitMethodSnapshot(
 internal sealed record JitDomainResult(
     ulong TotalJitHeapBytes,
     int JitManagerCount,
-    double JitHeapPctOfTotalProcess,
     int ActiveMethodsOnStacks,
     IReadOnlyList<JitMethodSnapshot> TopLargestMethods,
     IReadOnlyList<NameCountEntry> TopActiveFrameTypes,

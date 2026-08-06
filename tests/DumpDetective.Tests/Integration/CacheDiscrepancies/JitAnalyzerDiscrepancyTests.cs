@@ -39,7 +39,6 @@ public sealed class JitAnalyzerDiscrepancyTests
             JitDomainResult diskResult = (JitDomainResult)await analyzer.AnalyzeAsync(diskContext, CancellationToken.None);
             diskResult.TotalJitHeapBytes.Should().Be(memResult.TotalJitHeapBytes);
             diskResult.JitManagerCount.Should().Be(memResult.JitManagerCount);
-            diskResult.JitHeapPctOfTotalProcess.Should().Be(memResult.JitHeapPctOfTotalProcess);
             diskResult.ActiveMethodsOnStacks.Should().Be(memResult.ActiveMethodsOnStacks);
             diskResult.UnmanagedFrameCount.Should().Be(memResult.UnmanagedFrameCount);
             diskResult.ManagedFrameCount.Should().Be(memResult.ManagedFrameCount);

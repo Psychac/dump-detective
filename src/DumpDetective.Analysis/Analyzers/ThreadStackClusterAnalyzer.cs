@@ -94,9 +94,8 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 // Fallback (non-participant) path: used when this analyzer is invoked directly
                 // (tests, benchmarks) instead of through AnalysisPipeline's dispatcher.
-                var threads = runtime.Threads.ToArray();
-                osThreadIdByAddress = new Dictionary<ulong, uint>(capacity: threads.Length);
-                foreach (ClrThread thread in threads)
+                osThreadIdByAddress = new Dictionary<ulong, uint>();
+                foreach (ClrThread thread in runtime.Threads)
                 {
                     if (thread.Address != 0)
                         osThreadIdByAddress[thread.Address] = thread.OSThreadId;
@@ -106,7 +105,7 @@ namespace DumpDetective.Analysis.Analyzers
                 aliveThreads = 0;
                 var scanCounter = new ObjectScanCounter("clustering thread stacks", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-                foreach (ClrThread thread in threads)
+                foreach (ClrThread thread in runtime.Threads)
                 {
                     scanCounter.Tick();
 

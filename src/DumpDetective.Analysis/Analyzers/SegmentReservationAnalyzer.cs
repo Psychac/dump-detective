@@ -44,6 +44,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
 
         var segmentTable = new List<SegmentReservationEntry>(64);
         var reservedByHeap = new Dictionary<int, ulong>(16);
+        var committedByHeap = new Dictionary<int, ulong>(16);
 
         foreach (ClrSegment segment in heap.Segments)
         {
@@ -63,6 +64,12 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
                 reservedByHeap[logicalHeap] = existing + reserved;
             else
                 reservedByHeap[logicalHeap] = reserved;
+
+            // Per-logical-heap committed bytes (Server GC per-CPU breakdown).
+            if (committedByHeap.TryGetValue(logicalHeap, out ulong existingCommitted))
+                committedByHeap[logicalHeap] = existingCommitted + committed;
+            else
+                committedByHeap[logicalHeap] = committed;
 
             // Ephemeral fill % = committed / segment length (object range).
             double fillPct = 0.0;
@@ -119,6 +126,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             NonEphemeralSohSegmentCount: nonEphemeralSohCount,
             SegmentTable: segmentTable,
             ReservedByLogicalHeap: reservedByHeap,
+            CommittedByLogicalHeap: committedByHeap,
             AddressSpacePressureRisk: pressureRisk,
             PressureRiskReason: pressureReason,
             DumpPointerSize: dumpPointerSize);

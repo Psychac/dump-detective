@@ -23,6 +23,7 @@ internal sealed record SegmentReservationDomainResult(
     int NonEphemeralSohSegmentCount,
     IReadOnlyList<SegmentReservationEntry> SegmentTable,
     IReadOnlyDictionary<int, ulong> ReservedByLogicalHeap,
+    IReadOnlyDictionary<int, ulong> CommittedByLogicalHeap,
     bool AddressSpacePressureRisk,
     string PressureRiskReason,
     int DumpPointerSize) : AnalyzerDomainResult;

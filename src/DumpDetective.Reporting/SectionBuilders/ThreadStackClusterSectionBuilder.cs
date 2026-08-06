@@ -28,7 +28,10 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
-        if (d.TopClusterSignatures.Count > 0)
+        // Only emit TopClusterSignatures text blocks if typed TopClusters slot is not available.
+        // When TopClusters is populated, the typed slot has all the information (signature, count, thread IDs),
+        // making text blocks redundant.
+        if ((d.TopClusters == null || d.TopClusters.Count == 0) && d.TopClusterSignatures.Count > 0)
         {
             int sigLimit = Math.Min(d.TopClusterSignatures.Count, TopSignaturesToShow);
             for (int i = 0; i < sigLimit; i++)

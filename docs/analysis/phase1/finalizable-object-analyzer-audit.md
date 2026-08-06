@@ -261,7 +261,7 @@ dotMemory provides:
 | ✅ DONE | Add queue pressure ratio metric: `FinalizerQueueCount / TotalFinalizableObjects` | Medium (diagnostic) | Trivial | High | Improvement |
 | P2 | Move `DetectKnownFinalizerQueuePatterns` heuristics into `FinalizableObjectFindingGenerator` or expose them as section annotations | Medium (UX) | Medium | High | Improvement |
 | P2 | Reservoir-sample queue entries instead of first-N to improve retained-size coverage | Medium (correctness) | Medium | High | Improvement |
-| P2 | Eliminate double `heap.GetObject()` fetch in Step 3 — carry `ClrObject` through queue sample list | Low (perf) | Easy | High | Improvement |
+| ✅ DONE | Eliminate double `heap.GetObject()` fetch in Step 3 — carry `ClrObject` through queue sample list | Low (perf) | Easy | High | Improvement |
 | P3 | Replace full `finalizableTypes.Sort()` with top-K partial sort when count >> TopTypeLimit | Low (perf) | Easy | Medium | Improvement |
 | P3 | Reuse `HashSet<ulong>` + `Queue` across BFS calls via `ArrayPool` | Low (perf) | Medium | High | Improvement |
 | P3 | Add per-queue-entry generation field (`Gen0/1/2/LOH`) to `FinalizerQueueEntry` | Medium (diagnostic) | Easy | High | Improvement |

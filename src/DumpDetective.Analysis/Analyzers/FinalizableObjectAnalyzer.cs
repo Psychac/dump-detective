@@ -150,7 +150,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 3: Finalizer queue analysis ─────────────────────────────
             int queueCount = 0;
-            var queueSamples = new List<(ulong Addr, string TypeName, ulong ShallowSize)>(Math.Min(options.QueueScanLimit, 128));
+            var queueSamples = new List<(ClrObject Obj, string TypeName)>(Math.Min(options.QueueScanLimit, 128));
             var queueTypeCountMap = new Dictionary<string, int>();
 
             foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
@@ -164,7 +164,7 @@ namespace DumpDetective.Analysis.Analyzers
                 queueTypeCountMap[typeName]++;
 
                 if (queueSamples.Count < options.QueueScanLimit && obj.IsValid && obj.Type is not null)
-                    queueSamples.Add((obj.Address, typeName, obj.Size));
+                    queueSamples.Add((obj, typeName));
             }
 
             // Build top queue types by count
@@ -175,7 +175,7 @@ namespace DumpDetective.Analysis.Analyzers
                 .ToList();
 
             // Sort by shallow size descending, analyse top N
-            queueSamples.Sort(static (a, b) => b.ShallowSize.CompareTo(a.ShallowSize));
+            queueSamples.Sort(static (a, b) => b.Obj.Size.CompareTo(a.Obj.Size));
 
             int entryLimit = Math.Min(queueSamples.Count, options.TopQueueEntries);
             var topEntries = new List<FinalizerQueueEntry>(entryLimit);
@@ -189,9 +189,8 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < entryLimit; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                (ulong addr, string typeName, ulong shallowSize) = queueSamples[i];
+                (ClrObject obj, string typeName) = queueSamples[i];
 
-                ClrObject obj = heap.GetObject(addr);
                 if (!obj.IsValid || obj.Type is null)
                     continue;
 
@@ -211,15 +210,15 @@ namespace DumpDetective.Analysis.Analyzers
                 if (isDisposable && disposedFound && !disposedValue)
                     hasUndisposedDisposable = true;
 
-                (ulong retained, bool wasCapped) = BfsEstimateRetained(heap, addr, options.MaxBfsNodes, options.MaxBfsDepth);
+                (ulong retained, bool wasCapped) = BfsEstimateRetained(heap, obj.Address, options.MaxBfsNodes, options.MaxBfsDepth);
                 if (wasCapped)
                     isRetainedEstimatePartial = true;
                 totalQueueRetained += retained;
 
                 topEntries.Add(new FinalizerQueueEntry(
-                    Address: addr,
+                    Address: obj.Address,
                     TypeName: typeName,
-                    ShallowSize: shallowSize,
+                    ShallowSize: obj.Size,
                     EstimatedRetainedBytes: retained,
                     IsDisposableType: isDisposable,
                     DisposedFieldFound: disposedFound,

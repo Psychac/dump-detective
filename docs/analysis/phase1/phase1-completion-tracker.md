@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 27 |
-| **P1 Implemented** | 42 |
-| **P2 Implemented** | 3 |
-| **Overall P0+P1 Rate** | 49.9% (69/138) |
+| **P0 Implemented** | 33 |
+| **P1 Implemented** | 50 |
+| **P2 Implemented** | 12 |
+| **Overall P0+P1 Rate** | 39.9% (83/208) |
 
 ---
 
@@ -90,58 +90,6 @@
 | **Total P1 recommendations** | **139** | — |
 | **P1 items implemented** | **42** | 30.2% |
 | **Combined P0+P1 rate** | **49.9%** | (69/138) |
-
----
-
-## High-Priority Next Steps
-
-### ✅ Completed Recently
-
-- ✅ FinalizableObjectAnalyzer P1 complete (Cache point + Fallback path)
-  - P1 Cache: Cache `IsDisposableType` and `FindDisposedField` by MethodTable
-  - P1 Fallback: Build `finalizableTypes` per-type stats in fallback heap scan path
-- ✅ TimerLeakAnalyzer P2-3 (OtherTimerCategory exclusions) — commit 2f664ec
-  - P2-3: Exclude CLR-internal timer types (TimerQueue, TimerThread) from OtherTimer pattern
-- ✅ TimerLeakAnalyzer P1-3 (Cancellation support) — commit 5b1b4be
-  - P1-3: Pass CancellationToken through PopulateEvidence for graceful shutdown
-- ✅ TimerLeakAnalyzer P1-1 (Evidence rendering) + P2-2 (LINQ fix) — commit 0fe6b1d
-  - P1-1: Render Evidence.RootPath per type in section builder
-  - P2-2: Remove System.Linq, replace with manual loops (hot-path fix)
-- ✅ TimerLeakAnalyzer P0 COMPLETE (both items done) — commits a4d2ae8, b44cb62
-  - P0-1: Fix double-counting (use LogicalTimerCount for severity thresholds)
-  - P0-2: Add PeriodicTimer coverage (System.Threading.PeriodicTimer detection)
-- ✅ GCGenerationAnalyzer P2-5 (document LohThresholdBytes removal) — commit 5dcbcf2
-- ✅ GCGenerationAnalyzer P2-3 (Gen0/Gen1 trend metrics) — commit 732ec5e
-- ✅ GCGenerationAnalyzer P2-2 (explicit Tags, Order, IsThreadSafe) — commit ee670c5
-- ✅ GCGenerationAnalyzer P2-1 (Gen0 allocation pressure finding) — commit 9947f2c
-- ✅ GCGenerationAnalyzer P1-4 (suppress LOH Info noise) — commit 3bf3868
-- ✅ GCGenerationAnalyzer P1-1 (exact gen bytes from segments) — commit 8234499
-- ✅ GCGenerationAnalyzer P0 COMPLETE (all 3 items done) — commits bc83e77, 5b0d188, 993c462
-  - P0-1: label gen bytes as approximate
-  - P0-2: flag fallback path result
-  - P0-3: remove unused LohThresholdBytes
-- ✅ SegmentReservationAnalyzer P0 (32-bit bitness) — commit fe44ff0
-- ✅ SegmentReservationAnalyzer P1 (4/4 items) — commits shown in roadmap
-- ✅ SegmentReservationAnalyzer P2 (7/7 items) — commits shown in roadmap
-
-### 🎯 Next Wave (Recommended Order)
-
-1. **WeakReferenceAnalyzer P1** (2 pending)
-   - P1-2: Merge Phase A/C passes
-   - P1-3: Phase B fallback heap scan
-
-2. **WcfChannelAnalyzer P0-2 + P1** (5 pending)
-   - P0-2: Extract endpoint address (critical)
-   - P1-1 through P1-4: ChannelFactory detection, bindings, etc.
-
-3. **DbConnectionAnalyzer P1** (1 pending)
-   - Final cleanup item
-
-4. **HttpObjectAnalyzer P1** (2 pending)
-   - Findings quality improvements
-
-5. **LeakCandidateAnalyzer** (6 P0+P1 pending) — HIGH-IMPACT
-   - Core leak detection capability
 
 ---
 

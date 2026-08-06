@@ -10,26 +10,23 @@ internal static class SegmentKindMapper
 {
     public static HeapSegmentKind Map(ClrSegment segment)
     {
-        string k = segment.Kind.ToString();
-        if (k.Contains("Large", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.LargeObjectHeap;
-        if (k.Contains("Pinned", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.PinnedObjectHeap;
-        if (k.Contains("Frozen", StringComparison.OrdinalIgnoreCase)) return HeapSegmentKind.Frozen;
-        return HeapSegmentKind.SmallObjectHeap;
+        return segment.Kind switch
+        {
+            GCSegmentKind.Large => HeapSegmentKind.LargeObjectHeap,
+            GCSegmentKind.Pinned => HeapSegmentKind.PinnedObjectHeap,
+            GCSegmentKind.Frozen => HeapSegmentKind.Frozen,
+            _ => HeapSegmentKind.SmallObjectHeap,
+        };
     }
 
     public static bool IsEphemeral(ClrSegment segment)
     {
-        string kindName = segment.Kind.ToString();
-        if (kindName.Contains("Ephemeral", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (!kindName.Contains("Large", StringComparison.OrdinalIgnoreCase)
-            && !kindName.Contains("Pinned", StringComparison.OrdinalIgnoreCase)
-            && !kindName.Contains("Frozen", StringComparison.OrdinalIgnoreCase)
-            && segment.Generation0.Length > 0)
-            return true;
-
-        return false;
+        return segment.Kind switch
+        {
+            GCSegmentKind.Generation0 or GCSegmentKind.Generation1 or GCSegmentKind.Ephemeral => true,
+            GCSegmentKind.Generation2 or GCSegmentKind.Large or GCSegmentKind.Pinned or GCSegmentKind.Frozen => false,
+            _ => segment.Generation0.Length > 0,
+        };
     }
 
     /// <summary>

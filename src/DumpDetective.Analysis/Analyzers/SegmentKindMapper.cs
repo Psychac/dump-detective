@@ -42,4 +42,16 @@ internal static class SegmentKindMapper
         try { return (int)seg.GetGeneration(address); }
         catch { return -1; }
     }
+
+    /// <summary>Returns the byte length of a <see cref="MemoryRange"/> (End − Start).</summary>
+    public static ulong GetRangeLength(MemoryRange range) =>
+        range.End >= range.Start ? range.End - range.Start : 0;
+
+    /// <summary>Returns the committed bytes for the segment (length of committed memory range).</summary>
+    public static ulong GetCommittedBytes(ClrSegment segment) =>
+        GetRangeLength(segment.CommittedMemory);
+
+    /// <summary>Returns the reserved bytes for the segment (length of reserved memory range).</summary>
+    public static ulong GetReservedBytes(ClrSegment segment) =>
+        GetRangeLength(segment.ReservedMemory);
 }

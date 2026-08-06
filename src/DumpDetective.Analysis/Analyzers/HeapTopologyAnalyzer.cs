@@ -52,8 +52,8 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         foreach (ClrSegment segment in heap.Segments)
         {
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
-            ulong committed = GetCommittedBytes(segment);
-            ulong reserved = GetReservedBytes(segment);
+            ulong committed = SegmentKindMapper.GetCommittedBytes(segment);
+            ulong reserved = SegmentKindMapper.GetReservedBytes(segment);
             ulong used = 0;
             ulong start = segment.Start;
             ulong end = segment.End;
@@ -229,17 +229,6 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
 
     public void Dispose() { }
 
-    private static ulong GetCommittedBytes(ClrSegment segment)
-    {
-        MemoryRange mem = segment.CommittedMemory;
-        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
-    }
-
-    private static ulong GetReservedBytes(ClrSegment segment)
-    {
-        MemoryRange mem = segment.ReservedMemory;
-        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
-    }
     private static int CountObjects(
         ClrSegment segment,
         HeapSegmentKind kind,

@@ -56,8 +56,8 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ulong committed = GetLength(segment.CommittedMemory);
-            ulong reserved = GetLength(segment.ReservedMemory);
+            ulong committed = SegmentKindMapper.GetCommittedBytes(segment);
+            ulong reserved = SegmentKindMapper.GetReservedBytes(segment);
             bool isEphemeral = SegmentKindMapper.IsEphemeral(segment);
             int logicalHeap = segment.SubHeap?.Index ?? 0;
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
@@ -165,10 +165,6 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-
-    /// <summary>Returns the byte length of a <see cref="MemoryRange"/> (End − Start).</summary>
-    private static ulong GetLength(MemoryRange range) =>
-        range.End >= range.Start ? range.End - range.Start : 0;
 
     /// <summary>
     /// Returns true when the segment is an ephemeral SOH segment (contains Gen0/Gen1).

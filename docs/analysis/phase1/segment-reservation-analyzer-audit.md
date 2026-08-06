@@ -290,8 +290,8 @@ dotMemory exposes committed heap size but not per-segment reservation. DumpDetec
 | **P1** | Add committed per logical heap (`CommittedByLogicalHeap`) to `SegmentReservationDomainResult` | High — Server GC imbalance detection | Low | High | Improvement | ✅ DONE (91d3639) |
 | **P1** | Add per-kind committed/reserved totals to domain result and key metrics | High — distinguishes LOH vs SOH reservation pressure | Low | High | Improvement | ✅ DONE (1294d65) |
 | **P1** | Fix section builder to use options-driven thresholds (or shared constants) instead of hardcoded values | Medium — prevents threshold divergence after tuning | Low | Very high | Improvement | ✅ DONE (0edebb0) |
-| **P2** | Add `TotalSegmentCount` and `SegmentCountByKind` to domain result and key metrics | Medium — fragmentation proxy | Low | High | Improvement |
-| **P2** | Add `MaxEphemeralFillPct` alongside `AvgEphemeralFillPct` | Medium — identifies near-full regions in regions-based GC | Low | High | Improvement |
+| **P2** | Add `TotalSegmentCount` and `SegmentCountByKind` to domain result and key metrics | Medium — fragmentation proxy | Low | High | Improvement | ✅ DONE (773da64) |
+| **P2** | Add `MaxEphemeralFillPct` alongside `AvgEphemeralFillPct` | Medium — identifies near-full regions in regions-based GC | Low | High | Improvement | ✅ DONE (773da64) |
 | **P2** | Switch `SegmentKindMapper.Map()` from `string.Contains` to a direct `switch` on `GCSegmentKind` enum | Medium — robustness against new CLR segment kinds | Low | High | Improvement |
 | **P2** | Deduplicate `GetLength` / `GetCommittedBytes` / `GetReservedBytes` between this analyzer and `HeapTopologyAnalyzer` | Medium — prevents drift | Low | High | Evolution (shared utility) |
 | **P2** | Add mid-loop cancellation check (every 128 segments) and progress reporting | Low perf impact, high correctness | Low | High | Improvement |

@@ -291,11 +291,11 @@ dotMemory shows generation distribution, LOH objects, survivor counts, and fragm
 
 #### P0 — Critical
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| P0-1 | **Label gen byte values as approximate in domain result and report.** Add a `GenBytesAreApproximate` flag to `GCGenerationDomainResult`; surface it in the section builder and findings. | High — prevents engineer acting on inaccurate memory figures | Low | High | Improvement |
-| P0-2 | **Suppress or flag the fallback path result in reports.** When `BuildFromTypeStatistics` is used, add a `FallbackMode = true` indicator to the domain result; `GCPressureSectionBuilder` and the finding generator should note that Gen0/Gen1 are unknown and Gen2% is unreliable. | High — prevents false Critical/Warning findings | Low | High | Improvement |
-| P0-3 | **Remove or implement `LohThresholdBytes`.** The dead option is a correctness trap. Either apply it (e.g. filter the top LOH types list to objects above the threshold) or remove it. | Medium — eliminates misleading configuration surface | Low | High | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| P0-1 | **Label gen byte values as approximate in domain result and report.** Add a `GenBytesAreApproximate` flag to `GCGenerationDomainResult`; surface it in the section builder and findings. | High — prevents engineer acting on inaccurate memory figures | Low | High | Improvement | ✅ DONE (commit bc83e77) |
+| P0-2 | **Suppress or flag the fallback path result in reports.** When `BuildFromTypeStatistics` is used, add a `FallbackMode = true` indicator to the domain result; `GCPressureSectionBuilder` and the finding generator should note that Gen0/Gen1 are unknown and Gen2% is unreliable. | High — prevents false Critical/Warning findings | Low | High | Improvement | Pending |
+| P0-3 | **Remove or implement `LohThresholdBytes`.** The dead option is a correctness trap. Either apply it (e.g. filter the top LOH types list to objects above the threshold) or remove it. | Medium — eliminates misleading configuration surface | Low | High | Improvement | Pending |
 
 #### P1 — High
 

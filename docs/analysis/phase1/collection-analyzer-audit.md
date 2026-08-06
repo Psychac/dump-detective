@@ -547,9 +547,9 @@ eliminates all multi-core benefit.
 
 #### P0 — Critical
 
-| # | Recommendation | Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|
-| P0-1 | **Fix `WasteCountsByKind`** — populate from per-kind wasteful accumulators (`wasteCountByKind`/`wasteBytesByKind` in `LocalWasteAccumulator`), not total inventory counts. Surface both `WasteCountsByKind` and `WasteBytesByKind` in `CollectionDomainResult`. Update finding generator, section builder, trend comparer. | Correctness of all per-kind reporting | Low | High | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Class | Status |
+|---|---|---|---|---|---|---|
+| P0-1 | **Fix `WasteCountsByKind`** — populate from per-kind wasteful accumulators (`wasteCountByKind`/`wasteBytesByKind` in `LocalWasteAccumulator`), not total inventory counts. Surface both `WasteCountsByKind` and `WasteBytesByKind` in `CollectionDomainResult`. Update finding generator, section builder, trend comparer. | Correctness of all per-kind reporting | Low | High | Improvement | ✅ DONE |
 | P0-2 | **Fix `TrySetComputedElementSize` first-write path** — when `TryGetValue` returns false, call `GetOrBuildFieldLayout` to get the full layout, then CAS-update `ComputedElementSize` only. Do not construct a layout from a default-value struct. | Prevents cache corruption and `null`-return from all `Analyze*` methods for affected types | Low | High | Improvement |
 | P0-3 | **Fix `heapLock is object` — consult `_options.SerializeHeapAccess`** — replace `if (heapLock is object)` with `if (_options.SerializeHeapAccess)` and make `heapLock` nullable (`object? heapLock = _options.SerializeHeapAccess ? new object() : null`). This restores multi-core benefit for dumps where ClrMD access is provably thread-safe. | Performance on multi-core hosts; eliminates dead `else` branch | Low | High | Improvement |
 

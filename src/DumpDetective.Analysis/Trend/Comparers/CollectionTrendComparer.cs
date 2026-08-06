@@ -20,6 +20,9 @@ namespace DumpDetective.Analysis.Trend.Comparers
             foreach (var kv in r.WasteCountsByKind ?? new Dictionary<CollectionKind, int>())
                 metrics.Add(new("collection.waste.kind.count", kv.Key.ToString(), kv.Value, "collections", MetricTrendDirection.HigherIsWorse));
 
+            foreach (var kv in r.WasteBytesByKind ?? new Dictionary<CollectionKind, ulong>())
+                metrics.Add(new("collection.waste.kind.bytes", kv.Key.ToString(), kv.Value, "bytes", MetricTrendDirection.HigherIsWorse));
+
             return metrics;
         }
 

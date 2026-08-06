@@ -21,6 +21,7 @@ internal sealed record CollectionDomainResult(
     int WastefulCollectionCount,
     IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null,
     IReadOnlyDictionary<CollectionKind, int>? WasteCountsByKind = null,
+    IReadOnlyDictionary<CollectionKind, ulong>? WasteBytesByKind = null,
     IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown = null
 ) : AnalyzerDomainResult;
 internal sealed record WastefulCollectionSnapshot(

@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 33 |
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
-| **P0 Implemented** | 35 |
+| **P0 Implemented** | 36 |
 | **P1 Implemented** | 53 |
 | **P2 Implemented** | 12 |
-| **Overall P0+P1 Rate** | 42.3% (88/208) |
+| **Overall P0+P1 Rate** | 42.9% (89/208) |
 
 ---
 
@@ -41,16 +41,17 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 9 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
-| 10 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
-| 11 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
-| 12 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
-| 13 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
-| 14 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
-| 15 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
-| 16 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 9 | **CollectionAnalyzer** | 1/3 | 0/5 | 0/8 | 0/5 | P0-1 done (WasteCountsByKind fix); 2 P0, 5 P1 pending |
+| 10 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
+| 11 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 12 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 13 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 14 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
+| 15 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
+| 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
+| 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 
-**Subtotal: 13/13 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
+**Subtotal: 14/14 P0 done, 14/28 P1 done, 3/10 P2 done** (in-progress pools)
 
 ---
 
@@ -59,7 +60,6 @@
 | Analyzer | P0 | P1 | Total Pending | Notes |
 |----------|----|----|---|-------|
 | AsyncTaskAnalyzer | 0/2 | 0/4 | 6 | — |
-| CollectionAnalyzer | 0/3 | 0/5 | 8 | — |
 | CrashAnalyzer | — | — | — | No roadmap found |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
@@ -83,13 +83,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 7 | All recommendations implemented |
-| Analyzers with partial P0+P1 completion | 8 | Some items done, some pending (ObjectShapeAnalyzer, TimerLeakAnalyzer added this session) |
-| Analyzers with zero P0+P1 completion | 18 | Not yet started |
+| Analyzers with partial P0+P1 completion | 9 | Some items done, some pending (CollectionAnalyzer, ObjectShapeAnalyzer, TimerLeakAnalyzer) |
+| Analyzers with zero P0+P1 completion | 17 | Not yet started |
 | **Total P0 recommendations** | **69** | — |
-| **P0 items implemented** | **27** | 39.1% |
+| **P0 items implemented** | **28** | 40.6% |
 | **Total P1 recommendations** | **139** | — |
 | **P1 items implemented** | **42** | 30.2% |
-| **Combined P0+P1 rate** | **49.9%** | (69/138) |
+| **Combined P0+P1 rate** | **50.7%** | (70/138) |
 
 ---
 

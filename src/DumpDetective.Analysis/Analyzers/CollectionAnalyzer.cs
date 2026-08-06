@@ -148,6 +148,7 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.WastefulCollectionCount,
                 topSnapshots,
                 collectionStats.WasteCountsByKind,
+                collectionStats.WasteBytesByKind,
                 collectionStats.GenerationBreakdown);
 
             if (collectionStats.TotalCollections == 0)
@@ -467,25 +468,23 @@ namespace DumpDetective.Analysis.Analyzers
                 _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
             }
 
-            // Aggregate a typed per-kind breakdown for reporting.
+            // Compute per-kind wasteful counts and bytes from the wasteful collections list
             try
             {
-                int wasteCount = stats.WastefulCollectionCount;
-                if (wasteCount > 0)
+                var wasteCountDict = new Dictionary<CollectionKind, int>(8);
+                var wasteByteDict = new Dictionary<CollectionKind, ulong>(8);
+                foreach (var c in wasteful)
                 {
-                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
-                    {
-                        [CollectionKind.Dictionary] = stats.Dictionaries,
-                        [CollectionKind.List] = stats.Lists,
-                        [CollectionKind.ArrayList] = stats.ArrayLists,
-                        [CollectionKind.Stack] = stats.Stacks,
-                        [CollectionKind.SortedList] = stats.SortedLists,
-                        [CollectionKind.SortedSet] = stats.SortedSets,
-                        [CollectionKind.HashSet] = stats.HashSets,
-                        [CollectionKind.Queue] = stats.Queues,
-                    };
-                    stats.WasteCountsByKind = wasteCountsByKind;
+                    if (!wasteCountDict.ContainsKey(c.Kind))
+                        wasteCountDict[c.Kind] = 0;
+                    wasteCountDict[c.Kind]++;
+
+                    if (!wasteByteDict.ContainsKey(c.Kind))
+                        wasteByteDict[c.Kind] = 0;
+                    wasteByteDict[c.Kind] += c.WastedMemory;
                 }
+                stats.WasteCountsByKind = wasteCountDict;
+                stats.WasteBytesByKind = wasteByteDict;
             }
             catch (Exception ex)
             {
@@ -815,6 +814,17 @@ namespace DumpDetective.Analysis.Analyzers
             wastefulList.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
             localWaste.Dispose();
 
+            var wasteCountDict = new Dictionary<CollectionKind, int>(kindCount);
+            var wasteByteDict = new Dictionary<CollectionKind, ulong>(kindCount);
+            for (int i = 0; i < kindCount; i++)
+            {
+                var kind = (CollectionKind)i;
+                if (wasteCountByKind[i] > 0)
+                    wasteCountDict[kind] = wasteCountByKind[i];
+                if (wasteBytesByKind[i] > 0)
+                    wasteByteDict[kind] = wasteBytesByKind[i];
+            }
+
             var stats = new CollectionStatistics
             {
                 TotalCollections = totalCollections,
@@ -828,7 +838,9 @@ namespace DumpDetective.Analysis.Analyzers
                 Queues = queues,
                 WastefulCollections = wastefulList,
                 WastefulCollectionCount = wastefulCount,
-                TotalWastedMemory = totalWastedMemory
+                TotalWastedMemory = totalWastedMemory,
+                WasteCountsByKind = wasteCountDict,
+                WasteBytesByKind = wasteByteDict
             };
 
             // materialize generation breakdown
@@ -860,31 +872,6 @@ namespace DumpDetective.Analysis.Analyzers
                 dictionaries, lists, hashSets, queues,
                 skippedDictionaries, skippedLists, skippedHashSets, skippedQueues,
                 stats.WastefulCollectionCount);
-
-            // Aggregate a typed per-kind breakdown for reporting.
-            try
-            {
-                int wasteCount = stats.WastefulCollectionCount;
-                if (wasteCount > 0)
-                {
-                    var wasteCountsByKind = new Dictionary<CollectionKind, int>(8)
-                    {
-                        [CollectionKind.Dictionary] = dictionaries,
-                        [CollectionKind.List] = lists,
-                        [CollectionKind.ArrayList] = arrayLists,
-                        [CollectionKind.Stack] = stacks,
-                        [CollectionKind.SortedList] = sortedLists,
-                        [CollectionKind.SortedSet] = sortedSets,
-                        [CollectionKind.HashSet] = hashSets,
-                        [CollectionKind.Queue] = queues,
-                    };
-                    stats.WasteCountsByKind = wasteCountsByKind;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error computing waste metrics");
-            }
 
             return stats;
         }
@@ -1708,6 +1695,7 @@ namespace DumpDetective.Analysis.Analyzers
         public int WastefulCollectionCount { get; set; }
         public List<WastefulCollection> WastefulCollections { get; set; } = new();
         public IReadOnlyDictionary<CollectionKind, int> WasteCountsByKind { get; set; } = new Dictionary<CollectionKind, int>();
+        public IReadOnlyDictionary<CollectionKind, ulong> WasteBytesByKind { get; set; } = new Dictionary<CollectionKind, ulong>();
         public IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown { get; set; }
     }
 

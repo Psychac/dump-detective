@@ -21,7 +21,7 @@ public sealed class JitFindingGeneratorTests
     }
 
     [Fact]
-    public void Generate_WithSignals_ReturnsOverviewAndTopDetail()
+    public void Generate_WithSignals_ReturnsOverviewAndAllSignals()
     {
         var gen = new JitFindingGenerator();
         var topMethods = new List<JitMethodSnapshot>
@@ -32,9 +32,13 @@ public sealed class JitFindingGeneratorTests
 
         var findings = gen.Generate(result);
 
-        findings.Should().HaveCount(2);
+        // Should emit overview + 4 concurrent signals (heap bloat, unmanaged ratio, tiered, large methods)
+        findings.Should().HaveCount(5);
         findings[0].Title.Should().Contain("overview");
-        findings[1].Title.Should().Contain("unusually large");
+        findings.Should().ContainSingle(f => f.Title.Contains("unusually large"));
+        findings.Should().ContainSingle(f => f.Title.Contains("High unmanaged"));
+        findings.Should().ContainSingle(f => f.Title.Contains("Tiered compilation"));
+        findings.Should().ContainSingle(f => f.Title.Contains("Large JIT-compiled"));
     }
 
     private static JitDomainResult BuildResult(

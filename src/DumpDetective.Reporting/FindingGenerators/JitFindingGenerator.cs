@@ -112,7 +112,7 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                 summarySeverity = signals[i].Severity;
         }
 
-        var findings = new List<InsightFinding>(2)
+        var findings = new List<InsightFinding>(1 + signals.Count)
         {
             // Summary finding (always emitted).
             new InsightFinding(
@@ -126,35 +126,27 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                       $"{r.UnmanagedFrameCount:N0} runtime/internal. " +
                       $"Tiered recompilations observed: {r.TieredMethodCount:N0}.",
             Recommendation: signals.Count > 0
-                ? "Review the top JIT signal below and validate codegen/interop hotspots."
+                ? "Review the detailed JIT signals below and validate codegen/interop hotspots."
                 : "JIT footprint is within expected range.",
             Tags: ["jit", "overview"],
             MetricValue: (double)r.TotalJitHeapBytes,
             MetricUnit: "bytes")
         };
 
-        if (signals.Count > 0)
+        // Emit all detected signals (sorted by severity descending, then priority descending)
+        for (int i = 0; i < signals.Count; i++)
         {
-            JitSignal top = signals[0];
-            for (int i = 1; i < signals.Count; i++)
-            {
-                JitSignal s = signals[i];
-                bool betterSeverity = SeverityRank(s.Severity) > SeverityRank(top.Severity);
-                bool sameSeverityHigherPriority = SeverityRank(s.Severity) == SeverityRank(top.Severity) && s.Priority > top.Priority;
-                if (betterSeverity || sameSeverityHigherPriority)
-                    top = s;
-            }
-
+            JitSignal sig = signals[i];
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Performance",
-                Severity: top.Severity,
-                Title: top.Title,
-                Evidence: top.Evidence,
-                Recommendation: top.Recommendation,
-                Tags: top.Tags,
-                MetricValue: top.MetricValue,
-                MetricUnit: top.MetricUnit));
+                Severity: sig.Severity,
+                Title: sig.Title,
+                Evidence: sig.Evidence,
+                Recommendation: sig.Recommendation,
+                Tags: sig.Tags,
+                MetricValue: sig.MetricValue,
+                MetricUnit: sig.MetricUnit));
         }
 
         return findings;

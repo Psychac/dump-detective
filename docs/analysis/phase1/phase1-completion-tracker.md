@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 35 |
-| **P1 Implemented** | 50 |
+| **P1 Implemented** | 51 |
 | **P2 Implemented** | 12 |
-| **Overall P0+P1 Rate** | 40.9% (85/208) |
+| **Overall P0+P1 Rate** | 41.3% (86/208) |
 
 ---
 
@@ -48,9 +48,9 @@
 | 14 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 15 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 16 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
-| 17 | **JitAnalyzer** | 2/2 | 0/3 | 0/5 | 0/4 | ✅ P0 complete (2/2) — IsTiered flag + JitHeapPctOfTotalProcess removal |
+| 17 | **JitAnalyzer** | 2/2 | 1/3 | 0/5 | 0/4 | ✅ P0 complete (2/2); P1-1 ✅ DONE (emit all signals); P1-2,P1-3 pending |
 
-**Subtotal: 16/20 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
+**Subtotal: 16/20 P0 done, 15/30 P1 done, 3/10 P2 done** (in-progress pools)
 
 ---
 

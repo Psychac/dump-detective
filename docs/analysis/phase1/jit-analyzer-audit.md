@@ -240,7 +240,7 @@ dotMemory profiling mode shows JIT time per method. Static dump analysis cannot 
 |---|---|---|---|---|---|
 | **P0** | ✅ Fix `IsTiered` flag: wire tiered status from `tokenToNativeCode` to `JitMethodSnapshot` in `BuildTopMethods` | Medium — correct the misleading report column | Low | High | Improvement |
 | **P0** | ✅ Expose `JitHeapPctOfTotalProcess` as `null` or remove the field rather than emitting 0.0 | Low — prevents misinterpretation | Low | High | Improvement |
-| **P1** | Fix finding generator to emit all signals, not just the single highest-priority one | Medium — engineers lose concurrent signal context | Low | High | Improvement |
+| **P1** | ✅ Fix finding generator to emit all signals, not just the single highest-priority one | Medium — engineers lose concurrent signal context | Low | High | Improvement |
 | **P1** | Fix hardcoded "64 KB threshold" string in `JitFindingGenerator` to reflect actual `LargeMethodThresholdBytes` option value | Low | Low | High | Improvement |
 | **P1** | Add cancellation check inside the per-frame inner loop (every N frames) | Low — correctness under cancellation | Low | High | Improvement |
 | **P2** | Replace tiered count heuristic with `(module handle, token, generic context)` tuple identity; mark the count as an estimate | Medium — improves confidence | Medium | High | Improvement |

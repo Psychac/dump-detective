@@ -83,7 +83,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
                       $"({FormatHelper.FormatBytes(r.WeakReferenceObjectBytes)}). " +
                       $"Stale wrappers: {r.StaleWrapperCount:N0}.",
             Recommendation: signals.Count > 0
-                ? "Review the highest-impact weak-reference signal below."
+                ? $"Review the {signals.Count} weak-reference signal(s) below."
                 : "Weak handle health is acceptable.",
             Tags: ["weak-reference", "handles", "overview"],
             MetricValue: (double)r.TotalWeakHandles,
@@ -92,26 +92,24 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
 
         if (signals.Count > 0)
         {
-            WeakRefSignal top = signals[0];
-            for (int i = 1; i < signals.Count; i++)
-            {
-                WeakRefSignal s = signals[i];
-                bool betterSeverity = SeverityRank(s.Severity) > SeverityRank(top.Severity);
-                bool sameSeverityHigherPriority = SeverityRank(s.Severity) == SeverityRank(top.Severity) && s.Priority > top.Priority;
-                if (betterSeverity || sameSeverityHigherPriority)
-                    top = s;
-            }
+            // Sort by severity (descending) then priority (descending)
+            var sortedSignals = signals.OrderByDescending(s => SeverityRank(s.Severity))
+                                       .ThenByDescending(s => s.Priority)
+                                       .ToList();
 
-            findings.Add(new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Memory",
-                Severity: top.Severity,
-                Title: top.Title,
-                Evidence: top.Evidence,
-                Recommendation: top.Recommendation,
-                Tags: top.Tags,
-                MetricValue: top.MetricValue,
-                MetricUnit: top.MetricUnit));
+            foreach (var signal in sortedSignals)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: AnalyzerName,
+                    Category: "Memory",
+                    Severity: signal.Severity,
+                    Title: signal.Title,
+                    Evidence: signal.Evidence,
+                    Recommendation: signal.Recommendation,
+                    Tags: signal.Tags,
+                    MetricValue: signal.MetricValue,
+                    MetricUnit: signal.MetricUnit));
+            }
         }
 
         return findings;

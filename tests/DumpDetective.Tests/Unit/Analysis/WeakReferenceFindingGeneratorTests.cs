@@ -22,16 +22,17 @@ public sealed class WeakReferenceFindingGeneratorTests
     }
 
     [Fact]
-    public void Generate_WithSignals_ReturnsOverviewAndTopDetail()
+    public void Generate_WithBothSignals_ReturnsOverviewAndBothDetails()
     {
         var gen = new WeakReferenceFindingGenerator();
         var result = BuildResult(total: 5000, alive: 300, dead: 4700, ratio: 0.94, stale: 900, dependentDeadKeys: 25);
 
         var findings = gen.Generate(result);
 
-        findings.Should().HaveCount(2);
+        findings.Should().HaveCount(3);
         findings[0].Title.Should().Contain("overview");
         findings[1].Title.Should().Contain("dead weak handle targets");
+        findings[2].Title.Should().Contain("Dependent handles");
         findings[0].Severity.Should().Be(FindingSeverity.Critical);
     }
 

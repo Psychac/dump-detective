@@ -47,6 +47,10 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         var committedByHeap = new Dictionary<int, ulong>(16);
         var reservedByKind = new Dictionary<HeapSegmentKind, ulong>();
         var committedByKind = new Dictionary<HeapSegmentKind, ulong>();
+        var segmentCountByKind = new Dictionary<HeapSegmentKind, int>();
+
+        int totalSegmentCount = 0;
+        double maxEphemeralFillPct = 0.0;
 
         foreach (ClrSegment segment in heap.Segments)
         {
@@ -60,6 +64,13 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
 
             totalCommitted += committed;
             totalReserved += reserved;
+            totalSegmentCount++;
+
+            // Per-kind segment count (fragmentation proxy).
+            if (segmentCountByKind.TryGetValue(kind, out int kindCount))
+                segmentCountByKind[kind] = kindCount + 1;
+            else
+                segmentCountByKind[kind] = 1;
 
             // Per-logical-heap reserved bytes (Server GC per-CPU breakdown).
             if (reservedByHeap.TryGetValue(logicalHeap, out ulong existing))
@@ -92,6 +103,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
                 if (fillPct > 100.0) fillPct = 100.0;
                 ephemeralCount++;
                 ephemeralFillSum += fillPct;
+                if (fillPct > maxEphemeralFillPct) maxEphemeralFillPct = fillPct;
             }
             else if (!isEphemeral && kind == HeapSegmentKind.SmallObjectHeap)
             {
@@ -136,12 +148,15 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             ReservedToCommittedRatio: ratio,
             EphemeralSegmentCount: ephemeralCount,
             AvgEphemeralFillPct: avgFill,
+            MaxEphemeralFillPct: maxEphemeralFillPct,
             NonEphemeralSohSegmentCount: nonEphemeralSohCount,
+            TotalSegmentCount: totalSegmentCount,
             SegmentTable: segmentTable,
             ReservedByLogicalHeap: reservedByHeap,
             CommittedByLogicalHeap: committedByHeap,
             ReservedByKind: reservedByKind,
             CommittedByKind: committedByKind,
+            SegmentCountByKind: segmentCountByKind,
             AddressSpacePressureRisk: pressureRisk,
             PressureRiskReason: pressureReason,
             RatioHighPressureThreshold: options.RatioHighPressureThreshold,

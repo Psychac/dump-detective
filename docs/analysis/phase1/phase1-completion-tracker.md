@@ -15,8 +15,8 @@
 | **Total P0 Recommendations Identified** | ~49 |
 | **Total P1 Recommendations Identified** | ~94 |
 | **P0 Items Implemented** | 20 |
-| **P1 Items Implemented** | 34 |
-| **Overall P0+P1 Implementation Rate** | 38.8% (54/139) |
+| **P1 Items Implemented** | 35 |
+| **Overall P0+P1 Implementation Rate** | 39.6% (55/139) |
 
 ---
 
@@ -32,6 +32,7 @@
 | 4 | **BoxingAnalyzer** | 2/2 | 4/4 | 0/5 | 0/4 | All P0+P1 done; P2 pending |
 | 5 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | All P0+P1 done; P2 mostly done |
 | 6 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | All P0+P1 done; P2 mostly done |
+| 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 0/10 | 0/6 | All P0+P1 done; P2 pending |
 
 ### 🟡 IN_PROGRESS (Some P0+P1 Done)
 
@@ -65,7 +66,6 @@
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ObjectShapeAnalyzer | 0/3 | 0/5 | 8 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
-| **SegmentReservationAnalyzer** | **1/1** | **3/4** | **5** | ✅ P0 done (fe44ff0); 3/4 P1 done (c42460f, 91d3639, 1294d65); 1 P1 pending |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
 | StringAnalyzer | 0/3 | 0/5 | 8 | — |
 | ThreadAnalyzer | 0/3 | 0/4 | 7 | High-impact (hang/deadlock detection) |
@@ -93,11 +93,11 @@ None currently blocking. SegmentReservationAnalyzer P0 bitness fix completed (co
 
 ## Progress by Category
 
-### ✅ Analyzers Complete (6 total)
+### ✅ Analyzers Complete (7 total)
 
 All P0 and P1 recommendations implemented. Move on to P2/P3 if needed.
 
-### 🟡 Analyzers Partially Done (5 total)
+### 🟡 Analyzers Partially Done (4 total)
 
 Focus on completing remaining P0/P1 items:
 - **WeakReferenceAnalyzer**: 2/4 P1 done (merge passes, fallback path)
@@ -106,7 +106,7 @@ Focus on completing remaining P0/P1 items:
 - **DbConnectionAnalyzer**: 2/2 P0, 3/4 P1 (1 item pending)
 - **GCRootAnalyzer**: 0/2 P0, 1/4 P1 (minimal progress)
 
-### ⏳ Analyzers Not Started (22 total)
+### ⏳ Analyzers Not Started (21 total)
 
 **High-impact priority (core functionality):**
 1. LeakCandidateAnalyzer (0/6 P0+P1) — core leak detection
@@ -116,7 +116,7 @@ Focus on completing remaining P0/P1 items:
 5. ReferenceChainAnalyzer (0/9 P0+P1) — path finding
 
 **Infrastructure-level (affects multiple analyzers):**
-- **SegmentReservationAnalyzer + HeapTopologyAnalyzer**: Duplicate segment enumeration → shared utility needed
+- **HeapTopologyAnalyzer**: Duplicates SegmentReservationAnalyzer segment enumeration → shared utility would consolidate
 - **FinalizableObjectAnalyzer**: 4 items done but not P0/P1-labeled; 2 labeled P1 pending
 
 ---

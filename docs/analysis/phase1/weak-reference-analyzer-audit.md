@@ -339,30 +339,30 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 
 ### Priority Roadmap
 
-| # | Recommendation | Area | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|---|
-| P0-1 | **Fix `staleHolderTypeHits` never populated in Phase B** — record holder type per MT group during stale probe loop | Correctness | High | Low | High | Improvement |
-| P0-2 | **Fix GZip stream not disposed in InMemory export paths** — add `tmpGz?.Dispose(); tmpGz = null;` after both InMemory foreach loops | Correctness | High | Low | High | Improvement |
-| P1-1 | **Fix hard-coded "50 000" cap literal** — add `ScanCapUsed` int to `WeakReferenceDomainResult`; emit it in finding text | Diagnostic | Medium | Low | High | Improvement |
-| P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement |
-| P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement |
-| P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement |
-| P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement |
-| P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement |
-| P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement |
-| P2-4 | **Add `ObjectScanCounter` to Phase C reader path** for progress reporting on large dumps | Performance | Low | Low | High | Improvement |
-| P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement |
-| P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement |
-| P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution |
-| P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement |
-| P3-4 | **Add `(estimated)` qualifier** to stale wrapper count in evidence text; document approximation method | Diagnostic | Low | Low | High | Improvement |
+| # | Recommendation | Area | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|---|
+| P0-1 | **Fix `staleHolderTypeHits` never populated in Phase B** — record holder type per MT group during stale probe loop | Correctness | High | Low | High | Improvement | ✅ Done (commit aea3761) |
+| P0-2 | **Fix GZip stream not disposed in InMemory export paths** — add `tmpGz?.Dispose(); tmpGz = null;` after both InMemory foreach loops | Correctness | High | Low | High | Improvement | ✅ Done (commit aea3761) |
+| P1-1 | **Fix hard-coded "50 000" cap literal** — add `ScanCapUsed` int to `WeakReferenceDomainResult`; emit it in finding text | Diagnostic | Medium | Low | High | Improvement | Pending |
+| P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement | Pending |
+| P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement | Pending |
+| P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | Pending |
+| P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | Pending |
+| P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement | Pending |
+| P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement | Pending |
+| P2-4 | **Add `ObjectScanCounter` to Phase C reader path** for progress reporting on large dumps | Performance | Low | Low | High | Improvement | Pending |
+| P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement | Pending |
+| P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement | Pending |
+| P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution | Pending |
+| P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement | Pending |
+| P3-4 | **Add `(estimated)` qualifier** to stale wrapper count in evidence text; document approximation method | Diagnostic | Low | Low | High | Improvement | Pending |
 
 ---
 
 ### Final Verdict
 
 1. **Is the analyzer production-ready?**
-   Partially. Phase A (handle liveness) and Phase C (dependent handle dead keys) are production-quality. Phase B (WeakReference object stale analysis) has two bugs that make its primary output wrong or corrupt — it should not be relied upon until P0-1 and P0-2 are resolved.
+   ✅ **Yes.** Phase A (handle liveness), Phase B (WeakReference stale analysis), and Phase C (dependent handle dead keys) are all production-quality. P0-1 and P0-2 have been resolved (commit aea3761).
 
 2. **Highest-impact improvements?**
    P0-1 (populate `staleHolderTypeHits`) and P0-2 (fix GZip disposal) restore Phase B to functioning state. P1-2 (merge passes) halves disk I/O for the most common production case. P2-1 (per-kind alive/dead breakdown) significantly increases diagnostic value for WeakLong finalization issues.
@@ -371,4 +371,4 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
    P3-2 ("held only via weak reference" detection) would position DumpDetective ahead of all commercial tools in this area. It requires a join against `ReverseReferenceIndex` — an index that already exists in the platform for other analyzers — making it a feasible cross-analyzer collaboration.
 
 4. **Highest engineering return?**
-   P0-1, P0-2, and P1-4 are low-effort fixes with high diagnostic impact. P1-2 and P2-3 are medium-effort performance improvements. These five items together restore the analyzer to full correctness and meaningfully improve both performance and signal quality.
+   ✅ P0-1 and P0-2 are complete (commit aea3761). Remaining quick wins: P1-4, P1-1, and P2-2 are low-effort fixes with high diagnostic impact. P1-2 and P2-3 are medium-effort performance improvements that will further enhance correctness and signal quality.

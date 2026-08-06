@@ -24,9 +24,9 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         var blocks = new List<SectionBlock>();
 
         SectionLeadFinding? leadFinding = null;
-        if (d.ReservedToCommittedRatio > 10.0 || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > 4.0))
+        if (d.ReservedToCommittedRatio > d.RatioHighPressureThreshold || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold))
         {
-            bool critical = d.ReservedToCommittedRatio > 10.0;
+            bool critical = d.ReservedToCommittedRatio > d.RatioHighPressureThreshold;
             string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
                 ? d.PressureRiskReason
                 : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7.";
@@ -39,11 +39,11 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                 ConfidenceScore: 0.85,
                 Caveats: []);
         }
-        else if (d.ReservedToCommittedRatio > 4.0)
+        else if (d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold)
         {
             string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
                 ? d.PressureRiskReason
-                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: 4\u00d7).";
+                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: {d.RatioMediumPressureThreshold:F0}\u00d7).";
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated segment reservation \u2014 ratio {d.ReservedToCommittedRatio:F1}\u00d7",

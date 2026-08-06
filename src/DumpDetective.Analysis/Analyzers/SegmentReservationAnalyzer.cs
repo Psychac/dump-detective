@@ -144,6 +144,8 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             CommittedByKind: committedByKind,
             AddressSpacePressureRisk: pressureRisk,
             PressureRiskReason: pressureReason,
+            RatioHighPressureThreshold: options.RatioHighPressureThreshold,
+            RatioMediumPressureThreshold: 4.0,
             DumpPointerSize: dumpPointerSize);
     }
 

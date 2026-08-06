@@ -78,6 +78,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topModules,
                 conflictDetails,
                 options.HeavyModuleWarningThresholdBytes,
+                analysis.UnknownIdentityDuplicates,
                 heapStats?.TopByMemory,
                 heapStats?.DensityAnomalies,
                 TotalDomains: appDomains.TotalDomains,
@@ -350,18 +351,24 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                 {
                     // No conflicting known identities; mark any unknowns for reporting but do NOT treat as conflicts
+                    bool hasUnknownDuplicates = false;
                     foreach (var kv in identities)
                     {
                         var id = kv.Key;
                         bool isUnknown = string.IsNullOrEmpty(id.Version) && string.IsNullOrEmpty(id.PublicKeyToken) && string.IsNullOrEmpty(id.FileHash);
-                        if (isUnknown)
+                        if (isUnknown && kv.Value.Count > 1)
                         {
+                            hasUnknownDuplicates = true;
                             foreach (var mi in kv.Value)
                             {
                                 if (!mi.AssemblyName.Contains("(Unknown identity)", StringComparison.Ordinal))
                                     mi.AssemblyName = mi.AssemblyName + " (Unknown identity)";
                             }
                         }
+                    }
+                    if (hasUnknownDuplicates)
+                    {
+                        analysis.UnknownIdentityDuplicates.Add(kvp.Key);
                     }
                 }
             }
@@ -406,6 +413,7 @@ namespace DumpDetective.Analysis.Analyzers
         public int DynamicModules { get; set; }
         public Dictionary<string, List<ModuleInfo>> ModulesByName { get; set; } = new();
         public Dictionary<string, List<ModuleInfo>> VersionConflicts { get; set; } = new();
+        public HashSet<string> UnknownIdentityDuplicates { get; set; } = new();
     }
 
     internal class ModuleInfo

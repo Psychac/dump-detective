@@ -154,6 +154,24 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
                 MetricUnit: "excluded-modules"));
         }
 
+        // ── Unknown-identity duplicate modules ────────────────────────────────────────
+        if (r.UnknownIdentityDuplicateModules.Count > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Dependency",
+                Severity: FindingSeverity.Warning,
+                Title: $"Unknown-identity duplicate modules: {r.UnknownIdentityDuplicateModules.Count:N0} module(s) with unidentifiable versions",
+                Evidence: $"{r.UnknownIdentityDuplicateModules.Count:N0} module(s) appear multiple times with no version, public-key-token, or file-hash. " +
+                          "This makes it impossible to distinguish whether these are intentional loads of the same assembly or accidental duplicates. " +
+                          $"Modules: {string.Join(", ", r.UnknownIdentityDuplicateModules.Take(5))}." +
+                          (r.UnknownIdentityDuplicateModules.Count > 5 ? $" (+ {r.UnknownIdentityDuplicateModules.Count - 5} more)" : ""),
+                Recommendation: "Verify that duplicate loads of these assemblies are intentional. If possible, ensure assemblies have strong-named identity (version, public-key-token) to enable proper conflict detection.",
+                Tags: ["modules", "identity", "duplicate", "dependency"],
+                MetricValue: r.UnknownIdentityDuplicateModules.Count,
+                MetricUnit: "unknown-identity-modules"));
+        }
+
         return findings;
     }
 }

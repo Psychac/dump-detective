@@ -29,7 +29,7 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
                 Evidence: r.PressureRiskReason,
                 Recommendation: is32Bit
                     ? "Migrate to a 64-bit process to avoid virtual address exhaustion."
-                    : "Investigate GC segment reservation policy; consider COMPLUS_GCSegmentSize tuning.",
+                    : "Investigate GC segment reservation policy; consider tuning System.GC.HeapHardLimit in runtimeconfig.json.",
                 Tags: ["segments", "virtual-memory", "address-space"],
                 MetricValue: r.ReservedToCommittedRatio,
                 MetricUnit: "ratio"));

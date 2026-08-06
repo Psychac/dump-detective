@@ -35,8 +35,31 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         if (d.ExcludedModuleCount > 0)
             keyMetrics["excluded_modules"] = new NumericMetricValue(d.ExcludedModuleCount, MetricUnit.Count);
 
+        // Build summary narrative
+        var summaryParts = new List<string>();
+        summaryParts.Add($"{d.TotalModules:N0} modules loaded across {d.TotalDomains:N0} AppDomain(s)");
+
+        if (d.DynamicModules > 0)
+            summaryParts.Add($"{d.DynamicModules:N0} native dynamic modules");
+
+        if (d.TotalDynamicModules > 0)
+            summaryParts.Add($"{d.TotalDynamicModules:N0} runtime-generated dynamic modules");
+
+        if (d.VersionConflictGroups > 0)
+            summaryParts.Add($"{d.VersionConflictGroups:N0} version conflict group(s)");
+
+        if (d.UnknownIdentityDuplicateModules.Count > 0)
+            summaryParts.Add($"{d.UnknownIdentityDuplicateModules.Count:N0} unknown-identity duplicate(s)");
+
+        if (d.ExcludedModuleCount > 0)
+            summaryParts.Add($"{d.ExcludedModuleCount:N0} modules excluded from deep analysis");
+
+        if (d.AnonymousModuleCount > 0)
+            summaryParts.Add($"{d.AnonymousModuleCount:N0} anonymous/in-memory modules");
+
         var blocks = new List<SectionBlock>
         {
+            T($"Runtime inventory: {string.Join(", ", summaryParts)}."),
             T(d.ConflictingAssemblyNames.Count > 0
                 ? $"Conflict groups include: {string.Join(", ", d.ConflictingAssemblyNames.Take(6))}."
                 : "No version conflict groups were reported."),

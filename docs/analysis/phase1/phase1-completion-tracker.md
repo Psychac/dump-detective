@@ -47,6 +47,7 @@
 | 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 14 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 15 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 16 | **FinalizableObjectAnalyzer** | 4/4 | 1/2 | 0/8 | 0/3 | ✅ P0 complete (4/4); P1 50% (1/2); P1 Cache point complete |
 
 **Subtotal: 13/13 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
 

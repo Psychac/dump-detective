@@ -137,6 +137,9 @@ namespace DumpDetective.Analysis.Analyzers
             bool hasUndisposedDisposable = false;
             bool isRetainedEstimatePartial = false;
 
+            var isDisposableCache = new Dictionary<ulong, bool>();
+            var disposedFieldCache = new Dictionary<ulong, ClrInstanceField?>();
+
             for (int i = 0; i < entryLimit; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -146,11 +149,12 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!obj.IsValid || obj.Type is null)
                     continue;
 
-                bool isDisposable = IsDisposableType(obj.Type);
+                ulong mt = obj.Type.MethodTable;
+                bool isDisposable = IsDisposableType(obj.Type, isDisposableCache, mt);
                 bool disposedFound = false;
                 bool disposedValue = false;
 
-                ClrInstanceField? disposedField = FindDisposedField(obj.Type);
+                ClrInstanceField? disposedField = FindDisposedField(obj.Type, disposedFieldCache, mt);
                 if (disposedField is not null)
                 {
                     disposedFound = true;
@@ -197,25 +201,43 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private static bool IsDisposableType(ClrType type)
+        private static bool IsDisposableType(ClrType type, Dictionary<ulong, bool> cache, ulong methodTable)
         {
+            if (cache.TryGetValue(methodTable, out bool result))
+                return result;
+
+            bool isDisposable = false;
             foreach (ClrInterface iface in type.EnumerateInterfaces())
             {
                 if (iface.Name is "System.IDisposable")
-                    return true;
+                {
+                    isDisposable = true;
+                    break;
+                }
             }
-            return false;
+
+            cache[methodTable] = isDisposable;
+            return isDisposable;
         }
 
-        private static ClrInstanceField? FindDisposedField(ClrType type)
+        private static ClrInstanceField? FindDisposedField(ClrType type, Dictionary<ulong, ClrInstanceField?> cache, ulong methodTable)
         {
-            foreach (ClrInstanceField field in type.Fields)
+            if (cache.TryGetValue(methodTable, out ClrInstanceField? cached))
+                return cached;
+
+            ClrInstanceField? field = null;
+            foreach (ClrInstanceField f in type.Fields)
             {
-                string? name = field.Name;
+                string? name = f.Name;
                 if (name is "_disposed" or "disposed" or "m_disposed" or "_isDisposed" or "isDisposed")
-                    return field;
+                {
+                    field = f;
+                    break;
+                }
             }
-            return null;
+
+            cache[methodTable] = field;
+            return field;
         }
 
         /// <summary>

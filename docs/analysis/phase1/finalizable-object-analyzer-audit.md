@@ -255,7 +255,7 @@ dotMemory provides:
 | ✅ DONE | Qualify `FinalizerQueueRetainedBytes` as upper-bound estimate (shared sub-graphs double-counted); added `IsRetainedEstimatePartial` flag when BFS capped | High (correctness) | Easy | High | Improvement |
 | ✅ DONE | Add per-type queue count aggregation — one pass over `EnumerateFinalizableObjects()` building `Dictionary<string, int>`, emit as `TopQueueTypesByCount` table | High (diagnostic) | Easy | High | Improvement |
 | ✅ DONE | Add `LohCount` total to `FinalizableObjectDomainResult` | Medium | Trivial | High | Improvement |
-| P1 | Cache `IsDisposableType` and `FindDisposedField` results by MethodTable within the analysis call | Medium (perf) | Easy | High | Improvement |
+| ✅ DONE | Cache `IsDisposableType` and `FindDisposedField` results by MethodTable within the analysis call | Medium (perf) | Easy | High | Improvement |
 | P1 | Fix fallback path to build `finalizableTypes` list or emit an explicit caveat in the result | Medium (correctness) | Easy | High | Improvement |
 | P2 | Detect CriticalFinalizerObject / SafeHandle accumulation — check `ClrType` hierarchy or type name | High (diagnostic) | Medium | High | Improvement |
 | P2 | Add queue pressure ratio metric: `FinalizerQueueCount / TotalFinalizableObjects` | Medium (diagnostic) | Trivial | High | Improvement |

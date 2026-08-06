@@ -15,7 +15,7 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
         if (result is not ObjectShapeAnalyzerDomainResult r) return [];
         if (r.TotalTypesAnalyzed == 0) return [];
 
-        var findings = new List<InsightFinding>(2);
+        var findings = new List<InsightFinding>(3);
 
         // Flag when avg ref fields per type is high — indicates heavy GC scan burden.
         if (r.AvgRefFieldsPerType >= 4.0)
@@ -59,6 +59,34 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
                     MetricValue: topValCount,
                     MetricUnit: "instances"));
             }
+        }
+
+        // Flag finalizable reference-heavy types with large instance counts — finalizers
+        // delay GC completion and these types amplify GC scan cost.
+        var finalizableRefHeavy = r.TopReferenceHeavyTypes
+            .Where(t => t.IsFinalizable && t.InstanceCount >= 10_000)
+            .ToList();
+
+        if (finalizableRefHeavy.Count > 0)
+        {
+            string typeList = string.Join(", ", finalizableRefHeavy.Take(3).Select(t =>
+                $"{FormatTypeName(t.TypeName)} ({t.InstanceCount:N0} instances, {t.ReferenceFields} ref fields)"));
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: $"Finalizable reference-heavy types: {finalizableRefHeavy.Count} types with ≥10K instances",
+                Evidence: $"{finalizableRefHeavy.Count} finalizable reference-heavy type(s) found. " +
+                                $"Top: {typeList}. " +
+                                $"These types combine high instance counts with many reference fields, " +
+                                $"amplifying GC scan cost and delaying finalizer queues.",
+                Recommendation: "Consider: (1) Reducing instance counts via pooling or caching, " +
+                                "(2) Refactoring to value types or weak references, " +
+                                "(3) Implementing IDisposable to avoid finalizer overhead.",
+                Tags: ["finalizer", "reference-heavy", "gc-scan", "object-shape"],
+                MetricValue: finalizableRefHeavy.Count,
+                MetricUnit: "types"));
         }
 
         return findings;

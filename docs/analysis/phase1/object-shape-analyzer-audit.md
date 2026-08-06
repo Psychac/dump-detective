@@ -302,7 +302,7 @@ is retained.
 | I-4 | **Add Balanced type list** (top 20 by instance count, refRatio 0.2–0.6) to the domain result and section builder. | High | Medium | High | Improvement | — |
 | I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement | ✅ DONE |
 | I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement | — |
-| I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | — |
+| I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | ✅ DONE |
 | I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | — |
 | I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | — |
 | I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | — |
@@ -355,7 +355,7 @@ incomplete. The report is useful for quick triage but insufficient for confident
 | P1 | I-3 | Aggregate GC scan work key metric | High | Low | High | Improvement | ✅ DONE |
 | P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement | ✅ DONE |
 | P1 | I-6 | Array shape table | High | Medium | High | Improvement | — |
-| P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | — |
+| P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | ✅ DONE |
 | P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | — |
 | P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | — |
 | P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | — |

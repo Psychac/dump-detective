@@ -32,7 +32,7 @@
 | 4 | **BoxingAnalyzer** | 2/2 | 4/4 | 0/5 | 0/4 | All P0+P1 done; P2 pending |
 | 5 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | All P0+P1 done; P2 mostly done |
 | 6 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | All P0+P1 done; P2 mostly done |
-| 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 4/10 | 0/6 | All P0+P1 done; 4/10 P2 done; 6 P2 pending |
+| 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 5/10 | 0/6 | All P0+P1 done; 5/10 P2 done; 5 P2 pending |
 
 ### 🟡 IN_PROGRESS (Some P0+P1 Done)
 

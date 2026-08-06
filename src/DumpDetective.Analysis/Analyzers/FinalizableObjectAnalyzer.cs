@@ -48,6 +48,7 @@ namespace DumpDetective.Analysis.Analyzers
             long gen0 = 0, gen1 = 0, gen2 = 0, loh = 0;
 
             var finalizableTypes = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
+            var fallbackTypeNames = new Dictionary<ulong, string>();  // For fallback path type name caching
 
             if (typeAggregates is not null)
             {
@@ -69,17 +70,59 @@ namespace DumpDetective.Analysis.Analyzers
             else
             {
                 // Fallback: scan heap directly (only used when no Phase 1 index is available)
+                // Build per-type statistics to match the Phase 1 index path output.
+                var typeStats = new Dictionary<ulong, (string Name, ulong Mt, long Count, ulong Bytes, long Gen0, long Gen1, long Gen2, long Loh)>();
+
                 foreach (ClrObject obj in heap.EnumerateObjects())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!obj.IsValid || obj.Type is null || !obj.Type.IsFinalizable)
                         continue;
+
                     totalObjects++;
                     totalBytes += obj.Size;
+
                     int g = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
                     if (g == 0) gen0++;
                     else if (g == 1) gen1++;
                     else if (g == 2) gen2++;
+                    else if (g >= 3) loh++;  // LOH is typically reported as Gen3 or higher
+
+                    // Accumulate per-type stats
+                    ulong mt = obj.Type.MethodTable;
+                    string typeName = obj.Type.Name ?? "<unknown>";
+                    if (!typeStats.TryGetValue(mt, out var stat))
+                    {
+                        stat = (typeName, mt, 0, 0, 0, 0, 0, 0);
+                        fallbackTypeNames[mt] = typeName;
+                    }
+
+                    stat.Count++;
+                    stat.Bytes += obj.Size;
+                    if (g == 0) stat.Gen0++;
+                    else if (g == 1) stat.Gen1++;
+                    else if (g == 2) stat.Gen2++;
+                    else if (g >= 3) stat.Loh++;
+
+                    typeStats[mt] = stat;
+                }
+
+                // Convert per-type stats to TypeAggregateIndexEntry equivalents
+                foreach (var (mt, (typeName, _, count, bytes, g0, g1, g2, lohCount)) in typeStats)
+                {
+                    var entry = new TypeAggregateIndexEntry(
+                        MethodTable: mt,
+                        ModuleId: 0,  // Module ID not available in fallback path
+                        Count: count,
+                        TotalSize: bytes,
+                        LohCount: lohCount,
+                        LohSize: lohCount > 0 ? bytes : 0,  // Assume LOH objects contribute to TotalSize
+                        SampleAddress: 0,  // No sample address available in fallback path
+                        Gen0Count: g0,
+                        Gen1Count: g1,
+                        Gen2Count: g2,
+                        Flags: TypeAggregateFlags.IsFinalizableType);
+                    finalizableTypes.Add((mt, entry));
                 }
             }
 
@@ -91,7 +134,10 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 (ulong mt, TypeAggregateIndexEntry e) = finalizableTypes[i];
-                string typeName = TypeAggregateNameResolver.ResolveTypeName(heap, mt, e.SampleAddress);
+                // Use cached type name from fallback path if available; otherwise resolve from sample address
+                string typeName = fallbackTypeNames.TryGetValue(mt, out var cached)
+                    ? cached
+                    : TypeAggregateNameResolver.ResolveTypeName(heap, mt, e.SampleAddress);
                 topTypesByGen2.Add(new TypeGenerationProfile(
                     TypeName: typeName,
                     Gen0Count: e.Gen0Count,

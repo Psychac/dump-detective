@@ -30,8 +30,9 @@
 | 5 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
 | 6 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
 | 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 0/4 | ✅ P0+P1+P2 |
+| 8 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 0/8 | 0/3 | ✅ P0+P1 |
 
-**Subtotal: 14/14 P0 done, 34/34 P1 done**
+**Subtotal: 18/18 P0 done, 38/38 P1 done**
 
 ---
 
@@ -39,15 +40,14 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 8 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
-| 9 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
-| 10 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
-| 11 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
-| 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
-| 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
-| 14 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
-| 15 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
-| 16 | **FinalizableObjectAnalyzer** | 4/4 | 1/2 | 0/8 | 0/3 | ✅ P0 complete (4/4); P1 50% (1/2); P1 Cache point complete |
+| 9 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
+| 10 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 11 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 12 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 13 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
+| 14 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
+| 15 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
+| 16 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 
 **Subtotal: 13/13 P0 done, 14/27 P1 done, 3/10 P2 done** (in-progress pools)
 
@@ -98,6 +98,9 @@
 
 ### ✅ Completed Recently
 
+- ✅ FinalizableObjectAnalyzer P1 complete (Cache point + Fallback path) — commits TBD
+  - P1 Cache: Cache `IsDisposableType` and `FindDisposedField` by MethodTable
+  - P1 Fallback: Build `finalizableTypes` per-type stats in fallback heap scan path
 - ✅ TimerLeakAnalyzer P2-3 (OtherTimerCategory exclusions) — commit 2f664ec
   - P2-3: Exclude CLR-internal timer types (TimerQueue, TimerThread) from OtherTimer pattern
 - ✅ TimerLeakAnalyzer P1-3 (Cancellation support) — commit 5b1b4be

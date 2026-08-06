@@ -40,13 +40,14 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 8 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
-| 9 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
-| 10 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
-| 11 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
-| 12 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
+| 8 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
+| 9 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 10 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 11 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 12 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
+| 13 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 
-**Subtotal: 6/8 P0 done, 7/18 P1 done** (in-progress pools)
+**Subtotal: 9/10 P0 done, 9/22 P1 done** (in-progress pools)
 
 ---
 
@@ -60,7 +61,6 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **FinalizableObjectAnalyzer** | 4 (unlabeled) | 0/2 | 2+ | **4 DONE items not P0/P1-labeled** |
-| GCGenerationAnalyzer | 3/3 | 2/4 | 0 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done (commits 8234499, 3bf3868, 9947f2c, ee670c5, 732ec5e, 5dcbcf2) |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | JitAnalyzer | 0/2 | 0/3 | 5 | — |
@@ -84,13 +84,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 7 | All recommendations implemented |
-| Analyzers with partial P0+P1 completion | 5 | Some items done, some pending |
-| Analyzers with zero P0+P1 completion | 21 | Not yet started |
+| Analyzers with partial P0+P1 completion | 6 | Some items done, some pending (GCGenerationAnalyzer added this session) |
+| Analyzers with zero P0+P1 completion | 20 | Not yet started |
 | **Total P0 recommendations** | **69** | — |
-| **P0 items implemented** | **20** | 29.0% |
+| **P0 items implemented** | **23** | 33.3% |
 | **Total P1 recommendations** | **139** | — |
-| **P1 items implemented** | **35** | 25.2% |
-| **Combined P0+P1 rate** | **39.9%** | (55/138) |
+| **P1 items implemented** | **37** | 26.6% |
+| **Combined P0+P1 rate** | **43.5%** | (60/138) |
 
 ---
 

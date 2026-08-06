@@ -295,7 +295,7 @@ dotMemory exposes committed heap size but not per-segment reservation. DumpDetec
 | **P2** | Switch `SegmentKindMapper.Map()` from `string.Contains` to a direct `switch` on `GCSegmentKind` enum | Medium — robustness against new CLR segment kinds | Low | High | Improvement | ✅ DONE (cd1c80f) |
 | **P2** | Deduplicate `GetLength` / `GetCommittedBytes` / `GetReservedBytes` between this analyzer and `HeapTopologyAnalyzer` | Medium — prevents drift | Low | High | Evolution (shared utility) |
 | **P2** | Add mid-loop cancellation check (every 128 segments) and progress reporting | Low perf impact, high correctness | Low | High | Improvement |
-| **P2** | Suppress `FillPct` column (show `—`) for non-ephemeral segments in section builder | Low — reduces report noise | Low | High | Improvement |
+| **P2** | Suppress `FillPct` column (show `—`) for non-ephemeral segments in section builder | Low — reduces report noise | Low | High | Improvement | ✅ DONE (d2c05a3) |
 | **P2** | Update recommendation text: replace `COMPLUS_GCSegmentSize` with `System.GC.HeapHardLimit` / `GCHeapHardLimit` | Low — accuracy | Trivial | Very high | Improvement |
 | **P3** | Add `segment.End` address to `SegmentReservationEntry` for parity with `!eeheap -gc` | Low | Low | High | Improvement |
 | **P3** | Add `IsServer` flag and logical heap count to domain result | Low — contextualises multi-heap data | Low | High | Improvement |

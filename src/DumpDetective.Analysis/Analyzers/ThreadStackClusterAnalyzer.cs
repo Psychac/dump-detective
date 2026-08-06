@@ -147,7 +147,8 @@ namespace DumpDetective.Analysis.Analyzers
                     c.Signature,
                     c.ThreadpoolWorkerCount,
                     c.GcCount,
-                    c.FinalizerCount))
+                    c.FinalizerCount,
+                    c.SampleManagedThreadIds))
                 .ToArray();
 
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
@@ -241,7 +242,10 @@ namespace DumpDetective.Analysis.Analyzers
                 cluster.FinalizerCount++;
 
             if (cluster.SampleThreadAddresses.Count < maxThreadIdsPerCluster && thread.Address != 0)
+            {
                 cluster.SampleThreadAddresses.Add(thread.Address);
+                cluster.SampleManagedThreadIds.Add(thread.ManagedThreadId);
+            }
         }
 
         private static string BuildSignature(IEnumerable<ClrStackFrame> frames, int maxFramesPerSignature, ClrThread? thread = null)
@@ -287,6 +291,7 @@ namespace DumpDetective.Analysis.Analyzers
             public int GcCount { get; set; }
             public int FinalizerCount { get; set; }
             public List<ulong> SampleThreadAddresses { get; } = new();
+            public List<int> SampleManagedThreadIds { get; } = new();
 
             public StackCluster(string signature)
             {

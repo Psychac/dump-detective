@@ -19,4 +19,5 @@ internal sealed record ThreadClusterSnapshot(
     string Signature,
     int ThreadpoolWorkerCount = 0,
     int GcCount = 0,
-    int FinalizerCount = 0);
+    int FinalizerCount = 0,
+    IReadOnlyList<int>? SampleManagedThreadIds = null);

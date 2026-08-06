@@ -30,10 +30,10 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     {
         cancellationToken.ThrowIfCancellationRequested();
         SegmentReservationAnalysisOptions options = context.AnalysisOptions.SegmentReservationAnalysis;
-        return ValueTask.FromResult(Analyze(context, context.Heap, options, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context, context.Heap, context.Progress, options, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(AnalysisContext context, ClrHeap heap, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(AnalysisContext context, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
     {
         ulong totalCommitted = 0;
         ulong totalReserved = 0;
@@ -51,10 +51,16 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
 
         int totalSegmentCount = 0;
         double maxEphemeralFillPct = 0.0;
+        const int ProgressReportInterval = 128;
 
         foreach (ClrSegment segment in heap.Segments)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            // Mid-loop cancellation check and progress reporting (every 128 segments).
+            if ((totalSegmentCount % ProgressReportInterval) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new(totalSegmentCount, "analyzing segment reservation", $"{totalSegmentCount} segments processed"));
+            }
 
             ulong committed = SegmentKindMapper.GetCommittedBytes(segment);
             ulong reserved = SegmentKindMapper.GetReservedBytes(segment);

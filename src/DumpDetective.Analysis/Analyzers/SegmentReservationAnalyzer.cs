@@ -107,6 +107,8 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             pressureReason = $"Reserved-to-committed ratio is {ratio:F1}x (>{options.RatioHighPressureThreshold:F0}x threshold). GC is holding large uncommitted reservations.";
         }
 
+        segmentTable.Sort((a, b) => b.ReservedBytes.CompareTo(a.ReservedBytes));
+
         return new SegmentReservationDomainResult(
             TotalCommittedBytes: totalCommitted,
             TotalReservedBytes: totalReserved,

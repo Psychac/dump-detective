@@ -76,6 +76,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             for (int i = 0; i < limit; i++)
             {
                 SegmentReservationEntry seg = d.SegmentTable[i];
+                string fillPctDisplay = seg.IsEphemeral ? $"{seg.FillPct:F1}%" : "—";
                 rows.Add(Row(
                     Cell($"0x{seg.Address:X}"),
                     Cell(seg.Kind.ToString()),
@@ -83,7 +84,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                     Cell(FormatBytes(seg.ReservedBytes),  (long)Math.Min(seg.ReservedBytes,  long.MaxValue)),
                     Cell(seg.IsEphemeral ? "Yes" : "No"),
                     Cell(seg.LogicalHeap.ToString("N0"), seg.LogicalHeap),
-                    Cell($"{seg.FillPct:F1}%")));
+                    Cell(fillPctDisplay)));
             }
             compactTables.Add(STCompact("Segment table",
                 new[] { CH("Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %", "number", "percent") },

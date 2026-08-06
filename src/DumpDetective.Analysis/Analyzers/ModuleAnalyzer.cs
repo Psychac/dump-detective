@@ -15,6 +15,7 @@ namespace DumpDetective.Analysis.Analyzers
         public string Category => "Modules";
         public IReadOnlyCollection<string> Tags => new[] { "modules", "runtime", "assemblies" };
         public int Order => 60;
+        public bool IsThreadSafe => false;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

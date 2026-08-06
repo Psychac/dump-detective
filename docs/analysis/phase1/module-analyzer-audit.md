@@ -270,7 +270,7 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 | **P1** ✅ | In `Balanced` preset, set `PreferIndexOnly = true` or add a guard to skip type enumeration when no heap index exists and all results would be zero | Area 5 | Medium | Low | High | Improvement |
 | **P2** ✅ | Expose `Tags` and `Order` on `ModuleAnalyzer` (`["modules","runtime","assemblies"]`, order ~60) | Area 1 | Low | Low | High | Improvement |
 | **P2** | Replace `ModuleProbe` reflection with direct `ClrModule.MetadataImport` API once confirmed available in target ClrMD version | Area 3/6 | Medium | Medium | Medium | Improvement |
-| **P2** | Add `IsThreadSafe` declaration (currently `false` by interface default; document explicitly) | Area 1 | Low | Low | High | Improvement |
+| **P2** ✅ | Add `IsThreadSafe` declaration (currently `false` by interface default; document explicitly) | Area 1 | Low | Low | High | Improvement |
 | **P2** ✅ | Emit "unknown-identity duplicate modules" as a `Warning` finding rather than silently annotating `AssemblyName` | Area 6 | Medium | Low | High | Improvement |
 | **P2** ✅ | Add a summary text block to `ModuleSectionBuilder` enumerating totals before tables | Area 2 | Medium | Low | High | Improvement |
 | **P3** | Expose `AssemblyLoadContext` name per module (via reflection on ClrMD, .NET 5+) | Area 4/7 | High | Medium | Medium | Evolution |

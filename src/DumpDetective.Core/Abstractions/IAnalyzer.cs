@@ -10,6 +10,7 @@ public interface IAnalyzer : IDisposable
     string Category => AnalyzerCategory.Infer(Name);
     IReadOnlyCollection<string> Tags => [];
     int Order => 0;
+    bool IsThreadSafe => false;
     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
 
     /// <summary>

@@ -15,8 +15,8 @@
 | **Total P0 Identified** | 69 |
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 23 |
-| **P1 Implemented** | 36 |
-| **Overall P0+P1 Rate** | 42.8% (59/138) |
+| **P1 Implemented** | 37 |
+| **Overall P0+P1 Rate** | 43.5% (60/138) |
 
 ---
 
@@ -60,7 +60,7 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **FinalizableObjectAnalyzer** | 4 (unlabeled) | 0/2 | 2+ | **4 DONE items not P0/P1-labeled** |
-| GCGenerationAnalyzer | 3/3 | 1/4 | 3 | P0 complete (commits bc83e77, 5b0d188, 993c462); P1-1 done (commit 8234499) |
+| GCGenerationAnalyzer | 3/3 | 2/4 | 2 | P0 complete; P1-1,P1-4 done (commits 8234499, 3bf3868) |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | JitAnalyzer | 0/2 | 0/3 | 5 | — |
@@ -98,6 +98,7 @@
 
 ### ✅ Completed Recently
 
+- ✅ GCGenerationAnalyzer P1-4 (suppress LOH Info noise) — commit 3bf3868
 - ✅ GCGenerationAnalyzer P1-1 (exact gen bytes from segments) — commit 8234499
 - ✅ GCGenerationAnalyzer P0 COMPLETE (all 3 items done) — commits bc83e77, 5b0d188, 993c462
   - P0-1: label gen bytes as approximate

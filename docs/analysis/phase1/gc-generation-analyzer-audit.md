@@ -304,7 +304,7 @@ dotMemory shows generation distribution, LOH objects, survivor counts, and fragm
 | P1-1 | **Replace `ComputeApproxGenBytes` with segment-based exact gen bytes.** Use `ClrHeap.Segments` to get per-generation committed bytes directly, eliminating the approximation. This also fixes the `AllocationPatternAnalyzer` which shares the same helper. | High — correct memory figures, removes approximation propagation | Medium | High | Improvement | ✅ DONE (commit 8234499) |
 | P1-2 | **Add POH detection.** Check `ClrSegment.Kind` for `GCSegmentKind.Pinned`; add `PohBytes`/`PohObjects` to `GCGenerationDomainResult`. LOH and POH are different heaps on .NET 5+ and conflating them is a diagnostic error. | High — correctness on .NET 5+ | Medium | High | Improvement |
 | P1-3 | **Add LOH fragmentation ratio.** Walk LOH segments for free list objects; compute `LohFreeBytes / LohCommittedBytes`. Add to domain result and section. | High — LOH fragmentation is a leading cause of OOM | Medium | High | Improvement |
-| P1-4 | **Suppress the unconditional LOH `Info` finding for healthy dumps.** Only emit it when LOH > 20% (configurable) or when something meaningful can be said. | Medium — reduces noise for healthy dumps | Low | High | Improvement |
+| P1-4 | **Suppress the unconditional LOH `Info` finding for healthy dumps.** Only emit it when LOH > 20% (configurable) or when something meaningful can be said. | Medium — reduces noise for healthy dumps | Low | High | Improvement | ✅ DONE (commit 3bf3868) |
 
 #### P2 — Medium
 

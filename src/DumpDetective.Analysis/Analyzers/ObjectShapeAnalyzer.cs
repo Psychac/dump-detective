@@ -57,8 +57,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             int cap = Math.Min(candidates.Count, options.InstanceCountCap);
 
-            var refHeavy = new List<TypeShapeProfile>(options.TopListLimit);
-            var valHeavy = new List<TypeShapeProfile>(options.TopListLimit);
+            var refHeavyCandidates = new List<TypeShapeProfile>();
+            var valHeavyCandidates = new List<TypeShapeProfile>();
 
             long totalRefFields = 0;
             int typesAnalyzed = 0;
@@ -105,13 +105,22 @@ namespace DumpDetective.Analysis.Analyzers
                     InterfaceCount: ifaceCount,
                     Category: category);
 
-                // Rank by (refRatio × instanceCount) — types with many instances and
-                // many ref fields impose the highest GC scan cost.
-                if (category == ObjectShapeCategory.ReferenceHeavy && refHeavy.Count < options.TopListLimit)
-                    refHeavy.Add(profile);
-                else if (category == ObjectShapeCategory.ValueHeavy && valHeavy.Count < options.TopListLimit)
-                    valHeavy.Add(profile);
+                if (category == ObjectShapeCategory.ReferenceHeavy)
+                    refHeavyCandidates.Add(profile);
+                else if (category == ObjectShapeCategory.ValueHeavy)
+                    valHeavyCandidates.Add(profile);
             }
+
+            // Sort by GC scan cost score (refRatio × instanceCount) in descending order
+            refHeavyCandidates.Sort(static (a, b) =>
+                (b.ReferenceFieldRatio * (double)b.InstanceCount)
+                    .CompareTo(a.ReferenceFieldRatio * (double)a.InstanceCount));
+
+            valHeavyCandidates.Sort(static (a, b) =>
+                ((double)b.InstanceCount).CompareTo((double)a.InstanceCount));
+
+            var refHeavy = refHeavyCandidates.Take(options.TopListLimit).ToList();
+            var valHeavy = valHeavyCandidates.Take(options.TopListLimit).ToList();
 
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 

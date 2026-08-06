@@ -294,21 +294,21 @@ is retained.
 
 ### Improvements
 
-| ID | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| I-1 | **Fix ranking**: sort `refHeavy` and `valHeavy` by `refRatio × instanceCount` descending, not by insertion order from the instance-count pre-sort. | High | Low | High | Improvement |
-| I-2 | **Add GC scan cost score column** (`RefFields × InstanceCount`) to the section builder tables and as a sort key. | High | Low | High | Improvement |
-| I-3 | **Add aggregate GC scan work metric** (`Σ RefFields × InstanceCount`) as a key metric and trend-comparer entry. | High | Low | High | Improvement |
-| I-4 | **Add Balanced type list** (top 20 by instance count, refRatio 0.2–0.6) to the domain result and section builder. | High | Medium | High | Improvement |
-| I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement |
-| I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement |
-| I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement |
-| I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement |
-| I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement |
-| I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement |
-| I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement |
-| I-12 | **Add `IAnalyzer.Tags` override**: `["gc", "object-shape", "memory", "gc-scan"]`. | Low | Low | High | Improvement |
-| I-13 | **Replace full sort with partial sort** for `candidates` when `shapes.Count` is large: use a min-heap approach to select top-`InstanceCountCap` entries in O(n log k). | Low | Medium | Medium | Improvement |
+| ID | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| I-1 | **Fix ranking**: sort `refHeavy` and `valHeavy` by `refRatio × instanceCount` descending, not by insertion order from the instance-count pre-sort. | High | Low | High | Improvement | ✅ DONE |
+| I-2 | **Add GC scan cost score column** (`RefFields × InstanceCount`) to the section builder tables and as a sort key. | High | Low | High | Improvement | — |
+| I-3 | **Add aggregate GC scan work metric** (`Σ RefFields × InstanceCount`) as a key metric and trend-comparer entry. | High | Low | High | Improvement | — |
+| I-4 | **Add Balanced type list** (top 20 by instance count, refRatio 0.2–0.6) to the domain result and section builder. | High | Medium | High | Improvement | — |
+| I-5 | **Include `TotalSize` from `TypeAggregateIndexEntry`** in `TypeShapeProfile` and ranking. | High | Low | High | Improvement | — |
+| I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement | — |
+| I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | — |
+| I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | — |
+| I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | — |
+| I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | — |
+| I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement | — |
+| I-12 | **Add `IAnalyzer.Tags` override**: `["gc", "object-shape", "memory", "gc-scan"]`. | Low | Low | High | Improvement | — |
+| I-13 | **Replace full sort with partial sort** for `candidates` when `shapes.Count` is large: use a min-heap approach to select top-`InstanceCountCap` entries in O(n log k). | Low | Medium | Medium | Improvement | — |
 
 ### Evolutions
 
@@ -347,24 +347,24 @@ incomplete. The report is useful for quick triage but insufficient for confident
 
 ### Priority Roadmap
 
-| Priority | ID | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|---|
-| P0 | I-1 | Fix ranking: sort by `refRatio × instanceCount` | High | Low | High | Improvement |
-| P0 | I-2 | Add GC scan cost score column | High | Low | High | Improvement |
-| P0 | I-4 | Add Balanced type list | High | Medium | High | Improvement |
-| P1 | I-3 | Aggregate GC scan work key metric | High | Low | High | Improvement |
-| P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement |
-| P1 | I-6 | Array shape table | High | Medium | High | Improvement |
-| P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement |
-| P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution |
-| P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement |
-| P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement |
-| P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement |
-| P2 | E-2 | Generation-aware shape ranking | High | High | Medium | Evolution |
-| P3 | I-11 | Fix misleading BoxingAnalyzer recommendation | Low | Low | High | Improvement |
-| P3 | I-12 | Add `IAnalyzer.Tags` override | Low | Low | High | Improvement |
-| P3 | I-13 | Partial sort for large type counts | Low | Medium | Medium | Improvement |
-| P3 | E-3 | Struct padding estimation for value-heavy types | Medium | Medium | Medium | Evolution |
+| Priority | ID | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|---|
+| P0 | I-1 | Fix ranking: sort by `refRatio × instanceCount` | High | Low | High | Improvement | ✅ DONE |
+| P0 | I-2 | Add GC scan cost score column | High | Low | High | Improvement | — |
+| P0 | I-4 | Add Balanced type list | High | Medium | High | Improvement | — |
+| P1 | I-3 | Aggregate GC scan work key metric | High | Low | High | Improvement | — |
+| P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement | — |
+| P1 | I-6 | Array shape table | High | Medium | High | Improvement | — |
+| P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | — |
+| P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | — |
+| P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | — |
+| P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | — |
+| P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement | — |
+| P2 | E-2 | Generation-aware shape ranking | High | High | Medium | Evolution | — |
+| P3 | I-11 | Fix misleading BoxingAnalyzer recommendation | Low | Low | High | Improvement | — |
+| P3 | I-12 | Add `IAnalyzer.Tags` override | Low | Low | High | Improvement | — |
+| P3 | I-13 | Partial sort for large type counts | Low | Medium | Medium | Improvement | — |
+| P3 | E-3 | Struct padding estimation for value-heavy types | Medium | Medium | Medium | Evolution | — |
 
 ### Final Verdict
 

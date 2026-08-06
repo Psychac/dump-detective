@@ -35,7 +35,7 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
                 blocks.Add(T(FormatHelper.TruncateString(d.TopClusterSignatures[i], 120)));
         }
 
-        blocks.Add(d.DiversityPercent < 20
+        blocks.Add(d.DiversityPercent <= 25
             ? T("Low signature diversity; large clusters may indicate coordinated blocking/contention.")
             : T("Signature diversity suggests varied active work."));
 

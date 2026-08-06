@@ -91,14 +91,15 @@ internal sealed class JitFindingGenerator : IFindingGenerator
         {
             var top = r.TopLargestMethods[0];
             ulong topSize = (ulong)top.HotSize + top.ColdSize;
+            string thresholdDisplay = FormatHelper.FormatBytes(r.LargeMethodThresholdBytes);
             signals.Add(new JitSignal(
                 Severity: FindingSeverity.Info,
                 Priority: 140,
                 Title: "Large JIT-compiled methods detected on thread stacks",
                 Evidence: $"Largest method on stacks: '{top.Signature}' " +
                           $"({FormatHelper.FormatBytes(topSize)} native code). " +
-                          $"{r.TopLargestMethods.Count} method(s) exceed the 64 KB threshold.",
-                Recommendation: "Refactor methods over 64 KB native code — they prevent " +
+                          $"{r.TopLargestMethods.Count} method(s) exceed the {thresholdDisplay} threshold.",
+                Recommendation: $"Refactor methods over {thresholdDisplay} native code — they prevent " +
                                 "inlining and stress the JIT register allocator.",
                 Tags: ["jit", "code-size", "performance"],
                 MetricValue: (double)topSize,

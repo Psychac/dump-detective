@@ -73,6 +73,10 @@ public sealed class JitAnalyzer : IAnalyzer
             {
                 if (frameIdx++ >= options.MaxFramesPerThread) break;
 
+                // Check cancellation every 50 frames to allow responsive cancellation during deep stack walks
+                if (frameIdx % 50 == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
                 if (frame.Kind == ClrStackFrameKind.ManagedMethod)
                 {
                     managedFrameCount++;
@@ -151,7 +155,8 @@ public sealed class JitAnalyzer : IAnalyzer
             TopActiveFrameTypes: topFrameTypes,
             UnmanagedFrameCount: unmanagedFrameCount,
             ManagedFrameCount: managedFrameCount,
-            TieredMethodCount: tieredMethodCount);
+            TieredMethodCount: tieredMethodCount,
+            LargeMethodThresholdBytes: options.LargeMethodThresholdBytes);
     }
 
     private static IReadOnlyList<JitMethodSnapshot> BuildTopMethods(

@@ -20,4 +20,5 @@ internal sealed record JitDomainResult(
     IReadOnlyList<NameCountEntry> TopActiveFrameTypes,
     int UnmanagedFrameCount,
     int ManagedFrameCount,
-    int TieredMethodCount) : AnalyzerDomainResult;
+    int TieredMethodCount,
+    uint LargeMethodThresholdBytes) : AnalyzerDomainResult;

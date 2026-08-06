@@ -40,6 +40,7 @@ public sealed class JitAnalyzerDiscrepancyTests
             diskResult.TotalJitHeapBytes.Should().Be(memResult.TotalJitHeapBytes);
             diskResult.JitManagerCount.Should().Be(memResult.JitManagerCount);
             diskResult.ActiveMethodsOnStacks.Should().Be(memResult.ActiveMethodsOnStacks);
+            diskResult.LargeMethodThresholdBytes.Should().Be(memResult.LargeMethodThresholdBytes);
             diskResult.UnmanagedFrameCount.Should().Be(memResult.UnmanagedFrameCount);
             diskResult.ManagedFrameCount.Should().Be(memResult.ManagedFrameCount);
             diskResult.TieredMethodCount.Should().Be(memResult.TieredMethodCount);

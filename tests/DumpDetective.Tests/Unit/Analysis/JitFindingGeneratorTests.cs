@@ -56,6 +56,7 @@ public sealed class JitFindingGeneratorTests
             TopActiveFrameTypes: [],
             UnmanagedFrameCount: unmanagedFrames,
             ManagedFrameCount: managedFrames,
-            TieredMethodCount: tieredMethods);
+            TieredMethodCount: tieredMethods,
+            LargeMethodThresholdBytes: 64 * 1024);
     }
 }

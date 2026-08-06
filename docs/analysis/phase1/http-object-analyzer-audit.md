@@ -385,7 +385,7 @@ the standard pipeline. Silently wrong when the cache is absent.
 | **P0-1** | **Fix fallback path zero-count bug in `TypedResourceCandidateScanner` or implement `IHeapIndexScanParticipant`** | **Correctness** | **Evolution** | **Critical** | **Low** | **High** | ✅ **DONE** |
 | **P0-2** | **Add `HttpWebRequest` finding threshold (e.g. ≥ 10)** | **Diagnostic** | **Improvement** | **High** | **Low** | **High** | ✅ **DONE** |
 | P1-1 | Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture | Diagnostic | Improvement | High | Medium | High | |
-| P1-2 | Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas | Correctness | Improvement | Medium | Low | High | |
+| **P1-2** | **Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas** | **Correctness** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
 | P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High | |
 | P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium | |
 | P2-2 | Add `IHttpClientFactory` handler tracking entry detection | Diagnostic | Improvement | Medium | Medium | Medium | |
@@ -486,3 +486,32 @@ the standard pipeline. Silently wrong when the cache is absent.
 - **Consistency:** Now has same threshold-based structure as HttpClient/HttpWebResponse/ServicePoint
 - **Production incident support:** Engineers investigating socket exhaustion will now see HttpWebRequest accumulation immediately
 - **Obsolescence detection:** Provides early warning of legacy API usage in modernization efforts
+
+---
+
+## Implementation Summary (P1-2)
+
+**Status:** ✅ **COMPLETE** — Commit `112c273`
+
+### What Was Done
+
+1. **Extended `HttpObjectTrendComparer.ExtractMetrics`**
+   - Added `http.messagehandler` metric tracking HttpMessageHandlerCount
+   - Added `http.servicepoint` metric tracking ServicePointCount
+   - Both marked with MetricTrendDirection.HigherIsWorse (accumulation is bad)
+
+2. **Extended `HttpObjectTrendComparer.Compare`**
+   - Added delta computation for `http.messagehandler` (baseline vs current)
+   - Added delta computation for `http.servicepoint` (baseline vs current)
+   - Follows same pattern as existing metrics (total, client, request, response, bytes)
+
+3. **Impact**
+   - Previously: ServicePoint and Handler count changes were extracted but silently dropped by Compare
+   - Now: Spikes in ServicePoint or Handler counts between snapshots are visible in trend reports
+   - Enables detection of handler leaks and ServicePoint accumulation across time
+
+### Testing
+
+- All 40 trend comparison tests pass
+- All 8 HTTP object analyzer tests pass
+- No regressions in existing trend comparer functionality

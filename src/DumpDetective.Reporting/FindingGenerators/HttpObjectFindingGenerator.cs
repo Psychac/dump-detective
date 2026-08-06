@@ -14,7 +14,7 @@ internal sealed class HttpObjectFindingGenerator : IFindingGenerator
     {
         if (result is not HttpObjectDomainResult r || !r.HttpObjectsFound) return [];
 
-        var findings = new List<InsightFinding>(3);
+        var findings = new List<InsightFinding>(4);
 
         // ── HttpClient misuse ──────────────────────────────────────────────────
         if (r.HttpClientCount >= 5)
@@ -37,6 +37,27 @@ internal sealed class HttpObjectFindingGenerator : IFindingGenerator
                 Tags: ["infrastructure", "http", "httpclient", "sockets"],
                 MetricValue: r.HttpClientCount,
                 MetricUnit: "HttpClient instances"));
+        }
+
+        // ── HttpWebRequest accumulation (obsolete API) ────────────────────────
+        if (r.HttpWebRequestCount >= 10)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Warning,
+                Title: $"{r.HttpWebRequestCount:N0} HttpWebRequest objects on managed heap",
+                Evidence: $"{r.HttpWebRequestCount:N0} System.Net.HttpWebRequest objects found. " +
+                          "HttpWebRequest is obsolete in .NET 6+ and known to accumulate. " +
+                          "Each pending request holds resources until the response is received and disposed. " +
+                          "Accumulation indicates synchronous I/O, incomplete cleanup, or timeout hangs.",
+                Recommendation:
+                    "Migrate to HttpClient (HttpClientFactory in ASP.NET Core). " +
+                    "If using HttpWebRequest for legacy reasons, ensure requests complete with timeouts " +
+                    "and responses are always disposed. Investigate why requests are pending on the heap.",
+                Tags: ["infrastructure", "http", "httpwebrequest", "obsolete"],
+                MetricValue: r.HttpWebRequestCount,
+                MetricUnit: "HttpWebRequest objects"));
         }
 
         // ── HttpWebResponse not disposed ──────────────────────────────────────

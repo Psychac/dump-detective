@@ -161,6 +161,15 @@ public sealed class InfrastructureFindingGeneratorTests
     }
 
     [Fact]
+    public void HttpObject_Warning_WhenManyWebRequests()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(httpClients: 0, webRequests: 10, webResponses: 0);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpwebrequest"));
+    }
+
+    [Fact]
     public void HttpObject_Warning_WhenManyWebResponses()
     {
         var gen = new HttpObjectFindingGenerator();
@@ -182,7 +191,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void HttpObject_BelowThresholds_NoFindings()
     {
         var gen = new HttpObjectFindingGenerator();
-        var result = HttpResult(httpClients: 4, webRequests: 10, webResponses: 5, servicePoints: 10);
+        var result = HttpResult(httpClients: 4, webRequests: 9, webResponses: 5, servicePoints: 10);
         gen.Generate(result).Should().BeEmpty();
     }
 

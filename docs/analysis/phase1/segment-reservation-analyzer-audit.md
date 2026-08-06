@@ -296,7 +296,7 @@ dotMemory exposes committed heap size but not per-segment reservation. DumpDetec
 | **P2** | Deduplicate `GetLength` / `GetCommittedBytes` / `GetReservedBytes` between this analyzer and `HeapTopologyAnalyzer` | Medium — prevents drift | Low | High | Evolution (shared utility) | ✅ DONE (1575092) |
 | **P2** | Add mid-loop cancellation check (every 128 segments) and progress reporting | Low perf impact, high correctness | Low | High | Improvement | ✅ DONE (8a63d52) |
 | **P2** | Suppress `FillPct` column (show `—`) for non-ephemeral segments in section builder | Low — reduces report noise | Low | High | Improvement | ✅ DONE (d2c05a3) |
-| **P2** | Update recommendation text: replace `COMPLUS_GCSegmentSize` with `System.GC.HeapHardLimit` / `GCHeapHardLimit` | Low — accuracy | Trivial | Very high | Improvement |
+| **P2** | Update recommendation text: replace `COMPLUS_GCSegmentSize` with `System.GC.HeapHardLimit` / `GCHeapHardLimit` | Low — accuracy | Trivial | Very high | Improvement | ✅ DONE (a1d31d0) |
 | **P3** | Add `segment.End` address to `SegmentReservationEntry` for parity with `!eeheap -gc` | Low | Low | High | Improvement |
 | **P3** | Add `IsServer` flag and logical heap count to domain result | Low — contextualises multi-heap data | Low | High | Improvement |
 | **P3** | Investigate `ClrSegment.IsEphemeral` in the current ClrMD version and prefer it over custom detection | Low | Low | Medium | Improvement |

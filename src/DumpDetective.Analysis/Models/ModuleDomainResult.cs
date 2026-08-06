@@ -24,7 +24,9 @@ public sealed record ModuleHeapStats(
     string AssemblyName,
     int UniqueTypeCount,
     long ObjectCount,
-    ulong TotalBytes);
+    ulong TotalBytes,
+    ulong LohBytes,
+    long Gen2ObjectCount);
 
 /// <summary>Modules where memory is abnormally concentrated into very few types.</summary>
 public sealed record ModuleTypeDensity(

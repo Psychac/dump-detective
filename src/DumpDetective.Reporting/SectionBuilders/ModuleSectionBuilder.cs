@@ -89,9 +89,10 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(stats.UniqueTypeCount.ToString("N0"),  stats.UniqueTypeCount),
                     Cell(stats.ObjectCount.ToString("N0"),      stats.ObjectCount),
                     Cell(FormatBytes(stats.TotalBytes),         (long)Math.Min(stats.TotalBytes, long.MaxValue)),
-                    Cell(objectsPerType.ToString("F1"))));
+                    Cell(stats.Gen2ObjectCount.ToString("N0"),  stats.Gen2ObjectCount),
+                    Cell(FormatBytes(stats.LohBytes),           (long)Math.Min(stats.LohBytes, long.MaxValue))));
             }
-            compactTables.Add(STCompact("Modules by heap footprint", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Objects/Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Modules by heap footprint", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Total Bytes","bytes"), CH("Gen2 Objects","number"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.HeavyTypeDensityModules is { Count: > 0 })

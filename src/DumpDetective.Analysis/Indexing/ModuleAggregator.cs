@@ -13,7 +13,7 @@ namespace DumpDetective.Analysis.Indexing
             DumpDetective.Core.Options.ModuleAnalysisOptions options)
         {
             if (modules is null) return (Array.Empty<ModuleHeapStats>(), Array.Empty<ModuleTypeDensity>());
-            var statsById = new Dictionary<int, (int uniqueTypes, long objectCount, ulong totalBytes)>();
+            var statsById = new Dictionary<int, (int uniqueTypes, long objectCount, ulong totalBytes, ulong lohBytes, long gen2ObjectCount)>();
 
             foreach (var kv in aggregates)
             {
@@ -22,10 +22,12 @@ namespace DumpDetective.Analysis.Indexing
                 if (id < 0 || id >= modules.Count) continue;
 
                 if (!statsById.TryGetValue(id, out var val))
-                    val = (0, 0L, 0UL);
+                    val = (0, 0L, 0UL, 0UL, 0L);
                 val.uniqueTypes++;
                 val.objectCount += agg.Count;
                 val.totalBytes += agg.TotalSize;
+                val.lohBytes += agg.LohSize;
+                val.gen2ObjectCount += agg.Gen2Count;
                 statsById[id] = val;
             }
 
@@ -64,7 +66,9 @@ namespace DumpDetective.Analysis.Indexing
                     mod.AssemblyName ?? string.Empty,
                     s.uniqueTypes,
                     s.objectCount,
-                    s.totalBytes));
+                    s.totalBytes,
+                    s.lohBytes,
+                    s.gen2ObjectCount));
             }
 
             density.Sort((a, b) => b.BytesPerType.CompareTo(a.BytesPerType));

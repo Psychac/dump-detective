@@ -47,6 +47,7 @@ namespace DumpDetective.Analysis.Analyzers
             _participantClusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             _participantAliveThreads = 0;
             _participantScanCounter = new ObjectScanCounter("clustering thread stacks", context.Progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+            _participantScanSucceeded = false;
         }
 
         void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);

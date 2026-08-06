@@ -30,10 +30,10 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     {
         cancellationToken.ThrowIfCancellationRequested();
         SegmentReservationAnalysisOptions options = context.AnalysisOptions.SegmentReservationAnalysis;
-        return ValueTask.FromResult(Analyze(context.Heap, options, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context, context.Heap, options, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap heap, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(AnalysisContext context, ClrHeap heap, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
     {
         ulong totalCommitted = 0;
         ulong totalReserved = 0;
@@ -93,9 +93,10 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         double avgFill = ephemeralCount > 0 ? ephemeralFillSum / ephemeralCount : 0.0;
 
         // Evaluate address space pressure (§25.3).
+        int dumpPointerSize = context.Runtime.DataTarget.DataReader.PointerSize;
         bool pressureRisk = false;
         string pressureReason = string.Empty;
-        if (IntPtr.Size == 4 && totalReserved > options.ThirtyTwoBitPressureThresholdBytes)
+        if (dumpPointerSize == 4 && totalReserved > options.ThirtyTwoBitPressureThresholdBytes)
         {
             pressureRisk = true;
             pressureReason = $"32-bit process has {totalReserved / (1024 * 1024):N0} MB reserved (>{options.ThirtyTwoBitPressureThresholdBytes / (1024 * 1024):N0} MB threshold).";
@@ -117,7 +118,8 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             SegmentTable: segmentTable,
             ReservedByLogicalHeap: reservedByHeap,
             AddressSpacePressureRisk: pressureRisk,
-            PressureRiskReason: pressureReason);
+            PressureRiskReason: pressureReason,
+            DumpPointerSize: dumpPointerSize);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

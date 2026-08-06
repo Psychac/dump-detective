@@ -20,7 +20,7 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
         // Address space pressure.
         if (r.AddressSpacePressureRisk)
         {
-            bool is32Bit = IntPtr.Size == 4;
+            bool is32Bit = r.DumpPointerSize == 4;
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",

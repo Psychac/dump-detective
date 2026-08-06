@@ -24,4 +24,5 @@ internal sealed record SegmentReservationDomainResult(
     IReadOnlyList<SegmentReservationEntry> SegmentTable,
     IReadOnlyDictionary<int, ulong> ReservedByLogicalHeap,
     bool AddressSpacePressureRisk,
-    string PressureRiskReason) : AnalyzerDomainResult;
+    string PressureRiskReason,
+    int DumpPointerSize) : AnalyzerDomainResult;

@@ -285,21 +285,26 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
 
+                var scanCounter = new ObjectScanCounter("counting dependent handle dead keys", progress,
+                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+
                 if (reader is not null)
                 {
                     using (reader)
                     {
                         foreach (var rec in reader.EnumerateRecords(cancellationToken))
                         {
+                            scanCounter.Tick();
                             cancellationToken.ThrowIfCancellationRequested();
                             if (rec.Kind != KindDependent) continue;
                             ulong addr = rec.Address;
                             if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
-                            ClrObject obj = heap.GetObject(addr);
-                            if (!obj.IsValid) dependentHandleDeadKeyCount++;
+                            // Use pre-computed IsAlive from snapshot to avoid redundant heap.GetObject call.
+                            if (!rec.IsAlive) dependentHandleDeadKeyCount++;
                             if (options.ProduceRawExports)
                                 WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
                         }
+                        scanCounter.Complete();
                     }
                     try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
                     catch { }

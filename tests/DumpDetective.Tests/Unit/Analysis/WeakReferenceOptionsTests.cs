@@ -12,8 +12,9 @@ public class WeakReferenceOptionsTests
         var fast = WeakReferenceAnalysisOptions.Preset(AnalysisProfile.Fast);
         fast.HandleScanCap.Should().Be(20_000);
         fast.TopTypeLimit.Should().Be(8);
-        fast.WeakRefProbeSampleLimit.Should().Be(4);
+        fast.WeakRefProbeSampleLimit.Should().Be(8);
         fast.ProduceRawExports.Should().BeFalse();
+        fast.AbsoluteDeadCountThreshold.Should().Be(5_000);
     }
 
     [Fact]
@@ -22,8 +23,9 @@ public class WeakReferenceOptionsTests
         var bal = WeakReferenceAnalysisOptions.Preset(AnalysisProfile.Balanced);
         bal.HandleScanCap.Should().Be(50_000);
         bal.TopTypeLimit.Should().Be(15);
-        bal.WeakRefProbeSampleLimit.Should().Be(8);
+        bal.WeakRefProbeSampleLimit.Should().Be(50);
         bal.ProduceRawExports.Should().BeFalse();
+        bal.AbsoluteDeadCountThreshold.Should().Be(10_000);
     }
 
     [Fact]
@@ -32,7 +34,8 @@ public class WeakReferenceOptionsTests
         var full = WeakReferenceAnalysisOptions.Preset(AnalysisProfile.Full);
         full.HandleScanCap.Should().Be(200_000);
         full.TopTypeLimit.Should().Be(40);
-        full.WeakRefProbeSampleLimit.Should().Be(32);
+        full.WeakRefProbeSampleLimit.Should().Be(500);
         full.ProduceRawExports.Should().BeTrue();
+        full.AbsoluteDeadCountThreshold.Should().Be(50_000);
     }
 }

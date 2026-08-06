@@ -28,13 +28,18 @@ internal sealed class MemoryHandleSnapshotReader : IHandleSnapshotReader
             var kind = (byte)h.HandleKind;
             ulong addr = h.Object.Address;
             ulong mt = 0UL;
+            bool isAlive = false;
             if (addr != 0)
             {
                 var obj = _heap.GetObject(addr);
-                if (obj.IsValid) mt = obj.Type?.MethodTable ?? 0UL;
+                if (obj.IsValid)
+                {
+                    mt = obj.Type?.MethodTable ?? 0UL;
+                    isAlive = true;
+                }
             }
 
-            yield return new HandleRecord(addr, mt, kind);
+            yield return new HandleRecord(addr, mt, kind, isAlive);
             _count++;
             if (_count > _cap) yield break;
         }

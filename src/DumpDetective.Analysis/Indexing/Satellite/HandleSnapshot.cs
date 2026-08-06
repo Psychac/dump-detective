@@ -2,7 +2,7 @@ using System;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
 
-internal readonly record struct HandleRecord(ulong Address, ulong MethodTable, byte Kind);
+internal readonly record struct HandleRecord(ulong Address, ulong MethodTable, byte Kind, bool IsAlive = true);
 
 internal interface IHandleSnapshotReader : IDisposable
 {

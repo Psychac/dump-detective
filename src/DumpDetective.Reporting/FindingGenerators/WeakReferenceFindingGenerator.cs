@@ -25,7 +25,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
     {
         if (result is not WeakReferenceDomainResult r) return [];
 
-        var signals = new List<WeakRefSignal>(2);
+        var signals = new List<WeakRefSignal>(3);
 
         // High dead-target ratio — stale wrapper accumulation.
         if (r.TotalWeakHandles > 0 && r.DeadTargetRatio >= 0.5)
@@ -42,6 +42,23 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
                 Tags: ["weak-reference", "handles", "cache", "memory-leak"],
                 MetricValue: r.DeadTargetRatio,
                 MetricUnit: "ratio"));
+        }
+
+        // Absolute dead-count threshold signal (complementary to ratio).
+        const int absoluteDeadCountThreshold = 10_000;
+        if (r.DeadWeakTargets > absoluteDeadCountThreshold)
+        {
+            signals.Add(new WeakRefSignal(
+                Severity: r.DeadWeakTargets > 100_000 ? FindingSeverity.Critical : FindingSeverity.Warning,
+                Priority: 150,
+                Title: "High absolute count of dead weak handle targets",
+                Evidence: $"{r.DeadWeakTargets:N0} dead weak handles accumulated. " +
+                          $"Large-scale applications with millions of handles can have benign ratios but still accumulate significant dead count.",
+                Recommendation: "Review cache retention patterns and event subscription cleanup. " +
+                                "Implement periodic purging of dead entries to prevent unbounded growth.",
+                Tags: ["weak-reference", "handles", "cache", "memory-leak"],
+                MetricValue: r.DeadWeakTargets,
+                MetricUnit: "handles"));
         }
 
         // Dependent handle dead-key signal.

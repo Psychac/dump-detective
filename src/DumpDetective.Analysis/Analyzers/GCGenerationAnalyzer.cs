@@ -124,7 +124,8 @@ namespace DumpDetective.Analysis.Analyzers
                 (int)Math.Min(int.MaxValue, lohObjects),
                 topLohTypes,
                 gen2Pct,
-                profiles);
+                profiles,
+                GenBytesAreApproximate: true);
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────
@@ -174,7 +175,8 @@ namespace DumpDetective.Analysis.Analyzers
                 totalObjects, lohObjects,
                 topLohTypes,
                 gen2Pct,
-                PerTypeGenerationProfiles: []);
+                PerTypeGenerationProfiles: [],
+                GenBytesAreApproximate: true);
         }
 
         public void Dispose() { }

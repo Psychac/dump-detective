@@ -27,4 +27,5 @@ public sealed record GCGenerationDomainResult(
     long LohObjects,
     IReadOnlyList<TypeSnapshot> TopLohTypes,
     double Gen2Pct = 0.0,
-    IReadOnlyList<TypeGenerationProfile>? PerTypeGenerationProfiles = null) : AnalyzerDomainResult;
+    IReadOnlyList<TypeGenerationProfile>? PerTypeGenerationProfiles = null,
+    bool GenBytesAreApproximate = true) : AnalyzerDomainResult;

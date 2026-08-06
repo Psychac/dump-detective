@@ -37,6 +37,9 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
         };
 
+        if (d.GenBytesAreApproximate)
+            blocks.Add(T("⚠ Generation byte values are approximate and computed from per-type averages. High-variance types (arrays, strings) may show inaccurate per-generation splits."));
+
         if (d.Gen2Pct >= 40.0)
             blocks.Add(T("Gen2 dominates the heap; retention is likely becoming long-lived."));
         if (d.LohPercent >= 35.0)

@@ -115,7 +115,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 
         byType.Sort(static (a, b) => b.Count.CompareTo(a.Count));
 
-        PopulateEvidence(heap, cache, byType);
+        PopulateEvidence(heap, cache, byType, cancellationToken);
 
         int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + periodicTimerCount + otherTimerCount;
 
@@ -133,8 +133,9 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             ByType: byType);
     }
 
-    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<TimerObjectTypeSummary> byType)
+    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<TimerObjectTypeSummary> byType, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (cache is null || byType.Count == 0)
             return;
 
@@ -152,6 +153,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 
         for (int i = 0; i < byType.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             TimerObjectTypeSummary summary = byType[i];
             ulong? sampleAddress = cache.GetSampleInstanceAddress(summary.TypeName);
             if (sampleAddress is null)

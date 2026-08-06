@@ -85,6 +85,24 @@ Analyzers now detect `System.Threading.PeriodicTimer` instances (shipped with .N
 
 Evidence root paths are now visible to engineers in the report, making retention chains immediately actionable without requiring debugger inspection. Truncated searches are explicitly flagged, allowing engineers to assess confidence in findings. All LINQ usage in hot paths has been eliminated.
 
+### P1-3 Pass CancellationToken through PopulateEvidence (2026-08-06)
+
+**Changes Made:**
+
+**Analyzer Robustness:**
+- Added `CancellationToken` parameter to `PopulateEvidence` method signature
+- Added cancellation check at method entry point (before root retrieval)
+- Added cancellation check in for loop (before each root path search)
+
+**Implementation Details:**
+- Token is passed through from `Analyze()` method which already receives it
+- Per-type root path searches now respect cancellation (critical since search is bounded but can run seconds on large heaps)
+- Loop check allows early exit when operation is cancelled on large candidate sets
+
+### Result
+
+Root path finding operations on large dumps can now be cancelled instead of blocking indefinitely. Provides graceful shutdown path for long-running evidence collection phase, improving robustness on 10GB+ dumps.
+
 ---
 
 ## Audit Area 1 — Role & Opportunity Assessment
@@ -438,7 +456,7 @@ for genuine leaks. The false-positive-severity risk is real.
 | **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement | ✅ COMPLETE |
 | **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement | ✅ COMPLETE |
 | **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement | ⏳ PENDING |
-| **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement | ⏳ PENDING |
+| **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement |

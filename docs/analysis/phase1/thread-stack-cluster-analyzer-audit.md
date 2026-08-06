@@ -328,7 +328,7 @@ insufficient for production use.
 | P0-1 | Reset `_participantScanSucceeded = false` in `BeforeThreadStackScan` | Improvement | High | Trivial | High | Improvement | ✅ Done |
 | P0-2 | Add dominant-cluster finding: "N of M threads (X%) blocked in [signature]" to `FindingGenerator` | Improvement | High | Low | High | Improvement | ✅ Done |
 | P1-1 | Remove `SamplingMode` enum or implement it in `BuildSignature` | Improvement | Medium | Low | High | Improvement | ✅ Done |
-| P1-2 | Align diversity thresholds: pick one value (suggest 25%) and apply consistently across `FindingGenerator` and `SectionBuilder` | Improvement | Medium | Trivial | High | Improvement |
+| P1-2 | Align diversity thresholds: pick one value (suggest 25%) and apply consistently across `FindingGenerator` and `SectionBuilder` | Improvement | Medium | Trivial | High | Improvement | ✅ Done |
 | P1-3 | Add per-cluster `IsThreadpoolWorker` / `IsGc` / `IsFinalizer` breakdown using ClrMD thread-type properties | Improvement | High | Low | High | Improvement |
 | P1-4 | Classify `<No managed frames>` clusters by `ClrThread.IsGc`, `IsFinalizer`, `IsThreadpoolCompletionPort` instead of one sentinel | Improvement | Medium | Low | High | Improvement |
 | P1-5 | Remove `runtime.Threads.ToArray()` in fallback path; use `foreach` on `runtime.Threads` directly | Improvement | Low | Trivial | High | Improvement |

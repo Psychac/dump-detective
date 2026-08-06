@@ -15,7 +15,8 @@ public sealed record LoadedModuleSnapshot(
 
 public sealed record ModuleConflictGroup(
     string ModuleName,
-    IReadOnlyList<LoadedModuleSnapshot> Instances);
+    IReadOnlyList<LoadedModuleSnapshot> Instances,
+    IReadOnlyList<string> Versions);
 
 /// <summary>Per-module heap memory and object footprint aggregated from the heap index.</summary>
 public sealed record ModuleHeapStats(

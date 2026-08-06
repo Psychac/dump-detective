@@ -52,14 +52,19 @@ namespace DumpDetective.Analysis.Analyzers
                 topModules.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic, m.IsPEFile));
             }
 
-            // Conflict groups — preserve full per-instance detail for the printer.
+            // Conflict groups — preserve full per-instance detail for the printer, extract distinct versions.
             var conflictDetails = new List<ModuleConflictGroup>(analysis.VersionConflicts.Count);
             foreach (var kvp in analysis.VersionConflicts)
             {
                 var instances = new List<LoadedModuleSnapshot>(kvp.Value.Count);
+                var versionSet = new HashSet<string>();
                 foreach (var m in kvp.Value)
+                {
                     instances.Add(new LoadedModuleSnapshot(m.Name, m.AssemblyName, m.FullPath, m.Address, m.Size, m.IsDynamic, m.IsPEFile));
-                conflictDetails.Add(new ModuleConflictGroup(kvp.Key, instances));
+                    ExtractVersionFromAssemblyName(m.AssemblyName, versionSet);
+                }
+                var versions = versionSet.Count > 0 ? versionSet.Order().ToList() : new List<string>();
+                conflictDetails.Add(new ModuleConflictGroup(kvp.Key, instances, versions));
             }
 
             return new ModuleDomainResult(
@@ -371,6 +376,24 @@ namespace DumpDetective.Analysis.Analyzers
             return analysis;
         }
 
+        private static void ExtractVersionFromAssemblyName(string assemblyName, HashSet<string> versionSet)
+        {
+            if (string.IsNullOrEmpty(assemblyName))
+                return;
+
+            int versionStart = assemblyName.IndexOf("Version=", StringComparison.OrdinalIgnoreCase);
+            if (versionStart == -1)
+                return;
+
+            versionStart += 8;
+            int versionEnd = assemblyName.IndexOf(',', versionStart);
+            if (versionEnd == -1)
+                versionEnd = assemblyName.Length;
+
+            string version = assemblyName.Substring(versionStart, versionEnd - versionStart).Trim();
+            if (!string.IsNullOrEmpty(version))
+                versionSet.Add(version);
+        }
 
         public void Dispose() { }
     }

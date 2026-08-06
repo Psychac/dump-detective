@@ -27,12 +27,29 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
             : conflicts > 0 ? FindingSeverity.Warning
             : FindingSeverity.Info;
 
+        string conflictEvidence = $"{r.TotalModules:N0} modules loaded, {r.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).";
+        if (conflicts > 0 && r.ConflictDetails.Count > 0)
+        {
+            // Emit details of conflicting versions
+            var conflictSummary = new System.Text.StringBuilder();
+            int detailCount = Math.Min(3, r.ConflictDetails.Count);
+            for (int i = 0; i < detailCount; i++)
+            {
+                var group = r.ConflictDetails[i];
+                conflictSummary.Append($" {group.ModuleName}: {string.Join(", ", group.Versions)}");
+                if (i < detailCount - 1) conflictSummary.Append(";");
+            }
+            if (r.ConflictDetails.Count > 3)
+                conflictSummary.Append($" (+ {r.ConflictDetails.Count - 3} more)");
+            conflictEvidence += $" Conflicts: {conflictSummary}";
+        }
+
         findings.Add(new InsightFinding(
             Analyzer: AnalyzerName,
             Category: "Dependency",
             Severity: conflictSeverity,
             Title: conflicts > 0 ? "Module identity conflicts detected" : "Module dependency snapshot",
-            Evidence: $"{r.TotalModules:N0} modules loaded, {r.DynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).",
+            Evidence: conflictEvidence,
             Recommendation: conflicts > 0
                 ? "Align dependency versions and verify binding redirects/deployment consistency."
                 : "No immediate module-version conflict action required.",

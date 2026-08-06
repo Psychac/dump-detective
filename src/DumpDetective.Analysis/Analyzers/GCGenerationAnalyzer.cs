@@ -12,6 +12,9 @@ namespace DumpDetective.Analysis.Analyzers
     {
         public string Name => "GC Generation Analysis";
         public string Category => "GC";
+        public IReadOnlyCollection<string> Tags => new[] { "gc", "generations", "memory", "performance" };
+        public int Order => 10;
+        public bool IsThreadSafe => false;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

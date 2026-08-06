@@ -346,7 +346,7 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 | P1-1 | **Fix hard-coded "50 000" cap literal** — add `ScanCapUsed` int to `WeakReferenceDomainResult`; emit it in finding text | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 4785d51) |
 | P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement | Pending |
 | P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement | Pending |
-| P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | Pending |
+| P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 7ebe9bd) |
 | P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | Pending |
 | P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement | Pending |
 | P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement | Pending |

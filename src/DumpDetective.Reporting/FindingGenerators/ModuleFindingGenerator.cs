@@ -136,6 +136,24 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
                 MetricUnit: "modules"));
         }
 
+        // ── Truncated module enumeration (analysis blind spot) ────────────────────────
+        if (r.ExcludedModuleCount > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Analysis",
+                Severity: FindingSeverity.Warning,
+                Title: $"Module enumeration truncated: {r.ExcludedModuleCount:N0} modules excluded from analysis",
+                Evidence: $"{r.ExcludedModuleCount:N0} module(s) were excluded due to AppDomain enumeration limits. " +
+                          "This represents a blind spot where heap attribution, type density, and other module metrics " +
+                          "may be incomplete or skewed toward the largest modules.",
+                Recommendation: "Increase ModuleEnumerationLimit in analysis options to include all modules if full coverage is required. " +
+                                 "Note that analyzing all modules on large memory dumps may significantly increase runtime and memory consumption.",
+                Tags: ["analysis", "truncation", "blind-spot"],
+                MetricValue: r.ExcludedModuleCount,
+                MetricUnit: "excluded-modules"));
+        }
+
         return findings;
     }
 }

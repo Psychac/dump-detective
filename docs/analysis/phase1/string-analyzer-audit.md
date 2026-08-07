@@ -296,7 +296,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P0-1** | Fix `UniqueStrings` / `DuplicationRatio` semantics at low coverage — rename to `SampledUniquePatterns` with XML documentation | Improvement | High | Low | High | ✅ DONE |
 | **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High | ✅ DONE |
 | **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High | ✅ DONE |
-| **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High |
+| **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High | ✅ DONE |
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High |
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
 | **P1-4** | Fix `estimatedInterningSaving` — either remove it or compute it correctly as `DuplicateWastedBytes` for patterns where all instances share the same value (prebuilt index provides this) | Improvement | Medium | Low | High |
@@ -313,6 +313,36 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
 
 ---
+
+---
+
+## P1-1 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was implemented:**
+1. Extended `LongStringEntry` record with two new fields: `Preview` (string?) and `TypeName` (string?)
+2. Updated all three locations where LongStringEntry is created:
+   - Index scan path (line 139): Both fields set to null (no object access in index phase)
+   - Heap scan path 1 (line 466): Preview extracted via `obj.AsString(maxLength: 100)`, TypeName from `obj.Type?.Name`
+   - Heap scan path 2 (line 497): Same as path 1
+3. Updated StringSectionBuilder to display both new fields in the VeryLongStrings table:
+   - Added "Preview" column (truncated to 50 chars for readability)
+   - Added "Type" column (displays type name or "(unknown)" if unavailable)
+4. Table header updated: Address | Char Length | Size | Preview | Type
+
+**Why it matters:**
+- Engineers no longer need manual WinDbg investigation to understand very long strings
+- String content preview (truncated) provides immediate context
+- Type name identifies which object is holding the problematic string
+- Together: address + preview + type enables immediate diagnosis without external tools
+
+**Files changed:** 2 files
+- StringDomainResult.cs (LongStringEntry record extended with 2 fields)
+- StringAnalyzer.cs (3 locations updated to populate new fields)
+- StringSectionBuilder.cs (table rendering updated with 2 new columns)
+
+**Build status:** ✓ Clean (StringAnalyzer compiles without errors; pre-existing warnings in unrelated code)
 
 ---
 

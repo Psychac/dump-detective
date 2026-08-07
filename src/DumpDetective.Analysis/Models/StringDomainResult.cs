@@ -4,7 +4,17 @@ namespace DumpDetective.Analysis.Models;
 
 // String Analysis
 
-internal sealed record LongStringEntry(ulong Address, int CharLength, ulong SizeBytes);
+/// <summary>
+/// Represents a very long string (>85 KB) on the Large Object Heap.
+/// </summary>
+internal sealed record LongStringEntry(
+    ulong Address,
+    int CharLength,
+    ulong SizeBytes,
+    /// <summary>Content preview (truncated to first ~100 chars for readability)</summary>
+    string? Preview = null,
+    /// <summary>Type name of the object holding this string (if available)</summary>
+    string? TypeName = null);
 
 internal sealed record DistributionSummary(
     IReadOnlyDictionary<string, double> Percentiles,

@@ -136,7 +136,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         if (entry.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
         {
             int ecl = (int)Math.Min((entry.Size - 26) / 2, int.MaxValue);
-            _indexScanVeryLongStrings!.Add(new LongStringEntry(entry.Address, ecl, entry.Size));
+            _indexScanVeryLongStrings!.Add(new LongStringEntry(entry.Address, ecl, entry.Size, Preview: null, TypeName: null));
         }
 
         if (_indexScanStringsRead >= _indexScanMaxToDedup) return;
@@ -463,7 +463,9 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                         if (obj.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
                         {
                             int ecl = obj.Size > 26 ? (int)Math.Min((obj.Size - 26) / 2, int.MaxValue) : 0;
-                            veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size));
+                            string? preview = obj.AsString(maxLength: 100);
+                            string? typeName = obj.Type?.Name;
+                            veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size, Preview: preview, TypeName: typeName));
                         }
                         if (stringOptions.DetectInterning && fohSegments.Count > 0 && IsInFoh(obj.Address, fohSegments))
                         { internedStringCount++; internedStringBytes += obj.Size; continue; }
@@ -494,7 +496,11 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                 if (obj.Size >= (ulong)stringOptions.LohThresholdBytes) lohStringBytes += obj.Size;
                 int ecl = obj.Size > 26 ? (int)Math.Min((obj.Size - 26) / 2, int.MaxValue) : 0;
                 if (obj.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
-                    veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size));
+                {
+                    string? preview = obj.AsString(maxLength: 100);
+                    string? typeName = obj.Type?.Name;
+                    veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size, Preview: preview, TypeName: typeName));
+                }
                 if (fohSegments.Count > 0 && IsInFoh(obj.Address, fohSegments))
                 { internedStringCount++; internedStringBytes += obj.Size; }
                 stringMts.Add(obj.Type.MethodTable);

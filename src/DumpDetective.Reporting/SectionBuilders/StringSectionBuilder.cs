@@ -142,12 +142,15 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < d.VeryLongStrings.Count; i++)
             {
                 var s = d.VeryLongStrings[i];
+                string previewDisplay = string.IsNullOrEmpty(s.Preview) ? "(no preview)" : s.Preview.Length > 50 ? s.Preview[..50] + "..." : s.Preview;
                 rows.Add(Row(
                     Cell($"0x{s.Address:X}"),
                     Cell($"{s.CharLength:N0} chars", s.CharLength),
-                    Cell(FormatHelper.FormatBytes(s.SizeBytes), (long)s.SizeBytes)));
+                    Cell(FormatHelper.FormatBytes(s.SizeBytes), (long)s.SizeBytes),
+                    Cell(previewDisplay),
+                    Cell(s.TypeName ?? "(unknown)")));
             }
-            compactTables.Add(STCompact("Strings exceeding LOH threshold", new[] { CH("Address"), CH("Char Length","number"), CH("Size","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Strings exceeding LOH threshold", new[] { CH("Address"), CH("Char Length","number"), CH("Size","bytes"), CH("Preview"), CH("Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

@@ -66,9 +66,9 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
         }
 
         if (d.DeadlockCandidateCount >= 2)
-            blocks.Add(T("Probable deadlock pattern detected."));
+            blocks.Add(T("Potential deadlock pattern detected (candidates identified; cycle confirmation required)."));
         else if (d.ContestedLockCount > 0)
-            blocks.Add(T("Lock contention present; monitor lock acquisition order."));
+            blocks.Add(T("Lock contention present; monitor lock acquisition order matters."));
         else
             blocks.Add(T("No lock contention/deadlock candidates detected."));
 
@@ -128,13 +128,17 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
         SectionLeadFinding? leadFinding = null;
         if (d.DeadlockCandidateCount > 0)
             leadFinding = new SectionLeadFinding(
-                Severity: "Critical",
-                Title: $"Deadlock detected \u2014 {d.DeadlockCandidateCount} cycle(s) identified",
+                Severity: "Warning",
+                Title: $"Potential deadlock pattern \u2014 {d.DeadlockCandidateCount} candidate(s) identified",
                 Summary: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
-                Recommendation: "Enforce a consistent lock acquisition order across all threads. Use lock timeouts or restructure code to eliminate nested locking.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.85,
-                Caveats: ["Detection is based on recorded BlockingObjects; cooperative waits (e.g. SemaphoreSlim) may not appear."]);
+                Recommendation: "Review lock acquisition order and use cycle detection tools (e.g., !dlk in WinDbg SOS) to confirm a circular-wait cycle exists before assuming deadlock.",
+                ConfidenceSymbol: "\u25cf\u25cf\u25cb",
+                ConfidenceScore: 0.65,
+                Caveats: [
+                    "Deadlock candidates are based on top-frame heuristics (Monitor.Wait/Enter) and do not confirm an actual cycle.",
+                    "Two independently blocked threads (unrelated locks) may both appear as candidates.",
+                    "Detection does not cover non-monitor primitives (ReaderWriterLockSlim, SemaphoreSlim, etc.)."
+                ]);
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

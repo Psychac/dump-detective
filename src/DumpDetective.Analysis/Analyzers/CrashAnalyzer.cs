@@ -532,8 +532,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (!exceptionMethodTables.TryGetValue(mt, out bool isException))
             {
                 ClrObject o = heap.GetObject(exceptionAddress);
-                string? n = o.IsValid ? o.Type?.Name : null;
-                isException = n?.Contains("Exception", StringComparison.Ordinal) == true;
+                isException = o.IsValid && o.Type?.IsException == true;
                 exceptionMethodTables[mt] = isException;
             }
 
@@ -788,8 +787,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return isException;
 
             ClrObject obj = heap.GetObject(entry.Address);
-            string? typeName = obj.IsValid ? obj.Type?.Name : null;
-            isException = typeName?.Contains("Exception", StringComparison.Ordinal) == true;
+            isException = obj.IsValid && obj.Type?.IsException == true;
             exceptionMethodTables[entry.MethodTable] = isException;
             return isException;
         }

@@ -442,7 +442,7 @@ in DumpDetective's platform but is not wired into this analyzer.
 | I-2 | Replace `_stackTrace` byte-buffer parsing with `ClrObject.AsException()?.StackTrace` | P0 | High | Low | High | ✅ DONE |
 | I-3 | Migrate full field extraction (`_message`, `_HResult`, `_innerException`) to `ClrException` wrapper | P1 | High | Medium | High | Pending |
 | I-4 | Raise thread stack capture from `.Take(10)` to match `MaxCurrentThreadFramesToPrint` ceiling | P1 | Medium | Low | High | Pending |
-| I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High | Pending |
+| I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High | ✅ DONE |
 | I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High | Pending |
 | I-7 | Add `ILogger<CrashAnalyzer>?` injection; emit per-object diagnostics on `catch {}` sites | P1 | Medium | Low | High | Pending |
 | I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High | Pending |

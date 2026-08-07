@@ -69,7 +69,7 @@
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
-| LohFragmentationAnalyzer | 0/2 | 0/5 | 7 | — |
+| LohFragmentationAnalyzer | 1/2 | 0/5 | 6 | P0-1 done (enum comparison, POH parity) |
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |

@@ -177,9 +177,9 @@ namespace DumpDetective.Analysis.Analyzers
             return totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
         }
 
-        // Matches LohFreeBlockWriter.Write key which uses segment.Start.
+        // Matches LohFreeBlockWriter.Write which indexes both Large and Pinned segments.
         private static bool IsLohSegment(ClrSegment segment)
-            => segment.Kind.ToString().Contains("Large", StringComparison.OrdinalIgnoreCase);
+            => segment.Kind == GCSegmentKind.Large || segment.Kind == GCSegmentKind.Pinned;
 
         private static ulong GetSegmentAddress(ClrSegment segment) => segment.Start;
 

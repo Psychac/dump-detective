@@ -354,24 +354,24 @@ inconsistency (Area 2-W1) and wrong per-segment size column (Area 2-W2) are user
 
 ### Priority Roadmap
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---------------|--------|-----------|-----------|----------------|
-| **P0** | Fix `IsLohSegment` to use enum comparison and align index-path segment filter with what `LohFreeBlockWriter` writes (include/exclude Pinned consistently) | High | Low | High | Improvement |
-| **P0** | Align severity thresholds between `LohFragmentationFindingGenerator` and `LohFragmentationSectionBuilder` | Medium | Low | High | Improvement |
-| **P1** | Add `TotalBytes` to `LohSegmentSnapshot`; fix per-segment Size column in section builder | High | Low | High | Improvement |
-| **P1** | Replace unbounded `largeObjectCandidates` list in fallback with a top-N bounded accumulator (same pattern as `LargeObjectTracker`) | Medium | Low | High | Improvement |
-| **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement |
-| **P1** | Fix redundant `heap.GetObject(objectAddress)` in `AccumulateSegmentObjectByAddress` — pass `ClrObject` directly | Medium | Low | High | Improvement |
-| **P1** | Add type-aggregated LOH table (top types by total bytes) to domain result and section builder | High | Medium | High | Improvement |
-| **P2** | Add `CancellationToken` to `BuildFreeGapHistogram` | Low | Low | High | Improvement |
-| **P2** | Change `loh.largest.free.block` metric trend direction from `Neutral` to `LowerIsWorse` in `LohFragmentationTrendComparer` | Low | Low | High | Improvement |
-| **P2** | Document or remove the unused Offset field in `LohFreeBlockIndex.bin`; reclaim 8 bytes/record or expose offset for gap-adjacency analysis | Low | Low | Medium | Improvement |
-| **P2** | Expose POH as either a separate analyzer section or an explicit excluded/included flag with reporting | High | Medium | Medium | Evolution |
-| **P2** | Add unit tests for `BuildFreeGapHistogram`, `IsLohSegment`, and the index aggregation path using synthetic data | Medium | Medium | High | Improvement |
-| **P3** | Replace `LohSegmentStats` inner class with a readonly record struct | Low | Low | High | Improvement |
-| **P3** | Interpret histogram output in the section builder — add a text note when gap distribution is severely small (e.g., > 80% gaps < 1 KB) | Medium | Low | Medium | Improvement |
-| **P3** | Add a Phase 1 type-aggregated LOH writer to enable type-grouped reporting without a fallback heap scan | High | High | Medium | Evolution |
-| **P3** | Evaluate exposing MT field in `LargeObjectIndex.bin` for type resolution without `heap.GetObject` overhead | Low | Low | Medium | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---------------|--------|-----------|-----------|----------------|--------|
+| **P0** | Fix `IsLohSegment` to use enum comparison and align index-path segment filter with what `LohFreeBlockWriter` writes (include/exclude Pinned consistently) | High | Low | High | Improvement | ✅ DONE |
+| **P0** | Align severity thresholds between `LohFragmentationFindingGenerator` and `LohFragmentationSectionBuilder` | Medium | Low | High | Improvement | — |
+| **P1** | Add `TotalBytes` to `LohSegmentSnapshot`; fix per-segment Size column in section builder | High | Low | High | Improvement | — |
+| **P1** | Replace unbounded `largeObjectCandidates` list in fallback with a top-N bounded accumulator (same pattern as `LargeObjectTracker`) | Medium | Low | High | Improvement | — |
+| **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement | — |
+| **P1** | Fix redundant `heap.GetObject(objectAddress)` in `AccumulateSegmentObjectByAddress` — pass `ClrObject` directly | Medium | Low | High | Improvement | — |
+| **P1** | Add type-aggregated LOH table (top types by total bytes) to domain result and section builder | High | Medium | High | Improvement | — |
+| **P2** | Add `CancellationToken` to `BuildFreeGapHistogram` | Low | Low | High | Improvement | — |
+| **P2** | Change `loh.largest.free.block` metric trend direction from `Neutral` to `LowerIsWorse` in `LohFragmentationTrendComparer` | Low | Low | High | Improvement | — |
+| **P2** | Document or remove the unused Offset field in `LohFreeBlockIndex.bin`; reclaim 8 bytes/record or expose offset for gap-adjacency analysis | Low | Low | Medium | Improvement | — |
+| **P2** | Expose POH as either a separate analyzer section or an explicit excluded/included flag with reporting | High | Medium | Medium | Evolution | — |
+| **P2** | Add unit tests for `BuildFreeGapHistogram`, `IsLohSegment`, and the index aggregation path using synthetic data | Medium | Medium | High | Improvement | — |
+| **P3** | Replace `LohSegmentStats` inner class with a readonly record struct | Low | Low | High | Improvement | — |
+| **P3** | Interpret histogram output in the section builder — add a text note when gap distribution is severely small (e.g., > 80% gaps < 1 KB) | Medium | Low | Medium | Improvement | — |
+| **P3** | Add a Phase 1 type-aggregated LOH writer to enable type-grouped reporting without a fallback heap scan | High | High | Medium | Evolution | — |
+| **P3** | Evaluate exposing MT field in `LargeObjectIndex.bin` for type resolution without `heap.GetObject` overhead | Low | Low | Medium | Improvement | — |
 
 ---
 

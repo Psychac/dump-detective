@@ -53,7 +53,8 @@ internal sealed record ThreadStateSnapshot(
     string? WaitReason,
     IReadOnlyList<string> TopFrames,
     int StackRootCount,
-    ulong StackSizeBytes);
+    ulong StackSizeBytes,
+    string? ThreadName = null);
 
 internal sealed record ThreadExceptionSnapshot(
     uint ThreadId,

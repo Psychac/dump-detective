@@ -321,7 +321,8 @@ namespace DumpDetective.Analysis.Analyzers
                     .Take(maxFramesForThreadScan)
                     .ToArray(),
                 source.StackRootCount,
-                stackSizeBytes);
+                stackSizeBytes,
+                source.ThreadName);
         }
 
         private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)
@@ -440,7 +441,8 @@ namespace DumpDetective.Analysis.Analyzers
                         TopFrames = stackFrames,
                         ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
                         ExceptionMessage = currentException.Message,
-                        StackRootCount = exceptionStackRoots
+                        StackRootCount = exceptionStackRoots,
+                        ThreadName = thread.Name
                     });
                 }
 
@@ -453,7 +455,8 @@ namespace DumpDetective.Analysis.Analyzers
                         Thread = thread,
                         TopFrames = stackFrames,
                         ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = lockStackRoots
+                        StackRootCount = lockStackRoots,
+                        ThreadName = thread.Name
                     });
                 }
 
@@ -470,7 +473,8 @@ namespace DumpDetective.Analysis.Analyzers
                         WaitCategory = waitClassification.Value.Category,
                         WaitReason = waitClassification.Value.Reason,
                         ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = blockedStackRoots
+                        StackRootCount = blockedStackRoots,
+                        ThreadName = thread.Name
                     });
                 }
                 else if (!thread.IsGc && !thread.IsFinalizer)
@@ -529,7 +533,8 @@ namespace DumpDetective.Analysis.Analyzers
                             Thread = thread,
                             TopFrames = stackFrames,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount)
+                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount),
+                            ThreadName = thread.Name
                         };
 
                         sampler.Add(candidate);
@@ -765,5 +770,6 @@ namespace DumpDetective.Analysis.Analyzers
         public string? WaitReason { get; set; }
         public string? ExceptionType { get; set; }
         public string? ExceptionMessage { get; set; }
+        public string? ThreadName { get; set; }
     }
 }

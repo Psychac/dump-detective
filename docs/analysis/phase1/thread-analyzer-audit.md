@@ -302,7 +302,7 @@ The `WaitPatterns` table does not cover:
 | P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement | ✅ DONE |
 | P0-3 | Call `thread.EnumerateBlockingObjects()` in `ProcessThread`; emit blocking-object table (address, type, owner thread ID) per blocked snapshot | Diagnostic | Very High | Medium | High | Improvement | — |
 | P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement | ✅ DONE |
-| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | — |
+| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | ✅ DONE |
 | P1-3 | Replace `frames[0]` hotspot with first non-framework frame; filter `System.`, `Microsoft.`, `ThreadPool`, `Task` prefixes | Reporting | High | Low | High | Improvement | — |
 | P1-4 | Fix background prewarm progress: replace `Math.Min(prewarm, prewarm)` with actual `idx` count | Correctness | Low | Trivial | High | Improvement | — |
 | P2-1 | Replace LINQ `OrderByDescending + ToList()` in `FinalizeCategorization` with `List<T>.Sort()` | Performance | Medium | Low | High | Improvement | — |

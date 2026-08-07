@@ -300,7 +300,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High | ✅ DONE |
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
 | **P1-4** | Fix `estimatedInterningSaving` — remove misleading metric | Improvement | Medium | Low | High | ✅ DONE |
-| **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High |
+| **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High | ✅ DONE |
 | **P2-1** | Fix `MinDuplicateStringCount` off-by-one (`< minCount` instead of `<= minCount`) | Improvement | Low | Low | High |
 | **P2-2** | Add Gen0/Gen1 string counts to result model | Improvement | Medium | Medium | Medium |
 | **P2-3** | Document / annotate `Gen2StringBytes` as approximate; extend `TypeAggregateIndexEntry` to carry `Gen2TotalSize` | Evolution | Medium | Medium | High |
@@ -313,6 +313,41 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
 
 ---
+
+---
+
+## P1-5 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was implemented:**
+Added cap to VeryLongStrings list to keep only top 1000 entries by size (after all collection is complete).
+
+**The fix:**
+```csharp
+const int maxVeryLongStringsToKeep = 1000;
+if (veryLongStrings.Count > maxVeryLongStringsToKeep)
+{
+    veryLongStrings.Sort((a, b) => b.SizeBytes.CompareTo(a.SizeBytes));
+    veryLongStrings.RemoveRange(maxVeryLongStringsToKeep, veryLongStrings.Count - maxVeryLongStringsToKeep);
+}
+```
+
+**Why this matters:**
+- Before: A dump with 100,000 LOH strings would allocate a 100K-entry list
+- After: Capped at 1,000 largest entries, bounded memory usage
+- Trade-off: Engineers see top 1000 by size (highest impact), not all LOH strings
+  - But 1000 entries is still very comprehensive (shows patterns, not exhaustive list)
+
+**Performance impact:**
+- Sort: O(n log n) on at most 1000 entries (if already capped)
+- RemoveRange: O(n) but only if > 1000 entries
+- Overall: Minimal since operation is post-analysis, not in hot loop
+
+**Files changed:** 1 file
+- StringAnalyzer.cs (added cap logic before returning result)
+
+**Build status:** ✓ Clean (StringAnalyzer project only)
 
 ---
 

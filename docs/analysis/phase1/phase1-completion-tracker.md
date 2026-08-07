@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 73 |
 | **Total P1 Identified** | 143 |
 | **P0 Implemented** | 44 |
-| **P1 Implemented** | 60 |
+| **P1 Implemented** | 61 |
 | **P2 Implemented** | 15 |
-| **Overall P0+P1 Rate** | 46.1% (104/217) |
+| **Overall P0+P1 Rate** | 46.2% (105/217) |
 
 ---
 
@@ -33,7 +33,7 @@
 | 8 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 2/8 | 0/3 | ✅ P0+P1 complete; P2 25% (2/8) |
 | 9 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
 | 10 | **CollectionAnalyzer** | 3/3 | 0/5 | 0/8 | 0/5 | ✅ P0 complete; P1 0% (0/5) |
-| 11 | **StringAnalyzer** | 3/3 | 3/5 | 0/8 | 0/5 | ✅ P0 COMPLETE; P1-1,P1-2,P1-4 DONE (preview+type + warning + remove misleading metric); P1-3,P1-5 pending |
+| 11 | **StringAnalyzer** | 3/3 | 4/5 | 0/8 | 0/5 | ✅ P0 COMPLETE; P1 80% (4/5 done); P1-3 pending |
 
 **Subtotal: 22/22 P0 done, 41/41 P1 done**
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **73** | — |
 | **P0 items implemented** | **44** | 60.3% |
 | **Total P1 recommendations** | **143** | — |
-| **P1 items implemented** | **60** | 42.0% |
-| **Combined P0+P1 rate** | **46.1%** | (104/217) |
+| **P1 items implemented** | **61** | 42.7% |
+| **Combined P0+P1 rate** | **46.2%** | (105/217) |
 
 ---
 

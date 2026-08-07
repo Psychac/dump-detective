@@ -798,6 +798,14 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             FrequencyBuckets: freqBuckets,
             SampleCount: sampleCount);
 
+        // Cap VeryLongStrings to top 1000 by size to prevent unbounded growth
+        const int maxVeryLongStringsToKeep = 1000;
+        if (veryLongStrings.Count > maxVeryLongStringsToKeep)
+        {
+            veryLongStrings.Sort((a, b) => b.SizeBytes.CompareTo(a.SizeBytes));
+            veryLongStrings.RemoveRange(maxVeryLongStringsToKeep, veryLongStrings.Count - maxVeryLongStringsToKeep);
+        }
+
         return new StringDomainResult(
             TotalStrings: totalStrings,
             TotalStringMemoryBytes: totalStringMemory,

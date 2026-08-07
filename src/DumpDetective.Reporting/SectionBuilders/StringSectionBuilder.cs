@@ -25,11 +25,6 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             BuildConfidenceBand(0.85, ["String statistics are measured from analyzed heap data."]),
         };
 
-        ulong estimatedInterningSaving = 0;
-        int interningLimit = Math.Min(d.TopDuplicates.Count, 20);
-        for (int i = 0; i < interningLimit; i++)
-            estimatedInterningSaving += d.TopDuplicates[i].WastedBytes;
-
         string dedupLine = d.DeduplicationSkipped
             ? "Skipped"
             : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
@@ -52,7 +47,6 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 : new TextMetricValue("N/A"),
             ["duplication_ratio"] = new NumericMetricValue(d.DuplicationRatio, MetricUnit.Ratio),
             ["duplicate_waste_bytes"] = new NumericMetricValue((double)d.DuplicateWastedBytes, MetricUnit.Bytes),
-            ["estimated_interning_saving_bytes"] = new NumericMetricValue((double)estimatedInterningSaving, MetricUnit.Bytes),
             ["loh_string_bytes"] = new NumericMetricValue((double)d.LohStringBytes, MetricUnit.Bytes),
             ["gen2_string_count"] = new NumericMetricValue(d.Gen2StringCount, MetricUnit.Count),
             ["interned_strings_foh"] = new NumericMetricValue(d.InternedStringCount, MetricUnit.Count),

@@ -299,7 +299,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High | ✅ DONE |
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High | ✅ DONE |
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
-| **P1-4** | Fix `estimatedInterningSaving` — either remove it or compute it correctly as `DuplicateWastedBytes` for patterns where all instances share the same value (prebuilt index provides this) | Improvement | Medium | Low | High |
+| **P1-4** | Fix `estimatedInterningSaving` — remove misleading metric | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High |
 | **P2-1** | Fix `MinDuplicateStringCount` off-by-one (`< minCount` instead of `<= minCount`) | Improvement | Low | Low | High |
 | **P2-2** | Add Gen0/Gen1 string counts to result model | Improvement | Medium | Medium | Medium |
@@ -313,6 +313,33 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
 
 ---
+
+---
+
+## P1-4 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was fixed:**
+Removed `estimatedInterningSaving` metric from key metrics and section builder.
+
+**Why removal was correct:**
+1. **Metric was misleading:** Labeled "EstimatedInterningSaving" but was just `sum(TopDuplicates[0..19].WastedBytes)` — a subset of total `DuplicateWastedBytes`
+2. **Incorrect semantics:** Implied concrete savings from `string.Intern()`, but interning only helps strings referenced from multiple sites with different values
+3. **Arbitrary boundary:** Top-20 cutoff had no semantic meaning
+4. **Redundant:** Total waste already reported via `DuplicateWastedBytes`
+
+**What engineers still have:**
+- `DuplicateWastedBytes`: Total waste from all duplicate patterns (comprehensive signal)
+- `DuplicationRatio`: Proportion of all strings that are duplicates
+- `TopDuplicates` list: Shows top patterns individually (granular signal)
+
+**No loss of signal:** Engineers can still see waste by pattern via TopDuplicates table and calculate their own subset analysis if needed.
+
+**Files changed:** 1 file
+- StringSectionBuilder.cs (removed calculation + metric from keyMetrics dictionary)
+
+**Build status:** ✓ Clean (StringSectionBuilder compiles without errors)
 
 ---
 

@@ -294,7 +294,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | ID | Recommendation | Classification | Impact | Difficulty | Confidence | Status |
 |---|---|---|---|---|---|---|
 | **P0-1** | Fix `UniqueStrings` / `DuplicationRatio` semantics at low coverage — rename to `SampledUniquePatterns` with XML documentation | Improvement | High | Low | High | ✅ DONE |
-| **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High |
+| **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High | ✅ DONE |
 | **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High |
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High |
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High |
@@ -316,9 +316,30 @@ Type-level object count and size grouping. No duplicate content detection.
 
 ---
 
-## P0-1 Implementation Summary (COMPLETED)
+## P0-2 Implementation Summary (COMPLETED)
 
 **Commit:** (pending)
+
+**What was implemented:**
+1. Added `VeryLongStringFinding` in StringFindingGenerator (Info severity)
+2. Finding emitted when `VeryLongStrings.Count > 0`
+3. Evidence includes: count of very long strings + total size in bytes
+4. Title: "Very long strings detected"
+5. Recommendation: Refactor to avoid extremely long strings; use ReadOnlySpan<char>, StringBuilder, or streaming APIs
+
+**Why this matters:**
+- The VeryLongStrings list was being computed and surfaced in reports, but no actionable finding was emitted
+- Without a finding, operators must manually scan the table to notice the issue
+- Now flagged as Info-level (not Warning, since LOH strings already get Warning)
+
+**Files changed:** 1 file
+- StringFindingGenerator.cs (added VeryLongStringFinding logic)
+
+---
+
+## P0-1 Implementation Summary (COMPLETED)
+
+**Commit:** ede311d
 
 **What was implemented:**
 1. Renamed `UniqueStrings` field → `SampledUniquePatterns` in StringDomainResult

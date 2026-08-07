@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 34 |
 | **Total P0 Identified** | 73 |
 | **Total P1 Identified** | 143 |
-| **P0 Implemented** | 42 |
+| **P0 Implemented** | 43 |
 | **P1 Implemented** | 57 |
 | **P2 Implemented** | 15 |
-| **Overall P0+P1 Rate** | 45.6% (99/217) |
+| **Overall P0+P1 Rate** | 45.6% (100/217) |
 
 ---
 
@@ -52,7 +52,7 @@
 | 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 | 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done (unresolved + dynamic confidence + trivial perf); P0-1,P0-2,P1-1,P1-4,P2-2,P2-4 pending |
-| 21 | **StringAnalyzer** | 1/3 | 0/5 | 0/8 | 0/5 | ✅ P0-1 DONE (rename UniqueStrings → SampledUniquePatterns + docs); P0-2,P0-3 pending; all P1 pending |
+| 21 | **StringAnalyzer** | 2/3 | 0/5 | 0/8 | 0/5 | ✅ P0-1,P0-2 DONE (SampledUniquePatterns rename + VeryLongStringFinding); P0-3 pending; all P1 pending |
 
 **Subtotal: 19/26 P0 done, 20/39 P1 done, 18/51 P2 done** (in-progress pools)
 
@@ -88,10 +88,10 @@
 | Analyzers with partial P0+P1 completion | 10 | Some items done, some pending (StringAnalyzer now has P0-1; ThreadAnalyzer, ObjectShapeAnalyzer, TimerLeakAnalyzer, and others with P0 partial/complete but P1 pending) |
 | Analyzers with zero P0+P1 completion | 16 | Not yet started |
 | **Total P0 recommendations** | **73** | — |
-| **P0 items implemented** | **42** | 57.5% |
+| **P0 items implemented** | **43** | 58.9% |
 | **Total P1 recommendations** | **143** | — |
 | **P1 items implemented** | **57** | 39.9% |
-| **Combined P0+P1 rate** | **45.6%** | (99/217) |
+| **Combined P0+P1 rate** | **45.6%** | (100/217) |
 
 ---
 

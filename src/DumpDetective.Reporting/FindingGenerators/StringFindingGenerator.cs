@@ -58,6 +58,24 @@ internal sealed class StringFindingGenerator : IFindingGenerator
                 MetricUnit: "bytes"));
         }
 
+        if (r.VeryLongStrings?.Count > 0)
+        {
+            ulong veryLongTotalSize = 0;
+            foreach (var entry in r.VeryLongStrings)
+                veryLongTotalSize += entry.SizeBytes;
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Info,
+                Title: "Very long strings detected",
+                Evidence: $"{r.VeryLongStrings.Count:N0} very long string(s) totaling {FormatHelper.FormatBytes(veryLongTotalSize)} (individual threshold > 85 KB). These block GC compaction and fragment the Large Object Heap.",
+                Recommendation: "Refactor to avoid allocating extremely long strings; use ReadOnlySpan<char>, StringBuilder with limited buffering, or streaming APIs.",
+                Tags: ["string", "loh", "fragmentation", "memory"],
+                MetricValue: veryLongTotalSize,
+                MetricUnit: "bytes"));
+        }
+
         if (r.PctOfManagedHeap > 20.0)
         {
             findings.Add(new InsightFinding(

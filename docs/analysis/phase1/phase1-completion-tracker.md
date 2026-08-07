@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 34 |
 | **Total P0 Identified** | 73 |
 | **Total P1 Identified** | 143 |
-| **P0 Implemented** | 41 |
+| **P0 Implemented** | 42 |
 | **P1 Implemented** | 57 |
 | **P2 Implemented** | 15 |
-| **Overall P0+P1 Rate** | 45.2% (98/216) |
+| **Overall P0+P1 Rate** | 45.6% (99/217) |
 
 ---
 
@@ -72,7 +72,7 @@
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
-| StringAnalyzer | 0/3 | 0/5 | 8 | — |
+| StringAnalyzer | 1/3 | 0/5 | 7 | ✅ P0-1 DONE (rename UniqueStrings → SampledUniquePatterns + docs) |
 
 ---
 

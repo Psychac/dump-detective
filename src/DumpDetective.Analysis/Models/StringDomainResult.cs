@@ -27,9 +27,21 @@ internal sealed record DuplicateStringSnapshot(
 internal sealed record StringDomainResult(
     int TotalStrings,
     ulong TotalStringMemoryBytes,
-    int UniqueStrings,
+    /// <summary>
+    /// Count of unique string fingerprints (hash + length + char endpoints) observed in the sample.
+    /// This is NOT the count of unique string values in the heap.
+    /// When sampling coverage is low (e.g., 1% of 5M strings), this represents the unique patterns
+    /// in that 1% sample only. Derived from: <c>dedup_skipped ? 0 : stringStats.Count</c>.
+    /// Used in <see cref="DuplicationRatio"/> calculation; consumers should gate interpretation on <see cref="SamplingCoverage"/>.
+    /// </summary>
+    int SampledUniquePatterns,
     int DuplicatePatternCount,
     ulong DuplicateWastedBytes,
+    /// <summary>
+    /// Ratio of duplicate occurrence count to total strings: <c>(TotalStrings - SampledUniquePatterns) / TotalStrings</c>.
+    /// Interpretation is only meaningful when <see cref="SamplingCoverage"/> is high (≥ 0.05 / 5%).
+    /// At low coverage, the ratio is an artifact of the sample size and does not reflect heap-wide distribution.
+    /// </summary>
     double DuplicationRatio,
     double PctOfManagedHeap,
     IReadOnlyList<DuplicateStringSnapshot> TopDuplicates,

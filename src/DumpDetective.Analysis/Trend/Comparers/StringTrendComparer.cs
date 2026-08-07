@@ -13,7 +13,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             {
                 new("string.total", null, r.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
                 new("string.total.bytes", null, r.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("string.unique", null, r.UniqueStrings, "objects", MetricTrendDirection.Neutral),
+                new("string.unique", null, r.SampledUniquePatterns, "objects", MetricTrendDirection.Neutral),
                 new("string.duplicate.patterns", null, r.DuplicatePatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
                 new("string.duplicate.wasted.bytes", null, r.DuplicateWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("string.duplication.ratio", null, r.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
@@ -35,7 +35,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             [
                 MetricDeltaHelper.Compute("string.total", null, b.TotalStrings, c.TotalStrings, "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.total.bytes", null, b.TotalStringMemoryBytes, c.TotalStringMemoryBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("string.unique", null, b.UniqueStrings, c.UniqueStrings, "objects", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("string.unique", null, b.SampledUniquePatterns, c.SampledUniquePatterns, "objects", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("string.duplicate.patterns", null, b.DuplicatePatternCount, c.DuplicatePatternCount, "patterns", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.duplicate.wasted.bytes", null, b.DuplicateWastedBytes, c.DuplicateWastedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.duplication.ratio", null, b.DuplicationRatio, c.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),

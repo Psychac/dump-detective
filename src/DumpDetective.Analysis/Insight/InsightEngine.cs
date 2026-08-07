@@ -755,8 +755,9 @@ internal sealed class InsightEngine
             Severity: FindingSeverity.Info,
             Title: "High string duplication ratio detected",
             Evidence: $"{strings.DuplicationRatio:P0} of string instances are duplicates " +
-                      $"({strings.TotalStrings - strings.UniqueStrings:N0} duplicate out of {strings.TotalStrings:N0} total). " +
-                      $"Wasted: {FormatBytes(strings.DuplicateWastedBytes)}.",
+                      $"({strings.TotalStrings - strings.SampledUniquePatterns:N0} duplicate out of {strings.TotalStrings:N0} total). " +
+                      $"Wasted: {FormatBytes(strings.DuplicateWastedBytes)}. " +
+                      $"(Based on {strings.SamplingCoverage:P1} sampling coverage; interpret with caution at low coverage.)",
             Recommendation: "Consider string.Intern for frequently duplicated strings, " +
                             "or use a string→int dictionary for repeated tokens.",
             Tags: ["strings", "duplication", "memory"],

@@ -38,7 +38,7 @@ public sealed class StringAnalyzerDiscrepancyTests
             StringDomainResult diskResult = await RunThroughPipelineAsync(runtime, diskCache, analysisOptions);
             diskResult.TotalStrings.Should().Be(memResult.TotalStrings);
             diskResult.TotalStringMemoryBytes.Should().Be(memResult.TotalStringMemoryBytes);
-            diskResult.UniqueStrings.Should().Be(memResult.UniqueStrings);
+            diskResult.SampledUniquePatterns.Should().Be(memResult.SampledUniquePatterns);
             diskResult.DuplicatePatternCount.Should().Be(memResult.DuplicatePatternCount);
             diskResult.DuplicateWastedBytes.Should().Be(memResult.DuplicateWastedBytes);
             diskResult.DuplicationRatio.Should().Be(memResult.DuplicationRatio);

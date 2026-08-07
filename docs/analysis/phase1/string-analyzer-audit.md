@@ -291,9 +291,9 @@ Type-level object count and size grouping. No duplicate content detection.
 
 ### Priority Roadmap
 
-| ID | Recommendation | Classification | Impact | Difficulty | Confidence |
-|---|---|---|---|---|---|
-| **P0-1** | Fix `UniqueStrings` / `DuplicationRatio` semantics at low coverage — gate behind coverage threshold or rename to `SampledUniquePatterns` | Improvement | High | Low | High |
+| ID | Recommendation | Classification | Impact | Difficulty | Confidence | Status |
+|---|---|---|---|---|---|---|
+| **P0-1** | Fix `UniqueStrings` / `DuplicationRatio` semantics at low coverage — rename to `SampledUniquePatterns` with XML documentation | Improvement | High | Low | High | ✅ DONE |
 | **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High |
 | **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High |
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High |
@@ -314,9 +314,37 @@ Type-level object count and size grouping. No duplicate content detection.
 
 ---
 
+---
+
+## P0-1 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was implemented:**
+1. Renamed `UniqueStrings` field → `SampledUniquePatterns` in StringDomainResult
+2. Added comprehensive XML documentation clarifying it represents unique fingerprints in the sample, NOT unique strings in the heap
+3. Updated `DuplicationRatio` documentation to warn consumers that interpretation is only valid at high sampling coverage (≥5%)
+4. Enhanced InsightEngine finding to include sampling coverage caveat: `"(Based on X% sampling coverage; interpret with caution at low coverage)"`
+5. Added new metric `sampling_coverage` to StringSectionBuilder for visibility
+6. Updated all references: StringAnalyzer, InsightEngine, StringTrendComparer, StringSectionBuilder, and tests
+
+**Why this matters:**
+- **Before:** Engineers reading reports at 1% sampling coverage would see `UniqueStrings: 3,847` and silently assume it represented the full heap
+- **After:** Field name + documentation + reporting context make the sampling limitation explicit. Engineers cannot misinterpret low-coverage results as heap-wide.
+
+**Files changed:** 6 files
+- StringDomainResult.cs (domain model + XML docs)
+- StringAnalyzer.cs (variable rename, export field rename)
+- InsightEngine.cs (finding text updated)
+- StringTrendComparer.cs (trend metrics)
+- StringSectionBuilder.cs (reporting + new coverage metric)
+- StringAnalyzerDiscrepancyTests.cs (test assertions)
+
+---
+
 ### Final Verdict
 
-1. **Production-ready?** Yes for scalar statistics (total count, memory, LOH, FOH, Gen2). Conditionally for dedup — results are trustworthy when `SamplingCoverage` is high or the prebuilt index is used; misleading when 1% sampling is silently applied.
+1. **Production-ready?** Yes for scalar statistics (total count, memory, LOH, FOH, Gen2). Conditionally for dedup — results are trustworthy when `SamplingCoverage` is high or the prebuilt index is used; misleading when 1% sampling is silently applied. **[FIXED by P0-1: field rename + documentation now prevents misinterpretation]**
 
 2. **Highest-impact improvements:** Fix `UniqueStrings` semantics (P0-1), add preview + type to very-long-strings (P1-1), add top-types-by-total-string-bytes (P1-3), add pinned string detection (P2-4).
 

@@ -503,7 +503,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         }
 
         // ── Aggregate dedup results ──────────────────────────────────────────────────────
-        int uniqueStrings = dedupSkipped ? 0 : ComputeUniqueCount(stringStats);
+        int sampledUniquePatterns = dedupSkipped ? 0 : ComputeUniqueCount(stringStats);
         int duplicatePatternCount = 0;
         ulong duplicateWastedBytes = 0;
 
@@ -671,7 +671,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         }
 
         double duplicationRatio = (!dedupSkipped && totalStrings > 0)
-            ? (totalStrings - uniqueStrings) / (double)totalStrings
+            ? (totalStrings - sampledUniquePatterns) / (double)totalStrings
             : 0.0;
         double pctOfManagedHeap = totalManagedBytes > 0
             ? totalStringMemory * 100.0 / totalManagedBytes
@@ -704,7 +704,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                 {
                     TotalStrings = totalStrings,
                     TotalStringMemoryBytes = totalStringMemory,
-                    UniqueStrings = uniqueStrings,
+                    SampledUniquePatterns = sampledUniquePatterns,
                     DuplicatePatternCount = duplicatePatternCount,
                     DuplicateWastedBytes = duplicateWastedBytes,
                     TopByWaste = topByWaste.Select(d => new { d.Preview, d.Count, d.WastedBytes, SampleAddresses = d.SampleAddresses, d.DominantMethodTable }),
@@ -795,7 +795,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         return new StringDomainResult(
             TotalStrings: totalStrings,
             TotalStringMemoryBytes: totalStringMemory,
-            UniqueStrings: uniqueStrings,
+            SampledUniquePatterns: sampledUniquePatterns,
             DuplicatePatternCount: duplicatePatternCount,
             DuplicateWastedBytes: duplicateWastedBytes,
             DuplicationRatio: duplicationRatio,

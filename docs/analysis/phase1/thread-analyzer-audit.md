@@ -309,7 +309,7 @@ The `WaitPatterns` table does not cover:
 | P2-2 | Replace LINQ in `ToThreadStateSnapshot` / `ToThreadExceptionSnapshot` with explicit loops | Performance | Low | Low | High | Improvement | ✅ DONE |
 | P2-3 | Replace `List<string>` allocation in `FormatThreadState` with `Span<string>` or `string.Create` | Performance | Medium | Medium | High | Improvement | — |
 | P2-4 | Remove redundant `_stackRootCountByThreadAddress` mirror when shared cache is present | Performance | Low | Low | High | Improvement | ✅ DONE |
-| P2-5 | Add `BlockedThreadRatio` (`BlockedThreadCount / AliveThreadCount`) to `ThreadDomainResult`; emit as key metric | Reporting | Medium | Trivial | High | Improvement | — |
+| P2-5 | Add `BlockedThreadRatio` (`BlockedThreadCount / AliveThreadCount`) to `ThreadDomainResult`; emit as key metric | Reporting | Medium | Trivial | High | Improvement | ✅ DONE |
 | P2-6 | Add `StackMemorySummary` (total, mean, max, p95 stack bytes) to `ThreadDomainResult` | Diagnostic | Medium | Low | High | Improvement | — |
 | P2-7 | Add targeted findings for: finalizer blocked, blocked ratio > 70%, zero active threads, async chain depth > 10 | Reporting | High | Low | High | Improvement | — |
 | P2-8 | Add `WaitPatterns` entries for `CountdownEvent.Wait`, `Barrier.SignalAndWait`, `ValueTask` | Correctness | Medium | Low | Medium | Improvement | — |

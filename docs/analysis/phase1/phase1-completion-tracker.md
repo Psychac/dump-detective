@@ -14,7 +14,7 @@
 | **Total P1 Identified** | 139 |
 | **P0 Implemented** | 40 |
 | **P1 Implemented** | 57 |
-| **P2 Implemented** | 15 |
+| **P2 Implemented** | 16 |
 | **Overall P0+P1 Rate** | 46.6% (97/208) |
 
 ---
@@ -42,7 +42,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 18 | **ThreadAnalyzer** | 2/3 | 4/4 | 3/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4 done; P2-3,P2-5,P2-6,P2-7,P2-8 pending |
+| 18 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 9 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
 | 11 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
 | 12 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
@@ -52,7 +52,7 @@
 | 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 
-**Subtotal: 16/21 P0 done, 18/35 P1 done, 14/45 P2 done** (in-progress pools)
+**Subtotal: 16/21 P0 done, 18/35 P1 done, 15/45 P2 done** (in-progress pools)
 
 ---
 

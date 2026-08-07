@@ -38,6 +38,7 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<string>? FinalizerFrames = null,
     int AsyncChainThreadCount = 0,
     int MaxAsyncChainDepth = 0,
+    double BlockedThreadRatio = 0.0,
     int SampledSnapshotCount = 0,
     int CapturedSnapshotCount = 0,
     int SamplingCapacity = 0,

@@ -296,6 +296,7 @@ namespace DumpDetective.Analysis.Analyzers
                     finalizerFrameStrings,
                     threadInfo.AsyncChainThreadCount,
                     threadInfo.MaxAsyncChainDepth,
+                    threadInfo.AliveCount > 0 ? (double)threadInfo.PotentiallyBlockedThreads.Count / threadInfo.AliveCount : 0.0,
                     sampledSnapshots.Count,
                     (locksSnapshots.Count + blockedSnapshots.Count + exceptionSnapshots.Count),
                     options.MaxSampledStackSnapshots,

@@ -32,6 +32,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["blocked_threads"] = new NumericMetricValue(d.BlockedThreadCount, MetricUnit.Count),
             ["lock_holding_threads"] = new NumericMetricValue(d.LockHoldingThreadCount, MetricUnit.Count),
             ["threads_with_exceptions"] = new NumericMetricValue(d.ThreadsWithActiveExceptionsCount, MetricUnit.Count),
+            ["blocked_thread_ratio"] = new TextMetricValue($"{d.BlockedThreadRatio:P1}"),
             ["threadpool_queue_depth"] = new NumericMetricValue(d.ThreadPoolQueueDepth, MetricUnit.Count),
             ["threadpool_active_workers"] = new NumericMetricValue(d.ThreadPoolActiveWorkers, MetricUnit.Count),
             ["threadpool_idle_workers"] = new NumericMetricValue(d.ThreadPoolIdleWorkers, MetricUnit.Count),

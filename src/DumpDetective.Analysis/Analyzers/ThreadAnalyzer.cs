@@ -603,7 +603,11 @@ namespace DumpDetective.Analysis.Analyzers
                 ? sharedCache.GetOrCountThreadStackRoots(thread, maxStackRootsToCount)
                 : CountStackRoots(thread, maxStackRootsToCount);
 
-            cache[thread.Address] = count;
+            // Only populate local cache when there's no shared cache; the shared cache
+            // already deduplicates, so the local mirror is redundant when present.
+            if (sharedCache is null)
+                cache[thread.Address] = count;
+
             return count;
         }
 

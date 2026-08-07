@@ -283,7 +283,7 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 | P0-3 | Rename `CycleSummary` to `BlockedAtFrame` or populate it with a real cycle description | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P0-4 | Fix `DeadlockCandidateCount >= 2` → `Critical` threshold to require a confirmed cycle | Correctness | High | Low | High | Improvement | ✅ DONE |
 | P1-1 | Capture waiting thread IDs per contested lock (via `BlockingObjects`) | Diagnostic quality | High | Low (follows P0-1) | High | Improvement |
-| P1-2 | Add owner thread frame summary (N frames) for deadlock candidate owners | Diagnostic quality | High | Low | High | Improvement |
+| P1-2 | Add owner thread frame summary (N frames) for deadlock candidate owners | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P1-3 | Replace O(M×N) lock-to-thread grouping with a pre-built `Dictionary<int, List<LockContention>>` | Performance | Medium | Low | High | Improvement |
 | P1-4 | Add unit tests: contested lock detection, deadlock cycle detection, no-contention path, null-owner path | Testing | High | Medium | High | Improvement |
 | P2-1 | Expose unresolved-owner count in domain result and flag in report (thread exited while holding lock) | Diagnostic quality | Medium | Low | High | Improvement |

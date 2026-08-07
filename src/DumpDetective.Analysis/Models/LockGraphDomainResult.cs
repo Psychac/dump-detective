@@ -9,7 +9,8 @@ internal sealed record DeadlockCandidateSnapshot(
     uint OsThreadId,
     IReadOnlyList<string> LockObjectTypes,
     IReadOnlyList<ulong> LockObjectAddresses,
-    string BlockedAtFrame);
+    string BlockedAtFrame,
+    IReadOnlyList<string> OwnerThreadFrames = null!);
 
 internal sealed record ContestedLockSnapshot(
     ulong ObjectAddress,

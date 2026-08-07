@@ -88,15 +88,19 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 string lockAddresses = dc.LockObjectAddresses.Count > 0
                     ? string.Join(", ", dc.LockObjectAddresses.Select(address => $"0x{address:x}"))
                     : "(none)";
+                string ownerFrames = dc.OwnerThreadFrames.Count > 0
+                    ? FormatHelper.TruncateString(string.Join(" ← ", dc.OwnerThreadFrames), 100)
+                    : "(no frames)";
                 dcRows.Add(new TableRow([
                     Cell($"{dc.ManagedThreadId}"),
                     Cell($"{dc.OsThreadId}"),
                     Cell(FormatHelper.TruncateString(lockTypes, 60)),
                     Cell(FormatHelper.TruncateString(lockAddresses, 70)),
-                    Cell(FormatHelper.TruncateString(dc.BlockedAtFrame, 80))]));
+                    Cell(FormatHelper.TruncateString(dc.BlockedAtFrame, 80)),
+                    Cell(ownerFrames)]));
             }
             compactTables.Add(STCompact("Deadlock candidate threads",
-                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Blocked At Frame") },
+                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Blocked At Frame"), CH("Stack Trace") },
                 dcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

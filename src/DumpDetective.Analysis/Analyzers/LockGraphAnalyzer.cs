@@ -95,12 +95,15 @@ namespace DumpDetective.Analysis.Analyzers
 
                 string summary = $"Thread {dc.Thread.ManagedThreadId} (OS: {dc.Thread.OSThreadId}) holds {dc.LocksHeld.Count} lock(s), blocked at: {dc.TopFrame}";
 
+                var ownerFrames = CaptureOwnerThreadFrames(dc.Thread, maxFrames: 3);
+
                 deadlockDetails.Add(new DeadlockCandidateSnapshot(
                     (uint)dc.Thread.ManagedThreadId,
                     (uint)dc.Thread.OSThreadId,
                     lockTypes,
                     lockAddresses,
-                    summary));
+                    summary,
+                    ownerFrames));
             }
 
             return new LockGraphDomainResult(
@@ -220,6 +223,26 @@ namespace DumpDetective.Analysis.Analyzers
                 return StringConstants.UnknownType;
 
             return obj.Type.Name ?? StringConstants.UnknownType;
+        }
+
+        private static IReadOnlyList<string> CaptureOwnerThreadFrames(ClrThread thread, int maxFrames)
+        {
+            var frames = new List<string>(maxFrames);
+            if (thread == null || !thread.IsAlive)
+                return frames;
+
+            int frameCount = 0;
+            foreach (var frame in thread.EnumerateStackTrace())
+            {
+                if (frameCount >= maxFrames)
+                    break;
+                if (frame.Method?.Signature != null)
+                {
+                    frames.Add(frame.Method.Signature);
+                    frameCount++;
+                }
+            }
+            return frames;
         }
 
         public void Dispose() { }

@@ -280,7 +280,7 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 |---|---|---|---|---|---|---|
 | P0-1 | Use `ClrThread.BlockingObjects` to build actual wait-for edges; replace top-frame heuristic | Correctness | Critical | Medium | High | Improvement |
 | P0-2 | Implement DFS cycle detection on the wait-for graph; only emit deadlock when a cycle is proven | Correctness | Critical | Medium | High | Improvement |
-| P0-3 | Rename `CycleSummary` to `BlockedAtFrame` or populate it with a real cycle description | Diagnostic quality | High | Low | High | Improvement |
+| P0-3 | Rename `CycleSummary` to `BlockedAtFrame` or populate it with a real cycle description | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P0-4 | Fix `DeadlockCandidateCount >= 2` → `Critical` threshold to require a confirmed cycle | Correctness | High | Low | High | Improvement |
 | P1-1 | Capture waiting thread IDs per contested lock (via `BlockingObjects`) | Diagnostic quality | High | Low (follows P0-1) | High | Improvement |
 | P1-2 | Add owner thread frame summary (N frames) for deadlock candidate owners | Diagnostic quality | High | Low | High | Improvement |

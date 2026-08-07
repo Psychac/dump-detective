@@ -93,10 +93,10 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell($"{dc.OsThreadId}"),
                     Cell(FormatHelper.TruncateString(lockTypes, 60)),
                     Cell(FormatHelper.TruncateString(lockAddresses, 70)),
-                    Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
+                    Cell(FormatHelper.TruncateString(dc.BlockedAtFrame, 80))]));
             }
             compactTables.Add(STCompact("Deadlock candidate threads",
-                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Summary") },
+                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Blocked At Frame") },
                 dcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

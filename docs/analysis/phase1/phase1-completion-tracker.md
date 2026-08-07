@@ -9,13 +9,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total Analyzers Audited** | 33 |
-| **Total P0 Identified** | 69 |
-| **Total P1 Identified** | 139 |
-| **P0 Implemented** | 40 |
+| **Total Analyzers Audited** | 34 |
+| **Total P0 Identified** | 73 |
+| **Total P1 Identified** | 143 |
+| **P0 Implemented** | 41 |
 | **P1 Implemented** | 57 |
-| **P2 Implemented** | 16 |
-| **Overall P0+P1 Rate** | 46.6% (97/208) |
+| **P2 Implemented** | 15 |
+| **Overall P0+P1 Rate** | 45.2% (98/216) |
 
 ---
 
@@ -56,6 +56,25 @@
 
 ---
 
+## Analyzers: IN_PROGRESS (Some P0/P1 Done)
+
+| # | Analyzer | P0 | P1 | P2 | P3 | Notes |
+|---|----------|----|----|----|----|-------|
+| 18 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
+| 9 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
+| 11 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 12 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 13 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 14 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
+| 15 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
+| 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
+| 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 19 | **LockGraphAnalyzer** | 1/4 | 0/4 | 0/4 | 0/3 | P0-3 done (field rename for clarity); P0-1,P0-2,P0-4 pending |
+
+**Subtotal: 17/25 P0 done, 18/39 P1 done, 15/51 P2 done** (in-progress pools)
+
+---
+
 ## Analyzers: NOT STARTED (No P0/P1 Implementation)
 
 | Analyzer | P0 | P1 | Total Pending | Notes |
@@ -67,7 +86,6 @@
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
-| LockGraphAnalyzer | 0/4 | 0/4 | 8 | — |
 | LohFragmentationAnalyzer | 0/2 | 0/5 | 7 | — |
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |

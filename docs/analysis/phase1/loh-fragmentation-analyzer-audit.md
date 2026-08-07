@@ -357,7 +357,7 @@ inconsistency (Area 2-W1) and wrong per-segment size column (Area 2-W2) are user
 | # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
 |---|---------------|--------|-----------|-----------|----------------|--------|
 | **P0** | Fix `IsLohSegment` to use enum comparison and align index-path segment filter with what `LohFreeBlockWriter` writes (include/exclude Pinned consistently) | High | Low | High | Improvement | ✅ DONE |
-| **P0** | Align severity thresholds between `LohFragmentationFindingGenerator` and `LohFragmentationSectionBuilder` | Medium | Low | High | Improvement | — |
+| **P0** | Align severity thresholds between `LohFragmentationFindingGenerator` and `LohFragmentationSectionBuilder` | Medium | Low | High | Improvement | ✅ DONE |
 | **P1** | Add `TotalBytes` to `LohSegmentSnapshot`; fix per-segment Size column in section builder | High | Low | High | Improvement | — |
 | **P1** | Replace unbounded `largeObjectCandidates` list in fallback with a top-N bounded accumulator (same pattern as `LargeObjectTracker`) | Medium | Low | High | Improvement | — |
 | **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement | — |

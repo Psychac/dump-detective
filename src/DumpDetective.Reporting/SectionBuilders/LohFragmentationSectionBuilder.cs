@@ -66,9 +66,9 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                 })));
         }
 
-        if (d.FragmentationPercent >= 40)
+        if (d.FragmentationPercent >= 30)
             blocks.Add(T("LOH fragmentation is critically high — compaction or large-object pooling recommended."));
-        else if (d.FragmentationPercent >= 20)
+        else if (d.FragmentationPercent >= 15)
             blocks.Add(T("LOH fragmentation is elevated — monitor allocation patterns."));
         else
             blocks.Add(T("LOH fragmentation is within normal range."));
@@ -107,16 +107,16 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         }
 
         SectionLeadFinding? leadFinding = null;
-        if (d.FragmentationPercent > 60)
+        if (d.FragmentationPercent >= 30)
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
-                Title: $"Severe LOH fragmentation — {d.FragmentationPercent:F1}% of LOH is free space",
+                Title: $"Critical LOH fragmentation — {d.FragmentationPercent:F1}% of LOH is free space",
                     Summary: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
                 Recommendation: "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,
                 Caveats: []);
-        else if (d.FragmentationPercent > 30)
+        else if (d.FragmentationPercent >= 15)
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated LOH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
@@ -135,12 +135,12 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
 
     private static string GetSeverityBand(double fragmentationPercent)
     {
-        if (fragmentationPercent > 60)
-            return "Critical (> 60%)";
+        if (fragmentationPercent >= 30)
+            return "Critical (\u2265 30%)";
 
-        if (fragmentationPercent > 30)
-            return "Warning (30%\u201360%)";
+        if (fragmentationPercent >= 15)
+            return "Warning (15%\u201330%)";
 
-        return "OK (\u2264 30%)";
+        return "OK (< 15%)";
     }
 }

@@ -161,16 +161,28 @@ namespace DumpDetective.Analysis.Analyzers
 
             result.ContestedLocks.Sort((a, b) => b.WaitingThreadCount.CompareTo(a.WaitingThreadCount));
 
+            // Pre-build lock-by-owner-thread map to avoid O(M×N) lookup in the loop below
+            var locksByOwnerManagedId = new Dictionary<int, List<LockContention>>();
+            foreach (var lockEntry in result.AllHeldLocks)
+            {
+                if (lockEntry.OwnerThread != null)
+                {
+                    if (!locksByOwnerManagedId.TryGetValue(lockEntry.OwnerThread.ManagedThreadId, out var lockList))
+                    {
+                        lockList = new List<LockContention>();
+                        locksByOwnerManagedId[lockEntry.OwnerThread.ManagedThreadId] = lockList;
+                    }
+                    lockList.Add(lockEntry);
+                }
+            }
+
             // Deadlock candidates: threads that own at least one inflated lock AND are blocked on a monitor
-            var ownerManagedIds = new HashSet<uint>(
-                result.AllHeldLocks
-                    .Where(l => l.OwnerThread != null)
-                    .Select(l => (uint)l.OwnerThread!.ManagedThreadId));
+            var ownerManagedIds = new HashSet<int>(locksByOwnerManagedId.Keys);
 
             foreach (var thread in threads)
             {
                 if (!thread.IsAlive || thread.LockCount == 0) continue;
-                if (!ownerManagedIds.Contains((uint)thread.ManagedThreadId)) continue;
+                if (!ownerManagedIds.Contains(thread.ManagedThreadId)) continue;
 
                 string? topFrameSignature;
                 if (_participantScanSucceeded)
@@ -204,9 +216,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Thread = thread,
                     TopFrame = topFrameSignature,
-                    LocksHeld = result.AllHeldLocks
-                        .Where(l => l.OwnerThread?.ManagedThreadId == thread.ManagedThreadId)
-                        .ToList()
+                    LocksHeld = locksByOwnerManagedId.TryGetValue(thread.ManagedThreadId, out var locks) ? locks : []
                 });
             }
 

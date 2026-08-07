@@ -17,6 +17,7 @@ internal sealed record ThreadDomainResult(
     IReadOnlyDictionary<string, int>? ThreadStateDistribution = null,
     IReadOnlyDictionary<string, int>? AppDomainDistribution = null,
     IReadOnlyDictionary<string, int>? GcModeDistribution = null,
+    IReadOnlyDictionary<string, int>? ExceptionTypeDistribution = null,
     IReadOnlyList<ThreadStateSnapshot>? TopLockedThreads = null,
     IReadOnlyList<ThreadStateSnapshot>? TopBlockedThreads = null,
     IReadOnlyList<ThreadExceptionSnapshot>? ThreadsWithActiveExceptions = null,

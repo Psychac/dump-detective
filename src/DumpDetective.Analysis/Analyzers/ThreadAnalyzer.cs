@@ -264,6 +264,7 @@ namespace DumpDetective.Analysis.Analyzers
                     new Dictionary<string, int>(threadInfo.StateDistribution),
                     new Dictionary<string, int>(threadInfo.AppDomainDistribution),
                     new Dictionary<string, int>(threadInfo.GcModeDistribution),
+                    new Dictionary<string, int>(threadInfo.ExceptionTypeDistribution),
                     locksSnapshots,
                     blockedSnapshots,
                     exceptionSnapshots,

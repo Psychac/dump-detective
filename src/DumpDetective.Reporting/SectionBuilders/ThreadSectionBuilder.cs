@@ -135,6 +135,14 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact("GC mode distribution", new[] { CH("GC Mode"), CH("Count","number") }, gcModeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (d.ExceptionTypeDistribution is { Count: > 0 })
+        {
+            var exTypeRows = new List<TableRow>(d.ExceptionTypeDistribution.Count);
+            foreach (var kvp in d.ExceptionTypeDistribution.OrderByDescending(kvp => kvp.Value))
+                exTypeRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
+            compactTables.Add(STCompact("Exception type distribution", new[] { CH("Exception Type"), CH("Count","number") }, exTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (d.ThreadsWithActiveExceptions is { Count: > 0 })
         {
             var exRows = new List<TableRow>(d.ThreadsWithActiveExceptions.Count);

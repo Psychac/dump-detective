@@ -299,7 +299,7 @@ The `WaitPatterns` table does not cover:
 | # | Recommendation | Area | Impact | Difficulty | Confidence | Class | Status |
 |---|---|---|---|---|---|---|---|
 | P0-1 | Fix `ThreadPoolCount` double-count: add `else if` guard between flag check and frame check | Correctness | High | Trivial | High | Improvement | ✅ DONE |
-| P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement | — |
+| P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement | ✅ DONE |
 | P0-3 | Call `thread.EnumerateBlockingObjects()` in `ProcessThread`; emit blocking-object table (address, type, owner thread ID) per blocked snapshot | Diagnostic | Very High | Medium | High | Improvement | — |
 | P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement | — |
 | P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | — |

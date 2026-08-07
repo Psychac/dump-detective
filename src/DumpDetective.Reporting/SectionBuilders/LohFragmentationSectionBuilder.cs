@@ -43,7 +43,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                 var s = segments[i];
                 segRows.Add(new TableRow([
                     Cell($"0x{s.Address:x16}"),
-                    Cell(FormatHelper.FormatBytes(d.TotalBytes / (ulong)Math.Max(1, d.SegmentCount))),
+                    Cell(FormatHelper.FormatBytes(s.TotalBytes), (long)s.TotalBytes),
                     Cell($"{s.FragmentationPercent:F1}%", s.FragmentationPercent),
                     Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock)]));
             }

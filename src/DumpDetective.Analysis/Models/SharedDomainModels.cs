@@ -6,6 +6,7 @@ namespace DumpDetective.Analysis.Models;
 
 public sealed record LohSegmentSnapshot(
     ulong Address,
+    ulong TotalBytes,
     double FragmentationPercent,
     ulong FreeBytes,
     ulong LargestFreeBlock);

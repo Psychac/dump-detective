@@ -150,7 +150,7 @@ namespace DumpDetective.Analysis.Analyzers
             int topN = Math.Min(options.TopSegments, segmentStats.Count);
             var topSegments = new List<LohSegmentSnapshot>(topN);
             for (int i = 0; i < topN; i++)
-                topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
+                topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].TotalBytes, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
 
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
 
@@ -262,7 +262,7 @@ namespace DumpDetective.Analysis.Analyzers
             // Step 3: Compute per-segment and global stats.
             ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
             int totalFreeBlocks = 0;
-            var segStats = new List<(ulong Address, double FragPct, ulong FreeBytes, ulong LargestFree)>(segmentTotalBytes.Count);
+            var segStats = new List<(ulong Address, ulong TotalBytes, double FragPct, ulong FreeBytes, ulong LargestFree)>(segmentTotalBytes.Count);
 
             foreach ((ulong addr, ulong totalBytes) in segmentTotalBytes)
             {
@@ -283,7 +283,7 @@ namespace DumpDetective.Analysis.Analyzers
                 totalFreeBlocks += segFreeCount;
                 if (segLargest > maxFreeBlock) maxFreeBlock = segLargest;
 
-                segStats.Add((addr, fragPct, segFree, segLargest));
+                segStats.Add((addr, totalBytes, fragPct, segFree, segLargest));
             }
 
             double overallFragPct = totalAllBytes == 0 ? 0 : totalFreeBytes * 100.0 / totalAllBytes;
@@ -297,7 +297,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             var topSegs = new List<LohSegmentSnapshot>(Math.Min(options.TopSegments, segStats.Count));
             for (int i = 0; i < topSegs.Capacity; i++)
-                topSegs.Add(new LohSegmentSnapshot(segStats[i].Address, segStats[i].FragPct, segStats[i].FreeBytes, segStats[i].LargestFree));
+                topSegs.Add(new LohSegmentSnapshot(segStats[i].Address, segStats[i].TotalBytes, segStats[i].FragPct, segStats[i].FreeBytes, segStats[i].LargestFree));
 
             // Step 4: Build free-gap histogram.
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);

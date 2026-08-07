@@ -54,9 +54,9 @@
 | 20 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 21 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 22 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
-| 23 | **LohFragmentationAnalyzer** | 2/2 | 0/5 | 0/7 | 0/2 | ✅ P0 complete (P0-1, P0-2); all P1, all P2 pending |
+| 23 | **LohFragmentationAnalyzer** | 2/2 | 1/5 | 0/7 | 0/2 | ✅ P0 complete; P1-1 done (TotalBytes + per-segment size); P1-2,P1-3,P1-4,P1-5 pending |
 
-**Subtotal: 28/34 P0 done, 28/49 P1 done, 19/51 P2 done** (in-progress pools)
+**Subtotal: 28/34 P0 done, 29/49 P1 done, 19/51 P2 done** (in-progress pools)
 
 ---
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **75** | — |
 | **P0 items implemented** | **46** | 61.3% (18 COMPLETE + 28 IN_PROGRESS) |
 | **Total P1 recommendations** | **148** | — |
-| **P1 items implemented** | **64** | 43.2% (36 COMPLETE + 28 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **49.3%** | (110/223) |
+| **P1 items implemented** | **65** | 43.9% (36 COMPLETE + 29 IN_PROGRESS) |
+| **Combined P0+P1 rate** | **49.8%** | (111/223) |
 
 ---
 

@@ -24,6 +24,7 @@ internal sealed record LockGraphDomainResult(
     int ContestedLockCount,
     int MaxWaitersOnSingleLock,
     int DeadlockCandidateCount,
+    int UnresolvedOwnerCount = 0,
     IReadOnlyList<NameCountEntry>? TopContestedLockTypes = null,
     IReadOnlyList<DeadlockCandidateSnapshot>? DeadlockCandidateDetails = null,
     IReadOnlyList<ContestedLockSnapshot>? ContestedLockDetails = null) : AnalyzerDomainResult;

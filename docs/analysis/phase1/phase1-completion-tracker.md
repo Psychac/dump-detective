@@ -51,9 +51,9 @@
 | 15 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
-| 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 0/4 | 0/3 | P0-3,P0-4 done (field rename + severity fix); P1-2,P1-3 done (owner frames + perf); P0-1,P0-2,P1-1,P1-4 pending |
+| 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 1/6 | 0/3 | P0-3,P0-4 done (field rename + severity fix); P1-2,P1-3 done (owner frames + perf); P2-1 done (unresolved owners); P0-1,P0-2,P1-1,P1-4,P2-2+ pending |
 
-**Subtotal: 18/25 P0 done, 20/39 P1 done, 15/51 P2 done** (in-progress pools)
+**Subtotal: 18/25 P0 done, 20/39 P1 done, 16/51 P2 done** (in-progress pools)
 
 ---
 

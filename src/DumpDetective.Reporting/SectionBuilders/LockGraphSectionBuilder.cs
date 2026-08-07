@@ -30,7 +30,11 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["contested_locks"] = new NumericMetricValue(d.ContestedLockCount, MetricUnit.Count),
             ["max_waiters_on_single_lock"] = new NumericMetricValue(d.MaxWaitersOnSingleLock, MetricUnit.Count),
             ["deadlock_candidates"] = new NumericMetricValue(d.DeadlockCandidateCount, MetricUnit.Count),
+            ["unresolved_owners"] = new NumericMetricValue(d.UnresolvedOwnerCount, MetricUnit.Count),
         };
+
+        if (d.UnresolvedOwnerCount > 0)
+            blocks.Add(T($"⚠ {d.UnresolvedOwnerCount} lock(s) held by threads that are no longer in the runtime (possible thread crash/termination)."));
 
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)

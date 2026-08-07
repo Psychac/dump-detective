@@ -90,6 +90,20 @@ internal sealed class StringFindingGenerator : IFindingGenerator
                 MetricUnit: "bytes"));
         }
 
+        if (!r.DeduplicationSkipped && r.SamplingCoverage < 0.05 && r.SamplingCoverage > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Analysis",
+                Severity: FindingSeverity.Info,
+                Title: "Low sampling coverage on deduplication analysis",
+                Evidence: $"String deduplication was performed on a sample covering only {r.SamplingCoverage * 100.0:F1}% of all strings ({r.StringsSampled:N0} sampled out of ~{(int)(r.StringsSampled / Math.Max(r.SamplingCoverage, 0.01)):N0} total). Results may not be representative of heap-wide patterns.",
+                Recommendation: "Increase sampling limits or re-run with Full dedup mode to validate findings. Current results should be treated as indicative, not definitive.",
+                Tags: ["sampling", "coverage", "deduplication"],
+                MetricValue: r.SamplingCoverage * 100.0,
+                MetricUnit: "percent"));
+        }
+
         return findings;
     }
 }

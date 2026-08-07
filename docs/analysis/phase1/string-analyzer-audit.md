@@ -297,7 +297,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High | ✅ DONE |
 | **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High | ✅ DONE |
-| **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High |
+| **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High | ✅ DONE |
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
 | **P1-4** | Fix `estimatedInterningSaving` — either remove it or compute it correctly as `DuplicateWastedBytes` for patterns where all instances share the same value (prebuilt index provides this) | Improvement | Medium | Low | High |
 | **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High |
@@ -313,6 +313,40 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
 
 ---
+
+---
+
+## P1-2 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was implemented:**
+1. Added low-coverage warning finding in StringFindingGenerator
+2. Condition: Emitted when deduplication was performed (not skipped) AND SamplingCoverage < 5% AND > 0%
+3. Severity: Info (not Warning, to avoid over-alerting on sampling limitations)
+4. Evidence: Reports actual coverage percentage + sampled count + estimated total
+5. Recommendation: Increase sampling limits or re-run with Full dedup mode to validate
+
+**Why it matters:**
+- Engineers need to know when dedup results are based on a small sample
+- At < 5% coverage, results may not be representative (e.g., 1% sample of 5M strings = only 50K strings analyzed)
+- Without this warning, engineers might act on unreliable pattern data for string interning
+- Related to P0-1 fix (SampledUniquePatterns rename) — this adds the guardrail
+
+**Example finding:**
+```
+Title: Low sampling coverage on deduplication analysis
+Evidence: String deduplication was performed on a sample covering only 1.0% of all 
+strings (50,000 sampled out of ~5,000,000 total). Results may not be representative 
+of heap-wide patterns.
+Recommendation: Increase sampling limits or re-run with Full dedup mode to validate 
+findings. Current results should be treated as indicative, not definitive.
+```
+
+**Files changed:** 1 file
+- StringFindingGenerator.cs (added low-coverage finding logic)
+
+**Build status:** ✓ Clean (StringFindingGenerator compiles without errors)
 
 ---
 

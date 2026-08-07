@@ -308,6 +308,13 @@ namespace DumpDetective.Analysis.Analyzers
                 ? source.Thread.StackBase - source.Thread.StackLimit
                 : 0;
 
+            var frameStrings = new List<string>(Math.Min(maxFramesForThreadScan, source.TopFrames.Count));
+            for (int i = 0; i < source.TopFrames.Count && frameStrings.Count < maxFramesForThreadScan; i++)
+            {
+                var f = source.TopFrames[i];
+                frameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
+            }
+
             return new ThreadStateSnapshot(
                 (uint)source.Thread.ManagedThreadId,
                 source.Thread.OSThreadId,
@@ -316,10 +323,7 @@ namespace DumpDetective.Analysis.Analyzers
                 source.Thread.GCMode.ToString(),
                 source.WaitCategory,
                 source.WaitReason,
-                source.TopFrames
-                    .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
-                    .Take(maxFramesForThreadScan)
-                    .ToArray(),
+                frameStrings,
                 source.StackRootCount,
                 stackSizeBytes,
                 source.ThreadName);
@@ -327,6 +331,13 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)
         {
+            var frameStrings = new List<string>(Math.Min(maxFramesForThreadScan, source.TopFrames.Count));
+            for (int i = 0; i < source.TopFrames.Count && frameStrings.Count < maxFramesForThreadScan; i++)
+            {
+                var f = source.TopFrames[i];
+                frameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
+            }
+
             return new ThreadExceptionSnapshot(
                 (uint)source.Thread.ManagedThreadId,
                 source.Thread.OSThreadId,
@@ -335,10 +346,7 @@ namespace DumpDetective.Analysis.Analyzers
                 FormatThreadState(source.Thread.State),
                 source.Thread.GCMode.ToString(),
                 (int)source.Thread.LockCount,
-                source.TopFrames
-                    .Select(f => f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType)
-                    .Take(maxFramesForThreadScan)
-                    .ToArray(),
+                frameStrings,
                 source.StackRootCount);
         }
 
@@ -562,17 +570,14 @@ namespace DumpDetective.Analysis.Analyzers
             IProgress<AnalyzerProgressReport>? progress)
         {
             // Sort threads with locks by lock count (descending)
-            result.ThreadsWithLocks = threadsWithLocks
-                .OrderByDescending(t => t.Thread.LockCount)
-                .ToList();
+            threadsWithLocks.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.ThreadsWithLocks = threadsWithLocks;
 
-            result.PotentiallyBlockedThreads = blockedThreads
-                .OrderByDescending(t => t.Thread.LockCount)
-                .ToList();
+            blockedThreads.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.PotentiallyBlockedThreads = blockedThreads;
 
-            result.ThreadsWithExceptions = threadsWithExceptions
-                .OrderByDescending(t => t.Thread.LockCount)
-                .ToList();
+            threadsWithExceptions.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.ThreadsWithExceptions = threadsWithExceptions;
 
             // materialize reservoir samples into the categorization result
             if (sampler.Capacity > 0)

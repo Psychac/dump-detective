@@ -515,7 +515,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         {
             if (info.Count <= minCount) continue;
             duplicatePatternCount++;
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
+            ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
             duplicateWastedBytes += wasted;
             byWasteHeap.Enqueue(info, info.TotalSize);
             if (byWasteHeap.Count > stringOptions.TopDuplicatesToShow) byWasteHeap.Dequeue();
@@ -1056,7 +1056,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         while (pq.Count > 0)
         {
             StringLeakInfo info = pq.Dequeue();
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
+            ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
             int avg = info.Count > 0 ? (int)Math.Min(info.TotalSize / (ulong)info.Count, int.MaxValue) : 0;
             string? dominantType = null;
             if (info.DominantMethodTable != 0 && mtToName is not null && mtToName.TryGetValue(info.DominantMethodTable, out var n))
@@ -1086,7 +1086,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         while (pq.Count > 0)
         {
             StringLeakInfo info = pq.Dequeue();
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
+            ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
             int avg = info.Count > 0 ? (int)Math.Min(info.TotalSize / (ulong)info.Count, int.MaxValue) : 0;
             string? dominantType = null;
             if (info.DominantMethodTable != 0 && mtToName is not null && mtToName.TryGetValue(info.DominantMethodTable, out var n))

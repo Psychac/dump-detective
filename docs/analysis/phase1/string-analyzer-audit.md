@@ -295,7 +295,7 @@ Type-level object count and size grouping. No duplicate content detection.
 |---|---|---|---|---|---|---|
 | **P0-1** | Fix `UniqueStrings` / `DuplicationRatio` semantics at low coverage — rename to `SampledUniquePatterns` with XML documentation | Improvement | High | Low | High | ✅ DONE |
 | **P0-2** | Add `VeryLongStringFinding` in `StringFindingGenerator` for LOH-resident strings | Improvement | High | Low | High | ✅ DONE |
-| **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High |
+| **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High |
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High |
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
@@ -316,9 +316,43 @@ Type-level object count and size grouping. No duplicate content detection.
 
 ---
 
-## P0-2 Implementation Summary (COMPLETED)
+## P0-3 Implementation Summary (COMPLETED)
 
 **Commit:** (pending)
+
+**What was fixed:**
+The `DuplicateWastedBytes` calculation used integer truncation that systematically over-counted waste across thousands of duplicate patterns.
+
+**The fix:**
+Replaced the formula in three locations (main aggregation + two drain methods):
+
+**Before (incorrect):**
+```csharp
+ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
+```
+Example: TotalSize=100, Count=3 → 100/3=33 (truncated) → wasted=67 (over-count)
+
+**After (correct):**
+```csharp
+ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
+```
+Example: TotalSize=100, Count=3 → 100*2/3=66.67→66 (mathematically equivalent, no truncation bias)
+
+**Why it matters:**
+- The old formula biased waste calculations upward (always rounded down, then subtracted)
+- Applied across thousands of patterns, the cumulative error inflates `DuplicateWastedBytes` reported in findings
+- Engineers rely on waste figures to prioritize string interning efforts; incorrect numbers mislead optimization priorities
+
+**Files changed:** 1 file
+- StringAnalyzer.cs (3 locations: main aggregation, DrainToDescendingWaste, DrainToDescendingCount)
+
+**Build status:** ✓ Clean (StringAnalyzer project only; unrelated ClrMD errors in ThreadAnalyzer)
+
+---
+
+## P0-2 Implementation Summary (COMPLETED)
+
+**Commit:** 612cfc6
 
 **What was implemented:**
 1. Added `VeryLongStringFinding` in StringFindingGenerator (Info severity)

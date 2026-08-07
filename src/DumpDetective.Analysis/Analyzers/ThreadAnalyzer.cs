@@ -703,11 +703,33 @@ namespace DumpDetective.Analysis.Analyzers
             if (frames.Count == 0)
                 return;
 
-            string top = ThreadWaitClassifier.GetFrameSignature(frames[0]);
-            if (string.IsNullOrWhiteSpace(top))
-                return;
+            // Find first non-framework frame for better hotspot signal
+            for (int i = 0; i < frames.Count; i++)
+            {
+                string sig = ThreadWaitClassifier.GetFrameSignature(frames[i]);
+                if (!IsFrameworkFrameSignature(sig))
+                {
+                    IncrementCount(hotspots, sig);
+                    return;
+                }
+            }
 
-            IncrementCount(hotspots, top);
+            // Fall back to first frame if all are framework frames
+            string fallback = ThreadWaitClassifier.GetFrameSignature(frames[0]);
+            if (!string.IsNullOrWhiteSpace(fallback))
+                IncrementCount(hotspots, fallback);
+        }
+
+        private static bool IsFrameworkFrameSignature(string signature)
+        {
+            if (string.IsNullOrWhiteSpace(signature))
+                return false;
+
+            return signature.StartsWith("System.", StringComparison.Ordinal) ||
+                   signature.StartsWith("Microsoft.", StringComparison.Ordinal) ||
+                   signature.StartsWith("ThreadPool", StringComparison.Ordinal) ||
+                   signature.StartsWith("Task", StringComparison.Ordinal) ||
+                   signature.StartsWith("mscorlib", StringComparison.Ordinal);
         }
 
         private static void IncrementCount(Dictionary<string, int> map, string key)

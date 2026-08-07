@@ -436,31 +436,31 @@ in DumpDetective's platform but is not wired into this analyzer.
 
 ### Improvements (Enhance CrashAnalyzer)
 
-| ID | Recommendation | P | Impact | Difficulty | Confidence |
-|---|---|---|---|---|---|
-| I-1 | Fix `BuildCrashThreadSnapshots`: eliminate static wrapper, call `this.BuildCrashThreadSnapshotsImpl` | P0 | High | Low | High |
-| I-2 | Replace `_stackTrace` byte-buffer parsing with `ClrObject.AsException()?.StackTrace` | P0 | High | Low | High |
-| I-3 | Migrate full field extraction (`_message`, `_HResult`, `_innerException`) to `ClrException` wrapper | P1 | High | Medium | High |
-| I-4 | Raise thread stack capture from `.Take(10)` to match `MaxCurrentThreadFramesToPrint` ceiling | P1 | Medium | Low | High |
-| I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High |
-| I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High |
-| I-7 | Add `ILogger<CrashAnalyzer>?` injection; emit per-object diagnostics on `catch {}` sites | P1 | Medium | Low | High |
-| I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High |
-| I-9 | Add `AggregateException` inner exception unwrapping | P2 | High | Medium | High |
-| I-10 | Add exception message distribution per type (distinct count + most common message) | P2 | High | Low | High |
-| I-11 | Implement crash bucket `(exception_type, top_user_frame)` | P2 | High | Medium | High |
-| I-12 | Flag rethrown exceptions (non-null `_remoteStackTraceString`) and lower inference confidence | P2 | Medium | Low | High |
-| I-13 | Derive lead finding `ConfidenceScore` from actual `InferenceConfidence` distribution | P2 | Medium | Low | High |
-| I-14 | Add exception heap size per type (sum `HeapEntry.Size` in participant scan) | P3 | Medium | Low | Medium |
-| I-15 | Cross-reference top user-code frames against `ModuleDomainResult` for assembly attribution | P3 | Medium | Medium | Medium |
+| ID | Recommendation | P | Impact | Difficulty | Confidence | Status |
+|---|---|---|---|---|---|---|
+| I-1 | Fix `BuildCrashThreadSnapshots`: eliminate static wrapper, call `this.BuildCrashThreadSnapshotsImpl` | P0 | High | Low | High | ✅ DONE |
+| I-2 | Replace `_stackTrace` byte-buffer parsing with `ClrObject.AsException()?.StackTrace` | P0 | High | Low | High | Pending |
+| I-3 | Migrate full field extraction (`_message`, `_HResult`, `_innerException`) to `ClrException` wrapper | P1 | High | Medium | High | Pending |
+| I-4 | Raise thread stack capture from `.Take(10)` to match `MaxCurrentThreadFramesToPrint` ceiling | P1 | Medium | Low | High | Pending |
+| I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High | Pending |
+| I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High | Pending |
+| I-7 | Add `ILogger<CrashAnalyzer>?` injection; emit per-object diagnostics on `catch {}` sites | P1 | Medium | Low | High | Pending |
+| I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High | Pending |
+| I-9 | Add `AggregateException` inner exception unwrapping | P2 | High | Medium | High | Pending |
+| I-10 | Add exception message distribution per type (distinct count + most common message) | P2 | High | Low | High | Pending |
+| I-11 | Implement crash bucket `(exception_type, top_user_frame)` | P2 | High | Medium | High | Pending |
+| I-12 | Flag rethrown exceptions (non-null `_remoteStackTraceString`) and lower inference confidence | P2 | Medium | Low | High | Pending |
+| I-13 | Derive lead finding `ConfidenceScore` from actual `InferenceConfidence` distribution | P2 | Medium | Low | High | Pending |
+| I-14 | Add exception heap size per type (sum `HeapEntry.Size` in participant scan) | P3 | Medium | Low | Medium | Pending |
+| I-15 | Cross-reference top user-code frames against `ModuleDomainResult` for assembly attribution | P3 | Medium | Medium | Medium | Pending |
 
 ### Evolutions (Improve the Platform)
 
-| ID | Recommendation | P | Impact | Difficulty | Confidence |
-|---|---|---|---|---|---|
-| E-1 | Add exception retention paths for Gen2 objects via existing reverse-reference index | P2 | High | Medium | High |
-| E-2 | Wire `ModuleDomainResult` and `ThreadDomainResult` into section builder for cross-section correlation | P2 | Medium | Medium | High |
-| E-3 | Define a platform-level shared extraction-function pattern for `IHeapIndexScanParticipant` dual paths | P3 | Medium | High | Medium |
+| ID | Recommendation | P | Impact | Difficulty | Confidence | Status |
+|---|---|---|---|---|---|---|
+| E-1 | Add exception retention paths for Gen2 objects via existing reverse-reference index | P2 | High | Medium | High | Pending |
+| E-2 | Wire `ModuleDomainResult` and `ThreadDomainResult` into section builder for cross-section correlation | P2 | Medium | Medium | High | Pending |
+| E-3 | Define a platform-level shared extraction-function pattern for `IHeapIndexScanParticipant` dual paths | P3 | Medium | High | Medium | Pending |
 
 ---
 

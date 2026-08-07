@@ -12,6 +12,11 @@ namespace DumpDetective.Analysis.Analyzers
         public Dictionary<string, int> ActiveExceptionTypeCounts { get; set; } = new();
         public Dictionary<string, List<ExceptionInstance>> ExceptionsByType { get; set; } = new();
         public List<CrashThreadCandidate> CrashThreadCandidates { get; set; } = new();
+        // GC generation distribution per exception type
+        public Dictionary<string, int> ExceptionGen0Counts { get; set; } = new();
+        public Dictionary<string, int> ExceptionGen1Counts { get; set; } = new();
+        public Dictionary<string, int> ExceptionGen2Counts { get; set; } = new();
+        public Dictionary<string, int> ExceptionLohCounts { get; set; } = new();
         // Set by BuildCrashThreadSnapshots after inference pass
         public int InferredTraceCount { get; set; }
     }

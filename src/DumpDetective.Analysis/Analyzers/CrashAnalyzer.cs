@@ -7,6 +7,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 
 using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
 
 using System.Collections.Concurrent;
 
@@ -15,6 +16,7 @@ namespace DumpDetective.Analysis.Analyzers
     public class CrashAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
     {
         private CrashAnalysisOptions _options = CrashAnalysisOptions.Default;
+        private ILogger<CrashAnalyzer>? _logger;
 
         public string Name => "Crash Analysis";
         public string Category => "Crash";
@@ -30,6 +32,10 @@ namespace DumpDetective.Analysis.Analyzers
         private Dictionary<ulong, bool>? _exceptionMethodTables;
         private Dictionary<ulong, string>? _methodTableNameCache;
         private Dictionary<uint, CrashThreadCandidate>? _crashThreadCandidates;
+        private Dictionary<string, int>? _exceptionGen0Counts;
+        private Dictionary<string, int>? _exceptionGen1Counts;
+        private Dictionary<string, int>? _exceptionGen2Counts;
+        private Dictionary<string, int>? _exceptionLohCounts;
         private int _totalExceptions;
         private int _activeExceptionsCount;
         private ObjectScanCounter? _scanCounter;
@@ -45,6 +51,12 @@ namespace DumpDetective.Analysis.Analyzers
         public CrashAnalyzer(CrashAnalysisOptions options)
         {
             _options = options ?? CrashAnalysisOptions.Default;
+        }
+
+        public CrashAnalyzer(CrashAnalysisOptions options, ILogger<CrashAnalyzer>? logger)
+        {
+            _options = options ?? CrashAnalysisOptions.Default;
+            _logger = logger;
         }
 
         /// <summary>
@@ -63,6 +75,10 @@ namespace DumpDetective.Analysis.Analyzers
             _exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
             _methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
             _crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
+            _exceptionGen0Counts = new Dictionary<string, int>();
+            _exceptionGen1Counts = new Dictionary<string, int>();
+            _exceptionGen2Counts = new Dictionary<string, int>();
+            _exceptionLohCounts = new Dictionary<string, int>();
             _totalExceptions = 0;
             _activeExceptionsCount = 0;
             _scanCounter = new ObjectScanCounter("scanning for exceptions", context.Progress);
@@ -79,7 +95,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
 
-        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CrashAnalyzer(_options);
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CrashAnalyzer(_options, _logger);
 
         // Workers cover disjoint, ascending-address record ranges (see HeapIndexScanDispatcher.
         // RunParallelPass), and `partials` arrives in that same ascending order with `this`
@@ -202,6 +218,27 @@ namespace DumpDetective.Analysis.Analyzers
             _exceptionTypeCounts!.TryGetValue(key, out int typeCount);
             _exceptionTypeCounts[key] = typeCount + 1;
 
+            int generation = _heap!.GetObjectGeneration(exceptionAddress);
+            switch (generation)
+            {
+                case 0:
+                    _exceptionGen0Counts!.TryGetValue(key, out int gen0);
+                    _exceptionGen0Counts[key] = gen0 + 1;
+                    break;
+                case 1:
+                    _exceptionGen1Counts!.TryGetValue(key, out int gen1);
+                    _exceptionGen1Counts[key] = gen1 + 1;
+                    break;
+                case 2:
+                    _exceptionGen2Counts!.TryGetValue(key, out int gen2);
+                    _exceptionGen2Counts[key] = gen2 + 1;
+                    break;
+                default:
+                    _exceptionLohCounts!.TryGetValue(key, out int loh);
+                    _exceptionLohCounts[key] = loh + 1;
+                    break;
+            }
+
             bool isActive = _activeExceptions!.TryGetValue(exceptionAddress, out var activeExceptionContext);
             if (isActive)
             {
@@ -288,7 +325,11 @@ namespace DumpDetective.Analysis.Analyzers
                 ExceptionsByType = sortedExceptionsByType,
                 CrashThreadCandidates = _crashThreadCandidates!.Values
                     .OrderByDescending(c => c.ActiveExceptionCount)
-                    .ToList()
+                    .ToList(),
+                ExceptionGen0Counts = _exceptionGen0Counts!,
+                ExceptionGen1Counts = _exceptionGen1Counts!,
+                ExceptionGen2Counts = _exceptionGen2Counts!,
+                ExceptionLohCounts = _exceptionLohCounts!
             };
         }
 
@@ -639,6 +680,10 @@ namespace DumpDetective.Analysis.Analyzers
             var activeExceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
             var exceptionInstances = new ConcurrentBag<(string TypeName, ExceptionInstance Instance, bool IsActive)>();
             var crashThreadCandidates = new ConcurrentDictionary<uint, CrashThreadCandidate>();
+            var exceptionGen0Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+            var exceptionGen1Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+            var exceptionGen2Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+            var exceptionLohCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
             var candidateLock = new object();
             int totalExceptions = 0, activeExceptionsCount = 0;
             var scanCounter = new DumpDetective.Analysis.Cache.ObjectScanCounter("scanning for exceptions", progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
@@ -656,6 +701,23 @@ namespace DumpDetective.Analysis.Analyzers
                 string key = typeName ?? StringConstants.UnknownType;
                 Interlocked.Increment(ref totalExceptions);
                 exceptionTypeCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
+
+                int generation = heap.GetObjectGeneration(exceptionAddress);
+                switch (generation)
+                {
+                    case 0:
+                        exceptionGen0Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                        break;
+                    case 1:
+                        exceptionGen1Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                        break;
+                    case 2:
+                        exceptionGen2Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                        break;
+                    default:
+                        exceptionLohCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                        break;
+                }
 
                 bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
 
@@ -749,7 +811,11 @@ namespace DumpDetective.Analysis.Analyzers
                 ExceptionsByType = sortedExceptionsByType,
                 CrashThreadCandidates = crashThreadCandidates.Values
                     .OrderByDescending(c => c.ActiveExceptionCount)
-                    .ToList()
+                    .ToList(),
+                ExceptionGen0Counts = new Dictionary<string, int>(exceptionGen0Counts, StringComparer.Ordinal),
+                ExceptionGen1Counts = new Dictionary<string, int>(exceptionGen1Counts, StringComparer.Ordinal),
+                ExceptionGen2Counts = new Dictionary<string, int>(exceptionGen2Counts, StringComparer.Ordinal),
+                ExceptionLohCounts = new Dictionary<string, int>(exceptionLohCounts, StringComparer.Ordinal)
             };
         }
 
@@ -769,7 +835,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     ThreadId = (uint)thread.ManagedThreadId,
                     OSThreadId = thread.OSThreadId,
-                    CurrentThreadStack = thread.EnumerateStackTrace().Take(10).ToList()
+                    CurrentThreadStack = thread.EnumerateStackTrace().Take(_options.MaxCurrentThreadFramesToPrint).ToList()
                 };
             }
 
@@ -848,9 +914,9 @@ namespace DumpDetective.Analysis.Analyzers
                     instance.CurrentThreadStack = activeContext.CurrentThreadStack;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Continue with partial info
+                _logger?.LogDebug(ex, "Error extracting exception info from 0x{Address:X}", exceptionAddress);
             }
 
             return instance;
@@ -953,9 +1019,9 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Return what we have
+                _logger?.LogDebug(ex, "Error extracting stack trace from exception at 0x{Address:X}", exceptionAddress);
             }
 
             return stackFrames;

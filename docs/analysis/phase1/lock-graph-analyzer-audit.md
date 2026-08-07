@@ -288,9 +288,9 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 | P1-4 | Add unit tests: contested lock detection, deadlock cycle detection, no-contention path, null-owner path | Testing | High | Medium | High | Improvement |
 | P2-1 | Expose unresolved-owner count in domain result and flag in report (thread exited while holding lock) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
 | P2-2 | Add `ReaderWriterLockSlim` state detection via heap object field inspection | Coverage | Medium | Medium | Medium | Improvement |
-| P2-3 | Make confidence score dynamic (lower when owner resolution rate is poor) | Diagnostic quality | Medium | Low | High | Improvement |
+| P2-3 | Make confidence score dynamic (lower when owner resolution rate is poor) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
 | P2-4 | Elevate `LockWaitGraph` to a shared platform primitive for HangAnalyzer cross-correlation | Architecture | Medium | Medium | Medium | Evolution |
-| P2-5 | Lower `reportEveryObjects` in `ObjectScanCounter` to `50` for sync block enumeration | Performance | Low | Trivial | High | Improvement |
+| P2-5 | Lower `reportEveryObjects` in `ObjectScanCounter` to `50` for sync block enumeration | Performance | Low | Trivial | High | Improvement | ✅ DONE |
 | P2-6 | Replace `ToLowerInvariant().Contains(...)` with `string.Contains(..., StringComparison.OrdinalIgnoreCase)` | Correctness | Low | Trivial | High | Improvement |
 | P3-1 | Flag high-recursion contested locks as potential re-entrancy signals | Diagnostic quality | Low | Low | Medium | Improvement |
 | P3-2 | `SemaphoreSlim` and cooperative-wait primitive detection via heap object traversal | Coverage | Low | High | Low | Improvement |

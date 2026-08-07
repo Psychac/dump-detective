@@ -25,6 +25,18 @@ internal sealed record LockGraphDomainResult(
     int MaxWaitersOnSingleLock,
     int DeadlockCandidateCount,
     int UnresolvedOwnerCount = 0,
+    int LocksWithOwnerAddress = 0,
     IReadOnlyList<NameCountEntry>? TopContestedLockTypes = null,
     IReadOnlyList<DeadlockCandidateSnapshot>? DeadlockCandidateDetails = null,
     IReadOnlyList<ContestedLockSnapshot>? ContestedLockDetails = null) : AnalyzerDomainResult;
+
+internal static class LockGraphDomainResultExtensions
+{
+    public static double CalculateOwnerResolutionConfidence(this LockGraphDomainResult result)
+    {
+        if (result.LocksWithOwnerAddress == 0)
+            return 0.85;
+        double resolutionRate = (double)(result.LocksWithOwnerAddress - result.UnresolvedOwnerCount) / result.LocksWithOwnerAddress;
+        return 0.5 + (resolutionRate * 0.35);
+    }
+}

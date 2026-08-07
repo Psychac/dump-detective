@@ -112,6 +112,7 @@ namespace DumpDetective.Analysis.Analyzers
                     graph.ContestedLocks.Count > 0 ? graph.ContestedLocks[0].WaitingThreadCount : 0,
                     graph.DeadlockCandidates.Count,
                     graph.UnresolvedOwnerCount,
+                    graph.LocksWithOwnerAddress,
                     topContestedTypes,
                     deadlockDetails,
                     contestedLockDetails);
@@ -131,7 +132,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
             result.ThreadByAddress = threadByAddress;
 
-            var scanCounter = new ObjectScanCounter("scanning sync blocks", progress, reportEveryObjects: 1000);
+            var scanCounter = new ObjectScanCounter("scanning sync blocks", progress, reportEveryObjects: 50);
             foreach (SyncBlock sb in heap.EnumerateSyncBlocks())
             {
                 scanCounter.Tick();
@@ -140,6 +141,9 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 string typeName = ResolveTypeNameByAddress(heap, sb.Object);
+
+                if (sb.HoldingThreadAddress != 0)
+                    result.LocksWithOwnerAddress++;
 
                 bool ownerResolved = threadByAddress.TryGetValue(sb.HoldingThreadAddress, out ClrThread? ownerThread);
                 if (!ownerResolved && sb.HoldingThreadAddress != 0)
@@ -285,6 +289,7 @@ namespace DumpDetective.Analysis.Analyzers
         public List<DeadlockCandidate> DeadlockCandidates { get; } = new();
         public Dictionary<ulong, ClrThread> ThreadByAddress { get; set; } = new();
         public int UnresolvedOwnerCount { get; set; }
+        public int LocksWithOwnerAddress { get; set; }
     }
 
 }

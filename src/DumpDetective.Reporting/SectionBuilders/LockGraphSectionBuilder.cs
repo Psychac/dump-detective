@@ -19,9 +19,10 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
     {
         var d = (LockGraphDomainResult)result;
         var compactTables = new List<CompactTable>();
+        double confidenceScore = d.CalculateOwnerResolutionConfidence();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(0.85, ["Derived from recorded wait chains and lock ownership."]),
+            BuildConfidenceBand(confidenceScore, ["Derived from recorded wait chains and lock ownership."]),
         };
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -135,18 +136,25 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         SectionLeadFinding? leadFinding = null;
         if (d.DeadlockCandidateCount > 0)
+        {
+            string confidenceSymbol = confidenceScore >= 0.75 ? "\u25cf\u25cf\u25cf\u25cf"
+                : confidenceScore >= 0.65 ? "\u25cf\u25cf\u25cf\u25cb"
+                : confidenceScore >= 0.50 ? "\u25cf\u25cf\u25cb\u25cb"
+                : "\u25cf\u25cb\u25cb\u25cb";
+
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Potential deadlock pattern \u2014 {d.DeadlockCandidateCount} candidate(s) identified",
                 Summary: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
                 Recommendation: "Review lock acquisition order and use cycle detection tools (e.g., !dlk in WinDbg SOS) to confirm a circular-wait cycle exists before assuming deadlock.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cb",
-                ConfidenceScore: 0.65,
+                ConfidenceSymbol: confidenceSymbol,
+                ConfidenceScore: confidenceScore,
                 Caveats: [
                     "Deadlock candidates are based on top-frame heuristics (Monitor.Wait/Enter) and do not confirm an actual cycle.",
                     "Two independently blocked threads (unrelated locks) may both appear as candidates.",
                     "Detection does not cover non-monitor primitives (ReaderWriterLockSlim, SemaphoreSlim, etc.)."
                 ]);
+        }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

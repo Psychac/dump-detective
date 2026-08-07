@@ -921,45 +921,20 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
 
-                // Try to parse _stackTrace field (native format)
-                var stackTraceField = exceptionObj.Type?.GetFieldByName("_stackTrace");
-                if (stackTraceField != null)
+                // Try ClrException.StackTrace (the correct API for stack frames)
+                var clrException = exceptionObj.AsException();
+                if (clrException != null && clrException.StackTrace != null && clrException.StackTrace.Count > 0)
                 {
-                    var stackTraceObj = stackTraceField.ReadObject(exceptionObj, interior: false);
-                    if (stackTraceObj.IsValid && stackTraceObj.IsArray)
+                    for (int i = 0; i < Math.Min(clrException.StackTrace.Count, 50); i++)
                     {
-                        var array = stackTraceObj.AsArray();
-                        for (int i = 0; i < Math.Min(array.Length, 50); i++)
+                        var frame = clrException.StackTrace[i];
+                        if (frame?.Method != null)
                         {
-                            var element = array.GetObjectValue(i);
-                            if (element.IsValid && element.Type != null)
-                            {
-                                // Each element is a StackTraceElement - try to extract method info
-                                var methodField = element.Type.GetFieldByName("_method");
-                                if (methodField != null)
-                                {
-                                    var methodObj = methodField.ReadObject(element, interior: false);
-                                    if (methodObj.IsValid)
-                                    {
-                                        // Try to get method name
-                                        var nameField = methodObj.Type?.GetFieldByName("_name");
-                                        if (nameField != null)
-                                        {
-                                            var nameObj = nameField.ReadObject(methodObj, interior: false);
-                                            if (nameObj.IsValid)
-                                            {
-                                                string? methodName = nameObj.AsString();
-                                                if (!string.IsNullOrEmpty(methodName))
-                                                {
-                                                    stackFrames.Add($"   at {methodName}");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            stackFrames.Add($"   at {frame.Method.Signature}");
                         }
                     }
+                    if (stackFrames.Count > 0)
+                        return stackFrames;
                 }
 
                 // If still no stack, try to get from exception's ToString()

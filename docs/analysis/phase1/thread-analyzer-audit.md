@@ -296,27 +296,27 @@ The `WaitPatterns` table does not cover:
 
 ### Priority Roadmap
 
-| # | Recommendation | Area | Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|---|
-| P0-1 | Fix `ThreadPoolCount` double-count: add `else if` guard between flag check and frame check | Correctness | High | Trivial | High | Improvement |
-| P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement |
-| P0-3 | Call `thread.EnumerateBlockingObjects()` in `ProcessThread`; emit blocking-object table (address, type, owner thread ID) per blocked snapshot | Diagnostic | Very High | Medium | High | Improvement |
-| P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement |
-| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement |
-| P1-3 | Replace `frames[0]` hotspot with first non-framework frame; filter `System.`, `Microsoft.`, `ThreadPool`, `Task` prefixes | Reporting | High | Low | High | Improvement |
-| P1-4 | Fix background prewarm progress: replace `Math.Min(prewarm, prewarm)` with actual `idx` count | Correctness | Low | Trivial | High | Improvement |
-| P2-1 | Replace LINQ `OrderByDescending + ToList()` in `FinalizeCategorization` with `List<T>.Sort()` | Performance | Medium | Low | High | Improvement |
-| P2-2 | Replace LINQ in `ToThreadStateSnapshot` / `ToThreadExceptionSnapshot` with explicit loops | Performance | Low | Low | High | Improvement |
-| P2-3 | Replace `List<string>` allocation in `FormatThreadState` with `Span<string>` or `string.Create` | Performance | Medium | Medium | High | Improvement |
-| P2-4 | Remove redundant `_stackRootCountByThreadAddress` mirror when shared cache is present | Performance | Low | Low | High | Improvement |
-| P2-5 | Add `BlockedThreadRatio` (`BlockedThreadCount / AliveThreadCount`) to `ThreadDomainResult`; emit as key metric | Reporting | Medium | Trivial | High | Improvement |
-| P2-6 | Add `StackMemorySummary` (total, mean, max, p95 stack bytes) to `ThreadDomainResult` | Diagnostic | Medium | Low | High | Improvement |
-| P2-7 | Add targeted findings for: finalizer blocked, blocked ratio > 70%, zero active threads, async chain depth > 10 | Reporting | High | Low | High | Improvement |
-| P2-8 | Add `WaitPatterns` entries for `CountdownEvent.Wait`, `Barrier.SignalAndWait`, `ValueTask` | Correctness | Medium | Low | Medium | Improvement |
-| P3-1 | Add `AppDomainDistribution` guard: suppress column from reports when count == 1 (modern .NET single-domain) | Reporting | Low | Trivial | High | Improvement |
-| P3-2 | Document in-place mutation side-effect of `AsyncChainDetection.Full` frame widening; consider copying to avoid aliasing across category lists | Correctness | Low | Low | High | Improvement |
-| P3-3 | Add `ThreadStackClusterAnalyzer` result cross-reference into `ThreadSectionBuilder` ("see cluster analysis for grouping") | Platform | Medium | Low | Medium | Evolution |
-| P3-4 | Introduce `IThreadOwnershipIndex` shared infrastructure built during `BeforeThreadStackScan` from `EnumerateBlockingObjects`; share with `LockGraphAnalyzer` | Platform | Very High | High | High | Evolution |
+| # | Recommendation | Area | Impact | Difficulty | Confidence | Class | Status |
+|---|---|---|---|---|---|---|---|
+| P0-1 | Fix `ThreadPoolCount` double-count: add `else if` guard between flag check and frame check | Correctness | High | Trivial | High | Improvement | ✅ DONE |
+| P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement | — |
+| P0-3 | Call `thread.EnumerateBlockingObjects()` in `ProcessThread`; emit blocking-object table (address, type, owner thread ID) per blocked snapshot | Diagnostic | Very High | Medium | High | Improvement | — |
+| P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement | — |
+| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | — |
+| P1-3 | Replace `frames[0]` hotspot with first non-framework frame; filter `System.`, `Microsoft.`, `ThreadPool`, `Task` prefixes | Reporting | High | Low | High | Improvement | — |
+| P1-4 | Fix background prewarm progress: replace `Math.Min(prewarm, prewarm)` with actual `idx` count | Correctness | Low | Trivial | High | Improvement | — |
+| P2-1 | Replace LINQ `OrderByDescending + ToList()` in `FinalizeCategorization` with `List<T>.Sort()` | Performance | Medium | Low | High | Improvement | — |
+| P2-2 | Replace LINQ in `ToThreadStateSnapshot` / `ToThreadExceptionSnapshot` with explicit loops | Performance | Low | Low | High | Improvement | — |
+| P2-3 | Replace `List<string>` allocation in `FormatThreadState` with `Span<string>` or `string.Create` | Performance | Medium | Medium | High | Improvement | — |
+| P2-4 | Remove redundant `_stackRootCountByThreadAddress` mirror when shared cache is present | Performance | Low | Low | High | Improvement | — |
+| P2-5 | Add `BlockedThreadRatio` (`BlockedThreadCount / AliveThreadCount`) to `ThreadDomainResult`; emit as key metric | Reporting | Medium | Trivial | High | Improvement | — |
+| P2-6 | Add `StackMemorySummary` (total, mean, max, p95 stack bytes) to `ThreadDomainResult` | Diagnostic | Medium | Low | High | Improvement | — |
+| P2-7 | Add targeted findings for: finalizer blocked, blocked ratio > 70%, zero active threads, async chain depth > 10 | Reporting | High | Low | High | Improvement | — |
+| P2-8 | Add `WaitPatterns` entries for `CountdownEvent.Wait`, `Barrier.SignalAndWait`, `ValueTask` | Correctness | Medium | Low | Medium | Improvement | — |
+| P3-1 | Add `AppDomainDistribution` guard: suppress column from reports when count == 1 (modern .NET single-domain) | Reporting | Low | Trivial | High | Improvement | — |
+| P3-2 | Document in-place mutation side-effect of `AsyncChainDetection.Full` frame widening; consider copying to avoid aliasing across category lists | Correctness | Low | Low | High | Improvement | — |
+| P3-3 | Add `ThreadStackClusterAnalyzer` result cross-reference into `ThreadSectionBuilder` ("see cluster analysis for grouping") | Platform | Medium | Low | Medium | Evolution | — |
+| P3-4 | Introduce `IThreadOwnershipIndex` shared infrastructure built during `BeforeThreadStackScan` from `EnumerateBlockingObjects`; share with `LockGraphAnalyzer` | Platform | Very High | High | High | Evolution | — |
 
 ---
 

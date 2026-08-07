@@ -465,7 +465,9 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // ThreadPool worker threads surface a recognisable dispatch frame;
                 // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
-                if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread) || IsThreadPoolWorker(stackFrames))
+                if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
+                    result.ThreadPoolCount++;
+                else if (IsThreadPoolWorker(stackFrames))
                     result.ThreadPoolCount++;
 
                 // Capture the finalizer thread's stack and blocked state once

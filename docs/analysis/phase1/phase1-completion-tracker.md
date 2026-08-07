@@ -52,8 +52,9 @@
 | 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7,I-8 done (aggregate metric + TotalSize + finalizable finding + cap disclosure); 1 P0, 2 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 | 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done (unresolved + dynamic confidence + trivial perf); P0-1,P0-2,P1-1,P1-4,P2-2,P2-4 pending |
+| 21 | **StringAnalyzer** | 1/3 | 0/5 | 0/8 | 0/5 | ✅ P0-1 DONE (rename UniqueStrings → SampledUniquePatterns + docs); P0-2,P0-3 pending; all P1 pending |
 
-**Subtotal: 18/25 P0 done, 20/39 P1 done, 18/51 P2 done** (in-progress pools)
+**Subtotal: 19/26 P0 done, 20/39 P1 done, 18/51 P2 done** (in-progress pools)
 
 ---
 
@@ -72,7 +73,8 @@
 | MemoryAnalyzer | 0/2 | 0/5 | 7 | — |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
-| StringAnalyzer | 1/3 | 0/5 | 7 | ✅ P0-1 DONE (rename UniqueStrings → SampledUniquePatterns + docs) |
+
+**Subtotal: 0/25 P0 done, 0/40 P1 done** (not-started pools)
 
 ---
 

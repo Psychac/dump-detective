@@ -192,7 +192,7 @@ namespace DumpDetective.Analysis.Analyzers
                         if ((idx & 0xF) == 0)
                             progress?.Report(new(idx, $"Background prewarm: {idx}/{prewarm}"));
                     }
-                    progress?.Report(new(prewarm, $"Background prewarm complete: {Math.Min(prewarm, prewarm)} threads"));
+                    progress?.Report(new(idx, $"Background prewarm complete: {idx} threads"));
                 });
             }
             else if (cache.SizeTier != DumpSizeTier.Large)

@@ -9,13 +9,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total Analyzers Audited** | 34 |
-| **Total P0 Identified** | 73 |
-| **Total P1 Identified** | 143 |
-| **P0 Implemented** | 42 |
+| **Total Analyzers Audited** | 35 |
+| **Total P0 Identified** | 75 |
+| **Total P1 Identified** | 148 |
+| **P0 Implemented** | 43 |
 | **P1 Implemented** | 60 |
 | **P2 Implemented** | 18 |
-| **Overall P0+P1 Rate** | 44.3% (102/217) |
+| **Overall P0+P1 Rate** | 43.5% (103/236) |
 
 ---
 
@@ -53,8 +53,9 @@
 | 19 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 | 20 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 21 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
+| 22 | **CrashAnalyzer** | 1/2 | 0/5 | 0/8 | 0/3 | P0-1 (I-1 static wrapper fix) complete; P0-2 (_stackTrace path fix) pending |
 
-**Subtotal: 24/32 P0 done, 24/49 P1 done, 18/51 P2 done** (in-progress pools)
+**Subtotal: 25/33 P0 done, 24/49 P1 done, 18/51 P2 done** (in-progress pools)
 
 ---
 
@@ -63,7 +64,6 @@
 | Analyzer | P0 | P1 | Total Pending | Notes |
 |----------|----|----|---|-------|
 | AsyncTaskAnalyzer | 0/2 | 0/4 | 6 | — |
-| CrashAnalyzer | — | — | — | No roadmap found |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
@@ -74,7 +74,7 @@
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
 
-**Subtotal: 0/25 P0 done, 0/40 P1 done** (not-started pools)
+**Subtotal: 0/24 P0 done, 0/40 P1 done** (not-started pools)
 
 ---
 
@@ -85,13 +85,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 9 | All P0+P1 recommendations implemented |
-| Analyzers with partial P0+P1 completion | 12 | Some items done, some pending (includes CollectionAnalyzer, StringAnalyzer, and others) |
+| Analyzers with partial P0+P1 completion | 13 | Some items done, some pending (includes CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
 | Analyzers with zero P0+P1 completion | 13 | Not yet started |
-| **Total P0 recommendations** | **73** | — |
-| **P0 items implemented** | **42** | 57.5% (18 COMPLETE + 24 IN_PROGRESS) |
-| **Total P1 recommendations** | **143** | — |
-| **P1 items implemented** | **60** | 42.0% (36 COMPLETE + 24 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **44.3%** | (102/217) |
+| **Total P0 recommendations** | **75** | — |
+| **P0 items implemented** | **43** | 57.3% (18 COMPLETE + 25 IN_PROGRESS) |
+| **Total P1 recommendations** | **148** | — |
+| **P1 items implemented** | **60** | 40.5% (36 COMPLETE + 24 IN_PROGRESS) |
+| **Combined P0+P1 rate** | **43.5%** | (103/236) |
 
 ---
 

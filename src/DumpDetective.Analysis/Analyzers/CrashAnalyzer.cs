@@ -294,7 +294,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         private AnalyzerDomainResult BuildDomainResult(ExceptionAnalysis exceptionInfo)
         {
-            var candidateSnapshots = BuildCrashThreadSnapshots(exceptionInfo);
+            var candidateSnapshots = BuildCrashThreadSnapshotsImpl(exceptionInfo);
 
             // Respect payload options: by default include all types in payload. When disabled,
             // limit the sent type-counts to the top-N configured in options to reduce JSON size.
@@ -444,13 +444,6 @@ namespace DumpDetective.Analysis.Analyzers
 
             analysis.InferredTraceCount = inferredCount;
             return snapshots;
-        }
-
-        // Backwards-compatible private static wrapper used by unit tests that expect
-        // a static helper. Delegates to an instance method that can use runtime options.
-        private static IReadOnlyList<CrashThreadCandidateSnapshot> BuildCrashThreadSnapshots(ExceptionAnalysis analysis)
-        {
-            return new CrashAnalyzer().BuildCrashThreadSnapshotsImpl(analysis);
         }
 
         // Take up to max frames, normalizing each one (strips "at " prefix, simplifies async names)

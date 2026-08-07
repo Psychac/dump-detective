@@ -83,13 +83,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 8 | All P0+P1 recommendations implemented (including CollectionAnalyzer) |
-| Analyzers with partial P0+P1 completion | 9 | Some items done, some pending (ThreadAnalyzer, ObjectShapeAnalyzer, TimerLeakAnalyzer, and others with P0 partial/complete but P1 pending) |
+| Analyzers with partial P0+P1 completion | 10 | Some items done, some pending (StringAnalyzer now has P0-1; ThreadAnalyzer, ObjectShapeAnalyzer, TimerLeakAnalyzer, and others with P0 partial/complete but P1 pending) |
 | Analyzers with zero P0+P1 completion | 16 | Not yet started |
-| **Total P0 recommendations** | **69** | — |
-| **P0 items implemented** | **32** | 46.4% |
-| **Total P1 recommendations** | **139** | — |
-| **P1 items implemented** | **46** | 33.1% |
-| **Combined P0+P1 rate** | **56.5%** | (78/138) |
+| **Total P0 recommendations** | **73** | — |
+| **P0 items implemented** | **42** | 57.5% |
+| **Total P1 recommendations** | **143** | — |
+| **P1 items implemented** | **57** | 39.9% |
+| **Combined P0+P1 rate** | **45.6%** | (99/217) |
 
 ---
 

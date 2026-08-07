@@ -102,6 +102,17 @@ namespace DumpDetective.Analysis.Analyzers
             _stackRootCountByThreadAddress = new Dictionary<ulong, int>();
             _scanCounter = new ObjectScanCounter("Scanning threads", _participantProgress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
+            // Query ThreadPool telemetry once, before the stack walk
+            var threadPool = context.Runtime.ThreadPool;
+            if (threadPool is not null)
+            {
+                _categorization.ThreadPoolQueueDepth = threadPool.QueueLength;
+                _categorization.ThreadPoolActiveWorkers = threadPool.ActiveWorkerThreads;
+                _categorization.ThreadPoolIdleWorkers = threadPool.IdleWorkerThreads;
+                _categorization.ThreadPoolMinWorkers = threadPool.MinWorkerThreads;
+                _categorization.ThreadPoolMaxWorkers = threadPool.MaxWorkerThreads;
+            }
+
             int samplerCapacity = ComputeSamplerCapacity(_participantOptions.MaxSampledStackSnapshots, _participantCache?.SizeTier, totalThreads);
             _sampler = new Utilities.ReservoirSampler<ThreadWithStackTrace>(samplerCapacity, _participantOptions.SamplingSeed);
         }
@@ -272,6 +283,11 @@ namespace DumpDetective.Analysis.Analyzers
                     activeThreadHotspots,
                     sampledSnapshots,
                     threadInfo.ThreadPoolCount,
+                    threadInfo.ThreadPoolQueueDepth,
+                    threadInfo.ThreadPoolActiveWorkers,
+                    threadInfo.ThreadPoolIdleWorkers,
+                    threadInfo.ThreadPoolMinWorkers,
+                    threadInfo.ThreadPoolMaxWorkers,
                     threadInfo.FinalizerCount,
                     threadInfo.FinalizerIsBlocked,
                     threadInfo.FinalizerThread != null ? (uint?)threadInfo.FinalizerThread.ManagedThreadId : null,
@@ -717,6 +733,13 @@ namespace DumpDetective.Analysis.Analyzers
         // Async state-machine chain depth
         public int AsyncChainThreadCount { get; set; }
         public int MaxAsyncChainDepth { get; set; }
+
+        // ThreadPool telemetry (queried in BeforeThreadStackScan)
+        public int ThreadPoolQueueDepth { get; set; }
+        public int ThreadPoolActiveWorkers { get; set; }
+        public int ThreadPoolIdleWorkers { get; set; }
+        public int ThreadPoolMinWorkers { get; set; }
+        public int ThreadPoolMaxWorkers { get; set; }
 
         // Non-blocked user thread top-frame hotspots (Active Processing group)
         public Dictionary<string, int> ActiveThreadHotspots { get; set; } = new(StringComparer.Ordinal);

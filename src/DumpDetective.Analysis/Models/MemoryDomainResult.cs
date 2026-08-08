@@ -8,8 +8,8 @@ public sealed record MemoryDomainResult(
     ulong TotalBytes,
     ulong LohBytes,
     double LohPercent,
-    int TotalObjects,
-    int LohObjects,
+    long TotalObjects,
+    long LohObjects,
     ulong LohThresholdBytes,
     int UniqueTypes,
     IReadOnlyList<TypeSnapshot> TopTypes,
@@ -21,7 +21,8 @@ public sealed record MemoryDomainResult(
     double SmallObjectBytesPercent = 0,
     double ObjectsPerMb = 0,
     double MemoryPressureScore = 0,
-    IReadOnlyList<GCSegmentSummary>? SegmentSummaries = null) : AnalyzerDomainResult;
+    IReadOnlyList<GCSegmentSummary>? SegmentSummaries = null,
+    double LohFragmentationRatio = 0) : AnalyzerDomainResult;
 
 public sealed record GCSegmentSummary(
     string Generation,

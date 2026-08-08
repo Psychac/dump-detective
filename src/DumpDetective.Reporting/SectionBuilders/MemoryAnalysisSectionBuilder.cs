@@ -44,6 +44,11 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
 
         if (d.TopTypes.Count > 0)
         {
+            blocks.Add(T("Note: 'Est. Retained' represents approximate retained size from a single-sample bounded breadth-first search and may vary significantly from actual retained size for structurally complex types (e.g., containers, caches)."));
+        }
+
+        if (d.TopTypes.Count > 0)
+        {
             int chartLimit = Math.Min(12, d.TopTypes.Count);
             var items = new object[chartLimit];
             for (int i = 0; i < chartLimit; i++)

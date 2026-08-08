@@ -433,10 +433,10 @@ dotMemory shows:
 | P0 | Expand `MemoryFindingGenerator` with findings for high pressure score (≥ 70), top-type concentration (> 80%), small-object pressure | High | Low | High | Improvement | ✅ **DONE** |
 | P0 | Guard `heap.CanWalkHeap` before BFS retained estimation; propagate `MemoryAnalyzer.IsThreadSafe = true` | Medium | Low | High | Improvement | ✅ **DONE** |
 | P1 | Add GC segment summary to `MemoryDomainResult` (`heap.Segments`) — committed, reserved, free bytes per generation | High | Low | High | Improvement | ✅ **DONE** |
-| P1 | Add LOH fragmentation ratio (free-list bytes / LOH committed bytes) | High | Low | High | Improvement | Pending |
-| P1 | Promote `TotalObjects` and `LohObjects` from `int` to `long` | Medium | Low | High | Improvement | Pending |
-| P1 | Remove 4 redundant sort copies from `MemoryAnalysisProjection`; use composite sort for selection, linear scan for top-N bytes | Medium | Low | High | Improvement | Pending |
-| P1 | Label `EstimatedRetainedBytes` as approximate in section builder; add tooltip or footnote | Medium | Low | High | Improvement | Pending |
+| P1 | Add LOH fragmentation ratio (free-list bytes / LOH committed bytes) | High | Low | High | Improvement | ✅ **DONE** |
+| P1 | Promote `TotalObjects` and `LohObjects` from `int` to `long` | Medium | Low | High | Improvement | ✅ **DONE** |
+| P1 | Remove 4 redundant sort copies from `MemoryAnalysisProjection`; use composite sort for selection, linear scan for top-N bytes | Medium | Low | High | Improvement | ✅ **DONE** |
+| P1 | Label `EstimatedRetainedBytes` as approximate in section builder; add tooltip or footnote | Medium | Low | High | Improvement | ✅ **DONE** |
 | P2 | Expose `MemoryPressureScore` sub-components (LOH, concentration, small-object, density) as separate key metrics | Medium | Low | Medium | Improvement | Pending |
 | P2 | Break the `heapCache is HeapAnalysisCache` cast — surface `TryGetHeapIndex` on the `IHeapAnalysisCache` abstraction | Low | Medium | High | Improvement | Pending |
 | P2 | Add per-type generation distribution cross-reference with `GCGenerationDomainResult` in `InsightEngine` | High | Medium | High | Evolution | Pending |

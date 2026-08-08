@@ -8,8 +8,8 @@ namespace DumpDetective.Analysis.Utilities;
 internal sealed record MemoryAnalysisProjectionResult(
     ulong TotalMemory,
     ulong TotalLohMemory,
-    int TotalObjects,
-    int LohObjects,
+    long TotalObjects,
+    long LohObjects,
     double LohPercent,
     IReadOnlyList<CachedTypeStatistics> SelectedTypes,
     IReadOnlyList<SizeBucketEntry>? Histogram,
@@ -19,7 +19,8 @@ internal sealed record MemoryAnalysisProjectionResult(
     long SmallObjectCount,
     ulong SmallObjectBytes,
     double ObjectsPerMb,
-    double MemoryPressureScore);
+    double MemoryPressureScore,
+    double LohFragmentationRatio);
 
 internal static class MemoryAnalysisProjection
 {
@@ -30,8 +31,8 @@ internal static class MemoryAnalysisProjection
     {
         ulong totalMemory = 0;
         ulong totalLohMemory = 0;
-        int totalObjects = 0;
-        int lohObjects = 0;
+        long totalObjects = 0;
+        long lohObjects = 0;
         foreach (CachedTypeStatistics stat in typeStats.Values)
         {
             totalMemory += stat.TotalSize;
@@ -44,26 +45,6 @@ internal static class MemoryAnalysisProjection
 
         var bySize = new List<CachedTypeStatistics>(typeStats.Values);
         bySize.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-        var byCount = new List<CachedTypeStatistics>(typeStats.Values);
-        byCount.Sort((a, b) =>
-        {
-            int byObjectCount = b.Count.CompareTo(a.Count);
-            return byObjectCount != 0 ? byObjectCount : b.TotalSize.CompareTo(a.TotalSize);
-        });
-        var byLoh = new List<CachedTypeStatistics>(typeStats.Values);
-        byLoh.Sort((a, b) =>
-        {
-            int byLohSize = b.LohSize.CompareTo(a.LohSize);
-            return byLohSize != 0 ? byLohSize : b.TotalSize.CompareTo(a.TotalSize);
-        });
-        var byAverageSize = new List<CachedTypeStatistics>(typeStats.Values);
-        byAverageSize.Sort((a, b) =>
-        {
-            ulong aAvg = a.Count > 0 ? a.TotalSize / (ulong)a.Count : 0;
-            ulong bAvg = b.Count > 0 ? b.TotalSize / (ulong)b.Count : 0;
-            int byAvg = bAvg.CompareTo(aAvg);
-            return byAvg != 0 ? byAvg : b.TotalSize.CompareTo(a.TotalSize);
-        });
 
         var byCompositePressure = new List<CachedTypeStatistics>(typeStats.Values);
         ulong maxTotalSize = 0;
@@ -144,7 +125,7 @@ internal static class MemoryAnalysisProjection
         }
 
         static double PercentOf(ulong part, ulong total) => total == 0 ? 0 : part * 100.0 / total;
-        static double PercentOfCount(long part, int total) => total == 0 ? 0 : part * 100.0 / total;
+        static double PercentOfCount(long part, long total) => total == 0 ? 0 : part * 100.0 / total;
 
         ulong top1Bytes = bySize.Count > 0 ? bySize[0].TotalSize : 0;
         ulong top5Bytes = 0;
@@ -245,25 +226,10 @@ internal static class MemoryAnalysisProjection
         int sizeQuota = ComputeQuota(sizeWeight);
         remaining -= AddFromRankedList(bySize, sizeQuota, selectedTypeNames, selectedTypes);
 
-        int countQuota = ComputeQuota(countWeight);
-        remaining -= AddFromRankedList(byCount, countQuota, selectedTypeNames, selectedTypes);
-
-        int lohQuota = ComputeQuota(lohWeight);
-        remaining -= AddFromRankedList(byLoh, lohQuota, selectedTypeNames, selectedTypes);
-
-        int avgQuota = ComputeQuota(avgWeight);
-        remaining -= AddFromRankedList(byAverageSize, avgQuota, selectedTypeNames, selectedTypes);
-
         if (remaining > 0)
             remaining -= AddFromRankedList(byCompositePressure, remaining, selectedTypeNames, selectedTypes);
         if (remaining > 0)
             remaining -= AddFromRankedList(bySize, remaining, selectedTypeNames, selectedTypes);
-        if (remaining > 0)
-            remaining -= AddFromRankedList(byCount, remaining, selectedTypeNames, selectedTypes);
-        if (remaining > 0)
-            remaining -= AddFromRankedList(byLoh, remaining, selectedTypeNames, selectedTypes);
-        if (remaining > 0)
-            AddFromRankedList(byAverageSize, remaining, selectedTypeNames, selectedTypes);
 
         return new MemoryAnalysisProjectionResult(
             totalMemory,
@@ -279,6 +245,7 @@ internal static class MemoryAnalysisProjection
             smallObjectCount,
             smallObjectBytes,
             objectsPerMb,
-            memoryPressureScore);
+            memoryPressureScore,
+            0);
     }
 }

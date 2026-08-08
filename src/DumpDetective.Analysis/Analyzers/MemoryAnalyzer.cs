@@ -52,6 +52,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             MemoryAnalysisProjectionResult projection = MemoryAnalysisProjection.Build(typeStats, globalSizeBuckets, options);
             var segmentSummaries = BuildSegmentSummaries(heap);
+            double lohFragmentationRatio = CalculateLohFragmentationRatio(heap);
 
             static TypeSnapshot ToSnapshot(CachedTypeStatistics s, ulong retainedBytes, ulong sampleAddress)
             {
@@ -108,7 +109,8 @@ namespace DumpDetective.Analysis.Analyzers
                 SmallObjectBytesPercent: projection.TotalMemory == 0 ? 0 : projection.SmallObjectBytes * 100.0 / projection.TotalMemory,
                 ObjectsPerMb: projection.ObjectsPerMb,
                 MemoryPressureScore: projection.MemoryPressureScore,
-                SegmentSummaries: segmentSummaries);
+                SegmentSummaries: segmentSummaries,
+                LohFragmentationRatio: lohFragmentationRatio);
         }
 
         private static List<GCSegmentSummary> BuildSegmentSummaries(ClrHeap heap)
@@ -182,6 +184,39 @@ namespace DumpDetective.Analysis.Analyzers
                 if (committed.Start < committed.End)
                     used = committed.End - committed.Start;
                 return used;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static double CalculateLohFragmentationRatio(ClrHeap heap)
+        {
+            try
+            {
+                ulong lohCommitted = 0;
+                ulong lohObjectBytes = 0;
+
+                foreach (ClrSegment segment in heap.Segments)
+                {
+                    if (segment.Kind != GCSegmentKind.Large)
+                        continue;
+
+                    lohCommitted += SegmentKindMapper.GetCommittedBytes(segment);
+
+                    foreach (ClrObject obj in segment.EnumerateObjects())
+                    {
+                        if (obj.IsValid)
+                            lohObjectBytes += obj.Size;
+                    }
+                }
+
+                if (lohCommitted == 0)
+                    return 0;
+
+                ulong lohFreeBytes = lohCommitted > lohObjectBytes ? lohCommitted - lohObjectBytes : 0;
+                return lohFreeBytes * 100.0 / lohCommitted;
             }
             catch
             {

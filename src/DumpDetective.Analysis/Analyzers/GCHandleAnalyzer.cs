@@ -1,4 +1,6 @@
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -17,15 +19,15 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             GCHandleAnalysisOptions options = context.AnalysisOptions.GCHandleAnalysis;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap = null, IHeapAnalysisCache? cache = null)
         {
-            return Analyze(runtime, heap, cache, new GCHandleAnalysisOptions(), progress: null);
+            return Analyze(runtime, heap, cache, new GCHandleAnalysisOptions(), progress: null, CancellationToken.None);
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IHeapAnalysisCache? cache, GCHandleAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap? heap, IHeapAnalysisCache? cache, GCHandleAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var scanCounter = new ObjectScanCounter("scanning GC handles", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -50,14 +52,12 @@ namespace DumpDetective.Analysis.Analyzers
             var dependentTargetTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var dependentSourceTargetPairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-            // TODO: Prefer consuming a shared handle snapshot provider (HeapIndexBuildResult.InMemoryHandleSnapshot
-            // or IHandleSnapshotReader) when available to avoid repeated calls to runtime.EnumerateHandles().
-            foreach (ClrHandle handle in runtime.EnumerateHandles())
+            void ProcessHandle(ulong targetAddress, ulong methodTable, byte kindByte)
             {
                 scanCounter.Tick();
                 totalHandles++;
 
-                string kind = handle.HandleKind.ToString();
+                string kind = ((ClrHandleKind)kindByte).ToString();
                 Increment(byKind, kind);
 
                 if (IsWeakLike(kind))
@@ -65,37 +65,24 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                     strongLikeHandles++;
 
-                ulong targetAddress = GetTargetAddress(handle);
-                string? typeName;
-                ulong resolvedSize = 0;
-                if (heap is not null && cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out var build))
-                {
-                    // Fast-path: resolve type name via methodTableNameCache keyed on MT.
-                    // heap.GetObject is still needed to get the address + size, but we avoid
-                    // an extra sample-address lookup since the MT is already known.
-                    ClrObject targetObject = heap.GetObject(targetAddress);
-                    if (targetObject.IsValid)
-                    {
-                        resolvedSize = targetObject.Size;
-                        typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                    }
-                    else
-                    {
-                        typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                    }
-                }
-                else
-                {
-                    typeName = ResolveTargetTypeName(heap, targetAddress, methodTableNameCache);
-                }
+                string? typeName = ResolveTypeNameFromRecord(heap, targetAddress, methodTable, methodTableNameCache);
                 if (typeName == null)
-                    continue;
+                    return;
 
                 Increment(allTargetTypes, typeName);
 
                 if (kind.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
                 {
                     Increment(pinnedTypes, typeName);
+
+                    ulong resolvedSize = 0;
+                    if (heap is not null && targetAddress != 0)
+                    {
+                        ClrObject targetObject = heap.GetObject(targetAddress);
+                        if (targetObject.IsValid)
+                            resolvedSize = targetObject.Size;
+                    }
+
                     if (resolvedSize > 0)
                     {
                         totalPinnedRetainedBytes += resolvedSize;
@@ -105,9 +92,64 @@ namespace DumpDetective.Analysis.Analyzers
                             pinnedBytesByType[typeName] = resolvedSize;
                     }
                 }
+            }
 
-                if (kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase) && heap is not null)
+            // P0-2: Prefer the shared handle snapshot (disk or in-memory) built during indexing over a
+            // second runtime.EnumerateHandles() call. Dependent handle target addresses are not carried
+            // by the snapshot, so dependent edges are resolved via a bounded live-enumeration fallback below.
+            HeapIndexBuildResult? heapIndex = null;
+            if (cache is HeapAnalysisCache heapCache)
+                heapCache.TryGetHeapIndex(out heapIndex);
+
+            if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMemHandles)
+            {
+                foreach (var rec in inMemHandles)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ProcessHandle(rec.Addr, rec.Mt, rec.Kind);
+                }
+            }
+            else
+            {
+                IHandleSnapshotReader? reader = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
+                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
+                if (reader is null && heap is not null)
+                    reader = HandleSnapshotProvider.CreateMemoryReader(runtime, heap, int.MaxValue);
+
+                if (reader is not null)
+                {
+                    using (reader)
+                    {
+                        foreach (HandleRecord rec in reader.EnumerateRecords(cancellationToken))
+                            ProcessHandle(rec.Address, rec.MethodTable, rec.Kind);
+                    }
+                }
+                else
+                {
+                    // No heap available to resolve method tables — fall back to raw enumeration.
+                    foreach (ClrHandle handle in runtime.EnumerateHandles())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ProcessHandle(GetTargetAddress(handle), 0, (byte)handle.HandleKind);
+                    }
+                }
+            }
+
+            scanCounter.Complete();
+
+            // Dependent handle topology requires the live handle object to resolve the secondary
+            // (dependent) target address, which the snapshot does not carry. Scope this pass to
+            // Dependent-kind handles only.
+            if (heap is not null)
+            {
+                foreach (ClrHandle handle in runtime.EnumerateHandles())
+                {
+                    if (handle.HandleKind != ClrHandleKind.Dependent)
+                        continue;
+
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     dependentHandleCount++;
 
                     if (!TryGetHandleAddress(handle.Object, out ulong sourceAddress)
@@ -131,8 +173,6 @@ namespace DumpDetective.Analysis.Analyzers
                     Increment(dependentSourceTargetPairCounts, $"{sourceType} -> {dependentTargetType}");
                 }
             }
-
-            scanCounter.Complete();
 
             int pinnedHandleTargets = pinnedTypes.Values.Sum();
             double dependentUnresolvedPercent = dependentHandleCount == 0 ? 0
@@ -292,23 +332,22 @@ namespace DumpDetective.Analysis.Analyzers
             return true;
         }
 
-        private static string? ResolveTargetTypeName(ClrHeap? heap, ulong targetAddress, Dictionary<ulong, string> methodTableNameCache)
+        private static string? ResolveTypeNameFromRecord(ClrHeap? heap, ulong targetAddress, ulong methodTable, Dictionary<ulong, string> methodTableNameCache)
         {
             if (targetAddress == 0)
                 return null;
 
-            if (heap == null)
-                return $"Object@0x{targetAddress:X}";
-
-            ClrObject targetObject = heap.GetObject(targetAddress);
-            if (!targetObject.IsValid)
-                return $"Object@0x{targetAddress:X}";
-
-            ulong methodTable = targetObject.Type?.MethodTable ?? 0;
             if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cached))
                 return cached;
 
-            string name = targetObject.Type?.Name ?? StringConstants.UnknownType;
+            if (heap == null)
+                return $"Object@0x{targetAddress:X}";
+
+            ClrType? type = methodTable != 0 ? heap.GetTypeByMethodTable(methodTable) : null;
+            if (type == null)
+                return $"Object@0x{targetAddress:X}";
+
+            string name = type.Name ?? StringConstants.UnknownType;
             if (methodTable != 0)
                 methodTableNameCache[methodTable] = name;
 

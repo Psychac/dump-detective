@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 75 |
 | **Total P1 Identified** | 148 |
-| **P0 Implemented** | 45 |
+| **P0 Implemented** | 46 |
 | **P1 Implemented** | 64 |
 | **P2 Implemented** | 19 |
-| **Overall P0+P1 Rate** | 48.9% (109/223) |
+| **Overall P0+P1 Rate** | 49.3% (110/223) |
 
 ---
 
@@ -56,9 +56,9 @@
 | 22 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 23 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
-| 25 | **GCHandleAnalyzer** | 1/3 | 0/7 | 0/10 | 0/2 | P0-1 done (exception handling in reflection); P0-2,P0-3, all P1 pending |
+| 25 | **GCHandleAnalyzer** | 2/3 | 0/7 | 0/10 | 0/2 | P0-1 done (exception handling in reflection); P0-2 done (snapshot consumption, dependent-only live fallback); P0-3, all P1 pending |
 
-**Subtotal: 28/33 P0 done, 28/48 P1 done, 19/50 P2 done** (in-progress pools)
+**Subtotal: 29/33 P0 done, 28/48 P1 done, 19/50 P2 done** (in-progress pools)
 
 ---
 
@@ -88,10 +88,10 @@
 | Analyzers with partial P0+P1 completion | 15 | Some items done, some pending (includes CrashAnalyzer, GCHandleAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
 | Analyzers with zero P0+P1 completion | 9 | Not yet started |
 | **Total P0 recommendations** | **75** | — |
-| **P0 items implemented** | **49** | 65.3% (22 COMPLETE + 27 IN_PROGRESS) |
+| **P0 items implemented** | **50** | 66.7% (22 COMPLETE + 28 IN_PROGRESS) |
 | **Total P1 recommendations** | **148** | — |
 | **P1 items implemented** | **75** | 50.7% (41 COMPLETE + 34 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **54.8%** | (124/223) |
+| **Combined P0+P1 rate** | **55.2%** | (125/223) |
 
 ---
 

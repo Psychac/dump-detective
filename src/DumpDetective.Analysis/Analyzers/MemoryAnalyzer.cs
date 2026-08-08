@@ -14,6 +14,8 @@ namespace DumpDetective.Analysis.Analyzers
     {
         public string Name => "Memory Analysis";
         public string Category => "Memory";
+        public IReadOnlyCollection<string> Tags => ["memory", "heap", "pressure"];
+        public bool IsThreadSafe => true;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -61,6 +63,9 @@ namespace DumpDetective.Analysis.Analyzers
 
             static ulong EstimateRetained(ClrHeap heap, IHeapAnalysisCache cache, string typeName, HashSet<ulong> claimedAddresses)
             {
+                if (!heap.CanWalkHeap)
+                    return 0;
+
                 ulong sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
                 if (sampleAddress == 0)
                     return 0;

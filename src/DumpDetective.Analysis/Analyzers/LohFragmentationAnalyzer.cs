@@ -108,6 +108,7 @@ namespace DumpDetective.Analysis.Analyzers
                         objectAddress,
                         allFreeSizes,
                         largeObjectCandidates,
+                        options.TopLargeObjectsCount,
                         ref freeBytes,
                         ref largestFreeBlock,
                         ref objectCount,
@@ -154,11 +155,12 @@ namespace DumpDetective.Analysis.Analyzers
 
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
 
+            // Keep only top-N large objects (bounded accumulator reduces memory on high-object-count heaps).
+            TrimLargeObjectCandidates(largeObjectCandidates, options.TopLargeObjectsCount);
             largeObjectCandidates.Sort(static (a, b) => b.Size.CompareTo(a.Size));
-            int topLargeN = Math.Min(options.TopLargeObjectsCount, largeObjectCandidates.Count);
-            var topLargeObjects = new List<LargeObjectSnapshot>(topLargeN);
-            for (int i = 0; i < topLargeN; i++)
-                topLargeObjects.Add(new LargeObjectSnapshot(largeObjectCandidates[i].Address, largeObjectCandidates[i].TypeName, largeObjectCandidates[i].Size));
+            var topLargeObjects = new List<LargeObjectSnapshot>(largeObjectCandidates.Count);
+            foreach (var cand in largeObjectCandidates)
+                topLargeObjects.Add(new LargeObjectSnapshot(cand.Address, cand.TypeName, cand.Size));
 
             return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects);
         }
@@ -188,6 +190,7 @@ namespace DumpDetective.Analysis.Analyzers
             ulong objectAddress,
             List<ulong> allFreeSizes,
             List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
+            int maxLargeObjects,
             ref ulong freeBytes,
             ref ulong largestFreeBlock,
             ref int objectCount,
@@ -215,7 +218,22 @@ namespace DumpDetective.Analysis.Analyzers
 
                 ulong size = obj.Size;
                 if (size >= LohThreshold)
-                    largeObjectCandidates.Add((objectAddress, obj.Type?.Name ?? "Unknown", size));
+                {
+                    var candidate = (objectAddress, obj.Type?.Name ?? "Unknown", size);
+                    largeObjectCandidates.Add(candidate);
+
+                    // Bounded accumulator: keep only top-N by size (same pattern as LargeObjectTracker).
+                    if (largeObjectCandidates.Count > maxLargeObjects)
+                    {
+                        int minIdx = 0;
+                        for (int i = 1; i < largeObjectCandidates.Count; i++)
+                        {
+                            if (largeObjectCandidates[i].Size < largeObjectCandidates[minIdx].Size)
+                                minIdx = i;
+                        }
+                        largeObjectCandidates.RemoveAt(minIdx);
+                    }
+                }
             }
         }
 
@@ -430,6 +448,20 @@ namespace DumpDetective.Analysis.Analyzers
                 ObjectCount = objectCount;
                 FreeObjectCount = freeObjectCount;
                 FragmentationPercent = fragmentationPercent;
+            }
+        }
+
+        private static void TrimLargeObjectCandidates(List<(ulong Address, string TypeName, ulong Size)> candidates, int maxCount)
+        {
+            while (candidates.Count > maxCount)
+            {
+                int minIdx = 0;
+                for (int i = 1; i < candidates.Count; i++)
+                {
+                    if (candidates[i].Size < candidates[minIdx].Size)
+                        minIdx = i;
+                }
+                candidates.RemoveAt(minIdx);
             }
         }
 

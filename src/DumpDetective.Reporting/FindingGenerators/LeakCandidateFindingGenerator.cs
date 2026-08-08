@@ -17,64 +17,88 @@ internal sealed class LeakCandidateFindingGenerator : IFindingGenerator
         if (result is not LeakCandidateDomainResult r || r.TopCandidates.Count == 0)
             return [];
 
-        int consideredCount = Math.Min(5, r.TopCandidates.Count);
-        int maxScore = 0;
-        long totalInstances = 0;
-        ulong totalShallowBytes = 0;
-        FindingSeverity maxSeverity = FindingSeverity.Info;
-        LeakClass dominantClass = LeakClass.Unknown;
-        int dominantClassCount = 0;
+        var findings = new List<InsightFinding>();
 
-        string exampleA = string.Empty;
-        string exampleB = string.Empty;
-        string exampleC = string.Empty;
-
-        var classCounts = new Dictionary<LeakClass, int>();
-        for (int i = 0; i < consideredCount; i++)
+        var criticalCandidates = new List<LeakCandidateRecord>();
+        int criticalLimit = 3;
+        foreach (LeakCandidateRecord candidate in r.TopCandidates)
         {
-            LeakCandidateRecord candidate = r.TopCandidates[i];
-            totalShallowBytes += candidate.TotalSize;
-            totalInstances += candidate.InstanceCount;
+            if (candidate.Severity == FindingSeverity.Critical && criticalCandidates.Count < criticalLimit)
+                criticalCandidates.Add(candidate);
+        }
 
-            if (candidate.SuspicionScore > maxScore)
-                maxScore = candidate.SuspicionScore;
+        foreach (LeakCandidateRecord candidate in criticalCandidates)
+        {
+            var finding = new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Retention",
+                Severity: FindingSeverity.Critical,
+                Title: $"Critical leak candidate: {candidate.TypeName}",
+                Evidence: $"Type: {candidate.TypeName}\n" +
+                    $"Suspicion score: {candidate.SuspicionScore:N0}\n" +
+                    $"Shallow size: {FormatHelper.FormatBytes(candidate.TotalSize)} ({candidate.InstanceCount:N0} instances)\n" +
+                    $"Generation: {candidate.Gen2Pct:F1}% Gen2\n" +
+                    $"Classification: {candidate.Classification}",
+                Recommendation: BuildRecommendation(candidate.Classification),
+                Tags: ["leak", "candidate", "critical", candidate.Classification.ToString()],
+                MetricValue: candidate.TotalSize,
+                MetricUnit: "bytes");
+            findings.Add(finding);
+        }
 
-            if (SeverityRank(candidate.Severity) > SeverityRank(maxSeverity))
-                maxSeverity = candidate.Severity;
+        if (findings.Count == 0)
+        {
+            int consideredCount = Math.Min(5, r.TopCandidates.Count);
+            long totalInstances = 0;
+            ulong totalShallowBytes = 0;
+            FindingSeverity maxSeverity = FindingSeverity.Info;
+            LeakClass dominantClass = LeakClass.Unknown;
+            int dominantClassCount = 0;
 
-            if (!classCounts.TryGetValue(candidate.Classification, out int classCount))
-                classCount = 0;
-            classCount++;
-            classCounts[candidate.Classification] = classCount;
+            string exampleA = string.Empty;
+            string exampleB = string.Empty;
+            string exampleC = string.Empty;
 
-            if (classCount > dominantClassCount)
+            var classCounts = new Dictionary<LeakClass, int>();
+            for (int i = 0; i < consideredCount; i++)
             {
-                dominantClass = candidate.Classification;
-                dominantClassCount = classCount;
+                LeakCandidateRecord candidate = r.TopCandidates[i];
+                totalShallowBytes += candidate.TotalSize;
+                totalInstances += candidate.InstanceCount;
+
+                if (SeverityRank(candidate.Severity) > SeverityRank(maxSeverity))
+                    maxSeverity = candidate.Severity;
+
+                if (!classCounts.TryGetValue(candidate.Classification, out int classCount))
+                    classCount = 0;
+                classCount++;
+                classCounts[candidate.Classification] = classCount;
+
+                if (classCount > dominantClassCount)
+                {
+                    dominantClass = candidate.Classification;
+                    dominantClassCount = classCount;
+                }
+
+                string example = candidate.TypeName + " (score " + candidate.SuspicionScore.ToString("N0") + ")";
+                if (string.IsNullOrEmpty(exampleA)) exampleA = example;
+                else if (string.IsNullOrEmpty(exampleB)) exampleB = example;
+                else if (string.IsNullOrEmpty(exampleC)) exampleC = example;
             }
 
-            string example = candidate.TypeName + " (score " + candidate.SuspicionScore.ToString("N0") + ")";
-            if (string.IsNullOrEmpty(exampleA)) exampleA = example;
-            else if (string.IsNullOrEmpty(exampleB)) exampleB = example;
-            else if (string.IsNullOrEmpty(exampleC)) exampleC = example;
-        }
+            string evidence =
+                $"{consideredCount:N0} leak candidate(s) highlighted out of {r.TotalCandidates:N0} total. " +
+                $"Combined shallow size: {FormatHelper.FormatBytes(totalShallowBytes)} across {totalInstances:N0} instances.";
 
-        string evidence =
-            $"{consideredCount:N0} leak candidate(s) highlighted out of {r.TotalCandidates:N0} total. " +
-            $"Combined shallow size: {FormatHelper.FormatBytes(totalShallowBytes)} across {totalInstances:N0} instances. " +
-            $"Highest suspicion score: {maxScore:N0}.";
+            if (!string.IsNullOrEmpty(exampleA))
+            {
+                evidence += " Top examples: " + exampleA;
+                if (!string.IsNullOrEmpty(exampleB)) evidence += ", " + exampleB;
+                if (!string.IsNullOrEmpty(exampleC)) evidence += ", " + exampleC;
+                evidence += ".";
+            }
 
-        if (!string.IsNullOrEmpty(exampleA))
-        {
-            evidence += " Top examples: " + exampleA;
-            if (!string.IsNullOrEmpty(exampleB)) evidence += ", " + exampleB;
-            if (!string.IsNullOrEmpty(exampleC)) evidence += ", " + exampleC;
-            evidence += ".";
-        }
-
-        return
-        [
-            new InsightFinding(
+            findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Retention",
                 Severity: maxSeverity,
@@ -85,8 +109,10 @@ internal sealed class LeakCandidateFindingGenerator : IFindingGenerator
                 Recommendation: BuildRecommendation(dominantClass),
                 Tags: ["leak", "candidate", "aggregate", dominantClass.ToString()],
                 MetricValue: totalShallowBytes,
-                MetricUnit: "bytes")
-        ];
+                MetricUnit: "bytes"));
+        }
+
+        return findings;
     }
 
     private static int SeverityRank(FindingSeverity severity) => severity switch

@@ -14,7 +14,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("loh.fragmentation.percent", null, r.FragmentationPercent, "%", MetricTrendDirection.HigherIsWorse),
                 new("loh.free.bytes", null, r.FreeBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("loh.total.bytes", null, r.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("loh.largest.free.block", null, r.LargestFreeBlock, "bytes", MetricTrendDirection.Neutral),
+                new("loh.largest.free.block", null, r.LargestFreeBlock, "bytes", MetricTrendDirection.LowerIsWorse),
                 new("loh.segment.count", null, r.SegmentCount, "segments", MetricTrendDirection.Neutral)
             ];
         }

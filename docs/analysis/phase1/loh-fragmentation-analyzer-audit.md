@@ -363,8 +363,8 @@ inconsistency (Area 2-W1) and wrong per-segment size column (Area 2-W2) are user
 | **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement | ✅ DONE |
 | **P1** | Fix redundant `heap.GetObject(objectAddress)` in `AccumulateSegmentObjectByAddress` — pass `ClrObject` directly | Medium | Low | High | Improvement | ✅ DONE |
 | **P1** | Add type-aggregated LOH table (top types by total bytes) to domain result and section builder | High | Medium | High | Improvement | ✅ DONE |
-| **P2** | Add `CancellationToken` to `BuildFreeGapHistogram` | Low | Low | High | Improvement | — |
-| **P2** | Change `loh.largest.free.block` metric trend direction from `Neutral` to `LowerIsWorse` in `LohFragmentationTrendComparer` | Low | Low | High | Improvement | — |
+| **P2** | Add `CancellationToken` to `BuildFreeGapHistogram` | Low | Low | High | Improvement | ✅ DONE |
+| **P2** | Change `loh.largest.free.block` metric trend direction from `Neutral` to `LowerIsWorse` in `LohFragmentationTrendComparer` | Low | Low | High | Improvement | ✅ DONE |
 | **P2** | Document or remove the unused Offset field in `LohFreeBlockIndex.bin`; reclaim 8 bytes/record or expose offset for gap-adjacency analysis | Low | Low | Medium | Improvement | — |
 | **P2** | Expose POH as either a separate analyzer section or an explicit excluded/included flag with reporting | High | Medium | Medium | Evolution | — |
 | **P2** | Add unit tests for `BuildFreeGapHistogram`, `IsLohSegment`, and the index aggregation path using synthetic data | Medium | Medium | High | Improvement | — |

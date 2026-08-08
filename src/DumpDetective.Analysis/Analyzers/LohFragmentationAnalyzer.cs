@@ -335,7 +335,7 @@ namespace DumpDetective.Analysis.Analyzers
                 topSegs.Add(new LohSegmentSnapshot(segStats[i].Address, segStats[i].TotalBytes, segStats[i].FragPct, segStats[i].FreeBytes, segStats[i].LargestFree));
 
             // Step 4: Build free-gap histogram.
-            var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
+            var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
 
             // Step 5: Read LargeObjectIndex.bin and resolve type names (≤ 100 objects).
             List<LargeObjectSnapshot> topLargeObjects = [];
@@ -423,13 +423,14 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Free-gap histogram ────────────────────────────────────────────────────
 
-        private static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes)
+        private static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes, CancellationToken cancellationToken = default)
         {
             if (allFreeSizes.Count == 0) return [];
 
             int[] counts = new int[s_gapBuckets.Length];
             foreach (ulong size in allFreeSizes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 for (int b = 0; b < s_gapBuckets.Length; b++)
                 {
                     if (size >= s_gapBuckets[b].Min && size < s_gapBuckets[b].Max)
@@ -440,6 +441,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var result = new List<FreeGapBucket>(s_gapBuckets.Length);
             for (int b = 0; b < s_gapBuckets.Length; b++)
                 if (counts[b] > 0)

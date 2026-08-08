@@ -56,8 +56,9 @@
 | 22 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 23 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
+| 25 | **GCHandleAnalyzer** | 1/3 | 0/7 | 0/10 | 0/2 | P0-1 done (exception handling in reflection); P0-2,P0-3, all P1 pending |
 
-**Subtotal: 27/32 P0 done, 28/48 P1 done, 19/50 P2 done** (in-progress pools)
+**Subtotal: 28/33 P0 done, 28/48 P1 done, 19/50 P2 done** (in-progress pools)
 
 ---
 
@@ -68,13 +69,12 @@
 | AsyncTaskAnalyzer | 0/2 | 0/4 | 6 | — |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
-| GCHandleAnalyzer | 1/3 | 0/7 | 9 | P0-1 done (exception handling in reflection); P0-2,P0-3 pending |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
 | StaticRootLeakDetector | 0/4 | 0/5 | 9 | — |
 
-**Subtotal: 0/22 P0 done, 0/43 P1 done** (not-started pools)
+**Subtotal: 0/21 P0 done, 0/43 P1 done** (not-started pools)
 
 ---
 
@@ -85,8 +85,8 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 11 | All P0+P1 recommendations implemented (includes MemoryAnalyzer) |
-| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes CrashAnalyzer, GCHandleAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
-| Analyzers with zero P0+P1 completion | 10 | Not yet started |
+| Analyzers with partial P0+P1 completion | 15 | Some items done, some pending (includes CrashAnalyzer, GCHandleAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
+| Analyzers with zero P0+P1 completion | 9 | Not yet started |
 | **Total P0 recommendations** | **75** | — |
 | **P0 items implemented** | **49** | 65.3% (22 COMPLETE + 27 IN_PROGRESS) |
 | **Total P1 recommendations** | **148** | — |
@@ -119,7 +119,7 @@ Different audits use different conventions for marking completion:
 - SegmentReservationAnalyzer went from "critical bug" to "all major recommendations done" in one sprint
 
 **Remaining Work:**
-- 21 analyzers (64%) have zero P0/P1 implementation
+- 9 analyzers (26%) have zero P0/P1 implementation
 - High-impact blockers: LeakCandidateAnalyzer, ThreadAnalyzer (7-8 items each)
 - Platform-level opportunity: HeapTopologyAnalyzer + SegmentReservationAnalyzer share segment enumeration code
 

@@ -34,11 +34,15 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
             ["gen1_bytes"] = new NumericMetricValue((double)d.Gen1Bytes, MetricUnit.Bytes, FormatBytes(d.Gen1Bytes)),
             ["gen2_bytes"] = new NumericMetricValue((double)d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
             ["soh_bytes"] = new NumericMetricValue((double)d.SohBytes, MetricUnit.Bytes, FormatBytes(d.SohBytes)),
+            ["soh_fragmented"] = new NumericMetricValue((double)d.SohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.SohFragmentedBytes)),
             ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
+            ["loh_fragmented"] = new NumericMetricValue((double)d.LohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.LohFragmentedBytes)),
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
             ["poh_bytes"] = new NumericMetricValue((double)d.PohBytes, MetricUnit.Bytes, FormatBytes(d.PohBytes)),
+            ["poh_fragmented"] = new NumericMetricValue((double)d.PohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.PohFragmentedBytes)),
             ["poh_pct"] = new NumericMetricValue(d.PohPercent, MetricUnit.Percent, $"{d.PohPercent:F1}%"),
             ["foh_bytes"] = new NumericMetricValue((double)d.FrozenBytes, MetricUnit.Bytes, FormatBytes(d.FrozenBytes)),
+            ["foh_fragmented"] = new NumericMetricValue((double)d.FrozenFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.FrozenFragmentedBytes)),
             ["foh_pct"] = new NumericMetricValue(d.FrozenPercent, MetricUnit.Percent, $"{d.FrozenPercent:F1}%"),
         };
 

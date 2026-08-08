@@ -22,10 +22,10 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
     {
         cancellationToken.ThrowIfCancellationRequested();
         var opts = context.AnalysisOptions.HeapTopology;
-        return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, bool countSoh)
+    private static AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, bool countSoh, CancellationToken cancellationToken)
     {
         // heap.Segments is backed by a fixed list in ClrMD — enumerate twice rather than ToList(),
         // keeping one extra List<T> allocation off the heap for large dumps.
@@ -60,7 +60,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             ulong start = segment.Start;
             ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
-            int generation = segment.SubHeap?.Index ?? -1;
+            int logicalHeapIndex = segment.SubHeap?.Index ?? -1;
 
             // Extract generation range sizes for SOH segments
             ulong segGen0Bytes = 0, segGen1Bytes = 0, segGen2Bytes = 0;
@@ -81,30 +81,30 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 _ => null
             };
 
-            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, ref used, progress, typeStats);
-            if (generation >= 0)
+            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, ref used, progress, typeStats, cancellationToken);
+            if (logicalHeapIndex >= 0)
             {
-                if (bytesByLogicalHeap.TryGetValue(generation, out ulong existingBytes))
-                    bytesByLogicalHeap[generation] = existingBytes + committed;
+                if (bytesByLogicalHeap.TryGetValue(logicalHeapIndex, out ulong existingBytes))
+                    bytesByLogicalHeap[logicalHeapIndex] = existingBytes + committed;
                 else
-                    bytesByLogicalHeap[generation] = committed;
+                    bytesByLogicalHeap[logicalHeapIndex] = committed;
 
-                if (segmentCountByLogicalHeap.TryGetValue(generation, out int existingSegments))
-                    segmentCountByLogicalHeap[generation] = existingSegments + 1;
+                if (segmentCountByLogicalHeap.TryGetValue(logicalHeapIndex, out int existingSegments))
+                    segmentCountByLogicalHeap[logicalHeapIndex] = existingSegments + 1;
                 else
-                    segmentCountByLogicalHeap[generation] = 1;
+                    segmentCountByLogicalHeap[logicalHeapIndex] = 1;
 
                 if (objCount < 0)
                 {
-                    objectsByLogicalHeap[generation] = -1;
+                    objectsByLogicalHeap[logicalHeapIndex] = -1;
                 }
-                else if (objectsByLogicalHeap.TryGetValue(generation, out int existingObjects) && existingObjects >= 0)
+                else if (objectsByLogicalHeap.TryGetValue(logicalHeapIndex, out int existingObjects) && existingObjects >= 0)
                 {
-                    objectsByLogicalHeap[generation] = existingObjects + objCount;
+                    objectsByLogicalHeap[logicalHeapIndex] = existingObjects + objCount;
                 }
-                else if (!objectsByLogicalHeap.ContainsKey(generation))
+                else if (!objectsByLogicalHeap.ContainsKey(logicalHeapIndex))
                 {
-                    objectsByLogicalHeap[generation] = objCount;
+                    objectsByLogicalHeap[logicalHeapIndex] = objCount;
                 }
             }
 
@@ -125,7 +125,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 UsedBytes: used,
                 ReservedBytes: reserved,
                 Kind: kind,
-                Generation: generation,
+                Generation: logicalHeapIndex,
                 ObjectCount: objCount,
                 Gen0Bytes: segGen0Bytes,
                 Gen1Bytes: segGen1Bytes,
@@ -267,7 +267,8 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         ref long totalObjectsScanned,
         ref ulong usedBytes,
         IProgress<AnalyzerProgressReport>? progress,
-        Dictionary<string, SegmentTypeAccumulator>? typeStats = null)
+        Dictionary<string, SegmentTypeAccumulator>? typeStats = null,
+        CancellationToken cancellationToken = default)
     {
         // SOH holds the vast majority of objects on large dumps.
         // Skip enumeration unless explicitly requested to avoid O(87M) scans.
@@ -306,6 +307,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
 
             if (reportInner && (localScanned & (HeapTopologyAnalyzerOptions.ReportObjectScanInterval - 1)) == 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 totalObjectsScanned += localScanned;
                 localScanned = 0;
                 progress!.Report(new(

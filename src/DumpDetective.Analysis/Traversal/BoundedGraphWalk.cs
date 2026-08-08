@@ -2,6 +2,8 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Traversal;
 
+using System.Threading;
+
 /// <summary>
 /// Single bounded forward-BFS primitive for the heap object graph. Enforces the
 /// project's 20-depth cap internally regardless of caller-requested depth, replacing
@@ -144,13 +146,15 @@ internal static class BoundedGraphWalk
     /// (CLAUDE.md's mandated BFS-depth cap). Replaces
     /// <c>HeapAnalysisCache.GetRetainedObjects</c>, which had no depth cap at all.
     /// Sets <paramref name="wasCapped"/> to true if the scan hit <paramref name="maxObjects"/> limit.
+    /// Checks cancellation token every 256 dequeues for responsiveness.
     /// </summary>
     public static HashSet<ulong> CollectRetainedObjects(
         ClrHeap heap,
         ulong rootAddress,
         out bool wasCapped,
         int maxObjects = 10_000,
-        int maxDepth = AbsoluteMaxDepth)
+        int maxDepth = AbsoluteMaxDepth,
+        CancellationToken cancellationToken = default)
     {
         wasCapped = false;
         maxDepth = Math.Min(maxDepth, AbsoluteMaxDepth);
@@ -161,8 +165,14 @@ internal static class BoundedGraphWalk
         queue.Enqueue((rootAddress, 0));
         retained.Add(rootAddress);
 
+        int dequeueCount = 0;
+        const int CancellationCheckInterval = 256;
+
         while (queue.Count > 0 && retained.Count < maxObjects)
         {
+            if (++dequeueCount % CancellationCheckInterval == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
             (ulong current, int depth) = queue.Dequeue();
             ClrObject obj = heap.GetObject(current);
 

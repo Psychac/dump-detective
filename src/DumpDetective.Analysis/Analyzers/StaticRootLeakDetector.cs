@@ -20,17 +20,17 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             StaticRootLeakAnalysisOptions options = context.AnalysisOptions.StaticRootLeakAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            return Analyze(heap, cache, new StaticRootLeakAnalysisOptions(), progress: null);
+            return Analyze(heap, cache, new StaticRootLeakAnalysisOptions(), progress: null, CancellationToken.None);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
-            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, options, progress);
+            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, options, progress, cancellationToken);
             var significantStaticRoots = allStaticRootAnalysis
                 .Where(a => IsSignificant(a, options))
                 .ToArray();
@@ -82,7 +82,9 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.DirectObjectType,
                 evidence,
                 analysis.TopRetainedTypes,
-                analysis.ScanWasCapped);
+                analysis.ScanWasCapped,
+                analysis.ContainsCollections,
+                analysis.ContainsEventHandlers);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
@@ -91,7 +93,7 @@ namespace DumpDetective.Analysis.Analyzers
                 || analysis.ObjectsKeptAlive > options.SignificantObjectCountThreshold;
         }
 
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var results = new List<StaticRootAnalysis>();
             var processedRoots = new HashSet<ulong>();
@@ -120,7 +122,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!rootMetadata.IsValid)
                     continue;
 
-                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out bool scanWasCapped, options.MaxRetainedObjectsToScan);
+                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out bool scanWasCapped, options.MaxRetainedObjectsToScan, cancellationToken: cancellationToken);
 
                 var typeStats = new Dictionary<string, RetainedTypeInfo>();
                 var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);

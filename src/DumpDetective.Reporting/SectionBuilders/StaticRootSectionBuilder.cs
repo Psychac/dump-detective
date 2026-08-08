@@ -49,6 +49,18 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
             }
             compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Objects Kept Alive","number") }, rootRows));
 
+            var collectionRoots = roots.Where(r => r.ContainsCollections).ToList();
+            if (collectionRoots.Count > 0)
+            {
+                blocks.Add(T($"⚠️ {collectionRoots.Count} root(s) retain collection objects — likely cache-pattern retention."));
+            }
+
+            var eventHandlerRoots = roots.Where(r => r.ContainsEventHandlers).ToList();
+            if (eventHandlerRoots.Count > 0)
+            {
+                blocks.Add(T($"⚠️ {eventHandlerRoots.Count} root(s) retain event handler objects — check for unsubscription leaks."));
+            }
+
             for (int i = 0; i < limit; i++)
             {
                 var r = roots[i];

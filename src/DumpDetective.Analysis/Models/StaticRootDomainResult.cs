@@ -23,4 +23,6 @@ internal sealed record StaticRootSnapshot(
     string TypeName = "",
     Evidence? Evidence = null,
     IReadOnlyList<RetainedTypeInfo>? TopRetainedTypes = null,
-    bool ScanWasCapped = false);
+    bool ScanWasCapped = false,
+    bool ContainsCollections = false,
+    bool ContainsEventHandlers = false);

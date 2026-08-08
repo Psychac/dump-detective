@@ -389,10 +389,10 @@ for further manual investigation. Not suitable as a root-cause confirmation tool
 
 #### P0 — Critical
 
-| # | Recommendation | Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|
-| P0-1 | Replace `staticRoots.Contains(sampleAddress)` with a `IsStaticRooted` bit on `TypeAggregateIndexEntry` (set during Phase 1 when a static root address matches the type's MethodTable). | High — eliminates the most common false negative in classification | Medium | High | Improvement |
-| P0-2 | Remove the `heap.GetObject(sampleAddress)` call in the hot loop; resolve `MethodTable` directly from `TypeAggregateIndexEntry.MethodTable` and use `aggregate.SampleAddress` instead of calling `GetSampleInstanceAddress`. | Medium (perf + correctness) | Low | High | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Status | Class |
+|---|---|---|---|---|---|---|
+| P0-1 | Replace `staticRoots.Contains(sampleAddress)` with a `IsStaticRooted` bit on `TypeAggregateIndexEntry` (set during Phase 1 when a static root address matches the type's MethodTable). | High — eliminates the most common false negative in classification | Medium | High | Pending | Improvement |
+| P0-2 | Remove the `heap.GetObject(sampleAddress)` call in the hot loop; resolve `MethodTable` directly from `TypeAggregateIndexEntry.MethodTable` and use `aggregate.SampleAddress` instead of calling `GetSampleInstanceAddress`. | Medium (perf + correctness) | Low | High | ✅ DONE (commit 893a2ae) | Improvement |
 
 #### P1 — High
 
@@ -447,8 +447,10 @@ for further manual investigation. Not suitable as a root-cause confirmation tool
    enhancement that multiple analyzers would benefit from.
 
 4. **Highest engineering return?**
-   P0-2 (remove redundant `heap.GetObject()` in hot loop) — zero risk, immediate
-   correctness improvement, and minor performance gain.
+   ✅ P0-2 (remove redundant `heap.GetObject()` in hot loop) — **COMPLETE (commit 893a2ae)**.
+   Built upfront `typeName → methodTable` map using `heap.GetTypeByMethodTable()`, eliminated per-type
+   heap.GetObject call. Uses `aggregate.SampleAddress` and `aggregate.MethodTable` directly.
+   
    P1-2 (per-Critical finding emission) — one-line change to `LeakCandidateFindingGenerator`
    that materially improves incident alert quality.
    P2-1 (Gen0/Gen1 on record) — two field additions, no logic change, immediately

@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 60 |
+| **P0 Implemented** | 61 |
 | **P1 Implemented** | 99 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 67.5% (159/234) |
+| **Overall P0+P1 Rate** | 68.2% (160/234) |
 
 ---
 
@@ -61,8 +61,9 @@
 | 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 26 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
 | 27 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
+| 28 | **LeakCandidateAnalyzer** | 1/2 | 0/4 | 0/6 | 0/4 | ✅ P0-2 done (removed heap.GetObject call); P0-1, all P1 pending |
 
-**Subtotal: 33/38 P0 done, 38/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 34/39 P0 done, 38/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -72,9 +73,8 @@
 |----------|----|----|---|-------|
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
-| **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 
-**Subtotal: 0/8 P0 done, 0/15 P1 done** (not-started pools)
+**Subtotal: 0/6 P0 done, 0/11 P1 done** (not-started pools)
 
 ---
 
@@ -85,13 +85,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 13 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer) |
-| Analyzers with partial P0+P1 completion | 15 | Some items done, some pending (includes AsyncTaskAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
-| Analyzers with zero P0+P1 completion | 7 | Not yet started |
+| Analyzers with partial P0+P1 completion | 16 | Some items done, some pending (includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with zero P0+P1 completion | 6 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **60** | 76.9% |
+| **P0 items implemented** | **61** | 78.2% |
 | **Total P1 recommendations** | **156** | — |
 | **P1 items implemented** | **99** | 63.5% |
-| **Combined P0+P1 rate** | **67.5%** | (159/234) |
+| **Combined P0+P1 rate** | **68.2%** | (160/234) |
 
 ---
 

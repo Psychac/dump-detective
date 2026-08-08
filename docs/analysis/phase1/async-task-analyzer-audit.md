@@ -133,6 +133,8 @@ Every suspended `async` method has a boxed state machine on the heap. Scanning f
 
 Impact: High. Difficulty: Medium. Confidence: High.
 
+*.NET 11 caveat:* under Runtime Async (see [.NET 11 Runtime Async — Forward Compatibility](#net-11-runtime-async--forward-compatibility)), a suspended method may have no `IAsyncStateMachine` instance at all. Implement this inventory as best-effort per task, not as a required correlation — a `Task` with no matching state machine is an expected outcome, not a detection failure.
+
 **2. Multi-continuation fan-out detection**
 
 Detect tasks where `m_continuationObject` is a `List<object>`, enumerate the list, and report the fan-out count and target types. A task with 50 continuations attached indicates a broadcast-style event completion (e.g., a shared lock-release task). Unreleased broadcast tasks with large fan-outs are a common cause of suspension storms.
@@ -324,6 +326,22 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P3-2 | Add `TaskCompletionSource<T>` orphan detection | 4 | Evolution | Medium | Medium | High |
 | P3-3 | Rank pending types by total retained bytes (Size × Count) | 4, 7 | Improvement | Medium | Low | High |
 | P3-4 | Merge duplicate state-read with BFS `heap.GetObject` call to eliminate second lookup | 6 | Improvement | Low | Low | High |
+| P3-5 | Re-verify P1-2 (`IAsyncStateMachine` correlation) treats "no state machine found" as expected once .NET 11 Runtime Async adoption grows; confirm `RuntimeAsyncTask<T>` shape against GA runtime before hard-coding | 4, 7 | Evolution | Medium — prevents false-positive "orphan" classification | Low | Low (spec not final) |
+
+---
+
+## .NET 11 Runtime Async — Forward Compatibility
+
+**Status:** .NET 11 (preview) introduces **Runtime Async**, an opt-in CLR-native replacement for compiler-generated `IAsyncStateMachine` structs. See [async-state-machine-analyzer-audit.md § .NET 11 Runtime Async — Forward Compatibility](async-state-machine-analyzer-audit.md#net-11-runtime-async--forward-compatibility) for the full mechanism description; this section covers the impact specific to `AsyncTaskAnalyzer`.
+
+**Impact here:** `AsyncTaskAnalyzer`'s task model (`Task`/`Task<T>`, `m_stateFlags`, `m_continuationObject`, `m_action`) is **unaffected at the `Task` object level** — Runtime Async still produces ordinary `Task`/`Task<T>` (or `RuntimeAsyncTask<T>`-backed) instances on the heap for methods that don't complete synchronously, so the existing pending/orphan/continuation-BFS logic continues to function without modification. The risk is narrower than in the state machine analyzer:
+
+- The planned `IAsyncStateMachine` correlation work (P1-2 in the roadmap below, and the `!dumpasync`-parity item in Area 7) assumes every suspended async call is backed by a `<>t__builder`-linked state machine struct. Under Runtime Async, that link doesn't exist — the builder/state-machine bridge is replaced by `AsyncHelpers` and `RuntimeAsyncTask<T>`. **When P1-2 is implemented, it must not assume `IAsyncStateMachine` correlation is exhaustive** — a `Task` with no matching state machine instance is expected and normal for Runtime Async-compiled callers, not a bug or an orphan.
+- `RuntimeAsyncTask<T>`'s exact field layout (equivalent to `m_stateFlags`/`m_continuationObject` for correlation purposes) is not finalized pre-GA; do not hard-code assumptions about it yet.
+
+**Compatibility constraint:** As with the state machine analyzer, .NET Framework and non-opted-in .NET code paths remain on the classic model indefinitely. `Task`-level analysis (the bulk of this analyzer) needs no version branching since `Task` itself is unchanged; only the future `IAsyncStateMachine` correlation feature needs to treat "no state machine found" as a valid outcome rather than a detection failure.
+
+**Recommended action:** No change required to ship today. When implementing P1-2 (`IAsyncStateMachine` inventory + task linkage), gate the correlation as best-effort/optional per task, and re-verify against .NET 11 GA before assuming `RuntimeAsyncTask<T>` structure.
 
 ---
 

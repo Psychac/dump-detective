@@ -144,6 +144,8 @@ Aggregate `StackSizeBytes` across all threads. Report total, mean, max, and flag
 **8. Async chain coverage per thread**
 Count MoveNext depth per thread (already done) but also bin threads into depth buckets (1–5, 5–10, 10+). Deep chains (> 10) indicate long continuation chains that may indicate async deadlocks.
 
+*.NET 11 caveat:* `MoveNext` frame counting is specific to compiler-generated async and returns 0 for Runtime Async-compiled stacks, which have no synthetic state-machine frames (see [.NET 11 Runtime Async — Forward Compatibility](#net-11-runtime-async--forward-compatibility)). Any depth-bucketing built on top of this signal will under-report chain depth for Runtime Async code until an equivalent marker is identified post-GA.
+
 ---
 
 ## Audit Area 5 — Performance, Memory & Scalability
@@ -269,6 +271,18 @@ The `WaitPatterns` table does not cover:
 
 ---
 
+## .NET 11 Runtime Async — Forward Compatibility
+
+**Status:** .NET 11 (preview) introduces **Runtime Async**, an opt-in CLR-native replacement for compiler-generated `IAsyncStateMachine` async infrastructure. See [async-state-machine-analyzer-audit.md § .NET 11 Runtime Async — Forward Compatibility](async-state-machine-analyzer-audit.md#net-11-runtime-async--forward-compatibility) for the full mechanism description.
+
+**Impact here:** `ThreadAnalyzer`'s "async chain depth" measurement (Area 4, item 8; also cited as a competitive differentiator in Area 7 — "SOS does not aggregate MoveNext depth") works by counting `MoveNext` frames in the walked stack trace. Runtime Async's headline change is specifically that suspended-method call stacks **no longer contain synthetic `MoveNext`/state-machine-builder frames at all** — the real method names appear directly on the stack. For threads executing Runtime Async-compiled code, `MoveNext` frame counting will silently return a depth of 0 regardless of actual continuation depth, understating async chain depth rather than erroring.
+
+**Compatibility constraint:** .NET Framework and non-opted-in .NET code remain on the classic model, where `MoveNext` frames continue to appear exactly as today — the existing counting logic must not be removed. This is an additive detection gap, not a regression: on any mixed-mode dump the current logic still correctly measures the legacy-compiled portion of the call stack.
+
+**Recommended action:** No change required to ship today; the on-heap/on-stack shape for Runtime Async continuations is not finalized pre-GA. When re-auditing post-.NET 11 GA, evaluate whether `DispatchContinuations()`/`AsyncHelpers`-related frames (or another CLR-exposed continuation marker) can serve as an equivalent depth signal for Runtime Async stacks, and treat depth-0 threads with a Runtime Async-compiled frame present as "chain depth unknown" rather than "no async chain," to avoid a false negative in hang triage.
+
+---
+
 ## Final Executive Summary
 
 ### Overall Assessment
@@ -317,6 +331,7 @@ The `WaitPatterns` table does not cover:
 | P3-2 | Document in-place mutation side-effect of `AsyncChainDetection.Full` frame widening; consider copying to avoid aliasing across category lists | Correctness | Low | Low | High | Improvement | — |
 | P3-3 | Add `ThreadStackClusterAnalyzer` result cross-reference into `ThreadSectionBuilder` ("see cluster analysis for grouping") | Platform | Medium | Low | Medium | Evolution | — |
 | P3-4 | Introduce `IThreadOwnershipIndex` shared infrastructure built during `BeforeThreadStackScan` from `EnumerateBlockingObjects`; share with `LockGraphAnalyzer` | Platform | Very High | High | High | Evolution | — |
+| P3-5 | Re-audit async chain depth (`MoveNext` frame counting) against .NET 11 GA Runtime Async; add an additive continuation-depth signal for stacks with no `MoveNext` frames once the CLR-exposed marker is finalized | Correctness | Medium | Medium | Low (spec not final) | Evolution | — |
 
 ---
 

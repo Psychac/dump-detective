@@ -160,6 +160,7 @@ None. All logic serves async state machine diagnostics.
 | P2 | Fire-and-forget severity escalation based on count | Accurate triage |
 | P3 | Bounded transitive capture BFS for top suspects | More accurate retention estimate |
 | P3 | Sync-over-async cross-reference | High-value for deadlock investigation |
+| P3 | .NET 11 Runtime Async re-audit (additive `RuntimeAsyncTask` detection) | Prevents silent under-counting as Runtime Async adoption grows; blocked on GA spec |
 
 ---
 
@@ -278,6 +279,27 @@ dotMemory's "Async/Await" view (available in newer versions) shows async method 
 
 ---
 
+## .NET 11 Runtime Async — Forward Compatibility
+
+**Status:** .NET 11 (preview, targeting 2026 GA) introduces **Runtime Async**, moving async-method suspension from a compiler-generated `IAsyncStateMachine` struct into the CLR itself. It is opt-in per project (`<Features>runtime-async=on</Features>` in preview; direction is for BCL/ASP.NET Core to ship built with it on, with `<UseRuntimeAsync>false</UseRuntimeAsync>` as the opt-out).
+
+**What changes on the heap:**
+- For methods compiled under Runtime Async, the compiler no longer emits a `<MethodName>d__N : IAsyncStateMachine` struct, no `<>1__state` field, no `<>t__builder` field. The method body instead calls `AsyncHelpers.Await<T>(...)` under `[MethodImpl(MethodImplOptions.Async)]`.
+- Locals are kept on the JIT stack and only spilled to the heap when their lifetime actually crosses a suspension point — not unconditionally hoisted to fields as today. This is a *strictly smaller* heap footprint per suspension than the current model, not a superset, so `HighCaptureStateMachine` byte totals will under-report if only the old model is scanned (there is simply less to find, but what remains may live in an object this analyzer doesn't recognize).
+- Continuation orchestration is exposed through new runtime types (`System.Runtime.CompilerServices.AsyncHelpers`, `RuntimeAsyncTask<T>`, `DispatchContinuations()`), not through `TaskAwaiter`/`<>t__builder` wiring.
+- The exact object shape used for spilled locals (type name, field layout) is **not finalized as of .NET 11 preview** — this must be re-verified against the shipped GA runtime before any detection logic is written against it.
+
+**Why this matters here:** `AsyncStateMachineAnalyzer`'s entire population (`TypeAggregates` name-pattern match on `<...>d__\d+` + `IAsyncStateMachine` interface check, see [P2-4](#priority-roadmap) and the planned `IsAsyncStateMachineType` flag) will **silently under-count or entirely miss** suspended async methods compiled with Runtime Async on, because those methods produce no `d__N`/`IAsyncStateMachine` type at all. This is not a crash risk — the analyzer degrades to reporting only the legacy-compiled subset of async methods — but it is a correctness/completeness risk that will get worse as more code (starting with the BCL and ASP.NET Core itself) ships Runtime Async-compiled.
+
+**Compatibility constraint:** .NET Framework and all .NET versions ≤ 10 (and any .NET 11+ assembly that opts out) will continue to use the classic compiler-generated `d__N`/`IAsyncStateMachine` model indefinitely — mixed-mode dumps (old-style libraries calling into new-style application code, or vice versa) are the expected steady state for years. The existing detection path must **not** be removed or altered; it must remain the baseline, with Runtime Async detection added alongside it.
+
+**Recommended action (tracked as P3-4 below):** Do not implement Runtime Async detection yet — the on-heap shape is unstable pre-GA. Instead:
+1. Re-audit this analyzer once .NET 11 GA ships and ClrMD/DAC surfaces the finalized spilled-locals shape (watch `Microsoft.Diagnostics.Runtime` release notes for Runtime Async / `RuntimeAsyncTask` support).
+2. When implemented, add detection as an *additive* signal (e.g. a second `TypeAggregateFlags` bit or a name/namespace check for `RuntimeAsyncTask`), never replacing the existing `d__N`/`IAsyncStateMachine` path.
+3. Ensure the analyzer degrades gracefully (skip, not throw) on any dump where Runtime Async types are absent — which is every dump today and most dumps for the near future.
+
+---
+
 ## Final Executive Summary
 
 ### Overall Assessment
@@ -323,6 +345,7 @@ dotMemory's "Async/Await" view (available in newer versions) shows async method 
 | P3-1 | Task linkage: read `AsyncTaskMethodBuilder.m_task` from state machine sample; cross-reference with `AsyncTaskAnalyzer` results | Evolution | High — enables cross-analyzer async call graph | High | Medium |
 | P3-2 | Async call tree reconstruction analogous to `!dumpasync` (state machine → builder task → continuation → next state machine) | Evolution | Very High — flagship capability | Very High | Medium |
 | P3-3 | Add `statemachine.gen2.count` and `statemachine.gen2.fraction` to `AsyncStateMachineTrendComparer` metrics | Improvement | Medium — enables regression tracking of long-lived suspensions | Low | High |
+| P3-4 | Re-audit against .NET 11 GA Runtime Async; add additive `RuntimeAsyncTask`/spilled-locals detection alongside (not replacing) `d__N`/`IAsyncStateMachine` scan once ClrMD exposes the finalized shape | Evolution | High — prevents silent under-counting as Runtime Async adoption grows | Medium | Low (spec not final) |
 
 ### Final Verdict
 

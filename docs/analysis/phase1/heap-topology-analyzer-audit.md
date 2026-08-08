@@ -427,11 +427,11 @@ question every engineer will ask.
 
 #### P2 — Medium
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| 8 | Change `SegmentTypeAccumulator` from mutable struct in Dictionary to a class, or use `CollectionsMarshal.GetValueRefOrAddDefault` to eliminate redundant copy | Low-medium on large POH | Low | High | Improvement |
-| 9 | Extend `HeapTopologyTrendComparer` to track SOH bytes, total reserved, and reservation gap | Medium: enables VM growth trending | Low | High | Improvement |
-| 10 | Add segment object-density column (objects / committed MB) to the top-segments table | Medium: distinguishes dense vs. sparse segments | Low | Medium | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| 8 | Change `SegmentTypeAccumulator` from mutable struct in Dictionary to a class, or use `CollectionsMarshal.GetValueRefOrAddDefault` to eliminate redundant copy | Low-medium on large POH | Low | High | Improvement | ✅ DONE |
+| 9 | Extend `HeapTopologyTrendComparer` to track SOH bytes, total reserved, and reservation gap | Medium: enables VM growth trending | Low | High | Improvement | ✅ DONE |
+| 10 | Add segment object-density column (objects / committed MB) to the top-segments table | Medium: distinguishes dense vs. sparse segments | Low | Medium | Improvement | ✅ DONE |
 | 11 | Add per-kind fragmentation to `HeapTopologyFindingGenerator` with correct attribution | Medium | Medium | High | Improvement |
 | 12 | Share the segment enumeration loop with `SegmentReservationAnalyzer` via a shared segment-summary type or merge the passes | Medium: eliminates duplicated work on large dumps | High | Medium | Evolution |
 

@@ -403,4 +403,5 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 
 | ID | Recommendation | Status | Commit | Notes |
 |---|---|---|---|---|
-| I-1 | Share `ReferenceGraph` across per-type loop | ✅ IMPLEMENTED | TBD | Lifted `ReferenceGraph` creation outside loop; passes as parameter to all path-finding methods. Preserves edge cache across iterations, reducing ClrMD redundant calls. |
+| I-1 | Share `ReferenceGraph` across per-type loop | ✅ IMPLEMENTED | ec42b06 | Lifted `ReferenceGraph` creation outside loop; passes as parameter to all path-finding methods. Preserves edge cache across iterations, reducing ClrMD redundant calls. |
+| I-3 | Add structured `RootKind` to `ReferenceTypeSampleSnapshot` | ✅ IMPLEMENTED | TBD | Added `RootKind: string?` field to snapshot; populated from path finder result. Enables root-kind filtering and aggregation in reports and consumers. |

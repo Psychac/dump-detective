@@ -21,5 +21,6 @@ internal sealed record ReferenceTypeSampleSnapshot(
     string? SampleObjectType,
     ulong SampleObjectSize,
     bool HasGcRoot,
+    string? RootKind,
     string? RootPath,
     bool TraversalLimited);

@@ -22,6 +22,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
     private bool _participantScanSucceeded;
 
+    // Field cache by MethodTable to avoid repeated ClrMD lookups per type
+    // Maps (MethodTable, fieldName) to ClrInstanceField? (null if field not found on that type)
+    private Dictionary<(ulong MethodTable, string FieldName), ClrInstanceField?>? _fieldCacheByMt;
+
 
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
@@ -61,6 +65,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         _participantMaxTasksToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTasksToScan;
         _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
         _taskMts = null;
+        _fieldCacheByMt = new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
 
         if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {
@@ -183,7 +188,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 ClrObject obj = heap.GetObject(address);
                 if (obj.IsValid && obj.Type != null)
                 {
-                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                    var stateField = TryGetCachedField(obj.Type, mt, "m_stateFlags", "_stateFlags");
                     if (stateField != null)
                         stateFlags = stateField.Read<int>(obj, interior: false);
                 }
@@ -218,7 +223,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             ClrObject taskObj = heap.GetObject(address);
             if (taskObj.IsValid && taskObj.Type != null)
             {
-                var continuationField = taskObj.Type.GetFieldByName("m_continuationObject");
+                var continuationField = TryGetCachedField(taskObj.Type, mt, "m_continuationObject", "_continuationObject");
                 if (continuationField != null)
                 {
                     ClrObject continuationObj = continuationField.ReadObject(taskObj, interior: false);
@@ -261,7 +266,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                                 IncrementCount(continuationCount, current.Type.Name ?? string.Empty);
                             }
 
-                            var nextField = current.Type?.GetFieldByName("m_continuationObject");
+                            var nextField = current.Type != null
+                                ? TryGetCachedField(current.Type, current.Type.MethodTable, "m_continuationObject", "_continuationObject")
+                                : null;
                             if (nextField == null) break;
 
                             ClrObject next = nextField.ReadObject(current, interior: false);
@@ -405,6 +412,33 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Retrieves a field by trying multiple names with fallback (e.g., "m_fieldName" then "_fieldName").
+    /// Caches results by (MethodTable, fieldName) to avoid redundant ClrMD lookups.
+    /// </summary>
+    private ClrInstanceField? TryGetCachedField(ClrType type, ulong methodTable, params string[] fieldNames)
+    {
+        if (type is null || fieldNames.Length == 0)
+            return null;
+
+        _fieldCacheByMt ??= new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
+
+        foreach (string fieldName in fieldNames)
+        {
+            var cacheKey = (methodTable, fieldName);
+            if (_fieldCacheByMt.TryGetValue(cacheKey, out var cached))
+                return cached;
+
+            var field = type.GetFieldByName(fieldName);
+            _fieldCacheByMt[cacheKey] = field;
+
+            if (field != null)
+                return field;
+        }
+
+        return null;
+    }
 
     private static string ResolveTypeName(ClrHeap heap, ulong address, ulong mt,
         Dictionary<ulong, string> cache)

@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 61 |
-| **P1 Implemented** | 99 |
+| **P1 Implemented** | 100 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 68.2% (160/234) |
+| **Overall P0+P1 Rate** | 68.6% (161/234) |
 
 ---
 
@@ -61,9 +61,9 @@
 | 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 26 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
 | 27 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
-| 28 | **LeakCandidateAnalyzer** | 1/2 | 0/4 | 0/6 | 0/4 | ✅ P0-2 done (removed heap.GetObject call); P0-1, all P1 pending |
+| 28 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 34/39 P0 done, 38/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 34/39 P0 done, 39/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **61** | 78.2% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **99** | 63.5% |
-| **Combined P0+P1 rate** | **68.2%** | (160/234) |
+| **P1 items implemented** | **100** | 64.1% |
+| **Combined P0+P1 rate** | **68.6%** | (161/234) |
 
 ---
 

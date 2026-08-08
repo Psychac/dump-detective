@@ -398,10 +398,10 @@ for further manual investigation. Not suitable as a root-cause confirmation tool
 
 | # | Recommendation | Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P1-1 | Add retained-size estimate for top-10 suspects using `MemoryAnalyzer.EstimateRetained` (already exists). Store as `RetainedSize` on `LeakCandidateRecord`. | Very high — the most actionable signal for prioritization | Medium | High | Improvement |
-| P1-2 | Emit one `InsightFinding` per Critical-severity candidate (up to 3) rather than always collapsing into a single aggregate finding. | High — multi-leak dumps lose severity diversity | Low | High | Improvement |
-| P1-3 | Surface the first GC root hop (field name + owner type) for the top-3 suspects using a single-level `ClrObject.EnumerateReferences()` walk on the sample instance. | High — turns "investigate" into "here is where to look" | Medium | High | Improvement |
-| P1-4 | Replace `pinnedTargetTypes` (top-N type names from `GCHandleDomainResult`) with a full `HashSet<ulong>` of pinned addresses stored on `GCHandleDomainResult`. Check `aggregate.SampleAddress` membership. | High — eliminates top-N truncation silently dropping pinned types | Medium | High | Improvement |
+| P1-1 | Add retained-size estimate for top-10 suspects using `MemoryAnalyzer.EstimateRetained` (already exists). Store as `RetainedSize` on `LeakCandidateRecord`. | Very high — the most actionable signal for prioritization | Medium | High | Pending | Improvement |
+| P1-2 | Emit one `InsightFinding` per Critical-severity candidate (up to 3) rather than always collapsing into a single aggregate finding. | High — multi-leak dumps lose severity diversity | Low | High | ✅ DONE (commit a680c16) | Improvement |
+| P1-3 | Surface the first GC root hop (field name + owner type) for the top-3 suspects using a single-level `ClrObject.EnumerateReferences()` walk on the sample instance. | High — turns "investigate" into "here is where to look" | Medium | High | Pending | Improvement |
+| P1-4 | Replace `pinnedTargetTypes` (top-N type names from `GCHandleDomainResult`) with a full `HashSet<ulong>` of pinned addresses stored on `GCHandleDomainResult`. Check `aggregate.SampleAddress` membership. | High — eliminates top-N truncation silently dropping pinned types | Medium | High | Pending | Improvement |
 
 #### P2 — Medium
 
@@ -447,11 +447,14 @@ for further manual investigation. Not suitable as a root-cause confirmation tool
    enhancement that multiple analyzers would benefit from.
 
 4. **Highest engineering return?**
-   ✅ P0-2 (remove redundant `heap.GetObject()` in hot loop) — **COMPLETE (commit 893a2ae)**.
-   Built upfront `typeName → methodTable` map using `heap.GetTypeByMethodTable()`, eliminated per-type
-   heap.GetObject call. Uses `aggregate.SampleAddress` and `aggregate.MethodTable` directly.
+   ✅ P0-2 (remove redundant `heap.GetObject()` in hot loop) — **COMPLETE (commit 9ef2406)**.
+   Refactored to iterate aggregates directly, resolving typeName on-demand. Eliminates
+   intermediate dictionary allocation; cleaner code flow.
    
-   P1-2 (per-Critical finding emission) — one-line change to `LeakCandidateFindingGenerator`
-   that materially improves incident alert quality.
+   ✅ P1-2 (per-Critical finding emission) — **COMPLETE (commit a680c16)**.
+   Emit separate InsightFindings for each Critical-severity candidate (up to 3).
+   Non-Critical candidates fall back to aggregate finding. Surfaces severity diversity
+   in multi-leak dumps; materially improves incident alert quality.
+   
    P2-1 (Gen0/Gen1 on record) — two field additions, no logic change, immediately
    improves the candidate table.

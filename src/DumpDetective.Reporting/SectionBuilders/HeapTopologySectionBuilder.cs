@@ -101,6 +101,9 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
             for (int i = 0; i < d.TopSegmentsBySize.Count; i++)
             {
                 HeapSegmentSnapshot seg = d.TopSegmentsBySize[i];
+                double objectDensity = seg.CommittedBytes > 0 && seg.ObjectCount > 0
+                    ? (seg.ObjectCount * 1024.0 * 1024.0) / seg.CommittedBytes
+                    : 0.0;
                 rows.Add(Row(
                     Cell($"0x{seg.Address:X}"),
                     Cell(seg.Kind.ToString()),
@@ -109,10 +112,11 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(seg.UsedBytes), (long)Math.Min(seg.UsedBytes, long.MaxValue)),
                     Cell(FormatBytes(seg.ReservedBytes), (long)Math.Min(seg.ReservedBytes, long.MaxValue)),
                     Cell(seg.Generation.ToString("N0"), seg.Generation),
-                    Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount)));
+                    Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount),
+                    Cell(objectDensity > 0 ? $"{objectDensity:F1}" : "—", objectDensity > 0 ? objectDensity : null)));
             }
             compactTables.Add(STCompact("Top segments by size",
-                new[] { CH("Address"), CH("Kind"), CH("Length","bytes"), CH("Committed","bytes"), CH("Used","bytes"), CH("Reserved","bytes"), CH("Gen","number"), CH("Objects","number") },
+                new[] { CH("Address"), CH("Kind"), CH("Length","bytes"), CH("Committed","bytes"), CH("Used","bytes"), CH("Reserved","bytes"), CH("Gen","number"), CH("Objects","number"), CH("Density","objects/MB") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

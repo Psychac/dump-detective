@@ -293,12 +293,14 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                     string typeName = obj.Type.Name ?? string.Empty;
                     if (!string.IsNullOrWhiteSpace(typeName))
                     {
-                        if (!typeStats.TryGetValue(typeName, out SegmentTypeAccumulator acc))
+                        if (!typeStats.TryGetValue(typeName, out SegmentTypeAccumulator? acc))
+                        {
                             acc = new SegmentTypeAccumulator();
+                            typeStats[typeName] = acc;
+                        }
 
                         acc.Count++;
                         acc.TotalBytes += obj.Size;
-                        typeStats[typeName] = acc;
                     }
                 }
             }
@@ -342,7 +344,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         return snapshots;
     }
 
-    private struct SegmentTypeAccumulator
+    private sealed class SegmentTypeAccumulator
     {
         public int Count { get; set; }
         public ulong TotalBytes { get; set; }

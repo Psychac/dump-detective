@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 75 |
 | **Total P1 Identified** | 148 |
-| **P0 Implemented** | 44 |
+| **P0 Implemented** | 45 |
 | **P1 Implemented** | 64 |
 | **P2 Implemented** | 19 |
-| **Overall P0+P1 Rate** | 48.4% (108/223) |
+| **Overall P0+P1 Rate** | 48.9% (109/223) |
 
 ---
 
@@ -68,7 +68,7 @@
 | AsyncTaskAnalyzer | 0/2 | 0/4 | 6 | — |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
-| GCHandleAnalyzer | 0/3 | 0/7 | 10 | — |
+| GCHandleAnalyzer | 1/3 | 0/7 | 9 | P0-1 done (exception handling in reflection); P0-2,P0-3 pending |
 | HeapTopologyAnalyzer | 0/3 | 0/4 | 7 | Duplicates SegmentReservationAnalyzer work |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
@@ -85,13 +85,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 11 | All P0+P1 recommendations implemented (includes MemoryAnalyzer) |
-| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
+| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes CrashAnalyzer, GCHandleAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
 | Analyzers with zero P0+P1 completion | 10 | Not yet started |
 | **Total P0 recommendations** | **75** | — |
-| **P0 items implemented** | **48** | 64.0% (21 COMPLETE + 27 IN_PROGRESS) |
+| **P0 items implemented** | **49** | 65.3% (22 COMPLETE + 27 IN_PROGRESS) |
 | **Total P1 recommendations** | **148** | — |
 | **P1 items implemented** | **75** | 50.7% (41 COMPLETE + 34 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **54.3%** | (123/223) |
+| **Combined P0+P1 rate** | **54.8%** | (124/223) |
 
 ---
 

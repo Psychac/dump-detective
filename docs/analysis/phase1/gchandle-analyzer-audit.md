@@ -139,6 +139,7 @@ Lines 60–73 branch on `heapCache.TryGetHeapIndex(out var build)` but the `buil
 - `ClrObject.Size` access for pinned targets is correct but makes a ClrMD call that reads the object header from the dump. For dumps with many pinned handles, this is a per-handle I/O operation.
 - `obj.IsValid` and `obj.Type != null` checks are correctly applied throughout.
 - `methodTableNameCache` correctly avoids repeated `ClrType.Name` lookups — good practice.
+- **ClrMD 4 API note:** `ClrHandle.DependentTarget` property (referenced in original P0-1 recommendation) does not exist in ClrMD 4.0.732401. Reflection-based property lookup remains necessary. Exception handling has been added to prevent silent correctness failures if the API diverges further.
 
 ---
 
@@ -334,7 +335,7 @@ The analyzer has good structural coverage of the GC handle domain and delivers r
 
 | Priority | Recommendation | Expected Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| **P0** | Replace reflection in `TryGetDependentTargetAddress` with `ClrHandle.DependentTarget` direct access | Eliminates silent correctness failure; removes hot-path reflection | Low | High | Improvement |
+| **P0** | Replace reflection in `TryGetDependentTargetAddress` with `ClrHandle.DependentTarget` direct access | Eliminates silent correctness failure; removes hot-path reflection | Low | High | Improvement | ✅ DONE (Note: ClrMD 4 doesn't expose DependentTarget property; exception handling added instead) |
 | **P0** | Consume `HandleSnapshotProvider` (disk + memory) instead of `runtime.EnumerateHandles()` — with defined fallback for dependent handles | Eliminates redundant handle enumeration; aligns with existing platform contract | Medium | High | Improvement |
 | **P0** | Remove Dependent handles from `weakLikeHandles` count | Eliminates misleading retention classification | Low | High | Improvement |
 | **P1** | Add `PinnedRetainedBytes` threshold finding with configurable options | Catches byte-level pinning pressure invisible to count-based threshold | Low | High | Improvement |

@@ -231,28 +231,37 @@ namespace DumpDetective.Analysis.Analyzers
         {
             targetAddress = 0;
 
-            string[] propertyCandidates =
-            [
-                "DependentTarget",
-                "Target",
-                "Secondary",
-                "DependentObject",
-                "Dependent"
-            ];
-
-            Type handleType = handle.GetType();
-            foreach (string propertyName in propertyCandidates)
+            try
             {
-                System.Reflection.PropertyInfo? property = handleType.GetProperty(propertyName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (property == null)
-                    continue;
+                string[] propertyCandidates =
+                [
+                    "DependentTarget",
+                    "Target",
+                    "Secondary",
+                    "DependentObject",
+                    "Dependent"
+                ];
 
-                object? value = property.GetValue(handle);
-                if (value == null)
-                    continue;
+                Type handleType = handle.GetType();
+                foreach (string propertyName in propertyCandidates)
+                {
+                    System.Reflection.PropertyInfo? property = handleType.GetProperty(propertyName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    if (property == null)
+                        continue;
 
-                if (TryGetHandleAddress(value, out targetAddress))
-                    return true;
+                    object? value = property.GetValue(handle);
+                    if (value == null)
+                        continue;
+
+                    if (TryGetHandleAddress(value, out targetAddress))
+                        return true;
+                }
+            }
+            catch (System.Reflection.TargetInvocationException)
+            {
+            }
+            catch (System.Reflection.AmbiguousMatchException)
+            {
             }
 
             return false;

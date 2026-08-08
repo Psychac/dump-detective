@@ -35,7 +35,7 @@
 | 10 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 2/7 | 0/2 | ✅ P0+P1; P2-1,P2-2 done; P2-3,P2-4,P2-5 pending |
 | 11 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
 | 12 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
-| 13 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 0/7 | 0/3 | ✅ P0+P1 complete |
+| 13 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
 
 **Subtotal: 27/27 P0 done, 57/57 P1 done**
 

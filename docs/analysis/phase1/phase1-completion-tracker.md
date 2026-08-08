@@ -11,11 +11,11 @@
 |--------|-------|
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
-| **Total P1 Identified** | 152 |
+| **Total P1 Identified** | 156 |
 | **P0 Implemented** | 54 |
-| **P1 Implemented** | 86 |
+| **P1 Implemented** | 90 |
 | **P2 Implemented** | 19 |
-| **Overall P0+P1 Rate** | 60.5% (140/232) |
+| **Overall P0+P1 Rate** | 61.5% (144/236) |
 
 ---
 
@@ -89,9 +89,9 @@
 | Analyzers with zero P0+P1 completion | 9 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **54** | 69.2% (24 COMPLETE + 30 IN_PROGRESS) |
-| **Total P1 recommendations** | **152** | — |
-| **P1 items implemented** | **86** | 56.6% (57 COMPLETE + 29 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **60.5%** | (140/232) |
+| **Total P1 recommendations** | **156** | — |
+| **P1 items implemented** | **90** | 57.7% (61 COMPLETE + 29 IN_PROGRESS) |
+| **Combined P0+P1 rate** | **61.5%** | (144/236) |
 
 ---
 
@@ -114,9 +114,9 @@ Different audits use different conventions for marking completion:
 ## Key Insights
 
 **Major Wins:**
-- 13 analyzers (37%) have P0+P1 100% complete (up from 12)
+- 13 analyzers (37%) have P0+P1 100% complete
+- HeapTopologyAnalyzer completed all 7 P0+P1 items in a single session (generation breakdown, fragmentation, cancellation, variable naming)
 - 3 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer) have ALL P0+P1+P2 complete
-- HeapTopologyAnalyzer completed all P0 and P1 items in a single session (generation breakdown + fragmentation + reporting fixes)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**

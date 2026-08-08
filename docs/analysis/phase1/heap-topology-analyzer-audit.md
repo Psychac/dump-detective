@@ -418,12 +418,12 @@ question every engineer will ask.
 
 #### P1 — High
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| 4 | Add per-kind fragmentation (committed − used) to `HeapTopologyDomainResult` and report | High: LOH fragmentation is actionable; SOH fragmentation indicates GC compaction opportunity | Low | High | Improvement |
-| 5 | Switch `SegmentKindMapper.Map()` from string-based dispatch to `GcSegmentKind` enum comparison | Medium: correctness + zero-alloc; prevents silent misclassification on ClrMD updates | Low | High | Improvement |
-| 6 | Rename local `generation` variable in the main loop to `logicalHeapIndex` to eliminate conceptual confusion | Low effort, prevents ongoing bugs | Trivial | High | Improvement |
-| 7 | Add cancellation check inside the `CountObjects` inner loop (currently uncancellable for large SOH scans) | Medium: operator experience on full-scan mode | Low | High | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| 4 | Add per-kind fragmentation (committed − used) to `HeapTopologyDomainResult` and report | High: LOH fragmentation is actionable; SOH fragmentation indicates GC compaction opportunity | Low | High | Improvement | ✅ DONE |
+| 5 | Switch `SegmentKindMapper.Map()` from string-based dispatch to `GcSegmentKind` enum comparison | Medium: correctness + zero-alloc; prevents silent misclassification on ClrMD updates | Low | High | Improvement | ✅ DONE |
+| 6 | Rename local `generation` variable in the main loop to `logicalHeapIndex` to eliminate conceptual confusion | Low effort, prevents ongoing bugs | Trivial | High | Improvement | ✅ DONE |
+| 7 | Add cancellation check inside the `CountObjects` inner loop (currently uncancellable for large SOH scans) | Medium: operator experience on full-scan mode | Low | High | Improvement | ✅ DONE |
 
 #### P2 — Medium
 

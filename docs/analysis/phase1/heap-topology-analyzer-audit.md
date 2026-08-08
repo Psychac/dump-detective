@@ -410,11 +410,11 @@ question every engineer will ask.
 
 #### P0 — Critical
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| 1 | Fix `HeapTopologyFindingGenerator` fragmentation finding — the evidence, attribution, and recommendation are incorrect for a committed-vs-used metric | High: prevents misleading guidance in production reports | Low | High | Improvement |
-| 2 | Add Gen0 / Gen1 / Gen2 byte totals using `ClrSegment.Generation0/1/2` ranges in the existing segment loop | High: closes the biggest competitive gap; zero extra passes needed | Low | High | Improvement |
-| 3 | Fix `TotalUsedBytes` report caveat — either exclude it from the report when `CountSohObjects = false` or add a note that it excludes SOH | High: prevents misinterpretation of a key metric | Low | High | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| 1 | Fix `HeapTopologyFindingGenerator` fragmentation finding — the evidence, attribution, and recommendation are incorrect for a committed-vs-used metric | High: prevents misleading guidance in production reports | Low | High | Improvement | ✅ DONE |
+| 2 | Add Gen0 / Gen1 / Gen2 byte totals using `ClrSegment.Generation0/1/2` ranges in the existing segment loop | High: closes the biggest competitive gap; zero extra passes needed | Low | High | Improvement | ✅ DONE |
+| 3 | Fix `TotalUsedBytes` report caveat — either exclude it from the report when `CountSohObjects = false` or add a note that it excludes SOH | High: prevents misinterpretation of a key metric | Low | High | Improvement | ✅ DONE |
 
 #### P1 — High
 

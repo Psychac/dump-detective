@@ -37,6 +37,8 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0;
         ulong sohUsedBytes = 0, lohUsedBytes = 0, pohUsedBytes = 0, frozenUsedBytes = 0;
         ulong sohReserved = 0, lohReserved = 0, pohReserved = 0, frozenReserved = 0;
+        ulong gen0Bytes = 0, gen1Bytes = 0, gen2Bytes = 0;
+        ulong sohFragmented = 0, lohFragmented = 0, pohFragmented = 0, frozenFragmented = 0;
         int sohCount = 0, lohCount = 0, pohCount = 0, frozenCount = 0;
         int sohObjects = 0, lohObjects = 0, pohObjects = 0, frozenObjects = 0;
         long totalObjectsScanned = 0;
@@ -59,6 +61,18 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
             int generation = segment.SubHeap?.Index ?? -1;
+
+            // Extract generation range sizes for SOH segments
+            ulong segGen0Bytes = 0, segGen1Bytes = 0, segGen2Bytes = 0;
+            if (kind == HeapSegmentKind.SmallObjectHeap)
+            {
+                segGen0Bytes = SegmentKindMapper.GetRangeLength(segment.Generation0);
+                segGen1Bytes = SegmentKindMapper.GetRangeLength(segment.Generation1);
+                segGen2Bytes = SegmentKindMapper.GetRangeLength(segment.Generation2);
+                gen0Bytes += segGen0Bytes;
+                gen1Bytes += segGen1Bytes;
+                gen2Bytes += segGen2Bytes;
+            }
 
             Dictionary<string, SegmentTypeAccumulator>? typeStats = kind switch
             {
@@ -100,6 +114,8 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 Phase: "classifying heap segments",
                 Detail: $"{segmentsProcessed} / {totalSegments} segments, {totalObjectsScanned:N0} objects"));
 
+            ulong fragmented = committed > used ? committed - used : 0;
+
             snapshots.Add(new HeapSegmentSnapshot(
                 Address: segment.Address,
                 Start: start,
@@ -110,21 +126,28 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 ReservedBytes: reserved,
                 Kind: kind,
                 Generation: generation,
-                ObjectCount: objCount));
+                ObjectCount: objCount,
+                Gen0Bytes: segGen0Bytes,
+                Gen1Bytes: segGen1Bytes,
+                Gen2Bytes: segGen2Bytes));
 
             switch (kind)
             {
                 case HeapSegmentKind.SmallObjectHeap:
                     sohUsedBytes += used;
+                    sohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.LargeObjectHeap:
                     lohUsedBytes += used;
+                    lohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.PinnedObjectHeap:
                     pohUsedBytes += used;
+                    pohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.Frozen:
                     frozenUsedBytes += used;
+                    frozenFragmented += fragmented;
                     break;
             }
 
@@ -220,10 +243,18 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             FrozenPercent: frozenPercent,
             LohPercent: lohPercent,
             PohPercent: pohPercent,
+            Gen0Bytes: gen0Bytes,
+            Gen1Bytes: gen1Bytes,
+            Gen2Bytes: gen2Bytes,
+            SohFragmentedBytes: sohFragmented,
+            LohFragmentedBytes: lohFragmented,
+            PohFragmentedBytes: pohFragmented,
+            FrozenFragmentedBytes: frozenFragmented,
+            CountSohObjects: countSoh,
             KindSummaries: kindSummaries,
             PerLogicalHeapSummaries: logicalHeapSummaries,
-                TopPohTypes: topPohTypes,
-                TopFrozenTypes: topFrozenTypes,
+            TopPohTypes: topPohTypes,
+            TopFrozenTypes: topFrozenTypes,
             TopSegmentsBySize: topBySize);
     }
 

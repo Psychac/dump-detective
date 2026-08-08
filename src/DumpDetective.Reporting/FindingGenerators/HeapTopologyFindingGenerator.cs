@@ -50,31 +50,48 @@ internal sealed class HeapTopologyFindingGenerator : IFindingGenerator
                 MetricUnit: "%"));
         }
 
-        // ── Total heap fragmentation ──────────────────────────────────────────
-        // Free space dispersed across segments prevents GC from reclaiming it in aggregate.
-        if (r.TotalCommittedBytes > 0 && r.TotalUsedBytes < r.TotalCommittedBytes)
-        {
-            double heapFragPct = (r.TotalCommittedBytes - r.TotalUsedBytes) * 100.0 / r.TotalCommittedBytes;
-            if (heapFragPct >= 30.0)
-            {
-                FindingSeverity fragSev = heapFragPct >= 50.0 ? FindingSeverity.Critical : FindingSeverity.Warning;
-                ulong freeBytes = r.TotalCommittedBytes - r.TotalUsedBytes;
+        // ── Per-kind fragmentation analysis ──────────────────────────────────────────
+        // Committed-reserved gaps are normal on large Server GC deployments where memory growth
+        // outpaces usage. Focus on per-kind fragmentation where actionable.
 
+        // LOH fragmentation: pinning and LOH compaction are relevant.
+        if (r.LohBytes > 0)
+        {
+            double lohFragPct = r.LohFragmentedBytes * 100.0 / r.LohBytes;
+            if (lohFragPct >= 30.0)
+            {
+                FindingSeverity lohFragSev = lohFragPct >= 50.0 ? FindingSeverity.Critical : FindingSeverity.Warning;
                 findings.Add(new InsightFinding(
                     Analyzer: AnalyzerName,
                     Category: "Memory",
-                    Severity: fragSev,
-                    Title: $"Heap fragmentation {heapFragPct:F1}%",
-                    Evidence: $"{FormatBytes(freeBytes)} free but fragmented across segments " +
-                              $"(committed: {FormatBytes(r.TotalCommittedBytes)}, " +
-                              $"used: {FormatBytes(r.TotalUsedBytes)}). " +
-                              $"Gen0: {FormatBytes(r.SohBytes)} SOH | LOH: {FormatBytes(r.LohBytes)}.",
-                    Recommendation: "Reduce GCHandle.Alloc(Pinned) and use Memory<T> for I/O buffers. " +
-                                    "Pinned objects prevent GC from compacting segments and are the primary " +
-                                    "cause of total heap fragmentation. Enable LOH compaction via " +
-                                    "GCSettings.LargeObjectHeapCompactionMode for LOH free-space.",
-                    Tags: ["fragmentation", "memory", "gc", "pinning"],
-                    MetricValue: heapFragPct,
+                    Severity: lohFragSev,
+                    Title: $"LOH fragmentation {lohFragPct:F1}%",
+                    Evidence: $"Large Object Heap has {FormatBytes(r.LohFragmentedBytes)} of {FormatBytes(r.LohBytes)} committed free. " +
+                              $"This indicates LOH segments with reclaimed space not yet compacted.",
+                    Recommendation: "Enable LOH compaction via GCSettings.LargeObjectHeapCompactionMode = " +
+                                    "GCLargeObjectHeapCompactionMode.Default or Aggressive, or reduce large object allocations.",
+                    Tags: ["fragmentation", "loh", "memory", "gc"],
+                    MetricValue: lohFragPct,
+                    MetricUnit: "%"));
+            }
+        }
+
+        // POH fragmentation: pinning directly.
+        if (r.PohBytes > 0 && r.PohFragmentedBytes > 0)
+        {
+            double pohFragPct = r.PohFragmentedBytes * 100.0 / r.PohBytes;
+            if (pohFragPct >= 20.0)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: AnalyzerName,
+                    Category: "Memory",
+                    Severity: FindingSeverity.Info,
+                    Title: $"POH fragmentation {pohFragPct:F1}%",
+                    Evidence: $"Pinned Object Heap has {FormatBytes(r.PohFragmentedBytes)} of {FormatBytes(r.PohBytes)} committed free. " +
+                              $"This is typical for pinned allocations.",
+                    Recommendation: "Review pinned buffer pools and consider pooling strategies to reduce allocations.",
+                    Tags: ["fragmentation", "poh", "pinning", "memory"],
+                    MetricValue: pohFragPct,
                     MetricUnit: "%"));
             }
         }

@@ -30,6 +30,9 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
             ["used_bytes"] = new NumericMetricValue((double)d.TotalUsedBytes, MetricUnit.Bytes, FormatBytes(d.TotalUsedBytes)),
             ["reserved_bytes"] = new NumericMetricValue((double)d.TotalReservedBytes, MetricUnit.Bytes, FormatBytes(d.TotalReservedBytes)),
             ["reservation_gap"] = new NumericMetricValue((double)d.ReservationGapBytes, MetricUnit.Bytes, FormatBytes(d.ReservationGapBytes)),
+            ["gen0_bytes"] = new NumericMetricValue((double)d.Gen0Bytes, MetricUnit.Bytes, FormatBytes(d.Gen0Bytes)),
+            ["gen1_bytes"] = new NumericMetricValue((double)d.Gen1Bytes, MetricUnit.Bytes, FormatBytes(d.Gen1Bytes)),
+            ["gen2_bytes"] = new NumericMetricValue((double)d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
             ["soh_bytes"] = new NumericMetricValue((double)d.SohBytes, MetricUnit.Bytes, FormatBytes(d.SohBytes)),
             ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
@@ -41,6 +44,9 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
 
         if (d.FrozenBytes > 100UL * 1024 * 1024)
             blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
+
+        if (!d.CountSohObjects)
+            blocks.Add(T("Note: Used bytes shown above exclude SOH because SOH object enumeration was skipped. The Gen0/Gen1/Gen2 breakdown below accounts for all SOH allocations."));
 
         // Kind summary
         if (d.KindSummaries is { Count: > 0 })

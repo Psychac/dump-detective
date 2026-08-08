@@ -53,6 +53,14 @@ public sealed class HeapTopologyAnalyzerDiscrepancyTests
             diskResult.FrozenPercent.Should().Be(memResult.FrozenPercent);
             diskResult.LohPercent.Should().Be(memResult.LohPercent);
             diskResult.PohPercent.Should().Be(memResult.PohPercent);
+            diskResult.Gen0Bytes.Should().Be(memResult.Gen0Bytes);
+            diskResult.Gen1Bytes.Should().Be(memResult.Gen1Bytes);
+            diskResult.Gen2Bytes.Should().Be(memResult.Gen2Bytes);
+            diskResult.SohFragmentedBytes.Should().Be(memResult.SohFragmentedBytes);
+            diskResult.LohFragmentedBytes.Should().Be(memResult.LohFragmentedBytes);
+            diskResult.PohFragmentedBytes.Should().Be(memResult.PohFragmentedBytes);
+            diskResult.FrozenFragmentedBytes.Should().Be(memResult.FrozenFragmentedBytes);
+            diskResult.CountSohObjects.Should().Be(memResult.CountSohObjects);
             diskResult.KindSummaries.Count.Should().Be(memResult.KindSummaries.Count);
             diskResult.PerLogicalHeapSummaries.Count.Should().Be(memResult.PerLogicalHeapSummaries.Count);
             (diskResult.TopPohTypes?.Count ?? 0).Should().Be(memResult.TopPohTypes?.Count ?? 0);

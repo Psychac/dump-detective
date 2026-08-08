@@ -312,32 +312,32 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 
 ### Improvements (Enhance the Existing Analyzer)
 
-| ID | Recommendation | Impact | Difficulty | Confidence | Priority |
-|---|---|---|---|---|---|
-| I-1 | Lift `ReferenceGraph` creation out of the per-type loop — share one instance across all top-N iterations | High — reduces redundant ClrMD edge fetches; addresses 5.6GB Gen0 allocation root cause | Low | High | P0 |
-| I-2 | Remove dead options `MaxPathSearchObjects` and `FastModeMaxDepth` from `ReferenceChainOptions` | Medium — eliminates misleading configuration surface | Low | High | P1 |
-| I-3 | Add `RootKind: string?` to `ReferenceTypeSampleSnapshot`; populate from `TryFindAnyRootPath` return | High — enables root-kind filtering and aggregation in reports | Low | High | P1 |
-| I-4 | Fix `TopRetainedTypes` semantics — counts are always 0/1 (single sample); either remove the field or change it to a list of retained type names | Medium — removes misleading metric | Low | High | P1 |
-| I-5 | Replace path-string round-trip (`FormatPath` → `SectionBuilder` split) with structured `IReadOnlyList<string> PathHops` on domain result | Medium — eliminates fragile string parsing | Low | High | P1 |
-| I-6 | Add cancellation checks inside the per-type loop and inside `RootPathFinder`'s root iteration | Medium — required for large dumps | Low | High | P1 |
-| I-7 | Pool `BidirectionalPathFinder` internal collections (`_visited`, `_previous`, `_queue`) using `ArrayPool`/`ObjectPool` | Medium — reduces Gen0 pressure | Medium | Medium | P2 |
-| I-8 | Surface `RootKind` aggregate distribution in section builder (e.g., "3 of 5 retained types: StaticVar") | Medium — improves report actionability | Low | High | P2 |
-| I-9 | Add generation check before using a sample address — prefer Gen2/LOH samples over Gen0 | Medium — improves single-sample confidence | Low | High | P2 |
-| I-10 | Expose count of types with no sample address as a metric | Low — transparency improvement | Low | High | P3 |
-| I-11 | Remove dead `AnalyzeObject(ClrHeap, IHeapAnalysisCache, ulong)` method or promote to a named public API | Low — dead code cleanup | Low | High | P3 |
-| I-12 | Replace root-kind string `Contains("Weak")` filter with `ClrRootKind` enum comparison | Low — defensive correctness | Low | Medium | P3 |
+| ID | Recommendation | Impact | Difficulty | Confidence | Priority | Status |
+|---|---|---|---|---|---|---|
+| I-1 | Lift `ReferenceGraph` creation out of the per-type loop — share one instance across all top-N iterations | High — reduces redundant ClrMD edge fetches; addresses 5.6GB Gen0 allocation root cause | Low | High | P0 | ✅ DONE (ec42b06) |
+| I-2 | Remove dead options `MaxPathSearchObjects` and `FastModeMaxDepth` from `ReferenceChainOptions` | Medium — eliminates misleading configuration surface | Low | High | P1 | — |
+| I-3 | Add `RootKind: string?` to `ReferenceTypeSampleSnapshot`; populate from `TryFindAnyRootPath` return | High — enables root-kind filtering and aggregation in reports | Low | High | P1 | ✅ DONE (c05c6f4) |
+| I-4 | Fix `TopRetainedTypes` semantics — counts are always 0/1 (single sample); either remove the field or change it to a list of retained type names | Medium — removes misleading metric | Low | High | P1 | — |
+| I-5 | Replace path-string round-trip (`FormatPath` → `SectionBuilder` split) with structured `IReadOnlyList<string> PathHops` on domain result | Medium — eliminates fragile string parsing | Low | High | P1 | — |
+| I-6 | Add cancellation checks inside the per-type loop and inside `RootPathFinder`'s root iteration | Medium — required for large dumps | Low | High | P1 | — |
+| I-7 | Pool `BidirectionalPathFinder` internal collections (`_visited`, `_previous`, `_queue`) using `ArrayPool`/`ObjectPool` | Medium — reduces Gen0 pressure | Medium | Medium | P2 | — |
+| I-8 | Surface `RootKind` aggregate distribution in section builder (e.g., "3 of 5 retained types: StaticVar") | Medium — improves report actionability | Low | High | P2 | — |
+| I-9 | Add generation check before using a sample address — prefer Gen2/LOH samples over Gen0 | Medium — improves single-sample confidence | Low | High | P2 | — |
+| I-10 | Expose count of types with no sample address as a metric | Low — transparency improvement | Low | High | P3 | — |
+| I-11 | Remove dead `AnalyzeObject(ClrHeap, IHeapAnalysisCache, ulong)` method or promote to a named public API | Low — dead code cleanup | Low | High | P3 | — |
+| I-12 | Replace root-kind string `Contains("Weak")` filter with `ClrRootKind` enum comparison | Low — defensive correctness | Low | Medium | P3 | — |
 
 ### Evolutions (Improve the Platform)
 
-| ID | Recommendation | Impact | Difficulty | Confidence | Priority |
-|---|---|---|---|---|---|
-| E-1 | Add multi-sample analysis: sample 3–5 instances per type, report root consistency score | High — transforms single-sample boolean into confidence metric | Medium | High | P1 |
-| E-2 | Compute approximate retained subgraph size per sample via bounded BFS over the candidate set | High — aligns with dotMemory/PerfView parity; closes the biggest competitive gap | Medium | High | P1 |
-| E-3 | Enrich path hops with field names from `ClrStaticField.Name` / `ClrInstanceField.Name` for the first and last hop | High — closes the primary WinDbg/SOS parity gap | Medium | High | P1 |
-| E-4 | Correlate `ReferenceChainAnalyzer` output with `DominatorAnalyzer` results — flag types that are dominators of a significant heap fraction | High — closes the dotMemory parity gap | Medium | Medium | P2 |
-| E-5 | Detect "exclusively finalizer-retained" pattern as a distinct finding | Medium — specific leak pattern not detectable without this | Low | High | P2 |
-| E-6 | Detect shared root objects across top-N types — flag root addresses that appear in multiple type traces | Medium — identifies retention hubs | Low | High | P2 |
-| E-7 | Add `IHeapAnalysisCache.GetTopInstanceAddresses(string typeName, int count)` to support multi-sample analysis (E-1) | Medium — infrastructure dependency for E-1 | Medium | High | P2 |
+| ID | Recommendation | Impact | Difficulty | Confidence | Priority | Status |
+|---|---|---|---|---|---|---|
+| E-1 | Add multi-sample analysis: sample 3–5 instances per type, report root consistency score | High — transforms single-sample boolean into confidence metric | Medium | High | P1 | — |
+| E-2 | Compute approximate retained subgraph size per sample via bounded BFS over the candidate set | High — aligns with dotMemory/PerfView parity; closes the biggest competitive gap | Medium | High | P1 | — |
+| E-3 | Enrich path hops with field names from `ClrStaticField.Name` / `ClrInstanceField.Name` for the first and last hop | High — closes the primary WinDbg/SOS parity gap | Medium | High | P1 | — |
+| E-4 | Correlate `ReferenceChainAnalyzer` output with `DominatorAnalyzer` results — flag types that are dominators of a significant heap fraction | High — closes the dotMemory parity gap | Medium | Medium | P2 | — |
+| E-5 | Detect "exclusively finalizer-retained" pattern as a distinct finding | Medium — specific leak pattern not detectable without this | Low | High | P2 | — |
+| E-6 | Detect shared root objects across top-N types — flag root addresses that appear in multiple type traces | Medium — identifies retention hubs | Low | High | P2 | — |
+| E-7 | Add `IHeapAnalysisCache.GetTopInstanceAddresses(string typeName, int count)` to support multi-sample analysis (E-1) | Medium — infrastructure dependency for E-1 | Medium | High | P2 | — |
 
 ---
 
@@ -397,11 +397,3 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 
 4. **Highest engineering return?** In order: I-1, I-3 + I-5, E-2, E-3. The first two are low-effort fixes that immediately improve correctness of outputs. E-2 and E-3 require moderate effort but close the most significant gaps relative to production diagnostics tools.
 
----
-
-## Implementation Status
-
-| ID | Recommendation | Status | Commit | Notes |
-|---|---|---|---|---|
-| I-1 | Share `ReferenceGraph` across per-type loop | ✅ IMPLEMENTED | ec42b06 | Lifted `ReferenceGraph` creation outside loop; passes as parameter to all path-finding methods. Preserves edge cache across iterations, reducing ClrMD redundant calls. |
-| I-3 | Add structured `RootKind` to `ReferenceTypeSampleSnapshot` | ✅ IMPLEMENTED | TBD | Added `RootKind: string?` field to snapshot; populated from path finder result. Enables root-kind filtering and aggregation in reports and consumers. |

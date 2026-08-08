@@ -52,7 +52,7 @@ namespace DumpDetective.Analysis.Analyzers
             int retainedSamples = 0;
             int analyzedSamples = 0;
             int traversalLimitedSamples = 0;
-            var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var retainedTypeNames = new HashSet<string>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
             var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Length);
             progress?.Report(new(0, "loading root list"));
@@ -98,10 +98,7 @@ namespace DumpDetective.Analysis.Analyzers
                         if (hasGcRoot)
                         {
                             retainedSamples++;
-                            if (retainedTypeCounts.TryGetValue(typeName, out int current))
-                                retainedTypeCounts[typeName] = current + 1;
-                            else
-                                retainedTypeCounts[typeName] = 1;
+                            retainedTypeNames.Add(typeName);
 
                             if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
                                 sampleReferenceChains.Add($"{typeName}: {path}");
@@ -127,18 +124,15 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
-            var topRetainedTypes = retainedTypeCounts
-                .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
-                .Take(10)
-                .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
+            var retainedTypeList = retainedTypeNames
+                .OrderBy(name => name, StringComparer.Ordinal)
                 .ToArray();
 
             return new ReferenceChainDomainResult(
                 analyzedSamples,
                 retainedSamples,
                 retainedPct,
-                topRetainedTypes,
+                retainedTypeList,
                 sampleReferenceChains,
                 topTypeSampleTraces,
                 traversalLimitedSamples);

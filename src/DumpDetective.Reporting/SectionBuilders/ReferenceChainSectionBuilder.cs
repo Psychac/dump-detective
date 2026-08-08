@@ -87,14 +87,14 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
                     StatusLabel:      "Reference chain"));
             }
         }
-        var topRetained = d.TopRetainedTypes ?? [];
-        if (topRetained.Count > 0)
+        var retainedTypes = d.RetainedTypeNames ?? [];
+        if (retainedTypes.Count > 0)
         {
-            var rtRows = new List<TableRow>(Math.Min(topRetained.Count, 8));
-            int rtLimit = Math.Min(topRetained.Count, 8);
+            var rtRows = new List<TableRow>(Math.Min(retainedTypes.Count, 8));
+            int rtLimit = Math.Min(retainedTypes.Count, 8);
             for (int i = 0; i < rtLimit; i++)
-                rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(topRetained[i].Name, 80)), Cell($"{topRetained[i].Count:N0} retained sample(s)", topRetained[i].Count)]));
-            compactTables.Add(STCompact("Top retained sampled types", new[] { CH("Type"), CH("Retained Samples","number") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(retainedTypes[i], 80))]));
+            compactTables.Add(STCompact("Retained types", new[] { CH("Type") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

@@ -8,7 +8,7 @@ internal sealed record ReferenceChainDomainResult(
     int AnalyzedSamples,
     int RetainedSamples,
     double RetainedPercent,
-    IReadOnlyList<NameCountEntry>? TopRetainedTypes = null,
+    IReadOnlyList<string>? RetainedTypeNames = null,
     IReadOnlyList<string>? SampleReferenceChains = null,
     IReadOnlyList<ReferenceTypeSampleSnapshot>? TopTypeSampleTraces = null,
     int TraversalLimitedSamples = 0) : AnalyzerDomainResult;

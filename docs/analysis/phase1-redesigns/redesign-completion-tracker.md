@@ -2,7 +2,7 @@
 
 **Purpose:** Track redesign evaluation status, implementation progress, and measured performance baselines across Phase 1 analyzers.
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-08
 
 ---
 
@@ -10,10 +10,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Redesign Evaluations Complete** | 3 / ~34 |
-| **Completion Rate** | 8.8% |
-| **Implementation Plans Ready** | 1 / 3 |
-| **Performance Baselines Measured** | 2 / 3 |
+| **Redesign Evaluations Complete** | 3 / ~34 (+ 6 new-analyzer design sketches) |
+| **Completion Rate** | 8.8% existing; 6 new-analyzer designs drafted |
+| **Implementation Plans Ready** | 1 / 3 existing |
+| **Performance Baselines Measured** | 2 / 3 existing |
 | **Critical (P0) Redesign Wins** | 3 (crash: bugs, event: scale, dominator: perf) |
 
 ---
@@ -34,6 +34,14 @@
 | 3 | DominatorAnalyzer | 🟡 | ✅ [dominator-analyzer.md](dominator-analyzer.md) | ⏳ | — | **Medium** (perf) | **High** |
 | 4 | EventLeakAnalyzer | ✅ | ✅ [event-leak-analyzer.md](event-leak-analyzer.md) | ✅ [event-leak-analyzer-implementation-plan.md](event-leak-analyzer-implementation-plan.md) | 📊 | **High** (scale) | **High** |
 | 5 | RootPathFinder | 🟡 | ✅ [root-path-finder.md](root-path-finder.md) | ⏳ | 📊 | **High** (foundational) | **High** |
+| — | — | — | — | — | — | — | — |
+| **New Analyzers (P2–P3)** | — | — | — | — | — | — | — |
+| N1 | DiScopeLeakAnalyzer | 🟡 | ✅ [di-scope-leak-analyzer.md](di-scope-leak-analyzer.md) | ⏳ | — | **High** (P2 item 1) | **High** |
+| N2 | CacheHealthAnalyzer | 🟡 | ✅ [cache-health-analyzer.md](cache-health-analyzer.md) | ⏳ | — | **High** (P2 item 2) | **Medium** |
+| N3 | EfCoreAnalyzer | 🟡 | ✅ [ef-core-analyzer.md](ef-core-analyzer.md) | ⏳ | — | **High** (P2 item 2) | **High** |
+| N4 | NativeInteropAnalyzer | 🟡 | ✅ [native-interop-analyzer.md](native-interop-analyzer.md) | ⏳ spike req'd | — | **Medium** (P2 item 3) | **High** |
+| N5 | DuplicateObjectAnalyzer | 🟡 | ✅ [duplicate-object-analyzer.md](duplicate-object-analyzer.md) | ⏳ | — | **Medium** (P2/P3) | **Medium** |
+| N6 | AspNetDiagnosticsAnalyzer | 🟡 | ✅ [aspnet-diagnostics-analyzer.md](aspnet-diagnostics-analyzer.md) | ⏳ | — | **Low** (P3 deferred) | **High** |
 | — | — | — | — | — | — | — | — |
 | — | **Remaining 29** | ⏳ | — | — | — | — | — |
 

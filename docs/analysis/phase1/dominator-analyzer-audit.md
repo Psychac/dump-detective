@@ -8,6 +8,8 @@
 > **Protocol**: [phase1-analyzer-architecture-review.md](phase1-analyzer-architecture-review.md)
 >
 > **Date**: 2026-07-29
+>
+> **P0 Completion**: ✅ All 3 P0 items implemented (2026-08-09)
 
 ---
 
@@ -404,11 +406,11 @@ output is treated as authoritative.
 
 ### Priority Roadmap
 
-| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| P0 | Remove 8 `Console.Error.WriteLine("[PERF]...")` calls | High — production stderr noise on every run | Trivial | Certain | Improvement |
-| P0 | Delete dead code: local `methodTableHasRefs` dict, `MethodTableHasOutgoingRefs` / `TypeHasOutgoingRefs` private statics | Medium — maintenance debt | Trivial | Certain | Improvement |
-| P0 | Fix finding generator recommendation: `MaxReferenceAddressesToTrack` → `MaxReferenceAddresses` | Low — engineer confusion | Trivial | Certain | Improvement |
+| Priority | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| P0 | Remove 8 `Console.Error.WriteLine("[PERF]...")` calls | High — production stderr noise on every run | Trivial | Certain | Improvement | ✅ DONE |
+| P0 | Delete dead code: local `methodTableHasRefs` dict, `MethodTableHasOutgoingRefs` / `TypeHasOutgoingRefs` private statics | Medium — maintenance debt | Trivial | Certain | Improvement | ✅ DONE |
+| P0 | Fix finding generator recommendation: `MaxReferenceAddressesToTrack` → `MaxReferenceAddresses` | Low — engineer confusion | Trivial | Certain | Improvement | ✅ DONE |
 | P1 | Standardize BFS exclusivity semantics: use shared `visited` set in both `PopulateRetainedBytes` and the top-K loop, or document the intentional divergence | High — incorrect comparison between tables | Low | High | Improvement |
 | P1 | Surface `gen2Count` and `lohSize` in `TypeSnapshot` and the section builder table | High — major scoring factor invisible to engineers | Low | High | Improvement |
 | P1 | Fix section builder `.Take(20)` hardcode — respect `TopHighlyReferencedObjectsToShow` from options | Medium — configured value silently ignored | Low | High | Improvement |

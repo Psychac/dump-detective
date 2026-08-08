@@ -89,7 +89,7 @@ internal sealed class DominatorFindingGenerator : IFindingGenerator
                 Severity: FindingSeverity.Info,
                 Title: "Reference tracking was capped",
                 Evidence: $"Skipped {r.SkippedReferenceAddresses:N0} references because the tracking limit was reached.",
-                Recommendation: "Increase MaxReferenceAddressesToTrack for deeper incoming-reference coverage.",
+                Recommendation: "Increase MaxReferenceAddresses for deeper incoming-reference coverage.",
                 Tags: ["analysis-quality", "references"],
                 MetricValue: r.SkippedReferenceAddresses,
                 MetricUnit: "references"));

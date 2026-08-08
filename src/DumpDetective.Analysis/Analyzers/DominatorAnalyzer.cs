@@ -138,15 +138,11 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
         ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-        var __sw = System.Diagnostics.Stopwatch.StartNew();
         LeakSignals signals = _participantScanSucceeded
             ? BuildLeakSignalsFromParticipantState(context.Heap, options)
             : AnalyzeObjectsPass(context.Heap, context.Cache, options, policy, context.Progress);
-        Console.Error.WriteLine($"[PERF] DominatorAnalyzer.LeakSignals ({(_participantScanSucceeded ? "participant-state" : "no-index-fallback")}): {__sw.Elapsed.TotalSeconds:F2}s");
-        __sw.Restart();
 
         AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
-        Console.Error.WriteLine($"[PERF] DominatorAnalyzer.Analyze (post-scan): {__sw.Elapsed.TotalSeconds:F2}s");
 
         return ValueTask.FromResult(result);
     }
@@ -158,10 +154,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         LeakSignals signals,
         CancellationToken cancellationToken)
     {
-        var __sw = System.Diagnostics.Stopwatch.StartNew();
         Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
-        Console.Error.WriteLine($"[PERF]   Analyze.GetOrBuildTypeStatistics: {__sw.Elapsed.TotalSeconds:F2}s, {typeStats.Count} types");
-        __sw.Restart();
         if (typeStats.Count == 0)
             return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>());
 
@@ -203,21 +196,13 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
 
             candidates.Add((kv.Key, sampleAddress, count, totalSize, lohSize, gen2Count, score));
         }
-        Console.Error.WriteLine($"[PERF]   Analyze.CandidateBuildLoop: {__sw.Elapsed.TotalSeconds:F2}s, {candidates.Count} candidates");
-        __sw.Restart();
 
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
         PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
-        Console.Error.WriteLine($"[PERF]   Analyze.PopulateRetainedBytes: {__sw.Elapsed.TotalSeconds:F2}s, {topHighlyReferencedObjects.Count} objects");
-        __sw.Restart();
         PopulateEvidence(heap, cache, topHighlyReferencedObjects);
-        Console.Error.WriteLine($"[PERF]   Analyze.PopulateEvidence: {__sw.Elapsed.TotalSeconds:F2}s");
-        __sw.Restart();
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
-        Console.Error.WriteLine($"[PERF]   Analyze.BuildTopRetentionTypes+Sum: {__sw.Elapsed.TotalSeconds:F2}s");
-        __sw.Restart();
 
         if (candidates.Count == 0)
         {
@@ -278,9 +263,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
                 SampleAddress: sampleAddress));
         }
 
-        Console.Error.WriteLine($"[PERF]   Analyze.TopKBoundedGraphWalk: {__sw.Elapsed.TotalSeconds:F2}s, {topTypes.Count} types walked");
-        __sw.Restart();
-
         topTypes.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
         return new DominatorDomainResult(
@@ -304,10 +286,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
     // runs the same reference-counting pass directly over the live heap (or an in-memory index).
     private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
     {
-        Dictionary<ulong, bool>? methodTableHasRefs = cache is not null
-            ? null
-            : new Dictionary<ulong, bool>(capacity: 64);
-
         var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
         long skippedReferenceAddresses = 0;
         bool objectScanCapped = false;
@@ -327,16 +305,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             ulong objectAddress = entry.Address;
             if (objectAddress == 0) continue;
 
-            if (cache is not null)
-            {
-                if (!cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
-                    continue;
-            }
-            else
-            {
-                if (!MethodTableHasOutgoingRefs(heap, entry.MethodTable, methodTableHasRefs!))
-                    continue;
-            }
+            if (cache is not null && !cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
+                continue;
 
             if (maxScan > 0 && objectsTraced >= maxScan)
             {
@@ -658,39 +628,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             .ThenByDescending(static t => t.TotalBytes)
             .ThenByDescending(static t => t.TotalIncomingReferences)
             .ToArray();
-    }
-
-    private static bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable, Dictionary<ulong, bool> cache)
-    {
-        if (methodTable == 0)
-            return false;
-
-        if (cache.TryGetValue(methodTable, out bool cached))
-            return cached;
-
-        bool result = TypeHasOutgoingRefs(heap.GetTypeByMethodTable(methodTable));
-        cache[methodTable] = result;
-        return result;
-    }
-
-    private static bool TypeHasOutgoingRefs(ClrType? type)
-    {
-        if (type is null)
-            return false;
-
-        if (type.IsArray)
-            return type.ComponentType?.IsObjectReference == true;
-
-        // FIX-2: indexed for loop — same SZGenericArrayEnumerator boxing fix as in CountIncomingReferencesByAddress.
-        IReadOnlyList<ClrInstanceField> fields = type.Fields;
-        int count = fields.Count;
-        for (int i = 0; i < count; i++)
-        {
-            if (fields[i].IsObjectReference)
-                return true;
-        }
-
-        return false;
     }
 
     // Like AccumulateReference, but merges a worker-partial count instead of always incrementing by 1.

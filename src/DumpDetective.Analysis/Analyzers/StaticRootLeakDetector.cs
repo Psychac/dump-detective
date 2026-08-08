@@ -1,4 +1,5 @@
-﻿using DumpDetective.Analysis.Traversal;
+﻿using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -79,7 +80,8 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.TotalMemoryImpact,
                 analysis.ObjectsKeptAlive,
                 analysis.DirectObjectType,
-                evidence);
+                evidence,
+                analysis.TopRetainedTypes);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
@@ -245,13 +247,6 @@ namespace DumpDetective.Analysis.Analyzers
         public List<RetainedTypeInfo> TopRetainedTypes { get; set; } = new();
         public bool ContainsCollections { get; set; }
         public bool ContainsEventHandlers { get; set; }
-    }
-
-    internal class RetainedTypeInfo
-    {
-        public string TypeName { get; set; } = string.Empty;
-        public int Count { get; set; }
-        public ulong TotalSize { get; set; }
     }
 }
 

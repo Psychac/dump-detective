@@ -33,15 +33,37 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
         if (roots.Count > 0)
         {
             int limit = Math.Min(roots.Count, TopRootsToShow);
-            var rootRows = new List<TableRow>(limit);
+            var rootRows = new List<CompactRow>(limit);
             for (int i = 0; i < limit; i++)
             {
                 var r = roots[i];
-                rootRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(r.RootDescription, 90)),
-                    Cell(FormatHelper.FormatBytes(r.TotalMemoryImpact), (long)r.TotalMemoryImpact)]));
+                rootRows.Add(R(
+                    FormatHelper.TruncateString(r.RootDescription, 90),
+                    r.TypeName,
+                    (ulong)r.TotalMemoryImpact,
+                    (double)r.ObjectsKeptAlive));
             }
-                compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Roots Count","number") }, rootRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Objects Kept Alive","number") }, rootRows));
+
+            for (int i = 0; i < limit; i++)
+            {
+                var r = roots[i];
+                var topTypes = r.TopRetainedTypes;
+                if (topTypes != null && topTypes.Count > 0)
+                {
+                    var typeRows = new List<CompactRow>();
+                    foreach (var typeInfo in topTypes)
+                    {
+                        typeRows.Add(R(
+                            typeInfo.TypeName,
+                            (double)typeInfo.Count,
+                            (ulong)typeInfo.TotalSize));
+                    }
+                    compactTables.Add(STCompact($"Top retained types in '{FormatHelper.TruncateString(r.RootDescription, 60)}'",
+                        new[] { CH("Type"), CH("Count","number"), CH("Total Size","bytes") },
+                        typeRows));
+                }
+            }
         }
         else
         {

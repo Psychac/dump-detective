@@ -22,15 +22,15 @@ namespace DumpDetective.Analysis.Analyzers
             ReferenceChainOptions options = context.AnalysisOptions.ReferenceChain;
             ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress).Stamp(this));
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress, cancellationToken).Stamp(this));
         }
 
         internal AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
-            return AnalyzeTopTypes(heap, cache, options, ExecutionPolicy.Default, progress: null);
+            return AnalyzeTopTypes(heap, cache, options, ExecutionPolicy.Default, progress: null, CancellationToken.None);
         }
 
-        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
             int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0
@@ -71,6 +71,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             foreach (var typeKvp in topTypes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 typeIndex++;
                 progress?.Report(new(analyzedSamples, "tracing reference chains", $"{typeIndex}/{topTypes.Length} types"));
                 string typeName = typeKvp.Key;
@@ -95,7 +97,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out rootKind, out path, out pathHops, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -147,7 +149,7 @@ namespace DumpDetective.Analysis.Analyzers
             var provider = new ReferenceGraph(heap);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _, out _, out _);
+            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, CancellationToken.None, out _, out _, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
@@ -158,6 +160,7 @@ namespace DumpDetective.Analysis.Analyzers
             ReferenceChainOptions options,
             ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            CancellationToken cancellationToken,
             out string? rootKind,
             out string? path,
             out IReadOnlyList<string>? pathHops,
@@ -176,7 +179,7 @@ namespace DumpDetective.Analysis.Analyzers
             // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
             // with GC root count instead of a shared bounded budget (see
             // docs/analysis/root-path-search-blast-radius.md).
-            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, out rootKind, out path, out pathHops, out searchTruncated);
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
         }
 
         // ── Bidirectional bounded search (all modes) ────────────────────────────
@@ -188,6 +191,7 @@ namespace DumpDetective.Analysis.Analyzers
             ReferenceChainOptions options,
             ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            CancellationToken cancellationToken,
             out string? rootKind,
             out string? path,
             out IReadOnlyList<string>? pathHops,
@@ -223,7 +227,8 @@ namespace DumpDetective.Analysis.Analyzers
                 out List<ulong>? addresses,
                 out searchTruncated,
                 out int candidateSetSize,
-                out int reverseIndexEntryCount);
+                out int reverseIndexEntryCount,
+                cancellationToken);
 
             telemetry.TotalCandidateSetSize += candidateSetSize;
             telemetry.ReverseIndexEntries += reverseIndexEntryCount;

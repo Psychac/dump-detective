@@ -58,7 +58,8 @@ internal sealed class RootPathFinder
         out List<ulong>? path,
         out bool searchTruncated,
         out int candidateSetSize,
-        out int reverseIndexEntryCount)
+        out int reverseIndexEntryCount,
+        CancellationToken cancellationToken = default)
     {
         rootKind = null;
         path = null;
@@ -80,6 +81,7 @@ internal sealed class RootPathFinder
         var scanCounter = new ObjectScanCounter("Root path scan", reportEveryObjects: 500, reportEveryElapsed: TimeSpan.FromSeconds(2));
         foreach ((string kind, ulong rootAddress) in roots)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             scanCounter.Tick();
 
             if (!candidateSet.Contains(rootAddress) && rootAddress != target)

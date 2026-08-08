@@ -293,7 +293,7 @@ dotMemory's "Dominators" view identifies the object responsible for the most ret
 | P0-1 | **Fix broken compact table** in `StaticRootSectionBuilder` — populate all 4 columns or reduce to 2 declared headers | Report correctness | Low | High | Improvement | ✅ DONE |
 | P0-2 | **Surface `TopRetainedTypes`** in `StaticRootSnapshot` and the section builder — it is already computed | Diagnostic quality | Low | High | Improvement | ✅ DONE |
 | P0-3 | **Propagate BFS-cap flag** — when `CollectRetainedObjects` hits `maxObjects`, set a flag on `StaticRootAnalysis` and surface `"(size estimate — scan capped)"` in the report | Correctness/Confidence | Low | High | Improvement | ✅ DONE |
-| P0-4 | **Severity by retained bytes**: add Critical threshold (e.g., > 100 MB retained by any single root) independent of root count | Finding quality | Low | High | Improvement | Pending |
+| P0-4 | **Severity by retained bytes**: add Critical threshold (e.g., > 100 MB retained by any single root) independent of root count | Finding quality | Low | High | Improvement | ✅ DONE |
 
 #### P1 — High
 

@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 57 |
+| **P0 Implemented** | 58 |
 | **P1 Implemented** | 90 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 63.1% (149/236) |
+| **Overall P0+P1 Rate** | 63.6% (150/236) |
 
 ---
 
@@ -58,9 +58,9 @@
 | 22 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 23 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
-| 25 | **StaticRootLeakDetector** | 3/4 | 0/5 | 0/5 | 0/4 | P0 75% (P0-1,P0-2,P0-3 done); P0-4,P1-1,P1-2,P1-3,P1-4,P1-5 pending |
+| 25 | **StaticRootLeakDetector** | 4/4 | 0/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1-1,P1-2,P1-3,P1-4,P1-5 pending |
 
-**Subtotal: 30/36 P0 done, 29/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 31/36 P0 done, 29/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -73,7 +73,7 @@
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
-| **StaticRootLeakDetector** | 3/4 | 0/5 | 6 | P0-1,P0-2,P0-3 done; P0-4,P1-1,P1-2,P1-3,P1-4,P1-5 pending |
+| **StaticRootLeakDetector** | 4/4 | 0/5 | 5 | ✅ P0 complete; P1-1,P1-2,P1-3,P1-4,P1-5 pending |
 
 **Subtotal: 0/14 P0 done, 0/34 P1 done** (not-started pools)
 

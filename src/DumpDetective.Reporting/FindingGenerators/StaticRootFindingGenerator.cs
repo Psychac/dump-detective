@@ -11,6 +11,18 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
     public string AnalyzerName => "Static Root Leak Detection";
     public bool CanGenerate(AnalyzerDomainResult result) => result is StaticRootDomainResult;
 
+    private static FindingSeverity DetermineSeverity(StaticRootDomainResult result, ulong criticalByteThreshold)
+    {
+        if (result.RootCount >= 10)
+            return FindingSeverity.Critical;
+
+        var topRoots = result.TopRootsByRetainedBytes;
+        if (topRoots?.Count > 0 && topRoots[0].TotalMemoryImpact > criticalByteThreshold)
+            return FindingSeverity.Critical;
+
+        return FindingSeverity.Warning;
+    }
+
     public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result)
     {
         if (result is not StaticRootDomainResult r) return [];
@@ -32,7 +44,8 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
             ];
         }
 
-        FindingSeverity severity = r.RootCount >= 10 ? FindingSeverity.Critical : FindingSeverity.Warning;
+        const ulong CriticalByteThreshold = 100 * 1_024 * 1_024;
+        FindingSeverity severity = DetermineSeverity(r, CriticalByteThreshold);
         Evidence? topEvidence = r.TopRootsByRetainedBytes?.Count > 0 ? r.TopRootsByRetainedBytes[0].Evidence : null;
 
         return

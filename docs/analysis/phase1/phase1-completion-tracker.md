@@ -58,7 +58,7 @@
 | 22 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 23 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
-| 25 | **StaticRootLeakDetector** | 4/4 | 0/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1-1,P1-2,P1-3,P1-4,P1-5 pending |
+| 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 
 **Subtotal: 31/36 P0 done, 31/54 P1 done, 19/55 P2 done** (in-progress pools)
 
@@ -73,9 +73,8 @@
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 | ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
-| **StaticRootLeakDetector** | 4/4 | 2/5 | 3 | ✅ P0 complete; P1-2,P1-3 done; P1-1,P1-4,P1-5 pending |
 
-**Subtotal: 0/14 P0 done, 0/34 P1 done** (not-started pools)
+**Subtotal: 0/12 P0 done, 0/29 P1 done** (not-started pools)
 
 ---
 
@@ -86,13 +85,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 13 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer) |
-| Analyzers with partial P0+P1 completion | 13 | Some items done, some pending (includes CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, and others) |
-| Analyzers with zero P0+P1 completion | 9 | Not yet started |
+| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with zero P0+P1 completion | 8 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **54** | 69.2% (24 COMPLETE + 30 IN_PROGRESS) |
+| **P0 items implemented** | **58** | 74.4% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **90** | 57.7% (61 COMPLETE + 29 IN_PROGRESS) |
-| **Combined P0+P1 rate** | **61.5%** | (144/236) |
+| **P1 items implemented** | **92** | 59.0% |
+| **Combined P0+P1 rate** | **64.4%** | (152/236) |
 
 ---
 

@@ -466,7 +466,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return typeName[start..end];
     }
 
-    private static (string? ExceptionType, string? ExceptionMessage) ExtractFaultedTaskException(ClrObject taskObj)
+    private (string? ExceptionType, string? ExceptionMessage) ExtractFaultedTaskException(ClrObject taskObj)
     {
         if (!taskObj.IsValid || taskObj.Type is null)
             return (null, null);
@@ -489,16 +489,16 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return (null, null);
     }
 
-    private static ClrObject ReadObjectField(ClrObject source, string fieldName)
+    private ClrObject ReadObjectField(ClrObject source, string fieldName)
     {
         if (source.Type is null)
             return default;
 
-        var field = source.Type.GetFieldByName(fieldName);
+        var field = TryGetCachedField(source.Type, source.Type.MethodTable, fieldName);
         return field is null ? default : field.ReadObject(source, interior: false);
     }
 
-    private static bool TryFindExceptionLikeObject(ClrObject source, HashSet<ulong> visited, int depth, out ClrObject exceptionObj)
+    private bool TryFindExceptionLikeObject(ClrObject source, HashSet<ulong> visited, int depth, out ClrObject exceptionObj)
     {
         return ObjectGraphTraversal.TryFindByPredicate(
             source,
@@ -514,11 +514,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     && !typeName.Contains("ExceptionDispatchInfo", StringComparison.Ordinal)
                     && TryReadExceptionSummary(candidate, out _, out _);
             },
-            readObjectField: ReadObjectField,
+            readObjectField: (obj, fieldName) => ReadObjectField(obj, fieldName),
             out exceptionObj);
     }
 
-    private static bool TryReadExceptionSummary(ClrObject exceptionObj, out string? exceptionType, out string? message)
+    private bool TryReadExceptionSummary(ClrObject exceptionObj, out string? exceptionType, out string? message)
     {
         exceptionType = exceptionObj.Type?.Name;
         message = null;

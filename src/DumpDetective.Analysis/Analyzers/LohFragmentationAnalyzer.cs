@@ -96,16 +96,11 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     scanCounter.Tick();
 
-                    if (!obj.IsValid)
+                    if (!obj.IsValid || obj.Address == 0)
                         continue;
 
-                    ulong objectAddress = obj.Address;
-                    if (objectAddress == 0)
-                        continue;
-
-                    AccumulateSegmentObjectByAddress(
-                        heap,
-                        objectAddress,
+                    AccumulateSegmentObject(
+                        obj,
                         freeGapBucketCounts,
                         largeObjectCandidates,
                         options.TopLargeObjectsCount,
@@ -188,9 +183,8 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static ulong GetSegmentAddress(ClrSegment segment) => segment.Start;
 
-        private static void AccumulateSegmentObjectByAddress(
-            ClrHeap heap,
-            ulong objectAddress,
+        private static void AccumulateSegmentObject(
+            ClrObject obj,
             int[] freeGapBucketCounts,
             List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
             int maxLargeObjects,
@@ -199,13 +193,6 @@ namespace DumpDetective.Analysis.Analyzers
             ref int objectCount,
             ref int freeObjectCount)
         {
-            if (objectAddress == 0)
-                return;
-
-            ClrObject obj = heap.GetObject(objectAddress);
-            if (!obj.IsValid)
-                return;
-
             if (obj.IsFree)
             {
                 ulong size = obj.Size;
@@ -232,7 +219,7 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong size = obj.Size;
                 if (size >= LohThreshold)
                 {
-                    var candidate = (objectAddress, obj.Type?.Name ?? "Unknown", size);
+                    var candidate = (obj.Address, obj.Type?.Name ?? "Unknown", size);
                     largeObjectCandidates.Add(candidate);
 
                     // Bounded accumulator: keep only top-N by size (same pattern as LargeObjectTracker).

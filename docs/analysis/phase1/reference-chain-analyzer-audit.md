@@ -396,3 +396,11 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 3. **Platform evolution opportunities?** `E-7` (`GetTopInstanceAddresses` on cache) would enable multi-sample analysis across any analyzer. The `RootPathFinder` reusability is already an asset — formalizing it as a shared platform primitive (with a public API) would allow `EventLeakAnalyzer`, `TimerLeakAnalyzer`, and `StaticRootLeakDetector` to unify their traversal logic.
 
 4. **Highest engineering return?** In order: I-1, I-3 + I-5, E-2, E-3. The first two are low-effort fixes that immediately improve correctness of outputs. E-2 and E-3 require moderate effort but close the most significant gaps relative to production diagnostics tools.
+
+---
+
+## Implementation Status
+
+| ID | Recommendation | Status | Commit | Notes |
+|---|---|---|---|---|
+| I-1 | Share `ReferenceGraph` across per-type loop | ✅ IMPLEMENTED | TBD | Lifted `ReferenceGraph` creation outside loop; passes as parameter to all path-finding methods. Preserves edge cache across iterations, reducing ClrMD redundant calls. |

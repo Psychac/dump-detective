@@ -64,6 +64,11 @@ namespace DumpDetective.Analysis.Analyzers
             var telemetry = new TelemetryCounters();
             int typeIndex = 0;
 
+            // Create ReferenceGraph once, shared across all top-N type iterations.
+            // This preserves the edge cache across iterations, reducing redundant ClrMD calls
+            // for objects referenced by multiple types.
+            var provider = new ReferenceGraph(heap);
+
             foreach (var typeKvp in topTypes)
             {
                 typeIndex++;
@@ -88,7 +93,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out path, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out path, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -141,13 +146,15 @@ namespace DumpDetective.Analysis.Analyzers
         {
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
             List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
+            var provider = new ReferenceGraph(heap);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _);
+            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
             ClrHeap heap,
+            ReferenceGraph provider,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
@@ -167,12 +174,13 @@ namespace DumpDetective.Analysis.Analyzers
             // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
             // with GC root count instead of a shared bounded budget (see
             // docs/analysis/root-path-search-blast-radius.md).
-            return TryFindAnyRootPath_Bidirectional(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
         }
 
         // ── Bidirectional bounded search (all modes) ────────────────────────────
         private bool TryFindAnyRootPath_Bidirectional(
             ClrHeap heap,
+            ReferenceGraph provider,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
@@ -184,9 +192,8 @@ namespace DumpDetective.Analysis.Analyzers
             path = null;
             searchTruncated = false;
 
-            // Use ReferenceGraph as the reference provider — it caches edges, reducing re-fetching
-            // across the finder's internal phases (candidate set, reverse index, constrained BFS).
-            var provider = new ReferenceGraph(heap);
+            // Use shared ReferenceGraph as the reference provider — it caches edges across
+            // all types, reducing redundant ClrMD calls for objects referenced by multiple types.
             var limits = new RootPathSearchLimits
             {
                 MaxCandidateNodes = options.ResolvedMaxCandidateNodes,

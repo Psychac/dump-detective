@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 58 |
+| **P0 Implemented** | 59 |
 | **P1 Implemented** | 92 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 64.4% (152/236) |
+| **Overall P0+P1 Rate** | 64.5% (151/234) |
 
 ---
 
@@ -72,7 +72,7 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
-| ReferenceChainAnalyzer | 0/1 | 0/8 | 9 | — |
+| ReferenceChainAnalyzer | 1/1 | 0/8 | 8 | ✅ P0 complete (I-1: shared ReferenceGraph) |
 
 **Subtotal: 0/12 P0 done, 0/29 P1 done** (not-started pools)
 

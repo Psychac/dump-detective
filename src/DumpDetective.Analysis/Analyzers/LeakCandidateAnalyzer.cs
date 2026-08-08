@@ -39,6 +39,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = heapIndex.TypeAggregates;
         IReadOnlyDictionary<ulong, TypeShapeEntry>? shapes = heapIndex.TypeShapeCache;
 
+        Dictionary<string, ulong> typeNameToMethodTable = BuildTypeNameToMethodTableMap(heap, aggregates, typeStats);
+
         HashSet<ulong> staticRoots = cache.GetStaticRootedAddresses(heap);
 
         // Sourced from the already-completed gc-handle analyzer run rather than re-walking
@@ -61,16 +63,14 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ulong sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
+            if (!typeNameToMethodTable.TryGetValue(typeName, out ulong methodTable))
+                continue;
+
+            if (!aggregates.TryGetValue(methodTable, out TypeAggregateIndexEntry aggregate))
+                continue;
+
+            ulong sampleAddress = aggregate.SampleAddress;
             if (sampleAddress == 0)
-                continue;
-
-            ClrObject sample = heap.GetObject(sampleAddress);
-            if (!sample.IsValid || sample.Type is null)
-                continue;
-
-            ulong methodTable = sample.Type.MethodTable;
-            if (methodTable == 0 || !aggregates.TryGetValue(methodTable, out TypeAggregateIndexEntry aggregate))
                 continue;
 
             TypeShapeEntry shape = shapes is not null && shapes.TryGetValue(methodTable, out TypeShapeEntry foundShape)
@@ -245,5 +245,22 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             counts[classification] = value + 1;
         else
             counts[classification] = 1;
+    }
+
+    private static Dictionary<string, ulong> BuildTypeNameToMethodTableMap(
+        ClrHeap heap,
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates,
+        Dictionary<string, CachedTypeStatistics> typeStats)
+    {
+        var map = new Dictionary<string, ulong>(StringComparer.Ordinal);
+
+        foreach ((ulong methodTable, TypeAggregateIndexEntry _) in aggregates)
+        {
+            ClrType? type = heap.GetTypeByMethodTable(methodTable);
+            if (type?.Name is string typeName && typeStats.ContainsKey(typeName))
+                map[typeName] = methodTable;
+        }
+
+        return map;
     }
 }

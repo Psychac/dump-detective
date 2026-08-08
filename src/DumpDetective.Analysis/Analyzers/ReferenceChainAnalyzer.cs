@@ -33,9 +33,6 @@ namespace DumpDetective.Analysis.Analyzers
         private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
-            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0
-                ? policy.ReferenceChainMaxPathSearchObjects
-                : options.FallbackMaxPathSearchObjects;
             bool skipArrays = options.SkipArrays;
             int largeFanoutThreshold = options.LargeFanoutThreshold > 0 ? options.LargeFanoutThreshold : 100;
             var knownLeakPatterns = options.KnownLeakTypePatterns ?? Array.Empty<string>();

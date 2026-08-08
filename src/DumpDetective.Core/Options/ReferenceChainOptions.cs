@@ -29,17 +29,11 @@ public sealed class ReferenceChainOptions
     public int TopCount { get; init; } = 5;
 
     public int MaxPathDepth { get; init; } = 25;
-    public int FastModeMaxDepth { get; init; } = 25;
-    public int FallbackMaxPathSearchObjects { get; init; } = 5_000;
 
     /// <summary>
     /// Search strategy mode. Defaults to <see cref="ReferenceChainSearchMode.Balanced"/>.
     /// </summary>
     public ReferenceChainSearchMode SearchMode { get; init; } = ReferenceChainSearchMode.Balanced;
-
-    // ── Fast-mode limits ──────────────────────────────────────────────────────
-    /// <summary>Max BFS nodes visited before giving up (Fast mode only).</summary>
-    public int MaxPathSearchObjects { get; init; } = 5_000;
 
     // ── Balanced / Deep mode limits ───────────────────────────────────────────
     /// <summary>
@@ -95,8 +89,6 @@ public sealed class ReferenceChainOptions
         {
             TopCount = 5,
             MaxPathDepth = 12,
-            FastModeMaxDepth = 12,
-            MaxPathSearchObjects = 2_000,
             SearchMode = ReferenceChainSearchMode.Fast,
             MaxCandidateNodes = 10_000,
             MaxCandidateDepth = 6,
@@ -109,8 +101,6 @@ public sealed class ReferenceChainOptions
         {
             TopCount = 20,
             MaxPathDepth = 40,
-            FastModeMaxDepth = 40,
-            MaxPathSearchObjects = 20_000,
             SearchMode = ReferenceChainSearchMode.Deep,
             MaxCandidateNodes = 200_000,
             MaxCandidateDepth = 15,

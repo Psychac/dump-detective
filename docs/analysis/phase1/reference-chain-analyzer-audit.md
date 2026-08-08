@@ -315,7 +315,7 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 | ID | Recommendation | Impact | Difficulty | Confidence | Priority | Status |
 |---|---|---|---|---|---|---|
 | I-1 | Lift `ReferenceGraph` creation out of the per-type loop — share one instance across all top-N iterations | High — reduces redundant ClrMD edge fetches; addresses 5.6GB Gen0 allocation root cause | Low | High | P0 | ✅ DONE (ec42b06) |
-| I-2 | Remove dead options `MaxPathSearchObjects` and `FastModeMaxDepth` from `ReferenceChainOptions` | Medium — eliminates misleading configuration surface | Low | High | P1 | — |
+| I-2 | Remove dead options `MaxPathSearchObjects` and `FastModeMaxDepth` from `ReferenceChainOptions` | Medium — eliminates misleading configuration surface | Low | High | P1 | ✅ DONE (TBD) |
 | I-3 | Add `RootKind: string?` to `ReferenceTypeSampleSnapshot`; populate from `TryFindAnyRootPath` return | High — enables root-kind filtering and aggregation in reports | Low | High | P1 | ✅ DONE (c05c6f4) |
 | I-4 | Fix `TopRetainedTypes` semantics — counts are always 0/1 (single sample); either remove the field or change it to a list of retained type names | Medium — removes misleading metric | Low | High | P1 | ✅ DONE (062b7cc) |
 | I-5 | Replace path-string round-trip (`FormatPath` → `SectionBuilder` split) with structured `IReadOnlyList<string> PathHops` on domain result | Medium — eliminates fragile string parsing | Low | High | P1 | ✅ DONE (6f422ef) |
@@ -373,7 +373,7 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 | **P1** | I-4 | Fix `TopRetainedTypes` semantics | Removes misleading metric | Low | ✅ 062b7cc |
 | **P1** | I-5 | Structured path hops in domain result | Eliminates fragile string parsing | Low | ✅ 6f422ef |
 | **P1** | I-6 | Cancellation inside per-type loop | Required for large dumps | Low | ✅ TBD |
-| **P1** | I-2 | Remove dead `MaxPathSearchObjects` / `FastModeMaxDepth` | Eliminates misleading configuration | Low | — |
+| **P1** | I-2 | Remove dead `MaxPathSearchObjects` / `FastModeMaxDepth` | Eliminates misleading configuration | Low | ✅ TBD |
 | **P1** | E-1 | Multi-sample analysis (3–5 per type) | Transforms boolean to confidence score | Medium | — |
 | **P1** | E-2 | Retained subgraph size per sample | Closes largest competitive gap | Medium | — |
 | **P1** | E-3 | Field names in root path hops | Closes primary WinDbg/SOS parity gap | Medium | — |

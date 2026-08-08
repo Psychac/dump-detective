@@ -99,9 +99,7 @@ namespace DumpDetective.Core.Options
                 {
                     SearchMode = ReferenceChainSearchMode.Fast,
                     TopCount = 5,
-                    MaxPathSearchObjects = 2_000,
-                    MaxPathDepth = 15,
-                    FastModeMaxDepth = 15
+                    MaxPathDepth = 15
                 },
                 SerializeHeapAccess = false
             },
@@ -118,9 +116,7 @@ namespace DumpDetective.Core.Options
                 {
                     SearchMode = ReferenceChainSearchMode.Deep,
                     TopCount = 15,
-                    MaxPathSearchObjects = 20_000,
-                    MaxPathDepth = 40,
-                    FastModeMaxDepth = 40
+                    MaxPathDepth = 40
                 },
                 SerializeHeapAccess = false
             },
@@ -137,9 +133,7 @@ namespace DumpDetective.Core.Options
                 {
                     SearchMode = ReferenceChainSearchMode.Balanced,
                     TopCount = 10,
-                    MaxPathSearchObjects = 5_000,
-                    MaxPathDepth = 25,
-                    FastModeMaxDepth = 25
+                    MaxPathDepth = 25
                 },
                 SerializeHeapAccess = false
             }

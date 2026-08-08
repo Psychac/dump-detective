@@ -16,4 +16,6 @@ internal sealed record LohFragmentationDomainResult(
     /// <summary>Distribution of free-gap sizes across all LOH segments.</summary>
     IReadOnlyList<FreeGapBucket>? FreeGapHistogram = null,
     /// <summary>Top large objects by size (up to 20), from Phase 1 LargeObjectIndex.bin.</summary>
-    IReadOnlyList<LargeObjectSnapshot>? TopLargeObjects = null) : AnalyzerDomainResult;
+    IReadOnlyList<LargeObjectSnapshot>? TopLargeObjects = null,
+    /// <summary>Top types by total LOH bytes consumed (type-aggregated view of LOH consumption).</summary>
+    IReadOnlyList<LohTypeProfile>? TopLargeObjectTypes = null) : AnalyzerDomainResult;

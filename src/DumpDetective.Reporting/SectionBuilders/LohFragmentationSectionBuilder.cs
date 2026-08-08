@@ -91,6 +91,23 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps", "number", "percent") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        var largeObjectTypes = d.TopLargeObjectTypes ?? [];
+        if (largeObjectTypes.Count > 0)
+        {
+            var typeRows = new List<TableRow>(largeObjectTypes.Count);
+            for (int i = 0; i < largeObjectTypes.Count; i++)
+            {
+                var type = largeObjectTypes[i];
+                double pctOfLoh = d.TotalBytes == 0 ? 0 : type.TotalBytes * 100.0 / d.TotalBytes;
+                typeRows.Add(new TableRow([
+                    Cell(type.TypeName),
+                    Cell($"{type.ObjectCount:N0}", type.ObjectCount),
+                    Cell(FormatHelper.FormatBytes(type.TotalBytes), (long)type.TotalBytes),
+                    Cell($"{pctOfLoh:F1}%", pctOfLoh)]));
+            }
+            compactTables.Add(STCompact("LOH consumption by type", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("% of LOH", "number", "percent") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         var largeObjects = d.TopLargeObjects ?? [];
         if (largeObjects.Count > 0)
         {

@@ -19,6 +19,12 @@ public sealed record FreeGapBucket(string GapSizeRange, int GapCount);
 /// <summary>Snapshot of a single large (LOH) object captured during Phase 1 index build.</summary>
 public sealed record LargeObjectSnapshot(ulong Address, string TypeName, ulong Size);
 
+/// <summary>Type-aggregated LOH consumption summary — top types by total bytes.</summary>
+/// <param name="TypeName">The type name (e.g., "System.Byte[]").</param>
+/// <param name="ObjectCount">Number of objects of this type in LOH.</param>
+/// <param name="TotalBytes">Sum of all object sizes for this type.</param>
+public sealed record LohTypeProfile(string TypeName, int ObjectCount, ulong TotalBytes);
+
 /// <summary>One bucket in the object-size histogram built from <see cref="HeapIndexBuildResult.GlobalSizeBuckets"/>.</summary>
 /// <param name="RangeLabel">Human-readable range label, e.g. "64–255 B".</param>
 /// <param name="ObjectCount">Total number of objects whose shallow size falls in this bucket.</param>

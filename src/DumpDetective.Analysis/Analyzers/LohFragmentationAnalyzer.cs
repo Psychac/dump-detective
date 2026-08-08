@@ -76,6 +76,7 @@ namespace DumpDetective.Analysis.Analyzers
             var segmentStats = new List<LohSegmentStats>();
             int[] freeGapBucketCounts = new int[s_gapBuckets.Length];
             var largeObjectCandidates = new List<(ulong Address, string TypeName, ulong Size)>();
+            var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
             var scanCounter = new ObjectScanCounter("scanning LOH segments", progress, reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
             foreach (ClrSegment segment in heap.Segments)
@@ -103,6 +104,7 @@ namespace DumpDetective.Analysis.Analyzers
                         obj,
                         freeGapBucketCounts,
                         largeObjectCandidates,
+                        typeAggregation,
                         options.TopLargeObjectsCount,
                         ref freeBytes,
                         ref largestFreeBlock,
@@ -160,7 +162,13 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (var cand in largeObjectCandidates)
                 topLargeObjects.Add(new LargeObjectSnapshot(cand.Address, cand.TypeName, cand.Size));
 
-            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects);
+            // Build type-aggregated LOH consumption view: top types by total bytes.
+            var typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
+            foreach ((string typeName, (int count, ulong totalBytes)) in typeAggregation)
+                typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
+            typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
+
+            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects, typeProfiles);
         }
 
         private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
@@ -187,6 +195,7 @@ namespace DumpDetective.Analysis.Analyzers
             ClrObject obj,
             int[] freeGapBucketCounts,
             List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
+            Dictionary<string, (int Count, ulong TotalBytes)> typeAggregation,
             int maxLargeObjects,
             ref ulong freeBytes,
             ref ulong largestFreeBlock,
@@ -217,9 +226,17 @@ namespace DumpDetective.Analysis.Analyzers
                 objectCount++;
 
                 ulong size = obj.Size;
+                string typeName = obj.Type?.Name ?? "Unknown";
+
+                // Aggregate by type for type-grouped LOH consumption view.
+                if (typeAggregation.TryGetValue(typeName, out var existing))
+                    typeAggregation[typeName] = (existing.Count + 1, existing.TotalBytes + size);
+                else
+                    typeAggregation[typeName] = (1, size);
+
                 if (size >= LohThreshold)
                 {
-                    var candidate = (obj.Address, obj.Type?.Name ?? "Unknown", size);
+                    var candidate = (obj.Address, typeName, size);
                     largeObjectCandidates.Add(candidate);
 
                     // Bounded accumulator: keep only top-N by size (same pattern as LargeObjectTracker).
@@ -322,6 +339,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Step 5: Read LargeObjectIndex.bin and resolve type names (≤ 100 objects).
             List<LargeObjectSnapshot> topLargeObjects = [];
+            var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
             LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
                 if (topLargeObjects.Count >= options.TopLargeObjectsCount) return;
@@ -330,12 +348,24 @@ namespace DumpDetective.Analysis.Analyzers
                 string typeName = obj.Type?.Name ?? "Unknown";
                 if (string.Equals(typeName, "Free", StringComparison.Ordinal)) return;
                 topLargeObjects.Add(new LargeObjectSnapshot(address, typeName, size));
+
+                // Aggregate by type for type-grouped LOH consumption view.
+                if (typeAggregation.TryGetValue(typeName, out var existing))
+                    typeAggregation[typeName] = (existing.Count + 1, existing.TotalBytes + size);
+                else
+                    typeAggregation[typeName] = (1, size);
             }, cancellationToken);
+
+            // Build type-aggregated LOH consumption view: top types by total bytes.
+            var typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
+            foreach ((string typeName, (int count, ulong totalBytes)) in typeAggregation)
+                typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
+            typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
 
             return new LohFragmentationDomainResult(
                 segmentTotalBytes.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
                 totalFreeBlocks, overallFragPct, maxFreeBlock,
-                topSegs, freeGapHistogram, topLargeObjects);
+                topSegs, freeGapHistogram, topLargeObjects, typeProfiles);
         }
 
         // ── Segment metadata helpers ──────────────────────────────────────────────

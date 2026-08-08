@@ -34,8 +34,11 @@ namespace DumpDetective.Analysis.Analyzers
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
+            var asyncPinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
             var allTargetTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            var nullTargetHandlesByKind = new Dictionary<string, int>(StringComparer.Ordinal);
             ulong totalPinnedRetainedBytes = 0;
+            ulong totalAsyncPinnedRetainedBytes = 0;
             // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
             // for handles whose target type has already been resolved. Collapses N handles of
             // the same type into a single lookup. Also reused for dependent-handle target resolution.
@@ -44,6 +47,7 @@ namespace DumpDetective.Analysis.Analyzers
             int totalHandles = 0;
             int strongLikeHandles = 0;
             int weakLikeHandles = 0;
+            int unknownTargetCount = 0;
 
             int dependentHandleCount = 0;
             int dependentResolvedEdgeCount = 0;
@@ -65,18 +69,47 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                     strongLikeHandles++;
 
+                // P1-3: Track null-target handles per kind
+                if (targetAddress == 0)
+                {
+                    Increment(nullTargetHandlesByKind, kind);
+                    return;
+                }
+
                 string? typeName = ResolveTypeNameFromRecord(heap, targetAddress, methodTable, methodTableNameCache);
                 if (typeName == null)
+                {
+                    unknownTargetCount++;
                     return;
+                }
 
                 Increment(allTargetTypes, typeName);
 
-                if (kind.Contains("Pinned", StringComparison.OrdinalIgnoreCase))
+                // P1-2: Separate AsyncPinned vs Pinned byte accounting
+                if (kind == "AsyncPinned")
+                {
+                    ulong resolvedSize = 0;
+                    if (heap is not null)
+                    {
+                        ClrObject targetObject = heap.GetObject(targetAddress);
+                        if (targetObject.IsValid)
+                            resolvedSize = targetObject.Size;
+                    }
+
+                    if (resolvedSize > 0)
+                    {
+                        totalAsyncPinnedRetainedBytes += resolvedSize;
+                        if (asyncPinnedBytesByType.TryGetValue(typeName, out ulong existingBytes))
+                            asyncPinnedBytesByType[typeName] = existingBytes + resolvedSize;
+                        else
+                            asyncPinnedBytesByType[typeName] = resolvedSize;
+                    }
+                }
+                else if (kind == "Pinned")
                 {
                     Increment(pinnedTypes, typeName);
-
                     ulong resolvedSize = 0;
-                    if (heap is not null && targetAddress != 0)
+                    if (heap is not null)
                     {
                         ClrObject targetObject = heap.GetObject(targetAddress);
                         if (targetObject.IsValid)
@@ -203,6 +236,10 @@ namespace DumpDetective.Analysis.Analyzers
                 ToTopEntries(pinnedTypes, options.TopTypeCount),
                 totalPinnedRetainedBytes,
                 ToTopByteEntries(pinnedBytesByType, options.TopTypeCount),
+                totalAsyncPinnedRetainedBytes,
+                ToTopByteEntries(asyncPinnedBytesByType, options.TopTypeCount),
+                ToTopEntries(nullTargetHandlesByKind, options.TopTypeCount),
+                unknownTargetCount,
                 dependentHandleCount,
                 dependentResolvedEdgeCount,
                 dependentUnresolvedTargetCount,

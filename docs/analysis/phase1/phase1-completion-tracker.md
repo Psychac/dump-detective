@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 59 |
+| **P0 Implemented** | 60 |
 | **P1 Implemented** | 97 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 66.7% (156/234) |
+| **Overall P0+P1 Rate** | 67.0% (157/234) |
 
 ---
 
@@ -60,8 +60,9 @@
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
 | 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 26 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
+| 27 | **AsyncTaskAnalyzer** | 1/2 | 0/4 | 0/6 | 0/3 | P0-1 done (field cache + fallback); P0-2, all P1 pending |
 
-**Subtotal: 32/37 P0 done, 36/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 33/38 P0 done, 36/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -69,12 +70,11 @@
 
 | Analyzer | P0 | P1 | Total Pending | Notes |
 |----------|----|----|---|-------|
-| AsyncTaskAnalyzer | 0/2 | 0/4 | 6 | — |
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
 
-**Subtotal: 0/10 P0 done, 0/23 P1 done** (not-started pools)
+**Subtotal: 0/8 P0 done, 0/15 P1 done** (not-started pools)
 
 ---
 
@@ -85,13 +85,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 13 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer) |
-| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
-| Analyzers with zero P0+P1 completion | 8 | Not yet started |
+| Analyzers with partial P0+P1 completion | 15 | Some items done, some pending (includes AsyncTaskAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with zero P0+P1 completion | 7 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **58** | 74.4% |
+| **P0 items implemented** | **60** | 76.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **92** | 59.0% |
-| **Combined P0+P1 rate** | **64.4%** | (152/236) |
+| **P1 items implemented** | **97** | 62.2% |
+| **Combined P0+P1 rate** | **67.0%** | (157/234) |
 
 ---
 

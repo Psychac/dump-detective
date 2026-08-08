@@ -74,7 +74,7 @@ namespace DumpDetective.Analysis.Analyzers
             // NOTE: fallback path — used when no Phase 1 index is available.
 
             var segmentStats = new List<LohSegmentStats>();
-            var allFreeSizes = new List<ulong>(capacity: 256);
+            int[] freeGapBucketCounts = new int[s_gapBuckets.Length];
             var largeObjectCandidates = new List<(ulong Address, string TypeName, ulong Size)>();
             var scanCounter = new ObjectScanCounter("scanning LOH segments", progress, reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
 
@@ -106,7 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
                     AccumulateSegmentObjectByAddress(
                         heap,
                         objectAddress,
-                        allFreeSizes,
+                        freeGapBucketCounts,
                         largeObjectCandidates,
                         options.TopLargeObjectsCount,
                         ref freeBytes,
@@ -153,7 +153,10 @@ namespace DumpDetective.Analysis.Analyzers
             for (int i = 0; i < topN; i++)
                 topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].TotalBytes, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
 
-            var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes);
+            var freeGapHistogram = new List<FreeGapBucket>(s_gapBuckets.Length);
+            for (int b = 0; b < s_gapBuckets.Length; b++)
+                if (freeGapBucketCounts[b] > 0)
+                    freeGapHistogram.Add(new FreeGapBucket(s_gapBuckets[b].Label, freeGapBucketCounts[b]));
 
             // Keep only top-N large objects (bounded accumulator reduces memory on high-object-count heaps).
             TrimLargeObjectCandidates(largeObjectCandidates, options.TopLargeObjectsCount);
@@ -188,7 +191,7 @@ namespace DumpDetective.Analysis.Analyzers
         private static void AccumulateSegmentObjectByAddress(
             ClrHeap heap,
             ulong objectAddress,
-            List<ulong> allFreeSizes,
+            int[] freeGapBucketCounts,
             List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
             int maxLargeObjects,
             ref ulong freeBytes,
@@ -208,7 +211,17 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong size = obj.Size;
                 freeObjectCount++;
                 freeBytes += size;
-                allFreeSizes.Add(size);
+
+                // Accumulate directly into bucket counts instead of intermediate list (reduces memory on highly fragmented heaps).
+                for (int b = 0; b < s_gapBuckets.Length; b++)
+                {
+                    if (size >= s_gapBuckets[b].Min && size < s_gapBuckets[b].Max)
+                    {
+                        freeGapBucketCounts[b]++;
+                        break;
+                    }
+                }
+
                 if (size > largestFreeBlock)
                     largestFreeBlock = size;
             }

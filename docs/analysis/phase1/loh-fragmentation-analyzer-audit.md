@@ -360,7 +360,7 @@ inconsistency (Area 2-W1) and wrong per-segment size column (Area 2-W2) are user
 | **P0** | Align severity thresholds between `LohFragmentationFindingGenerator` and `LohFragmentationSectionBuilder` | Medium | Low | High | Improvement | ✅ DONE |
 | **P1** | Add `TotalBytes` to `LohSegmentSnapshot`; fix per-segment Size column in section builder | High | Low | High | Improvement | ✅ DONE |
 | **P1** | Replace unbounded `largeObjectCandidates` list in fallback with a top-N bounded accumulator (same pattern as `LargeObjectTracker`) | Medium | Low | High | Improvement | ✅ DONE |
-| **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement | — |
+| **P1** | Replace unbounded `allFreeSizes` list with direct bucket accumulation to eliminate the intermediate list | Medium | Low | High | Improvement | ✅ DONE |
 | **P1** | Fix redundant `heap.GetObject(objectAddress)` in `AccumulateSegmentObjectByAddress` — pass `ClrObject` directly | Medium | Low | High | Improvement | — |
 | **P1** | Add type-aggregated LOH table (top types by total bytes) to domain result and section builder | High | Medium | High | Improvement | — |
 | **P2** | Add `CancellationToken` to `BuildFreeGapHistogram` | Low | Low | High | Improvement | — |

@@ -59,8 +59,9 @@
 | 23 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
 | 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
+| 26 | **ReferenceChainAnalyzer** | 1/1 | 1/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 12.5% (I-3 done); P1-2,I-4-I-6,E-1-E-3 pending |
 
-**Subtotal: 31/36 P0 done, 31/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 32/37 P0 done, 32/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -72,9 +73,8 @@
 | DominatorAnalyzer | 0/3 | 0/5 | 8 | — |
 | EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 | **LeakCandidateAnalyzer** | 0/2 | 0/4 | 6 | **HIGH-IMPACT** — core leak detection |
-| ReferenceChainAnalyzer | 1/1 | 1/8 | 7 | ✅ P0 complete; P1 12.5% (I-3: structured RootKind) |
 
-**Subtotal: 0/12 P0 done, 0/29 P1 done** (not-started pools)
+**Subtotal: 0/10 P0 done, 0/23 P1 done** (not-started pools)
 
 ---
 

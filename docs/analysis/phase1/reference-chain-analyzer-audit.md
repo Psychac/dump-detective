@@ -366,26 +366,26 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 
 ### Priority Roadmap
 
-| Priority | ID | Description | Expected Impact | Difficulty |
-|---|---|---|---|---|
-| **P0** | I-1 | Share `ReferenceGraph` across per-type loop | Significant allocation reduction; 30–50% runtime improvement estimated | Low |
-| **P1** | I-3 | Structured `RootKind` on `ReferenceTypeSampleSnapshot` | Enables root filtering, aggregate reporting | Low |
-| **P1** | I-4 | Fix `TopRetainedTypes` semantics | Removes misleading metric | Low |
-| **P1** | I-5 | Structured path hops in domain result | Eliminates fragile string parsing | Low |
-| **P1** | I-6 | Cancellation inside per-type loop | Required for large dumps | Low |
-| **P1** | I-2 | Remove dead `MaxPathSearchObjects` / `FastModeMaxDepth` | Eliminates misleading configuration | Low |
-| **P1** | E-1 | Multi-sample analysis (3–5 per type) | Transforms boolean to confidence score | Medium |
-| **P1** | E-2 | Retained subgraph size per sample | Closes largest competitive gap | Medium |
-| **P1** | E-3 | Field names in root path hops | Closes primary WinDbg/SOS parity gap | Medium |
-| **P2** | I-7 | Pool `BidirectionalPathFinder` collections | Reduces Gen0 pressure | Medium |
-| **P2** | I-8 | Root kind aggregate in section builder | Improves report actionability | Low |
-| **P2** | I-9 | Prefer Gen2/LOH sample addresses | Improves single-sample confidence | Low |
-| **P2** | E-4 | DominatorAnalyzer correlation | Closes dotMemory parity gap | Medium |
-| **P2** | E-5 | Finalizer-only retention pattern | New specific finding | Low |
-| **P2** | E-6 | Shared root detection across types | Identifies retention hubs | Low |
-| **P3** | I-10 | Surface no-sample count as metric | Transparency | Low |
-| **P3** | I-11 | Remove dead `AnalyzeObject` method | Dead code cleanup | Low |
-| **P3** | I-12 | Use `ClrRootKind` enum for root filtering | Defensive correctness | Low |
+| Priority | ID | Description | Expected Impact | Difficulty | Status |
+|---|---|---|---|---|---|
+| **P0** | I-1 | Share `ReferenceGraph` across per-type loop | Significant allocation reduction; 30–50% runtime improvement estimated | Low | ✅ ec42b06 |
+| **P1** | I-3 | Structured `RootKind` on `ReferenceTypeSampleSnapshot` | Enables root filtering, aggregate reporting | Low | ✅ c05c6f4 |
+| **P1** | I-4 | Fix `TopRetainedTypes` semantics | Removes misleading metric | Low | — |
+| **P1** | I-5 | Structured path hops in domain result | Eliminates fragile string parsing | Low | — |
+| **P1** | I-6 | Cancellation inside per-type loop | Required for large dumps | Low | — |
+| **P1** | I-2 | Remove dead `MaxPathSearchObjects` / `FastModeMaxDepth` | Eliminates misleading configuration | Low | — |
+| **P1** | E-1 | Multi-sample analysis (3–5 per type) | Transforms boolean to confidence score | Medium | — |
+| **P1** | E-2 | Retained subgraph size per sample | Closes largest competitive gap | Medium | — |
+| **P1** | E-3 | Field names in root path hops | Closes primary WinDbg/SOS parity gap | Medium | — |
+| **P2** | I-7 | Pool `BidirectionalPathFinder` collections | Reduces Gen0 pressure | Medium | — |
+| **P2** | I-8 | Root kind aggregate in section builder | Improves report actionability | Low | — |
+| **P2** | I-9 | Prefer Gen2/LOH sample addresses | Improves single-sample confidence | Low | — |
+| **P2** | E-4 | DominatorAnalyzer correlation | Closes dotMemory parity gap | Medium | — |
+| **P2** | E-5 | Finalizer-only retention pattern | New specific finding | Low | — |
+| **P2** | E-6 | Shared root detection across types | Identifies retention hubs | Low | — |
+| **P3** | I-10 | Surface no-sample count as metric | Transparency | Low | — |
+| **P3** | I-11 | Remove dead `AnalyzeObject` method | Dead code cleanup | Low | — |
+| **P3** | I-12 | Use `ClrRootKind` enum for root filtering | Defensive correctness | Low | — |
 
 ### Final Verdict
 

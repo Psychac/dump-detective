@@ -20,4 +20,12 @@ public sealed record MemoryDomainResult(
     double SmallObjectCountPercent = 0,
     double SmallObjectBytesPercent = 0,
     double ObjectsPerMb = 0,
-    double MemoryPressureScore = 0) : AnalyzerDomainResult;
+    double MemoryPressureScore = 0,
+    IReadOnlyList<GCSegmentSummary>? SegmentSummaries = null) : AnalyzerDomainResult;
+
+public sealed record GCSegmentSummary(
+    string Generation,
+    ulong CommittedBytes,
+    ulong ReservedBytes,
+    ulong UsedBytes,
+    int SegmentCount);

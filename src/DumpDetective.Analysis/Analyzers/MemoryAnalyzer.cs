@@ -1,5 +1,6 @@
 ﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
@@ -50,6 +51,7 @@ namespace DumpDetective.Analysis.Analyzers
             MemoryAnalysisOptions options)
         {
             MemoryAnalysisProjectionResult projection = MemoryAnalysisProjection.Build(typeStats, globalSizeBuckets, options);
+            var segmentSummaries = BuildSegmentSummaries(heap);
 
             static TypeSnapshot ToSnapshot(CachedTypeStatistics s, ulong retainedBytes, ulong sampleAddress)
             {
@@ -105,7 +107,86 @@ namespace DumpDetective.Analysis.Analyzers
                 SmallObjectCountPercent: projection.TotalObjects == 0 ? 0 : projection.SmallObjectCount * 100.0 / projection.TotalObjects,
                 SmallObjectBytesPercent: projection.TotalMemory == 0 ? 0 : projection.SmallObjectBytes * 100.0 / projection.TotalMemory,
                 ObjectsPerMb: projection.ObjectsPerMb,
-                MemoryPressureScore: projection.MemoryPressureScore);
+                MemoryPressureScore: projection.MemoryPressureScore,
+                SegmentSummaries: segmentSummaries);
+        }
+
+        private static List<GCSegmentSummary> BuildSegmentSummaries(ClrHeap heap)
+        {
+            var summaries = new Dictionary<string, (ulong committed, ulong reserved, ulong used, int count)>();
+
+            foreach (ClrSegment segment in heap.Segments)
+            {
+                string generation = GetGenerationLabel(segment);
+                ulong committed = SegmentKindMapper.GetCommittedBytes(segment);
+                ulong reserved = SegmentKindMapper.GetReservedBytes(segment);
+                ulong used = GetSegmentUsedBytes(segment);
+
+                if (summaries.TryGetValue(generation, out var current))
+                {
+                    summaries[generation] = (
+                        committed: current.committed + committed,
+                        reserved: current.reserved + reserved,
+                        used: current.used + used,
+                        count: current.count + 1);
+                }
+                else
+                {
+                    summaries[generation] = (committed, reserved, used, 1);
+                }
+            }
+
+            var result = new List<GCSegmentSummary>(summaries.Count);
+            foreach (var (gen, (committed, reserved, used, count)) in summaries.OrderBy(x => GetGenerationOrder(x.Key)))
+            {
+                result.Add(new GCSegmentSummary(gen, committed, reserved, used, count));
+            }
+
+            return result;
+        }
+
+        private static string GetGenerationLabel(ClrSegment segment)
+        {
+            return segment.Kind switch
+            {
+                GCSegmentKind.Generation0 => "Gen0",
+                GCSegmentKind.Generation1 => "Gen1",
+                GCSegmentKind.Generation2 or GCSegmentKind.Ephemeral => "Gen2",
+                GCSegmentKind.Large => "LOH",
+                GCSegmentKind.Pinned => "POH",
+                GCSegmentKind.Frozen => "Frozen",
+                _ => "Unknown"
+            };
+        }
+
+        private static int GetGenerationOrder(string generation)
+        {
+            return generation switch
+            {
+                "Gen0" => 0,
+                "Gen1" => 1,
+                "Gen2" => 2,
+                "LOH" => 3,
+                "POH" => 4,
+                "Frozen" => 5,
+                _ => 6
+            };
+        }
+
+        private static ulong GetSegmentUsedBytes(ClrSegment segment)
+        {
+            try
+            {
+                ulong used = 0;
+                MemoryRange committed = segment.CommittedMemory;
+                if (committed.Start < committed.End)
+                    used = committed.End - committed.Start;
+                return used;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         public void Dispose() { }

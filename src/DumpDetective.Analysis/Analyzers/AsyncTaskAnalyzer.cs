@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -142,7 +143,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 TopFaultedTaskTypes: [],
                 TopContinuationTypes: [],
                 TopOrphanedTasks: [],
-                TopDeepestChains: []);
+                TopDeepestChains: [],
+                FaultedTaskExceptionHistograms: []);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -159,6 +161,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         var pendingTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var faultedTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var faultedTypeExceptions = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
         var continuationCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var orphanedSnapshots = new List<OrphanedTaskSnapshot>(capacity: 32);
         var deepestChains = new List<ContinuationChainSnapshot>(capacity: 5);
@@ -212,7 +215,24 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             if (!isCompleted && !isCanceled)
             {
                 if (isFaulted)
+                {
                     IncrementCount(faultedTypeCount, typeName);
+                    // Extract exception type for histogram
+                    ClrObject faultedObj = heap.GetObject(address);
+                    if (faultedObj.IsValid && faultedObj.Type != null)
+                    {
+                        (string? exceptionType, _) = ExtractFaultedTaskException(faultedObj);
+                        if (exceptionType != null)
+                        {
+                            if (!faultedTypeExceptions.TryGetValue(typeName, out var exceptionHistogram))
+                            {
+                                exceptionHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
+                                faultedTypeExceptions[typeName] = exceptionHistogram;
+                            }
+                            IncrementCount(exceptionHistogram, exceptionType);
+                        }
+                    }
+                }
                 else
                     IncrementCount(pendingTypeCount, typeName);
             }
@@ -310,6 +330,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         double avgDepth = depthSampleCount > 0 ? (double)totalDepthSum / depthSampleCount : 0.0;
 
+        var faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions, options.TopTypesToShow);
+
         return new AsyncTaskDomainResult(
             TotalTasks: total,
             PendingTasks: pending,
@@ -326,7 +348,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             TopFaultedTaskTypes: BuildTopN(faultedTypeCount, options.TopTypesToShow),
             TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
             TopOrphanedTasks: orphanedSnapshots,
-            TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToArray());
+            TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToArray(),
+            FaultedTaskExceptionHistograms: faultedProfiles);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -557,6 +580,26 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         if (string.IsNullOrEmpty(key)) return;
         dict.TryGetValue(key, out int count);
         dict[key] = count + 1;
+    }
+
+    private static IReadOnlyList<FaultedTaskTypeProfile> BuildFaultedTaskTypeProfiles(
+        Dictionary<string, int> faultedCounts,
+        Dictionary<string, Dictionary<string, int>> faultedExceptions,
+        int topTypesToShow)
+    {
+        var topFaulted = BuildTopN(faultedCounts, topTypesToShow);
+        var profiles = new List<FaultedTaskTypeProfile>(capacity: topFaulted.Count);
+
+        foreach (var entry in topFaulted)
+        {
+            var exceptionHistogram = faultedExceptions.TryGetValue(entry.Name, out var exceptionCounts)
+                ? BuildTopN(exceptionCounts, topTypesToShow)
+                : (IReadOnlyList<NameCountEntry>)[];
+
+            profiles.Add(new FaultedTaskTypeProfile(entry.Name, entry.Count, exceptionHistogram));
+        }
+
+        return profiles;
     }
 
     private static IReadOnlyList<NameCountEntry> BuildTopN(Dictionary<string, int> counts, int topTypesToShow)

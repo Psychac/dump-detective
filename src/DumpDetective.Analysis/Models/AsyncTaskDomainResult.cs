@@ -18,6 +18,11 @@ internal sealed record ContinuationChainSnapshot(
     int Depth,
     IReadOnlyList<string> ChainTypes);
 
+internal sealed record FaultedTaskTypeProfile(
+    string TaskType,
+    int TotalCount,
+    IReadOnlyList<NameCountEntry> ExceptionTypes);
+
 internal sealed record AsyncTaskDomainResult(
     int TotalTasks,
     int PendingTasks,
@@ -34,4 +39,5 @@ internal sealed record AsyncTaskDomainResult(
     IReadOnlyList<NameCountEntry> TopFaultedTaskTypes,
     IReadOnlyList<NameCountEntry> TopContinuationTypes,
     IReadOnlyList<OrphanedTaskSnapshot> TopOrphanedTasks,
-    IReadOnlyList<ContinuationChainSnapshot> TopDeepestChains) : AnalyzerDomainResult;
+    IReadOnlyList<ContinuationChainSnapshot> TopDeepestChains,
+    IReadOnlyList<FaultedTaskTypeProfile> FaultedTaskExceptionHistograms = default!) : AnalyzerDomainResult;

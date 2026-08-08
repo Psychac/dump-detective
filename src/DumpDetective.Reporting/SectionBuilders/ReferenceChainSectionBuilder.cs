@@ -45,14 +45,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
                 if (!trace.SampleAddress.HasValue)
                     status = "Sample unavailable";
 
-                IReadOnlyList<string>? rootHops = null;
-                if (trace.HasGcRoot && !string.IsNullOrWhiteSpace(trace.RootPath))
-                {
-                    // Raw format: "root → TypeA → TypeB → target" — split on arrow separators
-                    var hops = trace.RootPath!
-                        .Split([" → ", " -> "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    rootHops = hops.Length > 0 ? hops : null;
-                }
+                IReadOnlyList<string>? rootHops = trace.HasGcRoot ? trace.PathHops : null;
 
                 typeTraces.Add(new TypeSampleTrace(
                     TypeName:         trace.TypeName,

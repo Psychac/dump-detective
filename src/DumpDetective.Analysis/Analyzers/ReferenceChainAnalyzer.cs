@@ -83,6 +83,7 @@ namespace DumpDetective.Analysis.Analyzers
                 bool hasGcRoot = false;
                 string? rootKind = null;
                 string? path = null;
+                IReadOnlyList<string>? pathHops = null;
                 bool searchTruncated = false;
 
                 if (sampleAddress.HasValue)
@@ -94,7 +95,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out rootKind, out path, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out rootKind, out path, out pathHops, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -120,6 +121,7 @@ namespace DumpDetective.Analysis.Analyzers
                     hasGcRoot,
                     rootKind,
                     path,
+                    pathHops,
                     searchTruncated));
             }
 
@@ -145,7 +147,7 @@ namespace DumpDetective.Analysis.Analyzers
             var provider = new ReferenceGraph(heap);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _, out _);
+            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
@@ -158,10 +160,12 @@ namespace DumpDetective.Analysis.Analyzers
             TelemetryCounters telemetry,
             out string? rootKind,
             out string? path,
+            out IReadOnlyList<string>? pathHops,
             out bool searchTruncated)
         {
             rootKind = null;
             path = null;
+            pathHops = null;
             searchTruncated = false;
 
             if (!TryGetValidObject(heap, objectAddress, out _))
@@ -172,7 +176,7 @@ namespace DumpDetective.Analysis.Analyzers
             // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
             // with GC root count instead of a shared bounded budget (see
             // docs/analysis/root-path-search-blast-radius.md).
-            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, out rootKind, out path, out searchTruncated);
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, out rootKind, out path, out pathHops, out searchTruncated);
         }
 
         // ── Bidirectional bounded search (all modes) ────────────────────────────
@@ -186,10 +190,12 @@ namespace DumpDetective.Analysis.Analyzers
             TelemetryCounters telemetry,
             out string? rootKind,
             out string? path,
+            out IReadOnlyList<string>? pathHops,
             out bool searchTruncated)
         {
             rootKind = null;
             path = null;
+            pathHops = null;
             searchTruncated = false;
 
             // Use shared ReferenceGraph as the reference provider — it caches edges across
@@ -225,15 +231,17 @@ namespace DumpDetective.Analysis.Analyzers
             if (found)
             {
                 rootKind = foundRootKind;
-                path = FormatPath(heap, foundRootKind!, addresses);
+                path = FormatPath(heap, foundRootKind!, addresses, out pathHops);
                 return true;
             }
 
             return false;
         }
 
-        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses)
+        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses, out IReadOnlyList<string>? pathHops)
         {
+            pathHops = null;
+
             if (addresses is null || addresses.Count == 0)
                 return $"{rootKind}: <no path>";
 
@@ -242,6 +250,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 parts.Add(FormatNodeByAddress(heap, addresses[i]));
             }
+            pathHops = parts;
             string chain = string.Join(" -> ", parts);
             return $"{rootKind}: {chain}";
         }

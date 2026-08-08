@@ -317,8 +317,8 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 | I-1 | Lift `ReferenceGraph` creation out of the per-type loop — share one instance across all top-N iterations | High — reduces redundant ClrMD edge fetches; addresses 5.6GB Gen0 allocation root cause | Low | High | P0 | ✅ DONE (ec42b06) |
 | I-2 | Remove dead options `MaxPathSearchObjects` and `FastModeMaxDepth` from `ReferenceChainOptions` | Medium — eliminates misleading configuration surface | Low | High | P1 | — |
 | I-3 | Add `RootKind: string?` to `ReferenceTypeSampleSnapshot`; populate from `TryFindAnyRootPath` return | High — enables root-kind filtering and aggregation in reports | Low | High | P1 | ✅ DONE (c05c6f4) |
-| I-4 | Fix `TopRetainedTypes` semantics — counts are always 0/1 (single sample); either remove the field or change it to a list of retained type names | Medium — removes misleading metric | Low | High | P1 | ✅ DONE (TBD) |
-| I-5 | Replace path-string round-trip (`FormatPath` → `SectionBuilder` split) with structured `IReadOnlyList<string> PathHops` on domain result | Medium — eliminates fragile string parsing | Low | High | P1 | — |
+| I-4 | Fix `TopRetainedTypes` semantics — counts are always 0/1 (single sample); either remove the field or change it to a list of retained type names | Medium — removes misleading metric | Low | High | P1 | ✅ DONE (062b7cc) |
+| I-5 | Replace path-string round-trip (`FormatPath` → `SectionBuilder` split) with structured `IReadOnlyList<string> PathHops` on domain result | Medium — eliminates fragile string parsing | Low | High | P1 | ✅ DONE (TBD) |
 | I-6 | Add cancellation checks inside the per-type loop and inside `RootPathFinder`'s root iteration | Medium — required for large dumps | Low | High | P1 | — |
 | I-7 | Pool `BidirectionalPathFinder` internal collections (`_visited`, `_previous`, `_queue`) using `ArrayPool`/`ObjectPool` | Medium — reduces Gen0 pressure | Medium | Medium | P2 | — |
 | I-8 | Surface `RootKind` aggregate distribution in section builder (e.g., "3 of 5 retained types: StaticVar") | Medium — improves report actionability | Low | High | P2 | — |
@@ -370,8 +370,8 @@ Provides *dominators tree*, *shortest path to GC root*, and *key retention paths
 |---|---|---|---|---|---|
 | **P0** | I-1 | Share `ReferenceGraph` across per-type loop | Significant allocation reduction; 30–50% runtime improvement estimated | Low | ✅ ec42b06 |
 | **P1** | I-3 | Structured `RootKind` on `ReferenceTypeSampleSnapshot` | Enables root filtering, aggregate reporting | Low | ✅ c05c6f4 |
-| **P1** | I-4 | Fix `TopRetainedTypes` semantics | Removes misleading metric | Low | ✅ TBD |
-| **P1** | I-5 | Structured path hops in domain result | Eliminates fragile string parsing | Low | — |
+| **P1** | I-4 | Fix `TopRetainedTypes` semantics | Removes misleading metric | Low | ✅ 062b7cc |
+| **P1** | I-5 | Structured path hops in domain result | Eliminates fragile string parsing | Low | ✅ TBD |
 | **P1** | I-6 | Cancellation inside per-type loop | Required for large dumps | Low | — |
 | **P1** | I-2 | Remove dead `MaxPathSearchObjects` / `FastModeMaxDepth` | Eliminates misleading configuration | Low | — |
 | **P1** | E-1 | Multi-sample analysis (3–5 per type) | Transforms boolean to confidence score | Medium | — |

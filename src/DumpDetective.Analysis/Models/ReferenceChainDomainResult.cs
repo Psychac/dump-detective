@@ -23,4 +23,5 @@ internal sealed record ReferenceTypeSampleSnapshot(
     bool HasGcRoot,
     string? RootKind,
     string? RootPath,
+    IReadOnlyList<string>? PathHops,
     bool TraversalLimited);

@@ -37,10 +37,14 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
             for (int i = 0; i < limit; i++)
             {
                 var r = roots[i];
+                string bytesDisplay = FormatHelper.FormatBytes(r.TotalMemoryImpact);
+                if (r.ScanWasCapped)
+                    bytesDisplay += " (estimate — scan capped)";
+
                 rootRows.Add(R(
                     FormatHelper.TruncateString(r.RootDescription, 90),
                     r.TypeName,
-                    (ulong)r.TotalMemoryImpact,
+                    bytesDisplay,
                     (double)r.ObjectsKeptAlive));
             }
             compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Objects Kept Alive","number") }, rootRows));

@@ -81,7 +81,8 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.ObjectsKeptAlive,
                 analysis.DirectObjectType,
                 evidence,
-                analysis.TopRetainedTypes);
+                analysis.TopRetainedTypes,
+                analysis.ScanWasCapped);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
@@ -119,7 +120,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!rootMetadata.IsValid)
                     continue;
 
-                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, options.MaxRetainedObjectsToScan);
+                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out bool scanWasCapped, options.MaxRetainedObjectsToScan);
 
                 var typeStats = new Dictionary<string, RetainedTypeInfo>();
                 var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
@@ -172,7 +173,8 @@ namespace DumpDetective.Analysis.Analyzers
                     ObjectsKeptAlive = retainedObjects.Count,
                     TopRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport),
                     ContainsCollections = containsCollections,
-                    ContainsEventHandlers = containsEventHandlers
+                    ContainsEventHandlers = containsEventHandlers,
+                    ScanWasCapped = scanWasCapped
                 };
 
                 results.Add(analysis);
@@ -247,6 +249,7 @@ namespace DumpDetective.Analysis.Analyzers
         public List<RetainedTypeInfo> TopRetainedTypes { get; set; } = new();
         public bool ContainsCollections { get; set; }
         public bool ContainsEventHandlers { get; set; }
+        public bool ScanWasCapped { get; set; }
     }
 }
 

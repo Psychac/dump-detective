@@ -143,13 +143,16 @@ internal static class BoundedGraphWalk
     /// address up to <paramref name="maxObjects"/>, bounded to depth 20 by default
     /// (CLAUDE.md's mandated BFS-depth cap). Replaces
     /// <c>HeapAnalysisCache.GetRetainedObjects</c>, which had no depth cap at all.
+    /// Sets <paramref name="wasCapped"/> to true if the scan hit <paramref name="maxObjects"/> limit.
     /// </summary>
     public static HashSet<ulong> CollectRetainedObjects(
         ClrHeap heap,
         ulong rootAddress,
+        out bool wasCapped,
         int maxObjects = 10_000,
         int maxDepth = AbsoluteMaxDepth)
     {
+        wasCapped = false;
         maxDepth = Math.Min(maxDepth, AbsoluteMaxDepth);
 
         var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
@@ -172,9 +175,19 @@ internal static class BoundedGraphWalk
             foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
             {
                 if (reference.IsValid && retained.Add(reference.Address))
+                {
+                    if (retained.Count >= maxObjects)
+                    {
+                        wasCapped = true;
+                        break;
+                    }
                     queue.Enqueue((reference.Address, depth + 1));
+                }
             }
         }
+
+        if (retained.Count >= maxObjects)
+            wasCapped = true;
 
         return retained;
     }

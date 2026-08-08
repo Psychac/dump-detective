@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 60 |
-| **P1 Implemented** | 97 |
+| **P1 Implemented** | 98 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 67.0% (157/234) |
+| **Overall P0+P1 Rate** | 67.3% (158/234) |
 
 ---
 
@@ -60,9 +60,9 @@
 | 24 | **CrashAnalyzer** | 2/2 | 4/5 | 1/6 | 0/2 | ✅ P0 complete (I-1, I-2); P1 80% (I-4, I-5, I-6, I-7); P2 17% (I-8); I-3, I-9-I-13, I-14-I-15 pending |
 | 25 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 26 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
-| 27 | **AsyncTaskAnalyzer** | 1/2 | 0/4 | 0/6 | 0/3 | P0-1 done (field cache + fallback); P0-2, all P1 pending |
+| 27 | **AsyncTaskAnalyzer** | 1/2 | 1/4 | 0/6 | 0/3 | P0-1 done (field cache + fallback); P1-1 done (exception field caching); P0-2, P1-2/3/4 pending |
 
-**Subtotal: 33/38 P0 done, 36/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 33/38 P0 done, 37/54 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **60** | 76.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **97** | 62.2% |
-| **Combined P0+P1 rate** | **67.0%** | (157/234) |
+| **P1 items implemented** | **98** | 62.8% |
+| **Combined P0+P1 rate** | **67.3%** | (158/234) |
 
 ---
 

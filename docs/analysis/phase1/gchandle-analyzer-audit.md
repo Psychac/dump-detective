@@ -338,7 +338,7 @@ The analyzer has good structural coverage of the GC handle domain and delivers r
 |---|---|---|---|---|---|
 | **P0** | Replace reflection in `TryGetDependentTargetAddress` with `ClrHandle.DependentTarget` direct access | Eliminates silent correctness failure; removes hot-path reflection | Low | High | Improvement | ✅ DONE (Note: ClrMD 4 doesn't expose DependentTarget property; exception handling added instead) |
 | **P0** | Consume `HandleSnapshotProvider` (disk + memory) instead of `runtime.EnumerateHandles()` — with defined fallback for dependent handles | Eliminates redundant handle enumeration; aligns with existing platform contract | Medium | High | Improvement | ✅ DONE (in-memory/disk snapshot for non-dependent handles; live enumeration scoped to Dependent-kind only for edge resolution) |
-| **P0** | Remove Dependent handles from `weakLikeHandles` count | Eliminates misleading retention classification | Low | High | Improvement |
+| **P0** | Remove Dependent handles from `weakLikeHandles` count | Eliminates misleading retention classification | Low | High | Improvement | ✅ DONE (IsWeakLike now excludes "Dependent"; tracked separately via DependentHandleCount) |
 | **P1** | Add `PinnedRetainedBytes` threshold finding with configurable options | Catches byte-level pinning pressure invisible to count-based threshold | Low | High | Improvement |
 | **P1** | Add AsyncPinned vs Pinned split in pinned byte accounting | Separates I/O transient pins from structural pins | Low | High | Improvement |
 | **P1** | Track null-target handle counts per kind | Surfaces stale/leaked GCHandle.Alloc calls | Low | High | Improvement |

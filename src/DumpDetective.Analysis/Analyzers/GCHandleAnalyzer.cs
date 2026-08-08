@@ -216,8 +216,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         private static bool IsWeakLike(string kind)
         {
-            return kind.Contains("Weak", StringComparison.OrdinalIgnoreCase)
-                || kind.Contains("Dependent", StringComparison.OrdinalIgnoreCase);
+            return kind.Contains("Weak", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void Increment(Dictionary<string, int> counts, string key)

@@ -428,24 +428,24 @@ dotMemory shows:
 
 ### Priority Roadmap
 
-| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| P0 | Expand `MemoryFindingGenerator` with findings for high pressure score (≥ 70), top-type concentration (> 80%), small-object pressure | High | Low | High | Improvement |
-| P0 | Guard `heap.CanWalkHeap` before BFS retained estimation; propagate `MemoryAnalyzer.IsThreadSafe = true` | Medium | Low | High | Improvement |
-| P1 | Add GC segment summary to `MemoryDomainResult` (`heap.Segments`) — committed, reserved, free bytes per generation | High | Low | High | Improvement |
-| P1 | Add LOH fragmentation ratio (free-list bytes / LOH committed bytes) | High | Low | High | Improvement |
-| P1 | Promote `TotalObjects` and `LohObjects` from `int` to `long` | Medium | Low | High | Improvement |
-| P1 | Remove 4 redundant sort copies from `MemoryAnalysisProjection`; use composite sort for selection, linear scan for top-N bytes | Medium | Low | High | Improvement |
-| P1 | Label `EstimatedRetainedBytes` as approximate in section builder; add tooltip or footnote | Medium | Low | High | Improvement |
-| P2 | Expose `MemoryPressureScore` sub-components (LOH, concentration, small-object, density) as separate key metrics | Medium | Low | Medium | Improvement |
-| P2 | Break the `heapCache is HeapAnalysisCache` cast — surface `TryGetHeapIndex` on the `IHeapAnalysisCache` abstraction | Low | Medium | High | Improvement |
-| P2 | Add per-type generation distribution cross-reference with `GCGenerationDomainResult` in `InsightEngine` | High | Medium | High | Evolution |
-| P2 | Add string heap summary (total string bytes, top duplicates) to memory section | Medium | Medium | High | Evolution |
-| P2 | Report `Top1BytesPercent` as a named key metric; add finding when top-1 type > 40% of heap | Medium | Low | High | Improvement |
-| P3 | Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC | Medium | Medium | Medium | Evolution |
-| P3 | Instrument BFS retained estimation with mid-analysis progress reports | Low | Low | High | Improvement |
-| P3 | Add `CancellationToken` check inside `BoundedGraphWalk.ComputeExclusiveRetained` | Low | Low | High | Improvement |
-| P3 | Distinguish Phase-1 (exact) vs fallback (approximate) histogram in section builder | Low | Low | High | Improvement |
+| Priority | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| P0 | Expand `MemoryFindingGenerator` with findings for high pressure score (≥ 70), top-type concentration (> 80%), small-object pressure | High | Low | High | Improvement | ✅ **DONE** |
+| P0 | Guard `heap.CanWalkHeap` before BFS retained estimation; propagate `MemoryAnalyzer.IsThreadSafe = true` | Medium | Low | High | Improvement | Pending |
+| P1 | Add GC segment summary to `MemoryDomainResult` (`heap.Segments`) — committed, reserved, free bytes per generation | High | Low | High | Improvement | Pending |
+| P1 | Add LOH fragmentation ratio (free-list bytes / LOH committed bytes) | High | Low | High | Improvement | Pending |
+| P1 | Promote `TotalObjects` and `LohObjects` from `int` to `long` | Medium | Low | High | Improvement | Pending |
+| P1 | Remove 4 redundant sort copies from `MemoryAnalysisProjection`; use composite sort for selection, linear scan for top-N bytes | Medium | Low | High | Improvement | Pending |
+| P1 | Label `EstimatedRetainedBytes` as approximate in section builder; add tooltip or footnote | Medium | Low | High | Improvement | Pending |
+| P2 | Expose `MemoryPressureScore` sub-components (LOH, concentration, small-object, density) as separate key metrics | Medium | Low | Medium | Improvement | Pending |
+| P2 | Break the `heapCache is HeapAnalysisCache` cast — surface `TryGetHeapIndex` on the `IHeapAnalysisCache` abstraction | Low | Medium | High | Improvement | Pending |
+| P2 | Add per-type generation distribution cross-reference with `GCGenerationDomainResult` in `InsightEngine` | High | Medium | High | Evolution | Pending |
+| P2 | Add string heap summary (total string bytes, top duplicates) to memory section | Medium | Medium | High | Evolution | Pending |
+| P2 | Report `Top1BytesPercent` as a named key metric; add finding when top-1 type > 40% of heap | Medium | Low | High | Improvement | Pending |
+| P3 | Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC | Medium | Medium | Medium | Evolution | Pending |
+| P3 | Instrument BFS retained estimation with mid-analysis progress reports | Low | Low | High | Improvement | Pending |
+| P3 | Add `CancellationToken` check inside `BoundedGraphWalk.ComputeExclusiveRetained` | Low | Low | High | Improvement | Pending |
+| P3 | Distinguish Phase-1 (exact) vs fallback (approximate) histogram in section builder | Low | Low | High | Improvement | Pending |
 
 ### Final Verdict
 

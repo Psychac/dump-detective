@@ -101,6 +101,18 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact("Types by duplicate occurrence", new[] { CH("Type"), CH("Duplicate Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        // P1-3: Top types owning string fields
+        if (d.TopStringOwnerTypes is not null && d.TopStringOwnerTypes.Count > 0)
+        {
+            var rows = new List<TableRow>(d.TopStringOwnerTypes.Count);
+            foreach (var (typeName, totalBytes) in d.TopStringOwnerTypes)
+            {
+                double pct = d.TotalStringMemoryBytes > 0 ? totalBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
+                rows.Add(Row(Cell(typeName), Cell(FormatHelper.FormatBytes(totalBytes), (long)totalBytes), Cell($"{pct:F1}%", null)));
+            }
+            compactTables.Add(STCompact("Types by string field ownership", new[] { CH("Type"), CH("Total String Bytes","bytes"), CH("% of string memory", "number", "percent") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (d.TopDuplicates.Count > 0)
         {
             var rows = new List<TableRow>(d.TopDuplicates.Count);

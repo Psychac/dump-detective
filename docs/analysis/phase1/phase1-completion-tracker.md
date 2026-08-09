@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 64 |
-| **P1 Implemented** | 105 |
+| **P1 Implemented** | 106 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 72.2% (169/234) |
+| **Overall P0+P1 Rate** | 72.6% (170/234) |
 
 ---
 
@@ -38,8 +38,9 @@
 | 13 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
 | 14 | **DominatorAnalyzer** | 3/3 | 5/5 | 0/2 | 0/3 | ✅ P0+P1 |
 | 15 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
+| 16 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 
-**Subtotal: 33/33 P0 done, 67/67 P1 done**
+**Subtotal: 36/36 P0 done, 72/72 P1 done**
 
 ---
 
@@ -47,7 +48,6 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 12 | **StringAnalyzer** | 3/3 | 4/5 | 0/8 | 0/5 | P0 complete (3/3); P1 80% (4/5 done); P1-3 pending |
 | 13 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
 | 14 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
 | 15 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
@@ -64,7 +64,7 @@
 | 26 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 27 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 31/39 P0 done, 39/54 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 28/36 P0 done, 34/49 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 

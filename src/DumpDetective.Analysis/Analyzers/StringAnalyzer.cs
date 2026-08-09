@@ -25,6 +25,25 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// <inheritdoc/>
     public string Category => "Memory";
 
+    // Field layout cache per MethodTable to avoid re-enumerating ClrType.Fields
+    private sealed class FieldLayoutCache
+    {
+        private readonly Dictionary<ulong, ClrInstanceField[]> _cache = new();
+
+        public ClrInstanceField[] GetFields(ClrType? type)
+        {
+            if (type == null) return [];
+
+            var mt = type.MethodTable;
+            if (!_cache.TryGetValue(mt, out var fields))
+            {
+                fields = type.Fields.ToArray();
+                _cache[mt] = fields;
+            }
+            return fields;
+        }
+    }
+
     // Instance accumulator state for the index-scan dedup branch of the
     // IHeapIndexScanParticipant path. Populated by BeforeHeapIndexScan (called by the
     // pipeline dispatcher) and mutated per-entry by OnHeapEntry; consumed by AnalyzeAsync
@@ -806,6 +825,33 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             veryLongStrings.RemoveRange(maxVeryLongStringsToKeep, veryLongStrings.Count - maxVeryLongStringsToKeep);
         }
 
+        // P1-3: Scan for top object types owning string fields (Option B2 prototype)
+        IReadOnlyList<(string TypeName, ulong TotalBytes)>? topStringOwnerTypes = null;
+        if (stringMts.Count > 0)
+        {
+            try
+            {
+                var stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: 100);
+                var fieldCache = new FieldLayoutCache();
+                ScanForStringOwnerTypes(heap, stringMts, stringOwnerTypeBytes, fieldCache, maxTypesToTrack: 100);
+
+                if (stringOwnerTypeBytes.Count > 0)
+                {
+                    var topOwners = new List<(string, ulong)>(capacity: Math.Min(10, stringOwnerTypeBytes.Count));
+                    foreach (var kv in stringOwnerTypeBytes.OrderByDescending(kv => kv.Value).Take(10))
+                    {
+                        string typeName = heap.GetTypeByMethodTable(kv.Key)?.Name ?? $"0x{kv.Key:X}";
+                        topOwners.Add((typeName, kv.Value));
+                    }
+                    topStringOwnerTypes = topOwners;
+                }
+            }
+            catch
+            {
+                topStringOwnerTypes = null; // swallow errors gracefully
+            }
+        }
+
         return new StringDomainResult(
             TotalStrings: totalStrings,
             TotalStringMemoryBytes: totalStringMemory,
@@ -833,9 +879,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             AnalysisDurationMs: totalStopwatch.ElapsedMilliseconds,
             DedupSkipReason: dedupSkipped ? $"Dedup skipped: threshold={stringOptions.DeduplicationStringCountThreshold}" : null,
             TopDuplicateTypes: topDuplicateTypes,
-                Distribution: distribution,
-                PreviewMaxLength: stringOptions.PreviewMaxLength,
-                Artifacts: rawExports);
+            TopStringOwnerTypes: topStringOwnerTypes,
+            Distribution: distribution,
+            PreviewMaxLength: stringOptions.PreviewMaxLength,
+            Artifacts: rawExports);
     }
 
     // Internal helper used by the analyzer and unit tests to compute effective numeric caps
@@ -1181,6 +1228,51 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     }
 
     private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
+
+    /// <summary>Scan objects for field references to strings and accumulate by owner type.</summary>
+    private static void ScanForStringOwnerTypes(
+        ClrHeap heap,
+        HashSet<ulong> stringMts,
+        Dictionary<ulong, ulong> stringOwnerTypeBytes,
+        FieldLayoutCache fieldCache,
+        int maxTypesToTrack = 100)
+    {
+        int typesTracked = 0;
+
+        foreach (var obj in heap.EnumerateObjects())
+        {
+            if (!obj.IsValid || obj.Type == null) continue;
+
+            var fields = fieldCache.GetFields(obj.Type);
+            foreach (var field in fields)
+            {
+                try
+                {
+                    var fieldType = field.Type;
+                    if (fieldType == null) continue;
+
+                    var fieldMt = fieldType.MethodTable;
+                    if (!stringMts.Contains(fieldMt)) continue;
+
+                    var stringRef = field.ReadObject(obj, interior: false);
+                    if (!stringRef.IsValid) continue;
+
+                    var ownerMt = obj.Type.MethodTable;
+                    if (!stringOwnerTypeBytes.TryGetValue(ownerMt, out ulong existing))
+                    {
+                        if (stringOwnerTypeBytes.Count >= maxTypesToTrack) continue;
+                        typesTracked++;
+                    }
+                    stringOwnerTypeBytes[ownerMt] = existing + stringRef.Size;
+                }
+                catch
+                {
+                    // Safely skip malformed fields
+                    continue;
+                }
+            }
+        }
+    }
 
     public void Dispose() { }
 }

@@ -298,7 +298,7 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P0-3** | Fix `DuplicateWastedBytes` integer-division formula | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-1** | Add preview and type name to `VeryLongStrings` entries | Improvement | High | Low | High | ✅ DONE |
 | **P1-2** | Add low-coverage warning finding when `SamplingCoverage < 0.05` | Improvement | High | Low | High | ✅ DONE |
-| **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High |
+| **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High | ✅ DONE |
 | **P1-4** | Fix `estimatedInterningSaving` — remove misleading metric | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High | ✅ DONE |
 | **P2-1** | Fix `MinDuplicateStringCount` off-by-one (`< minCount` instead of `<= minCount`) | Improvement | Low | Low | High |
@@ -375,6 +375,51 @@ Removed `estimatedInterningSaving` metric from key metrics and section builder.
 - StringSectionBuilder.cs (removed calculation + metric from keyMetrics dictionary)
 
 **Build status:** ✓ Clean (StringSectionBuilder compiles without errors)
+
+---
+
+## P1-3 Implementation Summary (COMPLETED)
+
+**Commit:** (pending)
+
+**What was implemented:**
+P1-3 Option B2 prototype: Full-object-scan to find types that own string fields and report top 10 by total string bytes owned.
+
+**Infrastructure added:**
+1. `FieldLayoutCache` helper class: Caches `ClrType.Fields` enumerations per MethodTable to avoid re-enumerating field layouts
+2. `ScanForStringOwnerTypes()` static method: Iterates all heap objects, checks field types for string references, aggregates bytes by owner type
+3. `TopStringOwnerTypes` field in `StringDomainResult`: New optional field holds `IReadOnlyList<(string TypeName, ulong TotalBytes)>`
+
+**Integration:**
+- Called in `Analyze()` method before return statement
+- Resolves string MethodTables from TypeAggregates or type names
+- Instantiates FieldLayoutCache and Dictionary<ulong, ulong> accumulator
+- Populates TopStringOwnerTypes with top 10 owner types sorted by total string bytes descending
+- Gracefully skips on scan errors (malformed fields, null types)
+
+**Display:**
+- New "Types by string field ownership" table in StringSectionBuilder
+- Columns: Type name, Total String Bytes (formatted), % of string memory
+- Rows sorted by bytes descending
+
+**Performance notes:**
+- Single pass over heap objects
+- Field cache avoids repeated ClrType.Fields enumerations (O(1) cache hit per type)
+- Stops tracking new types after 100 unique owner types (configurable via maxTypesToTrack parameter)
+- Try-catch guards against malformed field reads
+
+**What it answers:**
+"Which object types own the most string fields?" — Direct answer to the most common follow-up question when strings dominate the heap. Engineers can then:
+1. Drill into those specific types in debuggers
+2. Profile retention chains for those types
+3. Evaluate string pooling or interning strategies for high-string-volume types
+
+**Files changed:** 3 files
+- StringAnalyzer.cs (added FieldLayoutCache class, ScanForStringOwnerTypes method, integration call)
+- StringDomainResult.cs (added TopStringOwnerTypes field)
+- StringSectionBuilder.cs (added TopStringOwnerTypes table display)
+
+**Build status:** ✓ Clean (StringAnalyzer and StringSectionBuilder compile without errors)
 
 ---
 

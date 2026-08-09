@@ -73,6 +73,8 @@ internal sealed record StringDomainResult(
     long AnalysisDurationMs = 0,
     string? DedupSkipReason = null,
     IReadOnlyList<DumpDetective.Core.Models.NameCountEntry>? TopDuplicateTypes = null,
+    /// <summary>Top object types by total string bytes they reference (not duplicate strings, all strings)</summary>
+    IReadOnlyList<(string TypeName, ulong TotalBytes)>? TopStringOwnerTypes = null,
     DistributionSummary? Distribution = null,
     int PreviewMaxLength = 0,
     IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;

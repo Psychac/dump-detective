@@ -33,11 +33,12 @@ namespace DumpDetective.Analysis.Analyzers
             public readonly ClrInstanceField? HeadField;
             public readonly ClrInstanceField? TailField;
             public readonly ClrInstanceField? AnyIntField;
+            public readonly ClrInstanceField? FreeCountField;
             public readonly ClrType? ComponentType;
             public readonly int ComponentStaticSize;
             public readonly ulong ComputedElementSize;
 
-            public FieldLayout(ClrInstanceField? sizeField, ClrInstanceField? countField, ClrInstanceField? itemsField, ClrInstanceField? entriesField, ClrInstanceField? arrayField, ClrInstanceField? headField, ClrInstanceField? tailField, ClrInstanceField? anyIntField, ClrType? componentType, int componentStaticSize, ulong computedElementSize)
+            public FieldLayout(ClrInstanceField? sizeField, ClrInstanceField? countField, ClrInstanceField? itemsField, ClrInstanceField? entriesField, ClrInstanceField? arrayField, ClrInstanceField? headField, ClrInstanceField? tailField, ClrInstanceField? anyIntField, ClrInstanceField? freeCountField, ClrType? componentType, int componentStaticSize, ulong computedElementSize)
             {
                 SizeField = sizeField;
                 CountField = countField;
@@ -47,6 +48,7 @@ namespace DumpDetective.Analysis.Analyzers
                 HeadField = headField;
                 TailField = tailField;
                 AnyIntField = anyIntField;
+                FreeCountField = freeCountField;
                 ComponentType = componentType;
                 ComponentStaticSize = componentStaticSize;
                 ComputedElementSize = computedElementSize;
@@ -1057,6 +1059,7 @@ namespace DumpDetective.Analysis.Analyzers
                 ClrInstanceField? arrayField = type.GetFieldByName("_array");
                 ClrInstanceField? headField = type.GetFieldByName("_head");
                 ClrInstanceField? tailField = type.GetFieldByName("_tail");
+                ClrInstanceField? freeCountField = type.GetFieldByName("_freeCount");
                 ClrInstanceField? anyInt = null;
                 ClrType? compType = type.ComponentType;
                 int compStaticSize = compType != null ? compType.StaticSize : 0;
@@ -1103,7 +1106,7 @@ namespace DumpDetective.Analysis.Analyzers
                 ClrInstanceField? resolvedSize = sizeField ?? countField ?? anyInt;
                 ClrInstanceField? resolvedCount = countField ?? sizeField ?? anyInt;
 
-                return new FieldLayout(resolvedSize, resolvedCount, resolvedItems, resolvedEntries, arrayField, headField, tailField, anyInt, compType, compStaticSize, computedElementSize);
+                return new FieldLayout(resolvedSize, resolvedCount, resolvedItems, resolvedEntries, arrayField, headField, tailField, anyInt, freeCountField, compType, compStaticSize, computedElementSize);
             });
         }
 
@@ -1124,7 +1127,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (existing.ComputedElementSize != 0)
                     return;
 
-                var updated = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, existing.ComponentType ?? compType, existing.ComponentStaticSize != 0 ? existing.ComponentStaticSize : (compType != null ? compType.StaticSize : 0), computedSize);
+                var updated = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, existing.FreeCountField, existing.ComponentType ?? compType, existing.ComponentStaticSize != 0 ? existing.ComponentStaticSize : (compType != null ? compType.StaticSize : 0), computedSize);
                 if (s_fieldLayoutCache.TryUpdate(methodTable, updated, existing))
                     return;
             }
@@ -1313,6 +1316,20 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 int count = Math.Max(0, countField.Read<int>(dictObj, interior: false));
+                int freeCount = 0;
+                if (layout.FreeCountField != null)
+                {
+                    try
+                    {
+                        freeCount = Math.Max(0, layout.FreeCountField.Read<int>(dictObj, interior: false));
+                    }
+                    catch
+                    {
+                        // freeCount field read failed; ignore and use count as-is
+                    }
+                }
+                int liveCount = Math.Max(0, count - freeCount);
+
                 var entriesObj = entriesField.ReadObject(dictObj, interior: false);
 
                 if (!entriesObj.IsValid || !entriesObj.IsArray)
@@ -1324,13 +1341,13 @@ namespace DumpDetective.Analysis.Analyzers
                 int capacity = entriesObj.AsArray().Length;
 
                 // No waste if fully packed or empty
-                if (capacity <= 0 || count >= capacity)
+                if (capacity <= 0 || liveCount >= capacity)
                 {
                     // suppressed debug: no actionable waste detected for this collection
                     return null;
                 }
 
-                double fillRate = (count / (double)capacity) * 100;
+                double fillRate = (liveCount / (double)capacity) * 100;
                 // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
                 ulong elementSize = 0;
                 var layoutMt = dictObj.Type?.MethodTable ?? 0UL;
@@ -1348,7 +1365,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     elementSize = entriesObj.Size / (ulong)capacity; // fallback
                 }
-                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedSlots = (ulong)(capacity - liveCount);
                 ulong wastedMemory = wastedSlots * elementSize;
 
                 // Root descriptions are populated post-scan for the top-N only (see PopulateRootDescriptions).
@@ -1356,14 +1373,15 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     Address = dictObj.Address,
                     Type = dictObj.Type?.Name ?? "Dictionary",
-                    Count = count,
+                    Count = liveCount,
                     Capacity = capacity,
                     FillRate = fillRate,
                     WastedMemory = wastedMemory,
                     ElementSize = elementSize,
                     ElementType = compType?.Name ?? string.Empty,
                     SizeEstimateConfidence = compType != null ? "High" : "Low",
-                    DetectionMethod = entriesField?.Name ?? string.Empty
+                    DetectionMethod = entriesField?.Name ?? string.Empty,
+                    FreeEntryCount = freeCount > 0 ? freeCount : null
                 };
             }
             catch (Exception ex)
@@ -1591,6 +1609,20 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 int count = Math.Max(0, countField.Read<int>(hashSetObj, interior: false));
+                int freeCount = 0;
+                if (layout.FreeCountField != null)
+                {
+                    try
+                    {
+                        freeCount = Math.Max(0, layout.FreeCountField.Read<int>(hashSetObj, interior: false));
+                    }
+                    catch
+                    {
+                        // freeCount field read failed; ignore and use count as-is
+                    }
+                }
+                int liveCount = Math.Max(0, count - freeCount);
+
                 var entriesObj = entriesField.ReadObject(hashSetObj, interior: false);
 
                 if (!entriesObj.IsValid || !entriesObj.IsArray)
@@ -1602,13 +1634,13 @@ namespace DumpDetective.Analysis.Analyzers
                 int capacity = entriesObj.AsArray().Length;
 
                 // No waste if fully packed or empty
-                if (capacity <= 0 || count >= capacity)
+                if (capacity <= 0 || liveCount >= capacity)
                 {
                     // suppressed debug: no actionable waste detected for this collection
                     return null;
                 }
 
-                double fillRate = (count / (double)capacity) * 100;
+                double fillRate = (liveCount / (double)capacity) * 100;
                 // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
                 ulong elementSize = 0;
                 var layoutMt = hashSetObj.Type?.MethodTable ?? 0UL;
@@ -1626,21 +1658,22 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     elementSize = entriesObj.Size / (ulong)capacity;
                 }
-                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedSlots = (ulong)(capacity - liveCount);
                 ulong wastedMemory = wastedSlots * elementSize;
 
                 return new WastefulCollection
                 {
                     Address = hashSetObj.Address,
                     Type = hashSetObj.Type?.Name ?? "HashSet",
-                    Count = count,
+                    Count = liveCount,
                     Capacity = capacity,
                     FillRate = fillRate,
                     WastedMemory = wastedMemory,
                     ElementSize = elementSize,
                     ElementType = compType?.Name ?? string.Empty,
                     SizeEstimateConfidence = compType != null ? "High" : "Low",
-                    DetectionMethod = entriesField?.Name ?? string.Empty
+                    DetectionMethod = entriesField?.Name ?? string.Empty,
+                    FreeEntryCount = freeCount > 0 ? freeCount : null
                 };
             }
             catch (Exception ex)
@@ -1712,6 +1745,7 @@ namespace DumpDetective.Analysis.Analyzers
         public string SizeEstimateConfidence { get; set; } = "Unknown";
         public string DetectionMethod { get; set; } = string.Empty;
         public string? RootDescription { get; set; }
+        public int? FreeEntryCount { get; set; }
         // Queue-specific diagnostics
         public int? Head { get; set; }
         public int? Tail { get; set; }

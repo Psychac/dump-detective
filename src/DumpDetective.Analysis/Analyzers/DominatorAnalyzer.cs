@@ -200,7 +200,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
         PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
-        PopulateEvidence(heap, cache, topHighlyReferencedObjects);
+        PopulateEvidence(heap, cache, topHighlyReferencedObjects, options);
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
 
@@ -549,7 +549,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         }
     }
 
-    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects)
+    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
     {
         if (objects.Count == 0)
             return;
@@ -559,10 +559,10 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         var provider = new ReferenceGraph(heap);
         var limits = new RootPathSearchLimits
         {
-            MaxCandidateNodes = 5_000,
-            MaxCandidateDepth = 8,
-            MaxRootExpansionDepth = 12,
-            LargeFanoutThreshold = 100,
+            MaxCandidateNodes = options.MaxRootPathCandidateNodes,
+            MaxCandidateDepth = options.MaxRootPathCandidateDepth,
+            MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
+            LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
         };
         var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
 

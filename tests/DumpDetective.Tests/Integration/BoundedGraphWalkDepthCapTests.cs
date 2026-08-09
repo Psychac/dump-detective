@@ -30,8 +30,8 @@ public sealed class BoundedGraphWalkDepthCapTests
 
         // AbsoluteMaxDepth is enforced inside BoundedGraphWalk itself, so requesting a depth
         // far beyond 20 must produce exactly the same reachable set as requesting 20 directly.
-        var atCap = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, maxObjects: 50_000, maxDepth: 20);
-        var wellBeyondCap = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, maxObjects: 50_000, maxDepth: 5_000);
+        var atCap = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out _, maxObjects: 50_000, maxDepth: 20);
+        var wellBeyondCap = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out _, maxObjects: 50_000, maxDepth: 5_000);
 
         wellBeyondCap.Count.Should().Be(atCap.Count);
     }

@@ -39,7 +39,11 @@ internal sealed record DominatorDomainResult(
     /// Maximum number of items to display in section builder tables (from RetentionOptions.TopHighlyReferencedObjectsToShow).
     /// Used to respect the configured display limit instead of hardcoding table size.
     /// </summary>
-    int MaxTopDominatorTypesToShow = 15) : AnalyzerDomainResult;
+    int MaxTopDominatorTypesToShow = 15,
+    /// <summary>
+    /// True when analysis results are based on heuristics only, without strict GC root verification.
+    /// </summary>
+    bool HeuristicOnly = true) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

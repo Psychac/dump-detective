@@ -833,7 +833,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             {
                 var stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: 100);
                 var fieldCache = new FieldLayoutCache();
-                ScanForStringOwnerTypes(heap, stringMts, stringOwnerTypeBytes, fieldCache, maxTypesToTrack: 100);
+                ScanForStringOwnerTypes(heap, stringMts, stringOwnerTypeBytes, fieldCache, progress, maxTypesToTrack: 100);
 
                 if (stringOwnerTypeBytes.Count > 0)
                 {
@@ -1235,12 +1235,15 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         HashSet<ulong> stringMts,
         Dictionary<ulong, ulong> stringOwnerTypeBytes,
         FieldLayoutCache fieldCache,
+        IProgress<AnalyzerProgressReport>? progress = null,
         int maxTypesToTrack = 100)
     {
         int typesTracked = 0;
+        var sc = new ObjectScanCounter("scanning for string-owning types", progress);
 
         foreach (var obj in heap.EnumerateObjects())
         {
+            sc.Tick();
             if (!obj.IsValid || obj.Type == null) continue;
 
             var fields = fieldCache.GetFields(obj.Type);
@@ -1272,6 +1275,8 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                 }
             }
         }
+
+        sc.Complete();
     }
 
     public void Dispose() { }

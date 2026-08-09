@@ -62,6 +62,16 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     private List<LongStringEntry>? _indexScanVeryLongStrings;
     private int _indexScanStringsRead;
 
+    // P1-3 accumulator state: string-field-ownership tracking. Independent of
+    // _indexScanDedupActive (runs even when dedup itself is skipped) — piggybacks on the
+    // same shared disk-index pass rather than doing its own heap.EnumerateObjects() walk.
+    private const int MaxStringOwnerTypesToTrack = 100;
+    private bool _indexScanOwnerTypesActive;
+    private FieldLayoutCache? _indexScanFieldCache;
+    private Dictionary<ulong, int[]>? _indexScanStringOwnerFieldIndices; // owner MT -> string field indices
+    private HashSet<ulong>? _indexScanTypesWithoutStringFields; // negative cache
+    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> total string bytes owned
+
     /// <summary>
     /// Resolves whether the index-scan dedup branch will run this pass (mirroring the
     /// same DeduplicationMode/prebuilt-availability decision made inline in
@@ -92,6 +102,24 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         }
 
         _indexScanStringMts = stringMts;
+
+        // P1-3: seed owner-type tracking whenever there are string types to look for, independent
+        // of whether dedup itself runs — this reuses the same shared disk-index pass.
+        _indexScanOwnerTypesActive = stringMts.Count > 0;
+        if (_indexScanOwnerTypesActive)
+        {
+            _indexScanFieldCache = new FieldLayoutCache();
+            _indexScanStringOwnerFieldIndices = new Dictionary<ulong, int[]>(capacity: 1000);
+            _indexScanTypesWithoutStringFields = new HashSet<ulong>(capacity: 1000);
+            _indexScanStringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+        }
+        else
+        {
+            _indexScanFieldCache = null;
+            _indexScanStringOwnerFieldIndices = null;
+            _indexScanTypesWithoutStringFields = null;
+            _indexScanStringOwnerTypeBytes = null;
+        }
 
         bool runDedup = stringOptions.EnableDeduplication
             && stringOptions.DeduplicationMode != DeduplicationMode.Disabled
@@ -147,6 +175,9 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// </summary>
     public void OnHeapEntry(in HeapEntry entry)
     {
+        if (_indexScanOwnerTypesActive)
+            AccumulateStringOwnerType(in entry);
+
         if (!_indexScanDedupActive) return;
 
         StringAnalysisOptions stringOptions = _indexScanStringOptions!;
@@ -164,6 +195,87 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         FingerprintAddress(_heap!, entry.Address, entry.Size, stringOptions, _indexScanStringStats!, _indexScanMaxUnique, _indexScanMethodTableDupCounts!, _indexScanLengthSamples!, _indexScanLengthBuckets!, samplingSource: "IndexScan");
     }
 
+    /// <summary>
+    /// P1-3: accumulate string-field bytes owned by <paramref name="entry"/>'s type, using
+    /// the entry's MethodTable (already known from the disk index — no memory read required)
+    /// to look up cached string-field indices before ever touching the object itself. Objects
+    /// of types with no string fields (the overwhelming majority) cost one HashSet lookup and
+    /// nothing else — <c>heap.GetObject</c> is only called once we know the type is relevant.
+    /// </summary>
+    private void AccumulateStringOwnerType(in HeapEntry entry)
+    {
+        ulong mt = entry.MethodTable;
+
+        if (_indexScanTypesWithoutStringFields!.Contains(mt))
+            return;
+
+        if (!_indexScanStringOwnerFieldIndices!.TryGetValue(mt, out int[]? stringFieldIndices))
+        {
+            ClrType? type = _heap!.GetTypeByMethodTable(mt);
+            if (type is null)
+            {
+                _indexScanTypesWithoutStringFields.Add(mt);
+                return;
+            }
+
+            var fields = _indexScanFieldCache!.GetFields(type);
+            var indices = new List<int>(capacity: 4);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                try
+                {
+                    ClrType? fieldType = fields[i].Type;
+                    if (fieldType != null && _indexScanStringMts!.Contains(fieldType.MethodTable))
+                        indices.Add(i);
+                }
+                catch
+                {
+                    // Skip malformed field definitions
+                }
+            }
+
+            if (indices.Count == 0)
+            {
+                _indexScanTypesWithoutStringFields.Add(mt);
+                return;
+            }
+
+            stringFieldIndices = indices.ToArray();
+            _indexScanStringOwnerFieldIndices[mt] = stringFieldIndices;
+        }
+
+        var ownerBytes = _indexScanStringOwnerTypeBytes!;
+        bool alreadyTracked = ownerBytes.ContainsKey(mt);
+        if (!alreadyTracked && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
+            return; // cap reached — only keep accumulating types already being tracked
+
+        ClrObject obj = _heap!.GetObject(entry.Address);
+        if (!obj.IsValid) return;
+
+        var objFields = _indexScanFieldCache!.GetFields(obj.Type);
+        ulong addBytes = 0;
+        foreach (int fieldIndex in stringFieldIndices)
+        {
+            try
+            {
+                if (fieldIndex >= objFields.Length) continue;
+                ClrObject stringRef = objFields[fieldIndex].ReadObject(obj, interior: false);
+                if (!stringRef.IsValid) continue;
+                addBytes += stringRef.Size;
+            }
+            catch
+            {
+                // Skip malformed field reads
+            }
+        }
+
+        if (addBytes > 0)
+        {
+            ownerBytes.TryGetValue(mt, out ulong existing);
+            ownerBytes[mt] = existing + addBytes;
+        }
+    }
+
     IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
         new StringAnalyzer();
 
@@ -172,6 +284,25 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     // to merge — workers whose dedup was also inactive contribute nothing.
     void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
     {
+        // P1-3 owner-type bytes: independent of dedup active state, merged separately.
+        if (_indexScanOwnerTypesActive)
+        {
+            var ownerBytes = _indexScanStringOwnerTypeBytes!;
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                var other = (StringAnalyzer)p;
+                if (!other._indexScanOwnerTypesActive) continue;
+
+                foreach (var kvp in other._indexScanStringOwnerTypeBytes!)
+                {
+                    if (!ownerBytes.ContainsKey(kvp.Key) && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
+                        continue;
+                    ownerBytes.TryGetValue(kvp.Key, out ulong existing);
+                    ownerBytes[kvp.Key] = existing + kvp.Value;
+                }
+            }
+        }
+
         if (!_indexScanDedupActive) return;
 
         var stringStats = _indexScanStringStats!;
@@ -825,17 +956,30 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             veryLongStrings.RemoveRange(maxVeryLongStringsToKeep, veryLongStrings.Count - maxVeryLongStringsToKeep);
         }
 
-        // P1-3: Scan for top object types owning string fields (Option B2 prototype)
+        // P1-3: top object types owning string fields.
         IReadOnlyList<(string TypeName, ulong TotalBytes)>? topStringOwnerTypes = null;
         if (stringMts.Count > 0)
         {
             try
             {
-                var stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: 100);
-                var fieldCache = new FieldLayoutCache();
-                ScanForStringOwnerTypes(heap, stringMts, stringOwnerTypeBytes, fieldCache, progress, maxTypesToTrack: 100);
+                Dictionary<ulong, ulong>? stringOwnerTypeBytes;
 
-                if (stringOwnerTypeBytes.Count > 0)
+                if (typeAggregates is not null && _indexScanOwnerTypesActive)
+                {
+                    // Index available: the scan already happened as this analyzer's
+                    // IHeapIndexScanParticipant.OnHeapEntry during the shared dispatcher pass
+                    // (disk-backed, no live heap walk) — just read the accumulated result back.
+                    stringOwnerTypeBytes = _indexScanStringOwnerTypeBytes;
+                }
+                else
+                {
+                    // No-index fallback: single live heap pass (rare path — small dumps / no cache).
+                    stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+                    var fieldCache = new FieldLayoutCache();
+                    ScanForStringOwnerTypesFallback(heap, stringMts, stringOwnerTypeBytes, fieldCache, progress, MaxStringOwnerTypesToTrack);
+                }
+
+                if (stringOwnerTypeBytes is not null && stringOwnerTypeBytes.Count > 0)
                 {
                     var topOwners = new List<(string, ulong)>(capacity: Math.Min(10, stringOwnerTypeBytes.Count));
                     foreach (var kv in stringOwnerTypeBytes.OrderByDescending(kv => kv.Value).Take(10))
@@ -1229,14 +1373,19 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
 
     private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
 
-    /// <summary>Scan objects for field references to strings and accumulate by owner type.</summary>
-    private static void ScanForStringOwnerTypes(
+    /// <summary>
+    /// No-index fallback: live heap.EnumerateObjects() walk for string-field ownership.
+    /// Only used when no disk-backed heap index is available (small dumps / uncached runs) —
+    /// the normal path piggybacks on the shared <see cref="IHeapIndexScanParticipant"/> pass
+    /// via <see cref="AccumulateStringOwnerType"/> instead.
+    /// </summary>
+    private static void ScanForStringOwnerTypesFallback(
         ClrHeap heap,
         HashSet<ulong> stringMts,
         Dictionary<ulong, ulong> stringOwnerTypeBytes,
         FieldLayoutCache fieldCache,
-        IProgress<AnalyzerProgressReport>? progress = null,
-        int maxTypesToTrack = 100)
+        IProgress<AnalyzerProgressReport>? progress,
+        int maxTypesToTrack)
     {
         // Cache: MethodTable -> string field indices (built on-demand per type)
         var stringFieldsByType = new Dictionary<ulong, int[]>(capacity: 1000);

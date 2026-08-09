@@ -46,7 +46,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 12 | **CollectionAnalyzer** | 3/3 | 1/5 | 0/8 | 0/5 | P0 complete (3/3); P1-1 (free count accounting) done; 4 P1 items pending |
+| 12 | **CollectionAnalyzer** | 3/3 | 2/5 | 0/8 | 0/5 | P0 complete (3/3); P1-1,P1-2 done; 3 P1 items pending |
 | 13 | **StringAnalyzer** | 3/3 | 4/5 | 0/8 | 0/5 | P0 complete (3/3); P1 80% (4/5 done); P1-3 pending |
 | 14 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
 | 15 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |

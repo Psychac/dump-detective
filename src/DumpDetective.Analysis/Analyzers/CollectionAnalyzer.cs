@@ -21,8 +21,6 @@ namespace DumpDetective.Analysis.Analyzers
     {
         // Cache of resolved interesting instance fields per MethodTable to avoid
         // repeatedly enumerating ClrType.Fields for every object of the same type.
-        private static readonly ConcurrentDictionary<ulong, FieldLayout> s_fieldLayoutCache = new(concurrencyLevel: 4, capacity: 256);
-
         private readonly struct FieldLayout
         {
             public readonly ClrInstanceField? SizeField;
@@ -56,6 +54,10 @@ namespace DumpDetective.Analysis.Analyzers
         }
         private CollectionAnalysisOptions _options;
         private readonly ILogger<CollectionAnalyzer>? _logger;
+
+        // Session-scoped field layout cache: initialized per analysis session (BeforeHeapIndexScan)
+        // to prevent stale ClrInstanceField references and cross-dump MethodTable collisions.
+        private ConcurrentDictionary<ulong, FieldLayout>? _fieldLayoutCache;
 
         // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
         // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
@@ -181,6 +183,7 @@ namespace DumpDetective.Analysis.Analyzers
             _cache = context.Cache;
             _progress = context.Progress;
 
+            _fieldLayoutCache = new ConcurrentDictionary<ulong, FieldLayout>(concurrencyLevel: 4, capacity: 256);
             _stats = new CollectionStatistics();
             _topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
             _wasteful = new List<WastefulCollection>(_topCapacity);
@@ -1042,13 +1045,16 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
-        private static FieldLayout GetOrBuildFieldLayout(ClrType? type)
+        private FieldLayout GetOrBuildFieldLayout(ClrType? type)
         {
             if (type == null)
                 return default;
 
+            if (_fieldLayoutCache == null)
+                return default;
+
             ulong mt = type.MethodTable;
-            return s_fieldLayoutCache.GetOrAdd(mt, _ =>
+            return _fieldLayoutCache.GetOrAdd(mt, _ =>
             {
                 // Prefer well-known field names first (fast path), then fall back to a single
                 // enumeration over fields to find reasonable candidates.
@@ -1110,14 +1116,14 @@ namespace DumpDetective.Analysis.Analyzers
             });
         }
 
-        private static void TrySetComputedElementSize(ulong methodTable, ClrType? compType, ulong computedSize)
+        private void TrySetComputedElementSize(ulong methodTable, ClrType? compType, ulong computedSize)
         {
-            if (computedSize == 0)
+            if (computedSize == 0 || _fieldLayoutCache == null)
                 return;
 
             while (true)
             {
-                if (!s_fieldLayoutCache.TryGetValue(methodTable, out var existing))
+                if (!_fieldLayoutCache.TryGetValue(methodTable, out var existing))
                 {
                     // Entry doesn't exist yet; we cannot build from default value.
                     // Return and let GetOrBuildFieldLayout handle the full initialization on next access.
@@ -1128,7 +1134,7 @@ namespace DumpDetective.Analysis.Analyzers
                     return;
 
                 var updated = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, existing.FreeCountField, existing.ComponentType ?? compType, existing.ComponentStaticSize != 0 ? existing.ComponentStaticSize : (compType != null ? compType.StaticSize : 0), computedSize);
-                if (s_fieldLayoutCache.TryUpdate(methodTable, updated, existing))
+                if (_fieldLayoutCache.TryUpdate(methodTable, updated, existing))
                     return;
             }
         }

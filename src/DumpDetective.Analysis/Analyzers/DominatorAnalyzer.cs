@@ -240,6 +240,10 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         int maxBreadth = options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000;
         const int MaxDepth = 20;
 
+        // Use a shared visited set for all top-K types to produce exclusive (non-overlapping) retained-size semantics,
+        // matching the semantics of PopulateRetainedBytes. This ensures the two retained-byte metrics are comparable.
+        var visited = new HashSet<ulong>(capacity: Math.Min(topCount * 256, 4096));
+
         for (int i = 0; i < topCount; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -249,7 +253,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             if (!root.IsValid || root.Type is null)
                 continue;
 
-            ulong retainedBytes = BoundedGraphWalk.ComputeExclusiveRetained(root, heap, new HashSet<ulong>(capacity: 256), maxBreadth, MaxDepth);
+            ulong retainedBytes = BoundedGraphWalk.ComputeExclusiveRetained(root, heap, visited, maxBreadth, MaxDepth);
             totalEstimatedRetainedBytes += retainedBytes;
 
             ulong averageSize = count > 0 ? totalSize / (ulong)count : 0;

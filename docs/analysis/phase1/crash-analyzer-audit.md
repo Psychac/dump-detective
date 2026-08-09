@@ -238,7 +238,8 @@ bucket, both look identical.
 Impact: High. Difficulty: Medium.
 
 **3. GC generation distribution of exception objects**  
-Call `heap.GetObjectGeneration(entry.Address)` in `OnHeapEntry` at zero additional scan cost.
+Use `HeapEntry.Generation` (pre-computed in disk-backed index) in `OnHeapEntry` at zero additional scan cost.
+For fallback (no index), compute via `heap.GetSegmentByAddress().GetGeneration()`.
 Gen2/LOH exception objects are retained through at least two GC cycles â€” a retention signal
 that complements `DominatorAnalyzer` and correlates with what the reverse-reference index shows.  
 Impact: High. Difficulty: Low.
@@ -445,7 +446,7 @@ in DumpDetective's platform but is not wired into this analyzer.
 | I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High | ✅ DONE |
 | I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High | N/A |
 | I-7 | Add `ILogger<CrashAnalyzer>?` injection; emit per-object diagnostics on `catch {}` sites | P1 | Medium | Low | High | ✅ DONE |
-| I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High | ✅ DONE |
+| I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High | ✅ DONE — uses HeapEntry.Generation from index |
 | I-9 | Add `AggregateException` inner exception unwrapping | P2 | High | Medium | High | Pending |
 | I-10 | Add exception message distribution per type (distinct count + most common message) | P2 | High | Low | High | Pending |
 | I-11 | Implement crash bucket `(exception_type, top_user_frame)` | P2 | High | Medium | High | Pending |

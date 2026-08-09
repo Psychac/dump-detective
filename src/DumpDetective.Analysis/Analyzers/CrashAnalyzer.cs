@@ -873,32 +873,16 @@ namespace DumpDetective.Analysis.Analyzers
 
             try
             {
-                // Get exception message
-                var messageField = exceptionObj.Type?.GetFieldByName("_message");
-                if (messageField != null)
+                var clrException = exceptionObj.AsException();
+                if (clrException != null)
                 {
-                    var messageObj = messageField.ReadObject(exceptionObj, interior: false);
-                    if (messageObj.IsValid)
-                    {
-                        instance.Message = messageObj.AsString() ?? "";
-                    }
-                }
+                    // Use ClrException wrapper for typed field access
+                    instance.Message = clrException.Message ?? "";
+                    instance.HResult = clrException.HResult;
 
-                // Get HRESULT
-                var hresultField = exceptionObj.Type?.GetFieldByName("_HResult");
-                if (hresultField != null)
-                {
-                    instance.HResult = hresultField.Read<int>(exceptionObj, interior: false);
-                }
-
-                // Get inner exception
-                var innerExceptionField = exceptionObj.Type?.GetFieldByName("_innerException");
-                if (innerExceptionField != null)
-                {
-                    var innerObj = innerExceptionField.ReadObject(exceptionObj, interior: false);
-                    if (innerObj.IsValid && innerObj.Type != null)
+                    if (clrException.InnerException != null && clrException.InnerException.Type != null)
                     {
-                        instance.InnerExceptionType = innerObj.Type.Name;
+                        instance.InnerExceptionType = clrException.InnerException.Type.Name;
                     }
                 }
 

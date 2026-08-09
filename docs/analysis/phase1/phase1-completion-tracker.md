@@ -57,7 +57,7 @@
 | 18 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 19 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7 done (aggregate metric + TotalSize + finalizable finding); 1 P0, 2 P1, 7 P2 pending |
 | 20 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
-| 21 | **ThreadAnalyzer** | 2/3 | 4/4 | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; ✅ P1 complete; P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
+| 21 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 22 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 23 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 25 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
@@ -129,4 +129,17 @@ Different audits use different conventions for marking completion:
 - FinalizableObjectAnalyzer has 4 completed items not P0/P1-labeled (ambiguous classification)
 - CrashAnalyzer has no roadmap section found
 - All P0 and P1 implementation tracked via commit references in roadmap status columns
+
+---
+
+## Implementation Blockers
+
+**ClrMD 4 API Limitations:**
+
+| Item | Issue | Impact | Resolution |
+|------|-------|--------|------------|
+| **ThreadAnalyzer P1-1** | `ClrThreadPool` does not expose QueueLength, ActiveWorkerThreads, IdleWorkerThreads, MinWorkerThreads, MaxWorkerThreads | ThreadPool starvation detection unavailable; high-signal queue depth metric cannot be implemented | Awaiting Microsoft.Diagnostics.Runtime API enhancement or direct memory inspection workaround |
+| **ThreadAnalyzer P1-2** | `ClrThread.Name` property not available | Thread triage acceleration lost; critical context (e.g., "SignalR Hub Dispatcher") unavailable in hang reports | Awaiting Microsoft.Diagnostics.Runtime API enhancement or managed thread enumeration workaround |
+
+**Status:** Both items marked as BLOCKED (⏳) rather than NOT STARTED, indicating active investigation and API limitations rather than lack of effort.
 

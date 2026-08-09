@@ -315,8 +315,8 @@ The `WaitPatterns` table does not cover:
 | P0-1 | Fix `ThreadPoolCount` double-count: add `else if` guard between flag check and frame check | Correctness | High | Trivial | High | Improvement | ✅ DONE |
 | P0-2 | Expose `ExceptionTypeDistribution` in `ThreadDomainResult` and `ThreadSectionBuilder` | Correctness/Reporting | High | Low | High | Improvement | ✅ DONE |
 | P0-3 | Call `thread.EnumerateBlockingObjects()` in `ProcessThread`; emit blocking-object table (address, type, owner thread ID) per blocked snapshot | Diagnostic | Very High | Medium | High | Improvement | — |
-| P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement | ✅ DONE |
-| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | ✅ DONE |
+| P1-1 | Query `runtime.ThreadPool` in `BeforeThreadStackScan`; add `ThreadPoolQueueDepth`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkers`, `MaxWorkers` to `ThreadDomainResult` | Diagnostic | High | Low | High | Improvement | ⏳ BLOCKED |
+| P1-2 | Read `thread.Name` in `ProcessThread`; include in `ThreadStateSnapshot`; surface in blocked/locked/sampled tables | Diagnostic | High | Trivial | High | Improvement | ⏳ BLOCKED |
 | P1-3 | Replace `frames[0]` hotspot with first non-framework frame; filter `System.`, `Microsoft.`, `ThreadPool`, `Task` prefixes | Reporting | High | Low | High | Improvement | ✅ DONE |
 | P1-4 | Fix background prewarm progress: replace `Math.Min(prewarm, prewarm)` with actual `idx` count | Correctness | Low | Trivial | High | Improvement | ✅ DONE |
 | P2-1 | Replace LINQ `OrderByDescending + ToList()` in `FinalizeCategorization` with `List<T>.Sort()` | Performance | Medium | Low | High | Improvement | ✅ DONE |
@@ -343,4 +343,30 @@ The `WaitPatterns` table does not cover:
 
 3. **Platform evolution opportunities:** `IThreadOwnershipIndex` (P3-4) would give both `ThreadAnalyzer` and `LockGraphAnalyzer` a shared, pre-built map from sync-block address to owner thread, eliminating duplicate work and enabling cross-analyzer deadlock chain detection.
 
-4. **Highest engineering return:** P0-1 (trivial, eliminates count defect), P0-2 (trivial, recovers already-computed data), P1-2 (trivial, thread names), P1-1 (low effort, high-signal threadpool telemetry), P1-3 (low effort, substantially better hotspot signal).
+4. **Highest engineering return:** P0-1 (trivial, eliminates count defect), P0-2 (trivial, recovers already-computed data), P1-3 (low effort, substantially better hotspot signal).
+
+---
+
+### Implementation Status & Blockers
+
+**P1-1 (ThreadPool Telemetry) — ⏳ BLOCKED**
+- **Why:** ClrMD 4 does not expose `ClrThreadPool` properties (`QueueLength`, `ActiveWorkerThreads`, `IdleWorkerThreads`, `MinWorkerThreads`, `MaxWorkerThreads`)
+- **Workaround:** ThreadPool metrics would require direct memory inspection of runtime internals or awaiting future ClrMD API expansion
+- **Impact:** ThreadPool starvation detection unavailable; queue depth tracking (high-signal for hangs) cannot be implemented
+- **Resolution:** Awaiting Microsoft.Diagnostics.Runtime API enhancement
+
+**P1-2 (Thread Names) — ⏳ BLOCKED**
+- **Why:** ClrMD 4 does not expose `ClrThread.Name` property
+- **Workaround:** Thread names would require enumerating managed thread objects and parsing thread-local storage, which is architecture-specific
+- **Impact:** Thread triage acceleration lost; thread context (e.g., "SignalR Hub Dispatcher") unavailable in reports
+- **Resolution:** Awaiting Microsoft.Diagnostics.Runtime API enhancement
+
+**Completed Implementations:**
+- P0-1 ✅ DONE — Fixed ThreadPoolCount double-counting
+- P0-2 ✅ DONE — Exposed ExceptionTypeDistribution
+- P1-3 ✅ DONE — Improved hotspot detection (skip framework frames)
+- P1-4 ✅ DONE — Fixed background prewarm progress reporting
+- P2-1 ✅ DONE — Removed LINQ OrderByDescending in FinalizeCategorization
+- P2-2 ✅ DONE — Removed LINQ Select/Take in snapshot methods
+- P2-4 ✅ DONE — Removed redundant cache mirror when shared cache present
+- P2-5 ✅ DONE — Added BlockedThreadRatio key metric

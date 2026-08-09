@@ -284,6 +284,10 @@ namespace DumpDetective.Analysis.Analyzers
 
             CollectionKind kind = ResolveCollectionKind(heap, entry, methodTableKinds);
 
+            // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
+            if (kind == CollectionKind.SortedSet)
+                return;
+
             if (kind == CollectionKind.Dictionary)
             {
                 stats.TotalCollections++;
@@ -407,25 +411,6 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     int idx = gen >= 3 ? 3 : gen;
                     generationCounts[CollectionKind.SortedList][idx]++;
-                }
-                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
-                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
-                {
-                    waste.Kind = kind;
-                    _wastefulCount++;
-                    _totalWasted += waste.WastedMemory;
-                    AddToTopWasteful(wasteful, waste, _topCapacity);
-                }
-            }
-            else if (kind == CollectionKind.SortedSet)
-            {
-                stats.TotalCollections++;
-                stats.SortedSets++;
-                int gen = entry.Generation;
-                if (gen >= 0)
-                {
-                    int idx = gen >= 3 ? 3 : gen;
-                    generationCounts[CollectionKind.SortedSet][idx]++;
                 }
                 var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
                 if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
@@ -581,6 +566,10 @@ namespace DumpDetective.Analysis.Analyzers
                     kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
                 }
                 if (kind == CollectionKind.None)
+                    return;
+
+                // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
+                if (kind == CollectionKind.SortedSet)
                     return;
 
                 // determine generation and increment per-kind generation counter. Prefer the

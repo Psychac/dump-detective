@@ -94,7 +94,6 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 bRows.Add(new TableRow([
                     Cell(s.ThreadId.ToString("N0"),    s.ThreadId),
                     Cell(s.OSThreadId.ToString("N0"),  s.OSThreadId),
-                    Cell(s.ThreadName ?? "—"),
                     Cell(s.LockCount.ToString("N0"),   s.LockCount),
                     Cell(s.ThreadState),
                     Cell(s.GcMode),
@@ -103,7 +102,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Top blocked threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Name"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, bRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top blocked threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, bRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLockedThreads is { Count: > 0 })
@@ -115,7 +114,6 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 lRows.Add(new TableRow([
                     Cell(s.ThreadId.ToString("N0"),    s.ThreadId),
                     Cell(s.OSThreadId.ToString("N0"),  s.OSThreadId),
-                    Cell(s.ThreadName ?? "—"),
                     Cell(s.LockCount.ToString("N0"),   s.LockCount),
                     Cell(s.ThreadState),
                     Cell(s.GcMode),
@@ -124,7 +122,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Top lock-holding threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Name"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, lRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top lock-holding threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, lRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ThreadStateDistribution is { Count: > 0 })
@@ -206,8 +204,6 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     ["Lock Count"]  = s.LockCount.ToString("N0"),
                     ["Stack Roots"] = s.StackRootCount.ToString("N0"),
                 };
-                if (!string.IsNullOrEmpty(s.ThreadName))
-                    meta["Thread Name"] = s.ThreadName!;
                 if (s.StackSizeBytes > 0)
                     meta["Stack Size"] = FormatBytes(s.StackSizeBytes);
                 if (!string.IsNullOrEmpty(s.WaitCategory))

@@ -189,8 +189,8 @@ internal sealed class ExecutiveSummaryProjector
     {
         for (int i = 0; i < runs.Count; i++)
         {
-            if (runs[i].Result is MemoryDomainResult mem) return mem.TotalObjects;
-            if (runs[i].Result is GCGenerationDomainResult gc) return gc.TotalObjects;
+            if (runs[i].Result is MemoryDomainResult mem) return (int)mem.TotalObjects;
+            if (runs[i].Result is GCGenerationDomainResult gc) return (int)gc.TotalObjects;
         }
 
         return null;

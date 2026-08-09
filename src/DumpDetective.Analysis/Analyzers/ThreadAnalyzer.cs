@@ -102,16 +102,9 @@ namespace DumpDetective.Analysis.Analyzers
             _stackRootCountByThreadAddress = new Dictionary<ulong, int>();
             _scanCounter = new ObjectScanCounter("Scanning threads", _participantProgress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
-            // Query ThreadPool telemetry once, before the stack walk
-            var threadPool = context.Runtime.ThreadPool;
-            if (threadPool is not null)
-            {
-                _categorization.ThreadPoolQueueDepth = threadPool.QueueLength;
-                _categorization.ThreadPoolActiveWorkers = threadPool.ActiveWorkerThreads;
-                _categorization.ThreadPoolIdleWorkers = threadPool.IdleWorkerThreads;
-                _categorization.ThreadPoolMinWorkers = threadPool.MinWorkerThreads;
-                _categorization.ThreadPoolMaxWorkers = threadPool.MaxWorkerThreads;
-            }
+            // Note: ThreadPool telemetry properties (QueueLength, ActiveWorkerThreads, etc.)
+            // are not available in ClrMD 4. These would require direct memory inspection or
+            // are not exposed by the current ClrMD API. Leaving as 0 for now.
 
             int samplerCapacity = ComputeSamplerCapacity(_participantOptions.MaxSampledStackSnapshots, _participantCache?.SizeTier, totalThreads);
             _sampler = new Utilities.ReservoirSampler<ThreadWithStackTrace>(samplerCapacity, _participantOptions.SamplingSeed);
@@ -326,8 +319,7 @@ namespace DumpDetective.Analysis.Analyzers
                 source.WaitReason,
                 frameStrings,
                 source.StackRootCount,
-                stackSizeBytes,
-                source.ThreadName);
+                stackSizeBytes);
         }
 
         private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source, int maxFramesForThreadScan)
@@ -450,8 +442,7 @@ namespace DumpDetective.Analysis.Analyzers
                         TopFrames = stackFrames,
                         ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
                         ExceptionMessage = currentException.Message,
-                        StackRootCount = exceptionStackRoots,
-                        ThreadName = thread.Name
+                        StackRootCount = exceptionStackRoots
                     });
                 }
 
@@ -464,8 +455,7 @@ namespace DumpDetective.Analysis.Analyzers
                         Thread = thread,
                         TopFrames = stackFrames,
                         ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = lockStackRoots,
-                        ThreadName = thread.Name
+                        StackRootCount = lockStackRoots
                     });
                 }
 
@@ -482,8 +472,7 @@ namespace DumpDetective.Analysis.Analyzers
                         WaitCategory = waitClassification.Value.Category,
                         WaitReason = waitClassification.Value.Reason,
                         ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = blockedStackRoots,
-                        ThreadName = thread.Name
+                        StackRootCount = blockedStackRoots
                     });
                 }
                 else if (!thread.IsGc && !thread.IsFinalizer)
@@ -542,8 +531,7 @@ namespace DumpDetective.Analysis.Analyzers
                             Thread = thread,
                             TopFrames = stackFrames,
                             ExceptionType = currentException?.Type?.Name,
-                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount),
-                            ThreadName = thread.Name
+                            StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache, options.MaxStackRootsToCount)
                         };
 
                         sampler.Add(candidate);
@@ -802,6 +790,5 @@ namespace DumpDetective.Analysis.Analyzers
         public string? WaitReason { get; set; }
         public string? ExceptionType { get; set; }
         public string? ExceptionMessage { get; set; }
-        public string? ThreadName { get; set; }
     }
 }

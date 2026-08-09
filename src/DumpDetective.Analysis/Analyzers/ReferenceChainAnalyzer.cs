@@ -265,7 +265,7 @@ namespace DumpDetective.Analysis.Analyzers
             return new ObjectMetadata(true, obj.Type?.Name, obj.Size);
         }
 
-        private static bool IsNoisyType(ClrType? type, bool skipArrays)
+        internal static bool IsNoisyType(ClrType? type, bool skipArrays)
         {
             if (type is null)
                 return false;
@@ -285,7 +285,7 @@ namespace DumpDetective.Analysis.Analyzers
             return false;
         }
 
-        private static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
+        internal static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
         {
             if (type is null)
                 return false;

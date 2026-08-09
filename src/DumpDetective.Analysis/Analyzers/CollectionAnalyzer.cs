@@ -1,5 +1,6 @@
 ﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -53,6 +54,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
         private CollectionAnalysisOptions _options;
+        private ReferenceChainOptions? _refChainOptions;
         private readonly ILogger<CollectionAnalyzer>? _logger;
 
         // Session-scoped field layout cache: initialized per analysis session (BeforeHeapIndexScan)
@@ -103,6 +105,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             _options = context.AnalysisOptions.Collection;
+            _refChainOptions = context.AnalysisOptions.ReferenceChain;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 
@@ -486,7 +489,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // Post-scan root descriptions for top-N — never per-item during the scan.
-            PopulateRootDescriptions(heap, cache, stats.WastefulCollections, _options);
+            PopulateRootDescriptions(heap, cache, stats.WastefulCollections, _options, _refChainOptions);
 
             return stats;
         }
@@ -863,7 +866,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Post-scan: populate root descriptions for top-N only — never during the scan loop.
             // Balanced/Deep only: run ReferenceChainAnalyzer for items without a description.
-            PopulateRootDescriptions(heap, cache, wastefulList, _options);
+            PopulateRootDescriptions(heap, cache, wastefulList, _options, _refChainOptions);
 
             // Reporting-level summary warnings are handled by the findings generator.
             // Log total wasted memory at debug level for diagnostic purposes.
@@ -1189,33 +1192,65 @@ namespace DumpDetective.Analysis.Analyzers
 
         // Populate root descriptions for the top-N items only, after the scan is complete.
         // This avoids the catastrophic O(n * heap-walk) cost of doing it per item during scanning.
-        // Balanced/Deep only: runs ReferenceChainAnalyzer BFS for items still missing a description.
-        private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options)
+        // Balanced/Deep only: uses RootPathFinder BFS for items still missing a description.
+        private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options, ReferenceChainOptions? refChainOptions)
         {
-            if (wastefulList.Count == 0)
+            if (wastefulList.Count == 0 || options.Profile == AnalysisProfile.Fast || cache is null || refChainOptions is null)
                 return;
 
             int topN = Math.Min(options.PathAnalysisTopN, wastefulList.Count);
 
-            // Balanced/Deep only: BFS path search for items still missing a description.
-            if (options.Profile != AnalysisProfile.Fast && cache is not null)
+            try
             {
-                try
+                // Get roots once for all items to avoid redundant cache lookups
+                IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+                if (roots.Count == 0)
+                    return;
+
+                // Create ReferenceGraph once, reused across all items to cache edges
+                var provider = new ReferenceGraph(heap);
+
+                var limits = new RootPathSearchLimits
                 {
-                    var chainAnalyzer = new ReferenceChainAnalyzer();
-                    for (int i = 0; i < topN; i++)
-                    {
-                        var item = wastefulList[i];
-                        if (!string.IsNullOrEmpty(item.RootDescription))
-                            continue;
-                        bool retained = chainAnalyzer.AnalyzeObject(heap, cache, item.Address);
-                        item.RootDescription = retained ? "Retained (reference path found)" : "No root path found (within budget)";
-                    }
-                }
-                catch (Exception ex)
+                    MaxCandidateNodes = refChainOptions.ResolvedMaxCandidateNodes,
+                    MaxCandidateDepth = refChainOptions.ResolvedMaxCandidateDepth,
+                    MaxRootExpansionDepth = refChainOptions.ResolvedMaxRootExpansionDepth,
+                    LargeFanoutThreshold = refChainOptions.LargeFanoutThreshold,
+                };
+
+                var telemetry = new ReferenceChainAnalyzer.TelemetryCounters();
+
+                for (int i = 0; i < topN; i++)
                 {
-                    _logger?.LogDebug(ex, "Error during targeted reference-path analysis for collections");
+                    var item = wastefulList[i];
+                    if (!string.IsNullOrEmpty(item.RootDescription))
+                        continue;
+
+                    var finder = new RootPathFinder(
+                        heap,
+                        provider,
+                        limits,
+                        telemetry.AsProxy(),
+                        type => ReferenceChainAnalyzer.IsNoisyType(type, refChainOptions.SkipArrays),
+                        type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns));
+
+                    bool found = finder.TryFindAnyRootPath(
+                        item.Address,
+                        roots,
+                        out string? rootKind,
+                        out List<ulong>? path,
+                        out bool searchTruncated,
+                        out _,
+                        out _);
+
+                    item.RootDescription = found
+                        ? $"{rootKind}: (reference path found)"
+                        : "No root path found (within budget)";
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error during targeted reference-path analysis for collections");
             }
         }
 

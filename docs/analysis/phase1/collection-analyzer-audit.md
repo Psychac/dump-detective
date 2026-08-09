@@ -48,8 +48,8 @@ other analyzer duplicates fill-rate logic.
 
 ### Unexpected / misplaced functionality
 
-- `CollectionAnalyzer` carries its own static `s_fieldLayoutCache` — a `ConcurrentDictionary<ulong, FieldLayout>` — with custom CAS-update logic. This is a private, hidden, cross-instance cache that duplicates the role of `HeapAnalysisCache`/`TypeMetadataCache`. No other analyzer owns a static unbounded type-layout cache.
-- `PopulateRootDescriptions` calls `new ReferenceChainAnalyzer()` directly and invokes `AnalyzeObject`. This creates an undeclared dependency on `ReferenceChainAnalyzer` (not expressed in any interface or registration) and duplicates work that the pipeline dispatcher could route through the shared `ReferenceChainAnalyzer` instance.
+- **[FIXED in P1-2]** `CollectionAnalyzer` carried a static `s_fieldLayoutCache` — now replaced with session-scoped instance cache.
+- **[FIXED in P1-4]** `PopulateRootDescriptions` previously called `new ReferenceChainAnalyzer()` directly, creating undeclared dependency and duplicating work. Now uses `RootPathFinder` directly for per-object root path queries (the correct low-level tool) instead of the full analyzer.
 
 ### Architectural observations
 
@@ -560,7 +560,7 @@ eliminates all multi-core benefit.
 | P1-1 | **Account for `Dictionary._freeCount`** — read `_freeCount` field (if present, .NET ≥ 5 layout), subtract from `_count` before fill-rate computation. Same for `HashSet<T>` (`_freeCount` field). Report `FreeEntryCount` in `WastefulCollectionSnapshot`. | Correct fill-rate for dictionaries with deletions | Medium | High | Improvement | ✅ DONE |
 | P1-2 | **Scoped, session-lifetime field-layout cache** — replace static `s_fieldLayoutCache` with an instance-level or `AnalysisContext`-scoped cache to prevent stale/cross-session entries and avoid holding `ClrInstanceField` references after `ClrRuntime` disposal. | Correctness in batch/service hosts | Medium | High | Improvement | ✅ DONE |
 | P1-3 | **Remove `SortedSet<T>` from array-backed waste analysis** — `SortedSet<T>` is a red-black tree with no capacity concept. Either exclude it or implement a dedicated node-count probe. Currently reports misleading fill rates. | Removes false findings | Low | High | Improvement | ✅ DONE |
-| P1-4 | **Propagate root path detail** — extend `WastefulCollectionSnapshot.RootDescription` to carry a structured path (field name, owner type, root kind) from `ReferenceChainAnalyzer`. Replace binary "Retained/Not found" with actual path segments. | Eliminates the largest diagnostic gap vs dotMemory | High | Medium | Improvement |
+| P1-4 | **Propagate root path detail via RootPathFinder** — use `RootPathFinder` (not `ReferenceChainAnalyzer`) for per-object root path queries. Replace binary "Retained/Not found" with structured path info. Avoids redundant heap analysis and architectural coupling. | Eliminates the largest diagnostic gap vs dotMemory | High | High | Improvement | ✅ DONE |
 | P1-5 | **Honor `IncludeQueueAnalysis` option** — add `if (!_options.IncludeQueueAnalysis && kind == CollectionKind.Queue) return;` guard in both `OnHeapEntry` and `ProcessEntry`. | Correctness of documented API | Low | High | Improvement | ✅ DONE |
 
 #### P2 — Medium

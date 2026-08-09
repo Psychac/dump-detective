@@ -66,11 +66,17 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     // _indexScanDedupActive (runs even when dedup itself is skipped) — piggybacks on the
     // same shared disk-index pass rather than doing its own heap.EnumerateObjects() walk.
     private const int MaxStringOwnerTypesToTrack = 100;
+    // Per-type sample cap: once a type has this many sampled instances, further instances of
+    // that type cost a single dictionary lookup (no GetObject/ReadObject) — bounds total
+    // ClrMD-touching calls to ~MaxStringOwnerTypesToTrack * MaxSamplesPerOwnerType regardless of
+    // heap size. Totals are extrapolated from the sample average against the type's real count.
+    private const int MaxSamplesPerOwnerType = 200;
     private bool _indexScanOwnerTypesActive;
     private FieldLayoutCache? _indexScanFieldCache;
     private Dictionary<ulong, int[]>? _indexScanStringOwnerFieldIndices; // owner MT -> string field indices
     private HashSet<ulong>? _indexScanTypesWithoutStringFields; // negative cache
-    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> total string bytes owned
+    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> sampled string bytes
+    private Dictionary<ulong, int>? _indexScanStringOwnerSampleCounts; // owner MT -> instances sampled
 
     /// <summary>
     /// Resolves whether the index-scan dedup branch will run this pass (mirroring the
@@ -112,6 +118,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             _indexScanStringOwnerFieldIndices = new Dictionary<ulong, int[]>(capacity: 1000);
             _indexScanTypesWithoutStringFields = new HashSet<ulong>(capacity: 1000);
             _indexScanStringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerSampleCounts = new Dictionary<ulong, int>(capacity: MaxStringOwnerTypesToTrack);
         }
         else
         {
@@ -119,6 +126,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             _indexScanStringOwnerFieldIndices = null;
             _indexScanTypesWithoutStringFields = null;
             _indexScanStringOwnerTypeBytes = null;
+            _indexScanStringOwnerSampleCounts = null;
         }
 
         bool runDedup = stringOptions.EnableDeduplication
@@ -245,10 +253,17 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         }
 
         var ownerBytes = _indexScanStringOwnerTypeBytes!;
+        var sampleCounts = _indexScanStringOwnerSampleCounts!;
         bool alreadyTracked = ownerBytes.ContainsKey(mt);
         if (!alreadyTracked && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
             return; // cap reached — only keep accumulating types already being tracked
 
+        sampleCounts.TryGetValue(mt, out int samplesSoFar);
+        if (samplesSoFar >= MaxSamplesPerOwnerType)
+            return; // sample cap reached for this type — total is extrapolated from the average
+
+        // Only past this point do we touch ClrMD's per-object machinery (GetObject/ReadObject),
+        // which is the expensive part — bounded above to MaxSamplesPerOwnerType per type.
         ClrObject obj = _heap!.GetObject(entry.Address);
         if (!obj.IsValid) return;
 
@@ -269,11 +284,9 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             }
         }
 
-        if (addBytes > 0)
-        {
-            ownerBytes.TryGetValue(mt, out ulong existing);
-            ownerBytes[mt] = existing + addBytes;
-        }
+        sampleCounts[mt] = samplesSoFar + 1;
+        ownerBytes.TryGetValue(mt, out ulong existing);
+        ownerBytes[mt] = existing + addBytes;
     }
 
     IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
@@ -288,6 +301,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         if (_indexScanOwnerTypesActive)
         {
             var ownerBytes = _indexScanStringOwnerTypeBytes!;
+            var sampleCounts = _indexScanStringOwnerSampleCounts!;
             foreach (IHeapIndexScanParticipant p in partials)
             {
                 var other = (StringAnalyzer)p;
@@ -299,6 +313,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                         continue;
                     ownerBytes.TryGetValue(kvp.Key, out ulong existing);
                     ownerBytes[kvp.Key] = existing + kvp.Value;
+
+                    sampleCounts.TryGetValue(kvp.Key, out int existingSamples);
+                    other._indexScanStringOwnerSampleCounts!.TryGetValue(kvp.Key, out int otherSamples);
+                    sampleCounts[kvp.Key] = existingSamples + otherSamples;
                 }
             }
         }
@@ -968,8 +986,19 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
                 {
                     // Index available: the scan already happened as this analyzer's
                     // IHeapIndexScanParticipant.OnHeapEntry during the shared dispatcher pass
-                    // (disk-backed, no live heap walk) — just read the accumulated result back.
-                    stringOwnerTypeBytes = _indexScanStringOwnerTypeBytes;
+                    // (disk-backed, no live heap walk) — bytes were sampled up to
+                    // MaxSamplesPerOwnerType instances per type, so extrapolate against the
+                    // type's real instance count from the pre-built index.
+                    stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+                    foreach (var kv in _indexScanStringOwnerTypeBytes!)
+                    {
+                        _indexScanStringOwnerSampleCounts!.TryGetValue(kv.Key, out int samples);
+                        if (samples <= 0) continue;
+
+                        ulong realCount = typeAggregates.TryGetValue(kv.Key, out var agg) ? (ulong)Math.Max(agg.Count, 0) : (ulong)samples;
+                        double avgBytesPerInstance = (double)kv.Value / samples;
+                        stringOwnerTypeBytes[kv.Key] = (ulong)(avgBytesPerInstance * realCount);
+                    }
                 }
                 else
                 {

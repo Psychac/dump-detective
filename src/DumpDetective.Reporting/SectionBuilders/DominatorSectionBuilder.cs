@@ -23,8 +23,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var (confidenceScore, caveats) = ConfidenceScoring.Compute(0.75,
             ConfidenceScoring.F(d.ObjectScanCapped, 0.15, "Object scan was capped; retention counts may be partial."),
             ConfidenceScoring.F(d.ReferenceCountingSkipped, 0.20, "Reference counting was skipped; results are estimated."),
-            ConfidenceScoring.F(d.SkippedReferenceAddresses > 0, 0.10, $"{d.SkippedReferenceAddresses:N0} reference addresses were skipped."),
-            ConfidenceScoring.F(d.HeuristicOnly, 0.10, "HeuristicOnly flag is set — results may be further imprecise."));
+            ConfidenceScoring.F(d.SkippedReferenceAddresses > 0, 0.10, $"{d.SkippedReferenceAddresses:N0} reference addresses were skipped."));
 
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
@@ -49,9 +48,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         if (d.TopDominatorTypes.Count > 0)
         {
-            blocks.Add(T(d.HeuristicOnly
-                ? $"Retained bytes are estimated with a bounded BFS over {d.AnalyzedCount:N0} suspects (breadth cap {d.MaxBreadth:N0}, depth cap {d.MaxDepth:N0})."
-                : "Retained bytes are available for the listed suspects."));
+            blocks.Add(T($"Retained bytes are estimated with a bounded BFS over {d.AnalyzedCount:N0} suspects (breadth cap {d.MaxBreadth:N0}, depth cap {d.MaxDepth:N0})."));
 
             compactTables.Add(STCompact(
                 "Top dominator suspects by retained bytes",

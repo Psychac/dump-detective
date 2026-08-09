@@ -10,7 +10,7 @@
 > **Date**: 2026-07-29
 >
 > **P0 Completion**: ✅ All 3 P0 items implemented (2026-08-09)
-> **P1 Completion**: ✅ 4/5 items implemented (P1-1 BFS exclusivity, P1-2 gen2Count surface, P1-3 Take option, P1-5 root path limits)
+> **P1 Completion**: ✅ All 5 P1 items implemented (P1-1 BFS exclusivity, P1-2 gen2Count surface, P1-3 Take option, P1-4 remove HeuristicOnly, P1-5 root path limits)
 
 ---
 
@@ -415,7 +415,7 @@ output is treated as authoritative.
 | P1 | Standardize BFS exclusivity semantics: use shared `visited` set in both `PopulateRetainedBytes` and the top-K loop, or document the intentional divergence | High — incorrect comparison between tables | Low | High | Improvement | ✅ DONE |
 | P1 | Surface `gen2Count` and `lohSize` in `TypeSnapshot` and the section builder table | High — major scoring factor invisible to engineers | Low | High | Improvement | ✅ DONE |
 | P1 | Fix section builder `.Take(20)` hardcode — respect `TopHighlyReferencedObjectsToShow` from options | Medium — configured value silently ignored | Low | High | Improvement | ✅ DONE |
-| P1 | Remove or rename `HeuristicOnly` flag — either always omit it or replace with a graduated confidence enum (`ShallowEstimate` / `DeepEstimate`) | Medium — currently misleads with a permanent confidence deduction | Medium | High | Improvement |
+| P1 | Remove or rename `HeuristicOnly` flag — either always omit it or replace with a graduated confidence enum (`ShallowEstimate` / `DeepEstimate`) | Medium — currently misleads with a permanent confidence deduction | Medium | High | Improvement | ✅ DONE |
 | P1 | Source `RootPathSearchLimits` in `PopulateEvidence` from `RetentionOptions` or `ExecutionPolicy` | Medium — evidence quality not tunable | Low | High | Improvement | ✅ DONE |
 | P2 | Add retention pressure ratio (`total_retained_est / total_heap_size`) as a key metric and trend metric | Medium — context for absolute byte values | Low | High | Improvement |
 | P2 | Add `wasCapped` per-type to `TypeSnapshot` and the section builder | Medium — indicates estimate reliability | Low | Medium | Improvement |

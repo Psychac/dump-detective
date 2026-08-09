@@ -208,7 +208,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         {
             return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>())
             {
-                HeuristicOnly = true,
                 MaxBreadth = options.MaxLeakScanObjects,
                 MaxDepth = 20,
                 HighlyReferencedObjectCount = signals.HighlyReferencedObjectCount,
@@ -276,7 +275,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             topTypes.Count,
             totalEstimatedRetainedBytes,
             topTypes,
-            HeuristicOnly: true,
             MaxBreadth: maxBreadth,
             MaxDepth: MaxDepth,
             HighlyReferencedObjectCount: signals.HighlyReferencedObjectCount,

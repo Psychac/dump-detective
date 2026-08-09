@@ -218,26 +218,34 @@ namespace DumpDetective.Analysis.Analyzers
             _exceptionTypeCounts!.TryGetValue(key, out int typeCount);
             _exceptionTypeCounts[key] = typeCount + 1;
 
-            int generation = _heap!.GetObjectGeneration(exceptionAddress);
-            switch (generation)
+            try
             {
-                case 0:
-                    _exceptionGen0Counts!.TryGetValue(key, out int gen0);
-                    _exceptionGen0Counts[key] = gen0 + 1;
-                    break;
-                case 1:
-                    _exceptionGen1Counts!.TryGetValue(key, out int gen1);
-                    _exceptionGen1Counts[key] = gen1 + 1;
-                    break;
-                case 2:
-                    _exceptionGen2Counts!.TryGetValue(key, out int gen2);
-                    _exceptionGen2Counts[key] = gen2 + 1;
-                    break;
-                default:
-                    _exceptionLohCounts!.TryGetValue(key, out int loh);
-                    _exceptionLohCounts[key] = loh + 1;
-                    break;
+                var seg = _heap!.GetSegmentByAddress(exceptionAddress);
+                if (seg != null)
+                {
+                    int generation = (int)seg.GetGeneration(exceptionAddress);
+                    switch (generation)
+                    {
+                        case 0:
+                            _exceptionGen0Counts!.TryGetValue(key, out int gen0);
+                            _exceptionGen0Counts[key] = gen0 + 1;
+                            break;
+                        case 1:
+                            _exceptionGen1Counts!.TryGetValue(key, out int gen1);
+                            _exceptionGen1Counts[key] = gen1 + 1;
+                            break;
+                        case 2:
+                            _exceptionGen2Counts!.TryGetValue(key, out int gen2);
+                            _exceptionGen2Counts[key] = gen2 + 1;
+                            break;
+                        default:
+                            _exceptionLohCounts!.TryGetValue(key, out int loh);
+                            _exceptionLohCounts[key] = loh + 1;
+                            break;
+                    }
+                }
             }
+            catch { }
 
             bool isActive = _activeExceptions!.TryGetValue(exceptionAddress, out var activeExceptionContext);
             if (isActive)
@@ -702,22 +710,30 @@ namespace DumpDetective.Analysis.Analyzers
                 Interlocked.Increment(ref totalExceptions);
                 exceptionTypeCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
 
-                int generation = heap.GetObjectGeneration(exceptionAddress);
-                switch (generation)
+                try
                 {
-                    case 0:
-                        exceptionGen0Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                        break;
-                    case 1:
-                        exceptionGen1Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                        break;
-                    case 2:
-                        exceptionGen2Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                        break;
-                    default:
-                        exceptionLohCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                        break;
+                    var seg = heap.GetSegmentByAddress(exceptionAddress);
+                    if (seg != null)
+                    {
+                        int generation = (int)seg.GetGeneration(exceptionAddress);
+                        switch (generation)
+                        {
+                            case 0:
+                                exceptionGen0Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                                break;
+                            case 1:
+                                exceptionGen1Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                                break;
+                            case 2:
+                                exceptionGen2Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                                break;
+                            default:
+                                exceptionLohCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
+                                break;
+                        }
+                    }
                 }
+                catch { }
 
                 bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
 
@@ -879,10 +895,16 @@ namespace DumpDetective.Analysis.Analyzers
                     // Use ClrException wrapper for typed field access
                     instance.Message = clrException.Message ?? "";
                     instance.HResult = clrException.HResult;
+                }
 
-                    if (clrException.InnerException != null && clrException.InnerException.Type != null)
+                // Get inner exception via field access (ClrException doesn't expose it)
+                var innerExceptionField = exceptionObj.Type?.GetFieldByName("_innerException");
+                if (innerExceptionField != null)
+                {
+                    var innerObj = innerExceptionField.ReadObject(exceptionObj, interior: false);
+                    if (innerObj.IsValid && innerObj.Type != null)
                     {
-                        instance.InnerExceptionType = clrException.InnerException.Type.Name;
+                        instance.InnerExceptionType = innerObj.Type.Name;
                     }
                 }
 
@@ -971,18 +993,23 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Try ClrException.StackTrace (the correct API for stack frames)
                 var clrException = exceptionObj.AsException();
-                if (clrException != null && clrException.StackTrace != null && clrException.StackTrace.Count > 0)
+                if (clrException?.StackTrace != null)
                 {
-                    for (int i = 0; i < Math.Min(clrException.StackTrace.Count, 50); i++)
+                    var strace = clrException.StackTrace;
+                    if (strace.Count() > 0)
                     {
-                        var frame = clrException.StackTrace[i];
-                        if (frame?.Method != null)
+                        int count = strace.Count();
+                        for (int i = 0; i < Math.Min(count, 50); i++)
                         {
-                            stackFrames.Add($"   at {frame.Method.Signature}");
+                            var frame = strace[i];
+                            if (frame?.Method != null)
+                            {
+                                stackFrames.Add($"   at {frame.Method.Signature}");
+                            }
                         }
+                        if (stackFrames.Count > 0)
+                            return stackFrames;
                     }
-                    if (stackFrames.Count > 0)
-                        return stackFrames;
                 }
 
                 // If still no stack, try to get from exception's ToString()

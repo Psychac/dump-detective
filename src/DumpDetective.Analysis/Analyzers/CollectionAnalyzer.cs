@@ -288,6 +288,10 @@ namespace DumpDetective.Analysis.Analyzers
             if (kind == CollectionKind.SortedSet)
                 return;
 
+            // Honor the IncludeQueueAnalysis option
+            if (kind == CollectionKind.Queue && !_options.IncludeQueueAnalysis)
+                return;
+
             if (kind == CollectionKind.Dictionary)
             {
                 stats.TotalCollections++;
@@ -570,6 +574,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
                 if (kind == CollectionKind.SortedSet)
+                    return;
+
+                // Honor the IncludeQueueAnalysis option
+                if (kind == CollectionKind.Queue && !_options.IncludeQueueAnalysis)
                     return;
 
                 // determine generation and increment per-kind generation counter. Prefer the

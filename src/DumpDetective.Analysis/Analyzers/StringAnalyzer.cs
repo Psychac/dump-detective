@@ -1238,6 +1238,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         IProgress<AnalyzerProgressReport>? progress = null,
         int maxTypesToTrack = 100)
     {
+        // Cache: MethodTable -> string field indices (built on-demand per type)
+        var stringFieldsByType = new Dictionary<ulong, int[]>(capacity: 1000);
+        var typesWithoutStringFields = new HashSet<ulong>(capacity: 1000); // Negative cache
+
         int typesTracked = 0;
         var sc = new ObjectScanCounter("scanning for string-owning types", progress);
 
@@ -1246,16 +1250,57 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             sc.Tick();
             if (!obj.IsValid || obj.Type == null) continue;
 
-            var fields = fieldCache.GetFields(obj.Type);
-            foreach (var field in fields)
+            var mt = obj.Type.MethodTable;
+
+            // Check negative cache first (common case: type has no string fields)
+            if (typesWithoutStringFields.Contains(mt))
+                continue;
+
+            // Check positive cache
+            if (!stringFieldsByType.TryGetValue(mt, out var stringFieldIndices))
+            {
+                // Build cache entry for this type (first time we see it)
+                var fields = fieldCache.GetFields(obj.Type);
+                var stringIndices = new List<int>(capacity: 4);
+
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    try
+                    {
+                        var fieldType = fields[i].Type;
+                        if (fieldType != null && stringMts.Contains(fieldType.MethodTable))
+                        {
+                            stringIndices.Add(i);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip malformed fields
+                        continue;
+                    }
+                }
+
+                if (stringIndices.Count > 0)
+                {
+                    stringFieldIndices = stringIndices.ToArray();
+                    stringFieldsByType[mt] = stringFieldIndices;
+                }
+                else
+                {
+                    // Negative cache: this type has no string fields
+                    typesWithoutStringFields.Add(mt);
+                    continue;
+                }
+            }
+
+            // Process string fields for this object
+            var objFields = fieldCache.GetFields(obj.Type);
+            foreach (int fieldIndex in stringFieldIndices)
             {
                 try
                 {
-                    var fieldType = field.Type;
-                    if (fieldType == null) continue;
-
-                    var fieldMt = fieldType.MethodTable;
-                    if (!stringMts.Contains(fieldMt)) continue;
+                    if (fieldIndex >= objFields.Length) continue;
+                    var field = objFields[fieldIndex];
 
                     var stringRef = field.ReadObject(obj, interior: false);
                     if (!stringRef.IsValid) continue;

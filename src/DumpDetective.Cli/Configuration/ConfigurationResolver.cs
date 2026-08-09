@@ -280,9 +280,7 @@ internal sealed class ConfigurationResolver
         {
             MaxLeakScanObjects = PositiveOrNull(policy?.MaxLeakScanObjects) ?? memoryLeak.MaxLeakScanObjects,
             MaxReferenceAddresses = PositiveOrNull(policy?.MaxReferenceAddresses) ?? memoryLeak.MaxReferenceAddresses,
-            ReferenceChainMaxPathDepth = PositiveOrNull(policy?.ReferenceChainMaxPathDepth) ?? referenceChain.MaxPathDepth,
-            ReferenceChainFastModeMaxDepth = PositiveOrNull(policy?.ReferenceChainFastModeMaxDepth) ?? referenceChain.FastModeMaxDepth,
-            ReferenceChainMaxPathSearchObjects = PositiveOrNull(policy?.ReferenceChainMaxPathSearchObjects) ?? referenceChain.MaxPathSearchObjects
+            ReferenceChainMaxPathDepth = PositiveOrNull(policy?.ReferenceChainMaxPathDepth) ?? referenceChain.MaxPathDepth
         };
     }
 

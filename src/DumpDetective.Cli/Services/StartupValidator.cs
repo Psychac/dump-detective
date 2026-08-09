@@ -156,11 +156,6 @@ internal sealed class StartupValidator
         {
             errors.Add("ReferenceChain.TopCount must be greater than zero.");
         }
-
-        if (options.MaxPathSearchObjects <= 0)
-        {
-            errors.Add("ReferenceChain.MaxPathSearchObjects must be greater than zero.");
-        }
     }
 
     private static void ValidateEventLeakOptions(EventLeakOptions options, List<string> errors)

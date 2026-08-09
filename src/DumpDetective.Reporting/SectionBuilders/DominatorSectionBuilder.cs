@@ -55,11 +55,13 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             compactTables.Add(STCompact(
                 "Top dominator suspects by retained bytes",
-                new[] { CH("Type"), CH("Objects","number"), CH("Shallow","bytes"), CH("Retained","bytes"), CH("Ratio", "number", "permille"), CH("Avg Size","bytes"), CH("Sample Addr") },
-                d.TopDominatorTypes.Take(20).Select(type => R(
+                new[] { CH("Type"), CH("Objects","number"), CH("Gen2","number"), CH("Shallow","bytes"), CH("LOH","bytes"), CH("Retained","bytes"), CH("Ratio", "number", "permille"), CH("Avg Size","bytes"), CH("Sample Addr") },
+                d.TopDominatorTypes.Take(d.MaxTopDominatorTypesToShow).Select(type => R(
                     type.TypeName,
                     type.Count,
+                    type.Gen2Count > 0 ? type.Gen2Count : null,
                     type.TotalBytes,
+                    type.LohBytes > 0 ? type.LohBytes : null,
                     type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
                     (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000),
                     type.AverageSize > 0 ? type.AverageSize : null,
@@ -69,7 +71,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 compactTables.Add(STCompact(
                     "Dominator impact per-mille (of total estimated retained)",
                     new[] { CH("Type"), CH("Est. Retained","bytes"), CH("Per-mille", "number", "permille") },
-                    d.TopDominatorTypes.Take(20).Select(type => R(
+                    d.TopDominatorTypes.Take(d.MaxTopDominatorTypesToShow).Select(type => R(
                         type.TypeName,
                         type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
                         type.EstimatedRetainedBytes == 0 ? null : (double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes)).ToArray()));
@@ -81,7 +83,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             compactTables.Add(STCompact(
                 "Highly referenced objects",
                 new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Incoming Refs","number"), CH("Est. Retained","bytes") },
-                d.TopHighlyReferencedObjects.Take(20).Select(o => R(new object?[] { $"0x{o.Address:X}", o.TypeName, o.Size, o.IncomingReferences, o.EstimatedRetainedBytes > 0 ? o.EstimatedRetainedBytes : null })).ToArray()));
+                d.TopHighlyReferencedObjects.Take(d.MaxTopDominatorTypesToShow).Select(o => R(new object?[] { $"0x{o.Address:X}", o.TypeName, o.Size, o.IncomingReferences, o.EstimatedRetainedBytes > 0 ? o.EstimatedRetainedBytes : null })).ToArray()));
         }
 
         if (d.TopRetentionTypes is { Count: > 0 })
@@ -89,7 +91,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             compactTables.Add(STCompact(
                 "Top retention types",
                 new[] { CH("Type"), CH("Objects","number"), CH("Footprint","bytes"), CH("Total Incoming Refs","number"), CH("Max Incoming Refs","number"), CH("Est. Retained","bytes"), CH("Ratio", "number", "ratio") },
-                d.TopRetentionTypes.Take(20).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, t.TotalBytes, t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? t.EstimatedRetainedBytes : null, RatioValue(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
+                d.TopRetentionTypes.Take(d.MaxTopDominatorTypesToShow).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, t.TotalBytes, t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? t.EstimatedRetainedBytes : null, RatioValue(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
         }
 
         if (caveats.Count > 0)

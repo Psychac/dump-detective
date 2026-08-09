@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 64 |
-| **P1 Implemented** | 101 |
+| **P1 Implemented** | 103 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 70.5% (165/234) |
+| **Overall P0+P1 Rate** | 70.9% (167/234) |
 
 ---
 
@@ -62,9 +62,9 @@
 | 26 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
 | 27 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 28 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
-| 29 | **DominatorAnalyzer** | 3/3 | 1/5 | 0/2 | 0/3 | ✅ P0 complete (3/3); P1 20% (1/5 done); P1-1 done; P1-2,P1-3,P1-4,P1-5 pending |
+| 29 | **DominatorAnalyzer** | 3/3 | 3/5 | 0/2 | 0/3 | ✅ P0 complete (3/3); P1 60% (3/5 done); P1-1,P1-2,P1-3 done; P1-4,P1-5 pending |
 
-**Subtotal: 37/42 P0 done, 40/59 P1 done, 19/57 P2 done** (in-progress pools)
+**Subtotal: 37/42 P0 done, 42/59 P1 done, 19/57 P2 done** (in-progress pools)
 
 ---
 

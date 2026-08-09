@@ -35,7 +35,12 @@ internal sealed record DominatorDomainResult(
     /// Total shallow bytes represented by <see cref="TopHighlyReferencedObjects"/>.
     /// This scoped footprint metric is a headline for reporting/trending.
     /// </summary>
-    ulong TopHighlyReferencedTotalBytes = 0) : AnalyzerDomainResult;
+    ulong TopHighlyReferencedTotalBytes = 0,
+    /// <summary>
+    /// Maximum number of items to display in section builder tables (from RetentionOptions.TopHighlyReferencedObjectsToShow).
+    /// Used to respect the configured display limit instead of hardcoding table size.
+    /// </summary>
+    int MaxTopDominatorTypesToShow = 15) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

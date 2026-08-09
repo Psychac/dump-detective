@@ -156,7 +156,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
     {
         Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
         if (typeStats.Count == 0)
-            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>());
+            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow);
 
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? aggregates = null;
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
@@ -216,7 +216,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
                 TopHighlyReferencedObjects = topHighlyReferencedObjects,
                 ObjectScanCapped = signals.ObjectScanCapped,
                 TopRetentionTypes = topRetentionTypes,
-                TopHighlyReferencedTotalBytes = topHighlyReferencedTotalBytes
+                TopHighlyReferencedTotalBytes = topHighlyReferencedTotalBytes,
+                MaxTopDominatorTypesToShow = options.TopHighlyReferencedObjectsToShow
             };
         }
 
@@ -233,7 +234,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             return StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
         });
 
-        int topCount = Math.Min(options.TopHighlyReferencedObjectsToShow, Math.Min(candidates.Count, 20));
+        int topCount = Math.Min(options.TopHighlyReferencedObjectsToShow, candidates.Count);
         var topTypes = new List<TypeSnapshot>(topCount);
         ulong totalEstimatedRetainedBytes = 0;
 
@@ -248,7 +249,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            (string typeName, ulong sampleAddress, int count, ulong totalSize, ulong lohSize, _, _) = candidates[i];
+            (string typeName, ulong sampleAddress, int count, ulong totalSize, ulong lohSize, long gen2Count, _) = candidates[i];
             ClrObject root = heap.GetObject(sampleAddress);
             if (!root.IsValid || root.Type is null)
                 continue;
@@ -264,7 +265,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
                 lohSize,
                 AverageSize: averageSize,
                 EstimatedRetainedBytes: retainedBytes,
-                SampleAddress: sampleAddress));
+                SampleAddress: sampleAddress,
+                Gen2Count: gen2Count));
         }
 
         topTypes.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
@@ -282,7 +284,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             TopHighlyReferencedObjects: topHighlyReferencedObjects,
             ObjectScanCapped: signals.ObjectScanCapped,
             TopRetentionTypes: topRetentionTypes,
-            TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes);
+            TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes,
+            MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow);
     }
 
     // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when

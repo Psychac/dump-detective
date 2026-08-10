@@ -37,6 +37,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return new ObjectShapeAnalyzerDomainResult(
                     TopReferenceHeavyTypes: [],
                     TopValueHeavyTypes: [],
+                    TopBalancedTypes: [],
                     TotalTypesAnalyzed: 0,
                     AvgRefFieldsPerType: 0,
                     TotalGcScanWork: 0,
@@ -61,6 +62,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             var refHeavyCandidates = new List<TypeShapeProfile>();
             var valHeavyCandidates = new List<TypeShapeProfile>();
+            var balancedCandidates = new List<TypeShapeProfile>();
 
             long totalRefFields = 0;
             long totalGcScanWork = 0;
@@ -117,6 +119,8 @@ namespace DumpDetective.Analysis.Analyzers
                     refHeavyCandidates.Add(profile);
                 else if (category == ObjectShapeCategory.ValueHeavy)
                     valHeavyCandidates.Add(profile);
+                else if (category == ObjectShapeCategory.Balanced)
+                    balancedCandidates.Add(profile);
             }
 
             // Sort by GC scan cost score (refRatio × instanceCount) in descending order
@@ -128,14 +132,20 @@ namespace DumpDetective.Analysis.Analyzers
             valHeavyCandidates.Sort(static (a, b) =>
                 b.TotalSize.CompareTo(a.TotalSize));
 
+            // Sort balanced types by instance count (most populous first)
+            balancedCandidates.Sort(static (a, b) =>
+                b.InstanceCount.CompareTo(a.InstanceCount));
+
             var refHeavy = refHeavyCandidates.Take(options.TopListLimit).ToList();
             var valHeavy = valHeavyCandidates.Take(options.TopListLimit).ToList();
+            var balanced = balancedCandidates.Take(options.TopListLimit).ToList();
 
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 
             return new ObjectShapeAnalyzerDomainResult(
                 TopReferenceHeavyTypes: refHeavy,
                 TopValueHeavyTypes: valHeavy,
+                TopBalancedTypes: balanced,
                 TotalTypesAnalyzed: typesAnalyzed,
                 AvgRefFieldsPerType: avgRefFields,
                 TotalGcScanWork: totalGcScanWork,

@@ -29,6 +29,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
             ["avg_ref_fields_per_type"] = new NumericMetricValue(d.AvgRefFieldsPerType, MetricUnit.Custom, $"{d.AvgRefFieldsPerType:F1}"),
             ["total_gc_scan_work"] = new NumericMetricValue(d.TotalGcScanWork, MetricUnit.Custom, d.TotalGcScanWork.ToString("N0")),
             ["reference_heavy_types"] = new NumericMetricValue(d.TopReferenceHeavyTypes.Count, MetricUnit.Count),
+            ["balanced_types"] = new NumericMetricValue(d.TopBalancedTypes.Count, MetricUnit.Count),
             ["value_heavy_types"] = new NumericMetricValue(d.TopValueHeavyTypes.Count, MetricUnit.Count),
         };
 
@@ -48,7 +49,15 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
                 BuildShapeRows(d.TopValueHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation. " +
+        if (d.TopBalancedTypes.Count > 0)
+        {
+            compactTables.Add(STCompact(
+                "Balanced types",
+                new[] { CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"), CH("Ref Ratio"), CH("Instances","number"), CH("Size (bytes)","number"), CH("GC Scan Cost","number"), CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category") },
+                BuildShapeRows(d.TopBalancedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Balanced types (ratio 0.2–0.6) are the numerically dominant heap residents. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation. " +
                     $"(Avg ref fields is computed over at most {d.InstanceCountCap:N0} types by instance count.)"));
 
         return new AnalyzerDetailSection(

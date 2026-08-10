@@ -38,6 +38,7 @@ namespace DumpDetective.Analysis.Analyzers
                     TopReferenceHeavyTypes: [],
                     TopValueHeavyTypes: [],
                     TopBalancedTypes: [],
+                    TopArrayTypes: [],
                     TotalTypesAnalyzed: 0,
                     AvgRefFieldsPerType: 0,
                     TotalGcScanWork: 0,
@@ -63,6 +64,7 @@ namespace DumpDetective.Analysis.Analyzers
             var refHeavyCandidates = new List<TypeShapeProfile>();
             var valHeavyCandidates = new List<TypeShapeProfile>();
             var balancedCandidates = new List<TypeShapeProfile>();
+            var arrayCandidates = new List<TypeShapeProfile>();
 
             long totalRefFields = 0;
             long totalGcScanWork = 0;
@@ -121,6 +123,10 @@ namespace DumpDetective.Analysis.Analyzers
                     valHeavyCandidates.Add(profile);
                 else if (category == ObjectShapeCategory.Balanced)
                     balancedCandidates.Add(profile);
+
+                // Collect reference-type arrays separately (arrays with 1+ ref fields)
+                if (profile.IsArray && shape.RefFields > 0)
+                    arrayCandidates.Add(profile);
             }
 
             // Sort by GC scan cost score (refRatio × instanceCount) in descending order
@@ -136,9 +142,15 @@ namespace DumpDetective.Analysis.Analyzers
             balancedCandidates.Sort(static (a, b) =>
                 b.InstanceCount.CompareTo(a.InstanceCount));
 
+            // Sort array types by GC scan cost (refFields × instanceCount) — single array impact
+            arrayCandidates.Sort(static (a, b) =>
+                ((long)(b.ReferenceFields * (double)b.InstanceCount))
+                    .CompareTo((long)(a.ReferenceFields * (double)a.InstanceCount)));
+
             var refHeavy = refHeavyCandidates.Take(options.TopListLimit).ToList();
             var valHeavy = valHeavyCandidates.Take(options.TopListLimit).ToList();
             var balanced = balancedCandidates.Take(options.TopListLimit).ToList();
+            var arrays = arrayCandidates.Take(options.TopListLimit).ToList();
 
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 
@@ -146,6 +158,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TopReferenceHeavyTypes: refHeavy,
                 TopValueHeavyTypes: valHeavy,
                 TopBalancedTypes: balanced,
+                TopArrayTypes: arrays,
                 TotalTypesAnalyzed: typesAnalyzed,
                 AvgRefFieldsPerType: avgRefFields,
                 TotalGcScanWork: totalGcScanWork,

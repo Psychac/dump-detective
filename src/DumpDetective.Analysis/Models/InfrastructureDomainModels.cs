@@ -23,7 +23,8 @@ internal sealed record DbConnectionSnapshot(
     ulong Address,
     string StateLabel,
     int StateValue,
-    string? AnonymisedConnectionString = null);
+    string? AnonymisedConnectionString = null,
+    sbyte Generation = -1);
 
 /// <summary>
 /// Summary of connections grouped by pool (server/database).
@@ -45,6 +46,8 @@ internal sealed record DbConnectionDomainResult(
     int BrokenConnections,
     int OtherConnections,
     int UnknownStateConnections,
+    int Gen2OpenConnections,
+    int Gen0OpenConnections,
     IReadOnlyList<DbConnectionTypeSummary> ByType,
     IReadOnlyList<DbConnectionSnapshot> TopOpenConnections,
     IReadOnlyList<PoolSummary> TopPools,

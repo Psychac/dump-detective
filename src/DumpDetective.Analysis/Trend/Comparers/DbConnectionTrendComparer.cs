@@ -16,6 +16,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("dbconn.closed", null, r.ClosedConnections,"connections", MetricTrendDirection.Neutral),
                 new("dbconn.broken", null, r.BrokenConnections,"connections", MetricTrendDirection.HigherIsWorse),
                 new("dbconn.unknown", null, r.UnknownStateConnections, "connections", MetricTrendDirection.HigherIsWorse),
+                new("dbconn.gen2.open", null, r.Gen2OpenConnections, "connections", MetricTrendDirection.HigherIsWorse),
+                new("dbconn.gen0.open", null, r.Gen0OpenConnections, "connections", MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (DbConnectionTypeSummary t in r.ByType)
@@ -37,6 +39,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("dbconn.closed", null, b.ClosedConnections, c.ClosedConnections, "connections", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("dbconn.broken", null, b.BrokenConnections, c.BrokenConnections, "connections", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("dbconn.unknown", null, b.UnknownStateConnections, c.UnknownStateConnections, "connections", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("dbconn.gen2.open", null, b.Gen2OpenConnections, c.Gen2OpenConnections, "connections", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("dbconn.gen0.open", null, b.Gen0OpenConnections, c.Gen0OpenConnections, "connections", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

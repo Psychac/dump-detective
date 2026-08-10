@@ -22,7 +22,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_NoFindings_WhenNotFound()
     {
         var gen = new DbConnectionFindingGenerator();
-        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, [], [], [], false);
+        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false);
         gen.CanGenerate(result).Should().BeTrue();
         gen.Generate(result).Should().BeEmpty();
     }
@@ -69,7 +69,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_CanGenerate_OnlyForDbConnectionDomainResult()
     {
         var gen = new DbConnectionFindingGenerator();
-        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, [], [], [], false)).Should().BeTrue();
+        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false)).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
     }
 
@@ -270,6 +270,8 @@ public sealed class InfrastructureFindingGeneratorTests
             BrokenConnections: broken,
             OtherConnections: other,
             UnknownStateConnections: unknown,
+            Gen2OpenConnections: 0,
+            Gen0OpenConnections: 0,
             ByType: summary,
             TopOpenConnections: [],
             TopPools: [],

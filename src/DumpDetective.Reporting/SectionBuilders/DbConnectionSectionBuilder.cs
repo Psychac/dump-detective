@@ -26,6 +26,8 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
         {
             ["total_connections"] = new NumericMetricValue(d.TotalConnections, MetricUnit.Count),
             ["open_connections"] = new NumericMetricValue(d.OpenConnections, MetricUnit.Count),
+            ["gen2_open_connections"] = new NumericMetricValue(d.Gen2OpenConnections, MetricUnit.Count),
+            ["gen0_open_connections"] = new NumericMetricValue(d.Gen0OpenConnections, MetricUnit.Count),
             ["closed_connections"] = new NumericMetricValue(d.ClosedConnections, MetricUnit.Count),
             ["broken_connections"] = new NumericMetricValue(d.BrokenConnections, MetricUnit.Count),
             ["other_connections"] = new NumericMetricValue(d.OtherConnections, MetricUnit.Count),
@@ -101,6 +103,13 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
             compactTables.Add(STCompact("Top exhausted connection pools",
                 new[] { CH("Pool (Server/Database)"), CH("Open","number"), CH("Sampled Total","number"), CH("Utilisation %","percent") },
                 poolRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        // Add generation breakdown note
+        if (d.OpenConnections > 0)
+        {
+            string genNote = $"Open connections breakdown by GC generation: Gen2 (long-lived, {d.Gen2OpenConnections:N0}) likely indicates leaks; Gen0 ({d.Gen0OpenConnections:N0}) likely in-flight transactions.";
+            blocks.Add(new TextBlock(genNote));
         }
 
         if (d.StateScanCapped)

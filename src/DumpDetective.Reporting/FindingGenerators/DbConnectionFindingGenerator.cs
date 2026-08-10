@@ -93,6 +93,26 @@ internal sealed class DbConnectionFindingGenerator : IFindingGenerator
                 MetricUnit: "broken connections"));
         }
 
+        // ── Gen2 (long-lived) open connections finding ──────────────────────────
+        if (r.Gen2OpenConnections >= 5)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Critical,
+                Title: $"{r.Gen2OpenConnections:N0} Gen2 (long-lived) open DB connections",
+                Evidence: $"{r.Gen2OpenConnections:N0} open connections are in Generation 2 (long-lived objects). " +
+                          "Gen2 objects are rarely collected, indicating these connections have been open for a long time and are likely leaked.",
+                Recommendation:
+                    "Gen2 open connections are strong evidence of connection pool leaks. " +
+                    "Review connection lifecycle: ensure all opened connections are properly closed in using blocks or try/finally. " +
+                    "Check for long-running operations that hold connections open unnecessarily. " +
+                    "Monitor for accumulated connection leaks in application restart cycles.",
+                Tags: ["infrastructure", "connections", "leak", "gen2", "long-lived"],
+                MetricValue: r.Gen2OpenConnections,
+                MetricUnit: "gen2 open connections"));
+        }
+
         return findings;
     }
 

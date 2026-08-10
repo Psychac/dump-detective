@@ -69,7 +69,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
         // Try to read anonymised connection string for server/pool identification
         string? anonymisedConnStr = TryReadAnonymisedConnectionString(heap, entry.Address);
 
-        return new DbConnectionSnapshot(typeName, entry.Address, stateLabel, stateVal, anonymisedConnStr);
+        return new DbConnectionSnapshot(typeName, entry.Address, stateLabel, stateVal, anonymisedConnStr, entry.Generation);
     }
 
     private static string? TryReadAnonymisedConnectionString(ClrHeap heap, ulong address)
@@ -120,7 +120,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
     private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
-    private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, ulong Bytes)>? _typeStats;
+    private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<DbConnectionSnapshot>? _sampler;
 
     /// <summary>
@@ -136,12 +136,12 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
 
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, ulong Bytes)>(candidateMts.Count);
+        var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
         {
             // Pre-seed from TypeAggregates when available (no heap access needed for counts)
             int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, kv.Value.Bytes);
+            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, 0, 0, kv.Value.Bytes);
         }
 
         _typeStats = typeStats;
@@ -187,6 +187,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
                     self.Broken + o.Broken,
                     self.Other + o.Other,
                     self.Unknown + o.Unknown,
+                    self.Gen2Open + o.Gen2Open,
+                    self.Gen0Open + o.Gen0Open,
                     self.Bytes);
             }
 
@@ -208,11 +210,21 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
         // Read state field (capped per type, gated via TryGetSample's reserve-then-sample order)
         DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, typeName);
 
-        // Tally state
+        // Tally state and generation
         int open = ts.Open; int closed = ts.Closed; int broken = ts.Broken; int other = ts.Other; int unknown = ts.Unknown;
+        int gen2Open = ts.Gen2Open; int gen0Open = ts.Gen0Open;
+
         if (snap is not null)
         {
-            if (snap.StateValue == StateOpen)        open++;
+            if (snap.StateValue == StateOpen)
+            {
+                open++;
+                // Track open connections by generation (Gen2 = long-lived/leaked, Gen0 = in-flight)
+                if (snap.Generation == 2)
+                    gen2Open++;
+                else if (snap.Generation == 0)
+                    gen0Open++;
+            }
             else if (snap.StateValue == StateClosed) closed++;
             else if (snap.StateValue == StateBroken) broken++;
             else                                     other++;
@@ -222,7 +234,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             // Field read failed; count as unknown state
             unknown++;
         }
-        typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, broken, other, unknown, ts.Bytes);
+        typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, broken, other, unknown, gen2Open, gen0Open, ts.Bytes);
 
         // Capture top-N open connections for the detail table
         if (snap is not null && snap.StateValue == StateOpen)
@@ -244,6 +256,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             return Empty();
 
         int totalConnections = 0, totalOpen = 0, totalClosed = 0, totalBroken = 0, totalOther = 0, totalUnknown = 0;
+        int totalGen2Open = 0, totalGen0Open = 0;
         var byType = new List<DbConnectionTypeSummary>(_typeStats.Count);
 
         foreach (var kv in _typeStats)
@@ -256,6 +269,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             totalBroken      += ts.Broken;
             totalOther       += ts.Other;
             totalUnknown     += ts.Unknown;
+            totalGen2Open    += ts.Gen2Open;
+            totalGen0Open    += ts.Gen0Open;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
@@ -271,6 +286,8 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             BrokenConnections:   totalBroken,
             OtherConnections:    totalOther,
             UnknownStateConnections: totalUnknown,
+            Gen2OpenConnections: totalGen2Open,
+            Gen0OpenConnections: totalGen0Open,
             ByType:              byType,
             TopOpenConnections:  _sampler?.TopSamples ?? [],
             TopPools:            topPools,
@@ -304,5 +321,5 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     }
 
     private static DbConnectionDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, [], [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false);
 }

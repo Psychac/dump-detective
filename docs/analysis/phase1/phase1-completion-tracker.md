@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 69 |
-| **P1 Implemented** | 120 |
+| **P1 Implemented** | 121 |
 | **P2 Implemented** | 23 |
-| **Overall P0+P1 Rate** | 80.8% (189/234) |
+| **Overall P0+P1 Rate** | 81.2% (190/234) |
 
 ---
 
@@ -52,7 +52,7 @@
 
 | 15 | **GCRootAnalyzer** | 1/2 | 4/4 | 0/5 | 0/3 | ✅ P0-2, P1-2, P1-3, P1-4 complete; P0-1 pending; 🎯 All P1 complete! |
 | 16 | **ObjectShapeAnalyzer** | 3/3 | 3/5 | 1/8 | 0/3 | ✅ P0 COMPLETE; I-3,I-5,I-7 done; I-6 skipped (duplicates ArrayAnalyzer); E-1 deferred (architectural blocker); I-8 done (P2); 1 P1, 7 P2 pending |
-| 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 17 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
 | 18 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 20 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
@@ -60,7 +60,7 @@
 | 22 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 23 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 22/27 P0 done, 23/32 P1 done, 20/50 P2 done** (in-progress pools)
+**Subtotal: 22/27 P0 done, 24/32 P1 done, 20/50 P2 done** (in-progress pools)
 
 ---
 
@@ -80,14 +80,14 @@
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Analyzers with P0+P1 100% complete | 17 | All P0+P1 recommendations implemented (includes GCRootAnalyzer P1 100%, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer) |
-| Analyzers with partial P0+P1 completion | 13 | Some items done, some pending (excludes GCRootAnalyzer; includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with P0+P1 100% complete | 18 | All P0+P1 recommendations implemented (includes TimerLeakAnalyzer, GCRootAnalyzer P1 100%, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer) |
+| Analyzers with partial P0+P1 completion | 12 | Some items done, some pending (includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **68** | 87.2% |
+| **P0 items implemented** | **69** | 88.5% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **120** | 76.9% |
-| **Combined P0+P1 rate** | **80.3%** | (188/234) |
+| **P1 items implemented** | **121** | 77.6% |
+| **Combined P0+P1 rate** | **81.2%** | (190/234) |
 
 ---
 

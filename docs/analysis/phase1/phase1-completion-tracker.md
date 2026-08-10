@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 65 |
-| **P1 Implemented** | 113 |
+| **P0 Implemented** | 67 |
+| **P1 Implemented** | 115 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 76.1% (178/234) |
+| **Overall P0+P1 Rate** | 77.8% (182/234) |
 
 ---
 
@@ -52,7 +52,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 14 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 14 | **HttpObjectAnalyzer** | 2/2 | 2/3 | 0/5 | 2/3 | ✅ P0 complete (P0-1, P0-2); P1 67% (P1-1, P1-2 done; P1-3 pending); P3-3 done (IHeapIndexScanParticipant) |
 | 15 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 16 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
 | 17 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7 done (aggregate metric + TotalSize + finalizable finding); 1 P0, 2 P1, 7 P2 pending |
@@ -64,7 +64,7 @@
 | 24 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 25 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 23/31 P0 done, 25/39 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 23/31 P0 done, 26/39 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **67** | 85.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **106** | 67.9% |
-| **Combined P0+P1 rate** | **77.1%** | (173/234) |
+| **P1 items implemented** | **115** | 73.7% |
+| **Combined P0+P1 rate** | **77.8%** | (182/234) |
 
 ---
 

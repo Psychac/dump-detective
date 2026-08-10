@@ -281,22 +281,22 @@ dotMemory provides:
 
 ### Priority Roadmap
 
-| Priority | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| **P0** | Replace average self-size estimate with `BoundedGraphWalk.ComputeExclusiveRetained` for top-N roots | Critical — severity ranking and insight findings are unreliable without this | Medium | High | Improvement |
-| **P0** | Relabel BFS walk output as "owned subgraph types" not "root path"; correct or suppress the misleading chain presentation | Critical — output is structurally incorrect for its stated purpose | Low | High | Improvement |
-| **P1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | Improvement |
-| **P1** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | Improvement |
-| **P1** | Propagate `CancellationToken` through `ReadRootCandidates` call and into `BoundedGraphWalk` | Medium — correctness gap that matters at 25 GB+ scale | Low | High | Improvement |
-| **P1** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | Improvement |
-| **P2** | Add per-type `FinalizerQueue` breakdown (top 10 types by count) | Medium — immediately identifies source of finalization pressure | Low | High | Improvement |
-| **P2** | Add generation distribution per root kind (Gen0/1/2/LOH fraction) using `heap.GetGeneration` | Medium — distinguishes transient stack roots from long-lived Gen2 retention | Medium | High | Improvement |
-| **P2** | Declare `Tags` (e.g., `["gc", "roots", "retention"]`) and `Order` on the analyzer | Low-medium — enables pipeline filtering and deterministic ordering | Low | High | Improvement |
-| **P2** | Fix `RootSetCache` write-ordering: use `Volatile.Write`/`Interlocked.CompareExchange` for `_roots` assignment | Low-medium — race is unlikely in practice but is a correctness gap | Low | High | Improvement |
-| **P2** | Add count of dropped zero-estimate roots to `GCRootDomainResult` and surface in the report | Low-medium — makes silent exclusions visible | Low | High | Improvement |
-| **P3** | Implement reverse BFS from root target back to GC root using `ReverseReferenceIndex` for exact retention chains | Very high if implemented — matches WinDbg `!gcroot` capability | Very High | Medium | Evolution |
-| **P3** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Very High | Medium | Evolution |
-| **P3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | Improvement |
+| Priority | Recommendation | Impact | Difficulty | Confidence | Status | Classification |
+|---|---|---|---|---|---|---|
+| **P0-1** | Replace average self-size estimate with `BoundedGraphWalk.ComputeExclusiveRetained` for top-N roots | Critical — severity ranking and insight findings are unreliable without this | Medium | High | ⏳ Pending | Improvement |
+| **P0-2** | Relabel BFS walk output as "owned subgraph types" not "root path"; correct or suppress the misleading chain presentation | Critical — output is structurally incorrect for its stated purpose | Low | High | ✅ DONE (e4dd83e) | Improvement |
+| **P1-1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | ⏳ Pending | Improvement |
+| **P1-2** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | ⏳ Pending | Improvement |
+| **P1-3** | Propagate `CancellationToken` through `ReadRootCandidates` call and into `BoundedGraphWalk` | Medium — correctness gap that matters at 25 GB+ scale | Low | High | ⏳ Pending | Improvement |
+| **P1-4** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | ⏳ Pending | Improvement |
+| **P2-1** | Add per-type `FinalizerQueue` breakdown (top 10 types by count) | Medium — immediately identifies source of finalization pressure | Low | High | ⏳ Pending | Improvement |
+| **P2-2** | Add generation distribution per root kind (Gen0/1/2/LOH fraction) using `heap.GetGeneration` | Medium — distinguishes transient stack roots from long-lived Gen2 retention | Medium | High | ⏳ Pending | Improvement |
+| **P2-3** | Declare `Tags` (e.g., `["gc", "roots", "retention"]`) and `Order` on the analyzer | Low-medium — enables pipeline filtering and deterministic ordering | Low | High | ⏳ Pending | Improvement |
+| **P2-4** | Fix `RootSetCache` write-ordering: use `Volatile.Write`/`Interlocked.CompareExchange` for `_roots` assignment | Low-medium — race is unlikely in practice but is a correctness gap | Low | High | ⏳ Pending | Improvement |
+| **P2-5** | Add count of dropped zero-estimate roots to `GCRootDomainResult` and surface in the report | Low-medium — makes silent exclusions visible | Low | High | ⏳ Pending | Improvement |
+| **P3-1** | Implement reverse BFS from root target back to GC root using `ReverseReferenceIndex` for exact retention chains | Very high if implemented — matches WinDbg `!gcroot` capability | Very High | Medium | ⏳ Future | Evolution |
+| **P3-2** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Very High | Medium | ⏳ Future | Evolution |
+| **P3-3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | ⏳ Future | Improvement |
 
 ---
 

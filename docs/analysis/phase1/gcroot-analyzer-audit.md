@@ -288,7 +288,7 @@ dotMemory provides:
 | **P1-1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | ⏳ Pending | Improvement |
 | **P1-2** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | ✅ DONE (8b6b6b8) | Improvement |
 | **P1-3** | Propagate `CancellationToken` through `ReadRootCandidates` call and into `BoundedGraphWalk` | Medium — correctness gap that matters at 25 GB+ scale | Low | High | ✅ DONE (d127297) | Improvement |
-| **P1-4** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | ⏳ Pending | Improvement |
+| **P1-4** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | ✅ DONE (2ea3a98) | Improvement |
 | **P2-1** | Add per-type `FinalizerQueue` breakdown (top 10 types by count) | Medium — immediately identifies source of finalization pressure | Low | High | ⏳ Pending | Improvement |
 | **P2-2** | Add generation distribution per root kind (Gen0/1/2/LOH fraction) using `heap.GetGeneration` | Medium — distinguishes transient stack roots from long-lived Gen2 retention | Medium | High | ⏳ Pending | Improvement |
 | **P2-3** | Declare `Tags` (e.g., `["gc", "roots", "retention"]`) and `Order` on the analyzer | Low-medium — enables pipeline filtering and deterministic ordering | Low | High | ⏳ Pending | Improvement |

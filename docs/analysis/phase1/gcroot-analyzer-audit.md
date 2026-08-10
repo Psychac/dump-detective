@@ -252,6 +252,7 @@ dotMemory provides:
 - Severity scoring and ranking — no equivalent in WinDbg or VS.
 - Trend comparison across dump series — unique to DumpDetective.
 - Disk-indexed root set reduces Phase-2 analysis startup cost — no equivalent in WinDbg.
+- **Root-owned subgraph visualization** — forward BFS from each root shows the object graph (types and structure) that the root retains. Answers "what does this root own?" independently of "why is it rooted?" — useful for understanding retention shape and designing root-release strategies.
 
 ---
 

@@ -40,8 +40,9 @@
 | 15 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 16 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 17 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |
+| 18 | **GCGenerationAnalyzer** | 3/3 | 4/4 | 4/5 | 0/3 | ✅ P0+P1 complete; P2 80% (4/5) |
 
-**Subtotal: 38/38 P0 done, 77/77 P1 done**
+**Subtotal: 41/41 P0 done, 81/81 P1 done**
 
 ---
 
@@ -49,22 +50,21 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 13 | **GCGenerationAnalyzer** | 3/3 | 3/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-2,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-3,P2-4 pending |
-| 14 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
-| 15 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
-| 16 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
-| 17 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
-| 18 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
-| 19 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7 done (aggregate metric + TotalSize + finalizable finding); 1 P0, 2 P1, 7 P2 pending |
-| 20 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
-| 21 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
-| 22 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
-| 23 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
-| 25 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
-| 26 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
-| 27 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
+| 13 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 14 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 15 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
+| 16 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
+| 17 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
+| 18 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7 done (aggregate metric + TotalSize + finalizable finding); 1 P0, 2 P1, 7 P2 pending |
+| 19 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
+| 20 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
+| 21 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
+| 22 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
+| 24 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
+| 25 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
+| 26 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 26/34 P0 done, 30/44 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 23/33 P0 done, 26/41 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -84,14 +84,14 @@
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Analyzers with P0+P1 100% complete | 14 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer) |
-| Analyzers with partial P0+P1 completion | 16 | Some items done, some pending (includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with P0+P1 100% complete | 15 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer) |
+| Analyzers with partial P0+P1 completion | 15 | Some items done, some pending (includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **64** | 82.1% |
+| **P0 items implemented** | **67** | 85.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **100** | 64.1% |
-| **Combined P0+P1 rate** | **70.1%** | (164/234) |
+| **P1 items implemented** | **104** | 66.7% |
+| **Combined P0+P1 rate** | **75.9%** | (171/234) |
 
 ---
 

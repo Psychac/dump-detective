@@ -384,7 +384,7 @@ the standard pipeline. Silently wrong when the cache is absent.
 |---|---|---|---|---|---|---|---|
 | **P0-1** | **Fix fallback path zero-count bug in `TypedResourceCandidateScanner` or implement `IHeapIndexScanParticipant`** | **Correctness** | **Evolution** | **Critical** | **Low** | **High** | ✅ **DONE** |
 | **P0-2** | **Add `HttpWebRequest` finding threshold (e.g. ≥ 10)** | **Diagnostic** | **Improvement** | **High** | **Low** | **High** | ✅ **DONE** |
-| P1-1 | Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture | Diagnostic | Improvement | High | Medium | High | |
+| **P1-1** | **Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture** | **Diagnostic** | **Improvement** | **High** | **Medium** | **High** | ✅ **DONE** |
 | **P1-2** | **Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas** | **Correctness** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
 | P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High | |
 | P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium | |
@@ -515,3 +515,56 @@ the standard pipeline. Silently wrong when the cache is absent.
 - All 40 trend comparison tests pass
 - All 8 HTTP object analyzer tests pass
 - No regressions in existing trend comparer functionality
+
+---
+
+## Implementation Summary (P1-1)
+
+**Status:** ✅ **COMPLETE** — Commit `813dfd9`
+
+### What Was Done
+
+1. **Created `HttpClientSnapshot` record** (InfrastructureDomainModels.cs)
+   ```csharp
+   internal sealed record HttpClientSnapshot(
+       string TypeName,
+       ulong Address,
+       string? BaseAddress = null,
+       long TimeoutMilliseconds = -1);
+   ```
+   - Captures type name, instance address, destination URI, and configured timeout
+   - Graceful null/default handling for field-read failures
+
+2. **Implemented `ITypedResourceInstanceSampler<HttpClientSnapshot>`** on HttpObjectAnalyzer
+   - `MaxStateSamplesPerType`: 500 (per-type cap on field reads)
+   - `TopSampleCap`: 20 (top N instances to keep)
+   - `TrySample()`: Reads HttpClient instance fields and returns populated snapshot
+
+3. **Field Reading Implementation**
+   - `_baseAddress`: ReadObject → AsString (destination URI)
+   - `_timeout`: Read<long> ticks → convert to milliseconds
+   - Both fields optional; returns valid snapshot with whatever could be read
+
+4. **Integration with Shared Index Scan**
+   - Store heap reference in `BeforeHeapIndexScan`
+   - Create sampler via `TypedResourceScanDriver.CreateSampler()`
+   - In `OnHeapEntry` for HttpClient types: call `TryGetSample()`, add successful snapshots to sampler
+   - In `BuildResult`: include `TopHttpClients` and `InstanceScanCapped` in domain result
+
+5. **Updated HttpObjectDomainResult**
+   - New field: `IReadOnlyList<HttpClientSnapshot> TopHttpClients`
+   - New field: `bool InstanceScanCapped`
+   - Signals whether per-instance data is complete or capped
+
+### Impact
+
+- **Investigation enablement:** Engineers can now see which endpoints HttpClient instances connect to and their timeouts
+- **Singleton verification:** Can identify whether reuse is actually happening (multiple clients vs single)
+- **Configuration discovery:** Timeout settings visible without manual debugger inspection
+- **Bounded cost:** Capped per-type (500) and top-N (20) prevents O(n) field reads on million-object heaps
+
+### Testing
+
+- All 8 HTTP object analyzer tests pass
+- Test helper updated to provide empty TopHttpClients / InstanceScanCapped=false for baseline tests
+- Sampler integration verified through existing shared index scan test suite

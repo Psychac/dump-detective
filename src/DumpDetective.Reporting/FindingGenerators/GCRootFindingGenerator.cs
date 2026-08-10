@@ -14,7 +14,7 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
     {
         if (result is not GCRootDomainResult r) return [];
 
-        var findings = new List<InsightFinding>(2);
+        var findings = new List<InsightFinding>(4);
 
         // ── Large static/strong root retention ─────────────────────────────
         ulong staticBytes = 0;
@@ -69,6 +69,35 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
                 Tags: ["gc", "roots", "finalizer", "pressure"],
                 MetricValue: finalizerCount,
                 MetricUnit: "objects"));
+        }
+
+        // ── Pinned handle accumulation & LOH fragmentation risk ────────────
+        int pinnedCount = 0;
+        int asyncPinnedCount = 0;
+        foreach (RootKindSummary ks in r.ByKind)
+        {
+            if (ks.Kind is "PinnedHandle")
+                pinnedCount = ks.Count;
+            else if (ks.Kind is "AsyncPinnedHandle")
+                asyncPinnedCount = ks.Count;
+        }
+
+        int totalPinned = pinnedCount + asyncPinnedCount;
+        if (totalPinned >= 100)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: totalPinned >= 500 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: $"Pinned handle accumulation: {totalPinned:N0} pinned objects",
+                Evidence: $"{pinnedCount:N0} pinned handles + {asyncPinnedCount:N0} async pinned handles = {totalPinned:N0} total. " +
+                          "Pinned objects prevent heap compaction and fragment both SOH (Small Object Heap) and LOH (Large Object Heap).",
+                Recommendation: "Review pinned handle sources and consider: (1) Unpin objects after marshaling completes, " +
+                                "(2) Use GCHandle.Alloc(obj, GCHandleType.Weak) for weak references instead of pinning, " +
+                                "(3) Consolidate pinned allocations to reduce fragmentation, (4) Monitor pinned handle growth across dumps.",
+                Tags: ["gc", "roots", "pinned", "fragmentation", "loh"],
+                MetricValue: totalPinned,
+                MetricUnit: "handles"));
         }
 
         // ── Root path cap signal ──────────────────────────────────────────

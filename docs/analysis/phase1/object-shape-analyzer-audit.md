@@ -49,6 +49,22 @@ The role is coherent and the Phase-2-only design is architecturally sound.
 
 **Rationale:** ArrayAnalyzer already comprehensively covers array diagnostics (instance populations, LOH allocation, sparseness patterns, multi-dimensional analysis). ObjectShapeAnalyzer's array table would duplicate this work from a type-structure lens with minimal unique value. Array type field layouts are trivial (e.g., `string[]` is 1 ref field per element), unlike reference-heavy or balanced type variety. The distinction does not justify the added complexity. **Array analysis deferred to ArrayAnalyzer.**
 
+### Decision: E-1 (Cross-Analyzer Retention Correlation) Deferred
+
+**Architectural Blocker:** E-1 requires inter-analyzer data passing and coordination that the current architecture does not support. Specifically:
+
+- **Current model:** Each analyzer runs independently → produces domain result → findings are generated independently. No cross-analyzer communication.
+- **E-1 requirement:** Pass ObjectShapeAnalyzer's top reference-heavy types as seeded input to LeakCandidateAnalyzer; have LeakCandidateAnalyzer accept filtered candidates and focus its root-path analysis on them.
+- **Missing infrastructure:**
+  - No mechanism for analyzer A to expose candidates to analyzer B
+  - No "seeded analysis" or "filtered input" mode in LeakCandidateAnalyzer
+  - No inter-analyzer execution coordination
+  - No cross-analyzer finding type (e.g., "Type X is high-cost AND retained by root Y")
+
+**Feasibility:** Would require major architectural changes to support inter-analyzer coordination, including redesigning the analyzer factory, execution model, and finding aggregation layer.
+
+**Path forward:** Defer E-1 until architecture is explicitly designed for cross-analyzer workflows. Consider as a separate initiative: *"Inter-Analyzer Coordination Framework."*
+
 ### Unexpected Functionality
 
 None. The classifier and ranker are well-scoped.
@@ -309,6 +325,7 @@ is retained.
 | I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | ✅ DONE |
 | I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | ✅ DONE |
 | I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | — |
+| E-1 | **Cross-analyzer retention correlation**: surface ObjectShapeAnalyzer's top reference-heavy types as input candidates to LeakCandidateAnalyzer or ReferenceChainAnalyzer for automatic root-path attribution. | Very High | High | Medium | Evolution | ⊘ DEFERRED |
 | I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | — |
 | I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement | — |
 | I-12 | **Add `IAnalyzer.Tags` override**: `["gc", "object-shape", "memory", "gc-scan"]`. | Low | Low | High | Improvement | — |
@@ -360,7 +377,7 @@ incomplete. The report is useful for quick triage but insufficient for confident
 | P1 | I-5 | Include `TotalSize` in profile and ranking | High | Low | High | Improvement | ✅ DONE |
 | P1 | I-6 | Array shape table | High | Medium | High | Improvement | ⊘ SKIPPED |
 | P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | ✅ DONE |
-| P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | — |
+| P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | ⊘ DEFERRED |
 | P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | ✅ DONE |
 | P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | — |
 | P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement | — |

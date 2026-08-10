@@ -51,7 +51,7 @@
 ---
 
 | 15 | **GCRootAnalyzer** | 1/2 | 4/4 | 0/5 | 0/3 | ✅ P0-2, P1-2, P1-3, P1-4 complete; P0-1 pending; 🎯 All P1 complete! |
-| 16 | **ObjectShapeAnalyzer** | 3/3 | 3/5 | 1/8 | 0/3 | ✅ P0 COMPLETE; I-3,I-5,I-7 done; I-6 skipped (duplicates ArrayAnalyzer); I-8 done (P2); 2 P1, 7 P2 pending |
+| 16 | **ObjectShapeAnalyzer** | 3/3 | 3/5 | 1/8 | 0/3 | ✅ P0 COMPLETE; I-3,I-5,I-7 done; I-6 skipped (duplicates ArrayAnalyzer); E-1 deferred (architectural blocker); I-8 done (P2); 1 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 | 18 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 19 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |

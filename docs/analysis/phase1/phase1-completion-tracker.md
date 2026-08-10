@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 64 |
-| **P1 Implemented** | 108 |
+| **P1 Implemented** | 109 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 73.5% (172/234) |
+| **Overall P0+P1 Rate** | 74.0% (173/234) |
 
 ---
 
@@ -41,8 +41,9 @@
 | 16 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 17 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |
 | 18 | **GCGenerationAnalyzer** | 3/3 | 4/4 | 4/5 | 0/3 | ✅ P0+P1 complete; P2 80% (4/5) |
+| 19 | **WeakReferenceAnalyzer** | 2/2 | 4/4 | 4/5 | 0/4 | ✅ P0+P1 complete; P2 80% (4/5) |
 
-**Subtotal: 41/41 P0 done, 81/81 P1 done**
+**Subtotal: 42/42 P0 done, 82/82 P1 done**
 
 ---
 
@@ -50,8 +51,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 13 | **WeakReferenceAnalyzer** | 2/2 | 3/4 | 4/5 | 0/4 | P0 complete; P1-2 done (merge passes); P1-3 pending (fallback) |
-| 14 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 13 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
 | 15 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
 | 16 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 17 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
@@ -64,7 +64,7 @@
 | 25 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 26 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 23/33 P0 done, 26/41 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 23/32 P0 done, 26/40 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **67** | 85.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **105** | 67.3% |
-| **Combined P0+P1 rate** | **76.5%** | (172/234) |
+| **P1 items implemented** | **106** | 67.9% |
+| **Combined P0+P1 rate** | **77.1%** | (173/234) |
 
 ---
 

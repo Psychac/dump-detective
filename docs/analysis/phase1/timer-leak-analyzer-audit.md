@@ -85,6 +85,30 @@ Analyzers now detect `System.Threading.PeriodicTimer` instances (shipped with .N
 
 Evidence root paths are now visible to engineers in the report, making retention chains immediately actionable without requiring debugger inspection. Truncated searches are explicitly flagged, allowing engineers to assess confidence in findings. All LINQ usage in hot paths has been eliminated.
 
+### P1-2 Implement ITypedResourceInstanceSampler (2026-08-06)
+
+**Changes Made:**
+
+**New Model and Interface:**
+- Added `TimerStateSnapshot` record with Address, Generation, PeriodMs, CallbackOwnerType fields
+- Implemented `ITypedResourceInstanceSampler<TimerStateSnapshot>` on TimerLeakAnalyzer
+- Added `MaxStateSamplesPerType` (100) and `TopSampleCap` (20) properties
+
+**Field Reading Logic:**
+- Implemented `TrySample()` method to extract _period field from TimerQueueTimer
+- Implemented `TryReadCallbackOwner()` to traverse _timerCallback → _target → Type.Name
+- Added error handling for corrupt/invalid objects, field not found, type casting failures
+- Graceful fallback: returns -1 for period or null for callback owner if reading fails
+
+**Integration:**
+- Integrated sampler into `PopulateEvidence` to capture samples during evidence population
+- Updated `TimerObjectTypeSummary` with optional `Samples` field (IReadOnlyList<TimerStateSnapshot>)
+- Samples captured per type alongside root path evidence
+
+### Result
+
+Timer state fields (_period, callback owner type) are now captured per type instance during evidence collection. Foundation is set for displaying actionable timer interval categories (recurring, one-shot, suspended) and callback ownership attribution in reports (next: section builder update).
+
 ### P1-3 Pass CancellationToken through PopulateEvidence (2026-08-06)
 
 **Changes Made:**
@@ -473,7 +497,7 @@ for genuine leaks. The false-positive-severity risk is real.
 | **P0** | Fix double-counting: use `TimerQueueTimerCount` as the logical-timer count for severity thresholds; expose raw object count separately | High — current severity is unreliable | Low | High | Improvement | ✅ COMPLETE |
 | **P0** | Add `System.Threading.PeriodicTimer` to `ClassifyType` | High — false negative for all .NET 6+ timer leaks | Very Low | High | Improvement | ✅ COMPLETE |
 | **P1** | Render `Evidence.RootPath` per type in `TimerLeakSectionBuilder` | High — evidence exists but is invisible to engineers | Low | High | Improvement | ✅ COMPLETE |
-| **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement | ⏳ PENDING |
+| **P1** | Implement `ITypedResourceInstanceSampler` to read `_period` and callback `_target.Type.Name` per sample in the shared scan pass | High — makes findings actionable (who owns it, how often fires) | Medium | High | Improvement | ✅ COMPLETE |
 | **P1** | Pass `CancellationToken` through `PopulateEvidence` | Medium — robustness on large dumps | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement | ✅ COMPLETE |

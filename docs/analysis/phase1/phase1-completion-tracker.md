@@ -49,7 +49,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 13 | **GCGenerationAnalyzer** | 3/3 | 2/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-2,P1-3,P2-4 pending |
+| 13 | **GCGenerationAnalyzer** | 3/3 | 3/4 | 4/5 | 0/3 | P0 complete; P1-1,P1-2,P1-4 done; P2-1,P2-2,P2-3,P2-5 done; P1-3,P2-4 pending |
 | 14 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
 | 15 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
 | 16 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |

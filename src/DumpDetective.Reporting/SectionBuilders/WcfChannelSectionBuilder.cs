@@ -68,13 +68,15 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
             {
                 WcfChannelSnapshot s = d.TopFaultedChannels[i];
                 string shortType = s.TypeName.Contains('.') ? s.TypeName.Split('.')[^1] : s.TypeName;
+                string remoteAddr = s.RemoteAddress ?? "(unknown)";
                 faultRows.Add(new TableRow([
                     Cell(shortType),
                     Cell($"0x{s.Address:X}"),
                     Cell(s.StateLabel),
+                    Cell(remoteAddr),
                 ]));
             }
-            compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State"), CH("Remote Endpoint") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.StateScanCapped)

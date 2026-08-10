@@ -20,6 +20,7 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
         if (r.FaultedChannels > 0)
         {
             string typeBreakdown = BuildFaultedBreakdown(r.ByType);
+            string endpointSummary = BuildEndpointSummary(r.TopFaultedChannels);
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
@@ -27,7 +28,7 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
                 Severity: FindingSeverity.Critical,
                 Title: $"{r.FaultedChannels:N0} WCF channel(s) in Faulted state",
                 Evidence: $"{r.FaultedChannels:N0} of {r.TotalChannels:N0} WCF channels are Faulted. " +
-                          $"Types: {typeBreakdown}. " +
+                          $"Types: {typeBreakdown}. {endpointSummary}" +
                           "A faulted channel cannot be reused and will throw CommunicationObjectFaultedException on all subsequent calls.",
                 Recommendation:
                     "WCF best practice: wrap channel usage in try/catch. " +
@@ -79,5 +80,29 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
             shown++;
         }
         return sb.Length > 0 ? sb.ToString() : "(mixed types)";
+    }
+
+    private static string BuildEndpointSummary(IReadOnlyList<WcfChannelSnapshot> topFaulted)
+    {
+        if (topFaulted.Count == 0) return "";
+        var endpoints = new System.Collections.Generic.HashSet<string>();
+        foreach (var snap in topFaulted)
+        {
+            if (!string.IsNullOrEmpty(snap.RemoteAddress) && snap.RemoteAddress != "(unknown)")
+                endpoints.Add(snap.RemoteAddress);
+        }
+        if (endpoints.Count == 0) return "";
+        var sb = new System.Text.StringBuilder("Remote endpoints: ");
+        int shown = 0;
+        foreach (var ep in endpoints)
+        {
+            if (shown >= 3) break;
+            if (shown > 0) sb.Append(", ");
+            sb.Append(ep);
+            shown++;
+        }
+        if (endpoints.Count > 3) sb.Append(", ...");
+        sb.Append(". ");
+        return sb.ToString();
     }
 }

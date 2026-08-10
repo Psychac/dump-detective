@@ -46,6 +46,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     public int TopSampleCap => TopFaultedCap;
 
     private static readonly string[] StateFieldNames = ["_state", "state", "communicationState"];
+    private static readonly string[] RemoteAddressFieldNames = ["_remoteAddress", "_via", "remoteAddress", "via"];
 
     WcfChannelSnapshot? ITypedResourceInstanceSampler<WcfChannelSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
     {
@@ -53,7 +54,81 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         if (stateVal < 0)
             return null;
 
-        return new WcfChannelSnapshot(typeName, entry.Address, MapCommunicationState(stateVal), stateVal);
+        string? remoteAddress = TryExtractRemoteAddress(heap, entry.Address);
+        return new WcfChannelSnapshot(typeName, entry.Address, MapCommunicationState(stateVal), stateVal, remoteAddress);
+    }
+
+    private static string? TryExtractRemoteAddress(ClrHeap heap, ulong channelAddress)
+    {
+        try
+        {
+            ClrObject channelObj = heap.GetObject(channelAddress);
+            if (!channelObj.IsValid || channelObj.Type == null)
+                return null;
+
+            foreach (string fieldName in RemoteAddressFieldNames)
+            {
+                ClrInstanceField? field = channelObj.Type.GetFieldByName(fieldName);
+                if (field == null)
+                    continue;
+
+                ClrObject endpointAddress = field.ReadObject(channelAddress, interior: false);
+                if (!endpointAddress.IsValid || endpointAddress.Type == null)
+                    continue;
+
+                return TryExtractUriFromEndpointAddress(heap, endpointAddress);
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractUriFromEndpointAddress(ClrHeap heap, ClrObject endpointAddress)
+    {
+        try
+        {
+            if (endpointAddress.Type == null)
+                return null;
+
+            string[] uriFieldNames = ["_uri", "uri", "_address", "address"];
+            foreach (string fieldName in uriFieldNames)
+            {
+                ClrInstanceField? field = endpointAddress.Type.GetFieldByName(fieldName);
+                if (field == null)
+                    continue;
+
+                ClrObject uriObj = field.ReadObject(endpointAddress.Address, interior: false);
+                if (!uriObj.IsValid || uriObj.Type == null)
+                    continue;
+
+                return TryExtractStringFromUri(heap, uriObj);
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractStringFromUri(ClrHeap heap, ClrObject uriObj)
+    {
+        try
+        {
+            string? uriStr = uriObj.AsString();
+            if (!string.IsNullOrEmpty(uriStr))
+                return uriStr;
+
+            return uriObj.ToString();
+        }
+        catch
+        {
+        }
+
+        return null;
     }
 
     private ClrHeap? _heap;

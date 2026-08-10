@@ -133,7 +133,8 @@ internal sealed record WcfChannelSnapshot(
     string TypeName,
     ulong Address,
     string StateLabel,
-    int StateValue);
+    int StateValue,
+    string? RemoteAddress = null);
 
 /// <summary>
 /// Domain result produced by <c>WcfChannelAnalyzer</c>.

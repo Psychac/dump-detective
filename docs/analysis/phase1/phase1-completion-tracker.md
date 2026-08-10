@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 64 |
-| **P1 Implemented** | 107 |
+| **P1 Implemented** | 108 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 72.9% (171/234) |
+| **Overall P0+P1 Rate** | 73.5% (172/234) |
 
 ---
 
@@ -50,7 +50,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 13 | **WeakReferenceAnalyzer** | 2/2 | 2/4 | 4/5 | 0/4 | P0 complete; 2 P1 pending (merge passes, fallback) |
+| 13 | **WeakReferenceAnalyzer** | 2/2 | 3/4 | 4/5 | 0/4 | P0 complete; P1-2 done (merge passes); P1-3 pending (fallback) |
 | 14 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
 | 15 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
 | 16 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
@@ -90,8 +90,8 @@
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **67** | 85.9% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **104** | 66.7% |
-| **Combined P0+P1 rate** | **75.9%** | (171/234) |
+| **P1 items implemented** | **105** | 67.3% |
+| **Combined P0+P1 rate** | **76.5%** | (172/234) |
 
 ---
 

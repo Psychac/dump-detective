@@ -344,7 +344,7 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 | P0-1 | **Fix `staleHolderTypeHits` never populated in Phase B** — record holder type per MT group during stale probe loop | Correctness | High | Low | High | Improvement | ✅ Done (commit aea3761) |
 | P0-2 | **Fix GZip stream not disposed in InMemory export paths** — add `tmpGz?.Dispose(); tmpGz = null;` after both InMemory foreach loops | Correctness | High | Low | High | Improvement | ✅ Done (commit aea3761) |
 | P1-1 | **Fix hard-coded "50 000" cap literal** — add `ScanCapUsed` int to `WeakReferenceDomainResult`; emit it in finding text | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 4785d51) |
-| P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement | Pending |
+| P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement | ✅ Done (commit f4caad1) |
 | P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement | Pending |
 | P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 7ebe9bd) |
 | P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | Pending |

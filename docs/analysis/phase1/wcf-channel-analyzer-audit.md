@@ -417,7 +417,7 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
 | P0-1 | **Add `OpeningChannels` and `ClosingChannels` to domain model and report.** Opening = stuck connecting; Closing = stuck draining. Both are actionable and currently invisible. | High | Low | High | ✅ Complete (commit 40da729) |
-| P0-2 | **Extract remote endpoint address into `WcfChannelSnapshot`.** Read `_remoteAddress` → `Uri` string in `TrySample`. Report in faulted-channel table and finding evidence. | Critical | Medium | High | Improvement |
+| P0-2 | **Extract remote endpoint address into `WcfChannelSnapshot`.** Read `_remoteAddress` → `Uri` string in `TrySample`. Report in faulted-channel table and finding evidence. | Critical | Medium | High | ✅ Complete (commit 5e94be5) |
 
 #### P1 — High
 
@@ -491,3 +491,24 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 - Graceful shutdown bottlenecks (high Closing count) now visible in reports
 - Trend analysis can now track Opening/Closing growth across dumps
 - Ready for P2-2: cross-correlation with timeout exceptions for automated diagnosis
+
+### ✅ P0-2 Complete (2026-08-10)
+
+**Commit:** `5e94be5`  
+**Status:** Remote endpoint addresses now extracted and displayed
+
+**What was done:**
+- Added `RemoteAddress` field (nullable string) to `WcfChannelSnapshot` record
+- Implemented three-level extraction chain in WcfChannelAnalyzer:
+  1. `TryExtractRemoteAddress()`: probe `_remoteAddress` or `_via` field on channel object
+  2. `TryExtractUriFromEndpointAddress()`: read `_uri` or `Uri` field from `System.ServiceModel.EndpointAddress`
+  3. `TryExtractStringFromUri()`: convert Uri to string via AsString() or ToString()
+- All field name probes are defensive (multiple variants, null checks, try/catch)
+- Updated `WcfChannelSectionBuilder` to display "Remote Endpoint" column in faulted channels table
+- Updated `WcfChannelFindingGenerator.BuildEndpointSummary()` to group unique endpoints (cap 3) in Finding evidence
+
+**Impact:**
+- Engineers investigating faulted channels no longer need manual `!do <addr>` inspection
+- Remote service URL now surfaces directly in report table and highlighted in Critical finding
+- Closes the final major diagnostic gap vs. manual WinDbg workflows
+- DumpDetective's WCF analysis now definitively superior to any available tool

@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 64 |
+| **P0 Implemented** | 65 |
 | **P1 Implemented** | 109 |
 | **P2 Implemented** | 22 |
-| **Overall P0+P1 Rate** | 74.0% (173/234) |
+| **Overall P0+P1 Rate** | 74.4% (174/234) |
 
 ---
 
@@ -51,7 +51,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Notes |
 |---|----------|----|----|----|----|-------|
-| 13 | **WcfChannelAnalyzer** | 1/2 | 0/4 | 0/4 | 0/3 | P0-1 done; P0-2 and all P1 pending |
+| 13 | **WcfChannelAnalyzer** | 2/2 | 0/4 | 0/4 | 0/3 | ✅ P0 complete (P0-1, P0-2 done); P1 pending |
 | 15 | **HttpObjectAnalyzer** | 2/2 | 1/3 | 0/5 | 1/3 | P0 complete; 2 P1 pending |
 | 16 | **DbConnectionAnalyzer** | 2/2 | 3/4 | — | — | P0 complete; 1 P1 pending |
 | 17 | **GCRootAnalyzer** | 0/2 | 1/4 | 0/5 | 0/3 | Minimal progress on P1 (1 of 4) |
@@ -64,7 +64,7 @@
 | 25 | **AsyncTaskAnalyzer** | 1/2 | 2/4 | 0/6 | 0/3 | ✅ P0-1,P1-1,P1-3 done; P0-2, P1-2/4 pending |
 | 26 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 23/32 P0 done, 26/40 P1 done, 19/55 P2 done** (in-progress pools)
+**Subtotal: 24/32 P0 done, 26/40 P1 done, 19/55 P2 done** (in-progress pools)
 
 ---
 

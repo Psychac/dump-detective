@@ -165,6 +165,15 @@ internal sealed record HttpObjectTypeSummary(
     ulong TotalBytes);
 
 /// <summary>
+/// Lightweight snapshot of a single HttpClient object, capped per scan.
+/// </summary>
+internal sealed record HttpClientSnapshot(
+    string TypeName,
+    ulong Address,
+    string? BaseAddress = null,
+    long TimeoutMilliseconds = -1);
+
+/// <summary>
 /// Domain result produced by <c>HttpObjectAnalyzer</c>.
 /// </summary>
 internal sealed record HttpObjectDomainResult(
@@ -176,7 +185,9 @@ internal sealed record HttpObjectDomainResult(
     int HttpMessageHandlerCount,
     int ServicePointCount,
     ulong TotalBytes,
-    IReadOnlyList<HttpObjectTypeSummary> ByType) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<HttpObjectTypeSummary> ByType,
+    IReadOnlyList<HttpClientSnapshot> TopHttpClients,
+    bool InstanceScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── Timer Objects ───────────────────────────────────────────────────────────
 

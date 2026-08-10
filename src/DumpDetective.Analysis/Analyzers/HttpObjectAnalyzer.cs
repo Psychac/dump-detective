@@ -15,10 +15,16 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - HttpWebResponse objects: indicate responses not disposed, holding sockets.
 ///   - ServicePoint accumulation: can exhaust the system-level connection table.
 /// </summary>
-public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource
+public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<HttpClientSnapshot>
 {
     public string Name => "HTTP Object Analysis";
     public string Category => "Infrastructure";
+
+    private const int MaxStateSamples = 500;
+    private const int TopHttpClientSampleCap = 20;
+
+    public int MaxStateSamplesPerType => MaxStateSamples;
+    public int TopSampleCap => TopHttpClientSampleCap;
 
     public bool IsCandidateType(string typeName) => ClassifyType(typeName) != HttpObjectCategory.None;
 
@@ -46,13 +52,63 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
         // Direct or subclass of HttpMessageHandler in System.Net.Http
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, HttpNamespacePrefixes, "Handler", HttpMessageHandlerTokens);
 
+    private static readonly string[] HttpClientBaseAddressFieldNames = ["_baseAddress"];
+    private static readonly string[] HttpClientTimeoutFieldNames = ["_timeout"];
+
+    HttpClientSnapshot? ITypedResourceInstanceSampler<HttpClientSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
+    {
+        if (!typeName.Equals("System.Net.Http.HttpClient", StringComparison.Ordinal))
+            return null;
+
+        string? baseAddress = null;
+        long timeoutMilliseconds = -1;
+
+        try
+        {
+            var obj = heap.GetObject(entry.Address);
+            if (!obj.IsValid || obj.Type == null)
+                return null;
+
+            // Try to read _baseAddress (Uri field)
+            var baseAddressField = obj.Type.GetFieldByName("_baseAddress");
+            if (baseAddressField != null)
+            {
+                var baseAddressObj = baseAddressField.ReadObject(entry.Address, interior: false);
+                if (baseAddressObj.IsValid && baseAddressObj.AsString() is string uri)
+                {
+                    baseAddress = uri;
+                }
+            }
+
+            // Try to read _timeout (TimeSpan ticks as long)
+            var timeoutField = obj.Type.GetFieldByName("_timeout");
+            if (timeoutField != null)
+            {
+                long ticks = timeoutField.Read<long>(entry.Address, interior: false);
+                if (ticks >= 0)
+                {
+                    // Convert ticks to milliseconds
+                    timeoutMilliseconds = ticks / TimeSpan.TicksPerMillisecond;
+                }
+            }
+        }
+        catch
+        {
+            // Silently ignore errors reading fields; we have what we could get
+        }
+
+        return new HttpClientSnapshot(typeName, entry.Address, baseAddress, timeoutMilliseconds);
+    }
+
     private enum HttpObjectCategory { None, HttpClient, HttpWebRequest, HttpWebResponse, HttpMessageHandler, ServicePoint }
 
     // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
     // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
     // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
+    private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private Dictionary<ulong, (string Name, int HttpClient, int HttpWebRequest, int HttpWebResponse, int HttpMessageHandler, int ServicePoint, ulong Bytes)>? _typeStats;
+    private InstanceStateSampler<HttpClientSnapshot>? _sampler;
     private bool _scanSucceeded;
 
     /// <summary>
@@ -62,6 +118,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
     void IHeapIndexScanParticipant.BeforeHeapIndexScan(AnalysisContext context)
     {
         _scanSucceeded = false;
+        _heap = context.Heap;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
             TypedResourceScanDriver.DiscoverCandidates(this, context.Heap, context.Cache);
@@ -76,6 +133,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
         }
 
         _typeStats = typeStats;
+        _sampler = TypedResourceScanDriver.CreateSampler(this);
     }
 
     /// <summary>
@@ -88,6 +146,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
     {
         var candidateMts = _candidateMts;
         var typeStats = _typeStats;
+        var sampler = _sampler;
 
         if (candidateMts is null || typeStats is null)
             return;
@@ -111,6 +170,13 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
         {
             case HttpObjectCategory.HttpClient:
                 httpClient++;
+                // Try to sample this HttpClient instance if sampler is available
+                if (sampler is not null && _heap is not null)
+                {
+                    HttpClientSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap, in entry, typeName);
+                    if (snap is not null)
+                        sampler.AddTopSample(snap);
+                }
                 break;
             case HttpObjectCategory.HttpWebRequest:
                 httpWebRequest++;
@@ -181,9 +247,11 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
             HttpMessageHandlerCount:  totalHttpMessageHandler,
             ServicePointCount:        totalServicePoint,
             TotalBytes:               totalBytes,
-            ByType:                   byType);
+            ByType:                   byType,
+            TopHttpClients:           _sampler?.TopSamples ?? [],
+            InstanceScanCapped:       _sampler?.ScanCapped ?? false);
     }
 
     private static HttpObjectDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, []);
+        new(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
 }

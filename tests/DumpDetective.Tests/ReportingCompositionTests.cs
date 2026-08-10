@@ -326,10 +326,6 @@ public sealed class ReportingCompositionTests
             [
                 new TypeShapeProfile("Demo.Balanced", 4, 2, 2, 0.50, 500, 5000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
             ],
-            TopArrayTypes:
-            [
-                new TypeShapeProfile("System.Object[]", 1, 1, 0, 1.0, 100, 10000, false, false, true, 1, 0, ObjectShapeCategory.ReferenceHeavy)
-            ],
             TotalTypesAnalyzed: 1,
             AvgRefFieldsPerType: 2,
             TotalGcScanWork: 20,

@@ -27,7 +27,9 @@ internal static class GCRootAnalysisProjection
         for (int i = 0; i < roots.Count; i++)
         {
             (ulong targetAddr, ulong rootAddr, byte rawKind) = roots[i];
-            ulong estimate = EstimateRetainedBytes(targetAddr, heap, aggregates);
+
+            ClrObject obj = GetObject(targetAddr, heap);
+            ulong estimate = EstimateRetainedBytes(obj, aggregates);
             if (estimate == 0)
                 continue;
 
@@ -35,7 +37,7 @@ internal static class GCRootAnalysisProjection
             kindCounts[kind] = (kindCounts.TryGetValue(kind, out int count) ? count : 0) + 1;
             kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong bytes) ? bytes : 0UL) + estimate;
 
-            string targetType = ResolveTypeName(targetAddr, heap, aggregates);
+            string targetType = ResolveTypeName(obj);
             int severity = ComputeSeverity(estimate, kind);
 
             findings.Add(new RootFinding(
@@ -63,49 +65,41 @@ internal static class GCRootAnalysisProjection
         return new GCRootAnalysisProjectionResult(byKind, findings);
     }
 
-    private static ulong EstimateRetainedBytes(
-        ulong targetAddr,
-        ClrHeap heap,
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
+    private static ClrObject GetObject(ulong targetAddr, ClrHeap heap)
     {
         if (targetAddr == 0)
-            return 0;
+            return default;
 
         try
         {
-            ClrObject obj = heap.GetObject(targetAddr);
-            if (!obj.IsValid || obj.Type is null)
-                return 0;
-
-            ulong mt = obj.Type.MethodTable;
-            if (mt != 0 && aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg) && agg.Count > 0)
-                return agg.TotalSize / (ulong)agg.Count; // avg size as single-object estimate
-
-            return obj.Size;
+            return heap.GetObject(targetAddr);
         }
         catch
         {
-            return 0;
+            return default;
         }
     }
 
-    private static string ResolveTypeName(
-        ulong targetAddr,
-        ClrHeap heap,
+    private static ulong EstimateRetainedBytes(
+        ClrObject obj,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
     {
-        if (targetAddr == 0)
-            return "(unknown)";
+        if (!obj.IsValid || obj.Type is null)
+            return 0;
 
-        try
-        {
-            ClrObject obj = heap.GetObject(targetAddr);
-            if (obj.IsValid && obj.Type?.Name is string name)
-                return name;
-        }
-        catch { }
+        ulong mt = obj.Type.MethodTable;
+        if (mt != 0 && aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg) && agg.Count > 0)
+            return agg.TotalSize / (ulong)agg.Count; // avg size as single-object estimate
 
-        return $"0x{targetAddr:X}";
+        return obj.Size;
+    }
+
+    private static string ResolveTypeName(ClrObject obj)
+    {
+        if (obj.IsValid && obj.Type?.Name is string name)
+            return name;
+
+        return obj.Address != 0 ? $"0x{obj.Address:X}" : "(unknown)";
     }
 
     private static int ComputeSeverity(ulong retainedBytes, string kind)

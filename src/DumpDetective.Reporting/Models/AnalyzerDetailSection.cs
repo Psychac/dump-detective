@@ -93,15 +93,15 @@ internal sealed record NamedStackTrace(
     IReadOnlyList<StackFrameEntry> Frames,
     bool Truncated);
 
-/// <summary>A single GC root path from root through intermediate types to a target object.</summary>
+/// <summary>Objects reachable from a GC root's target (owned subgraph). Forward BFS from target outward, not a root-to-target retention chain.</summary>
 internal sealed record RootPath(
     string RootKind,
     string TargetAddress,   // hex string e.g. "0x1A2B3C"
     int PathLength,
     bool WasCapped,
-    IReadOnlyList<string> Hops);  // type names, root-first; final entry is target type
+    IReadOnlyList<string> Hops);  // type names in BFS order from target; shows graph shape owned by root
 
-/// <summary>All root paths reaching a particular target type, grouped for display.</summary>
+/// <summary>Object subgraphs reachable from roots of a particular target type, grouped for display.</summary>
 internal sealed record RootPathGroup(
     string TargetType,         // fully qualified
     string TargetTypeShort,    // simple (last segment) name

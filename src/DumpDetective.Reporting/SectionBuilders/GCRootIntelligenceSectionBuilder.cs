@@ -29,6 +29,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             BuildConfidenceBand(confidenceScore,
                 new[] { "Average retained bytes are heuristic estimates." }.Concat(capCaveats).ToArray()),
             T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."),
+            T("Root-owned subgraph types show the object types reachable from each root. For exact root-to-target retention chains, use WinDbg !gcroot or dotMemory."),
         };
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>

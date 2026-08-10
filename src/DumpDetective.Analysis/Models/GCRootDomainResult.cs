@@ -23,7 +23,7 @@ public sealed record RootPathFinding(
     ulong TargetAddress,
     string TargetTypeName,
     string RootKind,
-    IReadOnlyList<string> PathTypeNames,
+    IReadOnlyList<string> PathTypeNames,  // forward BFS from target outward (owned subgraph), not root-to-target chain
     int PathLength,
     bool WasCapped);
 

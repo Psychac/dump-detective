@@ -61,6 +61,16 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 "HttpClient is designed for long-lived reuse. Use IHttpClientFactory or a static HttpClient. " +
                 "Creating per-request instances exhausts ephemeral TCP ports even before GC can collect them."));
 
+        if (d.HttpWebResponseCount >= 20)
+            blocks.Add(new TextBlock(
+                "Undisposed HttpWebResponse objects hold network streams open, exhausting connection pool slots. " +
+                "Always wrap responses in a `using` statement or explicitly call Dispose()."));
+
+        if (d.ServicePointCount >= 50)
+            blocks.Add(new TextBlock(
+                "ServicePointManager.MaxServicePoints defaults to unlimited, causing ServicePoint accumulation and potential OOM. " +
+                "Set a reasonable limit (e.g., 100) or migrate to HttpClient (.NET 6+ preferred)."));
+
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);

@@ -386,7 +386,7 @@ the standard pipeline. Silently wrong when the cache is absent.
 | **P0-2** | **Add `HttpWebRequest` finding threshold (e.g. ≥ 10)** | **Diagnostic** | **Improvement** | **High** | **Low** | **High** | ✅ **DONE** |
 | **P1-1** | **Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture** | **Diagnostic** | **Improvement** | **High** | **Medium** | **High** | ✅ **DONE** |
 | **P1-2** | **Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas** | **Correctness** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
-| P1-3 | Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder` | Diagnostic | Improvement | Medium | Low | High | |
+| **P1-3** | **Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder`** | **Diagnostic** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
 | P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium | |
 | P2-2 | Add `IHttpClientFactory` handler tracking entry detection | Diagnostic | Improvement | Medium | Medium | Medium | |
 | P2-3 | Add GC generation breakdown for `HttpClient` instances | Diagnostic | Improvement | Medium | Medium | High | |
@@ -568,3 +568,37 @@ the standard pipeline. Silently wrong when the cache is absent.
 - All 8 HTTP object analyzer tests pass
 - Test helper updated to provide empty TopHttpClients / InstanceScanCapped=false for baseline tests
 - Sampler integration verified through existing shared index scan test suite
+
+---
+
+## Implementation Summary (P1-3)
+
+**Status:** ✅ **COMPLETE** — Commit `9033ae1`
+
+### What Was Done
+
+1. **Added HttpWebResponse narrative block** (`HttpObjectSectionBuilder.cs`)
+   - Trigger: When HttpWebResponseCount ≥ 20
+   - Text: "Undisposed HttpWebResponse objects hold network streams open, exhausting connection pool slots. Always wrap responses in a `using` statement or explicitly call Dispose()."
+   - Explains the root cause (stream retention) and remediation (Dispose/using)
+
+2. **Added ServicePoint narrative block** (`HttpObjectSectionBuilder.cs`)
+   - Trigger: When ServicePointCount ≥ 50
+   - Text: "ServicePointManager.MaxServicePoints defaults to unlimited, causing ServicePoint accumulation and potential OOM. Set a reasonable limit (e.g., 100) or migrate to HttpClient (.NET 6+ preferred)."
+   - Explains the system limit issue and both tactical (limit) and strategic (migrate) solutions
+
+3. **Maintained consistent style** with existing HttpClient narrative
+   - Concise, technical language
+   - Direct guidance without repeating finding evidence
+   - Actionable recommendations
+
+### Impact
+
+- **Report quality:** Section now provides complete guidance for all three HTTP object classes (HttpClient, HttpWebResponse, ServicePoint)
+- **Engineer experience:** No need to cross-reference findings to understand what to do about HttpWebResponse/ServicePoint accumulation
+- **Consistency:** All major findings now have corresponding section narrative, not just HttpClient
+
+### Testing
+
+- All 8 HTTP object analyzer tests pass
+- No breaking changes to section builder API or output format

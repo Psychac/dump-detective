@@ -36,6 +36,12 @@ public sealed class GCGenerationAnalysisOptions
     /// </summary>
     public double Gen0PressureThresholdPercent { get; init; } = 40.0;
 
+    /// <summary>
+    /// POH (Pinned Object Heap) memory share threshold (%). Only emit POH Info finding when POH share exceeds this percentage.
+    /// POH is a separate heap for pinned objects (.NET 5+). Default 5%.
+    /// </summary>
+    public double PohThresholdPercent { get; init; } = 5.0;
+
     public static GCGenerationAnalysisOptions Preset(AnalysisProfile profile) => profile switch
     {
         AnalysisProfile.Fast => new GCGenerationAnalysisOptions { TopLohTypeLimit = 8, TopGenProfileLimit = 10 },

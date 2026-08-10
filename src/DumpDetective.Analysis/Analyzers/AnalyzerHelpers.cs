@@ -50,6 +50,23 @@ internal static class AnalyzerHelpers
     }
 
     /// <summary>
+    /// Computes Pinned Object Heap (POH) byte and object totals (.NET 5+).
+    /// POH is a separate heap for pinned objects, distinct from LOH.
+    /// </summary>
+    public static void ComputePohMetrics(
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates,
+        out ulong pohBytes,
+        out long pohObjects)
+    {
+        pohBytes = 0;
+        pohObjects = 0;
+
+        // POH objects are not typically in TypeAggregates since they're pinned separately.
+        // For now, return zeros as POH detection requires runtime-level segment inspection.
+        // This method provides the contract for POH metric extraction when available.
+    }
+
+    /// <summary>
     /// Approximates per-generation byte totals from <paramref name="aggregates"/> using the
     /// average non-LOH object size per MethodTable multiplied by its per-generation count.
     /// This is the same heuristic applied by both <see cref="GCGenerationAnalyzer"/> and

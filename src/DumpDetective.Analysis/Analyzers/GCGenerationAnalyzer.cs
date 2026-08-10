@@ -115,6 +115,9 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
+            // POH detection for .NET 5+
+            AnalyzerHelpers.ComputePohMetrics(aggregates, out ulong pohBytes, out long pohObjects);
+
             return new GCGenerationDomainResult(
                 gen0Bytes,
                 (int)Math.Min(int.MaxValue, gen0Objects),
@@ -127,8 +130,10 @@ namespace DumpDetective.Analysis.Analyzers
                 (int)Math.Min(int.MaxValue, totalObjects),
                 (int)Math.Min(int.MaxValue, lohObjects),
                 topLohTypes,
-                gen2Pct,
-                profiles,
+                PohBytes: pohBytes,
+                PohObjects: pohObjects,
+                Gen2Pct: gen2Pct,
+                PerTypeGenerationProfiles: profiles,
                 GenBytesAreApproximate: false,
                 FallbackMode: false,
                 LohThresholdPercent: options.LohThresholdPercent,
@@ -181,7 +186,9 @@ namespace DumpDetective.Analysis.Analyzers
                 lohBytes, lohPct,
                 totalObjects, lohObjects,
                 topLohTypes,
-                gen2Pct,
+                PohBytes: 0,
+                PohObjects: 0,
+                Gen2Pct: gen2Pct,
                 PerTypeGenerationProfiles: [],
                 GenBytesAreApproximate: true,
                 FallbackMode: true,

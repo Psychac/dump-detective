@@ -32,6 +32,8 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["gen2_objects"] = new NumericMetricValue(d.Gen2Objects, MetricUnit.Count),
             ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
             ["loh_objects"] = new NumericMetricValue(d.LohObjects, MetricUnit.Count),
+            ["poh_bytes"] = new NumericMetricValue((double)d.PohBytes, MetricUnit.Bytes, FormatBytes(d.PohBytes)),
+            ["poh_objects"] = new NumericMetricValue(d.PohObjects, MetricUnit.Count),
             ["total_objects"] = new NumericMetricValue(d.TotalObjects, MetricUnit.Count),
             ["gen2_pct"] = new NumericMetricValue(d.Gen2Pct, MetricUnit.Percent, $"{d.Gen2Pct:F1}%"),
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
@@ -46,6 +48,8 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             blocks.Add(T("Gen2 dominates the heap; retention is likely becoming long-lived."));
         if (d.LohPercent >= 35.0)
             blocks.Add(T("LOH share is elevated and may be contributing to fragmentation or promotion pressure."));
+        if (d.PohBytes > 0)
+            blocks.Add(T($"POH (Pinned Object Heap) detected: {FormatBytes(d.PohBytes)} in {d.PohObjects:N0} objects. POH is a separate heap for pinned objects on .NET 5+."));
 
         // Top LOH types — prefer PerTypeGenerationProfiles (per-gen counts) when available; fall back to TypeSnapshot
         if (d.PerTypeGenerationProfiles is { Count: > 0 })

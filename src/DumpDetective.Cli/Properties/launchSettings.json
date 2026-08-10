@@ -21,6 +21,10 @@
     "Trend2505": {
       "commandName": "Project",
       "commandLineArgs": "--trend=D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_12_45_12PM.dmp;D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_02_19_50PM.dmp;D:\\DUmps\\25-05\\PID__7736__Date__05_25_2026__Time_06_15_23PM.dmp --memory-diagnostics"
+    },
+    "Trend0604": {
+      "commandName": "Project",
+      "commandLineArgs": "--trend=D:\\DUmps\\06-04\\Date__04_06_2026__Time_11_44_57AM.dmp;D:\\DUmps\\06-04\\Date__04_06_2026__Time_12_58_17PM.dmp;D:\\DUmps\\06-04\\Date__04_06_2026__Time_06_43_20PM.dmp --memory-diagnostics"
     }
   }
 }

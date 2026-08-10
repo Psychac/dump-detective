@@ -298,6 +298,44 @@ dotMemory provides:
 | **P3** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Very High | Medium | Evolution |
 | **P3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | Improvement |
 
+---
+
+## Design Decision: P0-2 Root Path Semantics
+
+### Chosen Approach: Option A (Relabel as "Owned Subgraph Types")
+
+**Rationale:**
+- Forward BFS from root's target is genuinely useful for understanding what a root retains (retention shape, graph topology)
+- Relabeling honest-fies the semantics without losing diagnostic value
+- Low effort; immediate improvement to clarity
+- P3 reverse-BFS work becomes complementary enhancement, not a replacement
+
+**Trade-off:** Engineers seeking root-to-target chains must use WinDbg; DumpDetective shows what the root *owns* rather than why the object is *rooted*.
+
+---
+
+### Alternative: Option B (Suppress Until Reverse-BFS Available)
+
+**Description:**
+- Remove `Hops` data from reports entirely
+- Add caveat: "Full root-to-target chains require reverse-index BFS (P3 evolution)"
+- Keep severity table and kind breakdown (both correct and valuable)
+
+**Pros:**
+- Honest about current capability — no potentially misleading visualizations
+- Stronger signal that P3 reverse-BFS work is needed
+- Eliminates any residual confusion about forward vs. reverse semantics
+- Simpler mental model: "DumpDetective shows *which roots are severe*, and full chains require WinDbg"
+
+**Cons:**
+- Loses the "what does this root own?" diagnostic (retention shape, reachable types)
+- Engineers lose a useful visualization for designing root-release strategies
+- Requires more context-switching to WinDbg for any retention graph inspection
+
+**Viability:** High. Could be revisited if P3 reverse-BFS implementation is imminent, or if user feedback shows the forward BFS visualization adds more confusion than value in practice. Current choice (Option A) can be reverted to Option B with minimal change if needed (remove Hops from report rendering + update caveats).
+
+---
+
 ### Final Verdict
 
 1. **Is the analyzer production-ready?** Partially. Kind-level statistics and the severity table are usable for initial triage. The retained-size values and root path data should not be relied on for precise diagnosis without independent validation.

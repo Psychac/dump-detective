@@ -46,7 +46,7 @@ namespace DumpDetective.Analysis.Analyzers
             cancellationToken.ThrowIfCancellationRequested();
 
             // ── Step 1: Read all roots via the shared root-set cache ───────────
-            IReadOnlyList<RootRecord> rootRecords = heapCache.GetOrBuildRoots(heap);
+            IReadOnlyList<RootRecord> rootRecords = heapCache.GetOrBuildRoots(heap, cancellationToken);
             if (rootRecords.Count == 0)
                 return EmptyResult();
 
@@ -75,7 +75,7 @@ namespace DumpDetective.Analysis.Analyzers
                 cancellationToken.ThrowIfCancellationRequested();
                 RootFinding f = findings[i];
 
-                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped);
+                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped, cancellationToken);
 
                 if (wasCapped)
                     pathCappedCount++;

@@ -269,9 +269,9 @@ namespace DumpDetective.Analysis.Cache
             return _rootSetCache.GetOrBuildValidRoots(heap);
         }
 
-        public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap)
+        public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap, CancellationToken cancellationToken = default)
         {
-            return _rootSetCache.GetOrBuildRoots(heap);
+            return _rootSetCache.GetOrBuildRoots(heap, cancellationToken);
         }
 
         // Root enumeration moved into RootSetCache

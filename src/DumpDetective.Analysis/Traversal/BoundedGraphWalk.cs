@@ -25,7 +25,8 @@ internal static class BoundedGraphWalk
         ulong startAddr,
         int maxNodes,
         int maxDepth,
-        out bool wasCapped)
+        out bool wasCapped,
+        CancellationToken cancellationToken = default)
     {
         wasCapped = false;
         if (startAddr == 0)
@@ -42,6 +43,7 @@ internal static class BoundedGraphWalk
 
         while (queue.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             (ulong addr, int depth) = queue.Dequeue();
             nodesVisited++;
 

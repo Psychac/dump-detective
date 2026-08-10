@@ -40,7 +40,7 @@ internal class RootSetCache
         _progress = progress;
     }
 
-    public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap)
+    public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap, CancellationToken cancellationToken = default)
     {
         if (heap is null)
             throw new ArgumentNullException(nameof(heap));
@@ -53,7 +53,7 @@ internal class RootSetCache
         {
             try
             {
-                var candidates = RootIndexReader.ReadRootCandidates(builtIndex, CancellationToken.None);
+                var candidates = RootIndexReader.ReadRootCandidates(builtIndex, cancellationToken);
                 if (candidates.Count > 0)
                 {
                     var fromIndex = new List<RootRecord>(candidates.Count);

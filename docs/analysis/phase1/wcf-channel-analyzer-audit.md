@@ -426,7 +426,7 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 | P1-1 | **Add `ChannelFactory<T>` detection.** Detect `System.ServiceModel.ChannelFactory`-derived types; emit a Warning finding when high counts are present. Per-call ChannelFactory creation is a well-known expensive anti-pattern. | High | Low | High | ✅ Complete (commit 59bbb2f) |
 | P1-2 | **Add aggregate `TotalBytes` to `WcfChannelDomainResult` and to key metrics.** Sum `TotalBytes` across `ByType` in `BuildResult`. Surface in `AnalyzerDetailSection.KeyMetrics`. | Medium | Low | High | ✅ Complete (commit 8fd8f7b) |
 | P1-3 | **Fix key metrics to include `OtherChannels`** so metrics sum to `TotalChannels`. | Low | Trivial | High | ✅ Complete (commit ca22ead) |
-| P1-4 | **Promote `DbConnectionAnalyzer` to `IParallelHeapIndexScanParticipant`.** The pattern is proven here; `DbConnectionAnalyzer` uses identical infrastructure but is single-threaded. | Medium | Medium | High | Evolution |
+| P1-4 | **Promote `DbConnectionAnalyzer` to `IParallelHeapIndexScanParticipant`.** The pattern is proven here; `DbConnectionAnalyzer` uses identical infrastructure but is single-threaded. | Medium | Medium | High | ✅ Pre-existing (DbConnectionAnalyzer commit 6fa8b5f) |
 
 #### P2 — Medium
 
@@ -559,3 +559,14 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 - Metrics sum correctly to total channel count
 - Operators can verify channel state accounting at a glance
 - Trivial fix, high consistency gain
+
+### ✅ P1-4 Pre-existing (DbConnectionAnalyzer parallel implementation)
+
+**Note:** During WcfChannelAnalyzer audit, P1-4 recommended promoting DbConnectionAnalyzer to parallel scanning. Investigation reveals **this was already completed** in commit `6fa8b5f`.
+
+**Current State:**
+- DbConnectionAnalyzer implements `IParallelHeapIndexScanParticipant`
+- Has `CreateWorkerInstance()` and `MergePartial()` methods
+- Uses identical typed-resource infrastructure as WcfChannelAnalyzer
+
+**Status:** Platform-level improvement already in place. No action needed.

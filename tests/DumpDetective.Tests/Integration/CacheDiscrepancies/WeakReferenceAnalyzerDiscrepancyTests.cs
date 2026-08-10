@@ -46,6 +46,8 @@ public sealed class WeakReferenceAnalyzerDiscrepancyTests
             diskResult.StaleWrapperCount.Should().Be(memResult.StaleWrapperCount);
             diskResult.DependentHandleDeadKeyCount.Should().Be(memResult.DependentHandleDeadKeyCount);
             diskResult.ScanCapped.Should().Be(memResult.ScanCapped);
+            diskResult.PhaseBFallbackUsed.Should().Be(memResult.PhaseBFallbackUsed);
+            diskResult.PhaseBSkipped.Should().Be(memResult.PhaseBSkipped);
             diskResult.WeakHandleKinds.Count.Should().Be(memResult.WeakHandleKinds.Count);
             diskResult.TopWeakTargetTypes.Count.Should().Be(memResult.TopWeakTargetTypes.Count);
             diskResult.TopStaleWrapperHolderTypes.Count.Should().Be(memResult.TopStaleWrapperHolderTypes.Count);

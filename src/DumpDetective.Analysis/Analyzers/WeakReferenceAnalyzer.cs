@@ -238,18 +238,20 @@ namespace DumpDetective.Analysis.Analyzers
             catch { }
 
             // ── Phase B: WeakReference<T> object analysis ─────────────────────
-            progress?.Report(new(0, "scanning WeakReference objects"));
-
             int weakRefObjCount = 0;
             ulong weakRefObjBytes = 0;
             int staleWrapperCount = 0;
             var staleHolderTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
-
-            // Find WeakReference MT candidates from TypeAggregates
-            var weakRefMtEntries = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(4);
+            bool phaseBFallbackUsed = false;
+            bool phaseBSkipped = false;
 
             if (typeAggregates is not null)
             {
+                // Index path: use TypeAggregates
+                progress?.Report(new(0, "scanning WeakReference objects"));
+
+                var weakRefMtEntries = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(4);
+
                 foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
                 {
                     ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
@@ -258,51 +260,89 @@ namespace DumpDetective.Analysis.Analyzers
                     string? name = clrType.Name;
                     if (name is null) continue;
 
-                    // Match "System.WeakReference`1[...]" or "System.WeakReference"
                     bool isGenericWR = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
                     bool isNonGenericWR = string.Equals(name, WeakRefNonGenericName, StringComparison.Ordinal);
 
                     if (isGenericWR || isNonGenericWR)
                         weakRefMtEntries.Add((kv.Key, kv.Value));
                 }
-            }
 
-            // Bound the number of sample probes to avoid heavy per-type work.
-            int probeLimit = options.WeakRefProbeSampleLimit <= 0 ? int.MaxValue : options.WeakRefProbeSampleLimit;
-            int probesDone = 0;
+                int probeLimit = options.WeakRefProbeSampleLimit <= 0 ? int.MaxValue : options.WeakRefProbeSampleLimit;
+                int probesDone = 0;
 
-            foreach ((ulong mt, TypeAggregateIndexEntry entry) in weakRefMtEntries)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                // Respect the configured probe cap.
-                if (probesDone >= probeLimit) break;
-
-                weakRefObjCount += (int)Math.Min(entry.Count, int.MaxValue);
-                weakRefObjBytes += entry.TotalSize;
-
-                // Probe m_handle on a sample to identify stale wrappers.
-                // A stale wrapper is a WeakReference whose m_handle IntPtr is zero (collected target).
-                if (entry.SampleAddress == 0) continue;
-
-                ClrObject sample = heap.GetObject(entry.SampleAddress);
-                if (!sample.IsValid || sample.Type is null) continue;
-
-                ClrInstanceField? mHandleField = sample.Type.GetFieldByName("m_handle");
-                if (mHandleField is null) continue;
-
-                // Check a sample instance's m_handle field to detect stale wrappers.
-                // This probe is intentionally lightweight; we cap the number of probes with
-                // `WeakRefProbeSampleLimit` in the preset/options.
-                nint handleValue = mHandleField.Read<nint>(entry.SampleAddress, interior: false);
-                probesDone++;
-                if (handleValue == 0)
+                foreach ((ulong mt, TypeAggregateIndexEntry entry) in weakRefMtEntries)
                 {
-                    // Sample itself is stale — approximate all as stale (conservative estimate).
-                    staleWrapperCount += (int)Math.Min(entry.Count, int.MaxValue);
-                    // Record which WeakReference type holds stale wrappers.
-                    string holderTypeName = sample.Type.Name ?? "Unknown";
-                    IncrementDict(staleHolderTypeHits, holderTypeName);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (probesDone >= probeLimit) break;
+
+                    weakRefObjCount += (int)Math.Min(entry.Count, int.MaxValue);
+                    weakRefObjBytes += entry.TotalSize;
+
+                    if (entry.SampleAddress == 0) continue;
+
+                    ClrObject sample = heap.GetObject(entry.SampleAddress);
+                    if (!sample.IsValid || sample.Type is null) continue;
+
+                    ClrInstanceField? mHandleField = sample.Type.GetFieldByName("m_handle");
+                    if (mHandleField is null) continue;
+
+                    nint handleValue = mHandleField.Read<nint>(entry.SampleAddress, interior: false);
+                    probesDone++;
+                    if (handleValue == 0)
+                    {
+                        staleWrapperCount += (int)Math.Min(entry.Count, int.MaxValue);
+                        string holderTypeName = sample.Type.Name ?? "Unknown";
+                        IncrementDict(staleHolderTypeHits, holderTypeName);
+                    }
                 }
+            }
+            else
+            {
+                // Fallback path: scan heap when TypeAggregates unavailable (P1-3)
+                progress?.Report(new(0, "scanning WeakReference objects (fallback mode)"));
+
+                var scanCounter = new ObjectScanCounter("scanning WeakReference objects", progress,
+                    reportEveryObjects: 10000, reportEveryElapsed: TimeSpan.FromSeconds(2));
+
+                phaseBFallbackUsed = true;
+
+                foreach (var obj in heap.EnumerateObjects())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    scanCounter.Tick();
+
+                    if (obj.Type is null) continue;
+
+                    string? name = obj.Type.Name;
+                    if (name is null) continue;
+
+                    bool isGenericWR = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
+                    bool isNonGenericWR = string.Equals(name, WeakRefNonGenericName, StringComparison.Ordinal);
+
+                    if (!isGenericWR && !isNonGenericWR) continue;
+
+                    weakRefObjCount++;
+                    weakRefObjBytes += obj.Size;
+
+                    ClrInstanceField? mHandleField = obj.Type.GetFieldByName("m_handle");
+                    if (mHandleField is null) continue;
+
+                    try
+                    {
+                        nint handleValue = mHandleField.Read<nint>(obj.Address, interior: false);
+                        if (handleValue == 0)
+                        {
+                            staleWrapperCount++;
+                            string holderTypeName = obj.Type.Name ?? "Unknown";
+                            IncrementDict(staleHolderTypeHits, holderTypeName);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                scanCounter.Complete();
             }
 
             // Attach artifacts if exports were requested and produced
@@ -359,6 +399,8 @@ namespace DumpDetective.Analysis.Analyzers
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
                 ScanCapped: scanCapped,
                 ScanCapUsed: options.HandleScanCap,
+                PhaseBFallbackUsed: phaseBFallbackUsed,
+                PhaseBSkipped: phaseBSkipped,
                 Artifacts: rawExports);
         }
 

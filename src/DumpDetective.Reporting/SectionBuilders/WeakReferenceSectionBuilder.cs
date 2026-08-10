@@ -37,6 +37,11 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             ["dependent_handles_dead_primary_key"] = new NumericMetricValue(d.DependentHandleDeadKeyCount, MetricUnit.Count),
         };
 
+        if (d.PhaseBSkipped)
+            blocks.Add(T("⚠ Phase B (WeakReference Analysis) was skipped — heap object enumeration unavailable. No WeakReference object data available."));
+        else if (d.PhaseBFallbackUsed)
+            blocks.Add(T("ℹ Phase B (WeakReference Analysis) used fallback heap scan (heap index unavailable). Results are accurate but computation may be slower on large heaps."));
+
         if (d.ScanCapped)
             blocks.Add(T("⚠ Handle scan was capped at 50 000 entries — totals may be underestimated."));
 

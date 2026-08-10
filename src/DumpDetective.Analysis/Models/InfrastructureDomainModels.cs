@@ -195,13 +195,23 @@ internal sealed record HttpObjectDomainResult(
 // ── Timer Objects ───────────────────────────────────────────────────────────
 
 /// <summary>
+/// Sampled state from a single timer instance (period, callback owner).
+/// </summary>
+internal sealed record TimerStateSnapshot(
+    ulong Address,
+    uint Generation,
+    long PeriodMs,
+    string? CallbackOwnerType);
+
+/// <summary>
 /// Per-type count/size summary for timer-related objects found on the heap.
 /// </summary>
 internal sealed record TimerObjectTypeSummary(
     string TypeName,
     int Count,
     ulong TotalBytes,
-    Evidence? Evidence = null);
+    Evidence? Evidence = null,
+    IReadOnlyList<TimerStateSnapshot>? Samples = null);
 
 /// <summary>
 /// Domain result produced by <c>TimerLeakAnalyzer</c>.

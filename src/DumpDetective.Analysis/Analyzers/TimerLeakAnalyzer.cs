@@ -1,3 +1,5 @@
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
@@ -14,10 +16,13 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - System.Timers.Timer
 ///   - System.Threading.TimerQueueTimer / TimerHolder
 /// </summary>
-public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
+public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<TimerStateSnapshot>
 {
     public string Name => "Timer Leak Analysis";
     public string Category => "Infrastructure";
+
+    public int MaxStateSamplesPerType => 100;
+    public int TopSampleCap => 20;
 
     public bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
 
@@ -168,6 +173,9 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         };
         var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
 
+        var sampler = new TimerLeakAnalyzer();
+        var samplesByType = new Dictionary<string, List<TimerStateSnapshot>>(byType.Count);
+
         for (int i = 0; i < byType.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -175,6 +183,12 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             ulong? sampleAddress = cache.GetSampleInstanceAddress(summary.TypeName);
             if (sampleAddress is null)
                 continue;
+
+            var samples = new List<TimerStateSnapshot>(sampler.MaxStateSamplesPerType);
+            var entry = new HeapEntry(sampleAddress.Value, 0, 0);
+            var snapshot = (sampler as ITypedResourceInstanceSampler<TimerStateSnapshot>).TrySample(heap, entry, summary.TypeName);
+            if (snapshot != null)
+                samples.Add(snapshot);
 
             bool found = finder.TryFindAnyRootPath(sampleAddress.Value, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
             string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
@@ -185,8 +199,88 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
                     summary.TotalBytes,
                     rootPath,
                     searchTruncated,
-                    [new EvidenceSignal("InstanceCount", "Instances of this timer type", summary.Count)])
+                    [new EvidenceSignal("InstanceCount", "Instances of this timer type", summary.Count)]),
+                Samples = samples.Count > 0 ? samples : null
             };
+        }
+    }
+
+    TimerStateSnapshot? ITypedResourceInstanceSampler<TimerStateSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
+    {
+        if (!typeName.Equals("System.Threading.TimerQueueTimer", StringComparison.Ordinal))
+            return null;
+
+        long periodMs = TryReadPeriod(heap, entry.Address);
+        string? callbackOwnerType = TryReadCallbackOwner(heap, entry.Address);
+
+        return new TimerStateSnapshot(entry.Address, (uint)entry.Generation, periodMs, callbackOwnerType);
+    }
+
+    private static long TryReadPeriod(ClrHeap heap, ulong address)
+    {
+        try
+        {
+            var obj = heap.GetObject(address);
+            if (!obj.IsValid || obj.Type == null)
+                return -1;
+
+            var periodField = obj.Type.GetFieldByName("_period");
+            if (periodField == null)
+                return -1;
+
+            try
+            {
+                int intVal = periodField.Read<int>(address, interior: false);
+                return intVal;
+            }
+            catch
+            {
+                try
+                {
+                    long longVal = periodField.Read<long>(address, interior: false);
+                    return longVal;
+                }
+                catch
+                {
+                    return -1;
+                }
+            }
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    private static string? TryReadCallbackOwner(ClrHeap heap, ulong address)
+    {
+        try
+        {
+            var obj = heap.GetObject(address);
+            if (!obj.IsValid || obj.Type == null)
+                return null;
+
+            var callbackField = obj.Type.GetFieldByName("_timerCallback");
+            if (callbackField == null)
+                return null;
+
+            var callbackObj = callbackField.ReadObject(address, interior: false);
+            if (!callbackObj.IsValid || callbackObj.Type == null)
+                return null;
+
+            var targetField = callbackObj.Type.GetFieldByName("_target");
+            if (targetField == null)
+                return null;
+
+            var targetObj = targetField.ReadObject(callbackObj.Address, interior: false);
+            if (targetObj.IsValid && targetObj.Type != null)
+                return targetObj.Type.Name;
+
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

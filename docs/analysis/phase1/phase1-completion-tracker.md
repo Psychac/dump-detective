@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 68 |
-| **P1 Implemented** | 117 |
+| **P1 Implemented** | 118 |
 | **P2 Implemented** | 23 |
-| **Overall P0+P1 Rate** | 79.1% (185/234) |
+| **Overall P0+P1 Rate** | 79.5% (186/234) |
 
 ---
 
@@ -50,7 +50,7 @@
 
 ---
 
-| 15 | **GCRootAnalyzer** | 1/2 | 1/4 | 0/5 | 0/3 | ✅ P0-2 complete (relabel owned-subgraph semantics); P0-1 pending; P1-1,P1-2 pending |
+| 15 | **GCRootAnalyzer** | 1/2 | 2/4 | 0/5 | 0/3 | ✅ P0-2, P1-2 complete; P0-1 pending; P1-1,P1-3,P1-4 pending |
 | 16 | **ObjectShapeAnalyzer** | 2/3 | 3/5 | 1/8 | 0/3 | I-1,I-2 done (ranking + GC scan cost); I-3,I-5,I-7 done (aggregate metric + TotalSize + finalizable finding); 1 P0, 2 P1, 7 P2 pending |
 | 17 | **TimerLeakAnalyzer** | 2/2 | 2/3 | 2/5 | 0/3 | ✅ P0 complete (2/2); P1 67% (2/3); P2 40% (2/5); P1-2 pending |
 | 18 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
@@ -81,13 +81,13 @@
 | Category | Count | Notes |
 |----------|-------|-------|
 | Analyzers with P0+P1 100% complete | 16 | All P0+P1 recommendations implemented (includes MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer) |
-| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes GCRootAnalyzer P0-2 done, AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with partial P0+P1 completion | 14 | Some items done, some pending (includes GCRootAnalyzer P0-2/P1-2 done, AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
 | **P0 items implemented** | **68** | 87.2% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **117** | 75.0% |
-| **Combined P0+P1 rate** | **79.1%** | (185/234) |
+| **P1 items implemented** | **118** | 75.6% |
+| **Combined P0+P1 rate** | **79.5%** | (186/234) |
 
 ---
 

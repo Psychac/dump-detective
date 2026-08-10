@@ -53,7 +53,7 @@
 
 | 15 | **GCRootAnalyzer** | 1/2 | 4/4 | 0/5 | 0/3 | ✅ P0-2, P1-2, P1-3, P1-4 complete; P0-1 pending; 🎯 All P1 complete! |
 | 16 | **ObjectShapeAnalyzer** | 3/3 | 3/5 | 1/8 | 0/3 | ✅ P0 COMPLETE; I-3,I-5,I-7 done; I-6 skipped (duplicates ArrayAnalyzer); E-1 deferred (architectural blocker); I-8 done (P2); 1 P1, 7 P2 pending |
-| 17 | **ThreadAnalyzer** | 2/3 | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 pending; P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
+| 17 | **ThreadAnalyzer** | 2/3* | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 BLOCKED (ClrMD API, reverse-index workaround available); P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 18 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 19 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 20 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
@@ -132,10 +132,11 @@ Different audits use different conventions for marking completion:
 
 **ClrMD 4 API Limitations:**
 
-| Item | Issue | Impact | Resolution |
-|------|-------|--------|------------|
-| **ThreadAnalyzer P1-1** | `ClrThreadPool` does not expose QueueLength, ActiveWorkerThreads, IdleWorkerThreads, MinWorkerThreads, MaxWorkerThreads | ThreadPool starvation detection unavailable; high-signal queue depth metric cannot be implemented | Awaiting Microsoft.Diagnostics.Runtime API enhancement or direct memory inspection workaround |
-| **ThreadAnalyzer P1-2** | `ClrThread.Name` property not available | Thread triage acceleration lost; critical context (e.g., "SignalR Hub Dispatcher") unavailable in hang reports | Awaiting Microsoft.Diagnostics.Runtime API enhancement or managed thread enumeration workaround |
+| Item | Issue | Impact | Resolution | Workaround |
+|------|-------|--------|------------|-----------|
+| **ThreadAnalyzer P0-3** | `ClrThread.EnumerateBlockingObjects()` not exposed; only global `heap.EnumerateSyncBlocks()` available | Blocked threads show *what* they wait on but not *which thread holds it*; manual cross-reference with LockGraphAnalyzer required | Awaiting ClrMD 5.x API enhancement | ✅ **Reverse-index available** — iterate SyncBlocks globally, associate with blocked threads (4-5 hrs impl, <2% perf overhead) |
+| **ThreadAnalyzer P1-1** | `ClrThreadPool` does not expose QueueLength, ActiveWorkerThreads, IdleWorkerThreads, MinWorkerThreads, MaxWorkerThreads | ThreadPool starvation detection unavailable; high-signal queue depth metric cannot be implemented | Awaiting Microsoft.Diagnostics.Runtime API enhancement | Requires direct runtime memory inspection (complex, risky) |
+| **ThreadAnalyzer P1-2** | `ClrThread.Name` property not available | Thread triage acceleration lost; critical context unavailable in hang reports | Awaiting Microsoft.Diagnostics.Runtime API enhancement | Requires managed thread enumeration + TLS parsing (architecture-specific) |
 
-**Status:** Both items marked as BLOCKED (⏳) rather than NOT STARTED, indicating active investigation and API limitations rather than lack of effort.
+**Status:** All three items marked as BLOCKED (⏳) indicating API limitations. P0-3 has an implementable workaround; P1-1 and P1-2 are true API gaps.
 

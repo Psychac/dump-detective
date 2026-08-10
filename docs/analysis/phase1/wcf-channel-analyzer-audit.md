@@ -423,7 +423,7 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| P1-1 | **Add `ChannelFactory<T>` detection.** Detect `System.ServiceModel.ChannelFactory`-derived types; emit a Warning finding when high counts are present. Per-call ChannelFactory creation is a well-known expensive anti-pattern. | High | Low | High | Improvement |
+| P1-1 | **Add `ChannelFactory<T>` detection.** Detect `System.ServiceModel.ChannelFactory`-derived types; emit a Warning finding when high counts are present. Per-call ChannelFactory creation is a well-known expensive anti-pattern. | High | Low | High | ✅ Complete (commit 59bbb2f) |
 | P1-2 | **Add aggregate `TotalBytes` to `WcfChannelDomainResult` and to key metrics.** Sum `TotalBytes` across `ByType` in `BuildResult`. Surface in `AnalyzerDetailSection.KeyMetrics`. | Medium | Low | High | Improvement |
 | P1-3 | **Fix key metrics to include `OtherChannels`** so metrics sum to `TotalChannels`. | Low | Trivial | High | Improvement |
 | P1-4 | **Promote `DbConnectionAnalyzer` to `IParallelHeapIndexScanParticipant`.** The pattern is proven here; `DbConnectionAnalyzer` uses identical infrastructure but is single-threaded. | Medium | Medium | High | Evolution |
@@ -512,3 +512,21 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 - Remote service URL now surfaces directly in report table and highlighted in Critical finding
 - Closes the final major diagnostic gap vs. manual WinDbg workflows
 - DumpDetective's WCF analysis now definitively superior to any available tool
+
+### ✅ P1-1 Complete (2026-08-10)
+
+**Commit:** `59bbb2f`  
+**Status:** ChannelFactory<T> detection now emits Warning findings
+
+**What was done:**
+- Added `IsFactoryType()` method to detect `System.ServiceModel.ChannelFactory` types
+- Added `FactoryCount` field to `WcfChannelDomainResult` (default 0, opt-in)
+- Updated analyzer to count factory instances separately during heap scan
+- Factory counting works in parallel (`MergePartial` aggregates across workers)
+- Added Warning finding when factories are detected (well-known performance anti-pattern)
+- Updated section builder to display factory count in key metrics
+
+**Impact:**
+- Per-call ChannelFactory creation (expensive anti-pattern) now automatically surfaced
+- Finding includes technical remediation: "Create single static ChannelFactory<T> per endpoint and reuse it"
+- Closes performance diagnostic gap where DNS/certificate negotiation overhead went undiagnosed

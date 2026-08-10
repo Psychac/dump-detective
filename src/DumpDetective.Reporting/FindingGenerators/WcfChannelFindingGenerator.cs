@@ -14,7 +14,7 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
     {
         if (result is not WcfChannelDomainResult r || !r.WcfPresent) return [];
 
-        var findings = new List<InsightFinding>(2);
+        var findings = new List<InsightFinding>(3);
 
         // ── Faulted channels finding (always actionable) ───────────────────────
         if (r.FaultedChannels > 0)
@@ -61,6 +61,24 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
                 Tags: ["infrastructure", "wcf", "channel", "leak"],
                 MetricValue: r.TotalChannels,
                 MetricUnit: "channels"));
+        }
+
+        // ── ChannelFactory detection ──────────────────────────────────────────
+        if (r.FactoryCount > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Infrastructure",
+                Severity: FindingSeverity.Warning,
+                Title: $"{r.FactoryCount:N0} ChannelFactory<T> object(s) on managed heap",
+                Evidence: $"{r.FactoryCount:N0} ChannelFactory instances found. Per-call ChannelFactory creation is a well-known expensive anti-pattern.",
+                Recommendation:
+                    "ChannelFactory<T> is expensive to create (DNS resolution, certificate negotiation, endpoint binding). " +
+                    "Create a single static ChannelFactory<T> instance per service endpoint and reuse it to create channels. " +
+                    "Presence of ChannelFactory objects on the heap indicates the application may be creating new factories per call.",
+                Tags: ["infrastructure", "wcf", "factory", "performance"],
+                MetricValue: r.FactoryCount,
+                MetricUnit: "factories"));
         }
 
         return findings;

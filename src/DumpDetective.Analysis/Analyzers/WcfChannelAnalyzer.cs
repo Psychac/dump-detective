@@ -38,9 +38,14 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     // well-known base/proxy types.
     private static readonly string[] WcfNamespacePrefixes = ["System.ServiceModel."];
     private static readonly string[] WcfContainsTokens = ["Channel", "ClientBase", "CommunicationObject"];
+    private static readonly string[] FactoryNamespaces = ["System.ServiceModel."];
+    private static readonly string[] FactoryContainsTokens = ["ChannelFactory"];
 
     public bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, WcfNamespacePrefixes, ".ServiceChannel", WcfContainsTokens);
+
+    private static bool IsFactoryType(string typeName) =>
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, FactoryNamespaces, ".ChannelFactory", FactoryContainsTokens);
 
     public int MaxStateSamplesPerType => MaxStateSamples;
     public int TopSampleCap => TopFaultedCap;
@@ -135,6 +140,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<WcfChannelSnapshot>? _sampler;
+    private int _factoryCount;
 
     /// <summary>
     /// Resolves candidate WCF-type MethodTables and pre-seeds per-type counters from
@@ -182,6 +188,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             var other = (WcfChannelAnalyzer)p;
             if (other._typeStats is null) continue;
 
+            _factoryCount += other._factoryCount;
+
             foreach (var kvp in other._typeStats)
             {
                 if (!typeStats.TryGetValue(kvp.Key, out var self))
@@ -211,6 +219,13 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         var candidateMts = _candidateMts!;
         var typeStats = _typeStats!;
         var sampler = _sampler!;
+
+        ClrObject obj = _heap!.GetObject(entry.Address);
+        if (obj.IsValid && obj.Type != null && IsFactoryType(obj.Type.Name))
+        {
+            _factoryCount++;
+            return;
+        }
 
         if (!candidateMts.ContainsKey(entry.MethodTable)) return;
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
@@ -267,7 +282,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
         return new WcfChannelDomainResult(
-            WcfPresent:       totalChannels > 0,
+            WcfPresent:       totalChannels > 0 || _factoryCount > 0,
             TotalChannels:    totalChannels,
             OpeningChannels:  totalOpening,
             OpenedChannels:   totalOpened,
@@ -277,7 +292,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             OtherChannels:    totalOther,
             ByType:           byType,
             TopFaultedChannels: _sampler?.TopSamples ?? [],
-            StateScanCapped:  _sampler?.ScanCapped ?? false);
+            StateScanCapped:  _sampler?.ScanCapped ?? false,
+            FactoryCount:     _factoryCount);
     }
 
     private static string MapCommunicationState(int state) => state switch

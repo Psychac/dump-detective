@@ -29,6 +29,7 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["faulted"] = new NumericMetricValue(d.FaultedChannels, MetricUnit.Count),
             ["closing"] = new NumericMetricValue(d.ClosingChannels, MetricUnit.Count),
             ["closed"] = new NumericMetricValue(d.ClosedChannels, MetricUnit.Count),
+            ["factories"] = new NumericMetricValue(d.FactoryCount, MetricUnit.Count),
         };
 
         if (!d.WcfPresent)

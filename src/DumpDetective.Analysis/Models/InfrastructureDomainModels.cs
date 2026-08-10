@@ -150,7 +150,8 @@ internal sealed record WcfChannelDomainResult(
     int OtherChannels,
     IReadOnlyList<WcfChannelTypeSummary> ByType,
     IReadOnlyList<WcfChannelSnapshot> TopFaultedChannels,
-    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    bool StateScanCapped,
+    int FactoryCount = 0) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── HTTP Objects ──────────────────────────────────────────────────────────────
 

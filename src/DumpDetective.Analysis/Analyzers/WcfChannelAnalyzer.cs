@@ -264,6 +264,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
         // ── Build result ──────────────────────────────────────────────────────
         int totalChannels = 0, totalOpening = 0, totalOpened = 0, totalFaulted = 0, totalClosing = 0, totalClosed = 0, totalOther = 0;
+        ulong totalBytes = 0;
         var byType = new List<WcfChannelTypeSummary>(_typeStats.Count);
 
         foreach (var kv in _typeStats)
@@ -277,6 +278,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             totalClosing  += ts.Closing;
             totalClosed   += ts.Closed;
             totalOther    += ts.Other;
+            totalBytes    += ts.Bytes;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
@@ -293,7 +295,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             ByType:           byType,
             TopFaultedChannels: _sampler?.TopSamples ?? [],
             StateScanCapped:  _sampler?.ScanCapped ?? false,
-            FactoryCount:     _factoryCount);
+            FactoryCount:     _factoryCount,
+            TotalBytes:       totalBytes);
     }
 
     private static string MapCommunicationState(int state) => state switch

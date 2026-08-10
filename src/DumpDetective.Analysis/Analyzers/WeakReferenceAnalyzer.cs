@@ -59,8 +59,9 @@ namespace DumpDetective.Analysis.Analyzers
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out heapIndex))
                 typeAggregates = heapIndex.TypeAggregates;
 
-            // ── Phase A: Weak handle liveness ─────────────────────────────────
-            progress?.Report(new(0, "analysing weak handles"));
+            // ── Phases A & C: Weak handle liveness + Dependent handle dead-key count ──
+            // Merged into single pass over handle snapshot to halve disk I/O (P1-2)
+            progress?.Report(new(0, "scanning weak and dependent handles"));
 
             int totalWeakHandles = 0;
             int aliveWeakTargets = 0;
@@ -69,6 +70,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
             var weakHandleKinds = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            int dependentHandleDeadKeyCount = 0;
 
             // Optional exports
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
@@ -108,64 +111,21 @@ namespace DumpDetective.Analysis.Analyzers
                 foreach (var rec in inMem)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    // Only consider weak kinds
-                    if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
 
-                    totalWeakHandles++;
-                    IncrementDict(weakHandleKinds, KindToName(rec.Kind));
-                    if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
-
-                    ulong addr = rec.Addr;
-                    if (addr == 0) { deadWeakTargets++; continue; }
-
-                    ClrObject obj = heap.GetObject(addr);
-                    if (obj.IsValid)
+                    // Phase A: Weak kind branch
+                    if (rec.Kind == KindWeakShort || rec.Kind == KindWeakLong || rec.Kind == KindWeakWinRT)
                     {
-                        aliveWeakTargets++;
-                        string typeName = obj.Type?.Name ?? "Unknown";
-                        IncrementDict(targetTypeHits, typeName);
-                    }
-                    else
-                    {
-                        deadWeakTargets++;
-                    }
-                    if (options.ProduceRawExports)
-                        WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
-                }
-                try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
-                catch { }
-            }
-            else
-            {
-                // Otherwise try disk-backed snapshot, or enumerate live handles via a memory reader.
-                IHandleSnapshotReader? reader = null;
-                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
-                {
-                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
-                }
-                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+                        totalWeakHandles++;
+                        IncrementDict(weakHandleKinds, KindToName(rec.Kind));
+                        if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
-                var scanCounter = new ObjectScanCounter("scanning weak handles", progress,
-                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-                if (reader is not null)
-                {
-                    using (reader)
-                    {
-                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
+                        ulong addr = rec.Addr;
+                        if (addr == 0)
                         {
-                            scanCounter.Tick();
-                            cancellationToken.ThrowIfCancellationRequested();
-
-                            if (rec.Kind != KindWeakShort && rec.Kind != KindWeakLong && rec.Kind != KindWeakWinRT) continue;
-
-                            totalWeakHandles++;
-                            IncrementDict(weakHandleKinds, KindToName(rec.Kind));
-                            if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
-
-                            ulong addr = rec.Address;
-                            if (addr == 0) { deadWeakTargets++; continue; }
-
+                            deadWeakTargets++;
+                        }
+                        else
+                        {
                             ClrObject obj = heap.GetObject(addr);
                             if (obj.IsValid)
                             {
@@ -177,15 +137,105 @@ namespace DumpDetective.Analysis.Analyzers
                             {
                                 deadWeakTargets++;
                             }
-                            if (options.ProduceRawExports)
-                                WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
+                        }
+                        if (options.ProduceRawExports)
+                            WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
+                    }
+
+                    // Phase C: Dependent kind branch
+                    else if (rec.Kind == KindDependent)
+                    {
+                        ulong addr = rec.Addr;
+                        if (addr == 0)
+                        {
+                            dependentHandleDeadKeyCount++;
+                        }
+                        else
+                        {
+                            ClrObject obj = heap.GetObject(addr);
+                            if (!obj.IsValid) dependentHandleDeadKeyCount++;
+                        }
+                        if (options.ProduceRawExports)
+                            WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
+                    }
+                }
+            }
+            else
+            {
+                // Otherwise try disk-backed snapshot, or enumerate live handles via a memory reader.
+                IHandleSnapshotReader? reader = null;
+                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
+                {
+                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
+                }
+                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+
+                var scanCounter = new ObjectScanCounter("scanning weak and dependent handles", progress,
+                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
+
+                if (reader is not null)
+                {
+                    using (reader)
+                    {
+                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
+                        {
+                            scanCounter.Tick();
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            // Phase A: Weak kind branch
+                            if (rec.Kind == KindWeakShort || rec.Kind == KindWeakLong || rec.Kind == KindWeakWinRT)
+                            {
+                                totalWeakHandles++;
+                                IncrementDict(weakHandleKinds, KindToName(rec.Kind));
+                                if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
+
+                                ulong addr = rec.Address;
+                                if (addr == 0)
+                                {
+                                    deadWeakTargets++;
+                                }
+                                else
+                                {
+                                    ClrObject obj = heap.GetObject(addr);
+                                    if (obj.IsValid)
+                                    {
+                                        aliveWeakTargets++;
+                                        string typeName = obj.Type?.Name ?? "Unknown";
+                                        IncrementDict(targetTypeHits, typeName);
+                                    }
+                                    else
+                                    {
+                                        deadWeakTargets++;
+                                    }
+                                }
+                                if (options.ProduceRawExports)
+                                    WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
+                            }
+
+                            // Phase C: Dependent kind branch
+                            else if (rec.Kind == KindDependent)
+                            {
+                                ulong addr = rec.Address;
+                                if (addr == 0)
+                                {
+                                    dependentHandleDeadKeyCount++;
+                                }
+                                else
+                                {
+                                    if (!rec.IsAlive) dependentHandleDeadKeyCount++;
+                                }
+                                if (options.ProduceRawExports)
+                                    WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
+                            }
                         }
                         scanCounter.Complete();
                     }
-                    try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
-                    catch { }
                 }
             }
+
+            // Dispose export stream after both phases complete
+            try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
+            catch { }
 
             // ── Phase B: WeakReference<T> object analysis ─────────────────────
             progress?.Report(new(0, "scanning WeakReference objects"));
@@ -252,62 +302,6 @@ namespace DumpDetective.Analysis.Analyzers
                     // Record which WeakReference type holds stale wrappers.
                     string holderTypeName = sample.Type.Name ?? "Unknown";
                     IncrementDict(staleHolderTypeHits, holderTypeName);
-                }
-            }
-
-            // ── Phase C: Dependent handle dead-key count ──────────────────────
-            progress?.Report(new(0, "counting dependent handle dead keys"));
-
-            int dependentHandleDeadKeyCount = 0;
-
-            if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMemHandles)
-            {
-                foreach (var rec in inMemHandles)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (rec.Kind != KindDependent) continue;
-                    ulong addr = rec.Addr;
-                    if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
-                    ClrObject obj = heap.GetObject(addr);
-                    if (!obj.IsValid) dependentHandleDeadKeyCount++;
-                    if (options.ProduceRawExports)
-                        WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
-                }
-                try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
-                catch { }
-            }
-            else
-            {
-                IHandleSnapshotReader? reader = null;
-                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
-                {
-                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
-                }
-                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
-
-                var scanCounter = new ObjectScanCounter("counting dependent handle dead keys", progress,
-                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-                if (reader is not null)
-                {
-                    using (reader)
-                    {
-                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
-                        {
-                            scanCounter.Tick();
-                            cancellationToken.ThrowIfCancellationRequested();
-                            if (rec.Kind != KindDependent) continue;
-                            ulong addr = rec.Address;
-                            if (addr == 0) { dependentHandleDeadKeyCount++; continue; }
-                            // Use pre-computed IsAlive from snapshot to avoid redundant heap.GetObject call.
-                            if (!rec.IsAlive) dependentHandleDeadKeyCount++;
-                            if (options.ProduceRawExports)
-                                WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
-                        }
-                        scanCounter.Complete();
-                    }
-                    try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
-                    catch { }
                 }
             }
 

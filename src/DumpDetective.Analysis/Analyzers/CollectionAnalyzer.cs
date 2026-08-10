@@ -983,6 +983,20 @@ namespace DumpDetective.Analysis.Analyzers
             topList[minIndex] = candidate;
         }
 
+        /// <summary>
+        /// Fallback array-field lookup for when the cached <see cref="FieldLayout"/> has no known
+        /// array field. Called per-instance (not gated per-type like <see cref="GetOrBuildFieldLayout"/>),
+        /// so it's on the hot path for every affected queue/hashset instance under concurrent
+        /// <c>OnHeapEntry</c> callers.
+        /// </summary>
+        /// <remarks>
+        /// PERF: uses <see cref="ClrInstanceField.ElementType"/> — a signature tag, cheap — instead
+        /// of <c>field.Type?.IsArray</c>, which forces full <see cref="ClrType"/> resolution per
+        /// field and, called this frequently under concurrent workers, can serialize badly on
+        /// ClrMD's internal metadata-resolution locking (same class of regression measured in
+        /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c>: a ~20s scan turned into 5+
+        /// minutes).
+        /// </remarks>
         private static ClrInstanceField? FindFirstArrayField(ClrType? type)
         {
             if (type == null)
@@ -990,7 +1004,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             foreach (ClrInstanceField field in type.Fields)
             {
-                if (field.Type?.IsArray == true)
+                if (field.ElementType is ClrElementType.SZArray or ClrElementType.Array)
                     return field;
             }
 
@@ -1045,6 +1059,19 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
+        /// <summary>
+        /// Resolves (and caches) the well-known collection-internal fields for <paramref name="type"/>.
+        /// Gated once per unique MethodTable via <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd"/>
+        /// — the factory may race and run more than once under concurrent <c>OnHeapEntry</c> callers,
+        /// but that's cheap and idempotent, unlike leaving a window where the entry can be observed
+        /// missing.
+        /// </summary>
+        /// <remarks>
+        /// PERF: the field-name fallback loop below uses <see cref="ClrInstanceField.ElementType"/>
+        /// for the array/int32 checks, not <c>field.Type</c> — same rationale as
+        /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c> (full <see cref="ClrType"/>
+        /// resolution is expensive and serializes badly under concurrent callers).
+        /// </remarks>
         private FieldLayout GetOrBuildFieldLayout(ClrType? type)
         {
             if (type == null)
@@ -1082,7 +1109,7 @@ namespace DumpDetective.Analysis.Analyzers
                         if (anyInt == null && f.ElementType == ClrElementType.Int32)
                             anyInt = f;
 
-                        if (arrayField == null && f.Type?.IsArray == true)
+                        if (arrayField == null && f.ElementType is ClrElementType.SZArray or ClrElementType.Array)
                             arrayField = f;
 
                         string? name = f.Name;

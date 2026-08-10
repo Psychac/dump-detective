@@ -103,4 +103,13 @@ internal sealed record HeapIndexBuildResult(
     /// Null when string hashing was disabled or not yet implemented for the storage kind.
     /// </summary>
     IReadOnlyDictionary<ulong, StringDedupEntry>? StringDedupIndex = null,
-    DistributionSummary? StringDedupDistribution = null);
+    DistributionSummary? StringDedupDistribution = null,
+    /// <summary>
+    /// Per-MethodTable indices of instance fields whose type is <c>System.String</c>, built once
+    /// during Phase 1 alongside <see cref="TypeShapeCache"/>. Sparse — only present for types that
+    /// have at least one string field. Lets <c>StringAnalyzer</c>'s ownership sampling skip the
+    /// per-type <c>ClrType.Fields</c> walk it would otherwise repeat on first encounter of each MT.
+    /// Null on the cache-hit fast path (no full scan ran); consumers must fall back to a lazy
+    /// per-type computation in that case.
+    /// </summary>
+    IReadOnlyDictionary<ulong, int[]>? StringFieldIndicesByMethodTable = null);

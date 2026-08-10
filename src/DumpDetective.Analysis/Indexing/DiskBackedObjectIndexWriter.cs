@@ -80,6 +80,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var moduleRegistry = new ModuleRegistry();
         // Satellite data collected during parallel scan, written serially afterwards.
         var shapeCache = new ConcurrentDictionary<ulong, TypeShapeEntry>();
+        // Sparse: only populated for types with >=1 System.String field. Computed once per
+        // unique MT alongside shapeCache below, so StringAnalyzer's ownership sampling doesn't
+        // have to repeat this ClrType.Fields walk lazily on first encounter of each type.
+        var stringFieldIndexCache = new ConcurrentDictionary<ulong, int[]>();
         // OPT: global flags cache eliminates redundant ComputeTypeFlags calls across segments,
         // reducing IsFinalizable string allocations from (uniqueTypes × segmentCount) to uniqueTypes.
         var globalFlagsCache = new ConcurrentDictionary<ulong, TypeAggregateFlags>();
@@ -194,6 +198,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                             flags = ComputeTypeFlags(obj.Type);
                             globalFlagsCache.TryAdd(mt, flags);
                             shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
+                            int[] stringFieldIndices = ComputeStringFieldIndices(obj.Type);
+                            if (stringFieldIndices.Length > 0)
+                                stringFieldIndexCache.TryAdd(mt, stringFieldIndices);
                         }
                         state.FlagsCache[mt] = flags;
                         // GetOrAdd (not TryGetValue+TryAdd) — the factory may race and run more than
@@ -576,7 +583,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             GlobalSizeBuckets: globalSizeBuckets,
             TypeShapeCache: shapeCache,
             SatelliteWarnings: satelliteWarnings.Count > 0 ? satelliteWarnings : null,
-            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null);
+            StringDedupIndex: masterStringDedup.Count > 0 ? masterStringDedup : null,
+            StringFieldIndicesByMethodTable: stringFieldIndexCache.Count > 0 ? stringFieldIndexCache : null);
     }
 
     // ── Satellite section writing ────────────────────────────────────────────────
@@ -794,6 +802,41 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         return new TypeShapeEntry(refFields, valFields);
+    }
+
+    /// <summary>
+    /// Indices (into <c>type.Fields</c>, matching <see cref="StringAnalyzer"/>'s FieldLayoutCache
+    /// ordering) of instance fields whose type is <c>System.String</c>. Empty array (never null)
+    /// when the type has none, so the caller's <c>Length &gt; 0</c> check decides whether to add a
+    /// sparse-dictionary entry. Walks <c>type.Fields</c> itself rather than sharing
+    /// <see cref="ComputeTypeShape"/>'s loop — both run at most once per unique MethodTable.
+    /// </summary>
+    /// <remarks>
+    /// PERF: uses <see cref="ClrInstanceField.ElementType"/> — a tag read directly off the field's
+    /// metadata signature — instead of <c>field.Type?.Name</c>. <c>field.Type</c> forces full
+    /// <see cref="ClrType"/> resolution, which is far more expensive and, under this method's
+    /// <see cref="Parallel"/>.For segment-worker caller, serializes on ClrMD's internal
+    /// metadata-resolution locking badly enough to turn a ~20s scan into 5+ minutes (measured).
+    /// Same pattern applied at every other per-field type check touched in this optimization pass:
+    /// <see cref="StringAnalyzer"/>'s owner-type lazy fallback and
+    /// <c>ScanForStringOwnerTypesFallback</c>, and <c>CollectionAnalyzer.FindFirstArrayField</c> /
+    /// <c>CollectionAnalyzer.GetOrBuildFieldLayout</c>'s field-name fallback loop.
+    /// </remarks>
+    private static int[] ComputeStringFieldIndices(ClrType type)
+    {
+        List<int>? indices = null;
+        int i = 0;
+        foreach (ClrInstanceField field in type.Fields)
+        {
+            if (field.ElementType == ClrElementType.String)
+            {
+                indices ??= new List<int>(capacity: 4);
+                indices.Add(i);
+            }
+            i++;
+        }
+
+        return indices?.ToArray() ?? [];
     }
 
     // ── Index cache fast-path ──────────────────────────────────────────────────

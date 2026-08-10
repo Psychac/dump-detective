@@ -66,17 +66,32 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     // _indexScanDedupActive (runs even when dedup itself is skipped) — piggybacks on the
     // same shared disk-index pass rather than doing its own heap.EnumerateObjects() walk.
     private const int MaxStringOwnerTypesToTrack = 100;
-    // Per-type sample cap: once a type has this many sampled instances, further instances of
-    // that type cost a single dictionary lookup (no GetObject/ReadObject) — bounds total
-    // ClrMD-touching calls to ~MaxStringOwnerTypesToTrack * MaxSamplesPerOwnerType regardless of
-    // heap size. Totals are extrapolated from the sample average against the type's real count.
-    private const int MaxSamplesPerOwnerType = 200;
+    // Per-type reservoir size: bounds total ClrMD-touching calls to roughly
+    // MaxStringOwnerTypesToTrack * MaxSamplesPerOwnerType regardless of heap size (a hot type
+    // beyond this many instances is subsampled via reservoir sampling — see AccumulateStringOwnerType).
+    // Totals are extrapolated from the sample average against the type's real count.
+    private const int MaxSamplesPerOwnerType = 2000;
     private bool _indexScanOwnerTypesActive;
     private FieldLayoutCache? _indexScanFieldCache;
     private Dictionary<ulong, int[]>? _indexScanStringOwnerFieldIndices; // owner MT -> string field indices
     private HashSet<ulong>? _indexScanTypesWithoutStringFields; // negative cache
-    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> sampled string bytes
-    private Dictionary<ulong, int>? _indexScanStringOwnerSampleCounts; // owner MT -> instances sampled
+    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> sum of reservoir sample bytes
+    private Dictionary<ulong, int>? _indexScanStringOwnerSampleCounts; // owner MT -> samples held (<= MaxSamplesPerOwnerType)
+    // owner MT -> total instances of that type seen by this worker so far (uncapped) — drives
+    // Algorithm-R reservoir replacement so late-encountered instances aren't systematically
+    // excluded in favor of whichever were scanned first (address/allocation-order bias).
+    private Dictionary<ulong, int>? _indexScanStringOwnerSeenCounts;
+    // owner MT -> reservoir of individual sample byte values, sized MaxSamplesPerOwnerType.
+    // Needed (rather than just a running sum) so a replaced sample's old contribution can be
+    // subtracted when Algorithm-R swaps it out.
+    private Dictionary<ulong, ulong[]>? _indexScanStringOwnerReservoir;
+    private Random? _indexScanReservoirRng;
+    // Phase 1-built field-index map (HeapIndexBuildResult.StringFieldIndicesByMethodTable). When
+    // present, AccumulateStringOwnerType skips its own GetTypeByMethodTable + ClrType.Fields walk
+    // entirely — a dictionary miss here is a definitive "no string fields" answer, not just "not
+    // yet computed". Null on the cache-hit fast path (no full Phase 1 scan ran), in which case
+    // the lazy per-type computation below is the only option.
+    private IReadOnlyDictionary<ulong, int[]>? _indexScanPrecomputedStringFieldIndices;
 
     /// <summary>
     /// Resolves whether the index-scan dedup branch will run this pass (mirroring the
@@ -119,6 +134,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             _indexScanTypesWithoutStringFields = new HashSet<ulong>(capacity: 1000);
             _indexScanStringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
             _indexScanStringOwnerSampleCounts = new Dictionary<ulong, int>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerSeenCounts = new Dictionary<ulong, int>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerReservoir = new Dictionary<ulong, ulong[]>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanReservoirRng = new Random();
+            _indexScanPrecomputedStringFieldIndices = heapIndex?.StringFieldIndicesByMethodTable;
         }
         else
         {
@@ -127,6 +146,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             _indexScanTypesWithoutStringFields = null;
             _indexScanStringOwnerTypeBytes = null;
             _indexScanStringOwnerSampleCounts = null;
+            _indexScanStringOwnerSeenCounts = null;
+            _indexScanStringOwnerReservoir = null;
+            _indexScanReservoirRng = null;
+            _indexScanPrecomputedStringFieldIndices = null;
         }
 
         bool runDedup = stringOptions.EnableDeduplication
@@ -210,46 +233,68 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// of types with no string fields (the overwhelming majority) cost one HashSet lookup and
     /// nothing else — <c>heap.GetObject</c> is only called once we know the type is relevant.
     /// </summary>
+    /// <remarks>
+    /// Field-type checks below use <see cref="ClrInstanceField.ElementType"/>, never
+    /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
+    /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c> for why (full <see cref="ClrType"/>
+    /// resolution under a concurrent/parallel caller turned a ~20s scan into 5+ minutes).
+    /// <para>
+    /// Sampling uses Algorithm-R reservoir sampling (bounded to
+    /// <see cref="MaxSamplesPerOwnerType"/> instances per type) rather than taking the first N
+    /// instances encountered. Address/allocation-scan order otherwise biases the sample toward
+    /// older instances, which can systematically underestimate types that grow over time — exactly
+    /// the leak-detection pattern this table exists to surface.
+    /// </para>
+    /// </remarks>
     private void AccumulateStringOwnerType(in HeapEntry entry)
     {
         ulong mt = entry.MethodTable;
+        int[]? stringFieldIndices;
 
-        if (_indexScanTypesWithoutStringFields!.Contains(mt))
-            return;
-
-        if (!_indexScanStringOwnerFieldIndices!.TryGetValue(mt, out int[]? stringFieldIndices))
+        if (_indexScanPrecomputedStringFieldIndices is not null)
         {
-            ClrType? type = _heap!.GetTypeByMethodTable(mt);
-            if (type is null)
-            {
-                _indexScanTypesWithoutStringFields.Add(mt);
+            // Phase 1 already determined, for every unique MT, whether it owns string fields —
+            // a dictionary miss here is definitive: no negative cache or ClrType.Fields walk needed.
+            if (!_indexScanPrecomputedStringFieldIndices.TryGetValue(mt, out stringFieldIndices))
                 return;
-            }
+        }
+        else
+        {
+            // Cache-hit fast path (no Phase 1 scan ran this pipeline run) — fall back to computing
+            // field indices lazily, same as before Phase 1 carried this metadata.
+            if (_indexScanTypesWithoutStringFields!.Contains(mt))
+                return;
 
-            var fields = _indexScanFieldCache!.GetFields(type);
-            var indices = new List<int>(capacity: 4);
-            for (int i = 0; i < fields.Length; i++)
+            if (!_indexScanStringOwnerFieldIndices!.TryGetValue(mt, out stringFieldIndices))
             {
-                try
+                ClrType? type = _heap!.GetTypeByMethodTable(mt);
+                if (type is null)
                 {
-                    ClrType? fieldType = fields[i].Type;
-                    if (fieldType != null && _indexScanStringMts!.Contains(fieldType.MethodTable))
+                    _indexScanTypesWithoutStringFields.Add(mt);
+                    return;
+                }
+
+                var fields = _indexScanFieldCache!.GetFields(type);
+                var indices = new List<int>(capacity: 4);
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    // ElementType is a tag read off the field's metadata signature — cheap.
+                    // fields[i].Type would force full ClrType resolution per field; under
+                    // concurrent parallel-pass workers that serializes on ClrMD's internal
+                    // metadata-resolution locking (measured: turned a ~20s scan into 5+ minutes).
+                    if (fields[i].ElementType == ClrElementType.String)
                         indices.Add(i);
                 }
-                catch
+
+                if (indices.Count == 0)
                 {
-                    // Skip malformed field definitions
+                    _indexScanTypesWithoutStringFields.Add(mt);
+                    return;
                 }
-            }
 
-            if (indices.Count == 0)
-            {
-                _indexScanTypesWithoutStringFields.Add(mt);
-                return;
+                stringFieldIndices = indices.ToArray();
+                _indexScanStringOwnerFieldIndices[mt] = stringFieldIndices;
             }
-
-            stringFieldIndices = indices.ToArray();
-            _indexScanStringOwnerFieldIndices[mt] = stringFieldIndices;
         }
 
         var ownerBytes = _indexScanStringOwnerTypeBytes!;
@@ -258,12 +303,31 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         if (!alreadyTracked && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
             return; // cap reached — only keep accumulating types already being tracked
 
-        sampleCounts.TryGetValue(mt, out int samplesSoFar);
-        if (samplesSoFar >= MaxSamplesPerOwnerType)
-            return; // sample cap reached for this type — total is extrapolated from the average
+        // Algorithm-R reservoir sampling: decide whether this instance (the n-th of this type
+        // seen by this worker) gets sampled, rather than always taking the first
+        // MaxSamplesPerOwnerType encountered. Address/allocation order otherwise biases the
+        // sample toward older instances, which can systematically underestimate types that grow
+        // over time (the exact leak-detection pattern this analyzer exists to catch).
+        var seenCounts = _indexScanStringOwnerSeenCounts!;
+        seenCounts.TryGetValue(mt, out int n);
+        n++;
+        seenCounts[mt] = n;
+
+        int slot;
+        if (n <= MaxSamplesPerOwnerType)
+        {
+            slot = n - 1; // still filling the reservoir — always accept
+        }
+        else
+        {
+            int j = _indexScanReservoirRng!.Next(n); // uniform in [0, n)
+            if (j >= MaxSamplesPerOwnerType)
+                return; // not selected — skip the expensive per-object read entirely
+            slot = j;
+        }
 
         // Only past this point do we touch ClrMD's per-object machinery (GetObject/ReadObject),
-        // which is the expensive part — bounded above to MaxSamplesPerOwnerType per type.
+        // which is the expensive part — bounded above to MaxSamplesPerOwnerType reads per type.
         ClrObject obj = _heap!.GetObject(entry.Address);
         if (!obj.IsValid) return;
 
@@ -284,9 +348,17 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             }
         }
 
-        sampleCounts[mt] = samplesSoFar + 1;
+        var reservoirs = _indexScanStringOwnerReservoir!;
+        if (!reservoirs.TryGetValue(mt, out ulong[]? reservoir))
+        {
+            reservoir = new ulong[MaxSamplesPerOwnerType];
+            reservoirs[mt] = reservoir;
+        }
+
         ownerBytes.TryGetValue(mt, out ulong existing);
-        ownerBytes[mt] = existing + addBytes;
+        ownerBytes[mt] = existing - reservoir[slot] + addBytes; // subtract replaced sample, if any (0 while filling)
+        reservoir[slot] = addBytes;
+        sampleCounts[mt] = Math.Min(n, MaxSamplesPerOwnerType);
     }
 
     IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
@@ -1010,8 +1082,11 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
 
                 if (stringOwnerTypeBytes is not null && stringOwnerTypeBytes.Count > 0)
                 {
-                    var topOwners = new List<(string, ulong)>(capacity: Math.Min(10, stringOwnerTypeBytes.Count));
-                    foreach (var kv in stringOwnerTypeBytes.OrderByDescending(kv => kv.Value).Take(10))
+                    // Report all tracked owner types (bounded above by MaxStringOwnerTypesToTrack) —
+                    // the report UI paginates/filters compact tables client-side, so there's no need
+                    // to pre-truncate here.
+                    var topOwners = new List<(string, ulong)>(capacity: stringOwnerTypeBytes.Count);
+                    foreach (var kv in stringOwnerTypeBytes.OrderByDescending(kv => kv.Value))
                     {
                         string typeName = heap.GetTypeByMethodTable(kv.Key)?.Name ?? $"0x{kv.Key:X}";
                         topOwners.Add((typeName, kv.Value));
@@ -1408,6 +1483,11 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// the normal path piggybacks on the shared <see cref="IHeapIndexScanParticipant"/> pass
     /// via <see cref="AccumulateStringOwnerType"/> instead.
     /// </summary>
+    /// <remarks>
+    /// PERF: string-field detection uses <see cref="ClrInstanceField.ElementType"/>, not
+    /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
+    /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c>.
+    /// </remarks>
     private static void ScanForStringOwnerTypesFallback(
         ClrHeap heap,
         HashSet<ulong> stringMts,
@@ -1443,19 +1523,9 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
 
                 for (int i = 0; i < fields.Length; i++)
                 {
-                    try
-                    {
-                        var fieldType = fields[i].Type;
-                        if (fieldType != null && stringMts.Contains(fieldType.MethodTable))
-                        {
-                            stringIndices.Add(i);
-                        }
-                    }
-                    catch
-                    {
-                        // Skip malformed fields
-                        continue;
-                    }
+                    // ElementType is a signature tag — cheap, no full ClrType resolution needed.
+                    if (fields[i].ElementType == ClrElementType.String)
+                        stringIndices.Add(i);
                 }
 
                 if (stringIndices.Count > 0)

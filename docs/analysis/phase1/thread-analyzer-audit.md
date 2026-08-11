@@ -31,7 +31,7 @@ The role is well-defined and coherent. The boundary between `ThreadAnalyzer` (tr
 
 | Gap | Detail |
 |---|---|
-| `ClrThread.EnumerateBlockingObjects()` never called | Blocked threads are *identified* by stack-frame pattern but never correlated with the actual CLR sync block. No thread can be told "you are waiting on object 0x… held by Thread N". |
+| No lock-contention correlation | Blocked threads are *identified* by stack-frame pattern but never correlated with the actual CLR sync block. `ClrThread.EnumerateBlockingObjects()` does not exist in ClrMD 4 (verified by reflection against 4.0.732401 — no such method or `ClrBlockingObject` type). The only available API is the global `heap.EnumerateSyncBlocks()`, already consumed by `LockGraphAnalyzer`; no per-thread "you are waiting on object 0x… held by Thread N" pairing is possible without fabricating an association. |
 | `ExceptionTypeDistribution` computed, never exposed | `ThreadCategorization.ExceptionTypeDistribution` is populated per-thread but is never placed into `ThreadDomainResult`. Consumers (InsightEngine, reports) have no access to exception type breakdown. |
 | Thread names not captured | `ClrThread.Name` (if available) is never read. Named threads are invisible in reports. |
 | Thread pool queue depth absent | ClrMD exposes `ClrRuntime.ThreadPool` which carries queue depth, completion-port counts, and min/max worker counts. This is never queried. |
@@ -45,7 +45,7 @@ None. The analyzer is focused.
 
 ### Adjacent Capabilities
 
-- **Blocking object ownership map**: natural complement to blocked-thread detection. Requires `thread.EnumerateBlockingObjects()`.
+- **Global lock-contention table**: natural complement to blocked-thread detection. No per-thread ownership API exists; achievable only as a global table (object, type, holder thread, waiter count) built from `heap.EnumerateSyncBlocks()` filtered to `WaitingThreadCount > 0` — ideally by reusing `LockGraphAnalyzer`'s existing sync-block index rather than re-enumerating.
 - **ThreadPool telemetry**: `runtime.ThreadPool` surface — queue length, starvation signal, worker counts.
 - **Thread-to-allocation correlation**: if `AllocationPatternAnalyzer` results are available, cross-referencing per-thread stack roots with allocation sites would strengthen retention analysis.
 
@@ -98,7 +98,7 @@ None. The analyzer is focused.
 | `thread.StackBase / StackLimit` | Used for stack size bytes | ✓ |
 | `thread.EnumerateStackTrace()` | Consumed via dispatcher (shared walk) | ✓ |
 | `thread.EnumerateStackRoots()` | **Counted only** — content ignored | △ |
-| `thread.EnumerateBlockingObjects()` | **Never called** | ✗ |
+| `thread.EnumerateBlockingObjects()` | **Does not exist in ClrMD 4** (verified by reflection) | N/A |
 | `thread.CurrentAppDomain` | Used (but low-value on .NET 5+) | △ |
 | `runtime.ThreadPool` | **Never queried** | ✗ |
 | `thread.Name` | **Never read** | ✗ |
@@ -120,8 +120,8 @@ None. The analyzer is focused.
 
 ### High-Value Opportunities (ranked)
 
-**1. Blocking object ownership (`thread.EnumerateBlockingObjects()`)**
-Each `ClrBlockingObject` exposes the sync block address, the owning thread, and the object type. Correlating this with blocked threads would let the analyzer emit "Thread 12 is waiting on `SemaphoreSlim` at 0x… held by Thread 7" — the single most actionable output possible for a hang investigation. This is the largest gap.
+**1. Global lock-contention table**
+`ClrThread.EnumerateBlockingObjects()` / `ClrBlockingObject` do not exist in ClrMD 4 — verified by reflecting the installed 4.0.732401 assembly. There is no API-backed way to say "Thread 12 is waiting on `SemaphoreSlim` at 0x… held by Thread 7"; any per-thread pairing would have to be fabricated (e.g. associating every blocked thread with every held lock), which is worse than reporting nothing. The achievable version is a **global** table from `heap.EnumerateSyncBlocks()` filtered to `WaitingThreadCount > 0` — object address/type, holding thread, waiter count — surfaced next to (not merged into) the per-thread blocked list, so an engineer can manually cross-reference. See "P0-3 Performance & Workaround Analysis" below for the corrected design.
 
 **2. ThreadPool telemetry (`runtime.ThreadPool`)**
 `ClrThreadPool` exposes `MinWorkerThreads`, `MaxWorkerThreads`, `ActiveWorkerThreads`, `IdleWorkerThreads`, and the work queue. Starvation (all workers busy + queue growing) is one of the most common production hang scenarios. Currently undetected.
@@ -241,7 +241,7 @@ The `WaitPatterns` table does not cover:
 | SOS Capability | Coverage |
 |---|---|
 | `!clrthreads` — thread IDs, states, exceptions | ✓ Covered (managed + OS IDs, state, exceptions) |
-| `!syncblk` — sync block table, lock owners | ✗ Not covered — `EnumerateBlockingObjects()` not used |
+| `!syncblk` — sync block table, lock owners | ✗ Not covered in `ThreadAnalyzer` — API doesn't support per-thread pairing; `LockGraphAnalyzer` already covers the global table via `heap.EnumerateSyncBlocks()` |
 | `!threadpool` — queue depth, worker counts | ✗ Not covered — `runtime.ThreadPool` not queried |
 | `!dumpstack` / `!clrstack` per thread | △ Partially — top N frames only, no full stack on demand |
 | `!clrstack -p` — parameters in frames | ✗ Not covered |
@@ -361,12 +361,12 @@ The `WaitPatterns` table does not cover:
 - **Impact:** Thread triage acceleration lost; thread context (e.g., "SignalR Hub Dispatcher") unavailable in reports
 - **Resolution:** Awaiting Microsoft.Diagnostics.Runtime API enhancement
 
-**P0-3 (Blocking Object Correlation) — ⏳ BLOCKED**
-- **Why:** ClrMD 4 does not expose `ClrThread.EnumerateBlockingObjects()` per-thread enumeration API
+**P0-3 (Blocking Object Correlation) — ⏳ BLOCKED (per-thread), ✅ IMPLEMENTABLE (global table)**
+- **Why:** ClrMD 4 does not expose `ClrThread.EnumerateBlockingObjects()` per-thread enumeration API, nor a `ClrBlockingObject` type — confirmed by reflecting the installed `Microsoft.Diagnostics.Runtime.dll` 4.0.732401 (`ClrThread` exposes only `LockCount`)
 - **Verified:** LockGraphAnalyzer (reference implementation) uses only `heap.EnumerateSyncBlocks()` (global), confirming no per-thread API exists
-- **Impact:** Blocked threads show *what* they wait on (category/reason) but not *which thread holds it*; engineers must manually cross-reference with LockGraphAnalyzer
-- **Workaround:** Reverse-index approach available (see "P0-3 Performance & Workaround" below)
-- **Resolution:** Awaiting Microsoft.Diagnostics.Runtime API enhancement OR implement reverse-index workaround
+- **Impact:** Blocked threads show *what* they wait on (category/reason) but not *which thread holds it*; a true per-thread pairing cannot be computed from any available API
+- **Workaround:** A global lock-contention table (not a per-thread pairing) is implementable now — see "P0-3 Performance & Workaround" below
+- **Resolution:** Awaiting Microsoft.Diagnostics.Runtime API enhancement for true per-thread correlation; global table workaround does not require it
 
 **Completed Implementations:**
 - P0-1 ✅ DONE — Fixed ThreadPoolCount double-counting
@@ -382,9 +382,10 @@ The `WaitPatterns` table does not cover:
 
 ### P0-3 Performance & Workaround Analysis
 
-**API Status:**
-- `ClrThread.EnumerateBlockingObjects()` — ❌ NOT AVAILABLE in ClrMD 4.0.732401
-- `heap.EnumerateSyncBlocks()` — ✅ AVAILABLE (global enumeration only)
+**API Status (verified by reflecting the installed `Microsoft.Diagnostics.Runtime.dll` 4.0.732401):**
+- `ClrThread.EnumerateBlockingObjects()` — ❌ DOES NOT EXIST. `ClrThread`'s only lock-related member is `LockCount`.
+- `ClrBlockingObject` — ❌ DOES NOT EXIST as a type in the assembly at all.
+- `heap.EnumerateSyncBlocks()` — ✅ AVAILABLE (global enumeration only, already consumed by `LockGraphAnalyzer`)
 
 **Available Sync Block APIs:**
 - `SyncBlock.IsMonitorHeld` — lock held state
@@ -393,56 +394,40 @@ The `WaitPatterns` table does not cover:
 - `SyncBlock.Object` — object address
 - `SyncBlock.RecursionCount` — recursion depth
 
-**Reverse-Index Workaround (Implementable):**
+**Why a reverse-index per-thread pairing is the wrong design:**
 
-Since ClrMD doesn't provide per-thread blocking enumeration, use a reverse-index approach:
+An earlier draft of this workaround proposed associating every `PotentiallyBlockedThreads` entry with every held sync block ("conservative approach"). That is not conservative — for N blocked threads and M held locks it attaches all M locks to all N threads, a cartesian product with no evidentiary basis. Since ClrMD exposes no field connecting a specific thread to the specific object it is blocked on (no stack-argument unwinding, no `ClrBlockingObject`), any per-thread pairing is fabricated and should not be reported as fact. Reporting a 100%-false-positive pairing is worse than reporting nothing.
+
+**Corrected Workaround: Global Lock-Contention Table (Implementable)**
+
+Report contested locks globally, without claiming to know which blocked thread owns which wait. Reuse `LockGraphAnalyzer`'s existing sync-block index rather than re-enumerating `heap.EnumerateSyncBlocks()` a second time.
 
 ```csharp
-// In Analyze() method (once)
-var blockingObjectsByThread = BuildBlockingObjectIndex(heap);
-
-private Dictionary<uint, List<BlockingObjectInfo>> BuildBlockingObjectIndex(ClrHeap heap)
+// Build once, shared with / reused from LockGraphAnalyzer's index if available
+private List<LockContentionEntry> BuildLockContentionTable(ClrHeap heap, IReadOnlyDictionary<ulong, uint> threadIdByAddress)
 {
-    var index = new Dictionary<uint, List<BlockingObjectInfo>>();
-    var threadByAddress = BuildThreadAddressMap(runtime);
-    
-    // Iterate all sync blocks to create global map
+    var contended = new List<LockContentionEntry>();
+
     foreach (SyncBlock sb in heap.EnumerateSyncBlocks())
     {
-        if (!sb.IsMonitorHeld || sb.Object == 0) continue;
-        
-        var info = new BlockingObjectInfo
+        if (!sb.IsMonitorHeld || sb.Object == 0 || sb.WaitingThreadCount == 0) continue;
+
+        contended.Add(new LockContentionEntry
         {
             ObjectAddress = sb.Object,
             TypeName = ResolveTypeName(heap, sb.Object),
-            OwnerThreadId = threadByAddress.TryGetValue(sb.HoldingThreadAddress, out var owner) 
-                ? (uint?)owner.ManagedThreadId 
-                : null,
+            HolderThreadId = threadIdByAddress.TryGetValue(sb.HoldingThreadAddress, out var id) ? (uint?)id : null,
             WaitingThreadCount = sb.WaitingThreadCount
-        };
-        
-        // Associate with all blocked threads (conservative approach)
-        // Better: match via ThreadWaitClassifier pattern + SyncBlock type
-        foreach (uint blockedThreadId in _categorization.PotentiallyBlockedThreads)
-        {
-            if (!index.ContainsKey(blockedThreadId))
-                index[blockedThreadId] = new List<BlockingObjectInfo>();
-            index[blockedThreadId].Add(info);
-        }
+        });
     }
-    
-    return index;
-}
 
-// In ProcessThread (per thread)
-if (_categorization.PotentiallyBlockedThreads.Contains(thread.ManagedThreadId))
-{
-    var blockingObjects = blockingObjectsByThread
-        .GetValueOrDefault((uint)thread.ManagedThreadId) 
-        ?? new List<BlockingObjectInfo>();
-    threadSnapshot.BlockingObjects = blockingObjects;
+    return contended;
 }
 ```
+
+- Filtering to `WaitingThreadCount > 0` bounds the table to genuinely contested locks, not every held monitor.
+- `ThreadSectionBuilder` renders this table **alongside**, not merged into, the existing per-thread blocked list — with a note that engineers should cross-reference thread state (wait category/reason) against holder/waiter counts manually. This is an honest reflection of what the API can support.
+- No `BlockingObjects` field is added to `ThreadStateSnapshot`; no per-thread claim is made.
 
 **Performance Impact (Measured):**
 
@@ -452,27 +437,21 @@ if (_categorization.PotentiallyBlockedThreads.Contains(thread.ManagedThreadId))
 | Large | 25GB | 50,000 | ~3s | +50-100MB | 1.5% |
 | Pathological | 100GB | 200,000 | ~10s | +200MB | 1.8% |
 
-**Scaling:** Linear O(N); acceptable for all dump sizes.
+**Scaling:** Linear O(N); acceptable for all dump sizes. Cost drops further if the table is built once from `LockGraphAnalyzer`'s existing index instead of a second full `EnumerateSyncBlocks()` pass.
 
 **Architecture Changes (Minimal):**
-- Add `BuildBlockingObjectIndex()` method (50 lines)
-- Add `BlockingObjectInfo` model (5 properties)
-- Add `BlockingObjects` field to `ThreadStateSnapshot` (1 line per snapshot)
-- Add table rendering in `ThreadSectionBuilder` (60-90 lines)
-- **Total effort:** ~4-5 hours for full implementation
-
-**Accuracy Concerns:**
-- Reverse-index associates *all* blocked threads with *all* sync blocks (conservative)
-- Better accuracy requires matching via stack frame patterns (ThreadWaitClassifier enhancement)
-- Discrepancies surface in reports as "Detected wait pattern ≠ actual blocking object" — useful diagnostic signal
+- Add `BuildLockContentionTable()` — reuse `LockGraphAnalyzer`'s sync-block index if it runs in the same dispatch batch, else build standalone (~30 lines)
+- Add `LockContentionEntry` model (4 properties: object address, type, holder thread id, waiter count)
+- Add a `LockContentionTable` (or similarly named) collection to `ThreadDomainResult`, not to per-thread `ThreadStateSnapshot`
+- Add table rendering in `ThreadSectionBuilder` (40-60 lines)
+- **Total effort:** ~3-4 hours for full implementation
 
 **Future Enhancement:**
-- P2-7 could add cycle detection ("Thread A waits on lock held by B, B waits on lock held by A") → deadlock reporting
-- Requires same reverse-index infrastructure; no API blocker
+- P2-7 could add cycle detection ("Thread A waits on lock held by B, B waits on lock held by A") → deadlock reporting, built on the same global sync-block data plus `LockGraphAnalyzer`'s existing owner graph. No new API needed.
 
 **Recommendation:**
-P0-3 is **implementable now** via reverse-index workaround, not truly blocked. Reclassify as:
-- **Status:** ⏳ BLOCKED (awaiting direct API)
-- **Alternative:** Reverse-index workaround available for future implementation
-- **Timeline:** 4-5 hours if prioritized; performant enough for all dump sizes
-- **Unlock:** ClrMD 5.x may expose `ClrThread.EnumerateBlockingObjects()` → switch to direct API
+P0-3's original framing (per-thread blocking-object correlation) is genuinely blocked — no ClrMD API can support it. The global lock-contention table is a different, weaker but honest deliverable that is implementable now:
+- **Status:** ⏳ BLOCKED (per-thread correlation — awaiting `Microsoft.Diagnostics.Runtime` API enhancement)
+- **Alternative:** ✅ Global lock-contention table (`WaitingThreadCount > 0` sync blocks) — implementable, ~3-4 hours
+- **Do not implement:** the reverse-index cartesian-product pairing from the earlier draft of this section
+- **Unlock:** ClrMD 5.x may expose `ClrThread.EnumerateBlockingObjects()` / `ClrBlockingObject` → switch to true per-thread correlation

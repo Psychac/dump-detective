@@ -18,8 +18,8 @@ Partially. It correctly enumerates `SyncBlock`s and produces contention counts. 
 ### Coverage gaps
 
 - **Thin locks** (lock word stored in the object header, not yet inflated) are structurally invisible to `EnumerateSyncBlocks()`. This is a fundamental ClrMD limitation but is not communicated to the user.
-- **`ClrThread.BlockingObjects`** is not used. This ClrMD API directly exposes what a thread is currently blocked on and is the standard basis for lock graph construction.
-- **No wait-for graph**. There is no directed graph of "Thread A waits for lock L held by Thread B." Without it, cycle detection is impossible.
+- **`ClrThread.BlockingObjects` does not exist.** Verified by reflecting the installed `Microsoft.Diagnostics.Runtime.dll` 4.0.732401: `ClrThread` exposes only `LockCount`, `CurrentException`, `State`, `GCMode`, etc. — no `BlockingObjects` property, no per-thread blocking-object enumeration of any kind. This was never available to use, not merely unused (same finding as `ThreadAnalyzer` P0-3 — see [thread-analyzer-audit.md](thread-analyzer-audit.md)).
+- **No wait-for graph is possible with current ClrMD APIs.** `heap.EnumerateSyncBlocks()` gives the *holder* of a contested lock (`HoldingThreadAddress`) and a *count* of waiters (`WaitingThreadCount`), but no waiter identity and no way to tell which lock a given blocked thread is waiting on. Without waiter-to-lock identity, "Thread A waits for lock L held by Thread B" edges cannot be constructed from the heap/thread data ClrMD exposes — this isn't a missed API call, it's a structural gap in what the runtime surfaces.
 - **No waiting thread identity**. For each contested lock, the number of waiters is known but *which* threads are waiting is not captured.
 - **Non-monitor synchronisation primitives** — `ReaderWriterLockSlim`, `SemaphoreSlim`, `Mutex`, `ManualResetEvent`, `SpinLock` — are not covered.
 - **`Monitor.TryEnter`** is not matched by the top-frame heuristic despite being a potential blocking call when used with a timeout and a tight spin.
@@ -31,8 +31,8 @@ None. The analyzer is narrowly scoped to `SyncBlock`-based monitors.
 
 ### Shared infrastructure opportunities
 
-- `ClrThread.BlockingObjects` data could be elevated to a shared `LockWaitGraph` platform primitive consumable by HangAnalyzer and ThreadAnalyzer.
-- A `WaitForGraph<TNode>` utility (DFS cycle detection) would benefit this analyzer and any future synchronisation analyzer.
+- No `ClrThread.BlockingObjects`-based `LockWaitGraph` primitive is possible — the API doesn't exist. Any shared primitive would have to be built from the same `heap.EnumerateSyncBlocks()` holder/waiter-count data this analyzer and `ThreadAnalyzer` already have access to, i.e. a shared "contested lock inventory," not a wait-for graph.
+- A `WaitForGraph<TNode>` DFS-cycle-detection utility would still be valuable *if* a future ClrMD version exposes per-thread blocking-object data (see P0-1/P0-2 reclassification below); it has no data source to operate on today.
 
 ### Architectural observations
 
@@ -47,7 +47,7 @@ The `IThreadStackScanParticipant` integration is correct and appropriately conse
 - Key metrics (held, contested, max waiters, deadlock candidate count) are immediately visible.
 - Contested lock table includes address, type, waiter count, owning thread ID, and recursion count — actionable for most contention scenarios.
 - "Suspected deadlock locks" table (intersection of deadlock candidates and contested locks) is a useful correlation.
-- The caveat `"Detection is based on recorded BlockingObjects; cooperative waits may not appear"` is accurate.
+- The caveat `"Detection is based on recorded BlockingObjects; cooperative waits may not appear"` (`ReportSectionAssembler.cs:310`) is **inaccurate** — `BlockingObjects` is never used anywhere in this codebase because it does not exist in ClrMD 4. The caveat should instead describe what's actually true: detection is based on `heap.EnumerateSyncBlocks()` (global, held monitors only) plus a top-frame string heuristic, and misses thin locks, non-monitor primitives, and any wait not visible in the captured top frame.
 - Trend comparer exposes four meaningful metrics.
 
 ### Weaknesses
@@ -64,22 +64,22 @@ The `IThreadStackScanParticipant` integration is correct and appropriately conse
 
 - Waiting thread IDs per contested lock.
 - Owner thread frames beyond the top for deadlock candidate analysis.
-- Full wait chain narrative when `BlockingObjects` would enable it.
+- Full wait chain narrative — not achievable with current ClrMD APIs (`BlockingObjects` does not exist; no waiter-to-lock identity is exposed).
 - Recursion count analysis — a high recursion count on a contested lock is a re-entrancy signal worth calling out separately.
 
 ---
 
 ## Area 3 — ClrMD & Platform Utilization
 
-### `ClrThread.BlockingObjects` not used
+### `ClrThread.BlockingObjects` does not exist in ClrMD 4
 
-`BlockingObjects` is ClrMD's direct representation of a thread's monitored wait. It returns the lock object addresses, the kind of wait (`MonitorWait`, `MonitorLock`, `WaitOne`, `Unknown`), and for `MonitorLock` the owner thread. Using it would:
+Prior drafts of this audit assumed `BlockingObjects` was an unused-but-available ClrMD API that directly exposes what a thread is blocked on (lock addresses, wait kind, owner thread). **It is not.** Reflecting the installed `Microsoft.Diagnostics.Runtime.dll` 4.0.732401 shows `ClrThread` has no `BlockingObjects` member and no `ClrBlockingObject` type exists in the assembly at all (identical finding to `ThreadAnalyzer` P0-3 — see [thread-analyzer-audit.md](thread-analyzer-audit.md)). There is no ClrMD 4 API that would:
 
-1. Eliminate the fragile top-frame string matching entirely.
-2. Enable identification of *which threads are waiting* for each contested lock.
-3. Provide the raw edges of a wait-for graph without a second heap or stack enumeration.
+1. Eliminate the top-frame string matching (there is no alternative source for "what is this thread blocked on").
+2. Enable identification of *which threads are waiting* for each contested lock (`SyncBlock.WaitingThreadCount` is a count, not a set of thread IDs).
+3. Provide wait-for graph edges (no waiter-to-lock identity is exposed anywhere in ClrMD 4).
 
-The current approach — checking `topFrameSignature.ToLowerInvariant().Contains("monitor.enter")` — is fragile: JIT inlining can remove or transform the frame; obfuscation changes method names; `Monitor.TryEnter` with a timeout is missed entirely.
+The current top-frame heuristic — checking `topFrameSignature.ToLowerInvariant().Contains("monitor.enter")` — is fragile (JIT inlining can remove/transform the frame; obfuscation changes method names; `Monitor.TryEnter` with a timeout is missed), but it is not a shortcut around a better available API. It is the *only* signal ClrMD 4 offers for inferring what a thread is blocked on. Improvements should focus on hardening the heuristic (more wait patterns, `StringComparison.OrdinalIgnoreCase`) and being explicit in reports that this is inference, not a verified fact — not on replacing it with a nonexistent direct API.
 
 ### `heap.EnumerateSyncBlocks()` usage
 
@@ -113,15 +113,21 @@ Correctly implemented. `GetRequiredFrameCount` returns 1. `BeforeThreadStackScan
 
 ## Area 4 — Diagnostic Opportunity Analysis
 
+### Not achievable with ClrMD 4 (no data source)
+
+| Diagnostic | Why blocked |
+|---|---|
+| Build a real wait-for graph | Requires waiter-to-lock identity; `ClrThread.BlockingObjects` does not exist and no substitute API exposes this |
+| Identify waiting threads per lock | `SyncBlock.WaitingThreadCount` is a count only, no thread IDs |
+| True (verified) deadlock cycle reporting | Depends on the wait-for graph above; not constructible |
+
 ### High-value, achievable with existing ClrMD APIs
 
 | Diagnostic | API basis | Value |
 |---|---|---|
-| Build a real wait-for graph | `ClrThread.BlockingObjects` | Enables true cycle detection |
-| Identify waiting threads per lock | `ClrThread.BlockingObjects` | Shows which threads are stuck |
-| True deadlock cycle reporting | DFS on wait-for graph | Replaces heuristic with verified cycles |
-| Waiting thread top frames | `thread.EnumerateStackTrace()` scoped to waiters | Context for waiting side |
+| Waiting thread top frames | `thread.EnumerateStackTrace()` scoped to threads whose top frame matches a wait pattern | Context for waiting side (still heuristic, not verified identity-to-lock mapping) |
 | Owner thread frame summary | Already have owner thread; fetch N frames | Context for owning side |
+| Global lock-contention table (holder + waiter count, no per-waiter identity) | `heap.EnumerateSyncBlocks()` filtered to `WaitingThreadCount > 0` | Honest, achievable substitute for a wait-for graph; same approach as `ThreadAnalyzer` P0-3 |
 
 ### Medium-value additions
 
@@ -227,9 +233,9 @@ Hardcoded at 0.85 regardless of evidence quality. A scenario with zero resolved 
 
 ### WinDbg + SOS `!dlk`
 
-`!dlk` builds a true wait-for graph from `BlockingObjects` and runs DFS cycle detection. It reports the exact cycle: "Thread X owns Lock A, waits for Lock B. Thread Y owns Lock B, waits for Lock A." It shows each thread's full stack at point of blocking. DumpDetective's heuristic produces no equivalent; the `CycleSummary` does not convey a cycle.
+`!dlk` builds a true wait-for graph and runs DFS cycle detection. It reports the exact cycle: "Thread X owns Lock A, waits for Lock B. Thread Y owns Lock B, waits for Lock A." It shows each thread's full stack at point of blocking. DumpDetective's heuristic produces no equivalent; the `CycleSummary` does not convey a cycle.
 
-**Gap**: `ClrThread.BlockingObjects` is the same data source SOS uses. DumpDetective has access to it and does not use it.
+**Gap**: `!dlk` operates directly on the DAC/debugger layer with native access to thread block-info that ClrMD 4 does not surface as a managed API (no `BlockingObjects`, no `ClrThread`-level wait target). This is a genuine capability gap between what WinDbg's native debugging engine can see and what ClrMD 4 exposes to managed consumers — not a case of DumpDetective having access to an API and failing to call it.
 
 ### PerfView
 
@@ -245,7 +251,7 @@ Shows thread states (Blocked, Running) but no lock ownership graph.
 
 ### Summary
 
-DumpDetective's contention reporting is broadly competitive with dotMemory and VS. The deadlock detection is significantly weaker than WinDbg SOS because it does not use `ClrThread.BlockingObjects` for graph construction. The name "LockGraphAnalyzer" sets an expectation of graph-based analysis that the current implementation does not meet.
+DumpDetective's contention reporting is broadly competitive with dotMemory and VS. The deadlock detection is significantly weaker than WinDbg SOS because ClrMD 4 does not expose the per-thread blocking-object data `!dlk` relies on — this is a platform limitation, not an unused API. The name "LockGraphAnalyzer" sets an expectation of graph-based analysis that the current implementation cannot meet with ClrMD 4 and should either be renamed or have its scope explicitly documented as "contention inventory + heuristic candidate flagging," not a true wait-for graph.
 
 ---
 
@@ -265,11 +271,11 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 - Safe memory footprint — independent of heap size.
 
 **Major weaknesses**
-- No use of `ClrThread.BlockingObjects` — the primary ClrMD API for lock waits.
-- No wait-for graph and no cycle detection; deadlock label is heuristic only.
+- No wait-for graph and no cycle detection possible — `ClrThread.BlockingObjects` does not exist in ClrMD 4 (verified by reflection); deadlock label is heuristic only and cannot be upgraded to verified without a future ClrMD API.
 - `CycleSummary` field is misleadingly named; contains no cycle description.
 - `DeadlockCandidateCount >= 2` → `Critical` is a false-positive-prone threshold.
-- Waiting thread identities not captured.
+- Waiting thread identities not captured — `SyncBlock.WaitingThreadCount` exposes no thread IDs, so this is not capturable with current APIs either.
+- The shipped report limitations text (`ReportSectionAssembler.cs:310`) claims detection is "based on recorded BlockingObjects," which is factually wrong — no such API is called anywhere in the codebase. Should be corrected to describe the actual `heap.EnumerateSyncBlocks()` + top-frame-heuristic basis.
 - No unit tests; only one integration/discrepancy test.
 
 ---
@@ -278,18 +284,19 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 
 | # | Recommendation | Area | Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|---|
-| P0-1 | Use `ClrThread.BlockingObjects` to build actual wait-for edges; replace top-frame heuristic | Correctness | Critical | Medium | High | Improvement |
-| P0-2 | Implement DFS cycle detection on the wait-for graph; only emit deadlock when a cycle is proven | Correctness | Critical | Medium | High | Improvement |
+| P0-1 | ~~Use `ClrThread.BlockingObjects` to build actual wait-for edges~~ — **BLOCKED**: API does not exist in ClrMD 4 (verified by reflection). Reclassified: add a global lock-contention table (`heap.EnumerateSyncBlocks()` filtered to `WaitingThreadCount > 0`, holder + waiter count, no per-waiter identity) and harden the top-frame heuristic instead | Correctness | Critical | Medium | High | Improvement |
+| P0-2 | ~~Implement DFS cycle detection on the wait-for graph~~ — **BLOCKED**: no wait-for graph is constructible without waiter-to-lock identity, which ClrMD 4 does not expose. No true cycle detection is achievable until a future ClrMD API surfaces per-thread blocking-object data | Correctness | Critical | Medium | High | Improvement |
 | P0-3 | Rename `CycleSummary` to `BlockedAtFrame` or populate it with a real cycle description | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P0-4 | Fix `DeadlockCandidateCount >= 2` → `Critical` threshold to require a confirmed cycle | Correctness | High | Low | High | Improvement | ✅ DONE |
-| P1-1 | Capture waiting thread IDs per contested lock (via `BlockingObjects`) | Diagnostic quality | High | Low (follows P0-1) | High | Improvement |
+| P0-5 | Fix the shipped limitations text (`ReportSectionAssembler.cs:310`) — it claims detection is "based on recorded BlockingObjects," an API that is never called anywhere in the codebase | Correctness | High | Trivial | High | Improvement | ✅ DONE |
+| P1-1 | ~~Capture waiting thread IDs per contested lock (via `BlockingObjects`)~~ — **BLOCKED**: `SyncBlock.WaitingThreadCount` is a count only, no thread IDs; no ClrMD 4 API exposes waiter identity | Diagnostic quality | High | Low (follows P0-1) | High | Improvement |
 | P1-2 | Add owner thread frame summary (N frames) for deadlock candidate owners | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P1-3 | Replace O(M×N) lock-to-thread grouping with a pre-built `Dictionary<int, List<LockContention>>` | Performance | Medium | Low | High | Improvement | ✅ DONE |
 | P1-4 | Add unit tests: contested lock detection, deadlock cycle detection, no-contention path, null-owner path | Testing | High | Medium | High | Improvement |
 | P2-1 | Expose unresolved-owner count in domain result and flag in report (thread exited while holding lock) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
 | P2-2 | Add `ReaderWriterLockSlim` state detection via heap object field inspection | Coverage | Medium | Medium | Medium | Improvement |
 | P2-3 | Make confidence score dynamic (lower when owner resolution rate is poor) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
-| P2-4 | Elevate `LockWaitGraph` to a shared platform primitive for HangAnalyzer cross-correlation | Architecture | Medium | Medium | Medium | Evolution |
+| P2-4 | Elevate a shared "contested lock inventory" primitive (holder + waiter count from `heap.EnumerateSyncBlocks()`, not a wait-for graph) for HangAnalyzer/ThreadAnalyzer cross-correlation | Architecture | Medium | Medium | Medium | Evolution |
 | P2-5 | Lower `reportEveryObjects` in `ObjectScanCounter` to `50` for sync block enumeration | Performance | Low | Trivial | High | Improvement | ✅ DONE |
 | P2-6 | Replace `ToLowerInvariant().Contains(...)` with `string.Contains(..., StringComparison.OrdinalIgnoreCase)` | Correctness | Low | Trivial | High | Improvement |
 | P3-1 | Flag high-recursion contested locks as potential re-entrancy signals | Diagnostic quality | Low | Low | Medium | Improvement |
@@ -299,10 +306,10 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 
 ### Final Verdict
 
-1. **Production-ready?** Not for the deadlock detection path. The contention inventory (held lock count, contested lock table) is production-quality. The deadlock detection can produce Critical-severity false positives and should be gated or labelled as heuristic until P0-1 and P0-2 are implemented.
+1. **Production-ready?** Not for the deadlock detection path. The contention inventory (held lock count, contested lock table) is production-quality. The deadlock detection is permanently heuristic — not a temporary gap to be closed by P0-1/P0-2 — because ClrMD 4 exposes no per-thread blocking-object data. It should be gated or explicitly labelled as heuristic/unverified, and P0-5 (fix the inaccurate "based on BlockingObjects" limitations text) should ship regardless.
 
-2. **Highest-impact improvements**: P0-1 (use `ClrThread.BlockingObjects`) and P0-2 (DFS cycle detection) together would transform the analyzer from a heuristic flag generator into a genuine deadlock detector. Both are achievable with ClrMD APIs already available in the runtime. P0-3 and P0-4 are single-line fixes that eliminate the most misleading outputs.
+2. **Highest-impact improvements**: P0-1 and P0-2 as originally framed (use `ClrThread.BlockingObjects`, DFS cycle detection) are **not implementable** — verified by reflection, the API doesn't exist. The achievable substitute is a global lock-contention table (holder + waiter count, `WaitingThreadCount > 0`) plus a hardened, honestly-labelled top-frame heuristic. P0-3, P0-4, and P0-5 are the real near-term wins: they eliminate misleading outputs without depending on a nonexistent API.
 
-3. **Platform evolution opportunity**: A shared `LockWaitGraph` primitive built from `BlockingObjects` would make both HangAnalyzer and LockGraphAnalyzer more coherent and eliminate the duplication of stack-walking for lock-state inference that currently exists across these analyzers.
+3. **Platform evolution opportunity**: A shared "contested lock inventory" primitive built from `heap.EnumerateSyncBlocks()` (not `BlockingObjects`) would make `HangAnalyzer`, `ThreadAnalyzer`, and `LockGraphAnalyzer` more coherent and avoid three separate re-implementations of the same sync-block scan.
 
-4. **Highest engineering return**: P0-1 → P0-2 → P1-1 (sequential, each builds on the previous). Delivering these three items would bring the analyzer to production-reliable deadlock detection parity with WinDbg SOS `!dlk` at the ClrMD level.
+4. **Highest engineering return**: P0-3 → P0-4 → P0-5 → P1-1's achievable substitute (global contention table). True per-thread wait-for graph and verified cycle detection are blocked until a future ClrMD version exposes per-thread blocking-object data — track as an external dependency, not an internal implementation task.

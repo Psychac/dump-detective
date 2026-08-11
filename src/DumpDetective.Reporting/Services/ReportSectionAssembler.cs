@@ -307,7 +307,7 @@ internal static class ReportSectionAssembler
             "Task orphan detection relies on CLR private field name stability across runtime versions (E1).",
             "FOH/POH sizes include runtime-internal objects that are not application objects (B3).",
             "ClrThread.StackBase/StackLimit may be 0 for GC and finalizer threads (D1).",
-            "Deadlock detection misses cooperative waits that do not appear in BlockingObjects (D3).",
+            "Deadlock detection is a heuristic based on held sync blocks and top-frame wait patterns, not a verified wait-for graph; ClrMD does not expose per-thread blocking-object data (D3).",
             "String encoding waste (UTF-16 overhead vs ASCII content) is not detected (A7).",
             "Async state machine state-value distribution is unavailable; only averages are reported (E2).",
             "Collection generation field is not yet available from ClrMD; generation breakdown for collections is omitted (C3).",

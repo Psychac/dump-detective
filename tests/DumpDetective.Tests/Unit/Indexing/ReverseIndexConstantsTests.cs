@@ -62,19 +62,19 @@ public class ReverseIndexConstantsTests
     [Fact]
     public void CalculateBucketCount_SmallDump()
     {
-        long smallDump = 5L * 1024 * 1024 * 1024; // 5 GB
+        long smallDump = 3270L * 1024 * 1024; // 3.27 GB (from validation)
         int bucketCount = ReverseIndexConstants.CalculateBucketCount(smallDump);
 
-        bucketCount.Should().Be(1);
+        bucketCount.Should().Be(7); // 3270 / 500 = 6.54 → 7
     }
 
     [Fact]
     public void CalculateBucketCount_LargeDump()
     {
-        long largeDump = 25L * 1024 * 1024 * 1024; // 25 GB
+        long largeDump = 25630L * 1024 * 1024; // 25.63 GB (from validation)
         int bucketCount = ReverseIndexConstants.CalculateBucketCount(largeDump);
 
-        bucketCount.Should().Be(1); // 25 / 15 = 1.67 → 1
+        bucketCount.Should().Be(52); // 25630 / 500 = 51.26 → 52
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class ReverseIndexConstantsTests
         long hugeDump = 150L * 1024 * 1024 * 1024; // 150 GB
         int bucketCount = ReverseIndexConstants.CalculateBucketCount(hugeDump);
 
-        bucketCount.Should().Be(10); // 150 / 15 = 10
+        bucketCount.Should().Be(308); // 150*1024 / 500 = 307.2 → 308
     }
 
     [Fact]

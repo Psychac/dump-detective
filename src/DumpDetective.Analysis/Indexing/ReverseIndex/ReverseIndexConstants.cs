@@ -25,12 +25,14 @@ internal static class ReverseIndexConstants
 
     /// <summary>
     /// Calculate bucket count based on dump size to ensure per-bucket memory remains bounded.
-    /// Formula: N = max(1, dump_size_gb / 15) keeps per-bucket raw edge data under ~600 MB during sort.
+    /// Formula: N = ceil(dump_size_mb / 500) keeps per-bucket raw edge data under ~500 MB during sort.
+    /// Validated against 3.27 GB and 25.63 GB dumps with perfect distribution uniformity (3.7-3.9% CV).
+    /// Reference: pre-implementation-validation.md Investigation 2.
     /// </summary>
     public static int CalculateBucketCount(long dumpSizeBytes)
     {
-        var dumpSizeGb = dumpSizeBytes / (1024.0 * 1024 * 1024);
-        return Math.Max(1, (int)(dumpSizeGb / 15));
+        var dumpSizeMb = dumpSizeBytes / (1024.0 * 1024);
+        return Math.Max(1, (int)Math.Ceiling(dumpSizeMb / 500));
     }
 
     /// <summary>

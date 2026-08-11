@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Indexing.ReverseIndex;
+using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
 
@@ -69,6 +70,8 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
             stats.BucketStats[0].EdgeCount.Should().Be(ReverseIndexConstants.MaxParentsPerChild);
             stats.BucketStats[0].TruncatedChildrenCount.Should().Be(1);
             stats.TotalTruncatedChildren.Should().Be(1);
+
+            extractor.GetTruncatedChildren(0).Should().BeEquivalentTo(new[] { child });
         }
     }
 
@@ -165,6 +168,31 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
         var fileInfo = new FileInfo(bucket0);
         fileInfo.Exists.Should().BeTrue();
         fileInfo.Length.Should().Be(32);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WithProgress_ReportsOncePerBucketFlushed()
+    {
+        var extractor = new ReverseEdgeExtractor(bucketCount: 3, _tempDir);
+        extractor.RecordEdge(parent: 0x1000, child: 0x0100);
+        extractor.RecordEdge(parent: 0x2000, child: 0x0200);
+
+        var reports = new List<AnalyzerProgressReport>();
+        var progress = new SynchronousProgress<AnalyzerProgressReport>(r => reports.Add(r));
+
+        await extractor.DisposeAsync(progress);
+
+        reports.Should().HaveCount(3);
+        reports.Should().OnlyContain(r => r.Phase == "flushing reverse-index edges");
+        // ScannedCount is always 0 — these are phase-label-only reports (see ConsoleUx.ObjectScanProgress),
+        // not a global object counter, so per-bucket progress is carried entirely in Detail.
+        reports.Should().OnlyContain(r => r.ScannedCount == 0);
+        reports.Select(r => r.Detail).Should().Equal("1/3 buckets", "2/3 buckets", "3/3 buckets");
+    }
+
+    private sealed class SynchronousProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 
     [Fact]

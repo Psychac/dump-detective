@@ -1,3 +1,7 @@
+using System.Diagnostics;
+
+using DumpDetective.Core.Abstractions;
+
 namespace DumpDetective.Analysis.Indexing.ReverseIndex;
 
 /// <summary>
@@ -16,16 +20,29 @@ internal class ReverseEdgeSorter
     private const long MaxBucketSize = 600 * 1024 * 1024;
 
     /// <summary>
-    /// Sorts all buckets in parallel, returning per-bucket results.
-    /// Fails fast if any bucket exceeds MaxBucketSize.
+    /// Sorts all buckets in parallel, returning per-bucket results. Fails fast if any bucket
+    /// exceeds MaxBucketSize. Reports one "sorting reverse-index buckets" tick per completed
+    /// bucket — buckets can take anywhere from milliseconds to tens of seconds each depending on
+    /// fanout skew, so per-bucket-completion is the finest granularity worth surfacing (unlike
+    /// Phase A, sorting a single bucket isn't itself broken into observable sub-steps).
     /// </summary>
     public async Task<ReverseIndexSortResult> SortBucketsAsync(
         string cacheDir,
         int bucketCount,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<IReadOnlySet<ulong>>? truncatedChildrenPerBucket = null,
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
+        var stopwatch = Stopwatch.StartNew();
+        long completed = 0;
+
         var sortTasks = Enumerable.Range(0, bucketCount)
-            .Select(i => SortBucketAsync(cacheDir, i, ct))
+            .Select(i => SortBucketAsync(cacheDir, i, truncatedChildrenPerBucket?[i], ct, () =>
+            {
+                long done = Interlocked.Increment(ref completed);
+                progress?.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
+                    Detail: $"{done}/{bucketCount} buckets", Elapsed: stopwatch.Elapsed));
+            }))
             .ToArray();
 
         var results = await Task.WhenAll(sortTasks);
@@ -43,12 +60,16 @@ internal class ReverseEdgeSorter
     private async Task<BucketSortResult> SortBucketAsync(
         string cacheDir,
         int bucketIdx,
-        CancellationToken ct)
+        IReadOnlySet<ulong>? truncatedChildren,
+        CancellationToken ct,
+        Action onCompleted)
     {
-        return await Task.Run(() => SortBucketCore(cacheDir, bucketIdx), ct);
+        BucketSortResult result = await Task.Run(() => SortBucketCore(cacheDir, bucketIdx, truncatedChildren), ct);
+        onCompleted();
+        return result;
     }
 
-    private BucketSortResult SortBucketCore(string cacheDir, int bucketIdx)
+    private BucketSortResult SortBucketCore(string cacheDir, int bucketIdx, IReadOnlySet<ulong>? truncatedChildren)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -104,9 +125,12 @@ internal class ReverseEdgeSorter
                 // Write group: [child:8][count:4][truncated:1][pad:3][parents:8*count]
                 var bw = new BinaryWriter(dataWriter);
 
+                bool truncated = parents.Count > ReverseIndexConstants.MaxParentsPerChild
+                    || (truncatedChildren?.Contains(child) ?? false);
+
                 bw.Write(child);
                 bw.Write(parents.Count);
-                bw.Write(parents.Count > ReverseIndexConstants.MaxParentsPerChild);
+                bw.Write(truncated);
                 bw.Write(new byte[3]); // padding for alignment
 
                 foreach (var parent in parents)

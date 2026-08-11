@@ -94,7 +94,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, cache.TryGetReverseIndexProvider(), cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -146,7 +146,7 @@ namespace DumpDetective.Analysis.Analyzers
             var provider = new ReferenceGraph(heap);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, CancellationToken.None, out _, out _, out _, out _);
+            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, cache.TryGetReverseIndexProvider(), CancellationToken.None, out _, out _, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
@@ -157,6 +157,7 @@ namespace DumpDetective.Analysis.Analyzers
             ReferenceChainOptions options,
             ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            IBackwardReferenceProvider? reverseIndexProvider,
             CancellationToken cancellationToken,
             out string? rootKind,
             out string? path,
@@ -176,7 +177,7 @@ namespace DumpDetective.Analysis.Analyzers
             // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
             // with GC root count instead of a shared bounded budget (see
             // docs/analysis/root-path-search-blast-radius.md).
-            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, reverseIndexProvider, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
         }
 
         // ── Bidirectional bounded search (all modes) ────────────────────────────
@@ -188,6 +189,7 @@ namespace DumpDetective.Analysis.Analyzers
             ReferenceChainOptions options,
             ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            IBackwardReferenceProvider? reverseIndexProvider,
             CancellationToken cancellationToken,
             out string? rootKind,
             out string? path,
@@ -215,7 +217,8 @@ namespace DumpDetective.Analysis.Analyzers
                 limits,
                 telemetry.AsProxy(),
                 type => IsNoisyType(type, options.SkipArrays),
-                type => IsKnownLeakType(type, options.KnownLeakTypePatterns));
+                type => IsKnownLeakType(type, options.KnownLeakTypePatterns),
+                reverseIndexProvider);
 
             bool found = finder.TryFindAnyRootPath(
                 objectAddress,

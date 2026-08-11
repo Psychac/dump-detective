@@ -28,6 +28,19 @@ internal enum CacheSectionId
     ObjectSizes = 12,
     /// <summary>Columnar <c>sbyte[]</c> of per-object GC generations, aligned with <see cref="ObjectAddresses"/>.</summary>
     ObjectGenerations = 13,
+    /// <summary>
+    /// Concatenated sorted-group payloads (<c>.dat</c>) from every reverse-edge bucket, back to
+    /// back in bucket order. Per-bucket byte ranges are recorded in <see cref="ReverseEdgeMetadata"/>
+    /// since the container's TOC has one fixed slot per <see cref="CacheSectionId"/>, not one per bucket.
+    /// </summary>
+    ReverseEdgeBuckets = 14,
+    /// <summary>
+    /// Concatenated directory-index payloads (<c>.idx</c>) from every reverse-edge bucket, back to
+    /// back in bucket order, mirroring <see cref="ReverseEdgeBuckets"/>.
+    /// </summary>
+    ReverseEdgeDirectories = 15,
+    /// <summary>JSON <see cref="Indexing.ReverseIndex.ReverseIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above, plus extraction stats.</summary>
+    ReverseEdgeMetadata = 16,
 }
 
 /// <summary>
@@ -47,13 +60,15 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 3 when the columnar ObjectGenerations section (per-object GC generation,
-    /// 1 byte/sbyte) was added alongside ObjectAddresses/ObjectMethodTables/ObjectSizes —
-    /// old cache.bin files fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
+    /// Bumped to 4 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata
+    /// sections were added for the disk-backed reverse-reference index — old cache.bin files
+    /// fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
+    /// Previously bumped to 3 when the columnar ObjectGenerations section (per-object GC
+    /// generation, 1 byte/sbyte) was added alongside ObjectAddresses/ObjectMethodTables/ObjectSizes.
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 3;
+    public const int CurrentFormatVersion = 4;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

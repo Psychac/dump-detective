@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Enums;
 
@@ -29,6 +30,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // Remove once the A/B comparison picks a winner.
     private static readonly bool SkipRootIndexBuild =
         Environment.GetEnvironmentVariable("DD_SKIP_ROOT_INDEX_BUILD") == "1";
+
+    // Escape hatch for the reverse-reference index (see docs/analysis/phase1-redesigns/full-reverse-index-plan.md):
+    // set DD_SKIP_REVERSE_INDEX_BUILD=1 to skip forward-ref extraction during the heap scan if it
+    // regresses build time on a given dump — analyzers that would use it simply fall back to
+    // on-demand forward-ref enumeration, same as before this index existed.
+    private static readonly bool SkipReverseIndexBuild =
+        Environment.GetEnvironmentVariable("DD_SKIP_REVERSE_INDEX_BUILD") == "1";
 
     public HeapIndexBuildResult Build(
         ClrHeap heap,
@@ -115,6 +123,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // aggregation only touches MethodTable) then only pay for the bytes they read.
         int serialChunkEntries = Math.Max(writeBuffer / ColumnSize, 1);
         string indexDir = DumpIndexPaths.GetIndexDirectory(dumpPath);
+
+        // Reverse-reference index (Phase A): extracted alongside the main heap scan below since a
+        // second full heap pass is prohibitively expensive on large dumps — see
+        // docs/analysis/phase1-redesigns/full-reverse-index-plan.md Decision 2. One extractor
+        // instance for the whole scan; RecordEdge is thread-safe (per-bucket locks) so every
+        // segment's parallel worker below shares it directly.
+        int reverseIndexBucketCount = ReverseIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
+        ReverseEdgeExtractor? reverseEdgeExtractor = SkipReverseIndexBuild
+            ? null
+            : new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
+
         ClrSegment[] segments = heap.Segments.ToArray();
         string[] segAddrScratchFiles = new string[segments.Length];
         string[] segMtScratchFiles = new string[segments.Length];
@@ -128,7 +147,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             segGenScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.gen.tmp");
         }
 
-        using var containerWriter = new CacheContainerWriter(containerPath, dumpPath);
+        using var containerWriter = new CacheContainerWriter(containerPath, dumpPath, progress);
         Stream stream = containerWriter.Stream;
 
         var parallelOptions = new ParallelOptions
@@ -218,6 +237,19 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     var entry = new HeapEntry(obj.Address, mt, obj.Size, (sbyte)objGen);
                     segBuf[segCount++] = entry;
                     state.Builder.Add(entry, moduleId, flags, objGen);
+
+                    // Reverse-reference index (Phase A): record every outgoing edge for this
+                    // object. "carefully" matches the enumeration mode validated in Investigation 1
+                    // (see pre-implementation-validation.md) and, unlike a raw field walk, also
+                    // covers array elements — the dominant edge source for collection-held leaks.
+                    if (reverseEdgeExtractor is not null)
+                    {
+                        foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
+                        {
+                            if (reference.IsValid)
+                                reverseEdgeExtractor.RecordEdge(obj.Address, reference.Address);
+                        }
+                    }
 
                     // Collect satellite candidates (written serially after the parallel loop).
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
@@ -383,6 +415,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             DeleteScratchFiles(segMtScratchFiles);
             DeleteScratchFiles(segSizeScratchFiles);
             DeleteScratchFiles(segGenScratchFiles);
+            if (reverseEdgeExtractor is not null)
+            {
+                try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
+                DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
+            }
             throw;
         }
 
@@ -547,7 +584,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             try { containerWriter.AbortSection(); } catch { /* no section was open */ }
         }
 
-        stopwatch.Stop();
+        // Reverse-reference index (Phase B + C) — flush, sort and merge the buckets extracted
+        // during the heap scan above. Kept before stopwatch.Stop() so its progress reports (sort
+        // can take a while on many buckets) show a growing elapsed like the satellite sections.
+        if (reverseEdgeExtractor is not null)
+        {
+            string? reverseIndexWarning = WriteReverseIndexSections(
+                containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
+                cancellationToken, progress, stopwatch);
+            if (reverseIndexWarning is not null)
+                satelliteWarnings.Add(reverseIndexWarning);
+        }
 
         // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
         // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
@@ -572,11 +619,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         containerWriter.Finish();
 
+        // Stopped only now — HeapIndexBuildResult.Elapsed (what the CLI's "Scan + Index heap"
+        // checkmark displays) must cover the whole build, not just the core columnar scan
+        // captured earlier in scanElapsed; satellite sections, the reverse-index build, and
+        // TypeAggregates all run after that point and previously went uncounted.
+        stopwatch.Stop();
+        TimeSpan totalElapsed = stopwatch.Elapsed;
+
         return new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
             containerPath,
             objectCount,
-            scanElapsed,
+            totalElapsed,
             typeAggregates,
             InMemoryEntries: null,
             Modules: moduleRegistry.Modules,
@@ -717,6 +771,48 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Phase B + C for the reverse-reference index: flushes and sorts the buckets
+    /// <paramref name="extractor"/> collected during the heap scan, then merges them into
+    /// <paramref name="containerWriter"/>'s <c>ReverseEdgeBuckets</c>/<c>ReverseEdgeDirectories</c>/
+    /// <c>ReverseEdgeMetadata</c> sections. Non-fatal like the other satellite sections above — a
+    /// failure here just means <see cref="ReverseIndex.ReverseEdgeIndexReader.TryOpen"/> reports no
+    /// index available later, same as any other missing/corrupt section.
+    /// </summary>
+    private static string? WriteReverseIndexSections(
+        CacheContainerWriter containerWriter,
+        string indexDir,
+        int bucketCount,
+        ReverseEdgeExtractor extractor,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress,
+        Stopwatch stopwatch)
+    {
+        try
+        {
+            progress?.Report(new(0, "collecting reverse-index statistics", Detail: null, Elapsed: stopwatch.Elapsed));
+            ReverseEdgeExtractionStats stats = extractor.GetStatistics();
+            var truncatedPerBucket = new IReadOnlySet<ulong>[bucketCount];
+            for (int i = 0; i < bucketCount; i++)
+                truncatedPerBucket[i] = extractor.GetTruncatedChildren(i);
+
+            extractor.DisposeAsync(progress).AsTask().GetAwaiter().GetResult();
+
+            var sorter = new ReverseEdgeSorter();
+            sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, truncatedPerBucket, progress)
+                .GetAwaiter().GetResult();
+
+            ReverseEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);
+            return null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            DeleteReverseIndexScratchFiles(indexDir, bucketCount);
+            return $"ReverseIndex: {ex.GetType().Name}: {ex.Message}";
+        }
     }
 
     // ── Type classification helpers ────────────────────────────────────────────
@@ -873,6 +969,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         for (int i = 0; i < files.Length; i++)
         {
             try { File.Delete(files[i]); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>Best-effort cleanup of reverse-index bucket scratch files (<c>.tmp</c>/<c>.dat</c>/<c>.idx</c>) after a failed or abandoned build — mirrors <see cref="DeleteScratchFiles"/> for the segment scratch files.</summary>
+    private static void DeleteReverseIndexScratchFiles(string indexDir, int bucketCount)
+    {
+        for (int i = 0; i < bucketCount; i++)
+        {
+            try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.TemporaryScratchSuffix}")); } catch { /* best-effort */ }
+            try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.SortedDataSuffix}")); } catch { /* best-effort */ }
+            try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.DirectorySuffix}")); } catch { /* best-effort */ }
         }
     }
 

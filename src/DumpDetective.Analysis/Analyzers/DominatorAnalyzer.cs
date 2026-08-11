@@ -562,7 +562,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
             LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
         };
-        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
 
         for (int i = 0; i < objects.Count; i++)
         {

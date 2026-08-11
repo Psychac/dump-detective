@@ -1,6 +1,9 @@
 namespace DumpDetective.Analysis.Indexing.ReverseIndex;
 
+using System.Diagnostics;
 using System.Text;
+
+using DumpDetective.Core.Abstractions;
 
 /// <summary>
 /// Phase A: Extracts and partitions heap edges into hash-partitioned buckets.
@@ -90,6 +93,21 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
     }
 
     /// <summary>
+    /// Returns the set of children that hit the fanout cap in bucket <paramref name="bucketIndex"/>.
+    /// <see cref="ReverseEdgeSorter"/> needs this because by the time Phase B counts parents per
+    /// child, the count can never exceed <see cref="ReverseIndexConstants.MaxParentsPerChild"/> —
+    /// <see cref="RecordEdge"/> already dropped anything past the cap — so "count &gt; cap" can
+    /// never be observed downstream; only this set records that a child was actually truncated.
+    /// </summary>
+    public IReadOnlySet<ulong> GetTruncatedChildren(int bucketIndex)
+    {
+        lock (_bucketLocks[bucketIndex])
+        {
+            return _truncatedPerBucket[bucketIndex].ToHashSet();
+        }
+    }
+
+    /// <summary>
     /// Returns statistics collected during extraction: edge count per bucket and truncation info.
     /// </summary>
     public ReverseEdgeExtractionStats GetStatistics()
@@ -131,10 +149,21 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
     /// <summary>
     /// Flushes all bucket writers and disposes resources.
     /// </summary>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => DisposeAsync(progress: null);
+
+    /// <summary>
+    /// Flushes and closes every bucket's writer. On a large dump this can take a genuinely long
+    /// time (one <see cref="FileStream"/> flush per bucket, hundreds of buckets, gigabytes of raw
+    /// edges) — reports one "flushing reverse-index edges" tick per bucket so it doesn't look
+    /// stalled next to the sort phase's per-bucket reporting.
+    /// </summary>
+    public async ValueTask DisposeAsync(IProgress<AnalyzerProgressReport>? progress)
     {
-        foreach (var writer in _bucketWriters)
+        var stopwatch = Stopwatch.StartNew();
+
+        for (int i = 0; i < _bucketWriters.Length; i++)
         {
+            BinaryWriter? writer = _bucketWriters[i];
             if (writer != null)
             {
                 try
@@ -150,6 +179,9 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
                     writer.Dispose();
                 }
             }
+
+            progress?.Report(new AnalyzerProgressReport(0, "flushing reverse-index edges",
+                Detail: $"{i + 1}/{_bucketCount} buckets", Elapsed: stopwatch.Elapsed));
         }
 
         await ValueTask.CompletedTask;

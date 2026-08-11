@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Indexing.ReverseIndex;
+using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
 
@@ -259,5 +260,79 @@ public class ReverseEdgeSorterTests : IAsyncLifetime
 
             truncated.Should().BeFalse(); // Only 3 parents, not truncated
         }
+    }
+
+    [Fact]
+    public async Task SortBucketsAsync_MarksChildTruncatedWhenExtractorReportedIt()
+    {
+        // Phase A already caps parents-per-child at write time, so the raw bucket file itself
+        // never contains more than MaxParentsPerChild parents for any child — the sorter can only
+        // learn a child was truncated from the extractor's truncated-children set, not by counting.
+        var bucketFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.tmp");
+        using (var writer = new BinaryWriter(File.Create(bucketFile)))
+        {
+            writer.Write(0x0100UL); writer.Write(0x1000UL);
+            writer.Write(0x0200UL); writer.Write(0x2000UL); // untouched child, not truncated
+        }
+
+        var truncatedSets = new IReadOnlySet<ulong>[] { new HashSet<ulong> { 0x0100UL } };
+
+        var sorter = new ReverseEdgeSorter();
+        await sorter.SortBucketsAsync(_tempDir, bucketCount: 1, CancellationToken.None, truncatedSets);
+
+        var dataFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.dat");
+        using var reader = new BinaryReader(File.OpenRead(dataFile));
+
+        ulong child1 = reader.ReadUInt64();
+        reader.ReadInt32();
+        bool truncated1 = reader.ReadBoolean();
+        reader.ReadBytes(3);
+        reader.ReadUInt64(); // parent
+
+        child1.Should().Be(0x0100UL);
+        truncated1.Should().BeTrue();
+
+        ulong child2 = reader.ReadUInt64();
+        reader.ReadInt32();
+        bool truncated2 = reader.ReadBoolean();
+
+        child2.Should().Be(0x0200UL);
+        truncated2.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SortBucketsAsync_ReportsProgressOncePerCompletedBucket()
+    {
+        for (int b = 0; b < 4; b++)
+        {
+            var bucketFile = Path.Combine(_tempDir, $"reverse_edges_bucket_{b}.tmp");
+            using var writer = new BinaryWriter(File.Create(bucketFile));
+            writer.Write((ulong)(0x0100 + b));
+            writer.Write((ulong)(0x1000 + b));
+        }
+
+        var reports = new List<AnalyzerProgressReport>();
+        var progress = new SynchronousProgress<AnalyzerProgressReport>(r =>
+        {
+            lock (reports) reports.Add(r);
+        });
+
+        var sorter = new ReverseEdgeSorter();
+        await sorter.SortBucketsAsync(_tempDir, bucketCount: 4, CancellationToken.None, progress: progress);
+
+        reports.Should().HaveCount(4);
+        reports.Should().OnlyContain(r => r.Phase == "sorting reverse-index buckets");
+        // ScannedCount is always 0 — these are phase-label-only reports (see ConsoleUx.ObjectScanProgress),
+        // not a global object counter, so per-bucket progress is carried entirely in Detail.
+        reports.Should().OnlyContain(r => r.ScannedCount == 0);
+        reports.Select(r => r.Detail).Should().BeEquivalentTo(new[] { "1/4 buckets", "2/4 buckets", "3/4 buckets", "4/4 buckets" });
+    }
+
+    /// <summary>Invokes the callback synchronously and on whichever thread reports — bucket
+    /// completions run on the thread pool via <c>Task.Run</c>, so callers must synchronize their
+    /// own state (unlike <see cref="Progress{T}"/>, which marshals back to a captured context).</summary>
+    private sealed class SynchronousProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 }

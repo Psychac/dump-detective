@@ -171,7 +171,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             MaxRootExpansionDepth = 12,
             LargeFanoutThreshold = 100,
         };
-        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
 
         var sampler = new TimerLeakAnalyzer();
         var samplesByType = new Dictionary<string, List<TimerStateSnapshot>>(byType.Count);

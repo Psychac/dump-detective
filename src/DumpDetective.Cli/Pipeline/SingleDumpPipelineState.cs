@@ -70,5 +70,12 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// </summary>
     public bool HasDetailedStageMemoryStats { get; set; }
 
-    public void Dispose() => LoadContext?.Dispose();
+    public void Dispose()
+    {
+        // HeapCache isn't IDisposable on its interface (most cache implementations don't need it);
+        // duck-type so the disk-backed reverse-index reader's memory-mapped views still get
+        // released promptly instead of waiting on finalization.
+        (HeapCache as IDisposable)?.Dispose();
+        LoadContext?.Dispose();
+    }
 }

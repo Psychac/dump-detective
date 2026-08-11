@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace DumpDetective.Analysis.Cache
 {
-    internal class HeapAnalysisCache : IHeapAnalysisCache, IHeapIndexBuilder
+    internal class HeapAnalysisCache : IHeapAnalysisCache, IHeapIndexBuilder, IDisposable
     {
         private const int ProgressReportEveryScans = 25_000;
 
@@ -27,6 +27,7 @@ namespace DumpDetective.Analysis.Cache
         private HeapIndexBuildResult? _heapIndex;
         private readonly StatisticsCache _statisticsCache;
         private readonly RootSetCache _rootSetCache;
+        private readonly ReverseIndexCache _reverseIndexCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -55,6 +56,11 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             }, _methodTableCache);
+            _reverseIndexCache = new ReverseIndexCache(() =>
+            {
+                _heapIndexCache.TryGetHeapIndex(out var h);
+                return h;
+            });
         }
 
         public IEnumerable<CacheMetrics> GetCacheMetrics()
@@ -65,6 +71,7 @@ namespace DumpDetective.Analysis.Cache
             yield return _threadCache.GetMetrics();
             yield return _methodTableCache.GetMetrics();
             yield return _typeMetadataCache.GetMetrics();
+            yield return _reverseIndexCache.GetMetrics();
         }
 
         public HeapCacheHealth GetHealth()
@@ -276,6 +283,11 @@ namespace DumpDetective.Analysis.Cache
 
         // Root enumeration moved into RootSetCache
 
+        public IBackwardReferenceProvider? TryGetReverseIndexProvider()
+        {
+            return _reverseIndexCache.TryGetProvider();
+        }
+
         private void ReportProgress(string phase, long totalScans)
         {
             if (_progress is null || totalScans % ProgressReportEveryScans != 0)
@@ -283,6 +295,8 @@ namespace DumpDetective.Analysis.Cache
 
             _progress.Report(new AnalyzerProgressReport(totalScans, phase));
         }
+
+        public void Dispose() => _reverseIndexCache.Dispose();
     }
 
     internal class TaskStatistics

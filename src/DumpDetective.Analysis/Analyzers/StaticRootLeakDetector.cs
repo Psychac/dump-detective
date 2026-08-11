@@ -45,7 +45,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MaxRootExpansionDepth = 12,
                 LargeFanoutThreshold = 100,
             };
-            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false);
+            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
 
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)

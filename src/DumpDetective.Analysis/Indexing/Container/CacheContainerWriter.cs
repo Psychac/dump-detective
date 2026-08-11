@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.IO.Hashing;
 
+using DumpDetective.Core.Abstractions;
+
 namespace DumpDetective.Analysis.Indexing.Container;
 
 /// <summary>
@@ -13,9 +15,18 @@ internal sealed class CacheContainerWriter : IDisposable
     private static readonly int ReservedSectionCount = Enum.GetValues<CacheSectionId>().Length;
     private const int ChecksumBufferSize = 64 * 1024;
 
+    // Below this, EndSection's checksum re-read is fast enough (well under a second on typical
+    // disks) that per-chunk progress reporting would just be noise for the vast majority of
+    // sections — Handles/Roots/Tasks/etc. Only report for sections large enough that a silent
+    // checksum pass could plausibly look like a stall (e.g. the reverse-index sections, which can
+    // run tens to hundreds of MB even on modest dumps).
+    private const long ChecksumProgressThresholdBytes = 32L * 1024 * 1024;
+    private const long ChecksumProgressReportEveryBytes = 64L * 1024 * 1024;
+
     private readonly string _finalPath;
     private readonly string _tmpPath;
     private readonly string? _dumpPath;
+    private readonly IProgress<AnalyzerProgressReport>? _progress;
     private readonly FileStream _stream;
     private readonly List<CacheTocEntry> _entries = new(ReservedSectionCount);
 
@@ -29,10 +40,17 @@ internal sealed class CacheContainerWriter : IDisposable
     /// Optional (defaults to <c>null</c>) so existing direct test construction keeps working;
     /// omitting it just means the header's <c>DumpContentHash</c> stays zero-filled ("unknown").
     /// </param>
-    public CacheContainerWriter(string finalPath, string? dumpPath = null)
+    /// <param name="progress">
+    /// Optional — used only to report progress during <see cref="EndSection"/>'s checksum re-read
+    /// for sections large enough that it could otherwise look like a stall (see
+    /// <see cref="ChecksumProgressThresholdBytes"/>). Every other write path here already reports
+    /// through the caller's own progress instance directly.
+    /// </param>
+    public CacheContainerWriter(string finalPath, string? dumpPath = null, IProgress<AnalyzerProgressReport>? progress = null)
     {
         _finalPath = finalPath;
         _dumpPath = dumpPath;
+        _progress = progress;
         _tmpPath = finalPath + ".tmp";
         _stream = new FileStream(_tmpPath, FileMode.Create, FileAccess.ReadWrite, FileShare.Read,
             bufferSize: 64 * 1024, FileOptions.SequentialScan);
@@ -100,12 +118,17 @@ internal sealed class CacheContainerWriter : IDisposable
 
     private uint ComputeChecksum(long start, long length)
     {
+        bool reportProgress = _progress is not null && length >= ChecksumProgressThresholdBytes;
+        var stopwatch = reportProgress ? System.Diagnostics.Stopwatch.StartNew() : null;
+        long processedSinceLastReport = 0;
+
         var hasher = new XxHash32();
         _stream.Position = start;
         byte[] buffer = ArrayPool<byte>.Shared.Rent(ChecksumBufferSize);
         try
         {
             long remaining = length;
+            long processed = 0;
             while (remaining > 0)
             {
                 int toRead = (int)Math.Min(remaining, buffer.Length);
@@ -115,6 +138,18 @@ internal sealed class CacheContainerWriter : IDisposable
 
                 hasher.Append(buffer.AsSpan(0, read));
                 remaining -= read;
+                processed += read;
+
+                if (reportProgress)
+                {
+                    processedSinceLastReport += read;
+                    if (processedSinceLastReport >= ChecksumProgressReportEveryBytes)
+                    {
+                        processedSinceLastReport = 0;
+                        _progress!.Report(new AnalyzerProgressReport(0, $"verifying {_activeSectionId} section",
+                            Detail: $"{processed / (1024 * 1024)}/{length / (1024 * 1024)} MB", Elapsed: stopwatch!.Elapsed));
+                    }
+                }
             }
         }
         finally

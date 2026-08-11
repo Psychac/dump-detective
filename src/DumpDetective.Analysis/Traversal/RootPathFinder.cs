@@ -30,6 +30,7 @@ internal sealed class RootPathFinder
 {
     private readonly ClrHeap _heap;
     private readonly IReferenceProvider _provider;
+    private readonly IBackwardReferenceProvider? _reverseIndexProvider;
     private readonly RootPathSearchLimits _limits;
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _isNoise;
@@ -41,10 +42,12 @@ internal sealed class RootPathFinder
         RootPathSearchLimits limits,
         IPathSearchTelemetry telemetry,
         Func<ClrType?, bool> isNoise,
-        Func<ClrType?, bool> forceExpand)
+        Func<ClrType?, bool> forceExpand,
+        IBackwardReferenceProvider? reverseIndexProvider = null)
     {
         _heap = heap;
         _provider = provider;
+        _reverseIndexProvider = reverseIndexProvider;
         _limits = limits;
         _telemetry = telemetry;
         _isNoise = isNoise;
@@ -64,6 +67,19 @@ internal sealed class RootPathFinder
         rootKind = null;
         path = null;
         searchTruncated = false;
+
+        // When a disk-backed reverse index is available, use genuine bidirectional BFS instead of
+        // the forward-only heuristic below — see IndexBackedBidirectionalSearch for why this
+        // finds paths the heuristic can miss and covers a smaller search space.
+        if (_reverseIndexProvider is not null)
+        {
+            var indexBackedSearch = new IndexBackedBidirectionalSearch(
+                _heap, _provider, _reverseIndexProvider, _limits, _telemetry, _isNoise, _forceExpand);
+
+            return indexBackedSearch.TryFindPath(
+                target, roots, out rootKind, out path, out searchTruncated,
+                out candidateSetSize, out reverseIndexEntryCount, cancellationToken);
+        }
 
         // Phase 1: build candidate set via bidirectional expansion.
         var candidateBuilder = new CandidateSetBuilder(_heap, _provider, _limits, _telemetry, _isNoise, _forceExpand);

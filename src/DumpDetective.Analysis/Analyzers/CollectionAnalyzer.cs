@@ -1236,6 +1236,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Create ReferenceGraph once, reused across all items to cache edges
                 var provider = new ReferenceGraph(heap);
+                IBackwardReferenceProvider? reverseIndexProvider = cache.TryGetReverseIndexProvider();
 
                 var limits = new RootPathSearchLimits
                 {
@@ -1259,7 +1260,8 @@ namespace DumpDetective.Analysis.Analyzers
                         limits,
                         telemetry.AsProxy(),
                         type => ReferenceChainAnalyzer.IsNoisyType(type, refChainOptions.SkipArrays),
-                        type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns));
+                        type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns),
+                        reverseIndexProvider);
 
                     bool found = finder.TryFindAnyRootPath(
                         item.Address,

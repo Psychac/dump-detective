@@ -20,4 +20,11 @@ public interface IHeapAnalysisCache
     int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount);
     bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable);
     IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples();
+
+    /// <summary>
+    /// Returns the shared "who points at this object?" provider backed by the disk-backed
+    /// reverse-reference index, or <c>null</c> when unavailable (in-memory mode, skipped build,
+    /// pre-v4 cache, or missing sections). See <see cref="IBackwardReferenceProvider"/>.
+    /// </summary>
+    IBackwardReferenceProvider? TryGetReverseIndexProvider();
 }

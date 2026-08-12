@@ -110,7 +110,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // OPT: global module-id cache — moduleRegistry.GetOrAdd takes a lock, so it must only be
         // reached once per unique MT globally, never once per object (module is a type-level property).
         var globalModuleIdCache = new ConcurrentDictionary<ulong, int>();
-        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
+        var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, int StateFlags)>();
         var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
         // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
         var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
@@ -179,7 +179,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount]),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount], TaskStateFlagsFieldCache: new Dictionary<ulong, ClrInstanceField?>(capacity: 8)),
             (segIdx, _, state) =>
             {
                 ClrSegment segment = segments[segIdx];
@@ -290,7 +290,21 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
                     // Collect satellite candidates (written serially after the parallel loop).
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
-                        taskCandidates.Add((obj.Address, mt));
+                    {
+                        // obj.Type is already resolved here, so reading m_stateFlags now costs
+                        // one field lookup (cached per-MT below) and one field read — this is
+                        // strictly cheaper than the Phase 2 ClrMD re-read it eliminates.
+                        int taskStateFlags = 0;
+                        if (!state.TaskStateFlagsFieldCache.TryGetValue(mt, out ClrInstanceField? stateField))
+                        {
+                            stateField = obj.Type.GetFieldByName("m_stateFlags") ?? obj.Type.GetFieldByName("_stateFlags");
+                            state.TaskStateFlagsFieldCache[mt] = stateField;
+                        }
+                        if (stateField != null)
+                            taskStateFlags = stateField.Read<int>(obj, interior: false);
+
+                        taskCandidates.Add((obj.Address, mt, taskStateFlags));
+                    }
                     if (entry.Size >= 85_000)
                         largeCandidates.Add((obj.Address, mt, entry.Size));
                     // Collect LOH/POH free blocks during the scan — avoids a second segment walk
@@ -695,7 +709,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private static List<string> WriteSatelliteSections(
         CacheContainerWriter containerWriter,
         ClrHeap heap,
-        ConcurrentBag<(ulong Addr, ulong Mt)> taskCandidates,
+        ConcurrentBag<(ulong Addr, ulong Mt, int StateFlags)> taskCandidates,
         ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)> largeCandidates,
         ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)> lohFreeBlockCandidates,
         CancellationToken cancellationToken,
@@ -750,8 +764,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             containerWriter.BeginSection(CacheSectionId.Tasks);
             using (TaskIndexWriter tw = new(containerWriter.Stream))
             {
-                foreach ((ulong addr, ulong mt) in taskCandidates)
-                    tw.Add(addr, mt, stateFlags: 0); // stateFlags resolved in Phase 2 by AsyncTaskAnalyzer
+                foreach ((ulong addr, ulong mt, int stateFlags) in taskCandidates)
+                    tw.Add(addr, mt, stateFlags); // read during Phase 1 scan; 0 falls back to Phase 2 re-read
                 tw.Flush();
             }
             containerWriter.EndSection(taskCandidates.Count);

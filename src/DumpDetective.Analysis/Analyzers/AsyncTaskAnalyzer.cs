@@ -446,6 +446,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     {
         var result = new List<(ulong, ulong, int)>(capacity: 512);
         var scanCounter = new ObjectScanCounter("scanning task objects", progress);
+        var stateFieldCache = new Dictionary<ulong, ClrInstanceField?>(capacity: 8);
 
         foreach (ClrObject obj in heap.EnumerateObjects())
         {
@@ -459,7 +460,17 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             if (typeName is null || !TypeNamePatternMatcher.HasAnyPrefix(typeName, TaskNamespacePrefixes))
                 continue;
 
-            result.Add((obj.Address, obj.Type.MethodTable, 0));
+            // obj.Type is already resolved here, so reading m_stateFlags now is free
+            // relative to the Phase 2 re-read it would otherwise trigger.
+            ulong mt = obj.Type.MethodTable;
+            if (!stateFieldCache.TryGetValue(mt, out ClrInstanceField? stateField))
+            {
+                stateField = obj.Type.GetFieldByName("m_stateFlags") ?? obj.Type.GetFieldByName("_stateFlags");
+                stateFieldCache[mt] = stateField;
+            }
+            int stateFlags = stateField != null ? stateField.Read<int>(obj, interior: false) : 0;
+
+            result.Add((obj.Address, mt, stateFlags));
             if (result.Count >= maxTasksToScan)
                 break;
         }

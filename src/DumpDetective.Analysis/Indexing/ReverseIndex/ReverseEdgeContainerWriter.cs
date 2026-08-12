@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.IO.Hashing;
 using System.Text.Json;
 
 using DumpDetective.Analysis.Indexing.Container;
@@ -18,6 +19,8 @@ namespace DumpDetective.Analysis.Indexing.ReverseIndex;
 internal static class ReverseEdgeContainerWriter
 {
     private const int CopyBufferSize = 64 * 1024;
+    private const long CopyProgressThresholdBytes = 16L * 1024 * 1024;
+    private const long CopyProgressReportEveryBytes = 32L * 1024 * 1024;
 
     public static void Write(
         CacheContainerWriter containerWriter,
@@ -32,31 +35,39 @@ internal static class ReverseEdgeContainerWriter
 
         try
         {
+            // Hash each section's bytes as they're copied instead of via EndSection's default
+            // re-read pass — these merges are pure data concatenation with no placeholder-header-
+            // patched-afterward step, and on large dumps this section can run into the GBs, where a
+            // full re-read is real added wall-clock.
+            var bucketsHasher = new XxHash32();
             containerWriter.BeginSection(CacheSectionId.ReverseEdgeBuckets);
             long sectionStart = containerWriter.Stream.Position;
             for (int i = 0; i < bucketCount; i++)
             {
                 string dataFile = Path.Combine(cacheDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.SortedDataSuffix}");
                 long offset = containerWriter.Stream.Position - sectionStart;
-                long length = AppendFile(containerWriter.Stream, dataFile);
+                long length = AppendFile(containerWriter.Stream, dataFile, bucketsHasher, progress, stopwatch,
+                    label: $"bucket {i + 1}/{bucketCount} (data)");
                 dataLocations.Add((offset, length));
                 progress?.Report(new AnalyzerProgressReport(0, "merging reverse-index into cache.bin",
-                    Detail: $"{i + 1}/{bucketCount} buckets (data)", Elapsed: stopwatch.Elapsed));
+                    Detail: $"{i + 1}/{bucketCount} buckets (data, {length / (1024 * 1024):N0} MB)", Elapsed: stopwatch.Elapsed));
             }
-            containerWriter.EndSection(bucketCount);
+            containerWriter.EndSection(bucketCount, bucketsHasher.GetCurrentHashAsUInt32());
 
+            var directoriesHasher = new XxHash32();
             containerWriter.BeginSection(CacheSectionId.ReverseEdgeDirectories);
             sectionStart = containerWriter.Stream.Position;
             for (int i = 0; i < bucketCount; i++)
             {
                 string dirFile = Path.Combine(cacheDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.DirectorySuffix}");
                 long offset = containerWriter.Stream.Position - sectionStart;
-                long length = AppendFile(containerWriter.Stream, dirFile);
+                long length = AppendFile(containerWriter.Stream, dirFile, directoriesHasher, progress, stopwatch,
+                    label: $"bucket {i + 1}/{bucketCount} (directory)");
                 dirLocations.Add((offset, length));
                 progress?.Report(new AnalyzerProgressReport(0, "merging reverse-index into cache.bin",
-                    Detail: $"{i + 1}/{bucketCount} buckets (directory)", Elapsed: stopwatch.Elapsed));
+                    Detail: $"{i + 1}/{bucketCount} buckets (directory, {length / (1024 * 1024):N0} MB)", Elapsed: stopwatch.Elapsed));
             }
-            containerWriter.EndSection(bucketCount);
+            containerWriter.EndSection(bucketCount, directoriesHasher.GetCurrentHashAsUInt32());
 
             var metadata = new ReverseIndexMetadata
             {
@@ -91,11 +102,20 @@ internal static class ReverseEdgeContainerWriter
         DeleteScratchFiles(cacheDir, bucketCount);
     }
 
-    /// <summary>Streams <paramref name="path"/> onto the end of <paramref name="stream"/>, returning its length. A missing file (e.g. an empty bucket never created by the sorter) contributes a zero-length slice.</summary>
-    private static long AppendFile(Stream stream, string path)
+    /// <summary>
+    /// Streams <paramref name="path"/> onto the end of <paramref name="stream"/>, returning its
+    /// length. A missing file (e.g. an empty bucket never created by the sorter) contributes a
+    /// zero-length slice. Reports periodically for files large enough that a single silent copy
+    /// could otherwise look like a stall (see <see cref="CopyProgressThresholdBytes"/>).
+    /// </summary>
+    private static long AppendFile(Stream stream, string path, XxHash32 hasher, IProgress<AnalyzerProgressReport>? progress, Stopwatch stopwatch, string label)
     {
         if (!File.Exists(path))
             return 0;
+
+        long fileLength = new FileInfo(path).Length;
+        bool reportProgress = progress is not null && fileLength >= CopyProgressThresholdBytes;
+        long processedSinceLastReport = 0;
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
         long total = 0;
@@ -107,7 +127,20 @@ internal static class ReverseEdgeContainerWriter
             while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
             {
                 stream.Write(buffer, 0, read);
+                hasher.Append(buffer.AsSpan(0, read));
                 total += read;
+
+                if (reportProgress)
+                {
+                    processedSinceLastReport += read;
+                    if (processedSinceLastReport >= CopyProgressReportEveryBytes)
+                    {
+                        processedSinceLastReport = 0;
+                        progress!.Report(new AnalyzerProgressReport(0, "merging reverse-index into cache.bin",
+                            Detail: $"{label}: {total / (1024 * 1024):N0}/{fileLength / (1024 * 1024):N0} MB copied",
+                            Elapsed: stopwatch.Elapsed));
+                    }
+                }
             }
         }
         finally

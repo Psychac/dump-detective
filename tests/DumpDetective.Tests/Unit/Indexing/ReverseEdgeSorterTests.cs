@@ -320,12 +320,19 @@ public class ReverseEdgeSorterTests : IAsyncLifetime
         var sorter = new ReverseEdgeSorter();
         await sorter.SortBucketsAsync(_tempDir, bucketCount: 4, CancellationToken.None, progress: progress);
 
-        reports.Should().HaveCount(4);
         reports.Should().OnlyContain(r => r.Phase == "sorting reverse-index buckets");
         // ScannedCount is always 0 — these are phase-label-only reports (see ConsoleUx.ObjectScanProgress),
         // not a global object counter, so per-bucket progress is carried entirely in Detail.
         reports.Should().OnlyContain(r => r.ScannedCount == 0);
-        reports.Select(r => r.Detail).Should().BeEquivalentTo(new[] { "1/4 buckets", "2/4 buckets", "3/4 buckets", "4/4 buckets" });
+
+        // Each bucket now reports load/sort/write sub-phase transitions in addition to the
+        // per-bucket completion tick, so a slow single bucket doesn't look like a silent stall.
+        reports.Should().Contain(r => r.Detail!.Contains("loaded"));
+        reports.Should().Contain(r => r.Detail!.Contains("sorted"));
+
+        var completionReports = reports.Where(r => r.Detail!.Contains("buckets done")).ToList();
+        completionReports.Should().HaveCount(4);
+        completionReports.Select(r => r.Detail).Should().Contain(d => d!.StartsWith("4/4 buckets done"));
     }
 
     /// <summary>Invokes the callback synchronously and on whichever thread reports — bucket

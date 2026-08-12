@@ -93,6 +93,45 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
     }
 
     /// <summary>
+    /// Records a batch of (child, parent) edges already known to belong to
+    /// <paramref name="bucketIdx"/>, taking that bucket's lock once instead of once per edge.
+    /// Callers accumulate edges per-bucket locally (e.g. per <c>Parallel.For</c> worker) and flush
+    /// in batches — at hundreds of millions of edges the fixed per-call cost of <c>lock</c> is the
+    /// dominant overhead of <see cref="RecordEdge"/>, not the dictionary/write work itself.
+    /// Clears <paramref name="edges"/> after flushing so callers can reuse the same list instance.
+    /// </summary>
+    public void RecordEdgesBatch(int bucketIdx, List<(ulong Child, ulong Parent)> edges)
+    {
+        if (edges.Count == 0)
+            return;
+
+        lock (_bucketLocks[bucketIdx])
+        {
+            Dictionary<ulong, int> fanout = _fanoutPerBucket[bucketIdx];
+            HashSet<ulong> truncated = _truncatedPerBucket[bucketIdx];
+            BinaryWriter writer = _bucketWriters[bucketIdx];
+
+            foreach ((ulong child, ulong parent) in edges)
+            {
+                if (!fanout.TryGetValue(child, out int count))
+                    count = 0;
+
+                if (count >= ReverseIndexConstants.MaxParentsPerChild)
+                {
+                    truncated.Add(child);
+                    continue;
+                }
+
+                fanout[child] = count + 1;
+                writer.Write(child);
+                writer.Write(parent);
+            }
+        }
+
+        edges.Clear();
+    }
+
+    /// <summary>
     /// Returns the set of children that hit the fanout cap in bucket <paramref name="bucketIndex"/>.
     /// <see cref="ReverseEdgeSorter"/> needs this because by the time Phase B counts parents per
     /// child, the count can never exceed <see cref="ReverseIndexConstants.MaxParentsPerChild"/> —

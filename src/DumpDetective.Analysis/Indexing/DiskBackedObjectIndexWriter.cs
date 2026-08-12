@@ -23,6 +23,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // ObjectGenerations is a separate, narrower column (1 byte/sbyte vs. 8 bytes/ulong).
     private const int GenColumnSize = sizeof(sbyte);
     private const int ProgressReportEveryObjects = 100_000;
+    // Per-bucket edge batch size for the reverse-index (see ReverseEdgeExtractor.RecordEdgesBatch):
+    // amortizes the per-bucket lock over this many edges instead of taking it once per edge.
+    private const int EdgeBatchSize = 2048;
 
     // TEMPORARY perf A/B toggle (see docs/cache/17-DiskIndexBuildPhaseBreakdown.md option 2):
     // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
@@ -99,7 +102,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // reached once per unique MT globally, never once per object (module is a type-level property).
         var globalModuleIdCache = new ConcurrentDictionary<ulong, int>();
         var taskCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
-        var eventCandidates = new ConcurrentBag<(ulong Addr, ulong Mt)>();
         var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
         // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
         var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
@@ -162,7 +164,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount]),
             (segIdx, _, state) =>
             {
                 ClrSegment segment = segments[segIdx];
@@ -242,20 +244,38 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     // object. "carefully" matches the enumeration mode validated in Investigation 1
                     // (see pre-implementation-validation.md) and, unlike a raw field walk, also
                     // covers array elements — the dominant edge source for collection-held leaks.
+                    //
+                    // Edges are buffered per-bucket in thread-local lists and flushed in batches via
+                    // RecordEdgesBatch instead of calling RecordEdge per edge — at hundreds of
+                    // millions of edges, the fixed cost of the per-bucket lock (not the dictionary
+                    // work it guards) dominates, so amortizing it across EdgeBatchSize edges at a
+                    // time is the difference that matters.
                     if (reverseEdgeExtractor is not null)
                     {
+                        var edgeBuffers = state.EdgeBucketBuffers!;
                         foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
                         {
-                            if (reference.IsValid)
-                                reverseEdgeExtractor.RecordEdge(obj.Address, reference.Address);
+                            if (!reference.IsValid)
+                                continue;
+
+                            ulong child = reference.Address;
+                            int bucketIdx = (int)ReverseIndexConstants.ChildBucketHash(child, reverseIndexBucketCount);
+                            List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers[bucketIdx];
+                            if (bucketBuf is null)
+                            {
+                                bucketBuf = new List<(ulong Child, ulong Parent)>(EdgeBatchSize);
+                                edgeBuffers[bucketIdx] = bucketBuf;
+                            }
+
+                            bucketBuf.Add((child, obj.Address));
+                            if (bucketBuf.Count >= EdgeBatchSize)
+                                reverseEdgeExtractor.RecordEdgesBatch(bucketIdx, bucketBuf);
                         }
                     }
 
                     // Collect satellite candidates (written serially after the parallel loop).
                     if ((flags & TypeAggregateFlags.IsTaskType) != 0)
                         taskCandidates.Add((obj.Address, mt));
-                    if ((flags & TypeAggregateFlags.IsDelegateType) != 0)
-                        eventCandidates.Add((obj.Address, mt));
                     if (entry.Size >= 85_000)
                         largeCandidates.Add((obj.Address, mt, entry.Size));
                     // Collect LOH/POH free blocks during the scan — avoids a second segment walk
@@ -364,6 +384,20 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             },
             state =>
             {
+                // Flush any partially-filled per-bucket edge batches before this thread-local
+                // state is discarded — otherwise the last <EdgeBatchSize edges recorded against
+                // each bucket would be silently dropped.
+                if (reverseEdgeExtractor is not null)
+                {
+                    var edgeBuffers = state.EdgeBucketBuffers!;
+                    for (int b = 0; b < edgeBuffers.Length; b++)
+                    {
+                        List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers[b];
+                        if (bucketBuf is { Count: > 0 })
+                            reverseEdgeExtractor.RecordEdgesBatch(b, bucketBuf);
+                    }
+                }
+
                 lock (masterBuilder)
                 {
                     masterBuilder.Merge(state.Builder);
@@ -429,20 +463,20 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // column contiguous in the container so a reader that only needs MethodTable (type
         // aggregation) or Size (histograms) doesn't pay to read Address too.
         containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
-        ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer);
-        containerWriter.EndSection(objectCount);
+        uint addrChecksum = ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount, addrChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectMethodTables);
-        ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer);
-        containerWriter.EndSection(objectCount);
+        uint mtChecksum = ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount, mtChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
-        ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer);
-        containerWriter.EndSection(objectCount);
+        uint sizeChecksum = ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount, sizeChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
-        ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
-        containerWriter.EndSection(objectCount);
+        uint genChecksum = ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
+        containerWriter.EndSection(objectCount, genChecksum);
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
         // We keep the stopwatch running during satellite file writes so their progress reports
@@ -452,7 +486,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         // Write satellite sections serially after the parallel heap scan.
         List<string> satelliteWarnings = WriteSatelliteSections(containerWriter, heap,
-            taskCandidates, eventCandidates, largeCandidates, lohFreeBlockCandidates,
+            taskCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
 
         // Write StringDedup section (compact binary) so subsequent analyses
@@ -647,7 +681,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         CacheContainerWriter containerWriter,
         ClrHeap heap,
         ConcurrentBag<(ulong Addr, ulong Mt)> taskCandidates,
-        ConcurrentBag<(ulong Addr, ulong Mt)> eventCandidates,
         ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)> largeCandidates,
         ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)> lohFreeBlockCandidates,
         CancellationToken cancellationToken,
@@ -713,26 +746,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             containerWriter.AbortSection();
             warnings.Add($"Tasks: {ex.GetType().Name}: {ex.Message}");
-        }
-
-        // EventCandidates — delegate/event objects collected during heap scan
-        try
-        {
-            progress?.Report(new(0, "writing EventCandidates section", Detail: null, Elapsed: stopwatch.Elapsed));
-            containerWriter.BeginSection(CacheSectionId.EventCandidates);
-            using (EventCandidateIndexWriter ew = new(containerWriter.Stream))
-            {
-                foreach ((ulong addr, ulong mt) in eventCandidates)
-                    ew.Add(addr, mt);
-                ew.Flush();
-            }
-            containerWriter.EndSection(eventCandidates.Count);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"EventCandidates: {ex.GetType().Name}: {ex.Message}");
         }
 
         // LargeObjects — top-100 LOH objects by size
@@ -988,8 +1001,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     /// order, deleting each as it's consumed. Used to assemble a single columnar section from
     /// per-segment scratch files without materializing the whole column in memory.
     /// </summary>
-    private static void ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize)
+    /// <summary>
+    /// Concatenates <paramref name="files"/> onto <paramref name="stream"/>, hashing the bytes as
+    /// they're copied so the caller can close the section via
+    /// <see cref="CacheContainerWriter.EndSection(long, uint)"/> without a separate full re-read —
+    /// these columnar sections have no placeholder-header-patched-afterward step, so an inline hash
+    /// is safe and, at up to a few GB per section on large dumps, avoids doubling that section's I/O.
+    /// </summary>
+    private static uint ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize)
     {
+        var hasher = new XxHash32();
         byte[] copyBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
@@ -1003,7 +1024,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 {
                     int read;
                     while ((read = segStream.Read(copyBuf, 0, copyBuf.Length)) > 0)
+                    {
                         stream.Write(copyBuf, 0, read);
+                        hasher.Append(copyBuf.AsSpan(0, read));
+                    }
                 }
                 File.Delete(segFile);
             }
@@ -1013,6 +1037,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             ArrayPool<byte>.Shared.Return(copyBuf);
         }
+
+        return hasher.GetCurrentHashAsUInt32();
     }
 
     // ── Generation helpers ─────────────────────────────────────────────────────

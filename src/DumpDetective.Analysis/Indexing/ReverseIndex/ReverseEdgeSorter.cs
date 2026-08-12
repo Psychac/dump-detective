@@ -37,11 +37,13 @@ internal class ReverseEdgeSorter
         long completed = 0;
 
         var sortTasks = Enumerable.Range(0, bucketCount)
-            .Select(i => SortBucketAsync(cacheDir, i, truncatedChildrenPerBucket?[i], ct, () =>
+            .Select(i => SortBucketAsync(cacheDir, i, bucketCount, truncatedChildrenPerBucket?[i], ct, progress, stopwatch, result =>
             {
                 long done = Interlocked.Increment(ref completed);
+                long totalMb = (result.DataFileSize + result.DirectoryFileSize) / (1024 * 1024);
                 progress?.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
-                    Detail: $"{done}/{bucketCount} buckets", Elapsed: stopwatch.Elapsed));
+                    Detail: $"{done}/{bucketCount} buckets done (bucket {i + 1}: {result.EdgeCount:N0} edges, {totalMb:N0} MB, {result.ElapsedMs / 1000.0:F1}s)",
+                    Elapsed: stopwatch.Elapsed));
             }))
             .ToArray();
 
@@ -60,18 +62,29 @@ internal class ReverseEdgeSorter
     private async Task<BucketSortResult> SortBucketAsync(
         string cacheDir,
         int bucketIdx,
+        int bucketCount,
         IReadOnlySet<ulong>? truncatedChildren,
         CancellationToken ct,
-        Action onCompleted)
+        IProgress<AnalyzerProgressReport>? progress,
+        Stopwatch stopwatch,
+        Action<BucketSortResult> onCompleted)
     {
-        BucketSortResult result = await Task.Run(() => SortBucketCore(cacheDir, bucketIdx, truncatedChildren), ct);
-        onCompleted();
+        BucketSortResult result = await Task.Run(
+            () => SortBucketCore(cacheDir, bucketIdx, bucketCount, truncatedChildren, progress, stopwatch), ct);
+        onCompleted(result);
         return result;
     }
 
-    private BucketSortResult SortBucketCore(string cacheDir, int bucketIdx, IReadOnlySet<ulong>? truncatedChildren)
+    private BucketSortResult SortBucketCore(
+        string cacheDir,
+        int bucketIdx,
+        int bucketCount,
+        IReadOnlySet<ulong>? truncatedChildren,
+        IProgress<AnalyzerProgressReport>? progress,
+        Stopwatch stopwatch)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        string bucketLabel = $"bucket {bucketIdx + 1}/{bucketCount}";
 
         var tmpFile = Path.Combine(cacheDir, $"reverse_edges_bucket_{bucketIdx}{ReverseIndexConstants.TemporaryScratchSuffix}");
         var dataFile = Path.Combine(cacheDir, $"reverse_edges_bucket_{bucketIdx}{ReverseIndexConstants.SortedDataSuffix}");
@@ -86,62 +99,90 @@ internal class ReverseEdgeSorter
                 $"Increase bucket count and re-run extraction, or implement external merge-sort.");
         }
 
-        // B1: Load edges from raw file
+        // B1: Load edges from raw file into parallel key/value arrays (children/parents) rather
+        // than an array of tuples — Array.Sort(keys, values) below sorts via ulong's own
+        // IComparable<ulong>, with no per-comparison delegate call, which matters at the hundreds
+        // of millions of edges a large dump can produce.
         var edgeCount = fileInfo.Length / 16;
-        var edges = new (ulong child, ulong parent)[edgeCount];
+        var children = new ulong[edgeCount];
+        var parentAddrs = new ulong[edgeCount];
 
         using (var fs = File.OpenRead(tmpFile))
         using (var reader = new BinaryReader(fs))
         {
             for (long i = 0; i < edgeCount; i++)
             {
-                edges[i] = (reader.ReadUInt64(), reader.ReadUInt64());
+                children[i] = reader.ReadUInt64();
+                parentAddrs[i] = reader.ReadUInt64();
             }
         }
 
-        // B2: Sort by child address
-        Array.Sort(edges, (a, b) => a.child.CompareTo(b.child));
+        progress?.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
+            Detail: $"{bucketLabel}: loaded {edgeCount:N0} edges ({fileInfo.Length / (1024 * 1024):N0} MB), sorting...",
+            Elapsed: stopwatch.Elapsed));
+
+        // B2: Sort by child address (keys/values overload — no delegate per comparison)
+        Array.Sort(children, parentAddrs);
+
+        progress?.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
+            Detail: $"{bucketLabel}: sorted {edgeCount:N0} edges, writing...",
+            Elapsed: stopwatch.Elapsed));
 
         // B3: Group by child, write data + build directory
         var dirEntries = new List<(ulong childAddr, long fileOffset)>();
+        long lastWriteProgressReportEdge = 0;
 
         using (var dataWriter = File.Create(dataFile, bufferSize: 65536))
         {
+            // One writer for the whole bucket, offset tracked in memory — the previous version
+            // allocated a new BinaryWriter, called Flush() (forces the OS buffer out), and read
+            // .Length (a stat syscall) once PER GROUP. With millions of unique children in a large
+            // bucket that's millions of syscalls — the actual cause of multi-minute stalls on the
+            // write step, not anything progress-reporting could paper over.
+            var bw = new BinaryWriter(dataWriter);
+            byte[] pad3 = new byte[3];
             long currentOffset = 0;
 
-            for (int i = 0; i < edges.Length;)
+            for (int i = 0; i < children.Length;)
             {
-                var child = edges[i].child;
+                var child = children[i];
                 var groupStartOffset = currentOffset;
                 var parents = new List<ulong>();
 
                 // Collect all parents for this child
-                while (i < edges.Length && edges[i].child == child)
+                while (i < children.Length && children[i] == child)
                 {
-                    parents.Add(edges[i].parent);
+                    parents.Add(parentAddrs[i]);
                     i++;
                 }
 
                 // Write group: [child:8][count:4][truncated:1][pad:3][parents:8*count]
-                var bw = new BinaryWriter(dataWriter);
-
                 bool truncated = parents.Count > ReverseIndexConstants.MaxParentsPerChild
                     || (truncatedChildren?.Contains(child) ?? false);
 
                 bw.Write(child);
                 bw.Write(parents.Count);
                 bw.Write(truncated);
-                bw.Write(new byte[3]); // padding for alignment
+                bw.Write(pad3);
 
                 foreach (var parent in parents)
                     bw.Write(parent);
 
-                dataWriter.Flush();
-                currentOffset = dataWriter.Length;
+                currentOffset += 16 + (8L * parents.Count); // 8(child) + 4(count) + 1(truncated) + 3(pad) + 8*count(parents)
 
                 // Add directory entry
                 dirEntries.Add((child, groupStartOffset));
+
+                if (progress is not null && i - lastWriteProgressReportEdge >= 2_000_000)
+                {
+                    lastWriteProgressReportEdge = i;
+                    progress.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
+                        Detail: $"{bucketLabel}: writing... {i:N0}/{edgeCount:N0} edges ({dirEntries.Count:N0} groups)",
+                        Elapsed: stopwatch.Elapsed));
+                }
             }
+
+            bw.Flush();
         }
 
         // B4: Write directory index

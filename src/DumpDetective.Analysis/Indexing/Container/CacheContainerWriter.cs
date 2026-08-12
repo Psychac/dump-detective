@@ -116,6 +116,27 @@ internal sealed class CacheContainerWriter : IDisposable
         _sectionOpen = false;
     }
 
+    /// <summary>
+    /// Closes the current section using a checksum the caller already computed while writing the
+    /// section's bytes, skipping <see cref="EndSection(long)"/>'s re-read pass entirely. Only safe
+    /// for sections written as a single contiguous streamed pass with no placeholder-header-patched-
+    /// afterward step (unlike the satellite writers' record-count header, which is patched in place
+    /// after streaming and would make an in-flight hash wrong) — e.g. the columnar object sections
+    /// and the reverse-index bucket/directory merges, both multi-GB on large dumps where a full
+    /// re-read is real added wall-clock, not the tiny satellite sections where it's negligible.
+    /// </summary>
+    public void EndSection(long recordCount, uint precomputedChecksum)
+    {
+        if (!_sectionOpen)
+            throw new InvalidOperationException("No section is open.");
+
+        long end = _stream.Position;
+        long length = end - _activeSectionStart;
+
+        _entries.Add(new CacheTocEntry(_activeSectionId, _activeSectionStart, length, recordCount, precomputedChecksum));
+        _sectionOpen = false;
+    }
+
     private uint ComputeChecksum(long start, long length)
     {
         bool reportProgress = _progress is not null && length >= ChecksumProgressThresholdBytes;

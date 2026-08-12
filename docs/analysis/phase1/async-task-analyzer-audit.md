@@ -312,7 +312,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | ID | Recommendation | Area | Classification | Impact | Difficulty | Confidence | Status |
 |----|----------------|------|----------------|--------|------------|------------|--------|
 | P0-1 | Handle `m_stateFlags` / `_stateFlags` name fallback; cache field by `ClrType` | 3, 6 | Improvement | Critical | Low | High | ✅ DONE (b5c8107) |
-| P0-2 | Detect and traverse `List<object>` multi-continuation in BFS | 4, 6 | Improvement | High | Medium | High |
+| P0-2 | Detect and traverse `List<object>` multi-continuation in BFS | 4, 6 | Improvement | High | Medium | High | ✅ DONE (8cf7849) |
 | P1-1 | Cache `ClrInstanceField` for `m_continuationObject` and `m_stateFlags` by `ClrType` | 5 | Improvement | High | Low | High | ✅ DONE (b5572e4) |
 | P1-2 | Add `IAsyncStateMachine` inventory (type name + count + controlling task linkage) | 4, 7 | Evolution | High | Medium | High |
 | P1-3 | Add exception type histogram across all faulted tasks (not just orphaned snapshots) | 2, 4 | Improvement | High | Low | High | ✅ DONE (91babb4) |

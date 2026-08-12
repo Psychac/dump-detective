@@ -401,6 +401,8 @@ for further manual investigation. Not suitable as a root-cause confirmation tool
 | P1-1 | Add retained-size estimate for top-10 suspects using `MemoryAnalyzer.EstimateRetained` (already exists). Store as `RetainedSize` on `LeakCandidateRecord`. | Very high — the most actionable signal for prioritization | Medium | High | Pending | Improvement |
 | P1-2 | Emit one `InsightFinding` per Critical-severity candidate (up to 3) rather than always collapsing into a single aggregate finding. | High — multi-leak dumps lose severity diversity | Low | High | ✅ DONE (commit a680c16) | Improvement |
 | P1-3 | Surface the first GC root hop (field name + owner type) for the top-3 suspects using a single-level `ClrObject.EnumerateReferences()` walk on the sample instance. | High — turns "investigate" into "here is where to look" | Medium | High | Pending | Improvement |
+
+> **Reverse index note:** `EnumerateReferences()` on the sample instance walks *forward* (what the suspect points to), not the "who holds this suspect" hop the recommendation is actually after — the same forward/reverse mix-up flagged in `gcroot-analyzer-audit.md`. Use `ReverseEdgeIndexReader.TryGetParents(sampleAddress, ...)` (via `RootPathFinder`) instead for the correct single-hop parent lookup; no heap re-walk needed. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 | P1-4 | Replace `pinnedTargetTypes` (top-N type names from `GCHandleDomainResult`) with a full `HashSet<ulong>` of pinned addresses stored on `GCHandleDomainResult`. Check `aggregate.SampleAddress` membership. | High — eliminates top-N truncation silently dropping pinned types | Medium | High | Pending | Improvement |
 
 #### P2 — Medium

@@ -91,7 +91,34 @@ internal sealed class HeapIndexScanDispatcher
         // ↳ phase line gets the text, and the ticking status line stays blank.
         int currentParticipantIndex = -1;
         string? currentSubPhase = null;
-        context.ReportSubPhase = phase => Volatile.Write(ref currentSubPhase, phase);
+
+        // No " • " separator here (unlike other Publish calls below) — each distinct participant/
+        // sub-phase combination is reported as the phase itself, not as a fast-changing detail
+        // behind a static phase, so ConsoleDiagnosticsSink's phase-transition tracking sees a
+        // finite, bounded set of genuine transitions (one per participant × sub-phase).
+        string BuildSetupPhaseText(int idx, string? subPhase)
+        {
+            string participantLabel = idx >= 0 && idx < participants.Count
+                ? $"participant setup {idx + 1}/{participants.Count}: {participants[idx].GetType().Name}"
+                : "participant setup: starting";
+            return string.IsNullOrEmpty(subPhase) ? participantLabel : $"{participantLabel} — {subPhase}";
+        }
+
+        // Publishing only from the 300ms poll below (as before) means any participant whose
+        // BeforeHeapIndexScan finishes faster than the poll interval can complete entirely between
+        // two ticks — the index advances past it without a single poll ever observing it, so it
+        // never gets reported at all. Publishing here, synchronously at the exact moment each
+        // transition happens (on this same background thread, so no extra synchronization needed
+        // beyond the Volatile writes the poll loop already reads), guarantees every participant and
+        // every ReportSubPhase call gets its own event regardless of how briefly it ran; the poll
+        // loop below still re-publishes periodically so the live elapsed/heartbeat keeps ticking
+        // during whichever participant is currently slow.
+        context.ReportSubPhase = phase =>
+        {
+            Volatile.Write(ref currentSubPhase, phase);
+            Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0,
+                BuildSetupPhaseText(Volatile.Read(ref currentParticipantIndex), phase));
+        };
 
         Task setupTask = Task.Run(() =>
         {
@@ -99,6 +126,7 @@ internal sealed class HeapIndexScanDispatcher
             {
                 Interlocked.Exchange(ref currentParticipantIndex, i);
                 Volatile.Write(ref currentSubPhase, null);
+                Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0, BuildSetupPhaseText(i, null));
                 try
                 {
                     participants[i].BeforeHeapIndexScan(context);
@@ -113,13 +141,8 @@ internal sealed class HeapIndexScanDispatcher
         while (!setupTask.Wait(300))
         {
             int idx = Volatile.Read(ref currentParticipantIndex);
-            string detail = idx >= 0 && idx < participants.Count
-                ? $"{idx + 1}/{participants.Count}: {participants[idx].GetType().Name}"
-                : "starting";
             string? subPhase = Volatile.Read(ref currentSubPhase);
-            if (!string.IsNullOrEmpty(subPhase))
-                detail += $" — {subPhase}";
-            Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0, $"{ScanName}: preparing • participant setup {detail}");
+            Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0, BuildSetupPhaseText(idx, subPhase));
         }
 
         setupTask.GetAwaiter().GetResult();

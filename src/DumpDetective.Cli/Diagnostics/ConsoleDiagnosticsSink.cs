@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
 using System.Diagnostics;
 using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Pipeline;
 
 namespace DumpDetective.Cli.Diagnostics;
 
@@ -30,6 +31,10 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     private int _currentAnalyzerNoGrowthTicks;
     private string _currentAnalyzerPhase = "scanning";
     private string? _currentSubmodule;
+    // Tracks phase-transition durations for the currently-running analyzer/pass so completed
+    // phases can be printed with how long they took, instead of only ever showing the phase that
+    // happened to be active when the whole thing finished.
+    private PhaseTimeline? _currentPhaseTimeline;
 
     public ConsoleDiagnosticsSink(bool enabled, IReadOnlyList<IAnalyzer> analyzers)
     {
@@ -98,6 +103,11 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         details.Add($"cache-hit {cacheHitRatio:F1}% ({cacheHits:N0}/{cacheMisses:N0})");
                     }
 
+                    // Flush before resetting: the timeline is discarded by ResetAnalyzerTracking,
+                    // and its still-open final phase's duration is only known now, against this
+                    // event's elapsed — otherwise that last phase never gets a printed duration.
+                    FlushPhaseTimeline(diagnosticsEvent.AnalyzerName, elapsed);
+
                     // Reset before printing: closes the window where a stale AnalyzerProgress
                     // callback (posted via Progress<T>/ThreadPool) could fire after ObjectScanComplete
                     // sets _scanLineActive=false but before _currentAnalyzerName is cleared.
@@ -125,6 +135,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         : TimeSpan.Zero;
                     long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
                     string details = analyzerScanCount == 0 ? "no heap walk • status failed" : "status failed";
+                    FlushPhaseTimeline(diagnosticsEvent.AnalyzerName, elapsed);
                     ResetAnalyzerTracking();
                     ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Error($"Analyzer failed: {diagnosticsEvent.AnalyzerName} ({diagnosticsEvent.ExceptionType}: {diagnosticsEvent.ExceptionMessage})");
@@ -145,6 +156,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                         : TimeSpan.Zero;
                     long analyzerScanCount = GetAnalyzerScanCount(diagnosticsEvent.AnalyzerName, diagnosticsEvent.ObjectScanCount);
                     string details = analyzerScanCount == 0 ? "no heap walk • status canceled" : "status canceled";
+                    FlushPhaseTimeline(diagnosticsEvent.AnalyzerName, elapsed);
                     ResetAnalyzerTracking();
                     ConsoleUx.ObjectScanComplete(diagnosticsEvent.AnalyzerName, analyzerScanCount, elapsed, details);
                     ConsoleUx.Warning($"Analyzer canceled: {diagnosticsEvent.AnalyzerName}");
@@ -308,11 +320,6 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
             if (!string.Equals(diagnosticsEvent.AnalyzerName, _currentAnalyzerName, StringComparison.Ordinal))
                 return;
 
-            DateTime utcNow = DateTime.UtcNow;
-            if ((utcNow - _lastScanRenderUtc).TotalMilliseconds < 125)
-                return;
-
-            _lastScanRenderUtc = utcNow;
             TimeSpan elapsed = diagnosticsEvent.DurationMs.HasValue
                 ? TimeSpan.FromMilliseconds(diagnosticsEvent.DurationMs.Value)
                 : TimeSpan.Zero;
@@ -349,25 +356,41 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
                 basePhase = phaseSep >= 0 ? diagnosticsEvent.Message[..phaseSep] : diagnosticsEvent.Message;
             }
 
+            // Record every genuine phase transition immediately and unconditionally — never behind
+            // the print throttle below. Gating the Record call on the same cooldown as the console
+            // render used to silently drop transitions rather than defer them: if several phases
+            // changed within one throttle window, only whichever was current when the cooldown next
+            // expired ever got recorded, so fast-changing phases (e.g. sub-300ms participants in the
+            // shared heap-index scan dispatcher) vanished instead of just being batched together.
             if (!string.Equals(_currentAnalyzerPhase, basePhase, StringComparison.Ordinal))
             {
-                DateTime now = DateTime.UtcNow;
-                if ((now - _lastPhasePrintUtc).TotalMilliseconds >= 500)
-                {
-                    _currentAnalyzerPhase = basePhase;
-                    ConsoleUx.AnalyzerPhase(basePhase);
-                    _lastPhasePrintUtc = now;
-                }
+                _currentAnalyzerPhase = basePhase;
+                _currentPhaseTimeline?.Record(basePhase, elapsed);
             }
 
             // Parse detail out of the message if the analyzer embedded it as "phase • detail".
+            // Falls back to the phase itself when there's no explicit detail (e.g. the dispatcher's
+            // per-participant phases above), so the live line still shows what's currently running.
             string? detail = null;
             if (!string.IsNullOrWhiteSpace(diagnosticsEvent.Message))
             {
                 int sep = diagnosticsEvent.Message.IndexOf(" • ", StringComparison.Ordinal);
-                if (sep >= 0)
-                    detail = diagnosticsEvent.Message[(sep + 3)..];
+                detail = sep >= 0 ? diagnosticsEvent.Message[(sep + 3)..] : basePhase;
             }
+
+            // Rendering below is throttled for console-spam reasons — the bookkeeping above never
+            // is, so drained phase segments and scan-count deltas stay accurate even on ticks whose
+            // render gets skipped.
+            DateTime utcNow = DateTime.UtcNow;
+            if ((utcNow - _lastPhasePrintUtc).TotalMilliseconds >= 500)
+            {
+                ConsoleUx.PhaseBreakdown(_currentPhaseTimeline?.DrainCompletedSegments() ?? []);
+                _lastPhasePrintUtc = utcNow;
+            }
+
+            if ((utcNow - _lastScanRenderUtc).TotalMilliseconds < 125)
+                return;
+            _lastScanRenderUtc = utcNow;
 
             double displayRate = _currentAnalyzerLastNonZeroRate;
             if (displayRate <= 0 && elapsed.TotalSeconds > 0)
@@ -490,6 +513,24 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         _currentAnalyzerNoGrowthTicks = 0;
         _currentAnalyzerPhase = "scanning";
         _currentSubmodule = null;
+        _currentPhaseTimeline = new PhaseTimeline();
+        _currentPhaseTimeline.Record(_currentAnalyzerPhase, TimeSpan.FromMilliseconds(_currentAnalyzerLastElapsedMs));
+    }
+
+    /// <summary>
+    /// Prints the currently-open phase's final duration before its timeline is discarded by
+    /// <see cref="ResetAnalyzerTracking"/>. Guarded by name, matching the same staleness check
+    /// <see cref="PrintAnalyzerProgress"/> uses, since a completion event for one analyzer must
+    /// never flush another analyzer's still-in-progress timeline.
+    /// </summary>
+    private void FlushPhaseTimeline(string? analyzerName, TimeSpan elapsed)
+    {
+        if (_currentPhaseTimeline is null)
+            return;
+        if (!string.Equals(analyzerName, _currentAnalyzerName, StringComparison.Ordinal))
+            return;
+
+        ConsoleUx.PhaseBreakdown(_currentPhaseTimeline.GetRemainingSegments(elapsed));
     }
 
     private void ResetAnalyzerTracking()
@@ -504,9 +545,10 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
         _currentAnalyzerNoGrowthTicks = 0;
         _currentAnalyzerPhase = "scanning";
         _currentSubmodule = null;
+        _currentPhaseTimeline = null;
     }
 
-    
+
 
     private static long GetAnalyzerScanCount(string analyzerName, long reportedScanCount)
         => reportedScanCount;

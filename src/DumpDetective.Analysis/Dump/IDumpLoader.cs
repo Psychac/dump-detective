@@ -1,5 +1,7 @@
 using Microsoft.Diagnostics.Runtime;
 
+using DumpDetective.Core.Abstractions;
+
 namespace DumpDetective.Analysis.Dump;
 
 /// <summary>
@@ -13,5 +15,10 @@ internal interface IDumpLoader
     /// that grants access to the <see cref="ClrRuntime"/> and <see cref="ClrHeap"/>.
     /// The caller is responsible for disposing the returned context.
     /// </summary>
-    Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken);
+    /// <param name="progress">
+    /// Optional phase-label reports (e.g. "opening dump file", "loading CLR runtime (DAC)") — this
+    /// stage has no per-object count to drive a rate, so callers use it purely to know which of the
+    /// (usually single-digit-second, occasionally much slower) sub-steps is currently running.
+    /// </param>
+    Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken, IProgress<AnalyzerProgressReport>? progress = null);
 }

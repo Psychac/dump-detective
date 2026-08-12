@@ -112,6 +112,25 @@ internal static class ConsoleUx
     }
 
     /// <summary>
+    /// Persists a stage's phase-by-phase timing breakdown (see
+    /// <see cref="DumpDetective.Cli.Pipeline.PhaseTimeline"/>) as static lines instead of a live
+    /// status line, so it's still visible once the stage's completion summary has overwritten the
+    /// last progress report.
+    /// </summary>
+    public static void PhaseBreakdown(IReadOnlyList<(string Phase, TimeSpan Duration)> segments)
+    {
+        if (segments.Count == 0)
+            return;
+
+        lock (_consoleGate)
+        {
+            StopScanLiveIfActive();
+            foreach ((string phase, TimeSpan duration) in segments)
+                AnsiConsole.MarkupLine($"{IndentSub}[grey]↳  {Escape(phase)}  ·  {Escape(FormatElapsed(duration))}[/]");
+        }
+    }
+
+    /// <summary>
     /// Overwrites the current terminal line with a live scan progress indicator.
     /// <paramref name="operation"/> is used only in the completion summary; the rolling
     /// line intentionally omits it to reduce clutter (the analyzer name was just printed).

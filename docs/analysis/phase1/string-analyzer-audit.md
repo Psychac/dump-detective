@@ -312,6 +312,8 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P3-3** | Confidence band in `StringSectionBuilder` should be dynamic based on `SamplingCoverage` | Improvement | Medium | Low | High |
 | **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
 
+> **Reverse index available (2026-08-12):** `RootPathFinder` (P3-2) and the "reverse reference index"/"holder-type analysis" mentioned above (Area 4, Infrastructure Recommendations) are both implemented — `ReverseEdgeIndexReader.TryGetParents`, already consumed by CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
 ---
 
 ---

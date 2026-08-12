@@ -58,6 +58,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // ── Fast-path: skip full heap scan if cache.bin has a valid TypeAggregates section ──
         // TypeAggregates is written LAST, after all other sections, so its presence
         // guarantees the previous build completed successfully.
+        progress?.Report(new(0, "checking index cache", Detail: null, Elapsed: stopwatch.Elapsed));
         if (TryLoadFromCache(containerPath, dumpPath, out var cachedResult))
         {
             progress?.Report(new(cachedResult!.ObjectCount, "index cache hit",
@@ -66,6 +67,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             stopwatch.Stop();
             return cachedResult!;
         }
+
+        // Cache miss (or no cache) — everything from here through the first Parallel.For tick was
+        // previously unreported, showing as a silent gap that scales with dump size (observed ~2s
+        // on a 3.3GB dump, ~20s on 25GB) before any progress appeared on screen. The likely
+        // dominant cost is ClrHeap.Segments' first access below, which triggers ClrMD/DAC-side
+        // segment-list resolution — but this is reported either way so it's visible regardless of
+        // which sub-step actually turns out to be slow.
+        progress?.Report(new(0, "preparing heap scan", Detail: null, Elapsed: stopwatch.Elapsed));
 
         long objectCount = 0;
 
@@ -136,6 +145,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             ? null
             : new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
 
+        // heap.Segments is lazily resolved by ClrMD on first access — reported separately from
+        // "preparing heap scan" above so a profiling run can attribute time to this specific
+        // DAC-side segment-list resolution rather than lumping it in with the setup around it.
+        progress?.Report(new(0, "enumerating heap segments", Detail: null, Elapsed: stopwatch.Elapsed));
         ClrSegment[] segments = heap.Segments.ToArray();
         string[] segAddrScratchFiles = new string[segments.Length];
         string[] segMtScratchFiles = new string[segments.Length];
@@ -157,6 +170,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             CancellationToken = cancellationToken,
             MaxDegreeOfParallelism = maxSegmentParallelism
         };
+
+        progress?.Report(new(0, "indexing heap", Detail: $"{segments.Length} segments, DOP={maxSegmentParallelism}", Elapsed: stopwatch.Elapsed));
 
         try
         {
@@ -218,8 +233,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         {
                             flags = ComputeTypeFlags(obj.Type);
                             globalFlagsCache.TryAdd(mt, flags);
-                            shapeCache.TryAdd(mt, ComputeTypeShape(obj.Type));
-                            int[] stringFieldIndices = ComputeStringFieldIndices(obj.Type);
+                            (TypeShapeEntry shape, int[] stringFieldIndices) = ComputeTypeShapeAndStringFields(obj.Type);
+                            shapeCache.TryAdd(mt, shape);
                             if (stringFieldIndices.Length > 0)
                                 stringFieldIndexCache.TryAdd(mt, stringFieldIndices);
                         }
@@ -897,28 +912,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         return false;
     }
 
-    private static TypeShapeEntry ComputeTypeShape(ClrType type)
-    {
-        short refFields = 0;
-        short valFields = 0;
-
-        foreach (ClrInstanceField field in type.Fields)
-        {
-            if (field.IsObjectReference)
-                refFields++;
-            else
-                valFields++;
-        }
-
-        return new TypeShapeEntry(refFields, valFields);
-    }
-
     /// <summary>
-    /// Indices (into <c>type.Fields</c>, matching <see cref="StringAnalyzer"/>'s FieldLayoutCache
-    /// ordering) of instance fields whose type is <c>System.String</c>. Empty array (never null)
-    /// when the type has none, so the caller's <c>Length &gt; 0</c> check decides whether to add a
-    /// sparse-dictionary entry. Walks <c>type.Fields</c> itself rather than sharing
-    /// <see cref="ComputeTypeShape"/>'s loop — both run at most once per unique MethodTable.
+    /// Computes a type's <see cref="TypeShapeEntry"/> (ref/value field counts) and the indices
+    /// (into <c>type.Fields</c>, matching <see cref="StringAnalyzer"/>'s FieldLayoutCache ordering)
+    /// of its <c>System.String</c> instance fields in a single walk of <c>type.Fields</c> — these
+    /// were previously two separate loops over the same field list. Empty array (never null) when
+    /// the type has no string fields, so the caller's <c>Length &gt; 0</c> check decides whether to
+    /// add a sparse-dictionary entry. Both run at most once per unique MethodTable.
     /// </summary>
     /// <remarks>
     /// PERF: uses <see cref="ClrInstanceField.ElementType"/> — a tag read directly off the field's
@@ -928,24 +928,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     /// metadata-resolution locking badly enough to turn a ~20s scan into 5+ minutes (measured).
     /// Same pattern applied at every other per-field type check touched in this optimization pass:
     /// <see cref="StringAnalyzer"/>'s owner-type lazy fallback and
-    /// <c>ScanForStringOwnerTypesFallback</c>, and <c>CollectionAnalyzer.FindFirstArrayField</c> /
-    /// <c>CollectionAnalyzer.GetOrBuildFieldLayout</c>'s field-name fallback loop.
+    /// <c>ScanForStringOwnerTypesFallback</c>, and <c>CollectionAnalyzer.GetOrBuildFieldLayout</c>'s
+    /// field-name fallback loop.
     /// </remarks>
-    private static int[] ComputeStringFieldIndices(ClrType type)
+    private static (TypeShapeEntry Shape, int[] StringFieldIndices) ComputeTypeShapeAndStringFields(ClrType type)
     {
-        List<int>? indices = null;
+        short refFields = 0;
+        short valFields = 0;
+        List<int>? stringIndices = null;
+
         int i = 0;
         foreach (ClrInstanceField field in type.Fields)
         {
+            if (field.IsObjectReference)
+                refFields++;
+            else
+                valFields++;
+
             if (field.ElementType == ClrElementType.String)
             {
-                indices ??= new List<int>(capacity: 4);
-                indices.Add(i);
+                stringIndices ??= new List<int>(capacity: 4);
+                stringIndices.Add(i);
             }
             i++;
         }
 
-        return indices?.ToArray() ?? [];
+        return (new TypeShapeEntry(refFields, valFields), stringIndices?.ToArray() ?? []);
     }
 
     // ── Index cache fast-path ──────────────────────────────────────────────────

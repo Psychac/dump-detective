@@ -984,82 +984,6 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         /// <summary>
-        /// Fallback array-field lookup for when the cached <see cref="FieldLayout"/> has no known
-        /// array field. Called per-instance (not gated per-type like <see cref="GetOrBuildFieldLayout"/>),
-        /// so it's on the hot path for every affected queue/hashset instance under concurrent
-        /// <c>OnHeapEntry</c> callers.
-        /// </summary>
-        /// <remarks>
-        /// PERF: uses <see cref="ClrInstanceField.ElementType"/> — a signature tag, cheap — instead
-        /// of <c>field.Type?.IsArray</c>, which forces full <see cref="ClrType"/> resolution per
-        /// field and, called this frequently under concurrent workers, can serialize badly on
-        /// ClrMD's internal metadata-resolution locking (same class of regression measured in
-        /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c>: a ~20s scan turned into 5+
-        /// minutes).
-        /// </remarks>
-        private static ClrInstanceField? FindFirstArrayField(ClrType? type)
-        {
-            if (type == null)
-                return null;
-
-            foreach (ClrInstanceField field in type.Fields)
-            {
-                if (field.ElementType is ClrElementType.SZArray or ClrElementType.Array)
-                    return field;
-            }
-
-            return null;
-        }
-
-        private static ClrInstanceField? FindFirstInt32Field(ClrType? type)
-        {
-            if (type == null)
-                return null;
-
-            foreach (ClrInstanceField field in type.Fields)
-            {
-                if (field.ElementType == ClrElementType.Int32)
-                    return field;
-            }
-
-            return null;
-        }
-
-        private static ClrInstanceField? FindFieldByNameContains(ClrType? type, string token)
-        {
-            if (type == null)
-                return null;
-
-            foreach (ClrInstanceField field in type.Fields)
-            {
-                string? name = field.Name;
-                if (name != null && name.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
-                    return field;
-            }
-
-            return null;
-        }
-
-        private static ClrInstanceField? FindFieldByNameContainsAny(ClrType? type, string tokenA, string tokenB)
-        {
-            if (type == null)
-                return null;
-
-            foreach (ClrInstanceField field in type.Fields)
-            {
-                string? name = field.Name;
-                if (name == null)
-                    continue;
-
-                if (name.IndexOf(tokenA, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    name.IndexOf(tokenB, StringComparison.OrdinalIgnoreCase) >= 0)
-                    return field;
-            }
-
-            return null;
-        }
-
-        /// <summary>
         /// Resolves (and caches) the well-known collection-internal fields for <paramref name="type"/>.
         /// Gated once per unique MethodTable via <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd"/>
         /// — the factory may race and run more than once under concurrent <c>OnHeapEntry</c> callers,
@@ -1069,7 +993,7 @@ namespace DumpDetective.Analysis.Analyzers
         /// <remarks>
         /// PERF: the field-name fallback loop below uses <see cref="ClrInstanceField.ElementType"/>
         /// for the array/int32 checks, not <c>field.Type</c> — same rationale as
-        /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c> (full <see cref="ClrType"/>
+        /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c> (full <see cref="ClrType"/>
         /// resolution is expensive and serializes badly under concurrent callers).
         /// </remarks>
         private FieldLayout GetOrBuildFieldLayout(ClrType? type)
@@ -1472,10 +1396,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Common field names in BCL: _array, _head, _tail, _size (.NET Core/Framework varies)
                 var layout = GetOrBuildFieldLayout(queueObj.Type);
-                var arrayField = layout.ArrayField ?? layout.ItemsField ?? layout.EntriesField ?? FindFirstArrayField(queueObj.Type);
-                var headField = layout.HeadField ?? FindFieldByNameContains(queueObj.Type, "head");
-                var tailField = layout.TailField ?? FindFieldByNameContains(queueObj.Type, "tail");
-                var sizeField = layout.SizeField ?? layout.CountField ?? layout.AnyIntField ?? FindFieldByNameContainsAny(queueObj.Type, "size", "count");
+                var arrayField = layout.ArrayField ?? layout.ItemsField ?? layout.EntriesField;
+                var headField = layout.HeadField;
+                var tailField = layout.TailField;
+                var sizeField = layout.SizeField ?? layout.CountField ?? layout.AnyIntField;
 
                 // Only array + size are required to compute waste; head/tail are best-effort for diagnostics.
                 if (arrayField == null)
@@ -1662,7 +1586,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 var layout = GetOrBuildFieldLayout(hashSetObj.Type);
                 var countField = layout.CountField ?? layout.SizeField ?? layout.AnyIntField;
-                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField ?? FindFirstArrayField(hashSetObj.Type);
+                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField;
 
                 if (countField == null)
                 {

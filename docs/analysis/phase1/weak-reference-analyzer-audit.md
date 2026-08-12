@@ -354,6 +354,8 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 | P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
 | P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement | Pending |
 | P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution | Pending |
+
+> **Reverse index available (2026-08-12):** P3-2's `ReverseReferenceIndex` is implemented as `ReverseEdgeIndexReader.TryGetParents` — a per-`WeakTarget` existence check (parents empty/truncated-false ⇒ "held only via weak reference"), no traversal required. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 | P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement | Pending |
 | P3-4 | **Add `(estimated)` qualifier** to stale wrapper count in evidence text; document approximation method | Diagnostic | Low | Low | High | Improvement | Pending |
 

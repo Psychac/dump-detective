@@ -460,6 +460,8 @@ in DumpDetective's platform but is not wired into this analyzer.
 | ID | Recommendation | P | Impact | Difficulty | Confidence | Status |
 |---|---|---|---|---|---|---|
 | E-1 | Add exception retention paths for Gen2 objects via existing reverse-reference index | P2 | High | Medium | High | Pending |
+
+> **Reverse index available (2026-08-12):** E-1's "existing reverse-reference index" is `ReverseEdgeIndexReader`, queryable via `RootPathFinder`. No new infrastructure needed — same pattern already used by EventLeakAnalyzer/DominatorAnalyzer/TimerLeakAnalyzer. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 | E-2 | Wire `ModuleDomainResult` and `ThreadDomainResult` into section builder for cross-section correlation | P2 | Medium | Medium | High | Pending |
 | E-3 | Define a platform-level shared extraction-function pattern for `IHeapIndexScanParticipant` dual paths | P3 | Medium | High | Medium | Pending |
 

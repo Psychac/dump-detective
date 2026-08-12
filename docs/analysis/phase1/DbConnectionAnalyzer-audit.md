@@ -374,6 +374,8 @@ and produces actionable findings for the most common pool-exhaustion scenarios.
 | R11 | Read `SqlConnectionPool._objectList.Count` / `_maxPoolSize` for pool-utilisation ratio | Evolution | High — direct pool-exhaustion evidence | High | Medium | **P3** |
 | R12 | Add `!gcroot`-style retention path for top-N open connections via `RootPathFinder` | Evolution | High — matches SOS investigative workflow | High | Medium | **P3** |
 
+> **Reverse index available (2026-08-12):** `RootPathFinder` is now backed by `ReverseEdgeIndexReader.TryGetParents` — R12 is a direct drop-in, same pattern already used by EventLeakAnalyzer/TimerLeakAnalyzer/StaticRootLeakDetector. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
 ---
 
 ### Final Verdict

@@ -319,6 +319,8 @@ dotMemory shows the full retention path through handles to objects. DumpDetectiv
 | Per-kind pinned bytes | No | Partial | No (aggregate only) |
 | Source→target dependency pairs | No | No | Yes |
 | Multi-dump trend | No | No | Yes |
+
+> **Reverse index available (2026-08-12):** the "Retention path from handle" gap (line above) no longer requires new infrastructure — `ReverseEdgeIndexReader.TryGetParents` (via `RootPathFinder`) can walk from a handle's target object back to a GC root, the same pattern already used by EventLeakAnalyzer/DominatorAnalyzer/TimerLeakAnalyzer. Not yet an explicit roadmap item here; worth adding as a P2/P3 recommendation. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 | AsyncPinned vs Pinned split | Yes (kind column) | No | No |
 
 ---

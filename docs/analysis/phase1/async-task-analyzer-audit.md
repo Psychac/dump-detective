@@ -165,6 +165,8 @@ For the top-N orphaned tasks by size, call `RootPathFinder` to identify the GC r
 
 Impact: Medium. Difficulty: Medium. Confidence: High.
 
+> **Reverse index available (2026-08-12):** `RootPathFinder` is now backed by `ReverseEdgeIndexReader.TryGetParents` — this recommendation is a direct drop-in, same pattern already used by EventLeakAnalyzer/TimerLeakAnalyzer/StaticRootLeakDetector. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
 **7. Async deadlock heuristic**
 
 A task that is Pending and whose continuation chain leads back to itself (cycle in `m_continuationObject` graph) is a hard deadlock. The BFS already uses a `visited` `HashSet<ulong>` — a cycle detected during traversal should be flagged as `CycleDetected` and elevated as Critical in the finding generator.

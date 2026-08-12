@@ -37,6 +37,8 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         string lastPhase = "scanning heap";
         string? lastDetail = null;
         var progressLock = new object();
+        var timeline = new PhaseTimeline();
+        timeline.Record(lastPhase, wallClock.Elapsed);
 
         var progress = new Progress<AnalyzerProgressReport>(r =>
         {
@@ -50,6 +52,7 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
                 lastPhase = r.Phase;
                 lastDetail = string.IsNullOrWhiteSpace(r.Detail) ? r.Phase : r.Detail;
             }
+            timeline.Record(r.Phase, wallClock.Elapsed);
         });
 
         // Run the synchronous index build on a thread-pool thread so the heartbeat
@@ -68,6 +71,11 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
             if (done == buildTask)
                 break;
 
+            // Print any phase that finished since the last tick before rendering the live line for
+            // the current one — otherwise the breakdown only ever appears once, all at once, after
+            // the whole stage is done.
+            ConsoleUx.PhaseBreakdown(timeline.DrainCompletedSegments());
+
             // Heartbeat: re-render the spinner with the wall-clock elapsed so the
             // timer keeps ticking even when the writer hasn't fired a progress event.
             string details;
@@ -80,6 +88,7 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         wallClock.Stop();
 
         ConsoleUx.ObjectScanComplete(Name, heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
+        ConsoleUx.PhaseBreakdown(timeline.GetRemainingSegments(wallClock.Elapsed));
 
         if (heapIndex.SatelliteWarnings is { Count: > 0 } satelliteWarnings)
         {

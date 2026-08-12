@@ -266,6 +266,8 @@ dotMemory provides:
 | P3 | Reuse `HashSet<ulong>` + `Queue` across BFS calls via `ArrayPool` | Low (perf) | Medium | High | Improvement |
 | P3 | Add per-queue-entry generation field (`Gen0/1/2/LOH`) to `FinalizerQueueEntry` | Medium (diagnostic) | Easy | High | Improvement |
 | P3 | Expose root path cross-reference for top queue entries via `RootIndexReader` | High (diagnostic) | Hard | Medium | Evolution |
+
+> **Reverse index available (2026-08-12):** `RootIndexReader` alone only gives the root set, not a path to it. `RootPathFinder` now combines the root set with `ReverseEdgeIndexReader.TryGetParents` to walk backward from a target object to a GC root — this is the missing piece for a full path, not just "which roots exist." Same pattern already used by EventLeakAnalyzer/TimerLeakAnalyzer/StaticRootLeakDetector; downgrades this from "Hard" difficulty. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 | P3 | Add InsightEngine rule: queue count delta growing across trend series → dedicated finding | Medium (diagnostic) | Medium | Medium | Evolution |
 
 ---

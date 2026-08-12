@@ -222,13 +222,20 @@ first miss for that MethodTable. This means the closure is correct (type name is
 objects of the same MT), but the redundancy of calling `GetOrAdd` under a lock rather than
 double-checked with `TryGetValue` first is a minor inefficiency.
 
-### `FindFirstArrayField` / `FindFirstInt32Field` / `FindFieldByNameContains*` — redundant with `GetOrBuildFieldLayout`
+### `FindFirstArrayField` / `FindFirstInt32Field` / `FindFieldByNameContains*` — redundant with `GetOrBuildFieldLayout` — **FIXED**
 
 Four standalone static helper methods (`FindFirstArrayField`, `FindFirstInt32Field`,
-`FindFieldByNameContains`, `FindFieldByNameContainsAny`) are called from `AnalyzeQueue` despite
-`GetOrBuildFieldLayout` already performing equivalent field discovery and caching results. The
-queue path does a mix of `GetOrBuildFieldLayout` and uncached fallback calls, potentially
-re-enumerating `ClrType.Fields` multiple times per object type.
+`FindFieldByNameContains`, `FindFieldByNameContainsAny`) were called from `AnalyzeQueue` and
+`AnalyzeHashSet` despite `GetOrBuildFieldLayout` already performing equivalent field discovery
+and caching results. Since `GetOrBuildFieldLayout`'s single fallback walk uses the exact same
+match criteria, a `null` result from the cached layout guarantees these calls would also return
+`null` — they were provably dead code that still paid for a full `ClrType.Fields` re-enumeration
+per **instance** (not per type) whenever the cached layout was incomplete.
+
+Fixed: the four dead `?? FindXxx(...)` fallback calls were removed from `AnalyzeQueue` /
+`AnalyzeHashSet`, and the (now fully unused) helper methods were deleted. See
+[docs/cache/18-IndexBuildPerfOpportunities.md](../../cache/18-IndexBuildPerfOpportunities.md) for
+the related index-build-phase field-walk consolidation that prompted this fix.
 
 ### Missing `_freeCount` accounting in Dictionary
 
@@ -571,7 +578,7 @@ eliminates all multi-core benefit.
 | P2-2 | **Add `System.Collections.Immutable` namespace** to `BclCollectionNamespacePrefixes`; add dedicated `ImmutableArray<T>` probe (single `_array` field, count = `_array.Length`, waste = 0 unless builder-pattern detection). | New collection type coverage | Medium | Medium | Improvement |
 | P2-3 | **Per-collection resize recommendation** — add a `Recommendation` field to `WastefulCollectionSnapshot` (e.g., "Call TrimExcess()", "Construct with initial capacity X", "Unreachable — no fix needed"). Populate in the finding generator. | Actionability for engineers | Low | Medium | Improvement |
 | P2-4 | **Seal `CollectionAnalyzer`** and remove `public void Dispose() { }` override (redundant with default interface implementation). Override `Tags` = `["collections"]` and `Order` = `240`. | Code hygiene, prevents accidental subclass breaking `CreateWorkerInstance` | Low | High | Improvement |
-| P2-5 | **Consolidate `AnalyzeQueue` field discovery** — remove uncached `FindFirstArrayField` / `FindFieldByNameContains*` calls; route all field resolution through `GetOrBuildFieldLayout` to ensure queue field lookups are cached on first call. | Eliminates redundant `ClrType.Fields` enumeration per queue object | Low | High | Improvement |
+| P2-5 | **Consolidate `AnalyzeQueue`/`AnalyzeHashSet` field discovery** — remove uncached `FindFirstArrayField` / `FindFieldByNameContains*` calls; route all field resolution through `GetOrBuildFieldLayout` to ensure field lookups are cached on first call. | Eliminates redundant `ClrType.Fields` enumeration per object | Low | High | Improvement | ✅ DONE |
 
 #### P3 — Low
 

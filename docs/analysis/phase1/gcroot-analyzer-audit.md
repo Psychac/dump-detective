@@ -298,6 +298,8 @@ dotMemory provides:
 | **P3-2** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Very High | Medium | ⏳ Future | Evolution |
 | **P3-3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | ⏳ Future | Improvement |
 
+> **Reverse index available (2026-08-12):** the `ReverseReferenceIndex` P3-1 depends on is implemented — `ReverseEdgeIndexReader.TryGetParents`, consumed via `RootPathFinder`. P3-1 is no longer blocked on infrastructure; it can be re-scoped out of P3 since the query primitive already exists and is used by CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer today. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
 ---
 
 ## Design Decision: P0-2 Root Path Semantics

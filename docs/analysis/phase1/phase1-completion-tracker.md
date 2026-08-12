@@ -134,9 +134,32 @@ Different audits use different conventions for marking completion:
 
 | Item | Issue | Impact | Resolution | Workaround |
 |------|-------|--------|------------|-----------|
-| **ThreadAnalyzer P0-3** | `ClrThread.EnumerateBlockingObjects()` not exposed; only global `heap.EnumerateSyncBlocks()` available | Blocked threads show *what* they wait on but not *which thread holds it*; manual cross-reference with LockGraphAnalyzer required | Awaiting ClrMD 5.x API enhancement | ✅ **Reverse-index available** — iterate SyncBlocks globally, associate with blocked threads (4-5 hrs impl, <2% perf overhead) |
+| **ThreadAnalyzer P0-3** | `ClrThread.EnumerateBlockingObjects()` not exposed; only global `heap.EnumerateSyncBlocks()` available | Blocked threads show *what* they wait on but not *which thread holds it*; manual cross-reference with LockGraphAnalyzer required | Awaiting ClrMD 5.x API enhancement | ❌ **Not reverse-index** — the reverse edge index maps object→referrers (heap graph), not lock waiter→holder *thread* identity. The audit's final design (see `thread-analyzer-audit.md` "Why a reverse-index per-thread pairing is the wrong design") rejects a reverse-index-based pairing in favor of a global lock-contention table built directly from `heap.EnumerateSyncBlocks()` filtered to `WaitingThreadCount > 0`. |
 | **ThreadAnalyzer P1-1** | `ClrThreadPool` does not expose QueueLength, ActiveWorkerThreads, IdleWorkerThreads, MinWorkerThreads, MaxWorkerThreads | ThreadPool starvation detection unavailable; high-signal queue depth metric cannot be implemented | Awaiting Microsoft.Diagnostics.Runtime API enhancement | Requires direct runtime memory inspection (complex, risky) |
 | **ThreadAnalyzer P1-2** | `ClrThread.Name` property not available | Thread triage acceleration lost; critical context unavailable in hang reports | Awaiting Microsoft.Diagnostics.Runtime API enhancement | Requires managed thread enumeration + TLS parsing (architecture-specific) |
 
-**Status:** All three items marked as BLOCKED (⏳) indicating API limitations. P0-3 has an implementable workaround; P1-1 and P1-2 are true API gaps.
+**Status:** All three items marked as BLOCKED (⏳) indicating API limitations. P0-3's substitute is the global lock-contention table (not the reverse edge index — see note above); P1-1 and P1-2 are true API gaps.
+
+---
+
+## Reverse Edge Index — Consumer Opportunities
+
+A disk-backed reverse edge (parent-lookup) index now exists (`ReverseEdgeIndexReader.TryGetParents`), consumed today via `RootPathFinder`. It answers "who references this object" without a full in-memory reverse graph. Analyzers below already use it (directly or through `RootPathFinder`); the rest have **pending** audit recommendations that this index would unblock or simplify.
+
+**Already wired (via `RootPathFinder`):** CollectionAnalyzer, DominatorAnalyzer, EventLeakAnalyzer, ReferenceChainAnalyzer, StaticRootLeakDetector, TimerLeakAnalyzer.
+
+| # | Analyzer | Pending item | Audit priority | Reference |
+|---|----------|---------------|-----------------|-----------|
+| 1 | **GCRootAnalyzer** | P3-1: current BFS walks *forward* from the root (audit calls this structurally incorrect for "root path"); needs reverse BFS from target back to a GC root | P3 (flagged as highest-value single fix) | `gcroot-analyzer-audit.md` |
+| 2 | **LeakCandidateAnalyzer** | P1-3: surface first GC root hop (field + owner type) for top-3 suspects | P1, pending | `leak-candidate-analyzer-audit.md` |
+| 3 | **AsyncTaskAnalyzer** | Item 6: orphaned task GC root path sampling via `RootPathFinder` | P1/P2, pending | `async-task-analyzer-audit.md` |
+| 4 | **CrashAnalyzer** | E-1: exception retention paths for Gen2 exceptions via reverse-reference index | P2, pending | `crash-analyzer-audit.md` |
+| 5 | **WeakReferenceAnalyzer** | P3-2: "held only via weak reference" flag — join `WeakTarget` addresses against reverse index for strong-incoming-edge check | Pending | `weak-reference-analyzer-audit.md` |
+| 6 | **StringAnalyzer** | P3-2: retention-path sampling for top duplicate strings via `RootPathFinder`; holder-type histogram from reverse index | Pending | `string-analyzer-audit.md` |
+| 7 | **DbConnectionAnalyzer** | R12: `!gcroot`-style retention path for top-N open connections via `RootPathFinder` | P3, pending | `DbConnectionAnalyzer-audit.md` |
+| 8 | **GCHandleAnalyzer** | Retention path from handle to root — currently unsupported | P2 (0/10 done) | `gchandle-analyzer-audit.md` |
+| 9 | **FinalizableObjectAnalyzer** | No root-path attribution for finalizer-queue objects (`RootIndexReader` exists but unused) | P2 pending | `finalizable-object-analyzer-audit.md` |
+| 10 | **ObjectShapeAnalyzer** | Static-field GC-root weight ignored; no retention-path attribution | P1/P2 pending | `object-shape-analyzer-audit.md` |
+
+**Explicitly ruled out:** ThreadAnalyzer P0-3 and LockGraphAnalyzer's wait-for graph — these need lock waiter→holder *thread* identity, which the object-reference reverse index does not provide (see blocker table above).
 

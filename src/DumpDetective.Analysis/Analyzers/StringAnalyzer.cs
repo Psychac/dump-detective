@@ -236,7 +236,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// <remarks>
     /// Field-type checks below use <see cref="ClrInstanceField.ElementType"/>, never
     /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
-    /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c> for why (full <see cref="ClrType"/>
+    /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c> for why (full <see cref="ClrType"/>
     /// resolution under a concurrent/parallel caller turned a ~20s scan into 5+ minutes).
     /// <para>
     /// Sampling uses Algorithm-R reservoir sampling (bounded to
@@ -1486,7 +1486,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     /// <remarks>
     /// PERF: string-field detection uses <see cref="ClrInstanceField.ElementType"/>, not
     /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
-    /// <c>DiskBackedObjectIndexWriter.ComputeStringFieldIndices</c>.
+    /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c>.
     /// </remarks>
     private static void ScanForStringOwnerTypesFallback(
         ClrHeap heap,

@@ -40,7 +40,7 @@ public sealed class TrendOrchestrationServiceTests
 
     private sealed class ThrowingDumpLoader : IDumpLoader
     {
-        public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken)
+        public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken, IProgress<AnalyzerProgressReport>? progress = null)
             => throw new InvalidOperationException("dump load failed");
     }
 }

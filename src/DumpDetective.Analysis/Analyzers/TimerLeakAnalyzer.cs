@@ -24,57 +24,15 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     public int MaxStateSamplesPerType => 100;
     public int TopSampleCap => 20;
 
-    public bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
-
-    private enum TimerObjectCategory
-    {
-        None,
-        ThreadingTimer,
-        TimersTimer,
-        TimerQueueTimer,
-        TimerHolder,
-        PeriodicTimer,
-        OtherTimer
-    }
-
-    private static TimerObjectCategory ClassifyType(string typeName)
-    {
-        if (typeName.Equals("System.Threading.Timer", StringComparison.Ordinal))
-            return TimerObjectCategory.ThreadingTimer;
-        if (typeName.Equals("System.Timers.Timer", StringComparison.Ordinal))
-            return TimerObjectCategory.TimersTimer;
-        if (typeName.Equals("System.Threading.TimerQueueTimer", StringComparison.Ordinal))
-            return TimerObjectCategory.TimerQueueTimer;
-        if (typeName.Equals("System.Threading.TimerHolder", StringComparison.Ordinal))
-            return TimerObjectCategory.TimerHolder;
-        if (typeName.Equals("System.Threading.PeriodicTimer", StringComparison.Ordinal))
-            return TimerObjectCategory.PeriodicTimer;
-
-        if (IsKnownClrInternalTimerType(typeName))
-            return TimerObjectCategory.None;
-
-        if (TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, OtherTimerNamespacePrefixes, null, OtherTimerTokens))
-            return TimerObjectCategory.OtherTimer;
-
-        return TimerObjectCategory.None;
-    }
-
-    private static bool IsKnownClrInternalTimerType(string typeName)
-    {
-        for (int i = 0; i < ClrInternalTimerTypes.Length; i++)
-        {
-            if (typeName.Equals(ClrInternalTimerTypes[i], StringComparison.Ordinal))
-                return true;
-        }
-        return false;
-    }
-
     private static readonly string[] OtherTimerNamespacePrefixes = ["System.Threading.", "System.Timers."];
     private static readonly string[] OtherTimerTokens = ["Timer"];
     private static readonly string[] ClrInternalTimerTypes = [
         "System.Threading.TimerQueue",
         "System.Threading.TimerThread",
     ];
+
+
+    public bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
@@ -155,6 +113,9 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             ByType: byType);
     }
 
+    // For each timer type, samples a bounded set of instances and asks RootPathFinder for a
+    // GC root path to each — the resulting root kind/field feeds the leak narrative (finding
+    // text, evidence) attached to that type's summary.
     private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache? cache, List<TimerObjectTypeSummary> byType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -164,6 +125,10 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
 
         var provider = new ReferenceGraph(heap);
+
+        // Still needed with a reverse index provider: IndexBackedBidirectionalSearch bounds its
+        // own forward/backward expansion with these same limits (MaxCandidateNodes,
+        // MaxRootExpansionDepth, LargeFanoutThreshold) — they aren't a legacy-only fallback.
         var limits = new RootPathSearchLimits
         {
             MaxCandidateNodes = 5_000,
@@ -220,6 +185,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     {
         try
         {
+            // TODO: Can extract the field extraction logic in a helper.
             var obj = heap.GetObject(address);
             if (!obj.IsValid || obj.Type == null)
                 return -1;
@@ -284,6 +250,55 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         }
     }
 
+    #region Helpers
+
+    private static TimerObjectCategory ClassifyType(string typeName)
+    {
+        if (typeName.Equals("System.Threading.Timer", StringComparison.Ordinal))
+            return TimerObjectCategory.ThreadingTimer;
+        if (typeName.Equals("System.Timers.Timer", StringComparison.Ordinal))
+            return TimerObjectCategory.TimersTimer;
+        if (typeName.Equals("System.Threading.TimerQueueTimer", StringComparison.Ordinal))
+            return TimerObjectCategory.TimerQueueTimer;
+        if (typeName.Equals("System.Threading.TimerHolder", StringComparison.Ordinal))
+            return TimerObjectCategory.TimerHolder;
+        if (typeName.Equals("System.Threading.PeriodicTimer", StringComparison.Ordinal))
+            return TimerObjectCategory.PeriodicTimer;
+
+        if (IsKnownClrInternalTimerType(typeName))
+            return TimerObjectCategory.None;
+
+        if (TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, OtherTimerNamespacePrefixes, null, OtherTimerTokens))
+            return TimerObjectCategory.OtherTimer;
+
+        return TimerObjectCategory.None;
+    }
+
+    private static bool IsKnownClrInternalTimerType(string typeName)
+    {
+        for (int i = 0; i < ClrInternalTimerTypes.Length; i++)
+        {
+            if (typeName.Equals(ClrInternalTimerTypes[i], StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+
+    #endregion
+
     private static TimerLeakDomainResult Empty() =>
         new(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
 }
+
+internal enum TimerObjectCategory
+{
+    None,
+    ThreadingTimer,
+    TimersTimer,
+    TimerQueueTimer,
+    TimerHolder,
+    PeriodicTimer,
+    OtherTimer
+}
+

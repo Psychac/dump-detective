@@ -80,14 +80,14 @@
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Analyzers with P0+P1 100% complete | 18 | All P0+P1 recommendations implemented (includes TimerLeakAnalyzer, GCRootAnalyzer P1 100%, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer) |
-| Analyzers with partial P0+P1 completion | 12 | Some items done, some pending (includes AsyncTaskAnalyzer, LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
+| Analyzers with P0+P1 100% complete | 19 | All P0+P1 recommendations implemented (includes TimerLeakAnalyzer, GCRootAnalyzer P1 100%, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer, AsyncTaskAnalyzer) |
+| Analyzers with partial P0+P1 completion | 11 | Some items done, some pending (includes LeakCandidateAnalyzer, CrashAnalyzer, CollectionAnalyzer, StringAnalyzer, StaticRootLeakDetector, and others) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **69** | 88.5% |
+| **P0 items implemented** | **70** | 89.7% |
 | **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **121** | 77.6% |
-| **Combined P0+P1 rate** | **81.2%** | (190/234) |
+| **P1 items implemented** | **122** | 78.2% |
+| **Combined P0+P1 rate** | **82.1%** | (192/234) |
 
 ---
 

@@ -27,6 +27,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // Maps (MethodTable, fieldName) to ClrInstanceField? (null if field not found on that type)
     private Dictionary<(ulong MethodTable, string FieldName), ClrInstanceField?>? _fieldCacheByMt;
 
+    // Pool of reusable buffers for enumerating List<object> multi-continuation elements,
+    // indexed by recursion depth level. A single shared buffer isn't safe here because a
+    // nested List<object> (fan-out below fan-out) would recurse into TryReadListElements
+    // again and clear the buffer the outer frame is still iterating. Pool size is bounded
+    // by MaxContinuationDepth and reused across the whole task scan — no steady-state
+    // per-node allocation once warmed up.
+    private List<List<ClrObject>>? _continuationListBufferPool;
+
+    // Per-task record of which immediate child was chosen as the deepest branch at each
+    // visited node address — populated during ExploreContinuation, consumed once afterward
+    // to reconstruct the winning chain's type names for the top-5 deepest chains display.
+    // Cleared and reused per task.
+    private Dictionary<ulong, ClrObject>? _bestHopSelections;
+
 
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
@@ -36,6 +50,16 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
     // Sentinel continuation type — no-op callback; indicates orphan
     private const string NoOpContinuationType = "System.Threading.Tasks.Task+<>c";
+    // When >1 continuation is attached to a Task, the runtime replaces the scalar
+    // m_continuationObject with a List<object> holding all attached continuations.
+    private const string MultiContinuationListTypePrefix = "System.Collections.Generic.List<";
+    // Sanity cap on fan-out enumeration — protects against corrupted/adversarial size fields.
+    private const int MaxFanOutElementsToEnumerate = 10_000;
+    // Global per-task cap on total nodes visited during continuation-tree exploration.
+    // Bounds worst-case cost for pathological/adversarial fan-out trees (wide-and-deep
+    // multi-continuation graphs) independent of MaxContinuationDepth, which only bounds
+    // the depth of any single branch, not the total size of the reachable subgraph.
+    private const int MaxContinuationNodesToVisitPerTask = 2_000;
     private static readonly string[] TaskNamespacePrefixes = ["System.Threading.Tasks.Task"];
     private static readonly string[] ExceptionRelatedFields =
     [
@@ -144,7 +168,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 TopContinuationTypes: [],
                 TopOrphanedTasks: [],
                 TopDeepestChains: [],
-                FaultedTaskExceptionHistograms: []);
+                FaultedTaskExceptionHistograms: [],
+                MultiContinuationNodeCount: 0,
+                MaxContinuationFanOut: 0,
+                TopContinuationFanoutTypes: []);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -163,6 +190,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         var faultedTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var faultedTypeExceptions = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
         var continuationCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var fanoutTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var orphanedSnapshots = new List<OrphanedTaskSnapshot>(capacity: 32);
         var deepestChains = new List<ContinuationChainSnapshot>(capacity: 5);
 
@@ -170,6 +198,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int maxDepth = 0;
         int depthSampleCount = 0;
         int totalContinuations = 0;
+        int multiContinuationNodes = 0;
+        int maxFanOut = 0;
 
         // MT → type-name cache to avoid repeated ClrMD lookups
         var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
@@ -267,37 +297,38 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                         }
                     }
 
-                    // BFS chain depth
+                    // BFS chain depth — true branching traversal. When m_continuationObject
+                    // holds a List<object> (2+ continuations attached), every branch is
+                    // explored to find the true maximum depth and to fully capture fan-out
+                    // stats (not just the branch that happens to be walked first). See
+                    // ExploreContinuation for the node-budget and diamond-convergence caveats.
                     if (continuationObj.IsValid && continuationObj.Address != 0)
                     {
-                        int depth = 1;
-                        var visited = new HashSet<ulong>(capacity: 8) { address };
-                        ClrObject current = continuationObj;
-                            if (current.Type != null)
-                                chainTypes.Add(current.Type.Name ?? string.Empty);
+                        var visited = new HashSet<ulong>(capacity: 16) { address };
+                        _bestHopSelections ??= new Dictionary<ulong, ClrObject>(capacity: 32);
+                        _bestHopSelections.Clear();
+                        int nodeBudget = MaxContinuationNodesToVisitPerTask;
 
-                        while (depth < options.MaxContinuationDepth && current.IsValid && current.Address != 0
-                                 && visited.Add(current.Address))
+                        int depth = ExploreContinuation(
+                            continuationObj, visited, options.MaxContinuationDepth, ref nodeBudget, depthLevel: 0,
+                            continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
+                            _bestHopSelections);
+
+                        // Reconstruct the winning branch's type-name sequence for display by
+                        // replaying the per-node decisions recorded during exploration. Bounded
+                        // by the node-visit budget as a defensive guard — the recorded
+                        // selections form a DAG (visited-set enforced during construction) so
+                        // this terminates naturally once no further hop was recorded.
+                        ClrObject hop = continuationObj;
+                        int reconstructSteps = 0;
+                        while (hop.IsValid && hop.Address != 0 && reconstructSteps++ < MaxContinuationNodesToVisitPerTask)
                         {
-                            // Track continuation type for top-N
-                            if (current.Type != null)
-                            {
-                                totalContinuations++;
-                                IncrementCount(continuationCount, current.Type.Name ?? string.Empty);
-                            }
+                            if (!IsMultiContinuationList(hop.Type) && hop.Type != null)
+                                chainTypes.Add(hop.Type.Name ?? string.Empty);
 
-                            var nextField = current.Type != null
-                                ? TryGetCachedField(current.Type, current.Type.MethodTable, "m_continuationObject", "_continuationObject")
-                                : null;
-                            if (nextField == null) break;
-
-                            ClrObject next = nextField.ReadObject(current, interior: false);
-                            if (!next.IsValid || next.Address == 0) break;
-
-                            current = next;
-                            depth++;
-                                if (current.Type != null)
-                                    chainTypes.Add(current.Type.Name ?? string.Empty);
+                            if (!_bestHopSelections.TryGetValue(hop.Address, out ClrObject nextHop))
+                                break;
+                            hop = nextHop;
                         }
 
                         totalDepthSum += depth;
@@ -349,7 +380,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
             TopOrphanedTasks: orphanedSnapshots,
             TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToArray(),
-            FaultedTaskExceptionHistograms: faultedProfiles);
+            FaultedTaskExceptionHistograms: faultedProfiles,
+            MultiContinuationNodeCount: multiContinuationNodes,
+            MaxContinuationFanOut: maxFanOut,
+            TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow));
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -461,6 +495,165 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         }
 
         return null;
+    }
+
+    private static bool IsMultiContinuationList(ClrType? type)
+    {
+        string? name = type?.Name;
+        return name != null && name.StartsWith(MultiContinuationListTypePrefix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Reads the elements of a List&lt;object&gt; multi-continuation node into <paramref name="buffer"/>
+    /// via its backing <c>_items</c> array and <c>_size</c> fields. Returns false if the field
+    /// layout couldn't be resolved (e.g. unexpected list-like type).
+    /// </summary>
+    private bool TryReadListElements(ClrObject listObj, List<ClrObject> buffer, int maxElements)
+    {
+        buffer.Clear();
+
+        if (listObj.Type is null)
+            return false;
+
+        ulong mt = listObj.Type.MethodTable;
+        var itemsField = TryGetCachedField(listObj.Type, mt, "_items");
+        var sizeField = TryGetCachedField(listObj.Type, mt, "_size");
+        if (itemsField is null || sizeField is null)
+            return false;
+
+        ClrObject itemsObj = itemsField.ReadObject(listObj, interior: false);
+        if (!itemsObj.IsValid || !itemsObj.IsArray)
+            return false;
+
+        int size = sizeField.Read<int>(listObj, interior: false);
+        if (size <= 0)
+            return true;
+
+        ClrArray arr = itemsObj.AsArray();
+        int count = Math.Min(Math.Min(size, arr.Length), maxElements);
+
+        for (int i = 0; i < count; i++)
+        {
+            ClrObject elem = arr.GetObjectValue(i);
+            if (elem.IsValid && elem.Address != 0)
+                buffer.Add(elem);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the reusable element buffer for a given recursion depth level. A single shared
+    /// buffer isn't safe across recursive <see cref="ExploreContinuation"/> calls because a
+    /// nested List&lt;object&gt; would clear the buffer an outer frame is still iterating —
+    /// pooling by depth (bounded by MaxContinuationDepth) avoids that while staying
+    /// allocation-free after the pool warms up.
+    /// </summary>
+    private List<ClrObject> GetContinuationListBuffer(int depthLevel)
+    {
+        _continuationListBufferPool ??= new List<List<ClrObject>>(capacity: 16);
+        while (_continuationListBufferPool.Count <= depthLevel)
+            _continuationListBufferPool.Add(new List<ClrObject>(capacity: 32));
+        return _continuationListBufferPool[depthLevel];
+    }
+
+    /// <summary>
+    /// True branching exploration of a task's continuation graph. Returns the maximum depth
+    /// (in genuine continuation hops — List&lt;object&gt; wrapper nodes don't count) reachable
+    /// from <paramref name="node"/>. For every List&lt;object&gt; multi-continuation node
+    /// encountered anywhere in the reachable subgraph, all elements are enumerated for fan-out
+    /// stats and recursed into, so nested fan-out (a branch whose own continuation is itself
+    /// another List&lt;object&gt;) is fully discovered rather than only the first branch walked.
+    ///
+    /// Caveats:
+    /// - <paramref name="visited"/> is shared across the whole exploration to prevent
+    ///   re-expanding cycles; if two branches converge on the same downstream node (a
+    ///   "diamond"), whichever branch reaches it first claims it and the other branch is
+    ///   truncated there — an accepted approximation, not an exact max-depth guarantee.
+    /// - <paramref name="nodeBudget"/> bounds total nodes visited per task, independent of
+    ///   depth, to keep worst-case cost bounded for wide-and-deep fan-out trees.
+    /// - The winning branch at each node is recorded into <paramref name="bestHopSelections"/>
+    ///   (keyed by node address) so the caller can replay it afterward to build a display
+    ///   chain without allocating per-branch lists during exploration.
+    /// </summary>
+    private int ExploreContinuation(
+        ClrObject node,
+        HashSet<ulong> visited,
+        int remainingDepth,
+        ref int nodeBudget,
+        int depthLevel,
+        Dictionary<string, int> continuationCount,
+        Dictionary<string, int> fanoutTypeCount,
+        ref int totalContinuations,
+        ref int multiContinuationNodes,
+        ref int maxFanOut,
+        Dictionary<ulong, ClrObject> bestHopSelections)
+    {
+        if (remainingDepth <= 0 || !node.IsValid || node.Address == 0 || nodeBudget <= 0)
+            return 0;
+
+        if (!visited.Add(node.Address))
+            return 0;
+
+        nodeBudget--;
+
+        if (IsMultiContinuationList(node.Type))
+        {
+            List<ClrObject> buffer = GetContinuationListBuffer(depthLevel);
+            if (!TryReadListElements(node, buffer, MaxFanOutElementsToEnumerate))
+                return 0;
+
+            multiContinuationNodes++;
+            if (buffer.Count > maxFanOut)
+                maxFanOut = buffer.Count;
+
+            int bestDepth = 0;
+            ClrObject bestElem = default;
+            foreach (ClrObject elem in buffer)
+            {
+                if (elem.Type != null)
+                    IncrementCount(fanoutTypeCount, elem.Type.Name ?? string.Empty);
+
+                int elemDepth = ExploreContinuation(
+                    elem, visited, remainingDepth, ref nodeBudget, depthLevel + 1,
+                    continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
+                    bestHopSelections);
+
+                if (elemDepth > bestDepth)
+                {
+                    bestDepth = elemDepth;
+                    bestElem = elem;
+                }
+            }
+
+            if (bestElem.IsValid && bestElem.Address != 0)
+                bestHopSelections[node.Address] = bestElem;
+
+            return bestDepth;
+        }
+
+        totalContinuations++;
+        if (node.Type != null)
+            IncrementCount(continuationCount, node.Type.Name ?? string.Empty);
+
+        var nextField = node.Type != null
+            ? TryGetCachedField(node.Type, node.Type.MethodTable, "m_continuationObject", "_continuationObject")
+            : null;
+        if (nextField == null)
+            return 1;
+
+        ClrObject next = nextField.ReadObject(node, interior: false);
+        if (!next.IsValid || next.Address == 0)
+            return 1;
+
+        bestHopSelections[node.Address] = next;
+
+        int childDepth = ExploreContinuation(
+            next, visited, remainingDepth - 1, ref nodeBudget, depthLevel + 1,
+            continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
+            bestHopSelections);
+
+        return 1 + childDepth;
     }
 
     private static string ResolveTypeName(ClrHeap heap, ulong address, ulong mt,

@@ -40,4 +40,7 @@ internal sealed record AsyncTaskDomainResult(
     IReadOnlyList<NameCountEntry> TopContinuationTypes,
     IReadOnlyList<OrphanedTaskSnapshot> TopOrphanedTasks,
     IReadOnlyList<ContinuationChainSnapshot> TopDeepestChains,
-    IReadOnlyList<FaultedTaskTypeProfile> FaultedTaskExceptionHistograms = default!) : AnalyzerDomainResult;
+    IReadOnlyList<FaultedTaskTypeProfile> FaultedTaskExceptionHistograms = default!,
+    int MultiContinuationNodeCount = 0,
+    int MaxContinuationFanOut = 0,
+    IReadOnlyList<NameCountEntry>? TopContinuationFanoutTypes = default) : AnalyzerDomainResult;

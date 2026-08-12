@@ -57,7 +57,7 @@
 | 18 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 19 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
 | 20 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
-| 21 | **AsyncTaskAnalyzer** | 2/2 | 2/4 | 0/6 | 0/3 | ✅ P0 COMPLETE (P0-1,P0-2); P1-1,P1-3 done; P1-2,P1-4 pending |
+| 21 | **AsyncTaskAnalyzer** | 2/2 | 2/3 | 0/6 | 0/3 | ✅ P0 COMPLETE (P0-1,P0-2); P1-1,P1-3 done; P1-4 pending; P1-2 superseded by AsyncStateMachineAnalyzer P3-1 (not counted) |
 | 22 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
 **Subtotal: 21/27 P0 done, 21/32 P1 done, 20/50 P2 done** (in-progress pools)

@@ -314,7 +314,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P0-1 | Handle `m_stateFlags` / `_stateFlags` name fallback; cache field by `ClrType` | 3, 6 | Improvement | Critical | Low | High | ✅ DONE (b5c8107) |
 | P0-2 | Detect and traverse `List<object>` multi-continuation in BFS | 4, 6 | Improvement | High | Medium | High | ✅ DONE (8cf7849) |
 | P1-1 | Cache `ClrInstanceField` for `m_continuationObject` and `m_stateFlags` by `ClrType` | 5 | Improvement | High | Low | High | ✅ DONE (b5572e4) |
-| P1-2 | Add `IAsyncStateMachine` inventory (type name + count + controlling task linkage) | 4, 7 | Evolution | High | Medium | High |
+| P1-2 | Add `IAsyncStateMachine` inventory (type name + count + controlling task linkage) | 4, 7 | Evolution | High | Medium | High | ⤷ SUPERSEDED by [AsyncStateMachineAnalyzer P3-1](async-state-machine-analyzer-audit.md#priority-roadmap) — inventory already covered there; only the task-linkage half is a genuine gap, tracked on that side |
 | P1-3 | Add exception type histogram across all faulted tasks (not just orphaned snapshots) | 2, 4 | Improvement | High | Low | High | ✅ DONE (91babb4) |
 | P1-4 | Write `m_stateFlags` into the task index record during Phase 1 to eliminate Phase 2 re-reads | 5 | Evolution | Medium | Medium | High |
 | P2-1 | Fix `BuildTopN` threshold tracking bug (threshold stays 0 during fill) | 5 | Improvement | Low | Low | High |

@@ -61,6 +61,18 @@ namespace DumpDetective.Analysis.Analyzers
 
             List<RootFinding> findings = projection.FindingsBySeverityDescending;
             int topCount = Math.Min(findings.Count, options.TopSeverityLimit);
+
+            // Mechanism B (see docs/analysis/root-field-name-index-plan.md): owning-method
+            // attribution for Stack-kind roots, scoped to the severity-ranked top-N only — the
+            // per-thread frame walk this triggers on first use is too costly to run for every
+            // Stack root in the dump, and the report never shows more than TopSeverityLimit rows.
+            for (int i = 0; i < topCount; i++)
+            {
+                RootFinding f = findings[i];
+                if (f.RootKind == "Stack" && cache.TryResolveStackFrameOwner(heap, f.RootAddress, out string ownerType, out string methodName))
+                    findings[i] = f with { FieldDescription = $"in {ownerType}.{methodName}()" };
+            }
+
             IReadOnlyList<RootFinding> topFindings = findings.Count <= options.TopSeverityLimit
                 ? findings
                 : findings.GetRange(0, topCount);

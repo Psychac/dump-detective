@@ -285,7 +285,7 @@ dotMemory provides:
 |---|---|---|---|---|---|---|
 | **P0-1** | Replace average self-size estimate with `BoundedGraphWalk.ComputeExclusiveRetained` for top-N roots | Critical — severity ranking and insight findings are unreliable without this | Medium | High | ✅ DONE — see note below | Improvement |
 | **P0-2** | Relabel BFS walk output as "owned subgraph types" not "root path"; correct or suppress the misleading chain presentation | Critical — output is structurally incorrect for its stated purpose | Low | High | ✅ DONE (e4dd83e) | Improvement |
-| **P1-1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | ⏳ Pending | Improvement |
+| **P1-1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | ✅ DONE — see note below | Improvement |
 | **P1-2** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | ✅ DONE (8b6b6b8) | Improvement |
 | **P1-3** | Propagate `CancellationToken` through `ReadRootCandidates` call and into `BoundedGraphWalk` | Medium — correctness gap that matters at 25 GB+ scale | Low | High | ✅ DONE (d127297) | Improvement |
 | **P1-4** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | ✅ DONE (2ea3a98) | Improvement |
@@ -315,6 +315,35 @@ dotMemory provides:
 > shallow size in a prior commit but was not re-plumbed to the post-BFS true retained size
 > here. If exact retained size in the severity table itself is wanted, that's a follow-up
 > (re-sort `TopRootsBySeverity` by the Step 3 walked values for the roots that were walked).
+
+> **P1-1 resolution note:** shipped, but *not* as literally scoped — `ClrRoot.RootName`
+> doesn't exist in this project's actual ClrMD dependency (checked directly against
+> `microsoft.diagnostics.runtime 4.0.732401` on the `upgrade/clrmd-4` branch: `ClrRoot`
+> only exposes `Address`, `Object`, `RootKind`, `IsInterior`, `IsPinned`), so that specific
+> recommendation was dead on arrival. Replaced with two independent, kind-specific
+> mechanisms — see
+> [../root-field-name-index-plan.md](../root-field-name-index-plan.md) for the full design
+> and resolution notes:
+> - **Static/thread-static roots** (`StaticVar`/`ThreadStaticVar`): exact field identity via
+>   `ClrType.StaticFields`, keyed by `ClrStaticField.GetAddress(domain)` (the field's own
+>   storage address, matching `ClrRoot.Address`/`RootRecord.RootAddr` — not the ambiguous
+>   target-object-address keying the pre-existing `StaticRootLeakDetector` P1-1 mechanism
+>   used). Persisted to `RootIndex.bin` v2 as a variable-length trailer, computed once at
+>   Phase-1 build time; `RootSetCache.GetStaticFieldsByRootAddress` reads it disk-first with
+>   a live-scan fallback.
+> - **Stack roots**: not exact variable names (ClrMD has no PDB-based variable-slot mapping),
+>   but the owning method — correlating each stack root's slot address against per-thread
+>   frame `StackPointer` ranges (`RootSetCache.TryResolveStackFrameOwner`). Deliberately
+>   live/on-demand/top-N-only, not persisted, since it requires a per-thread walk
+>   (`EnumerateStackTrace`/`EnumerateStackRoots`) that isn't justified running unconditionally
+>   for every `Stack` root in the dump.
+>
+> `GCRootAnalysisProjection.Build` now populates `RootFinding.FieldDescription` for static
+> roots directly; `GCRootAnalyzer.Analyze` populates it for the top-`TopSeverityLimit`
+> `Stack`-kind findings after severity ranking. `StrongHandle`/`PinnedHandle`/
+> `RefCountedHandle`/`AsyncPinnedHandle`/`SizedRefHandle`/`FinalizerQueue` remain
+> permanently unattributed — these are anonymous GC handle-table slots or finalizer-queue
+> entries with no owner identity to recover from any tool, not a remaining gap in this work.
 
 ---
 

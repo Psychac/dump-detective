@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 
 using DumpDetective.Analysis.Indexing.Container;
 
@@ -8,7 +9,12 @@ internal static class RootIndexReader
 {
     private const int RootRecordSize = 20; // TargetAddr(8) | RootAddr(8) | Kind(1) | Pad(3)
     private const int RootHeaderMagic = 0x58495452; // "RTIX"
-    private const int RootHeaderVersion = 1;
+
+    // v2 appends a variable-length field-name trailer after the fixed root records; the trailer's
+    // record count is stashed in the shared IndexHeader's Reserved field (always 0 in v1). Bumping
+    // the version means a v1 cache.bin yields zero roots from disk (not just missing names) until
+    // the next full rebuild — accepted trade-off, see docs/analysis/root-field-name-index-plan.md.
+    private const int RootHeaderVersion = 2;
 
     public static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootCandidates(
         HeapIndexBuildResult index,
@@ -68,6 +74,71 @@ internal static class RootIndexReader
         }
 
         return roots;
+    }
+
+    /// <summary>
+    /// Reads the v2 field-name trailer written by <see cref="Satellite.RootIndexWriter"/>: a
+    /// <c>RootAddr → (OwnerType, FieldName, AppDomainId)</c> map for static/thread-static roots,
+    /// resolved once at Phase-1 build time. Returns an empty dictionary (not an error) when the
+    /// section is missing, the header is a pre-trailer version, or the file is otherwise
+    /// unreadable — callers fall back to a live scan in that case
+    /// (<see cref="Cache.RootSetCache.GetStaticFieldsByRootAddress"/>).
+    /// </summary>
+    public static Dictionary<ulong, (string OwnerType, string FieldName, int AppDomainId)> ReadRootFieldNames(
+        HeapIndexBuildResult index,
+        CancellationToken cancellationToken)
+    {
+        var names = new Dictionary<ulong, (string, string, int)>();
+
+        string containerPath = index.IndexPath;
+        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
+            return names;
+
+        if (!reader.TryOpenSection(CacheSectionId.Roots, out Stream? sectionStream) || sectionStream is null)
+            return names;
+
+        using Stream stream = sectionStream;
+
+        if (!IndexHeader.TryRead(stream, out IndexHeader header))
+            return names;
+
+        if (!header.IsValid(RootHeaderMagic, RootHeaderVersion))
+            return names;
+
+        long trailerCount = header.Reserved;
+        if (trailerCount <= 0)
+            return names;
+
+        // Skip past the fixed root records to reach the trailer.
+        stream.Position += header.RecordCount * RootRecordSize;
+
+        Span<byte> prefix = stackalloc byte[16]; // RootAddr(8) | OwnerTypeLen(2) | FieldNameLen(2) | AppDomainId(4)
+        byte[] textBuf = new byte[512];
+
+        for (long i = 0; i < trailerCount; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (stream.ReadAtLeast(prefix, prefix.Length, throwOnEndOfStream: false) < prefix.Length)
+                break;
+
+            ulong rootAddr = BinaryPrimitives.ReadUInt64LittleEndian(prefix);
+            int ownerTypeLen = BinaryPrimitives.ReadUInt16LittleEndian(prefix[8..]);
+            int fieldNameLen = BinaryPrimitives.ReadUInt16LittleEndian(prefix[10..]);
+            int appDomainId = BinaryPrimitives.ReadInt32LittleEndian(prefix[12..]);
+
+            int totalTextLen = ownerTypeLen + fieldNameLen;
+            if (totalTextLen > textBuf.Length)
+                textBuf = new byte[totalTextLen];
+
+            if (totalTextLen > 0 && stream.ReadAtLeast(textBuf.AsSpan(0, totalTextLen), totalTextLen, throwOnEndOfStream: false) < totalTextLen)
+                break;
+
+            string ownerType = Encoding.UTF8.GetString(textBuf, 0, ownerTypeLen);
+            string fieldName = Encoding.UTF8.GetString(textBuf, ownerTypeLen, fieldNameLen);
+            names[rootAddr] = (ownerType, fieldName, appDomainId);
+        }
+
+        return names;
     }
 
     // Byte values match Microsoft.Diagnostics.Runtime.ClrRootKind (ClrMD 4) exactly;

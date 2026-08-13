@@ -149,9 +149,14 @@ namespace DumpDetective.Analysis.Cache
             return _rootSetCache.GetStaticRootedAddresses(heap);
         }
 
-        public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByTargetAddress(ClrHeap heap)
+        public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(ClrHeap heap)
         {
-            return _rootSetCache.GetStaticFieldsByTargetAddress(heap);
+            return _rootSetCache.GetStaticFieldsByRootAddress(heap);
+        }
+
+        public bool TryResolveStackFrameOwner(ClrHeap heap, ulong rootAddr, out string ownerType, out string methodName)
+        {
+            return _rootSetCache.TryResolveStackFrameOwner(heap, rootAddr, out ownerType, out methodName);
         }
 
         public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
@@ -284,6 +289,11 @@ namespace DumpDetective.Analysis.Cache
         public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap)
         {
             return _rootSetCache.GetOrBuildValidRoots(heap);
+        }
+
+        public IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> GetOrBuildRootTriples(ClrHeap heap)
+        {
+            return _rootSetCache.GetOrBuildRootTriples(heap);
         }
 
         public IReadOnlyList<RootRecord> GetOrBuildRoots(ClrHeap heap, CancellationToken cancellationToken = default)

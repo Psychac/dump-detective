@@ -116,10 +116,12 @@ public class RunAnalyzersPipelineStageTests
         public long CacheMisses => 0;
         public DumpSizeTier SizeTier => DumpSizeTier.Small;
         public HashSet<ulong> GetStaticRootedAddresses(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
-        public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByTargetAddress(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
+        public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
+        public bool TryResolveStackFrameOwner(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong rootAddr, out string ownerType, out string methodName) { ownerType = ""; methodName = ""; return false; }
         public Dictionary<string, DumpDetective.Core.Models.CachedTypeStatistics> GetOrBuildTypeStatistics(Microsoft.Diagnostics.Runtime.ClrHeap heap) => new();
         public ulong? GetSampleInstanceAddress(string typeName) => null;
         public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(Microsoft.Diagnostics.Runtime.ClrHeap heap) => Array.Empty<(string, ulong)>();
+        public IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> GetOrBuildRootTriples(Microsoft.Diagnostics.Runtime.ClrHeap heap) => Array.Empty<(string, ulong, ulong)>();
         public int GetOrCountThreadStackRoots(Microsoft.Diagnostics.Runtime.ClrThread thread, int maxStackRootsToCount) => 0;
         public bool MethodTableHasOutgoingRefs(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong methodTable) => false;
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples() => Array.Empty<(ulong, ulong, ulong)>();

@@ -104,11 +104,11 @@ namespace DumpDetective.Analysis.Analyzers
             // which would be a third independent full-dump root walk (cache already performs two:
             // GetStaticRootedAddresses and GetOrBuildValidRoots). Filter to static roots inline.
             progress?.Report(new(0, "resolving static roots"));
-            IReadOnlyList<(string RootKind, ulong Address)> allRoots = cache.GetOrBuildValidRoots(heap);
+            IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> allRoots = cache.GetOrBuildRootTriples(heap);
             HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
-            var staticFieldsByAddress = cache.GetStaticFieldsByTargetAddress(heap);
+            var staticFieldsByRootAddress = cache.GetStaticFieldsByRootAddress(heap);
 
-            foreach ((string rootKind, ulong rootAddress) in allRoots)
+            foreach ((string rootKind, ulong rootAddress, ulong rootStorageAddress) in allRoots)
             {
                 if (!staticRootedAddresses.Contains(rootAddress))
                     continue;
@@ -212,7 +212,7 @@ namespace DumpDetective.Analysis.Analyzers
                 string? alcInfo = null;
                 string rootDescription;
 
-                if (staticFieldsByAddress.TryGetValue(rootAddress, out (string FieldOwnerType, string FieldName, int AppDomainId) fieldInfo))
+                if (staticFieldsByRootAddress.TryGetValue(rootStorageAddress, out (string FieldOwnerType, string FieldName, int AppDomainId) fieldInfo))
                 {
                     rootDescription = $"{fieldInfo.FieldOwnerType}.{fieldInfo.FieldName}";
                     if (fieldInfo.AppDomainId != 1)

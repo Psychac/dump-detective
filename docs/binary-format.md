@@ -58,7 +58,17 @@ Each section's payload is **exactly the bytes that would have been in the pre-mi
 
 - **ObjectAddresses / ObjectMethodTables / ObjectSizes / ObjectGenerations sections** (format version 2+ for the first three, 3+ for ObjectGenerations): four parallel columns — struct-of-arrays layout — one entry per heap object, aligned by index across all four columns. ObjectAddresses/ObjectMethodTables/ObjectSizes are `ulong[]` (8 bytes/object); ObjectGenerations is `sbyte[]` (1 byte/object) holding the object's GC generation (0/1/2, higher for LOH/POH/Frozen depending on ClrMD's reporting, or -1 if unresolved). Written by `DiskBackedObjectIndexWriter` as per-segment scratch-file columns, concatenated into the container; read back by `ObjectIndexReader`, which zips them into `HeapEntry` records via pooled buffers, batched by index size. The generation value is computed once per object during the single-pass heap scan (segment-kind lookup for non-ephemeral segments, `segment.GetGeneration(address)` for ephemeral ones — no extra ClrMD calls beyond what the scan already pays), so Phase 2 analyzers can read `entry.Generation` directly instead of re-resolving it via `SegmentKindMapper.ResolveGeneration(heap, address)`. Replaces the legacy interleaved `Objects` section (24-byte header + 24-byte `Address|MethodTable|Size` records); `RecordCount` in the TOC replaces the old per-section header.
 - **TypeAggregates section**: TypeAggregateIndex.bin format (extended header + type records)
-- **Roots section**: RootIndex.bin format (24-byte header + 20-byte root records)
+- **Roots section**: RootIndex.bin format (24-byte header + 20-byte root records), v2 (current):
+  after the fixed root records, a variable-length trailer — one record per
+  static/thread-static root that resolved to a declaring field — laid out as
+  `RootAddress(8) | OwnerTypeLen(2) | FieldNameLen(2) | AppDomainId(4) | OwnerType(N) |
+  FieldName(M)`. The trailer's record count is stashed in the shared 24-byte header's
+  `Reserved` field (bytes 16-23, always 0 in v1 and in every other satellite index that
+  doesn't use a trailer). Written by `RootIndexWriter.WriteFieldNameTrailer`, read by
+  `RootIndexReader.ReadRootFieldNames`. A v1 (pre-trailer) `RootIndex.bin` fails the reader's
+  header-version check entirely — not just missing field names, all root data — falling back
+  to a live heap walk once until the cache is rebuilt. See
+  [docs/analysis/root-field-name-index-plan.md](analysis/root-field-name-index-plan.md).
 - **Handles section**: HandleSnapshot.bin format (24-byte header + 20-byte handle records)
 - **Tasks section**: TaskIndex.bin format (24-byte header + task records)
 - **EventCandidates section**: EventCandidateIndex.bin format

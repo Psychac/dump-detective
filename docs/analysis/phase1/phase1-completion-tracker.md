@@ -12,10 +12,10 @@
 | **Total Analyzers Audited** | 35 |
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
-| **P0 Implemented** | 70 |
+| **P0 Implemented** | 71 |
 | **P1 Implemented** | 125 |
 | **P2 Implemented** | 23 |
-| **Overall P0+P1 Rate** | 83.3% (195/234) |
+| **Overall P0+P1 Rate** | 83.8% (196/234) |
 
 ---
 
@@ -48,9 +48,9 @@
 | 23 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
 | 24 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
 | 25 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 0/6 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
-| 26 | **GCRootAnalyzer** | 1/2 | 4/4 | 0/5 | 0/3 | ✅ P0-2 + All P1 complete (4/4); P0-1 pending |
+| 26 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
 
-**Subtotal: 52/53 P0 done, 100/100 P1 done**
+**Subtotal: 53/53 P0 done, 100/100 P1 done**
 
 ---
 
@@ -84,10 +84,10 @@
 | Analyzers with partial P0+P1 completion | 9 | Some items done, some pending (includes LeakCandidateAnalyzer, ReferenceChainAnalyzer, ThreadAnalyzer, LockGraphAnalyzer, ObjectShapeAnalyzer) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
 | **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **70** | 89.7% |
+| **P0 items implemented** | **71** | 91.0% |
 | **Total P1 recommendations** | **156** | — |
 | **P1 items implemented** | **125** | 80.1% |
-| **Combined P0+P1 rate** | **83.3%** | (195/234) |
+| **Combined P0+P1 rate** | **83.8%** | (196/234) |
 
 ---
 

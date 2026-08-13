@@ -14,10 +14,20 @@ public interface IHeapAnalysisCache
     DumpSizeTier SizeTier { get; }
 
     HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap);
-    Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByTargetAddress(ClrHeap heap);
+    Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(ClrHeap heap);
+
+    /// <summary>
+    /// Resolves a <c>Stack</c>-kind root's owning method (not an exact local-variable name — see
+    /// docs/analysis/root-field-name-index-plan.md Mechanism B) by correlating its stack-slot
+    /// address against the thread's frame ranges. Lazily builds and caches a per-thread map on
+    /// first call; intended for the small set of top-severity <c>Stack</c> findings a report
+    /// actually surfaces, not every stack root in the dump.
+    /// </summary>
+    bool TryResolveStackFrameOwner(ClrHeap heap, ulong rootAddr, out string ownerType, out string methodName);
     Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap);
     ulong? GetSampleInstanceAddress(string typeName);
     IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap);
+    IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> GetOrBuildRootTriples(ClrHeap heap);
     int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount);
     bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable);
     IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples();

@@ -25,6 +25,7 @@ internal static class GCRootAnalysisProjection
         var kindCounts = new Dictionary<string, int>(8);
         var kindBytes = new Dictionary<string, ulong>(8);
         var findings = new List<RootFinding>(roots.Count);
+        Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)>? staticFieldsByRootAddress = null;
 
         for (int i = 0; i < roots.Count; i++)
         {
@@ -40,10 +41,22 @@ internal static class GCRootAnalysisProjection
             string targetType = ResolveTypeName(heap, methodTable, targetAddr);
             int severity = ComputeSeverity(size, kind);
 
+            string? fieldDescription = null;
+            if (kind is "StaticVar" or "ThreadStaticVar")
+            {
+                staticFieldsByRootAddress ??= cache.GetStaticFieldsByRootAddress(heap);
+                if (staticFieldsByRootAddress.TryGetValue(rootAddr, out (string TypeName, string FieldName, int AppDomainId) fieldInfo))
+                {
+                    fieldDescription = fieldInfo.AppDomainId != 1
+                        ? $"{fieldInfo.TypeName}.{fieldInfo.FieldName} [AppDomain#{fieldInfo.AppDomainId}]"
+                        : $"{fieldInfo.TypeName}.{fieldInfo.FieldName}";
+                }
+            }
+
             findings.Add(new RootFinding(
                 RootKind: kind,
                 RootAddress: rootAddr,
-                FieldDescription: null,
+                FieldDescription: fieldDescription,
                 TargetTypeName: targetType,
                 TargetAddress: targetAddr,
                 EstimatedRetainedBytes: size,

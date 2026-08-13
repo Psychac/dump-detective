@@ -26,11 +26,16 @@ internal readonly struct IndexHeader
     public readonly long Reserved;
 
     public IndexHeader(int magic, int version, long recordCount)
+        : this(magic, version, recordCount, reserved: 0)
+    {
+    }
+
+    private IndexHeader(int magic, int version, long recordCount, long reserved)
     {
         Magic = magic;
         Version = version;
         RecordCount = recordCount;
-        Reserved = 0;
+        Reserved = reserved;
     }
 
     /// <summary>Writes this header into the first <see cref="Size"/> bytes of <paramref name="stream"/>.</summary>
@@ -61,7 +66,8 @@ internal readonly struct IndexHeader
         header = new IndexHeader(
             BinaryPrimitives.ReadInt32LittleEndian(buf),
             BinaryPrimitives.ReadInt32LittleEndian(buf[4..]),
-            BinaryPrimitives.ReadInt64LittleEndian(buf[8..]));
+            BinaryPrimitives.ReadInt64LittleEndian(buf[8..]),
+            BinaryPrimitives.ReadInt64LittleEndian(buf[16..]));
         return true;
     }
 
@@ -78,6 +84,23 @@ internal readonly struct IndexHeader
         stream.Position = baseOffset + 8;
         Span<byte> buf = stackalloc byte[8];
         BinaryPrimitives.WriteInt64LittleEndian(buf, recordCount);
+        stream.Write(buf);
+        stream.Position = saved;
+    }
+
+    /// <summary>
+    /// Seeks to <paramref name="baseOffset"/> + 16 and overwrites the <see cref="Reserved"/>
+    /// field. Repurposed by formats that append a variable-length trailer after their fixed
+    /// records (e.g. <c>RootIndex.bin</c> v2's per-root field-name trailer) to record the
+    /// trailer's own record count, so a reader knows how many trailer records follow without a
+    /// separate length-prefix scheme.
+    /// </summary>
+    public static void PatchReserved(Stream stream, long reserved, long baseOffset = 0)
+    {
+        long saved = stream.Position;
+        stream.Position = baseOffset + 16;
+        Span<byte> buf = stackalloc byte[8];
+        BinaryPrimitives.WriteInt64LittleEndian(buf, reserved);
         stream.Write(buf);
         stream.Position = saved;
     }

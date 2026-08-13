@@ -42,11 +42,10 @@ including every analyzer pass fanned out by `HeapIndexScanDispatcher`. And
 `new DiskBackedObjectIndexWriter()` regardless of the `_sizeTier` it computes —
 the tier is never actually used to pick a strategy.
 
-Notably, `HeapIndexBuildResult.InMemoryEntries`
-(`src/DumpDetective.Analysis/Indexing/HeapIndexBuildResult.cs:51`) and doc
-comments referencing it (e.g. `AsyncTaskAnalyzer.cs:373`) already assume an
-in-memory fast path exists — it doesn't; the field is always `null`. This
-looks like a partially-built feature.
+Update (re-checked against current source): `HeapIndexBuildResult.InMemoryEntries`
+no longer exists at all — the field was removed, not just left `null` — so
+there's no partially-built in-memory fast path to finish; wiring one up would
+be new work, not completing existing scaffolding.
 
 **Proposal:** wire up the in-memory path for Small/Medium tiers so both the
 build (#1) and every subsequent scan (Phase 2 shared analyzer pass, ad-hoc
@@ -85,20 +84,15 @@ array — real per-entry allocation overhead / GC pressure during a large scan.
 Candidate for a struct-of-arrays representation, but only worth chasing if
 profiling shows GC pressure from this specifically after #1/#2/#6 land.
 
-### 5. `maxSegmentParallelism` cap of 8 for Large tier
+### 5. `maxSegmentParallelism` cap of 8 for Large tier — Done
 
-Fixed regardless of actual core count or storage type
-(`DiskBackedObjectIndexWriter.cs:92-97`). Worth validating against a modern
-many-core + NVMe box — may be leaving throughput on the table — but this
-needs a benchmark, not a guess.
+Shipped: now `Math.Min(Environment.ProcessorCount, 8/4/2)` per size tier
+(`DiskBackedObjectIndexWriter.cs:100-105`) instead of a flat fixed cap.
 
-### 7. Redundant per-type field walks
+### 7. Redundant per-type field walks — Done
 
-`ComputeTypeShape` and `ComputeStringFieldIndices`
-(`DiskBackedObjectIndexWriter.cs:236-239`) each iterate `type.Fields`
-separately, back-to-back, for the same `ClrType`. Bounded by unique-type-count
-(cheap in aggregate), but on dumps with tens of thousands of types (plugin-
-heavy or generic-heavy apps) it's a free merge into a single loop.
+Shipped: `ComputeTypeShape` and `ComputeStringFieldIndices` were merged into
+one `ComputeTypeShapeAndStringFields`, a single walk over `type.Fields`.
 
 ### 8. Segment-level parallelism has a floor of "number of segments"
 
@@ -117,5 +111,5 @@ target dumps before investing here.
    disk for Small/Medium (bigger win, more surface area).
 3. **#2** — cap/stream `taskCandidates` / `lohFreeBlockCandidates` (addresses
    a real bounded-memory gap, independent of #1/#6).
-4. **#3, #4, #5, #7, #8** — lower priority; validate with profiling/benchmarks
-   before investing.
+4. **#3, #4, #8** — lower priority; validate with profiling/benchmarks
+   before investing. (#5, #7 done — see above.)

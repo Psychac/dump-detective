@@ -126,6 +126,13 @@ CLI, JSON, and structured reports. Summarize and rank findings; avoid raw dumps.
 ## Testing
 Support small and very large dumps. Include perf benchmarks and memory validation.
 
+**NEVER run `DD_RUN_DISCREPANCY_TESTS=1` (or any test that loads a real `.dmp` file) more than
+one at a time. NEVER run them via `run_in_background` or in parallel Bash calls.** These dumps are
+1GB-25GB+; each test process memory-maps/loads the full dump, and multiple concurrent runs have
+repeatedly OOM-crashed the development machine. Always run discrepancy/real-dump tests
+one-at-a-time, in the foreground, and wait for each to finish before starting the next — even if
+that means several sequential `dotnet test --filter` invocations instead of one combined run.
+
 ## Anti-patterns
 Don't load the entire heap; don't build full adjacency lists; avoid heavy reflection in hot paths.
 

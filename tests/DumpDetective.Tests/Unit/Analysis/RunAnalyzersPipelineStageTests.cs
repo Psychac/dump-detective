@@ -123,5 +123,11 @@ public class RunAnalyzersPipelineStageTests
         public bool MethodTableHasOutgoingRefs(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong methodTable) => false;
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples() => Array.Empty<(ulong, ulong, ulong)>();
         public DumpDetective.Core.Abstractions.IBackwardReferenceProvider? TryGetReverseIndexProvider() => null;
+        public bool TryGetObjectMetadata(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong address, out ulong methodTable, out ulong size)
+        {
+            methodTable = 0;
+            size = 0;
+            return false;
+        }
     }
 }

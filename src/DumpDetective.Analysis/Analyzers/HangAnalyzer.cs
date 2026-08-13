@@ -503,13 +503,16 @@ namespace DumpDetective.Analysis.Analyzers
                     return;
 
                 var entry = new HeapEntry(address, mt, 0);
-                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, static (_, state) =>
+                // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already the
+                // GetOrAdd key — resolve via the metadata cache instead of materializing a
+                // ClrObject just for the type name.
+                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, static (mt, heap) =>
                 {
-                    ClrObject o = state.heap.GetObject(state.address);
-                    return (!o.IsValid || o.Type == null)
+                    ClrType? type = heap.GetTypeByMethodTable(mt);
+                    return type is null
                         ? AsyncTypeProfile.None
-                        : AsyncTypeProfile.FromTypeName(o.Type.Name ?? string.Empty);
-                }, (heap, address));
+                        : AsyncTypeProfile.FromTypeName(type.Name ?? string.Empty);
+                }, heap);
 
                 if (!profile.IsPotentiallyRelevant)
                     return;
@@ -600,14 +603,16 @@ namespace DumpDetective.Analysis.Analyzers
             if (profileByMethodTable.TryGetValue(entry.MethodTable, out AsyncTypeProfile existing))
                 return existing;
 
-            ClrObject obj = heap.GetObject(entry.Address);
-            if (!obj.IsValid || obj.Type == null)
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): entry.MethodTable is
+            // already known — resolve via the metadata cache instead of materializing a ClrObject.
+            ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
+            if (type is null)
             {
                 profileByMethodTable[entry.MethodTable] = AsyncTypeProfile.None;
                 return AsyncTypeProfile.None;
             }
 
-            string typeName = obj.Type.Name ?? string.Empty;
+            string typeName = type.Name ?? string.Empty;
             AsyncTypeProfile profile = AsyncTypeProfile.FromTypeName(typeName);
             profileByMethodTable[entry.MethodTable] = profile;
             return profile;

@@ -108,6 +108,11 @@ namespace DumpDetective.Analysis.Cache
                 yield return t;
         }
 
+        public bool TryGetObjectMetadata(ClrHeap heap, ulong address, out ulong methodTable, out ulong size)
+        {
+            return _heapIndexCache.TryGetObjectMetadata(heap, address, out methodTable, out size);
+        }
+
         public void SetProgress(IProgress<AnalyzerProgressReport>? progress)
         {
             _progress = progress;
@@ -296,7 +301,11 @@ namespace DumpDetective.Analysis.Cache
             _progress.Report(new AnalyzerProgressReport(totalScans, phase));
         }
 
-        public void Dispose() => _reverseIndexCache.Dispose();
+        public void Dispose()
+        {
+            _reverseIndexCache.Dispose();
+            _heapIndexCache.Dispose();
+        }
     }
 
     internal class TaskStatistics

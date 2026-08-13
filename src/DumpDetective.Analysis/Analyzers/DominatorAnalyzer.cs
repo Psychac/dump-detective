@@ -121,7 +121,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         _progress?.Report(new(_scanCounter.Scanned, "building leak signals"));
 
         Dictionary<ulong, int> referenceCount = _referenceCount!;
-        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);
+        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, _cache, referenceCount, options);
         int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
 
         return new LeakSignals(
@@ -326,7 +326,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         scanCounter.Complete();
         progress?.Report(new(scanCounter.Scanned, "building leak signals"));
 
-        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, referenceCount, options);
+        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, cache, referenceCount, options);
         int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
 
         return new LeakSignals(
@@ -448,7 +448,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         }
     }
 
-    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, Dictionary<ulong, int> referenceCount, RetentionOptions options)
+    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, IHeapAnalysisCache? cache, Dictionary<ulong, int> referenceCount, RetentionOptions options)
     {
         int threshold = options.HighReferenceThreshold;
         // Heuristic: for small dictionaries the LINQ-based path is faster (no heap overhead).
@@ -467,7 +467,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Length);
             foreach (var top in topAddresses)
             {
-                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, top.Key, top.Value);
+                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, top.Key, top.Value);
                 if (snapshot is null)
                     continue;
 
@@ -503,7 +503,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         for (int i = buffer.Count - 1; i >= 0; i--)
         {
             var kvp = buffer[i];
-            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, kvp.Key, kvp.Value);
+            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, kvp.Key, kvp.Value);
             if (snapshot is null)
                 continue;
 
@@ -513,10 +513,24 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         return final;
     }
 
-    private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(ClrHeap heap, ulong objectAddress, int incomingReferences)
+    private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(ClrHeap heap, IHeapAnalysisCache? cache, ulong objectAddress, int incomingReferences)
     {
         if (objectAddress == 0)
             return null;
+
+        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): objectAddress comes from the
+        // reverse-index-driven incoming-reference count, not a live traversal — when a cache is
+        // available, delegate to it fully (it already handles disk-vs-in-memory internally per its
+        // own contract) rather than adding a second heap.GetObject fallback here, which would
+        // reintroduce the redundant-resolution pattern this index exists to remove.
+        if (cache is not null)
+        {
+            if (!cache.TryGetObjectMetadata(heap, objectAddress, out ulong methodTable, out ulong size))
+                return null;
+
+            string typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
+            return new HighlyReferencedObjectSnapshot(objectAddress, typeName, size, incomingReferences);
+        }
 
         ClrObject obj = heap.GetObject(objectAddress);
         if (!obj.IsValid)
@@ -562,13 +576,13 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
             LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
         };
-        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
 
         for (int i = 0; i < objects.Count; i++)
         {
             HighlyReferencedObjectSnapshot snapshot = objects[i];
             bool found = finder.TryFindAnyRootPath(snapshot.Address, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
-            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
 
             objects[i] = snapshot with
             {

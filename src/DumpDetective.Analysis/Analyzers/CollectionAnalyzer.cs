@@ -566,11 +566,11 @@ namespace DumpDetective.Analysis.Analyzers
                 if (heapLock != null)
                 {
                     lock (heapLock)
-                        kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
+                        kind = ResolveCollectionKindConcurrent(heap, mt, methodTableKinds);
                 }
                 else
                 {
-                    kind = ResolveCollectionKindConcurrent(heap, address, mt, methodTableKinds);
+                    kind = ResolveCollectionKindConcurrent(heap, mt, methodTableKinds);
                 }
                 if (kind == CollectionKind.None)
                     return;
@@ -898,12 +898,15 @@ namespace DumpDetective.Analysis.Analyzers
             if (methodTableKinds.TryGetValue(entry.MethodTable, out CollectionKind existing))
                 return existing;
 
-            ClrObject obj = heap.GetObject(entry.Address);
-            string typeName = obj.IsValid ? (obj.Type?.Name ?? string.Empty) : string.Empty;
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): the MethodTable is already
+            // known here, so resolve the ClrType directly via the metadata cache instead of
+            // materializing a ClrObject — same ClrType either way, no dump I/O.
+            ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
+            string typeName = type?.Name ?? string.Empty;
 
             // Skip array objects (e.g. Dictionary<...>[]). We only analyze instance objects that
             // represent collection types themselves (List<>, Dictionary<>, HashSet<>, Queue<>).
-            if (obj.IsValid && obj.Type?.IsArray == true)
+            if (type?.IsArray == true)
             {
                 methodTableKinds[entry.MethodTable] = CollectionKind.None;
                 return CollectionKind.None;
@@ -1091,16 +1094,18 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         private static CollectionKind ResolveCollectionKindConcurrent(
-            ClrHeap heap, ulong address, ulong methodTable,
+            ClrHeap heap, ulong methodTable,
             ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
         {
-            return methodTableKinds.GetOrAdd(methodTable, static (mt, state) =>
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): methodTable is already the
+            // GetOrAdd key — resolve via the metadata cache instead of materializing a ClrObject.
+            return methodTableKinds.GetOrAdd(methodTable, static (mt, heap) =>
             {
-                ClrObject obj = state.heap.GetObject(state.address);
-                string typeName = obj.IsValid ? (obj.Type?.Name ?? string.Empty) : string.Empty;
+                ClrType? type = heap.GetTypeByMethodTable(mt);
+                string typeName = type?.Name ?? string.Empty;
 
                 // Skip arrays (e.g. Dictionary<...>[]). Only classify actual collection instances.
-                if (obj.IsValid && obj.Type?.IsArray == true)
+                if (type?.IsArray == true)
                     return CollectionKind.None;
 
                 // Skip nested/inner types (e.g. ConcurrentDictionary+Node).
@@ -1136,7 +1141,7 @@ namespace DumpDetective.Analysis.Analyzers
                     return CollectionKind.SortedSet;
 
                 return CollectionKind.None;
-            }, (heap, address));
+            }, heap);
         }
 
 
@@ -1185,7 +1190,8 @@ namespace DumpDetective.Analysis.Analyzers
                         telemetry.AsProxy(),
                         type => ReferenceChainAnalyzer.IsNoisyType(type, refChainOptions.SkipArrays),
                         type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns),
-                        reverseIndexProvider);
+                        reverseIndexProvider,
+                        cache);
 
                     bool found = finder.TryFindAnyRootPath(
                         item.Address,

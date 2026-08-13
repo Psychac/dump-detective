@@ -29,6 +29,20 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         return ReadDiskEntriesRange(containerPath, startRecord, recordCount);
     }
 
+    public bool TryGetEntry(string containerPath, ulong address, out ulong methodTable, out ulong size)
+    {
+        methodTable = 0;
+        size = 0;
+
+        if (!ObjectAddressLookup.TryOpen(containerPath, out ObjectAddressLookup? lookup) || lookup is null)
+            return false;
+
+        using (lookup)
+        {
+            return lookup.TryGetEntry(address, out methodTable, out size);
+        }
+    }
+
     // Internal static helper kept for call sites that don't need DI.
     internal static IEnumerable<HeapEntry> ReadDiskEntries(string containerPath)
     {

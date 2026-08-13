@@ -444,7 +444,7 @@ namespace DumpDetective.Analysis.Analyzers
                 MaxRootExpansionDepth = 12,
                 LargeFanoutThreshold = 100,
             };
-            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
+            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
 
             var budgetSw = System.Diagnostics.Stopwatch.StartNew();
             long maxMs = Math.Max(0, options.MaxEvidenceEnrichmentMs);
@@ -493,7 +493,7 @@ namespace DumpDetective.Analysis.Analyzers
                     if (found) __foundCount++;
                     if (searchTruncated) __truncated++;
                     if (found)
-                        publisherRootPath = RootPathSearchSupport.FormatPath(heap, rootKind!, addresses);
+                        publisherRootPath = RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache);
                 }
 
                 topLeakInstances[i] = inst with

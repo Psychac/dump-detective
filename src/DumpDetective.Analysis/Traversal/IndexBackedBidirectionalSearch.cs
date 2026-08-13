@@ -4,6 +4,7 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Traversal;
 
+
 /// <summary>
 /// ClrMD-aware adapter around <see cref="BidirectionalGraphSearch"/>: supplies forward neighbors
 /// via <see cref="IReferenceProvider"/> (actual outgoing references) and backward neighbors via
@@ -26,6 +27,7 @@ internal sealed class IndexBackedBidirectionalSearch
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _isNoise;
     private readonly Func<ClrType?, bool> _forceExpand;
+    private readonly IHeapAnalysisCache? _cache;
 
     public IndexBackedBidirectionalSearch(
         ClrHeap heap,
@@ -34,7 +36,8 @@ internal sealed class IndexBackedBidirectionalSearch
         RootPathSearchLimits limits,
         IPathSearchTelemetry telemetry,
         Func<ClrType?, bool> isNoise,
-        Func<ClrType?, bool> forceExpand)
+        Func<ClrType?, bool> forceExpand,
+        IHeapAnalysisCache? cache = null)
     {
         _heap = heap;
         _forwardProvider = forwardProvider;
@@ -43,6 +46,7 @@ internal sealed class IndexBackedBidirectionalSearch
         _telemetry = telemetry;
         _isNoise = isNoise;
         _forceExpand = forceExpand;
+        _cache = cache;
     }
 
     public bool TryFindPath(
@@ -62,17 +66,20 @@ internal sealed class IndexBackedBidirectionalSearch
         // locals above via closure — iterator methods can't take ref/out parameters directly.
         IEnumerable<ulong> ForwardNeighbors(ulong node)
         {
-            ClrObject obj = _heap.GetObject(node);
-            if (!obj.IsValid)
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): this is a type-classification
+            // gate, not the traversal mechanism — actual neighbor expansion below goes through
+            // _forwardProvider, which is index-backed when a reverse index is in play.
+            ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
+            if (type is null)
                 yield break;
 
-            if (_isNoise(obj.Type))
+            if (_isNoise(type))
             {
                 _telemetry.IncrementPruned();
                 yield break;
             }
 
-            bool forceExpand = _forceExpand(obj.Type);
+            bool forceExpand = _forceExpand(type);
             int counted = 0;
 
             foreach (ulong childAddr in _forwardProvider.GetReferences(node))
@@ -91,11 +98,13 @@ internal sealed class IndexBackedBidirectionalSearch
 
         IEnumerable<ulong> BackwardNeighbors(ulong node)
         {
-            ClrObject obj = _heap.GetObject(node);
-            if (!obj.IsValid)
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): same type-classification gate
+            // as ForwardNeighbors above — actual reverse expansion goes through _backwardProvider.
+            ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
+            if (type is null)
                 yield break;
 
-            if (_isNoise(obj.Type))
+            if (_isNoise(type))
             {
                 _telemetry.IncrementPruned();
                 yield break;
@@ -111,7 +120,7 @@ internal sealed class IndexBackedBidirectionalSearch
                 truncatedByIndex = true;
             }
 
-            bool forceExpand = _forceExpand(obj.Type);
+            bool forceExpand = _forceExpand(type);
             int counted = 0;
 
             foreach (ulong parentAddr in parents)

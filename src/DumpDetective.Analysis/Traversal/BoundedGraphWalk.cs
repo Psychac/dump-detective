@@ -150,7 +150,23 @@ internal static class BoundedGraphWalk
     /// Sets <paramref name="wasCapped"/> to true if the scan hit <paramref name="maxObjects"/> limit.
     /// Checks cancellation token every 256 dequeues for responsiveness.
     /// </summary>
-    public static HashSet<ulong> CollectRetainedObjects(
+    /// <returns>
+    /// Every reachable address mapped to the <c>(MethodTable, Size)</c> this BFS's own
+    /// <c>heap.GetObject</c> call already resolved when the address was dequeued — captured for
+    /// free, so callers doing per-object aggregation over the result (e.g.
+    /// <c>StaticRootLeakDetector</c>'s type-stat rollup) don't need a second
+    /// <c>heap.GetObject</c> pass over the same addresses (see
+    /// docs/cache/19-ObjectAddressLookupIndex.md Appendix B). An entry left at the default
+    /// <c>(0, 0)</c> was <em>discovered</em> (added to prevent re-enqueueing a node reachable via
+    /// multiple paths) but never actually <em>dequeued and resolved</em> — either because
+    /// <c>heap.GetObject</c> found it invalid, or because the scan hit <paramref name="maxObjects"/>
+    /// before reaching it (only possible when <paramref name="wasCapped"/> is <c>true</c>, and
+    /// bounded by the fan-out of the last node processed before the cap). Callers should treat
+    /// <c>MethodTable == 0</c> as "no metadata available", the same convention a zero method table
+    /// already carries elsewhere in this codebase (e.g. <c>HeapStreamer</c> skips such objects
+    /// entirely when building the disk index).
+    /// </returns>
+    public static Dictionary<ulong, (ulong MethodTable, ulong Size)> CollectRetainedObjects(
         ClrHeap heap,
         ulong rootAddress,
         out bool wasCapped,
@@ -161,11 +177,11 @@ internal static class BoundedGraphWalk
         wasCapped = false;
         maxDepth = Math.Min(maxDepth, AbsoluteMaxDepth);
 
-        var retained = new HashSet<ulong>(capacity: Math.Min(1000, maxObjects));
+        var retained = new Dictionary<ulong, (ulong MethodTable, ulong Size)>(capacity: Math.Min(1000, maxObjects));
         var queue = new Queue<(ulong Address, int Depth)>(capacity: 256);
 
         queue.Enqueue((rootAddress, 0));
-        retained.Add(rootAddress);
+        retained.TryAdd(rootAddress, default);
 
         int dequeueCount = 0;
         const int CancellationCheckInterval = 256;
@@ -181,12 +197,14 @@ internal static class BoundedGraphWalk
             if (!obj.IsValid)
                 continue;
 
+            retained[current] = (obj.Type?.MethodTable ?? 0, obj.Size);
+
             if (depth >= maxDepth)
                 continue;
 
             foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
             {
-                if (reference.IsValid && retained.Add(reference.Address))
+                if (reference.IsValid && retained.TryAdd(reference.Address, default))
                 {
                     if (retained.Count >= maxObjects)
                     {

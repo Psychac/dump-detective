@@ -28,17 +28,17 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 | Section | Size | Description |
 |---------|------|-------------|
 | FileHeader | 64 bytes | Magic, version, TOC offset, section count |
-| TOC (Table of Contents) | ~416 bytes | 13 entries × 32 bytes each (ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
-| Section Data | Variable | Concatenated payload sections (ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta) |
+| TOC (Table of Contents) | up to ~544 bytes | up to 17 entries × 32 bytes each (ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations, TypeAggregates, Roots, Handles, Tasks, EventCandidates, LargeObjects, LohFreeBlocks, StringDedup, StringDedupMeta, ReverseEdgeBuckets, ReverseEdgeDirectories, ReverseEdgeMetadata, SegmentIndex) — the last four are optional satellite sections (reverse-reference index and the address-lookup segment table respectively) and may be absent from an individual `cache.bin` if the corresponding build step was skipped or failed non-fatally |
+| Section Data | Variable | Concatenated payload sections, same list as the TOC row above |
 
 ## FileHeader (64 bytes)
 
 | Field | Size | Type | Value |
 |-------|------|------|-------|
 | Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
-| FormatVersion | 4 bytes | int | 3 (bumped from 2 when the ObjectGenerations column was added; previously bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt) |
+| FormatVersion | 4 bytes | int | 4 (bumped from 3 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata sections were added; previously bumped from 2 when the ObjectGenerations column was added; previously bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt). `SegmentIndex` (added after v4) did **not** trigger a further bump — it's a purely additive, always-optional section; see [docs/cache/19-ObjectAddressLookupIndex.md](cache/19-ObjectAddressLookupIndex.md) for why. |
 | DumpContentHash | 32 bytes | bytes | Content-addressed cache key: dump file length (8 bytes) + XxHash64 over sampled start/middle/end 1MB windows (8 bytes), remaining 16 bytes reserved/zero. Zero-filled if unknown (predates this field, or hashing failed at build time); an all-zero stored hash is treated as "unknown" and accepted rather than a mismatch. See `DumpContentHasher`. |
-| SectionCount | 4 bytes | int | Number of sections in TOC (typically 13) |
+| SectionCount | 4 bytes | int | Number of sections in TOC (up to 17; fewer if optional satellite sections were skipped or failed non-fatally) |
 | TocOffset | 8 bytes | long | Offset to TOC = 64 |
 | Reserved | 8 bytes | bytes | Zero-filled |
 
@@ -46,7 +46,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 
 | Field | Size | Type | Description |
 |-------|------|------|-------------|
-| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects [unused since v2], 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta, 10=ObjectAddresses, 11=ObjectMethodTables, 12=ObjectSizes, 13=ObjectGenerations) |
+| SectionId | 4 bytes | int | Section identifier (`CacheSectionId` enum: 0=Objects [unused since v2], 1=TypeAggregates, 2=Roots, 3=Handles, 4=Tasks, 5=EventCandidates, 6=LargeObjects, 7=LohFreeBlocks, 8=StringDedup, 9=StringDedupMeta, 10=ObjectAddresses, 11=ObjectMethodTables, 12=ObjectSizes, 13=ObjectGenerations, 14=ReverseEdgeBuckets, 15=ReverseEdgeDirectories, 16=ReverseEdgeMetadata, 17=SegmentIndex) |
 | Offset | 8 bytes | long | Absolute byte offset of section payload in `cache.bin` |
 | Length | 8 bytes | long | Byte length of section payload |
 | RecordCount | 8 bytes | long | Number of records in section |
@@ -66,6 +66,32 @@ Each section's payload is **exactly the bytes that would have been in the pre-mi
 - **LohFreeBlocks section**: LohFreeBlockIndex.bin format
 - **StringDedup section**: StringDedupIndex.bin format (12-byte header + dedup records)
 - **StringDedupMeta section**: UTF-8 encoded JSON (distribution summary)
+- **ReverseEdgeBuckets / ReverseEdgeDirectories / ReverseEdgeMetadata sections**: the disk-backed
+  reverse-reference (parent-lookup) index — hash-partitioned, sorted-per-bucket edge data plus a JSON
+  metadata section describing bucket layout. Optional (skippable via `DD_SKIP_REVERSE_INDEX_BUILD=1`);
+  see `docs/analysis/phase1-redesigns/full-reverse-index-plan.md` for the full format, not duplicated
+  here.
+- **SegmentIndex section** (added after FormatVersion 4, no version bump — see the FileHeader row
+  above): a small per-GC-segment table enabling `ObjectAddressLookup`'s binary-search
+  `address → (MethodTable, Size)` point lookup (backing `IHeapAnalysisCache.TryGetObjectMetadata`), as
+  opposed to the sequential-only `ObjectAddresses`/etc. columns above. Segment-count-sized, not
+  object-count-sized — always fully loaded into memory by the reader rather than mmap'd. Optional
+  (skippable via `DD_SKIP_SEGMENT_INDEX_BUILD=1`; a missing section just means the point lookup falls
+  back to a live `heap.GetObject` resolution). Written/read by
+  `Indexing/Satellite/SegmentIndexWriter.cs`. Record layout (28 bytes, little-endian), header-plus-records
+  in the shared 24-byte `IndexHeader` style (magic `"SEGX"`, version 1) used by other satellite indexes:
+
+  | Field | Size | Type | Description |
+  |-------|------|------|-------------|
+  | Start | 8 bytes | ulong | Segment's starting address (`ClrSegment.Start`) |
+  | End | 8 bytes | ulong | Segment's ending address (`ClrSegment.End`) |
+  | FirstRecordIndex | 8 bytes | long | This segment's first record index into the concatenated `ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes` columns |
+  | RecordCount | 4 bytes | int | Number of objects in this segment (fits in `int` — no single GC segment holds anywhere near 2^31 objects) |
+
+  Segments with zero objects are omitted entirely (a lookup can never land in one). See
+  [docs/cache/19-ObjectAddressLookupIndex.md](cache/19-ObjectAddressLookupIndex.md) for the full design,
+  including why a two-level (segment table, then in-segment) binary search is needed instead of a
+  single flat one.
 
 ## Atomic Write
 

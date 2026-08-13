@@ -209,7 +209,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return;
 
             ulong mt = entry.MethodTable;
-            var (isException, typeName) = ResolveExceptionType(_heap!, exceptionAddress, mt, _exceptionMethodTables!, _methodTableNameCache!, null);
+            var (isException, typeName) = ResolveExceptionType(_heap!, mt, _exceptionMethodTables!, _methodTableNameCache!);
             if (!isException)
                 return;
 
@@ -559,21 +559,25 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         // Resolve whether a method-table corresponds to an exception type and return its resolved name.
+        //
+        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): mt is already a parameter here,
+        // so both IsException and Name resolve directly via heap.GetTypeByMethodTable(mt) — no
+        // heap.GetObject/exceptionAddress re-read needed at all. This also removes the old
+        // sample-address fallback path, which required a HeapIndexBuildResult that both call sites
+        // below always pass as null (dead code), and the redundant re-resolution of exceptionAddress
+        // the audit flagged (previously re-read up to 3x per exception across the two branches).
         private static (bool IsException, string? TypeName) ResolveExceptionType(
             ClrHeap heap,
-            ulong exceptionAddress,
             ulong mt,
             IDictionary<ulong, bool> exceptionMethodTables,
-            IDictionary<ulong, string> methodTableNameCache,
-            HeapIndexBuildResult? heapIdx)
+            IDictionary<ulong, string> methodTableNameCache)
         {
             if (mt == 0)
                 return (false, null);
 
             if (!exceptionMethodTables.TryGetValue(mt, out bool isException))
             {
-                ClrObject o = heap.GetObject(exceptionAddress);
-                isException = o.IsValid && o.Type?.IsException == true;
+                isException = heap.GetTypeByMethodTable(mt)?.IsException == true;
                 exceptionMethodTables[mt] = isException;
             }
 
@@ -582,18 +586,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (!methodTableNameCache.TryGetValue(mt, out string? typeName))
             {
-                string resolved;
-                if (heapIdx?.TypeAggregates.TryGetValue(mt, out var agg) == true && agg.SampleAddress != 0)
-                {
-                    ClrObject sample = heap.GetObject(agg.SampleAddress);
-                    resolved = (sample.IsValid && sample.Type != null)
-                        ? sample.Type.Name ?? string.Empty
-                        : heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
-                }
-                else
-                {
-                    resolved = heap.GetObject(exceptionAddress).Type?.Name ?? string.Empty;
-                }
+                string resolved = heap.GetTypeByMethodTable(mt)?.Name ?? string.Empty;
                 methodTableNameCache[mt] = resolved;
                 typeName = resolved;
             }
@@ -694,7 +687,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (exceptionAddress == 0)
                     return;
-                var (isException, typeName) = ResolveExceptionType(heap, exceptionAddress, mt, exceptionMethodTables, methodTableNameCache, null);
+                var (isException, typeName) = ResolveExceptionType(heap, mt, exceptionMethodTables, methodTableNameCache);
                 if (!isException)
                     return;
 
@@ -860,8 +853,9 @@ namespace DumpDetective.Analysis.Analyzers
             if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
                 return isException;
 
-            ClrObject obj = heap.GetObject(entry.Address);
-            isException = obj.IsValid && obj.Type?.IsException == true;
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): entry.MethodTable is already
+            // known — resolve via the metadata cache instead of materializing a ClrObject.
+            isException = heap.GetTypeByMethodTable(entry.MethodTable)?.IsException == true;
             exceptionMethodTables[entry.MethodTable] = isException;
             return isException;
         }

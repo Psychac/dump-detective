@@ -41,6 +41,16 @@ internal enum CacheSectionId
     ReverseEdgeDirectories = 15,
     /// <summary>JSON <see cref="Indexing.ReverseIndex.ReverseIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above, plus extraction stats.</summary>
     ReverseEdgeMetadata = 16,
+    /// <summary>
+    /// Small per-segment table of (Start, End, FirstRecordIndex, RecordCount) — see
+    /// <see cref="Indexing.Satellite.SegmentIndexWriter"/> and
+    /// docs/cache/19-ObjectAddressLookupIndex.md. Enables <c>ObjectAddressLookup</c>'s
+    /// binary-search point lookup (address → MethodTable/Size) without a container FormatVersion
+    /// bump: a missing section here just means the disk-backed point lookup is unavailable and
+    /// callers fall back to <c>heap.GetObject</c>, the same "absent section" contract every other
+    /// optional satellite section already has.
+    /// </summary>
+    SegmentIndex = 17,
 }
 
 /// <summary>

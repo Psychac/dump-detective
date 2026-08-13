@@ -26,5 +26,11 @@
     <None Include="Golden\Baselines\**\*.golden">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Disables xunit's default test-collection parallelism. Real-dump tests
+         (DiscrepancyFact) each load a full 1GB-25GB+ dump; running test classes
+         concurrently has repeatedly OOM-crashed the dev machine. See CLAUDE.md Testing. -->
+    <None Include="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

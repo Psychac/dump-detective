@@ -25,7 +25,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             LockGraphAnalysisOptions options = context.AnalysisOptions.LockGraphAnalysis;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Progress, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, context.Progress, options).Stamp(this));
         }
 
         public int GetRequiredFrameCount(AnalysisContext context) => 1;
@@ -51,12 +51,12 @@ namespace DumpDetective.Analysis.Analyzers
 
         public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
         {
-            return Analyze(runtime, heap, progress: null, new LockGraphAnalysisOptions());
+            return Analyze(runtime, heap, cache: null, progress: null, new LockGraphAnalysisOptions());
         }
 
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, LockGraphAnalysisOptions options)
+        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, LockGraphAnalysisOptions options)
         {
-            var graph = BuildLockGraph(runtime, heap, progress);
+            var graph = BuildLockGraph(runtime, heap, cache, progress);
 
             var topContestedTypes = new List<NameCountEntry>(options.MaxContestedLocksToShow);
             var typeWaiters = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -118,7 +118,7 @@ namespace DumpDetective.Analysis.Analyzers
                     contestedLockDetails);
         }
 
-        private LockGraphAnalysis BuildLockGraph(ClrRuntime runtime, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
+        private LockGraphAnalysis BuildLockGraph(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress)
         {
             var result = new LockGraphAnalysis();
 
@@ -140,7 +140,7 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!sb.IsMonitorHeld || sb.Object == 0)
                     continue;
 
-                string typeName = ResolveTypeNameByAddress(heap, sb.Object);
+                string typeName = ResolveTypeNameByAddress(heap, cache, sb.Object);
 
                 if (sb.HoldingThreadAddress != 0)
                     result.LocksWithOwnerAddress++;
@@ -230,10 +230,19 @@ namespace DumpDetective.Analysis.Analyzers
             return result;
         }
 
-        private static string ResolveTypeNameByAddress(ClrHeap heap, ulong objectAddress)
+        private static string ResolveTypeNameByAddress(ClrHeap heap, IHeapAnalysisCache? cache, ulong objectAddress)
         {
             if (objectAddress == 0)
                 return StringConstants.UnknownType;
+
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): address-only caller (from
+            // sync-block enumeration) — resolve via the disk-backed address index when available.
+            if (cache is not null)
+            {
+                return cache.TryGetObjectMetadata(heap, objectAddress, out ulong methodTable, out _) && methodTable != 0
+                    ? heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType
+                    : StringConstants.UnknownType;
+            }
 
             ClrObject obj = heap.GetObject(objectAddress);
             if (!obj.IsValid || obj.Type == null)

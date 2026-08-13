@@ -41,6 +41,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private static readonly bool SkipReverseIndexBuild =
         Environment.GetEnvironmentVariable("DD_SKIP_REVERSE_INDEX_BUILD") == "1";
 
+    // Escape hatch for the SegmentIndex satellite section (see
+    // docs/cache/19-ObjectAddressLookupIndex.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
+    // A/B build-time isolation. Cost is expected to be negligible (segment-count-sized, not
+    // object-count-sized), so this is cheap insurance rather than an anticipated need — remove once
+    // validated, same as the other temporary toggles above.
+    private static readonly bool SkipSegmentIndexBuild =
+        Environment.GetEnvironmentVariable("DD_SKIP_SEGMENT_INDEX_BUILD") == "1";
+
     public HeapIndexBuildResult Build(
         ClrHeap heap,
         CancellationToken cancellationToken,
@@ -154,6 +162,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         string[] segMtScratchFiles = new string[segments.Length];
         string[] segSizeScratchFiles = new string[segments.Length];
         string[] segGenScratchFiles = new string[segments.Length];
+        // SegmentIndex satellite (docs/cache/19-ObjectAddressLookupIndex.md): each worker writes its
+        // own segIdx slot exactly once below, so no lock is needed despite the parallel scan.
+        long[] segRecordCounts = new long[segments.Length];
         for (int i = 0; i < segments.Length; i++)
         {
             segAddrScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.addr.tmp");
@@ -354,6 +365,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
+                // Record this segment's final object count for the SegmentIndex satellite section
+                // (written after the parallel scan below). Each segIdx is written by exactly one
+                // worker, so no lock is needed.
+                segRecordCounts[segIdx] = segCount;
+
                 // Serialize segment entries to this segment's own columnar scratch files in
                 // fixed-size chunks — no shared-stream lock, so segments make independent
                 // progress. Scratch files are concatenated in segment order after the scan
@@ -517,6 +533,43 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         List<string> satelliteWarnings = WriteSatelliteSections(containerWriter, heap,
             taskCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
+
+        // SegmentIndex (docs/cache/19-ObjectAddressLookupIndex.md): a small per-segment table of
+        // (Start, End, FirstRecordIndex, RecordCount) enabling ObjectAddressLookup's binary-search
+        // point lookup, backing IHeapAnalysisCache.TryGetObjectMetadata. Segment boundaries/record
+        // counts are already known for free from the scan above — this only writes a
+        // segment-count-sized table, not object-count-sized. Cumulative offsets must match
+        // ConcatenateScratchFiles' write order above (segment index order), which they do since
+        // both iterate `segments` in the same order. Skipped/non-fatal like every other satellite
+        // section — a build without SegmentIndex still works, just without TryGetObjectMetadata.
+        if (!SkipSegmentIndexBuild)
+        {
+            try
+            {
+                progress?.Report(new(0, "writing SegmentIndex section", Detail: null, Elapsed: stopwatch.Elapsed));
+                var segmentIndexEntries = new List<SegmentIndexEntry>(segments.Length);
+                long cumulativeRecordIndex = 0;
+                for (int i = 0; i < segments.Length; i++)
+                {
+                    long recordCount = segRecordCounts[i];
+                    if (recordCount > 0)
+                    {
+                        segmentIndexEntries.Add(new SegmentIndexEntry(
+                            segments[i].Start, segments[i].End, cumulativeRecordIndex, (int)recordCount));
+                    }
+                    cumulativeRecordIndex += recordCount;
+                }
+
+                containerWriter.BeginSection(CacheSectionId.SegmentIndex);
+                SegmentIndexWriter.Write(containerWriter.Stream, segmentIndexEntries);
+                containerWriter.EndSection(segmentIndexEntries.Count);
+            }
+            catch (Exception ex)
+            {
+                containerWriter.AbortSection();
+                satelliteWarnings.Add($"SegmentIndex: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
 
         // Write StringDedup section (compact binary) so subsequent analyses
         // can read prebuilt dedup data without re-scanning the heap.

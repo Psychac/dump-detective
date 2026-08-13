@@ -88,13 +88,9 @@ namespace DumpDetective.Analysis.Analyzers
                 // P1-2: Separate AsyncPinned vs Pinned byte accounting
                 if (kind == "AsyncPinned")
                 {
-                    ulong resolvedSize = 0;
-                    if (heap is not null)
-                    {
-                        ClrObject targetObject = heap.GetObject(targetAddress);
-                        if (targetObject.IsValid)
-                            resolvedSize = targetObject.Size;
-                    }
+                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): only Size is needed —
+                    // resolve via the disk-backed address index instead of heap.GetObject.
+                    ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
 
                     if (resolvedSize > 0)
                     {
@@ -108,13 +104,9 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == "Pinned")
                 {
                     Increment(pinnedTypes, typeName);
-                    ulong resolvedSize = 0;
-                    if (heap is not null)
-                    {
-                        ClrObject targetObject = heap.GetObject(targetAddress);
-                        if (targetObject.IsValid)
-                            resolvedSize = targetObject.Size;
-                    }
+                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): only Size is needed —
+                    // resolve via the disk-backed address index instead of heap.GetObject.
+                    ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
 
                     if (resolvedSize > 0)
                     {
@@ -186,7 +178,7 @@ namespace DumpDetective.Analysis.Analyzers
                     dependentHandleCount++;
 
                     if (!TryGetHandleAddress(handle.Object, out ulong sourceAddress)
-                        || !TryResolveTypeNameStrict(heap, sourceAddress, methodTableNameCache, out string sourceType))
+                        || !TryResolveTypeNameStrict(heap, cache, sourceAddress, methodTableNameCache, out string sourceType))
                     {
                         dependentUnresolvedTargetCount++;
                         continue;
@@ -195,7 +187,7 @@ namespace DumpDetective.Analysis.Analyzers
                     Increment(dependentSourceTypeCounts, sourceType);
 
                     if (!TryGetDependentTargetAddress(handle, out ulong dependentTargetAddress)
-                        || !TryResolveTypeNameStrict(heap, dependentTargetAddress, methodTableNameCache, out string dependentTargetType))
+                        || !TryResolveTypeNameStrict(heap, cache, dependentTargetAddress, methodTableNameCache, out string dependentTargetType))
                     {
                         dependentUnresolvedTargetCount++;
                         continue;
@@ -343,29 +335,60 @@ namespace DumpDetective.Analysis.Analyzers
             return false;
         }
 
-        private static bool TryResolveTypeNameStrict(ClrHeap heap, ulong address, Dictionary<ulong, string> methodTableNameCache, out string typeName)
+        private static bool TryResolveTypeNameStrict(ClrHeap heap, IHeapAnalysisCache? cache, ulong address, Dictionary<ulong, string> methodTableNameCache, out string typeName)
         {
             typeName = StringConstants.UnknownType;
 
             if (address == 0)
                 return false;
 
-            ClrObject obj = heap.GetObject(address);
-            if (!obj.IsValid || obj.Type == null)
-                return false;
-
-            ulong methodTable = obj.Type.MethodTable;
-            if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cached))
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): address-only caller — resolve
+            // via the disk-backed address index instead of heap.GetObject when available.
+            ulong methodTable;
+            if (cache is not null)
             {
-                typeName = cached;
+                if (!cache.TryGetObjectMetadata(heap, address, out methodTable, out _) || methodTable == 0)
+                    return false;
+            }
+            else
+            {
+                ClrObject obj = heap.GetObject(address);
+                if (!obj.IsValid || obj.Type == null)
+                    return false;
+                methodTable = obj.Type.MethodTable;
+            }
+
+            if (methodTable != 0 && methodTableNameCache.TryGetValue(methodTable, out string? cachedName))
+            {
+                typeName = cachedName;
                 return true;
             }
 
-            typeName = obj.Type.Name ?? StringConstants.UnknownType;
+            ClrType? type = heap.GetTypeByMethodTable(methodTable);
+            typeName = type?.Name ?? StringConstants.UnknownType;
             if (methodTable != 0)
                 methodTableNameCache[methodTable] = typeName;
 
             return true;
+        }
+
+        /// <summary>
+        /// Resolves an object's size via the disk-backed address index when
+        /// <paramref name="cache"/> is available, falling back to a live
+        /// <c>heap.GetObject</c> resolution otherwise. Returns 0 for a null <paramref name="heap"/>
+        /// or an unresolvable <paramref name="address"/> — same contract the inline
+        /// <c>heap.GetObject(address).Size</c> checks this replaces already had.
+        /// </summary>
+        private static ulong ResolveSize(ClrHeap? heap, IHeapAnalysisCache? cache, ulong address)
+        {
+            if (heap is null)
+                return 0;
+
+            if (cache is not null)
+                return cache.TryGetObjectMetadata(heap, address, out _, out ulong size) ? size : 0;
+
+            ClrObject obj = heap.GetObject(address);
+            return obj.IsValid ? obj.Size : 0;
         }
 
         private static string? ResolveTypeNameFromRecord(ClrHeap? heap, ulong targetAddress, ulong methodTable, Dictionary<ulong, string> methodTableNameCache)

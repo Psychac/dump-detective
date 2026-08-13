@@ -28,4 +28,15 @@ internal interface IObjectIndexReader
     /// into disjoint contiguous ranges for concurrent reads.
     /// </summary>
     IEnumerable<HeapEntry> ReadEntriesRange(string containerPath, long startRecord, long recordCount);
+
+    /// <summary>
+    /// One-shot random-access lookup of a single <paramref name="address"/>'s
+    /// <c>(MethodTable, Size)</c> via the disk-backed <c>SegmentIndex</c> — see
+    /// <see cref="ObjectAddressLookup"/> and docs/cache/19-ObjectAddressLookupIndex.md. Opens,
+    /// looks up once, and disposes; callers making many lookups over one analysis run should hold
+    /// their own <see cref="ObjectAddressLookup"/> instance instead of calling this repeatedly.
+    /// Returns <c>false</c> — not an error — when the container/section is unavailable or
+    /// <paramref name="address"/> isn't found.
+    /// </summary>
+    bool TryGetEntry(string containerPath, ulong address, out ulong methodTable, out ulong size);
 }

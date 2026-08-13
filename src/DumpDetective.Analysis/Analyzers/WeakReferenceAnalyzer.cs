@@ -126,11 +126,12 @@ namespace DumpDetective.Analysis.Analyzers
                         }
                         else
                         {
-                            ClrObject obj = heap.GetObject(addr);
-                            if (obj.IsValid)
+                            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve via
+                            // the disk-backed address index instead of heap.GetObject.
+                            if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
                             {
                                 aliveWeakTargets++;
-                                string typeName = obj.Type?.Name ?? "Unknown";
+                                string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
                                 IncrementDict(targetTypeHits, typeName);
                             }
                             else
@@ -152,8 +153,9 @@ namespace DumpDetective.Analysis.Analyzers
                         }
                         else
                         {
-                            ClrObject obj = heap.GetObject(addr);
-                            if (!obj.IsValid) dependentHandleDeadKeyCount++;
+                            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve via
+                            // the disk-backed address index instead of heap.GetObject.
+                            if (!cache.TryGetObjectMetadata(heap, addr, out _, out _)) dependentHandleDeadKeyCount++;
                         }
                         if (options.ProduceRawExports)
                             WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
@@ -196,11 +198,12 @@ namespace DumpDetective.Analysis.Analyzers
                                 }
                                 else
                                 {
-                                    ClrObject obj = heap.GetObject(addr);
-                                    if (obj.IsValid)
+                                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve
+                                    // via the disk-backed address index instead of heap.GetObject.
+                                    if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
                                     {
                                         aliveWeakTargets++;
-                                        string typeName = obj.Type?.Name ?? "Unknown";
+                                        string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
                                         IncrementDict(targetTypeHits, typeName);
                                     }
                                     else

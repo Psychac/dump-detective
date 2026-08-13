@@ -35,6 +35,7 @@ internal sealed class RootPathFinder
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _isNoise;
     private readonly Func<ClrType?, bool> _forceExpand;
+    private readonly IHeapAnalysisCache? _cache;
 
     public RootPathFinder(
         ClrHeap heap,
@@ -43,7 +44,8 @@ internal sealed class RootPathFinder
         IPathSearchTelemetry telemetry,
         Func<ClrType?, bool> isNoise,
         Func<ClrType?, bool> forceExpand,
-        IBackwardReferenceProvider? reverseIndexProvider = null)
+        IBackwardReferenceProvider? reverseIndexProvider = null,
+        IHeapAnalysisCache? cache = null)
     {
         _heap = heap;
         _provider = provider;
@@ -52,6 +54,7 @@ internal sealed class RootPathFinder
         _telemetry = telemetry;
         _isNoise = isNoise;
         _forceExpand = forceExpand;
+        _cache = cache;
     }
 
     public bool TryFindAnyRootPath(
@@ -74,7 +77,7 @@ internal sealed class RootPathFinder
         if (_reverseIndexProvider is not null)
         {
             var indexBackedSearch = new IndexBackedBidirectionalSearch(
-                _heap, _provider, _reverseIndexProvider, _limits, _telemetry, _isNoise, _forceExpand);
+                _heap, _provider, _reverseIndexProvider, _limits, _telemetry, _isNoise, _forceExpand, _cache);
 
             return indexBackedSearch.TryFindPath(
                 target, roots, out rootKind, out path, out searchTruncated,
@@ -82,17 +85,17 @@ internal sealed class RootPathFinder
         }
 
         // Phase 1: build candidate set via bidirectional expansion.
-        var candidateBuilder = new CandidateSetBuilder(_heap, _provider, _limits, _telemetry, _isNoise, _forceExpand);
+        var candidateBuilder = new CandidateSetBuilder(_heap, _provider, _limits, _telemetry, _isNoise, _forceExpand, _cache);
         HashSet<ulong> candidateSet = candidateBuilder.Build(target, roots);
         candidateSetSize = candidateSet.Count;
 
         // Phase 2: build scoped reverse index over candidate set only.
         var reverseIndex = new ReverseReferenceIndex();
-        reverseIndex.Build(candidateSet, _heap, _provider, _limits, _telemetry, _forceExpand);
+        reverseIndex.Build(candidateSet, _heap, _provider, _limits, _telemetry, _forceExpand, _cache);
         reverseIndexEntryCount = reverseIndex.EntryCount;
 
         // Phase 3: constrained BFS from roots, staying inside candidate set.
-        var pathFinder = new BidirectionalPathFinder(_heap, _provider, candidateSet, reverseIndex, _limits, _telemetry, _forceExpand);
+        var pathFinder = new BidirectionalPathFinder(_heap, _provider, candidateSet, reverseIndex, _limits, _telemetry, _forceExpand, _cache);
 
         var scanCounter = new ObjectScanCounter("Root path scan", reportEveryObjects: 500, reportEveryElapsed: TimeSpan.FromSeconds(2));
         foreach ((string kind, ulong rootAddress) in roots)
@@ -142,16 +145,19 @@ internal sealed class ReverseReferenceIndex
         IReferenceProvider provider,
         RootPathSearchLimits limits,
         IPathSearchTelemetry telemetry,
-        Func<ClrType?, bool> forceExpand)
+        Func<ClrType?, bool> forceExpand,
+        IHeapAnalysisCache? cache = null)
     {
         foreach (ulong obj in candidateSet)
         {
-            ClrObject clrObj = heap.GetObject(obj);
-            if (!clrObj.IsValid)
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+            // only — provider.GetReferences below does the actual traversal.
+            ClrType? type = RootPathSearchSupport.ResolveType(heap, cache, obj);
+            if (type is null)
                 continue;
 
             int counted = 0;
-            bool expand = forceExpand(clrObj.Type);
+            bool expand = forceExpand(type);
 
             foreach (var childAddr in provider.GetReferences(obj))
             {
@@ -197,6 +203,7 @@ internal sealed class CandidateSetBuilder
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _isNoise;
     private readonly Func<ClrType?, bool> _forceExpand;
+    private readonly IHeapAnalysisCache? _cache;
 
     public CandidateSetBuilder(
         ClrHeap heap,
@@ -204,7 +211,8 @@ internal sealed class CandidateSetBuilder
         RootPathSearchLimits limits,
         IPathSearchTelemetry telemetry,
         Func<ClrType?, bool> isNoise,
-        Func<ClrType?, bool> forceExpand)
+        Func<ClrType?, bool> forceExpand,
+        IHeapAnalysisCache? cache = null)
     {
         _heap = heap;
         _provider = provider;
@@ -212,6 +220,7 @@ internal sealed class CandidateSetBuilder
         _telemetry = telemetry;
         _isNoise = isNoise;
         _forceExpand = forceExpand;
+        _cache = cache;
     }
 
     public HashSet<ulong> Build(
@@ -275,18 +284,20 @@ internal sealed class CandidateSetBuilder
         HashSet<ulong> candidate,
         int maxNodes)
     {
-        ClrObject obj = _heap.GetObject(address);
-        if (!obj.IsValid)
+        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+        // only — _provider.GetReferences below does the actual traversal.
+        ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, address);
+        if (type is null)
             return;
 
-        if (_isNoise(obj.Type))
+        if (_isNoise(type))
         {
             _telemetry.IncrementPruned();
             return;
         }
 
         int counted = 0;
-        bool forceExpand = _forceExpand(obj.Type);
+        bool forceExpand = _forceExpand(type);
 
         foreach (var childAddr in _provider.GetReferences(address))
         {
@@ -325,6 +336,7 @@ internal sealed class BidirectionalPathFinder
     private readonly RootPathSearchLimits _limits;
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _forceExpand;
+    private readonly IHeapAnalysisCache? _cache;
 
     public BidirectionalPathFinder(
         ClrHeap heap,
@@ -333,7 +345,8 @@ internal sealed class BidirectionalPathFinder
         ReverseReferenceIndex reverseIndex,
         RootPathSearchLimits limits,
         IPathSearchTelemetry telemetry,
-        Func<ClrType?, bool> forceExpand)
+        Func<ClrType?, bool> forceExpand,
+        IHeapAnalysisCache? cache = null)
     {
         _heap = heap;
         _provider = provider;
@@ -342,6 +355,7 @@ internal sealed class BidirectionalPathFinder
         _limits = limits;
         _telemetry = telemetry;
         _forceExpand = forceExpand;
+        _cache = cache;
     }
 
     private readonly HashSet<ulong> _visited = new(capacity: 256);
@@ -382,12 +396,14 @@ internal sealed class BidirectionalPathFinder
             if (depth >= maxDepth)
                 continue;
 
-            ClrObject obj = _heap.GetObject(current);
-            if (!obj.IsValid)
+            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+            // only — _provider.GetReferences below does the actual traversal.
+            ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, current);
+            if (type is null)
                 continue;
 
             int counted = 0;
-            bool forceExpand = _forceExpand(obj.Type);
+            bool forceExpand = _forceExpand(type);
 
             foreach (var childAddr in _provider.GetReferences(current))
             {

@@ -239,7 +239,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             else pending++;
 
             // Resolve type name
-            string typeName = ResolveTypeName(heap, address, mt, typeNameByMt);
+            string typeName = ResolveTypeName(heap, mt, typeNameByMt);
 
             // Track top type counts
             if (!isCompleted && !isCanceled)
@@ -667,14 +667,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return 1 + childDepth;
     }
 
-    private static string ResolveTypeName(ClrHeap heap, ulong address, ulong mt,
+    private static string ResolveTypeName(ClrHeap heap, ulong mt,
         Dictionary<ulong, string> cache)
     {
         if (cache.TryGetValue(mt, out string? name))
             return name;
 
-        ClrObject obj = heap.GetObject(address);
-        string resolved = (obj.IsValid ? obj.Type?.Name : null)
+        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already known —
+        // resolve via the metadata cache instead of materializing a ClrObject.
+        string resolved = heap.GetTypeByMethodTable(mt)?.Name
             ?? "System.Threading.Tasks.Task";
 
         cache[mt] = resolved;

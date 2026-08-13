@@ -343,9 +343,13 @@ namespace DumpDetective.Analysis.Analyzers
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
             LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
                 if (topLargeObjects.Count >= options.TopLargeObjectsCount) return;
-                ClrObject obj = heap.GetObject(address);
-                if (!obj.IsValid) return;
-                string typeName = obj.Type?.Name ?? "Unknown";
+                // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already a
+                // parameter of this callback — resolve via the metadata cache instead of
+                // materializing a ClrObject. A null type is the equivalent "unresolvable" gate
+                // heap.GetObject(address).IsValid served before.
+                ClrType? type = heap.GetTypeByMethodTable(mt);
+                if (type is null) return;
+                string typeName = type.Name ?? "Unknown";
                 if (string.Equals(typeName, "Free", StringComparison.Ordinal)) return;
                 topLargeObjects.Add(new LargeObjectSnapshot(address, typeName, size));
 

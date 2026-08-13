@@ -303,7 +303,20 @@ dotMemory's "Dominators" view identifies the object responsible for the most ret
 | P1-2 | **Surface `ContainsCollections` / `ContainsEventHandlers`** in snapshot and report | Diagnostic quality | Low | High | Improvement | ✅ DONE |
 | P1-3 | **Cancellation inside BFS inner loop** — check token every 256 dequeues | Scalability/UX | Low | High | Improvement | ✅ DONE |
 | P1-4 | **AssemblyLoadContext attribution** — check `ClrRuntime.AppDomains` / ALC information for the root's declaring type | High-value diagnostic | Medium | Medium | Improvement | Pending |
-| P1-5 | **Use object index for size/MT resolution** inside retained-object loop instead of `heap.GetObject` per address | Performance (25GB+) | Medium | High | Improvement | Pending |
+| P1-5 | **Use object index for size/MT resolution** inside retained-object loop instead of `heap.GetObject` per address | Performance (25GB+) | Medium | High | Improvement | ✅ DONE — see note below |
+
+**P1-5 note**: shipped differently than originally framed here. Investigating this recommendation
+(`docs/cache/19-ObjectAddressLookupIndex.md`) found that `StaticRootLeakDetector`'s specific
+retained-object loop didn't actually need a disk index lookup at all — `BoundedGraphWalk.CollectRetainedObjects`
+already calls `heap.GetObject` once per node for its own BFS traversal, so capturing `(MethodTable, Size)`
+from that existing call and returning it alongside the address (a zero-infrastructure change, done in
+that doc's Phase 4) eliminated the redundant second resolution pass entirely — cheaper than building an
+index just for this. The general-purpose disk-backed address index this recommendation originally asked
+for (`SegmentIndex`/`IHeapAnalysisCache.TryGetObjectMetadata`) was still built, but as a platform
+primitive for the ~20 other call sites across the codebase (`RootPathFinder`, `WeakReferenceAnalyzer`,
+`GCHandleAnalyzer`, `CrashAnalyzer`, `DominatorAnalyzer`, `LockGraphAnalyzer`, ...) that resolve a known
+address without an accompanying live BFS to piggyback on — see that doc's Phases 1–6 and Appendix B for
+the full reasoning and the audit of which call sites actually needed it.
 
 #### P2 — Medium
 
@@ -337,4 +350,4 @@ dotMemory's "Dominators" view identifies the object responsible for the most ret
 
 3. **Platform evolution opportunities**: P3-3 (finalizer queue cross-reference) requires a shared platform primitive (finalizer queue index) that would benefit multiple analyzers. P3-4 (dominator tree) is a full platform capability; if a `DominatorAnalyzer` does not exist, this analyzer's retained-size data is the natural input.
 
-4. **Highest engineering return**: Fix P0-1 through P0-4 (low effort, immediate report quality improvement), then P1-1 (field name resolution — closes the field-attribution gap that makes every other tool more useful), then P1-5 (index-based size resolution for large-dump performance). These four changes raise the score from 52 to approximately 78.
+4. **Highest engineering return**: Fix P0-1 through P0-4 (low effort, immediate report quality improvement), then P1-1 (field name resolution — closes the field-attribution gap that makes every other tool more useful), then P1-5 (large-dump size/MT resolution performance — shipped as a free-tuple capture in the shared BFS primitive rather than an index lookup for this analyzer specifically; see the P1-5 note above). These four changes raise the score from 52 to approximately 78.

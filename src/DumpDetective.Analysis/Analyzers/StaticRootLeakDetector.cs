@@ -45,12 +45,12 @@ namespace DumpDetective.Analysis.Analyzers
                 MaxRootExpansionDepth = 12,
                 LargeFanoutThreshold = 100,
             };
-            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider());
+            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
 
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
                 .Take(options.MaxRootsToReport)
-                .Select(r => BuildSnapshot(heap, validRoots, finder, r))
+                .Select(r => BuildSnapshot(heap, cache, validRoots, finder, r))
                 .ToArray();
 
             if (significantStaticRoots.Length == 0)
@@ -65,10 +65,10 @@ namespace DumpDetective.Analysis.Analyzers
             return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots);
         }
 
-        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IReadOnlyList<(string RootKind, ulong Address)> validRoots, RootPathFinder finder, StaticRootAnalysis analysis)
+        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IHeapAnalysisCache cache, IReadOnlyList<(string RootKind, ulong Address)> validRoots, RootPathFinder finder, StaticRootAnalysis analysis)
         {
             bool found = finder.TryFindAnyRootPath(analysis.DirectObjectAddress, validRoots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
-            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses) : null;
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
             var evidence = new Evidence(
                 analysis.TotalMemoryImpact,
                 rootPath,
@@ -125,21 +125,32 @@ namespace DumpDetective.Analysis.Analyzers
                 var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out bool scanWasCapped, options.MaxRetainedObjectsToScan, cancellationToken: cancellationToken);
 
                 var typeStats = new Dictionary<string, RetainedTypeInfo>();
+                // Memoizes MethodTable -> type name so a type with N retained instances resolves
+                // its name once via heap.GetTypeByMethodTable (metadata-cache hit, no dump I/O)
+                // instead of N times — see docs/cache/19-ObjectAddressLookupIndex.md Phase 4.
+                var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
                 var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
                 ulong totalSize = 0;
                 bool containsCollections = false;
                 bool containsEventHandlers = false;
                 int sampledCount = 0;
 
-                foreach (var address in retainedObjects)
+                foreach (var (address, (methodTable, size)) in retainedObjects)
                 {
-                    ObjectMetadata retainedMetadata = GetObjectMetadata(heap, address);
-                    if (!retainedMetadata.IsValid)
+                    // MethodTable == 0 means CollectRetainedObjects never resolved this address
+                    // (invalid, or — only when scanWasCapped — a frontier node the scan hit its
+                    // cap before dequeuing). See that method's remarks for the full contract.
+                    if (methodTable == 0)
                         continue;
 
-                    totalSize += retainedMetadata.Size;
+                    totalSize += size;
 
-                    string typeName = retainedMetadata.TypeName;
+                    if (!typeNameByMethodTable.TryGetValue(methodTable, out string? typeName))
+                    {
+                        typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
+                        typeNameByMethodTable[methodTable] = typeName;
+                    }
+
                     if (!typeStats.TryGetValue(typeName, out var info))
                     {
                         info = new RetainedTypeInfo { TypeName = typeName };
@@ -147,7 +158,7 @@ namespace DumpDetective.Analysis.Analyzers
                     }
 
                     info.Count++;
-                    info.TotalSize += retainedMetadata.Size;
+                    info.TotalSize += size;
 
                     if (sampledCount < options.SampleRetainedObjectsToInspect)
                     {
@@ -158,7 +169,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                         if (!containsEventHandlers)
                         {
-                            containsEventHandlers = HasDelegateFields(heap, address, retainedMetadata.MethodTable, delegateFieldByMethodTable);
+                            containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
                         }
 
                         sampledCount++;

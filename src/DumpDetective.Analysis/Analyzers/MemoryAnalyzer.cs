@@ -64,32 +64,51 @@ namespace DumpDetective.Analysis.Analyzers
                     ModuleName: string.IsNullOrWhiteSpace(s.ModuleName) ? null : s.ModuleName);
             }
 
-            static ulong EstimateRetained(ClrHeap heap, IHeapAnalysisCache cache, string typeName, HashSet<ulong> claimedAddresses)
+            var topTypes = new List<TypeSnapshot>(projection.SelectedTypes.Count);
+
+            if (heap.CanWalkHeap)
             {
-                if (!heap.CanWalkHeap)
-                    return 0;
+                var sampleAddresses = new ulong[projection.SelectedTypes.Count];
+                var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(projection.SelectedTypes.Count);
 
-                ulong sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
-                if (sampleAddress == 0)
-                    return 0;
+                for (int i = 0; i < projection.SelectedTypes.Count; i++)
+                {
+                    ulong sampleAddress = cache.GetSampleInstanceAddress(projection.SelectedTypes[i].TypeName) ?? 0;
+                    sampleAddresses[i] = sampleAddress;
+                    if (sampleAddress == 0)
+                        continue;
 
+                    ClrObject root = heap.GetObject(sampleAddress);
+                    if (root.IsValid && root.Type is not null)
+                        walkCandidates.Add((sampleAddress, root.Type.MethodTable, root.Size));
+                }
+
+                var visited = new HashSet<ulong>();
+                IReadOnlyList<RetainedSizeResult> retainedResults;
                 try
                 {
-                    ClrObject root = heap.GetObject(sampleAddress);
-                    return BoundedGraphWalk.ComputeExclusiveRetained(root, heap, claimedAddresses);
+                    retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
+                        walkCandidates, heap, cache, visited, maxCandidatesToWalk: walkCandidates.Count);
                 }
                 catch
                 {
-                    return 0;
+                    retainedResults = Array.Empty<RetainedSizeResult>();
+                }
+
+                var retainedByAddress = new Dictionary<ulong, ulong>(retainedResults.Count);
+                foreach (RetainedSizeResult r in retainedResults)
+                    retainedByAddress[r.Address] = r.RetainedSize;
+
+                for (int i = 0; i < projection.SelectedTypes.Count; i++)
+                {
+                    ulong retained = retainedByAddress.TryGetValue(sampleAddresses[i], out ulong r) ? r : 0;
+                    topTypes.Add(ToSnapshot(projection.SelectedTypes[i], retained, sampleAddresses[i]));
                 }
             }
-
-            var topTypes = new List<TypeSnapshot>(projection.SelectedTypes.Count);
-            HashSet<ulong> retainedClaims = new();
-            for (int i = 0; i < projection.SelectedTypes.Count; i++)
+            else
             {
-                CachedTypeStatistics stat = projection.SelectedTypes[i];
-                topTypes.Add(ToSnapshot(stat, EstimateRetained(heap, cache, stat.TypeName, retainedClaims), cache.GetSampleInstanceAddress(stat.TypeName) ?? 0));
+                for (int i = 0; i < projection.SelectedTypes.Count; i++)
+                    topTypes.Add(ToSnapshot(projection.SelectedTypes[i], retainedBytes: 0, cache.GetSampleInstanceAddress(projection.SelectedTypes[i].TypeName) ?? 0));
             }
 
             return new MemoryDomainResult(

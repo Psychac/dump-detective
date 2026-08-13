@@ -283,7 +283,7 @@ dotMemory provides:
 
 | Priority | Recommendation | Impact | Difficulty | Confidence | Status | Classification |
 |---|---|---|---|---|---|---|
-| **P0-1** | Replace average self-size estimate with `BoundedGraphWalk.ComputeExclusiveRetained` for top-N roots | Critical — severity ranking and insight findings are unreliable without this | Medium | High | ⏳ Pending | Improvement |
+| **P0-1** | Replace average self-size estimate with `BoundedGraphWalk.ComputeExclusiveRetained` for top-N roots | Critical — severity ranking and insight findings are unreliable without this | Medium | High | ✅ DONE — see note below | Improvement |
 | **P0-2** | Relabel BFS walk output as "owned subgraph types" not "root path"; correct or suppress the misleading chain presentation | Critical — output is structurally incorrect for its stated purpose | Low | High | ✅ DONE (e4dd83e) | Improvement |
 | **P1-1** | Capture `ClrRoot.RootName` in `RootSetCache.BuildFromLiveHeap` and extend `RootRecord` + disk index format to persist it | High — enables field-level diagnostics; the single biggest usability gap vs. WinDbg/dotMemory | High | High | ⏳ Pending | Improvement |
 | **P1-2** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | ✅ DONE (8b6b6b8) | Improvement |
@@ -299,6 +299,22 @@ dotMemory provides:
 | **P3-3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | ⏳ Future | Improvement |
 
 > **Reverse index available (2026-08-12):** the `ReverseReferenceIndex` P3-1 depends on is implemented — `ReverseEdgeIndexReader.TryGetParents`, consumed via `RootPathFinder`. P3-1 is no longer blocked on infrastructure; it can be re-scoped out of P3 since the query primitive already exists and is used by CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer today. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
+> **P0-1 resolution note:** shipped as `GCRootAnalyzer` Step 3 (path tracing) now also
+> running the top-`PathSearchTopN` severity-ranked candidates through
+> `RetainedSizeCandidateSelector.SelectAndCompute` — a shared shape-filter-then-bounded-walk
+> layer built on `BoundedGraphWalk.ComputeExclusiveRetained`, see
+> [../retained-size-candidate-selection.md](../retained-size-candidate-selection.md). True
+> BFS-computed retained size (`RootPathFinding.EstimatedRetainedBytes` /
+> `RetainedSizeWasWalked`) is now available per root and rendered in the root-path groups
+> table. Scoped deliberately: `GCRootAnalysisProjection`'s `RootFinding.EstimatedRetainedBytes`
+> (the "Top GC roots by severity" table and severity-score ranking input) still uses shallow
+> size, not a BFS walk — severity ranking has to happen *before* BFS budget is spent, by
+> design (that's the "rank by cheap proxy, walk only the survivors" pattern the selector
+> exists to provide), so it was already fixed from the audit's "average self-size" bug to
+> shallow size in a prior commit but was not re-plumbed to the post-BFS true retained size
+> here. If exact retained size in the severity table itself is wanted, that's a follow-up
+> (re-sort `TopRootsBySeverity` by the Step 3 walked values for the roots that were walked).
 
 ---
 

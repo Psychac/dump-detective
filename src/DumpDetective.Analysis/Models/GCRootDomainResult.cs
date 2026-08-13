@@ -25,7 +25,9 @@ public sealed record RootPathFinding(
     string RootKind,
     IReadOnlyList<string> PathTypeNames,  // forward BFS from target outward (owned subgraph), not root-to-target chain
     int PathLength,
-    bool WasCapped);
+    bool WasCapped,
+    ulong EstimatedRetainedBytes = 0,
+    bool RetainedSizeWasWalked = false);
 
 internal sealed record GCRootDomainResult(
     int TotalRoots,

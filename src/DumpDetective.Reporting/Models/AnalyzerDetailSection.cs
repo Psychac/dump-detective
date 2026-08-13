@@ -99,7 +99,9 @@ internal sealed record RootPath(
     string TargetAddress,   // hex string e.g. "0x1A2B3C"
     int PathLength,
     bool WasCapped,
-    IReadOnlyList<string> Hops);  // type names in BFS order from target; shows graph shape owned by root
+    IReadOnlyList<string> Hops,   // type names in BFS order from target; shows graph shape owned by root
+    ulong EstimatedRetainedBytes = 0,
+    bool RetainedSizeWasWalked = false);  // false => EstimatedRetainedBytes is the target's shallow size, not a true BFS walk result
 
 /// <summary>Object subgraphs reachable from roots of a particular target type, grouped for display.</summary>
 internal sealed record RootPathGroup(

@@ -137,6 +137,16 @@ internal class TypeMetadataCache
                     containsPointers = true;
                     offsets.Add(field.Offset);
                 }
+                else if (field.ElementType == ClrElementType.Struct && field.Type is ClrType nestedType
+                    && FieldTreeContainsPointers(nestedType, depth: 1))
+                {
+                    // A struct-typed field with no top-level reference field of its own can still
+                    // hold a reference underneath (e.g. `struct Entry { string Key; }` embedded in
+                    // a wrapper class). EnumerateReferences walks into these, so ContainsPointers
+                    // must too, or callers relying on it (e.g. RetainedSizeCandidateSelector.RequiresWalk)
+                    // would wrongly treat the wrapper's shallow size as its full retained size.
+                    containsPointers = true;
+                }
             }
         }
 
@@ -158,6 +168,31 @@ internal class TypeMetadataCache
             isFreeObject: isFreeObject,
             instanceSize: instanceSize,
             referenceFieldOffsets: offsets.ToImmutable());
+    }
+
+    // Value types cannot be self-referential (directly or transitively) — the CLR rejects such
+    // a struct at load time — so this recursion always terminates. The depth cap is a defensive
+    // guard rail, not a correctness requirement.
+    private const int MaxFieldRecursionDepth = 32;
+
+    private static bool FieldTreeContainsPointers(ClrType structType, int depth)
+    {
+        if (depth >= MaxFieldRecursionDepth)
+            return false;
+
+        foreach (var field in structType.Fields)
+        {
+            if (field.IsObjectReference)
+                return true;
+
+            if (field.ElementType == ClrElementType.Struct && field.Type is ClrType nestedType
+                && FieldTreeContainsPointers(nestedType, depth + 1))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public CacheMetrics GetMetrics()

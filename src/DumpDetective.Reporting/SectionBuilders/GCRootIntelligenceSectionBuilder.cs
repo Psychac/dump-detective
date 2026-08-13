@@ -83,7 +83,9 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                         TargetAddress: $"0x{p.TargetAddress:X8}",
                         PathLength:    p.PathLength,
                         WasCapped:     p.WasCapped,
-                        Hops:          p.PathTypeNames));
+                        Hops:          p.PathTypeNames,
+                        EstimatedRetainedBytes:  p.EstimatedRetainedBytes,
+                        RetainedSizeWasWalked:   p.RetainedSizeWasWalked));
                 }
 
                 rootPathGroups.Add(new RootPathGroup(

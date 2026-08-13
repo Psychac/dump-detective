@@ -65,9 +65,26 @@ namespace DumpDetective.Analysis.Analyzers
                 ? findings
                 : findings.GetRange(0, topCount);
 
-            // ── Step 3: BFS path tracing for top-N roots ────────────────────────
+            // ── Step 3: BFS path tracing + retained-size estimate for top-N roots ──
             int pathCappedCount = 0;
             int pathN = Math.Min(findings.Count, options.PathSearchTopN);
+
+            var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(pathN);
+            for (int i = 0; i < pathN; i++)
+            {
+                RootFinding f = findings[i];
+                if (cache.TryGetObjectMetadata(heap, f.TargetAddress, out ulong methodTable, out ulong size))
+                    walkCandidates.Add((f.TargetAddress, methodTable, size));
+            }
+
+            var retainedVisited = new HashSet<ulong>(capacity: Math.Min(pathN * 64, 4096));
+            IReadOnlyList<RetainedSizeResult> retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
+                walkCandidates, heap, cache, retainedVisited, maxCandidatesToWalk: pathN, options.MaxBfsNodes, options.MaxBfsDepth, cancellationToken);
+
+            var retainedByAddress = new Dictionary<ulong, RetainedSizeResult>(retainedResults.Count);
+            foreach (RetainedSizeResult r in retainedResults)
+                retainedByAddress[r.Address] = r;
+
             var pathFindings = new List<RootPathFinding>(pathN);
 
             for (int i = 0; i < pathN; i++)
@@ -80,13 +97,17 @@ namespace DumpDetective.Analysis.Analyzers
                 if (wasCapped)
                     pathCappedCount++;
 
+                retainedByAddress.TryGetValue(f.TargetAddress, out RetainedSizeResult retained);
+
                 pathFindings.Add(new RootPathFinding(
                     TargetAddress: f.TargetAddress,
                     TargetTypeName: f.TargetTypeName,
                     RootKind: f.RootKind,
                     PathTypeNames: pathTypes,
                     PathLength: pathTypes.Count,
-                    WasCapped: wasCapped));
+                    WasCapped: wasCapped,
+                    EstimatedRetainedBytes: retained.RetainedSize,
+                    RetainedSizeWasWalked: retained.WasWalked));
             }
 
             return new GCRootDomainResult(

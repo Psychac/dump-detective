@@ -199,7 +199,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
 
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
-        PopulateRetainedBytes(heap, topHighlyReferencedObjects, options);
+        PopulateRetainedBytes(heap, cache, topHighlyReferencedObjects, options);
         PopulateEvidence(heap, cache, topHighlyReferencedObjects, options);
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
@@ -235,7 +235,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
 
         int topCount = Math.Min(options.TopHighlyReferencedObjectsToShow, candidates.Count);
         var topTypes = new List<TypeSnapshot>(topCount);
-        ulong totalEstimatedRetainedBytes = 0;
 
         int maxBreadth = options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000;
         const int MaxDepth = 20;
@@ -244,16 +243,36 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         // matching the semantics of PopulateRetainedBytes. This ensures the two retained-byte metrics are comparable.
         var visited = new HashSet<ulong>(capacity: Math.Min(topCount * 256, 4096));
 
+        var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(topCount);
+        for (int i = 0; i < topCount; i++)
+        {
+            ulong sampleAddress = candidates[i].SampleAddress;
+            ClrObject root = heap.GetObject(sampleAddress);
+            if (!root.IsValid || root.Type is null)
+                continue;
+
+            // ShallowSize here is the single sample object's own size (what a skipped-walk result
+            // would fall back to), not the type-aggregate TotalSize — this walk estimates one
+            // sample instance's reachable graph, not the whole type's footprint.
+            walkCandidates.Add((sampleAddress, root.Type.MethodTable, root.Size));
+        }
+
+        IReadOnlyList<RetainedSizeResult> retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
+            walkCandidates, heap, cache, visited, maxCandidatesToWalk: topCount, maxBreadth, MaxDepth, cancellationToken);
+
+        var retainedByAddress = new Dictionary<ulong, ulong>(retainedResults.Count);
+        foreach (RetainedSizeResult r in retainedResults)
+            retainedByAddress[r.Address] = r.RetainedSize;
+
+        ulong totalEstimatedRetainedBytes = 0;
         for (int i = 0; i < topCount; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             (string typeName, ulong sampleAddress, int count, ulong totalSize, ulong lohSize, long gen2Count, _) = candidates[i];
-            ClrObject root = heap.GetObject(sampleAddress);
-            if (!root.IsValid || root.Type is null)
+            if (!retainedByAddress.TryGetValue(sampleAddress, out ulong retainedBytes))
                 continue;
 
-            ulong retainedBytes = BoundedGraphWalk.ComputeExclusiveRetained(root, heap, visited, maxBreadth, MaxDepth);
             totalEstimatedRetainedBytes += retainedBytes;
 
             ulong averageSize = count > 0 ? totalSize / (ulong)count : 0;
@@ -543,21 +562,32 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             incomingReferences);
     }
 
-    private static void PopulateRetainedBytes(ClrHeap heap, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
+    private static void PopulateRetainedBytes(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
     {
         if (objects.Count == 0)
             return;
 
+        var candidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(objects.Count);
+        foreach (HighlyReferencedObjectSnapshot snapshot in objects)
+        {
+            ClrObject root = heap.GetObject(snapshot.Address);
+            if (root.IsValid && root.Type is not null)
+                candidates.Add((snapshot.Address, root.Type.MethodTable, snapshot.Size));
+        }
+
         var visited = new HashSet<ulong>(capacity: Math.Min(objects.Count * 4, 256));
+        int maxBreadth = options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000;
+        IReadOnlyList<RetainedSizeResult> results = RetainedSizeCandidateSelector.SelectAndCompute(
+            candidates, heap, cache, visited, maxCandidatesToWalk: candidates.Count, maxBreadth, maxDepth: 20);
+
+        var retainedByAddress = new Dictionary<ulong, ulong>(results.Count);
+        foreach (RetainedSizeResult r in results)
+            retainedByAddress[r.Address] = r.RetainedSize;
+
         for (int i = 0; i < objects.Count; i++)
         {
-            HighlyReferencedObjectSnapshot snapshot = objects[i];
-            ClrObject root = heap.GetObject(snapshot.Address);
-            if (!root.IsValid)
-                continue;
-
-            ulong retained = BoundedGraphWalk.ComputeExclusiveRetained(root, heap, visited, maxBreadth: options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000, maxDepth: 20);
-            objects[i] = snapshot with { EstimatedRetainedBytes = retained };
+            if (retainedByAddress.TryGetValue(objects[i].Address, out ulong retained))
+                objects[i] = objects[i] with { EstimatedRetainedBytes = retained };
         }
     }
 

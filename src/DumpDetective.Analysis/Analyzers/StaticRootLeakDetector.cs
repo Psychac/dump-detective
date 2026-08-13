@@ -124,58 +124,89 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!rootMetadata.IsValid)
                     continue;
 
-                var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out bool scanWasCapped, options.MaxRetainedObjectsToScan, cancellationToken: cancellationToken);
+                int objectsKeptAlive;
+                ulong totalSize;
+                List<RetainedTypeInfo> topRetainedTypes;
+                bool scanWasCapped;
+                bool containsCollections;
+                bool containsEventHandlers;
 
-                var typeStats = new Dictionary<string, RetainedTypeInfo>();
-                // Memoizes MethodTable -> type name so a type with N retained instances resolves
-                // its name once via heap.GetTypeByMethodTable (metadata-cache hit, no dump I/O)
-                // instead of N times — see docs/cache/19-ObjectAddressLookupIndex.md Phase 4.
-                var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
-                var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
-                ulong totalSize = 0;
-                bool containsCollections = false;
-                bool containsEventHandlers = false;
-                int sampledCount = 0;
-
-                foreach (var (address, (methodTable, size)) in retainedObjects)
+                // Shape pre-check (docs/analysis/retained-size-candidate-selection.md Phase 4):
+                // a root whose direct object has no reference-typed field anywhere in its field
+                // tree can't reach anything beyond itself, so CollectRetainedObjects — which
+                // materializes a Dictionary up to MaxRetainedObjectsToScan entries — would only
+                // ever discover the root itself. Skip building it and synthesize the equivalent
+                // single-entry result directly from already-resolved rootMetadata.
+                if (!RetainedSizeCandidateSelector.RequiresWalk(cache, heap, rootMetadata.MethodTable))
                 {
-                    // MethodTable == 0 means CollectRetainedObjects never resolved this address
-                    // (invalid, or — only when scanWasCapped — a frontier node the scan hit its
-                    // cap before dequeuing). See that method's remarks for the full contract.
-                    if (methodTable == 0)
-                        continue;
-
-                    totalSize += size;
-
-                    if (!typeNameByMethodTable.TryGetValue(methodTable, out string? typeName))
+                    objectsKeptAlive = 1;
+                    totalSize = rootMetadata.Size;
+                    topRetainedTypes = new List<RetainedTypeInfo>(1)
                     {
-                        typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
-                        typeNameByMethodTable[methodTable] = typeName;
-                    }
+                        new RetainedTypeInfo { TypeName = rootMetadata.TypeName, Count = 1, TotalSize = rootMetadata.Size }
+                    };
+                    scanWasCapped = false;
+                    containsCollections = false;
+                    containsEventHandlers = false;
+                }
+                else
+                {
+                    var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out scanWasCapped, options.MaxRetainedObjectsToScan, cancellationToken: cancellationToken);
 
-                    if (!typeStats.TryGetValue(typeName, out var info))
+                    var typeStats = new Dictionary<string, RetainedTypeInfo>();
+                    // Memoizes MethodTable -> type name so a type with N retained instances resolves
+                    // its name once via heap.GetTypeByMethodTable (metadata-cache hit, no dump I/O)
+                    // instead of N times — see docs/cache/19-ObjectAddressLookupIndex.md Phase 4.
+                    var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
+                    var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
+                    totalSize = 0;
+                    containsCollections = false;
+                    containsEventHandlers = false;
+                    int sampledCount = 0;
+
+                    foreach (var (address, (methodTable, size)) in retainedObjects)
                     {
-                        info = new RetainedTypeInfo { TypeName = typeName };
-                        typeStats[typeName] = info;
-                    }
+                        // MethodTable == 0 means CollectRetainedObjects never resolved this address
+                        // (invalid, or — only when scanWasCapped — a frontier node the scan hit its
+                        // cap before dequeuing). See that method's remarks for the full contract.
+                        if (methodTable == 0)
+                            continue;
 
-                    info.Count++;
-                    info.TotalSize += size;
+                        totalSize += size;
 
-                    if (sampledCount < options.SampleRetainedObjectsToInspect)
-                    {
-                        if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
+                        if (!typeNameByMethodTable.TryGetValue(methodTable, out string? typeName))
                         {
-                            containsCollections = true;
+                            typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
+                            typeNameByMethodTable[methodTable] = typeName;
                         }
 
-                        if (!containsEventHandlers)
+                        if (!typeStats.TryGetValue(typeName, out var info))
                         {
-                            containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
+                            info = new RetainedTypeInfo { TypeName = typeName };
+                            typeStats[typeName] = info;
                         }
 
-                        sampledCount++;
+                        info.Count++;
+                        info.TotalSize += size;
+
+                        if (sampledCount < options.SampleRetainedObjectsToInspect)
+                        {
+                            if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
+                            {
+                                containsCollections = true;
+                            }
+
+                            if (!containsEventHandlers)
+                            {
+                                containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
+                            }
+
+                            sampledCount++;
+                        }
                     }
+
+                    objectsKeptAlive = retainedObjects.Count;
+                    topRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport);
                 }
 
                 string? alcInfo = null;
@@ -202,8 +233,8 @@ namespace DumpDetective.Analysis.Analyzers
                     DirectObjectType = rootMetadata.TypeName,
                     DirectObjectSize = rootMetadata.Size,
                     TotalMemoryImpact = totalSize,
-                    ObjectsKeptAlive = retainedObjects.Count,
-                    TopRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport),
+                    ObjectsKeptAlive = objectsKeptAlive,
+                    TopRetainedTypes = topRetainedTypes,
                     ContainsCollections = containsCollections,
                     ContainsEventHandlers = containsEventHandlers,
                     ScanWasCapped = scanWasCapped,

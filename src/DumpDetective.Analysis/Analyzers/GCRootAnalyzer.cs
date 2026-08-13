@@ -57,7 +57,7 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
             // ── Step 2: Group by kind, estimate retained bytes, score severity ─
-            GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, aggregates);
+            GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, cache, aggregates);
 
             List<RootFinding> findings = projection.FindingsBySeverityDescending;
             int topCount = Math.Min(findings.Count, options.TopSeverityLimit);

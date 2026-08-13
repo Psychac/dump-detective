@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Utilities;
 
@@ -14,6 +15,7 @@ internal static class GCRootAnalysisProjection
     public static GCRootAnalysisProjectionResult Build(
         IReadOnlyList<(ulong TargetAddr, ulong RootAddr, byte Kind)> roots,
         ClrHeap heap,
+        IHeapAnalysisCache cache,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
     {
         ulong totalHeapBytes = 0;
@@ -28,17 +30,15 @@ internal static class GCRootAnalysisProjection
         {
             (ulong targetAddr, ulong rootAddr, byte rawKind) = roots[i];
 
-            ClrObject obj = GetObject(targetAddr, heap);
-            ulong estimate = EstimateRetainedBytes(obj, aggregates);
-            if (estimate == 0)
+            if (targetAddr == 0 || !cache.TryGetObjectMetadata(heap, targetAddr, out ulong methodTable, out ulong size) || size == 0)
                 continue;
 
             string kind = RootIndexReader.KindToString(rawKind);
             kindCounts[kind] = (kindCounts.TryGetValue(kind, out int count) ? count : 0) + 1;
-            kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong bytes) ? bytes : 0UL) + estimate;
+            kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong bytes) ? bytes : 0UL) + size;
 
-            string targetType = ResolveTypeName(obj);
-            int severity = ComputeSeverity(estimate, kind);
+            string targetType = ResolveTypeName(heap, methodTable, targetAddr);
+            int severity = ComputeSeverity(size, kind);
 
             findings.Add(new RootFinding(
                 RootKind: kind,
@@ -46,7 +46,7 @@ internal static class GCRootAnalysisProjection
                 FieldDescription: null,
                 TargetTypeName: targetType,
                 TargetAddress: targetAddr,
-                EstimatedRetainedBytes: estimate,
+                EstimatedRetainedBytes: size,
                 SeverityScore: severity));
         }
 
@@ -65,41 +65,12 @@ internal static class GCRootAnalysisProjection
         return new GCRootAnalysisProjectionResult(byKind, findings);
     }
 
-    private static ClrObject GetObject(ulong targetAddr, ClrHeap heap)
+    private static string ResolveTypeName(ClrHeap heap, ulong methodTable, ulong targetAddr)
     {
-        if (targetAddr == 0)
-            return default;
-
-        try
-        {
-            return heap.GetObject(targetAddr);
-        }
-        catch
-        {
-            return default;
-        }
-    }
-
-    private static ulong EstimateRetainedBytes(
-        ClrObject obj,
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
-    {
-        if (!obj.IsValid || obj.Type is null)
-            return 0;
-
-        ulong mt = obj.Type.MethodTable;
-        if (mt != 0 && aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg) && agg.Count > 0)
-            return agg.TotalSize / (ulong)agg.Count; // avg size as single-object estimate
-
-        return obj.Size;
-    }
-
-    private static string ResolveTypeName(ClrObject obj)
-    {
-        if (obj.IsValid && obj.Type?.Name is string name)
+        if (methodTable != 0 && heap.GetTypeByMethodTable(methodTable)?.Name is string name)
             return name;
 
-        return obj.Address != 0 ? $"0x{obj.Address:X}" : "(unknown)";
+        return targetAddr != 0 ? $"0x{targetAddr:X}" : "(unknown)";
     }
 
     private static int ComputeSeverity(ulong retainedBytes, string kind)

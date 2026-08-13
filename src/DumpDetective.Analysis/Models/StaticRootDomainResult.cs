@@ -25,4 +25,5 @@ internal sealed record StaticRootSnapshot(
     IReadOnlyList<RetainedTypeInfo>? TopRetainedTypes = null,
     bool ScanWasCapped = false,
     bool ContainsCollections = false,
-    bool ContainsEventHandlers = false);
+    bool ContainsEventHandlers = false,
+    string? AssemblyLoadContextInfo = null);

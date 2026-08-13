@@ -84,7 +84,8 @@ namespace DumpDetective.Analysis.Analyzers
                 analysis.TopRetainedTypes,
                 analysis.ScanWasCapped,
                 analysis.ContainsCollections,
-                analysis.ContainsEventHandlers);
+                analysis.ContainsEventHandlers,
+                analysis.AssemblyLoadContextInfo);
         }
 
         private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
@@ -177,9 +178,22 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
 
-                string rootDescription = staticFieldsByAddress.TryGetValue(rootAddress, out (string FieldOwnerType, string FieldName) fieldInfo)
-                    ? $"{fieldInfo.FieldOwnerType}.{fieldInfo.FieldName}"
-                    : $"{rootKind} @ 0x{rootAddress:X}";
+                string? alcInfo = null;
+                string rootDescription;
+
+                if (staticFieldsByAddress.TryGetValue(rootAddress, out (string FieldOwnerType, string FieldName, int AppDomainId) fieldInfo))
+                {
+                    rootDescription = $"{fieldInfo.FieldOwnerType}.{fieldInfo.FieldName}";
+                    if (fieldInfo.AppDomainId != 1)
+                    {
+                        alcInfo = $"AppDomain#{fieldInfo.AppDomainId}";
+                        rootDescription += $" [{alcInfo}]";
+                    }
+                }
+                else
+                {
+                    rootDescription = $"{rootKind} @ 0x{rootAddress:X}";
+                }
 
                 var analysis = new StaticRootAnalysis
                 {
@@ -192,7 +206,8 @@ namespace DumpDetective.Analysis.Analyzers
                     TopRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport),
                     ContainsCollections = containsCollections,
                     ContainsEventHandlers = containsEventHandlers,
-                    ScanWasCapped = scanWasCapped
+                    ScanWasCapped = scanWasCapped,
+                    AssemblyLoadContextInfo = alcInfo
                 };
 
                 results.Add(analysis);
@@ -268,6 +283,7 @@ namespace DumpDetective.Analysis.Analyzers
         public bool ContainsCollections { get; set; }
         public bool ContainsEventHandlers { get; set; }
         public bool ScanWasCapped { get; set; }
+        public string? AssemblyLoadContextInfo { get; set; }
     }
 }
 

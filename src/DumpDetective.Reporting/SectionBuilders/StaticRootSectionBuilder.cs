@@ -61,6 +61,12 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 blocks.Add(T($"⚠️ {eventHandlerRoots.Count} root(s) retain event handler objects — check for unsubscription leaks."));
             }
 
+            var alcRoots = roots.Where(r => !string.IsNullOrEmpty(r.AssemblyLoadContextInfo)).ToList();
+            if (alcRoots.Count > 0)
+            {
+                blocks.Add(T($"⚠️ {alcRoots.Count} root(s) belong to non-default AppDomains — indicates potential plugin unload failure."));
+            }
+
             for (int i = 0; i < limit; i++)
             {
                 var r = roots[i];

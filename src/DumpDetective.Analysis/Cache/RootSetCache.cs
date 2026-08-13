@@ -25,7 +25,7 @@ internal class RootSetCache
 {
     private IReadOnlyList<RootRecord>? _roots;
     private HashSet<ulong>? _staticRootedAddresses;
-    private Dictionary<ulong, (string TypeName, string FieldName)>? _staticFieldsByTargetAddress;
+    private Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)>? _staticFieldsByTargetAddress;
     private IProgress<AnalyzerProgressReport>? _progress;
     private DateTime? _lastBuildTime;
     private string? _lastBuildError;
@@ -99,7 +99,7 @@ internal class RootSetCache
         return _staticRootedAddresses;
     }
 
-    public Dictionary<ulong, (string TypeName, string FieldName)> GetStaticFieldsByTargetAddress(ClrHeap heap)
+    public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByTargetAddress(ClrHeap heap)
     {
         if (heap is null)
             throw new ArgumentNullException(nameof(heap));
@@ -107,10 +107,12 @@ internal class RootSetCache
         if (_staticFieldsByTargetAddress is not null)
             return _staticFieldsByTargetAddress;
 
-        var map = new Dictionary<ulong, (string, string)>(capacity: 16384);
+        var map = new Dictionary<ulong, (string, string, int)>(capacity: 16384);
 
         foreach (ClrAppDomain domain in heap.Runtime.AppDomains)
         {
+            int domainId = domain.Id;
+
             foreach (ClrModule module in domain.Modules)
             {
                 foreach (var (mt, _) in module.EnumerateTypeDefToMethodTableMap())
@@ -131,7 +133,7 @@ internal class RootSetCache
 
                             ClrObject fieldValue = field.ReadObject(domain);
                             if (fieldValue.Address != 0 && !map.ContainsKey(fieldValue.Address))
-                                map[fieldValue.Address] = (type.Name, field.Name);
+                                map[fieldValue.Address] = (type.Name, field.Name, domainId);
                         }
                         catch
                         {

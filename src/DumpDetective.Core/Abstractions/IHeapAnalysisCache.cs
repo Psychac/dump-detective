@@ -14,6 +14,7 @@ public interface IHeapAnalysisCache
     DumpSizeTier SizeTier { get; }
 
     HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap);
+    Dictionary<ulong, (string TypeName, string FieldName)> GetStaticFieldsByTargetAddress(ClrHeap heap);
     Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap);
     ulong? GetSampleInstanceAddress(string typeName);
     IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap);

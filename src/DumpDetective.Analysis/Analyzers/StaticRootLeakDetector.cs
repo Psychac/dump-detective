@@ -105,6 +105,7 @@ namespace DumpDetective.Analysis.Analyzers
             progress?.Report(new(0, "resolving static roots"));
             IReadOnlyList<(string RootKind, ulong Address)> allRoots = cache.GetOrBuildValidRoots(heap);
             HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
+            var staticFieldsByAddress = cache.GetStaticFieldsByTargetAddress(heap);
 
             foreach ((string rootKind, ulong rootAddress) in allRoots)
             {
@@ -176,9 +177,13 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
 
+                string rootDescription = staticFieldsByAddress.TryGetValue(rootAddress, out (string FieldOwnerType, string FieldName) fieldInfo)
+                    ? $"{fieldInfo.FieldOwnerType}.{fieldInfo.FieldName}"
+                    : $"{rootKind} @ 0x{rootAddress:X}";
+
                 var analysis = new StaticRootAnalysis
                 {
-                    RootDescription = $"{rootKind} @ 0x{rootAddress:X}",
+                    RootDescription = rootDescription,
                     DirectObjectAddress = rootAddress,
                     DirectObjectType = rootMetadata.TypeName,
                     DirectObjectSize = rootMetadata.Size,

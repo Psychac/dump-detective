@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Analysis.Cache;
 
@@ -24,6 +25,7 @@ internal class RootSetCache
 {
     private IReadOnlyList<RootRecord>? _roots;
     private HashSet<ulong>? _staticRootedAddresses;
+    private Dictionary<ulong, (string TypeName, string FieldName)>? _staticFieldsByTargetAddress;
     private IProgress<AnalyzerProgressReport>? _progress;
     private DateTime? _lastBuildTime;
     private string? _lastBuildError;
@@ -95,6 +97,52 @@ internal class RootSetCache
 
         _staticRootedAddresses = statics;
         return _staticRootedAddresses;
+    }
+
+    public Dictionary<ulong, (string TypeName, string FieldName)> GetStaticFieldsByTargetAddress(ClrHeap heap)
+    {
+        if (heap is null)
+            throw new ArgumentNullException(nameof(heap));
+
+        if (_staticFieldsByTargetAddress is not null)
+            return _staticFieldsByTargetAddress;
+
+        var map = new Dictionary<ulong, (string, string)>(capacity: 16384);
+
+        foreach (ClrAppDomain domain in heap.Runtime.AppDomains)
+        {
+            foreach (ClrModule module in domain.Modules)
+            {
+                foreach (var (mt, _) in module.EnumerateTypeDefToMethodTableMap())
+                {
+                    if (mt == 0)
+                        continue;
+
+                    ClrType? type = heap.GetTypeByMethodTable(mt);
+                    if (type is null || TypeFilterHelper.IsSystemType(type.Name) || TypeFilterHelper.IsCompilerGenerated(type.Name))
+                        continue;
+
+                    foreach (ClrStaticField field in type.StaticFields)
+                    {
+                        try
+                        {
+                            if (string.IsNullOrEmpty(field.Name))
+                                continue;
+
+                            ClrObject fieldValue = field.ReadObject(domain);
+                            if (fieldValue.Address != 0 && !map.ContainsKey(fieldValue.Address))
+                                map[fieldValue.Address] = (type.Name, field.Name);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+        }
+
+        _staticFieldsByTargetAddress = map;
+        return _staticFieldsByTargetAddress;
     }
 
     /// <summary>

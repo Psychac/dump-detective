@@ -299,7 +299,7 @@ dotMemory's "Dominators" view identifies the object responsible for the most ret
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---------------|--------|------------|------------|----------------|
-| P1-1 | **Static field name resolution** — enumerate `ClrType.StaticFields`, match `field.ReadObject(…)` address to root address, surface `OwnerType.FieldName` in `RootDescription` | Actionability | Medium | High | Improvement | Pending |
+| P1-1 | **Static field name resolution** — enumerate `ClrType.StaticFields`, match `field.ReadObject(…)` address to root address, surface `OwnerType.FieldName` in `RootDescription` | Actionability | Medium | High | Improvement | ✅ DONE |
 | P1-2 | **Surface `ContainsCollections` / `ContainsEventHandlers`** in snapshot and report | Diagnostic quality | Low | High | Improvement | ✅ DONE |
 | P1-3 | **Cancellation inside BFS inner loop** — check token every 256 dequeues | Scalability/UX | Low | High | Improvement | ✅ DONE |
 | P1-4 | **AssemblyLoadContext attribution** — check `ClrRuntime.AppDomains` / ALC information for the root's declaring type | High-value diagnostic | Medium | Medium | Improvement | Pending |

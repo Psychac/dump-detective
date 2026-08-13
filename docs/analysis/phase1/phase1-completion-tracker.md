@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 78 |
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 70 |
-| **P1 Implemented** | 122 |
+| **P1 Implemented** | 123 |
 | **P2 Implemented** | 23 |
-| **Overall P0+P1 Rate** | 82.1% (192/234) |
+| **Overall P0+P1 Rate** | 82.5% (193/234) |
 
 ---
 
@@ -55,7 +55,7 @@
 | 16 | **ObjectShapeAnalyzer** | 3/3 | 3/5 | 1/8 | 0/3 | ✅ P0 COMPLETE; I-3,I-5,I-7 done; I-6 skipped (duplicates ArrayAnalyzer); E-1 deferred (architectural blocker); I-8 done (P2); 1 P1, 7 P2 pending |
 | 17 | **ThreadAnalyzer** | 2/3* | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 BLOCKED (ClrMD API, reverse-index workaround available); P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 18 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
-| 19 | **StaticRootLeakDetector** | 4/4 | 2/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 40% (P1-2,P1-3 done); P1-1,P1-4,P1-5 pending |
+| 19 | **StaticRootLeakDetector** | 4/4 | 3/5 | 0/5 | 0/4 | ✅ P0 complete (100%); P1 60% (P1-1,P1-2,P1-3 done); P1-4,P1-5 pending |
 | 20 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
 | 21 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 0/6 | 0/3 | ✅ P0+P1 COMPLETE; P1-2 superseded by AsyncStateMachineAnalyzer P3-1 (not counted) |
 | 22 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |

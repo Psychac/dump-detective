@@ -29,7 +29,8 @@ public sealed class AsyncStateMachineTrendComparerTests
                     SampleStateValue: 0,
                     ReferenceFieldCount: 2,
                     Gen2Count: gen2Count,
-                    Gen2Fraction: gen2Fraction)
+                    Gen2Fraction: gen2Fraction,
+                    IsAsyncVoid: false)
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],
@@ -116,7 +117,8 @@ public sealed class AsyncStateMachineTrendComparerTests
                     SampleStateValue: 0,
                     ReferenceFieldCount: 2,
                     Gen2Count: 40,
-                    Gen2Fraction: 0.4),
+                    Gen2Fraction: 0.4,
+                    IsAsyncVoid: false),
                 new StateMachineTypeProfile(
                     TypeName: "Type2<Method>d__2",
                     OriginatingMethod: "Method2",
@@ -126,7 +128,8 @@ public sealed class AsyncStateMachineTrendComparerTests
                     SampleStateValue: 1,
                     ReferenceFieldCount: 1,
                     Gen2Count: 60,
-                    Gen2Fraction: 0.6),
+                    Gen2Fraction: 0.6,
+                    IsAsyncVoid: false),
                 new StateMachineTypeProfile(
                     TypeName: "Type3<Method>d__3",
                     OriginatingMethod: "Method3",
@@ -136,7 +139,8 @@ public sealed class AsyncStateMachineTrendComparerTests
                     SampleStateValue: 2,
                     ReferenceFieldCount: 3,
                     Gen2Count: 50,
-                    Gen2Fraction: 0.5)
+                    Gen2Fraction: 0.5,
+                    IsAsyncVoid: false)
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],

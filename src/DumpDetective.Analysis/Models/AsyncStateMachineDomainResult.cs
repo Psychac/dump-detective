@@ -13,7 +13,8 @@ internal sealed record StateMachineTypeProfile(
     int SampleStateValue,
     int ReferenceFieldCount,
     long Gen2Count,
-    double Gen2Fraction);
+    double Gen2Fraction,
+    bool IsAsyncVoid);
 
 internal sealed record HighCaptureStateMachine(
     ulong Address,

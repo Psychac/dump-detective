@@ -175,6 +175,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 double gen2Fraction = entry.Count > 0 ? entry.Gen2Count / (double)entry.Count : 0.0;
+                bool isAsyncVoid = IsAsyncVoidStateMachine(clrType);
                 if (i < typeLimit)
                 {
                     topTypes.Add(new StateMachineTypeProfile(
@@ -186,7 +187,8 @@ namespace DumpDetective.Analysis.Analyzers
                         SampleStateValue: avgStateValue,
                         ReferenceFieldCount: refFieldCount,
                         Gen2Count: entry.Gen2Count,
-                        Gen2Fraction: gen2Fraction));
+                        Gen2Fraction: gen2Fraction,
+                        IsAsyncVoid: isAsyncVoid));
                 }
             }
 
@@ -246,6 +248,20 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (iface.Name is "System.Runtime.CompilerServices.IAsyncStateMachine")
                     return true;
+            }
+            return false;
+        }
+
+        private static bool IsAsyncVoidStateMachine(ClrType type)
+        {
+            foreach (ClrInstanceField f in type.Fields)
+            {
+                if (f.Name != "<>t__builder") continue;
+                ClrType? builderType = f.Type;
+                if (builderType?.Name is not null)
+                {
+                    return builderType.Name.Contains("AsyncVoidMethodBuilder");
+                }
             }
             return false;
         }

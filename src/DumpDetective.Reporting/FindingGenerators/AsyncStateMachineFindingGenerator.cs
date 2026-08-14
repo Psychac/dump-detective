@@ -12,6 +12,7 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
     private const int HighCountWarning = 1_000;
     private const int HighCountCritical = 10_000;
     private const int MaxFireAndForgetFindings = 3;
+    private const int AsyncVoidCountThreshold = 10;
     private const ulong LargeCaptureWarning = 50_000_000UL;  // 50 MB
     private const ulong LargeCaptureCritical = 200_000_000UL;  // 200 MB
 
@@ -81,6 +82,37 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
                 if (++fireAndForgetCount >= MaxFireAndForgetFindings)
                     break;
             }
+        }
+
+        // ── Async void method detection ───────────────────────────────────────
+        var asyncVoidMethods = new List<(string Method, string Type, int Count)>();
+        foreach (StateMachineTypeProfile profile in r.TopStateMachineTypes)
+        {
+            if (profile.IsAsyncVoid && profile.Count >= AsyncVoidCountThreshold)
+                asyncVoidMethods.Add((profile.OriginatingMethod, profile.DeclaringType, profile.Count));
+        }
+
+        if (asyncVoidMethods.Count > 0)
+        {
+            asyncVoidMethods.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+            string topAsyncVoid = asyncVoidMethods.Count > 0
+                ? $"{asyncVoidMethods[0].Method} (on {asyncVoidMethods[0].Type})"
+                : "N/A";
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: $"Async void method detected: {topAsyncVoid}",
+                Evidence: $"{asyncVoidMethods.Count} async void method(s) detected with state machines on heap. " +
+                          $"Top: {topAsyncVoid} with {asyncVoidMethods[0].Count} suspended instances.",
+                Recommendation: "Async void methods should be avoided except for event handlers. " +
+                                "They fire-and-forget by construction, make exception handling impossible, " +
+                                "and prevent callers from knowing when the operation completes. " +
+                                "Use async Task methods instead and await the result.",
+                Tags: ["async", "async-void", "memory", "antipattern"],
+                MetricValue: asyncVoidMethods.Count,
+                MetricUnit: "methods"));
         }
 
         // ── Large captured closures ────────────────────────────────────────────

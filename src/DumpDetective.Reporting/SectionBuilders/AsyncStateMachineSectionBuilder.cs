@@ -43,7 +43,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             int limit = Math.Min(d.TopStateMachineTypes.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top async state machine types by instance count",
-                new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Sample State"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent") },
+                new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Sample State"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
                 BuildTypeRows(d.TopStateMachineTypes, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             
             blocks.Add(T("Sample State values indicate the suspend position in the async method: " +
@@ -94,6 +94,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 Cell($"{t.ReferenceFieldCount:N0}",         t.ReferenceFieldCount),
                 Cell($"{t.Gen2Count:N0}",                   t.Gen2Count),
                 Cell($"{t.Gen2Fraction * 100:F1}%",         t.Gen2Fraction),
+                Cell(t.IsAsyncVoid ? "Yes" : "No"),
             ]));
         }
         return rows;

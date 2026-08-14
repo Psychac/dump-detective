@@ -25,9 +25,12 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AsyncStateMachineAnalyzer : IAnalyzer
     {
-        // Compiler-generated async state machine type suffix: <MethodName>d__N
+        // Compiler-generated async state machine type suffix: <MethodName>d__N[optional generic params]
+        // Matches both:
+        // - Non-generic: <Method>d__1
+        // - Generic: <Method>d__1[[T]] or <Method>d__1[[System.String, mscorlib]]
         private static readonly Regex StateMachinePattern =
-            new(@"<(.+?)>d__\d+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
+            new(@"<(.+?)>d__\d+(?:\[\[.+?\]\])?$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
         public string Name => "Async State Machine Analysis";
         public string Category => "Memory";

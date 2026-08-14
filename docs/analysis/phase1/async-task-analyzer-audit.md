@@ -320,7 +320,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P2-1 | Fix `BuildTopN` threshold tracking bug (threshold stays 0 during fill) | 5 | Improvement | Low | Low | High | ✅ DONE (3117069) |
 | P2-2 | Normalize pending-task finding threshold to a rate (pct of total) in addition to raw count | 2 | Improvement | Medium | Low | High | ✅ DONE (8e6eb40) |
 | P2-3 | Add orphaned task snapshot count vs. total orphan count note in section builder | 2 | Improvement | Medium | Low | High | ✅ DONE (8e6eb40) |
-| P2-4 | Harmonize section builder lead finding threshold (>50) with finding generator threshold (≥10) | 2 | Improvement | Low | Low | High |
+| P2-4 | Harmonize section builder lead finding threshold (>50) with finding generator threshold (≥10) | 2 | Improvement | Low | Low | High | ✅ DONE (ac3f451) |
 | P2-5 | Report `AvgContinuationDepth` denominator (`depthSampleCount`) in key metrics | 2 | Improvement | Low | Low | High |
 | P2-6 | Detect continuation chain cycles (async deadlock heuristic) during BFS | 4 | Improvement | High | Low | High |
 | P2-7 | Pending task GC generation distribution (Gen0/Gen1/Gen2/LOH) | 4 | Improvement | Medium | Low | High |

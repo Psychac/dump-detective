@@ -42,13 +42,14 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             AsyncStateMachineAnalysisOptions options = context.AnalysisOptions.AsyncStateMachineAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
             AsyncStateMachineAnalysisOptions options,
+            IProgress<AnalyzerProgressReport>? progress,
             CancellationToken cancellationToken)
         {
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
@@ -234,10 +235,14 @@ namespace DumpDetective.Analysis.Analyzers
                     ? cache.EnumerateIndexedEntriesAsTuples()
                     : LiveHeapEntries(heap);
 
+                var scanCounter = new ObjectScanCounter("scanning state machine instances for histogram",
+                    progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
+
                 int typesStillOpen = histogramMts.Count;
                 foreach ((ulong address, ulong mt, ulong _) in entries)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    scanCounter.Tick();
 
                     if (!histogramRemaining.TryGetValue(mt, out int remaining) || remaining <= 0) continue;
 
@@ -257,6 +262,8 @@ namespace DumpDetective.Analysis.Analyzers
                     if (remaining == 0 && --typesStillOpen == 0)
                         break;
                 }
+
+                scanCounter.Complete();
             }
 
             var topTypes = new List<StateMachineTypeProfile>(pendingProfiles.Count);

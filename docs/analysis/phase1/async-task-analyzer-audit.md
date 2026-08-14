@@ -327,7 +327,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P3-1 | Add `ValueTask` / `IValueTaskSource` tracking via `ManualResetValueTaskSourceCore` | 4 | Evolution | High | High | Medium |
 | P3-2 | Add `TaskCompletionSource<T>` orphan detection | 4 | Evolution | Medium | Medium | High |
 | P3-3 | Rank pending types by total retained bytes (Size × Count) | 4, 7 | Improvement | Medium | Low | High |
-| P3-4 | Merge duplicate state-read with BFS `heap.GetObject` call to eliminate second lookup | 6 | Improvement | Low | Low | High |
+| P3-4 | Merge duplicate state-read with BFS `heap.GetObject` call to eliminate second lookup | 6 | Improvement | Low | Low | High | ✅ DONE (82ad3aa) |
 | P3-5 | Re-verify P1-2 (`IAsyncStateMachine` correlation) treats "no state machine found" as expected once .NET 11 Runtime Async adoption grows; confirm `RuntimeAsyncTask<T>` shape against GA runtime before hard-coding | 4, 7 | Evolution | Medium — prevents false-positive "orphan" classification | Low | Low (spec not final) |
 
 ---

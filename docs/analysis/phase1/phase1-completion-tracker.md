@@ -14,7 +14,7 @@
 | **Total P1 Identified** | 158 |
 | **P0 Implemented** | 72 |
 | **P1 Implemented** | 127 |
-| **P2 Implemented** | 32 |
+| **P2 Implemented** | 33 |
 | **Overall P0+P1 Rate** | 84.0% (199/237) |
 
 ---
@@ -29,7 +29,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 
 | # | Analyzer | Re-Audit Date | Score | P0 | P1 | P2 | P3 | Status |
 |---|----------|----------------|-------|----|----|----|----|--------|
-| 1 | **AsyncStateMachineAnalyzer** | 2026-08-14 | 62→86/100 | 4/4 | 8/8 | 4/8 | 1/4 | ✅ Re-audit found P0-4 (regex drift silently defeated P2-4), P1-7 (gen2 fraction scope mismatch), P1-8 (dead code) — all fixed same-session; P2-5..P2-8 pending; see [async-state-machine-analyzer-audit.md](async-state-machine-analyzer-audit.md) |
+| 1 | **AsyncStateMachineAnalyzer** | 2026-08-14 | 62→86/100 | 4/4 | 8/8 | 5/8 | 1/4 | ✅ Re-audit found P0-4 (regex drift silently defeated P2-4), P1-7 (gen2 fraction scope mismatch), P1-8 (dead code) — all fixed same-session; P2-5 done, P2-6..P2-8 pending; see [async-state-machine-analyzer-audit.md](async-state-machine-analyzer-audit.md) |
 
 **Subtotal: 4/4 P0 done, 8/8 P1 done** (1 analyzer re-audited so far)
 

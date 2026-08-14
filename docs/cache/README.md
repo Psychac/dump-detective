@@ -1,79 +1,22 @@
+# Cache Subsystem Docs
 
-# DumpDetective Cache Modernization – Architecture Overview
+Two docs, current-state and forward-looking:
 
-> **Looking for what to actually work on?** See
-> [15-ImplementationRoadmap.md](15-ImplementationRoadmap.md) — the single
-> status-tracked task list. This file and the numbered docs below are the
-> design/analysis history behind it, not a to-do list.
+- **[cache-architecture.md](cache-architecture.md)** — the authoritative spec for what's
+  actually built: the `HeapAnalysisCache` facade and its sub-caches, the `cache.bin`
+  container, the disk writer/reader, the object-address point lookup, the reverse
+  (parent-lookup) index, forward-BFS traversal, and the governing design constraints.
+  Written directly against source, not against prior design docs.
+- **[backlog.md](backlog.md)** — everything real and not yet built: bounded-memory
+  gaps, perf wins with data already collected but unread, the confirmed GC-root
+  native-cost diagnosis and its unattempted mitigations, and gated/speculative items
+  with their trigger conditions.
 
-## Purpose
+For the exact byte-level `cache.bin` layout, see
+[docs/binary-format.md](../binary-format.md). For the disk-backed reverse-reference
+index's full format, see
+[docs/analysis/phase1-redesigns/full-reverse-index-plan.md](../analysis/phase1-redesigns/full-reverse-index-plan.md).
 
-This modernization improves cache reuse, reduces repeated ClrMD work, and lays the foundation for graph-based analysis while preserving the existing HeapIndex architecture.
-
-This is an evolution of the current implementation—not a rewrite.
-
-## Current Architecture
-
-Today HeapAnalysisCache owns multiple responsibilities:
-
-- Heap index lifecycle
-- Type statistics
-- Root cache
-- Method-table cache
-- Sample instances
-- Thread caches
-- Miscellaneous lookup helpers
-
-The heap index is already optimized through memory-backed and disk-backed implementations.
-
-Analyzers primarily operate on HeapEntry but graph-oriented analyzers still repeatedly query ClrMD.
-
-## Design Goals
-
-- Preserve existing analyzer behavior.
-- ~~Preserve MemoryBackedObjectIndexWriter and DiskBackedObjectIndexWriter.~~
-  Superseded: [Tier 2](15-ImplementationRoadmap.md#tier-2--single-file-container-migration-doc-14)
-  deletes both in favor of a single always-on writer.
-- Keep HeapIndex as the primary source of object metadata.
-- Eliminate repeated reference enumeration.
-- Never cache ClrObject or ClrType.
-- Prefer immutable caches.
-- Continue scaling to 25GB+ dumps.
-
-## Non Goals
-
-- Replace HeapIndex.
-- Rewrite analyzers.
-- Compute dominators or retained size.
-- Introduce eager graph building.
-- Change report formats.
-
-## Target Architecture
-
-HeapAnalysisCache (Facade) — **built**, matches code
- ├── HeapIndex
- ├── StatisticsCache
- ├── RootSetCache — canonical root-set (`RootRecord`), replaced `RootCache`; see
- │   [docs/architecture.md § Graph and traversal](../architecture.md)
- ├── TypeMetadataCache
- ├── ThreadCache
- ├── ReferenceGraphCache (lazy) — **not built, not on current roadmap**
- └── Future DiskGraphCache — **not built, not on current roadmap**
-
-Forward-BFS is likewise unified: `BoundedGraphWalk` (`DumpDetective.Analysis.Traversal`) replaced
-the formerly-separate `HeapTypePathTraversal`, `BoundedRetainedSizeBfs`, and
-`HeapAnalysisCache.GetRetainedObjects`, enforcing the 20-depth cap inside the primitive itself.
-
-Heap scanners continue using HeapIndex.
-Graph analyzers would consume ReferenceGraphCache, if it existed — see
-[cache-modernization-spec.md](cache-modernization-spec.md) for why this
-direction was superseded.
-
-## Guiding Rules
-
-- Object metadata belongs in HeapIndex.
-- Type metadata belongs in TypeMetadataCache.
-- Connectivity belongs in ReferenceGraphCache.
-- Graph caches store ObjectIds only.
-- Expensive caches are lazy.
-- Public APIs remain compatible unless explicitly stated.
+Prior design-history docs (numbered docs, `ArchitectureDecisions.md`,
+`cache-modernization-spec.md`) have been retired — their still-true content is folded
+into the two docs above; their still-open proposals are in `backlog.md`.

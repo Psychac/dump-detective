@@ -27,12 +27,12 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
         };
 
         SectionLeadFinding? leadFinding = null;
-        if (asyncTasks.MaxContinuationDepth > 50)
+        if (asyncTasks.MaxContinuationDepth >= 15)
         {
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Deep continuation chain detected (depth {asyncTasks.MaxContinuationDepth:N0})",
-                Summary: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 50-hop warning threshold.",
+                Summary: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 15-hop warning threshold.",
                 Recommendation: "Inspect the deepest chain table below. Deep chains can indicate async deadlocks or unbounded recursive continuations.",
                 ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,

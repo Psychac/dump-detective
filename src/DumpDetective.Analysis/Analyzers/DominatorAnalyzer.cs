@@ -537,7 +537,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         if (objectAddress == 0)
             return null;
 
-        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): objectAddress comes from the
+        // OPT (docs/cache/cache-architecture.md Phase 6): objectAddress comes from the
         // reverse-index-driven incoming-reference count, not a live traversal — when a cache is
         // available, delegate to it fully (it already handles disk-vs-in-memory internally per its
         // own contract) rather than adding a second heap.GetObject fallback here, which would

@@ -126,7 +126,7 @@ namespace DumpDetective.Analysis.Analyzers
                         }
                         else
                         {
-                            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve via
+                            // OPT (docs/cache/cache-architecture.md Phase 6): resolve via
                             // the disk-backed address index instead of heap.GetObject.
                             if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
                             {
@@ -153,7 +153,7 @@ namespace DumpDetective.Analysis.Analyzers
                         }
                         else
                         {
-                            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve via
+                            // OPT (docs/cache/cache-architecture.md Phase 6): resolve via
                             // the disk-backed address index instead of heap.GetObject.
                             if (!cache.TryGetObjectMetadata(heap, addr, out _, out _)) dependentHandleDeadKeyCount++;
                         }
@@ -198,7 +198,7 @@ namespace DumpDetective.Analysis.Analyzers
                                 }
                                 else
                                 {
-                                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): resolve
+                                    // OPT (docs/cache/cache-architecture.md Phase 6): resolve
                                     // via the disk-backed address index instead of heap.GetObject.
                                     if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
                                     {

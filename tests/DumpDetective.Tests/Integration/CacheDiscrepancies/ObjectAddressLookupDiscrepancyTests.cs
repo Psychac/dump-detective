@@ -8,7 +8,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 2 validation for docs/cache/19-ObjectAddressLookupIndex.md: the correctness oracle for
+/// Phase 2 validation for docs/cache/cache-architecture.md: the correctness oracle for
 /// <see cref="ObjectAddressLookup"/> — samples real addresses from a built disk index and confirms
 /// <c>TryGetEntry</c> agrees with <c>heap.GetObject(address).{Type.MethodTable, Size}</c> for every
 /// sample, against a real dump.

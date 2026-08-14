@@ -234,8 +234,8 @@ per **instance** (not per type) whenever the cached layout was incomplete.
 
 Fixed: the four dead `?? FindXxx(...)` fallback calls were removed from `AnalyzeQueue` /
 `AnalyzeHashSet`, and the (now fully unused) helper methods were deleted. See
-[docs/cache/18-IndexBuildPerfOpportunities.md](../../cache/18-IndexBuildPerfOpportunities.md) for
-the related index-build-phase field-walk consolidation that prompted this fix.
+[docs/cache/cache-architecture.md § 3](../../cache/cache-architecture.md#3-writer--diskbackedobjectindexwriter) for
+the related index-build-phase field-walk consolidation (`ComputeTypeShapeAndStringFields`) that prompted this fix.
 
 ### Missing `_freeCount` accounting in Dictionary
 

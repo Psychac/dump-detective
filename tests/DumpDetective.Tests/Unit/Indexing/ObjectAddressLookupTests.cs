@@ -28,7 +28,7 @@ public class ObjectAddressLookupTests : IDisposable
 
     // Two segments, deliberately written to the container out of address order (segment 2 has a
     // lower address range than segment 1) — exercises the defensive sort in TryOpen, matching the
-    // "segments aren't guaranteed address-sorted" premise in docs/cache/19-ObjectAddressLookupIndex.md.
+    // "segments aren't guaranteed address-sorted" premise in docs/cache/cache-architecture.md.
     // Segment A: [0x1000, 0x1100), 4 objects at 0x1000/0x1040/0x1080/0x10C0.
     // Segment B: [0x5000, 0x5040), 2 objects at 0x5000/0x5020.
     private static readonly (ulong Address, ulong MethodTable, ulong Size)[] SegAObjects =

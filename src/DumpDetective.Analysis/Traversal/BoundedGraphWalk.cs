@@ -156,7 +156,7 @@ internal static class BoundedGraphWalk
     /// free, so callers doing per-object aggregation over the result (e.g.
     /// <c>StaticRootLeakDetector</c>'s type-stat rollup) don't need a second
     /// <c>heap.GetObject</c> pass over the same addresses (see
-    /// docs/cache/19-ObjectAddressLookupIndex.md Appendix B). An entry left at the default
+    /// docs/cache/cache-architecture.md Appendix B). An entry left at the default
     /// <c>(0, 0)</c> was <em>discovered</em> (added to prevent re-enqueueing a node reachable via
     /// multiple paths) but never actually <em>dequeued and resolved</em> — either because
     /// <c>heap.GetObject</c> found it invalid, or because the scan hit <paramref name="maxObjects"/>

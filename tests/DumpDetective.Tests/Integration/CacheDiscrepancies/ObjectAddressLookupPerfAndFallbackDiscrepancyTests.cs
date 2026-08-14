@@ -10,7 +10,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 7 validation for docs/cache/19-ObjectAddressLookupIndex.md:
+/// Phase 7 validation for docs/cache/cache-architecture.md:
 /// 1. Lightweight latency comparison — <c>TryGetObjectMetadata</c> vs. live <c>heap.GetObject</c> —
 ///    at a realistic call volume, reusing a single dump load (a Stopwatch-based signal rather than a
 ///    full BenchmarkDotNet run, which is written separately in

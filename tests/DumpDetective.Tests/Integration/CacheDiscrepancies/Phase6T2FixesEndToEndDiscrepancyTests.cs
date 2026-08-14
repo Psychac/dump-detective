@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 6 validation for docs/cache/19-ObjectAddressLookupIndex.md: the 20 T2 call sites across
+/// Phase 6 validation for docs/cache/cache-architecture.md: the 20 T2 call sites across
 /// the shared root-path infrastructure (<c>RootPathFinder</c>, <c>IndexBackedBidirectionalSearch</c>,
 /// <c>RootPathSearchSupport</c>) and 6 analyzers (<c>StaticRootLeakDetector</c>,
 /// <c>DominatorAnalyzer</c>, <c>EventLeakAnalyzer</c>, <c>TimerLeakAnalyzer</c>,

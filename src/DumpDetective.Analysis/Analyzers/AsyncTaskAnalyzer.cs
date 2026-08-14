@@ -673,7 +673,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         if (cache.TryGetValue(mt, out string? name))
             return name;
 
-        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already known —
+        // OPT (docs/cache/cache-architecture.md Phase 5): mt is already known —
         // resolve via the metadata cache instead of materializing a ClrObject.
         string resolved = heap.GetTypeByMethodTable(mt)?.Name
             ?? "System.Threading.Tasks.Task";

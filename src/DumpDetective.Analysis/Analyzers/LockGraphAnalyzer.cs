@@ -235,7 +235,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (objectAddress == 0)
                 return StringConstants.UnknownType;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): address-only caller (from
+            // OPT (docs/cache/cache-architecture.md Phase 6): address-only caller (from
             // sync-block enumeration) — resolve via the disk-backed address index when available.
             if (cache is not null)
             {

@@ -16,7 +16,7 @@ internal class HeapIndexCache : IDisposable
     private string? _lastBuildError;
 
     // Lazily opened on first TryGetObjectMetadata call and kept open for the cache's lifetime —
-    // see docs/cache/19-ObjectAddressLookupIndex.md Phase 3. _addressLookupAttempted distinguishes
+    // see docs/cache/cache-architecture.md Phase 3. _addressLookupAttempted distinguishes
     // "not tried yet" from "tried and unavailable" so a missing/aborted SegmentIndex section
     // doesn't retry TryOpen on every call.
     private ObjectAddressLookup? _addressLookup;

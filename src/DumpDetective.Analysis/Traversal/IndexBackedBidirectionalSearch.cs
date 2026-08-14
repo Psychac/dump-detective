@@ -66,7 +66,7 @@ internal sealed class IndexBackedBidirectionalSearch
         // locals above via closure — iterator methods can't take ref/out parameters directly.
         IEnumerable<ulong> ForwardNeighbors(ulong node)
         {
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): this is a type-classification
+            // OPT (docs/cache/cache-architecture.md Phase 6): this is a type-classification
             // gate, not the traversal mechanism — actual neighbor expansion below goes through
             // _forwardProvider, which is index-backed when a reverse index is in play.
             ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
@@ -98,7 +98,7 @@ internal sealed class IndexBackedBidirectionalSearch
 
         IEnumerable<ulong> BackwardNeighbors(ulong node)
         {
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): same type-classification gate
+            // OPT (docs/cache/cache-architecture.md Phase 6): same type-classification gate
             // as ForwardNeighbors above — actual reverse expansion goes through _backwardProvider.
             ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
             if (type is null)

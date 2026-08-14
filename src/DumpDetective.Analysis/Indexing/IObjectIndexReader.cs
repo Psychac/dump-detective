@@ -32,7 +32,7 @@ internal interface IObjectIndexReader
     /// <summary>
     /// One-shot random-access lookup of a single <paramref name="address"/>'s
     /// <c>(MethodTable, Size)</c> via the disk-backed <c>SegmentIndex</c> — see
-    /// <see cref="ObjectAddressLookup"/> and docs/cache/19-ObjectAddressLookupIndex.md. Opens,
+    /// <see cref="ObjectAddressLookup"/> and docs/cache/cache-architecture.md. Opens,
     /// looks up once, and disposes; callers making many lookups over one analysis run should hold
     /// their own <see cref="ObjectAddressLookup"/> instance instead of calling this repeatedly.
     /// Returns <c>false</c> — not an error — when the container/section is unavailable or

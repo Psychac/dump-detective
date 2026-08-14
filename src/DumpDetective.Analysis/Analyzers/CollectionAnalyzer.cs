@@ -898,7 +898,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (methodTableKinds.TryGetValue(entry.MethodTable, out CollectionKind existing))
                 return existing;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): the MethodTable is already
+            // OPT (docs/cache/cache-architecture.md Phase 5): the MethodTable is already
             // known here, so resolve the ClrType directly via the metadata cache instead of
             // materializing a ClrObject — same ClrType either way, no dump I/O.
             ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
@@ -1097,7 +1097,7 @@ namespace DumpDetective.Analysis.Analyzers
             ClrHeap heap, ulong methodTable,
             ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
         {
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): methodTable is already the
+            // OPT (docs/cache/cache-architecture.md Phase 5): methodTable is already the
             // GetOrAdd key — resolve via the metadata cache instead of materializing a ClrObject.
             return methodTableKinds.GetOrAdd(methodTable, static (mt, heap) =>
             {

@@ -34,7 +34,7 @@ public interface IHeapAnalysisCache
 
     /// <summary>
     /// Resolves <paramref name="address"/>'s <c>(MethodTable, Size)</c> via the disk-backed
-    /// <c>SegmentIndex</c> point lookup when available (see docs/cache/19-ObjectAddressLookupIndex.md),
+    /// <c>SegmentIndex</c> point lookup when available (see docs/cache/cache-architecture.md),
     /// falling back to a live <paramref name="heap"/>.GetObject resolution when the disk index or its
     /// <c>SegmentIndex</c> section is unavailable (in-memory mode, old cache, aborted satellite
     /// write). Callers never need to branch on backing mode. Returns <c>false</c> — an expected

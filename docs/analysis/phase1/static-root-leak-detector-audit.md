@@ -306,7 +306,7 @@ dotMemory's "Dominators" view identifies the object responsible for the most ret
 | P1-5 | **Use object index for size/MT resolution** inside retained-object loop instead of `heap.GetObject` per address | Performance (25GB+) | Medium | High | Improvement | ✅ DONE — see note below |
 
 **P1-5 note**: shipped differently than originally framed here. Investigating this recommendation
-(`docs/cache/19-ObjectAddressLookupIndex.md`) found that `StaticRootLeakDetector`'s specific
+(see `docs/cache/cache-architecture.md` § 4) found that `StaticRootLeakDetector`'s specific
 retained-object loop didn't actually need a disk index lookup at all — `BoundedGraphWalk.CollectRetainedObjects`
 already calls `heap.GetObject` once per node for its own BFS traversal, so capturing `(MethodTable, Size)`
 from that existing call and returning it alongside the address (a zero-infrastructure change, done in

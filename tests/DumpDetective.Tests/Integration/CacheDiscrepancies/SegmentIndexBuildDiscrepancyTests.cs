@@ -10,7 +10,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 1 validation for docs/cache/19-ObjectAddressLookupIndex.md: confirms
+/// Phase 1 validation for docs/cache/cache-architecture.md: confirms
 /// DiskBackedObjectIndexWriter actually produces a well-formed SegmentIndex section against a real
 /// dump — record ranges are contiguous, sum to the total object count, and match the source
 /// ClrSegment boundaries. Unlike SegmentIndexWriterTests (synthetic data), this exercises the real

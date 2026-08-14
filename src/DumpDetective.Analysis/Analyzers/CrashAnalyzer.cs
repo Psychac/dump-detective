@@ -560,7 +560,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         // Resolve whether a method-table corresponds to an exception type and return its resolved name.
         //
-        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): mt is already a parameter here,
+        // OPT (docs/cache/cache-architecture.md Phase 6): mt is already a parameter here,
         // so both IsException and Name resolve directly via heap.GetTypeByMethodTable(mt) — no
         // heap.GetObject/exceptionAddress re-read needed at all. This also removes the old
         // sample-address fallback path, which required a HeapIndexBuildResult that both call sites
@@ -853,7 +853,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
                 return isException;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): entry.MethodTable is already
+            // OPT (docs/cache/cache-architecture.md Phase 6): entry.MethodTable is already
             // known — resolve via the metadata cache instead of materializing a ClrObject.
             isException = heap.GetTypeByMethodTable(entry.MethodTable)?.IsException == true;
             exceptionMethodTables[entry.MethodTable] = isException;

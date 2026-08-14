@@ -6,7 +6,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 0 validation for docs/cache/19-ObjectAddressLookupIndex.md: the proposed SegmentIndex
+/// Phase 0 validation for docs/cache/cache-architecture.md: the proposed SegmentIndex
 /// binary-search lookup relies on every GC segment yielding objects from
 /// <see cref="ClrSegment.EnumerateObjects"/> in strictly increasing address order. This is a load-
 /// bearing assumption for the whole design, not something to assume from GC folklore — this test
@@ -83,6 +83,6 @@ public sealed class SegmentAddressContiguityDiscrepancyTests
 
         violations.Should().BeEmpty(
             $"checked {segmentsChecked} segments ({kindsSummary}), {objectsChecked} objects total; " +
-            "any violation invalidates the SegmentIndex binary-search design in docs/cache/19-ObjectAddressLookupIndex.md");
+            "any violation invalidates the SegmentIndex binary-search design in docs/cache/cache-architecture.md");
     }
 }

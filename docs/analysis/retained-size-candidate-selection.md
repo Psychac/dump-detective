@@ -3,7 +3,7 @@
 > Status: **All phases (0-4) done.** From `GCRootAnalyzer` P0-1
 > discussion in [phase1/gcroot-analyzer-audit.md](phase1/gcroot-analyzer-audit.md) —
 > once shallow-size resolution fixed there (index-backed, see
-> [../cache/19-ObjectAddressLookupIndex.md](../cache/19-ObjectAddressLookupIndex.md)), clear
+> [../cache/cache-architecture.md § 4](../cache/cache-architecture.md#4-point-lookup--objectaddresslookup--segmentindex)), clear
 > remaining "true retained size" gap not GCRootAnalyzer-specific.
 
 ---
@@ -39,7 +39,7 @@ BFS budget currently spent uniformly, incl. cases just re-confirming number the
 - Traversal primitive (`ComputeExclusiveRetained`) already shared.
 - *Targeting* logic (who gets BFS budget, why) not shared, duplicated ad hoc per analyzer.
 - Shallow size now cheap + accurate for every object on heap (index-backed
-  `TryGetObjectMetadata`, see [../cache/19-ObjectAddressLookupIndex.md](../cache/19-ObjectAddressLookupIndex.md)).
+  `TryGetObjectMetadata`, see [../cache/cache-architecture.md § 4](../cache/cache-architecture.md#4-point-lookup--objectaddresslookup--segmentindex)).
   Makes shape-based filtering possible w/o new indexing work — `ClrType` field
   metadata (reference vs value fields) already available from type system w/o live
   heap read per candidate.
@@ -152,12 +152,12 @@ same analyzer run stay exclusive/non-overlapping, comparable to each other.
 
 - `ComputeExclusiveRetained` itself unchanged — proposal only adds selection layer
   in front of it.
-- Reference-graph edges still not persisted to disk (see
-  [../cache/19-ObjectAddressLookupIndex.md § Problem](../cache/19-ObjectAddressLookupIndex.md));
+- Reference-graph edges still not persisted to disk (only the reverse/parent-lookup
+  direction is — see [../cache/cache-architecture.md § 5](../cache/cache-architecture.md#5-reverse-parent-lookup-index));
   BFS still requires live `heap.GetObject` + `EnumerateReferences` per node actually
   walked. Proposal reduces *how many* nodes get walked, not per-node cost.
-- Per [docs/cache/README.md § Non Goals](../cache/README.md): stays out of
-  `HeapAnalysisCache`'s facade — traversal-layer utility, not new cache.
+- Stays out of `HeapAnalysisCache`'s facade — traversal-layer utility
+  (see [../cache/cache-architecture.md § 6](../cache/cache-architecture.md#6-traversal--boundedgraphwalk)), not a new cache.
 
 ---
 

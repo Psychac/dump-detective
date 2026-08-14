@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 5 validation for docs/cache/19-ObjectAddressLookupIndex.md: the 6 T1 call sites
+/// Phase 5 validation for docs/cache/cache-architecture.md: the 6 T1 call sites
 /// (<c>CollectionAnalyzer</c> x2, <c>LohFragmentationAnalyzer</c>, <c>HangAnalyzer</c> x2,
 /// <c>AsyncTaskAnalyzer</c>) swapped <c>heap.GetObject(address).Type</c> for
 /// <c>heap.GetTypeByMethodTable(mt)</c> — same <c>ClrType</c> either way, so this is a smoke test

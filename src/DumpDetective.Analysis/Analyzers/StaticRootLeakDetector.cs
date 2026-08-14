@@ -156,7 +156,7 @@ namespace DumpDetective.Analysis.Analyzers
                     var typeStats = new Dictionary<string, RetainedTypeInfo>();
                     // Memoizes MethodTable -> type name so a type with N retained instances resolves
                     // its name once via heap.GetTypeByMethodTable (metadata-cache hit, no dump I/O)
-                    // instead of N times — see docs/cache/19-ObjectAddressLookupIndex.md Phase 4.
+                    // instead of N times — see docs/cache/cache-architecture.md Phase 4.
                     var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
                     var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
                     totalSize = 0;

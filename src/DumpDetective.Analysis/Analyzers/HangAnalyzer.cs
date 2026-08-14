@@ -503,7 +503,7 @@ namespace DumpDetective.Analysis.Analyzers
                     return;
 
                 var entry = new HeapEntry(address, mt, 0);
-                // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already the
+                // OPT (docs/cache/cache-architecture.md Phase 5): mt is already the
                 // GetOrAdd key — resolve via the metadata cache instead of materializing a
                 // ClrObject just for the type name.
                 AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, static (mt, heap) =>
@@ -603,7 +603,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (profileByMethodTable.TryGetValue(entry.MethodTable, out AsyncTypeProfile existing))
                 return existing;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): entry.MethodTable is
+            // OPT (docs/cache/cache-architecture.md Phase 5): entry.MethodTable is
             // already known — resolve via the metadata cache instead of materializing a ClrObject.
             ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
             if (type is null)

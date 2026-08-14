@@ -338,8 +338,7 @@ bounded by report size, not root count or thread count).
   it cheaper, just amortizes it across every subsequent analysis run of the same
   cached dump instead of re-running it every time. Confirm this doesn't materially
   extend Phase-1 build time on large dumps with many types (worth a benchmark check
-  against `docs/cache/17-DiskIndexBuildPhaseBreakdown.md`'s existing Roots timing
-  numbers).
+  against the GC-root timing numbers in `docs/cache/cache-architecture.md` § 8).
 
 **Mechanism B:**
 

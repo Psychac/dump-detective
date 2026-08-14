@@ -36,7 +36,7 @@ As of **2026-07-15**, all disk-backed index data is written to a single **`cache
 | Field | Size | Type | Value |
 |-------|------|------|-------|
 | Magic | 8 bytes | bytes | "DDCACHE1" (ASCII) |
-| FormatVersion | 4 bytes | int | 4 (bumped from 3 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata sections were added; previously bumped from 2 when the ObjectGenerations column was added; previously bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt). `SegmentIndex` (added after v4) did **not** trigger a further bump — it's a purely additive, always-optional section; see [docs/cache/19-ObjectAddressLookupIndex.md](cache/19-ObjectAddressLookupIndex.md) for why. |
+| FormatVersion | 4 bytes | int | 4 (bumped from 3 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata sections were added; previously bumped from 2 when the ObjectGenerations column was added; previously bumped from 1 when the Objects section moved to columnar layout; old `cache.bin` files fail to parse and are rebuilt). `SegmentIndex` (added after v4) did **not** trigger a further bump — it's a purely additive, always-optional section; see [docs/cache/cache-architecture.md § 4](cache/cache-architecture.md#4-point-lookup--objectaddresslookup--segmentindex) for why. |
 | DumpContentHash | 32 bytes | bytes | Content-addressed cache key: dump file length (8 bytes) + XxHash64 over sampled start/middle/end 1MB windows (8 bytes), remaining 16 bytes reserved/zero. Zero-filled if unknown (predates this field, or hashing failed at build time); an all-zero stored hash is treated as "unknown" and accepted rather than a mismatch. See `DumpContentHasher`. |
 | SectionCount | 4 bytes | int | Number of sections in TOC (up to 17; fewer if optional satellite sections were skipped or failed non-fatally) |
 | TocOffset | 8 bytes | long | Offset to TOC = 64 |
@@ -99,7 +99,7 @@ Each section's payload is **exactly the bytes that would have been in the pre-mi
   | RecordCount | 4 bytes | int | Number of objects in this segment (fits in `int` — no single GC segment holds anywhere near 2^31 objects) |
 
   Segments with zero objects are omitted entirely (a lookup can never land in one). See
-  [docs/cache/19-ObjectAddressLookupIndex.md](cache/19-ObjectAddressLookupIndex.md) for the full design,
+  [docs/cache/cache-architecture.md § 4](cache/cache-architecture.md#4-point-lookup--objectaddresslookup--segmentindex) for the full design,
   including why a two-level (segment table, then in-segment) binary search is needed instead of a
   single flat one.
 

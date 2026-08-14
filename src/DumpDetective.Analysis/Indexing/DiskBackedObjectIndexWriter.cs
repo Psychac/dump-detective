@@ -27,7 +27,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // amortizes the per-bucket lock over this many edges instead of taking it once per edge.
     private const int EdgeBatchSize = 2048;
 
-    // TEMPORARY perf A/B toggle (see docs/cache/17-DiskIndexBuildPhaseBreakdown.md option 2):
+    // TEMPORARY perf A/B toggle (see docs/cache/backlog.md, GC-root enumeration option 2):
     // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
     // and let RootSetCache's live-heap fallback build roots on demand in Phase 2 instead.
     // Remove once the A/B comparison picks a winner.
@@ -42,7 +42,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         Environment.GetEnvironmentVariable("DD_SKIP_REVERSE_INDEX_BUILD") == "1";
 
     // Escape hatch for the SegmentIndex satellite section (see
-    // docs/cache/19-ObjectAddressLookupIndex.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
+    // docs/cache/cache-architecture.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
     // A/B build-time isolation. Cost is expected to be negligible (segment-count-sized, not
     // object-count-sized), so this is cheap insurance rather than an anticipated need — remove once
     // validated, same as the other temporary toggles above.
@@ -162,7 +162,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         string[] segMtScratchFiles = new string[segments.Length];
         string[] segSizeScratchFiles = new string[segments.Length];
         string[] segGenScratchFiles = new string[segments.Length];
-        // SegmentIndex satellite (docs/cache/19-ObjectAddressLookupIndex.md): each worker writes its
+        // SegmentIndex satellite (docs/cache/cache-architecture.md): each worker writes its
         // own segIdx slot exactly once below, so no lock is needed despite the parallel scan.
         long[] segRecordCounts = new long[segments.Length];
         for (int i = 0; i < segments.Length; i++)
@@ -534,7 +534,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             taskCandidates, largeCandidates, lohFreeBlockCandidates,
             cancellationToken, progress, stopwatch);
 
-        // SegmentIndex (docs/cache/19-ObjectAddressLookupIndex.md): a small per-segment table of
+        // SegmentIndex (docs/cache/cache-architecture.md): a small per-segment table of
         // (Start, End, FirstRecordIndex, RecordCount) enabling ObjectAddressLookup's binary-search
         // point lookup, backing IHeapAnalysisCache.TryGetObjectMetadata. Segment boundaries/record
         // counts are already known for free from the scan above — this only writes a

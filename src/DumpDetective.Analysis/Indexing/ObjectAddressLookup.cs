@@ -7,7 +7,7 @@ namespace DumpDetective.Analysis.Indexing;
 
 /// <summary>
 /// Random-access <c>address → (MethodTable, Size)</c> point lookup backed by the disk index — see
-/// docs/cache/19-ObjectAddressLookupIndex.md. Unlike <see cref="ObjectIndexReader"/>'s sequential
+/// docs/cache/cache-architecture.md. Unlike <see cref="ObjectIndexReader"/>'s sequential
 /// <c>ReadEntries</c>, this holds its mmap accessors open across many calls, since it's meant for
 /// repeated point queries over the lifetime of an analysis run, not a single streaming pass.
 /// </summary>
@@ -28,7 +28,7 @@ internal sealed class ObjectAddressLookup : IDisposable
     private readonly MemoryMappedViewAccessor _mt;
     private readonly MemoryMappedViewAccessor _size;
     // Sorted by Start — segment write order (segment index order) isn't guaranteed to be
-    // address-sorted (see docs/cache/19-ObjectAddressLookupIndex.md "why a naive global binary
+    // address-sorted (see docs/cache/cache-architecture.md "why a naive global binary
     // search doesn't work"), so this instance sorts its own copy once at open time.
     private readonly SegmentIndexEntry[] _segmentsByStart;
     private bool _disposed;
@@ -88,7 +88,7 @@ internal sealed class ObjectAddressLookup : IDisposable
     /// Looks up <paramref name="address"/>. Returns <c>false</c> — an expected outcome, not an
     /// error — when the address falls between segments (LOH/POH gaps, free blocks, padding) or
     /// doesn't land exactly on a record boundary (e.g. an interior pointer; out of scope, see
-    /// docs/cache/19-ObjectAddressLookupIndex.md's open questions).
+    /// docs/cache/cache-architecture.md's open questions).
     /// </summary>
     public bool TryGetEntry(ulong address, out ulong methodTable, out ulong size)
     {
@@ -137,7 +137,7 @@ internal sealed class ObjectAddressLookup : IDisposable
     /// <summary>
     /// Binary search over <paramref name="segment"/>'s record range in the mmap'd
     /// <c>ObjectAddresses</c> column. Relies on within-segment address monotonicity — validated
-    /// empirically in docs/cache/19-ObjectAddressLookupIndex.md's Phase 0 (14.6M objects across
+    /// empirically in docs/cache/cache-architecture.md's Phase 0 (14.6M objects across
     /// Ephemeral/Large segments, zero violations); see that doc for the remaining kinds to validate.
     /// </summary>
     private long FindRecord(SegmentIndexEntry segment, ulong address)

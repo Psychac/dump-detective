@@ -25,7 +25,7 @@ internal static class RootPathSearchSupport
     /// <summary>
     /// Resolves the <see cref="ClrType"/> at <paramref name="address"/> via the disk-backed
     /// address index when <paramref name="cache"/> is supplied (see
-    /// docs/cache/19-ObjectAddressLookupIndex.md), falling back to a live
+    /// docs/cache/cache-architecture.md), falling back to a live
     /// <c>heap.GetObject(address).Type</c> resolution when <paramref name="cache"/> is <c>null</c>
     /// or the index is unavailable. Returns <c>null</c> when <paramref name="address"/> isn't a
     /// live object — the same contract <c>heap.GetObject(address).Type</c> already had, so callers

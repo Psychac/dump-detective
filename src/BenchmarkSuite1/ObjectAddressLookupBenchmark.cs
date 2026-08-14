@@ -10,7 +10,7 @@ namespace BenchmarkSuite1
 {
     /// <summary>
     /// Benchmarks <see cref="HeapAnalysisCache.TryGetObjectMetadata"/> (disk-index-backed point
-    /// lookup, see docs/cache/19-ObjectAddressLookupIndex.md) against a live
+    /// lookup, see docs/cache/cache-architecture.md) against a live
     /// <c>heap.GetObject(address)</c> resolution, at a realistic per-analysis-run call volume.
     /// </summary>
     /// <remarks>

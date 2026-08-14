@@ -88,7 +88,7 @@ namespace DumpDetective.Analysis.Analyzers
                 // P1-2: Separate AsyncPinned vs Pinned byte accounting
                 if (kind == "AsyncPinned")
                 {
-                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): only Size is needed —
+                    // OPT (docs/cache/cache-architecture.md Phase 6): only Size is needed —
                     // resolve via the disk-backed address index instead of heap.GetObject.
                     ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
 
@@ -104,7 +104,7 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == "Pinned")
                 {
                     Increment(pinnedTypes, typeName);
-                    // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): only Size is needed —
+                    // OPT (docs/cache/cache-architecture.md Phase 6): only Size is needed —
                     // resolve via the disk-backed address index instead of heap.GetObject.
                     ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
 
@@ -342,7 +342,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (address == 0)
                 return false;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): address-only caller — resolve
+            // OPT (docs/cache/cache-architecture.md Phase 6): address-only caller — resolve
             // via the disk-backed address index instead of heap.GetObject when available.
             ulong methodTable;
             if (cache is not null)

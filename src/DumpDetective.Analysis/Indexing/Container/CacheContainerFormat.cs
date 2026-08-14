@@ -44,7 +44,7 @@ internal enum CacheSectionId
     /// <summary>
     /// Small per-segment table of (Start, End, FirstRecordIndex, RecordCount) — see
     /// <see cref="Indexing.Satellite.SegmentIndexWriter"/> and
-    /// docs/cache/19-ObjectAddressLookupIndex.md. Enables <c>ObjectAddressLookup</c>'s
+    /// docs/cache/cache-architecture.md. Enables <c>ObjectAddressLookup</c>'s
     /// binary-search point lookup (address → MethodTable/Size) without a container FormatVersion
     /// bump: a missing section here just means the disk-backed point lookup is unavailable and
     /// callers fall back to <c>heap.GetObject</c>, the same "absent section" contract every other

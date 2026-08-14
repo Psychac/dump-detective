@@ -13,7 +13,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 4 validation for docs/cache/19-ObjectAddressLookupIndex.md: the correctness oracle for
+/// Phase 4 validation for docs/cache/cache-architecture.md: the correctness oracle for
 /// <see cref="BoundedGraphWalk.CollectRetainedObjects"/>'s free-tuple capture — the
 /// <c>(MethodTable, Size)</c> it now returns per address must agree with a live
 /// <c>heap.GetObject(address)</c> resolution, and <see cref="StaticRootLeakDetector"/>'s refactored

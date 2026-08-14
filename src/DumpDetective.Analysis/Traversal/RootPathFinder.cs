@@ -150,7 +150,7 @@ internal sealed class ReverseReferenceIndex
     {
         foreach (ulong obj in candidateSet)
         {
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+            // OPT (docs/cache/cache-architecture.md Phase 6): type-classification gate
             // only — provider.GetReferences below does the actual traversal.
             ClrType? type = RootPathSearchSupport.ResolveType(heap, cache, obj);
             if (type is null)
@@ -284,7 +284,7 @@ internal sealed class CandidateSetBuilder
         HashSet<ulong> candidate,
         int maxNodes)
     {
-        // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+        // OPT (docs/cache/cache-architecture.md Phase 6): type-classification gate
         // only — _provider.GetReferences below does the actual traversal.
         ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, address);
         if (type is null)
@@ -396,7 +396,7 @@ internal sealed class BidirectionalPathFinder
             if (depth >= maxDepth)
                 continue;
 
-            // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 6): type-classification gate
+            // OPT (docs/cache/cache-architecture.md Phase 6): type-classification gate
             // only — _provider.GetReferences below does the actual traversal.
             ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, current);
             if (type is null)

@@ -343,7 +343,7 @@ namespace DumpDetective.Analysis.Analyzers
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
             LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
                 if (topLargeObjects.Count >= options.TopLargeObjectsCount) return;
-                // OPT (docs/cache/19-ObjectAddressLookupIndex.md Phase 5): mt is already a
+                // OPT (docs/cache/cache-architecture.md Phase 5): mt is already a
                 // parameter of this callback — resolve via the metadata cache instead of
                 // materializing a ClrObject. A null type is the equivalent "unresolvable" gate
                 // heap.GetObject(address).IsValid served before.

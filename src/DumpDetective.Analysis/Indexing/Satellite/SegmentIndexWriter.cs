@@ -27,7 +27,7 @@ internal readonly struct SegmentIndexEntry
 
 /// <summary>
 /// Writes/reads the <see cref="CacheSectionId.SegmentIndex"/> satellite section — see
-/// docs/cache/19-ObjectAddressLookupIndex.md. Small (segment-count-sized, not object-count-sized),
+/// docs/cache/cache-architecture.md. Small (segment-count-sized, not object-count-sized),
 /// so unlike <c>ObjectAddresses</c>/etc. this is always fully loaded into memory by the reader
 /// rather than mmap'd for zero-copy batch access.
 /// </summary>

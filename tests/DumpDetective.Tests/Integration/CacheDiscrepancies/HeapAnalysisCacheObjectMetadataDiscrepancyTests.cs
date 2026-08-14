@@ -9,7 +9,7 @@ using Xunit.Abstractions;
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
-/// Phase 3 validation for docs/cache/19-ObjectAddressLookupIndex.md: the correctness oracle for
+/// Phase 3 validation for docs/cache/cache-architecture.md: the correctness oracle for
 /// <see cref="IHeapAnalysisCache.TryGetObjectMetadata"/> across both backing modes, against a real
 /// dump — disk mode (delegates to <see cref="ObjectAddressLookup"/>) and in-memory mode (falls back
 /// to live <c>heap.GetObject</c>) must both agree with a live <c>heap.GetObject</c> resolution for

@@ -15,7 +15,7 @@ namespace DumpDetective.Tests.Unit.Cache;
 
 /// <summary>
 /// Unit coverage for <see cref="HeapIndexCache.TryGetObjectMetadata"/> — see
-/// docs/cache/19-ObjectAddressLookupIndex.md Phase 3. Only the disk-hit path is exercised here
+/// docs/cache/cache-architecture.md Phase 3. Only the disk-hit path is exercised here
 /// (no <c>ClrHeap</c> dependency); the live-fallback path (in-memory mode / unavailable
 /// SegmentIndex) needs a real <c>ClrHeap</c> and is covered by the discrepancy test suite instead.
 /// </summary>

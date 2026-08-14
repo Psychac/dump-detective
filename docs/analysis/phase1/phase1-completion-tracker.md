@@ -62,7 +62,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 21 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
 | 22 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
 | 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
-| 24 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 7/7 | 0/3 | ✅ P0+P1+P2 COMPLETE (2/2, 3/3, 7/7); P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
+| 24 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 7/7 | 3/5 | ✅ P0+P1+P2 COMPLETE (2/2, 3/3, 7/7); P3-2,P3-3,P3-4 done; P3-1 (ValueTask), P3-5 (Runtime Async re-verify) pending; P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
 | 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
 
 **Subtotal: 50/50 P0 done, 94/94 P1 done** (AsyncStateMachineAnalyzer moved to the RE-AUDITED table above; its P0/P1 counts are tracked there instead)

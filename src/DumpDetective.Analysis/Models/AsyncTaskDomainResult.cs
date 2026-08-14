@@ -44,4 +44,5 @@ internal sealed record AsyncTaskDomainResult(
     int MultiContinuationNodeCount = 0,
     int MaxContinuationFanOut = 0,
     IReadOnlyList<NameCountEntry>? TopContinuationFanoutTypes = default,
-    int DepthSampleCount = 0) : AnalyzerDomainResult;
+    int DepthSampleCount = 0,
+    bool CycleDetected = false) : AnalyzerDomainResult;

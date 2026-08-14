@@ -25,7 +25,22 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
     {
         if (result is not AsyncTaskDomainResult r) return [];
 
-        var signals = new List<AsyncSignal>(capacity: 4);
+        var signals = new List<AsyncSignal>(capacity: 5);
+
+        // Continuation chain cycles — hard deadlock
+        if (r.CycleDetected)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "cycle",
+                Severity: FindingSeverity.Critical,
+                Priority: 1000,
+                Title: "Async deadlock detected (continuation chain cycle)",
+                Evidence: "A task's continuation chain cycles back to itself, indicating a hard deadlock where the task cannot complete.",
+                Recommendation: "Inspect the task's continuation chain for circular references or self-awaits. Review async method implementations for patterns that schedule continuations back onto themselves.",
+                Tags: ["async", "task", "deadlock", "cycle"],
+                MetricValue: 1.0,
+                MetricUnit: "cycle-detected"));
+        }
 
         // Orphaned tasks — fire-and-forget anti-pattern or unobserved faults
         if (r.OrphanedTasks > 0)

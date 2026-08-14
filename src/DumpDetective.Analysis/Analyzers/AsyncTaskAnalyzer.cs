@@ -172,7 +172,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 MultiContinuationNodeCount: 0,
                 MaxContinuationFanOut: 0,
                 TopContinuationFanoutTypes: [],
-                DepthSampleCount: 0);
+                DepthSampleCount: 0,
+                CycleDetected: false);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -201,6 +202,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int totalContinuations = 0;
         int multiContinuationNodes = 0;
         int maxFanOut = 0;
+        bool cycleDetected = false;
 
         // MT → type-name cache to avoid repeated ClrMD lookups
         var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
@@ -311,9 +313,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                         int nodeBudget = MaxContinuationNodesToVisitPerTask;
 
                         int depth = ExploreContinuation(
-                            continuationObj, visited, options.MaxContinuationDepth, ref nodeBudget, depthLevel: 0,
+                            continuationObj, visited, address, options.MaxContinuationDepth, ref nodeBudget, depthLevel: 0,
                             continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
-                            _bestHopSelections);
+                            ref cycleDetected, _bestHopSelections);
 
                         // Reconstruct the winning branch's type-name sequence for display by
                         // replaying the per-node decisions recorded during exploration. Bounded
@@ -385,7 +387,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             MultiContinuationNodeCount: multiContinuationNodes,
             MaxContinuationFanOut: maxFanOut,
             TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow),
-            DepthSampleCount: depthSampleCount);
+            DepthSampleCount: depthSampleCount,
+            CycleDetected: cycleDetected);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -588,10 +591,13 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     /// - The winning branch at each node is recorded into <paramref name="bestHopSelections"/>
     ///   (keyed by node address) so the caller can replay it afterward to build a display
     ///   chain without allocating per-branch lists during exploration.
+    /// - <paramref name="rootCycleDetected"/> is set to true if a cycle leads back to the
+    ///   root task (indicating a hard deadlock).
     /// </summary>
     private int ExploreContinuation(
         ClrObject node,
         HashSet<ulong> visited,
+        ulong rootTaskAddress,
         int remainingDepth,
         ref int nodeBudget,
         int depthLevel,
@@ -600,13 +606,18 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         ref int totalContinuations,
         ref int multiContinuationNodes,
         ref int maxFanOut,
+        ref bool rootCycleDetected,
         Dictionary<ulong, ClrObject> bestHopSelections)
     {
         if (remainingDepth <= 0 || !node.IsValid || node.Address == 0 || nodeBudget <= 0)
             return 0;
 
         if (!visited.Add(node.Address))
+        {
+            if (node.Address == rootTaskAddress)
+                rootCycleDetected = true;
             return 0;
+        }
 
         nodeBudget--;
 
@@ -628,9 +639,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     IncrementCount(fanoutTypeCount, elem.Type.Name ?? string.Empty);
 
                 int elemDepth = ExploreContinuation(
-                    elem, visited, remainingDepth, ref nodeBudget, depthLevel + 1,
+                    elem, visited, rootTaskAddress, remainingDepth, ref nodeBudget, depthLevel + 1,
                     continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
-                    bestHopSelections);
+                    ref rootCycleDetected, bestHopSelections);
 
                 if (elemDepth > bestDepth)
                 {
@@ -662,9 +673,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         bestHopSelections[node.Address] = next;
 
         int childDepth = ExploreContinuation(
-            next, visited, remainingDepth - 1, ref nodeBudget, depthLevel + 1,
+            next, visited, rootTaskAddress, remainingDepth - 1, ref nodeBudget, depthLevel + 1,
             continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
-            bestHopSelections);
+            ref rootCycleDetected, bestHopSelections);
 
         return 1 + childDepth;
     }

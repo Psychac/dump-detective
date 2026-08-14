@@ -63,6 +63,8 @@ namespace DumpDetective.Analysis.Analyzers
             // Pattern: <MethodName>d__N in the type name (last component of full name)
             var candidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(32);
             bool scanLimited = false;
+            int skippedTypeCount = 0;
+            ulong skippedBytes = 0;
 
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
@@ -72,12 +74,16 @@ namespace DumpDetective.Analysis.Analyzers
                 if ((kv.Value.Flags & TypeAggregateFlags.IsAsyncStateMachineType) == 0)
                     continue;
 
-                candidates.Add((kv.Key, kv.Value));
-
-                if (candidates.Count >= options.TypeCandidateLimit)
+                if (candidates.Count < options.TypeCandidateLimit)
                 {
+                    candidates.Add((kv.Key, kv.Value));
+                }
+                else
+                {
+                    // Already at limit; this and all remaining types are skipped
                     scanLimited = true;
-                    break;
+                    skippedTypeCount++;
+                    skippedBytes += kv.Value.TotalSize;
                 }
             }
 
@@ -335,6 +341,8 @@ namespace DumpDetective.Analysis.Analyzers
             if (suspendedMap.Count > options.SuspendedMethodMapLimit)
                 suspendedMap.RemoveRange(options.SuspendedMethodMapLimit, suspendedMap.Count - options.SuspendedMethodMapLimit);
 
+            double skippedBytesFraction = totalBytes > 0 ? skippedBytes / (double)totalBytes : 0.0;
+
             return new AsyncStateMachineDomainResult(
                 TotalStateMachines: (int)Math.Min(totalCount, int.MaxValue),
                 TotalStateMachineBytes: totalBytes,
@@ -342,7 +350,9 @@ namespace DumpDetective.Analysis.Analyzers
                 TopByCapturedSize: topByCapturedSize,
                 SuspendedMethodMap: suspendedMap,
                 ScanLimited: scanLimited,
-                TotalGen2Count: totalGen2Count);
+                TotalGen2Count: totalGen2Count,
+                SkippedTypeCount: skippedTypeCount,
+                SkippedBytesFraction: skippedBytesFraction);
         }
 
         public void Dispose() { }

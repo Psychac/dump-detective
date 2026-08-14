@@ -39,4 +39,8 @@ internal sealed record AsyncStateMachineDomainResult(
     // Summed over ALL candidate types (bounded by TypeCandidateLimit), not just
     // TopStateMachineTypes (bounded by TopTypeLimit) — keeps this consistent with
     // TotalStateMachines as a denominator for Gen2 fraction (see AsyncStateMachineTrendComparer).
-    long TotalGen2Count = 0) : AnalyzerDomainResult;
+    long TotalGen2Count = 0,
+    // When ScanLimited=true, these quantify truncation impact: how many types were skipped
+    // and what fraction of total bytes they represent (vs. analyzed types).
+    int SkippedTypeCount = 0,
+    double SkippedBytesFraction = 0.0) : AnalyzerDomainResult;

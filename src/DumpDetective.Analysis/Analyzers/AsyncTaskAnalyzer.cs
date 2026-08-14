@@ -226,16 +226,17 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 progress?.Report(new(classifyScanCount, "classifying task states",
                     $"{classifyScanCount:N0} / {total:N0} tasks"));
 
+            // Single heap.GetObject call per task, reused below for stateFlags re-read,
+            // faulted-exception extraction, and BFS continuation traversal — previously
+            // three separate lookups of the same address.
+            ClrObject taskObj = heap.GetObject(address);
+
             // Re-read stateFlags from ClrMD if written as 0 during Phase 1
-            if (stateFlags == 0)
+            if (stateFlags == 0 && taskObj.IsValid && taskObj.Type != null)
             {
-                ClrObject obj = heap.GetObject(address);
-                if (obj.IsValid && obj.Type != null)
-                {
-                    var stateField = TryGetCachedField(obj.Type, mt, "m_stateFlags", "_stateFlags");
-                    if (stateField != null)
-                        stateFlags = stateField.Read<int>(obj, interior: false);
-                }
+                var stateField = TryGetCachedField(taskObj.Type, mt, "m_stateFlags", "_stateFlags");
+                if (stateField != null)
+                    stateFlags = stateField.Read<int>(taskObj, interior: false);
             }
 
             bool isCompleted = (stateFlags & MaskCompleted) != 0;
@@ -269,10 +270,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 {
                     IncrementCount(faultedTypeCount, typeName);
                     // Extract exception type for histogram
-                    ClrObject faultedObj = heap.GetObject(address);
-                    if (faultedObj.IsValid && faultedObj.Type != null)
+                    if (taskObj.IsValid && taskObj.Type != null)
                     {
-                        (string? exceptionType, _) = ExtractFaultedTaskException(faultedObj);
+                        (string? exceptionType, _) = ExtractFaultedTaskException(taskObj);
                         if (exceptionType != null)
                         {
                             if (!faultedTypeExceptions.TryGetValue(typeName, out var exceptionHistogram))
@@ -291,7 +291,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             // ── Orphan detection + continuation chain BFS ─────────────────────
             // taskEntries is already capped at MaxTasksToScan by all load paths;
             // BFS runs for every task with a valid continuation.
-            ClrObject taskObj = heap.GetObject(address);
             if (taskObj.IsValid && taskObj.Type != null)
             {
                 var continuationField = TryGetCachedField(taskObj.Type, mt, "m_continuationObject", "_continuationObject");

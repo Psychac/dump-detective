@@ -19,38 +19,53 @@
 
 ---
 
+## Analyzers: RE-AUDITED (Second-Pass Review Complete)
+
+Analyzers whose original P0-P3 roadmap was already COMPLETE, then went through a full second-pass
+re-audit (7-area protocol, `phase1-analyzer-architecture-review.md`) that re-validates the *current*
+implementation instead of trusting prior "DONE" markers. Kept separate from the COMPLETE table below
+since re-audit can surface regressions a first-pass roadmap alone would miss (see AsyncStateMachineAnalyzer:
+P0-4 was a regression hiding behind two individually-DONE roadmap items).
+
+| # | Analyzer | Re-Audit Date | Score | P0 | P1 | P2 | P3 | Status |
+|---|----------|----------------|-------|----|----|----|----|--------|
+| 1 | **AsyncStateMachineAnalyzer** | 2026-08-14 | 62→86/100 | 4/4 | 8/8 | 4/8 | 1/4 | ✅ Re-audit found P0-4 (regex drift silently defeated P2-4), P1-7 (gen2 fraction scope mismatch), P1-8 (dead code) — all fixed same-session; P2-5..P2-8 pending; see [async-state-machine-analyzer-audit.md](async-state-machine-analyzer-audit.md) |
+
+**Subtotal: 4/4 P0 done, 8/8 P1 done** (1 analyzer re-audited so far)
+
+---
+
 ## Analyzers: COMPLETE (All P0+P1 Done)
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Complete? |
 |---|----------|----|----|----|----|-----------|
-| 1 | **AsyncStateMachineAnalyzer** | 4/4 | 8/8 | 4/8 | 1/4 | ✅ P0+P1 complete (2026-08-14 re-audit found P0-4 regex-drift regression defeating P2-4, plus P1-7/P1-8 — all three fixed same-session; P2-4 restored to fully DONE via P0-4's shared-regex fix); P2-5..P2-8 (progress reporting, ScanLimited quantification, zero-result narrative, analyzer-level tests) still pending |
-| 2 | **AllocationPatternAnalyzer** | 2/2 | 5/5 | 5/6 | 0/5 | ✅ P0+P1 |
-| 3 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 0/4 | ✅ P0+P1+P2 |
-| 4 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 0/4 | ✅ P0+P1+P2 |
-| 5 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
-| 6 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
-| 7 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 0/4 | ✅ P0+P1+P2 |
-| 8 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 2/8 | 0/3 | ✅ P0+P1 complete; P2 25% (2/8) |
-| 9 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
-| 10 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 2/7 | 0/2 | ✅ P0+P1; P2-1,P2-2 done; P2-3,P2-4,P2-5 pending |
-| 11 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
-| 12 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
-| 13 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
-| 14 | **DominatorAnalyzer** | 3/3 | 5/5 | 0/2 | 0/3 | ✅ P0+P1 |
-| 15 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
-| 16 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
-| 17 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |
-| 18 | **GCGenerationAnalyzer** | 3/3 | 4/4 | 4/5 | 0/3 | ✅ P0+P1 complete; P2 80% (4/5) |
-| 19 | **WeakReferenceAnalyzer** | 2/2 | 4/4 | 4/5 | 0/4 | ✅ P0+P1 complete; P2 80% (4/5) |
-| 20 | **WcfChannelAnalyzer** | 2/2 | 4/4 | 0/4 | 0/3 | ✅ P0+P1 complete |
-| 21 | **HttpObjectAnalyzer** | 2/2 | 3/3 | 0/5 | 2/3 | ✅ P0+P1 complete; P0-1, P0-2, P1-1, P1-2, P1-3, P3-3 done |
-| 22 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
-| 23 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
-| 24 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
-| 25 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 0/6 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
-| 26 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
+| 1 | **AllocationPatternAnalyzer** | 2/2 | 5/5 | 5/6 | 0/5 | ✅ P0+P1 |
+| 2 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 0/4 | ✅ P0+P1+P2 |
+| 3 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 0/4 | ✅ P0+P1+P2 |
+| 4 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
+| 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
+| 6 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 0/4 | ✅ P0+P1+P2 |
+| 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 2/8 | 0/3 | ✅ P0+P1 complete; P2 25% (2/8) |
+| 8 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
+| 9 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 2/7 | 0/2 | ✅ P0+P1; P2-1,P2-2 done; P2-3,P2-4,P2-5 pending |
+| 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
+| 11 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
+| 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
+| 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 0/2 | 0/3 | ✅ P0+P1 |
+| 14 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
+| 15 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
+| 16 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |
+| 17 | **GCGenerationAnalyzer** | 3/3 | 4/4 | 4/5 | 0/3 | ✅ P0+P1 complete; P2 80% (4/5) |
+| 18 | **WeakReferenceAnalyzer** | 2/2 | 4/4 | 4/5 | 0/4 | ✅ P0+P1 complete; P2 80% (4/5) |
+| 19 | **WcfChannelAnalyzer** | 2/2 | 4/4 | 0/4 | 0/3 | ✅ P0+P1 complete |
+| 20 | **HttpObjectAnalyzer** | 2/2 | 3/3 | 0/5 | 2/3 | ✅ P0+P1 complete; P0-1, P0-2, P1-1, P1-2, P1-3, P3-3 done |
+| 21 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
+| 22 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
+| 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
+| 24 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 1/6 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2-1 done; P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
+| 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
 
-**Subtotal: 54/54 P0 done, 102/102 P1 done** (AsyncStateMachineAnalyzer's P0-4/P1-7/P1-8, found by the 2026-08-14 re-audit, were fixed same-session — see its row's status note)
+**Subtotal: 50/50 P0 done, 94/94 P1 done** (AsyncStateMachineAnalyzer moved to the RE-AUDITED table above; its P0/P1 counts are tracked there instead)
 
 ---
 
@@ -60,7 +75,7 @@
 | 18 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
 | 19 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
 
-**Subtotal: 19/25 P0 done, 18/28 P1 done, 20/50 P2 done** (in-progress pools)
+**Subtotal: 19/25 P0 done, 18/28 P1 done, 21/50 P2 done** (in-progress pools)
 
 ---
 

@@ -317,7 +317,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P1-2 | Add `IAsyncStateMachine` inventory (type name + count + controlling task linkage) | 4, 7 | Evolution | High | Medium | High | ⤷ SUPERSEDED by [AsyncStateMachineAnalyzer P3-1](async-state-machine-analyzer-audit.md#priority-roadmap) — inventory already covered there; only the task-linkage half is a genuine gap, tracked on that side |
 | P1-3 | Add exception type histogram across all faulted tasks (not just orphaned snapshots) | 2, 4 | Improvement | High | Low | High | ✅ DONE (91babb4) |
 | P1-4 | Write `m_stateFlags` into the task index record during Phase 1 to eliminate Phase 2 re-reads | 5 | Evolution | Medium | Medium | High | ✅ DONE (22ecc52) |
-| P2-1 | Fix `BuildTopN` threshold tracking bug (threshold stays 0 during fill) | 5 | Improvement | Low | Low | High |
+| P2-1 | Fix `BuildTopN` threshold tracking bug (threshold stays 0 during fill) | 5 | Improvement | Low | Low | High | ✅ DONE (3117069) |
 | P2-2 | Normalize pending-task finding threshold to a rate (pct of total) in addition to raw count | 2 | Improvement | Medium | Low | High |
 | P2-3 | Add orphaned task snapshot count vs. total orphan count note in section builder | 2 | Improvement | Medium | Low | High |
 | P2-4 | Harmonize section builder lead finding threshold (>50) with finding generator threshold (≥10) | 2 | Improvement | Low | Low | High |

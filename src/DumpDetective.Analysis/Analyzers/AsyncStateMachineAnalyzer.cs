@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -32,13 +33,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class AsyncStateMachineAnalyzer : IAnalyzer
     {
-        // Compiler-generated async state machine type suffix: <MethodName>d__N[optional generic params]
-        // Matches both:
-        // - Non-generic: <Method>d__1
-        // - Generic: <Method>d__1[[T]] or <Method>d__1[[System.String, mscorlib]]
-        private static readonly Regex StateMachinePattern =
-            new(@"<(.+?)>d__\d+(?:\[\[.+?\]\])?$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
-
         public string Name => "Async State Machine Analysis";
         public string Category => "Memory";
 
@@ -95,10 +89,12 @@ namespace DumpDetective.Analysis.Analyzers
             // ── Step 2: Aggregate totals ──────────────────────────────────────────
             long totalCount = 0;
             ulong totalBytes = 0;
+            long totalGen2Count = 0;
             for (int i = 0; i < candidates.Count; i++)
             {
                 totalCount += candidates[i].Entry.Count;
                 totalBytes += candidates[i].Entry.TotalSize;
+                totalGen2Count += candidates[i].Entry.Gen2Count;
             }
 
             // ── Step 3: Field metadata + sample-based analysis ───────────────────
@@ -125,7 +121,7 @@ namespace DumpDetective.Analysis.Analyzers
                 Match m;
                 try
                 {
-                    m = StateMachinePattern.Match(fullName, angleOpen);
+                    m = AsyncStateMachineNamePattern.Regex.Match(fullName, angleOpen);
                 }
                 catch (RegexMatchTimeoutException)
                 {
@@ -338,22 +334,13 @@ namespace DumpDetective.Analysis.Analyzers
                 TopStateMachineTypes: topTypes,
                 TopByCapturedSize: topByCapturedSize,
                 SuspendedMethodMap: suspendedMap,
-                ScanLimited: scanLimited);
+                ScanLimited: scanLimited,
+                TotalGen2Count: totalGen2Count);
         }
 
         public void Dispose() { }
 
         // ── Helpers ───────────────────────────────────────────────────────────────
-
-        private static bool ImplementsIAsyncStateMachine(ClrType type)
-        {
-            foreach (ClrInterface iface in type.EnumerateInterfaces())
-            {
-                if (iface.Name is "System.Runtime.CompilerServices.IAsyncStateMachine")
-                    return true;
-            }
-            return false;
-        }
 
         // Fallback for in-memory cache mode (no disk-backed object index available).
         private static IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> LiveHeapEntries(ClrHeap heap)

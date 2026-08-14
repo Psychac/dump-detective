@@ -4,7 +4,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
@@ -12,6 +11,7 @@ using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Enums;
+using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Indexing;
 
@@ -918,9 +918,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         return s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
     }
 
-    private static readonly Regex StateMachinePattern = 
-        new(@"<(.+?)>d__\d+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
-
     private static TypeAggregateFlags ComputeTypeFlags(ClrType type)
     {
         TypeAggregateFlags flags = TypeAggregateFlags.None;
@@ -966,8 +963,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private static bool IsAsyncStateMachineType(ClrType type)
     {
         // Check if type name matches async state machine pattern: <MethodName>d__N
+        // (optionally followed by CLR-appended generic type parameters).
         string? name = type.Name;
-        if (name is null || !StateMachinePattern.IsMatch(name))
+        if (name is null || !AsyncStateMachineNamePattern.Regex.IsMatch(name))
             return false;
 
         // Confirm it implements IAsyncStateMachine interface

@@ -35,7 +35,8 @@ public sealed class AsyncStateMachineTrendComparerTests
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],
-            ScanLimited: false);
+            ScanLimited: false,
+            TotalGen2Count: gen2Count);
 
     [Fact]
     public void ExtractMetrics_ReturnsGeneration2Metrics()
@@ -101,11 +102,17 @@ public sealed class AsyncStateMachineTrendComparerTests
     }
 
     [Fact]
-    public void ExtractMetrics_MultipleStateTypeProfiles_AggregatesGen2Count()
+    public void ExtractMetrics_UsesTotalGen2Count_NotTopStateMachineTypesSum()
     {
+        // P1-7 regression test: TotalGen2Count is a domain-level aggregate over ALL candidate
+        // types (bounded by TypeCandidateLimit), independent of TopStateMachineTypes (bounded by
+        // TopTypeLimit). Previously the comparer summed Gen2Count over TopStateMachineTypes only,
+        // which understated the fraction whenever candidates exceeded TopTypeLimit. Here
+        // TopStateMachineTypes sums to 150 but TotalGen2Count (the correct source) is 400 — if the
+        // comparer regressed to summing from TopStateMachineTypes, this test would fail.
         var comparer = new AsyncStateMachineTrendComparer();
         var result = new AsyncStateMachineDomainResult(
-            TotalStateMachines: 300,
+            TotalStateMachines: 1000,
             TotalStateMachineBytes: 3000,
             TopStateMachineTypes:
             [
@@ -116,7 +123,7 @@ public sealed class AsyncStateMachineTrendComparerTests
                     Count: 100,
                     TotalBytes: 1000,
                     DominantState: 0,
-                StateDistribution: [],
+                    StateDistribution: [],
                     ReferenceFieldCount: 2,
                     Gen2Count: 40,
                     Gen2Fraction: 0.4,
@@ -128,7 +135,7 @@ public sealed class AsyncStateMachineTrendComparerTests
                     Count: 100,
                     TotalBytes: 1000,
                     DominantState: 1,
-                StateDistribution: [],
+                    StateDistribution: [],
                     ReferenceFieldCount: 1,
                     Gen2Count: 60,
                     Gen2Fraction: 0.6,
@@ -140,7 +147,7 @@ public sealed class AsyncStateMachineTrendComparerTests
                     Count: 100,
                     TotalBytes: 1000,
                     DominantState: 2,
-                StateDistribution: [],
+                    StateDistribution: [],
                     ReferenceFieldCount: 3,
                     Gen2Count: 50,
                     Gen2Fraction: 0.5,
@@ -148,17 +155,18 @@ public sealed class AsyncStateMachineTrendComparerTests
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],
-            ScanLimited: false);
+            ScanLimited: true,
+            TotalGen2Count: 400);
 
         var metrics = comparer.ExtractMetrics(result);
 
         var gen2Count = metrics.FirstOrDefault(m => m.Key == "statemachine.gen2.count");
         gen2Count.Should().NotBeNull();
-        gen2Count!.Value.Should().Be(150);
+        gen2Count!.Value.Should().Be(400);
 
         var gen2Fraction = metrics.FirstOrDefault(m => m.Key == "statemachine.gen2.fraction");
         gen2Fraction.Should().NotBeNull();
-        gen2Fraction!.Value.Should().Be(50.0);
+        gen2Fraction!.Value.Should().Be(40.0);
     }
 
     private sealed record UnrelatedDomainResult : AnalyzerDomainResult;

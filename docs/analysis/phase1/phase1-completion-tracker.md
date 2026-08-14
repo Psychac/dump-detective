@@ -10,12 +10,12 @@
 | Metric | Value |
 |--------|-------|
 | **Total Analyzers Audited** | 35 |
-| **Total P0 Identified** | 78 |
-| **Total P1 Identified** | 156 |
-| **P0 Implemented** | 71 |
-| **P1 Implemented** | 125 |
+| **Total P0 Identified** | 79 |
+| **Total P1 Identified** | 158 |
+| **P0 Implemented** | 72 |
+| **P1 Implemented** | 127 |
 | **P2 Implemented** | 25 |
-| **Overall P0+P1 Rate** | 83.8% (196/234) |
+| **Overall P0+P1 Rate** | 84.0% (199/237) |
 
 ---
 
@@ -23,7 +23,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Complete? |
 |---|----------|----|----|----|----|-----------|
-| 1 | **AsyncStateMachineAnalyzer** | 3/3 | 6/6 | 4/4 | 1/3 | ✅ P0+P1+P2 complete; P3-3 done |
+| 1 | **AsyncStateMachineAnalyzer** | 4/4 | 8/8 | 4/8 | 1/4 | ✅ P0+P1 complete (2026-08-14 re-audit found P0-4 regex-drift regression defeating P2-4, plus P1-7/P1-8 — all three fixed same-session; P2-4 restored to fully DONE via P0-4's shared-regex fix); P2-5..P2-8 (progress reporting, ScanLimited quantification, zero-result narrative, analyzer-level tests) still pending |
 | 2 | **AllocationPatternAnalyzer** | 2/2 | 5/5 | 5/6 | 0/5 | ✅ P0+P1 |
 | 3 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 0/4 | ✅ P0+P1+P2 |
 | 4 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 0/4 | ✅ P0+P1+P2 |
@@ -50,7 +50,7 @@
 | 25 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 0/6 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
 | 26 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
 
-**Subtotal: 53/53 P0 done, 100/100 P1 done**
+**Subtotal: 54/54 P0 done, 102/102 P1 done** (AsyncStateMachineAnalyzer's P0-4/P1-7/P1-8, found by the 2026-08-14 re-audit, were fixed same-session — see its row's status note)
 
 ---
 
@@ -83,11 +83,11 @@
 | Analyzers with P0+P1 100% complete (all P1 done) | 21 | All P0+P1 recommendations implemented (includes AsyncTaskAnalyzer, StaticRootLeakDetector, GCRootAnalyzer, TimerLeakAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer, and 11 others) |
 | Analyzers with partial P0+P1 completion | 9 | Some items done, some pending (includes LeakCandidateAnalyzer, ReferenceChainAnalyzer, ThreadAnalyzer, LockGraphAnalyzer, ObjectShapeAnalyzer) |
 | Analyzers with zero P0+P1 completion | 5 | Not yet started |
-| **Total P0 recommendations** | **78** | — |
-| **P0 items implemented** | **71** | 91.0% |
-| **Total P1 recommendations** | **156** | — |
-| **P1 items implemented** | **125** | 80.1% |
-| **Combined P0+P1 rate** | **83.8%** | (196/234) |
+| **Total P0 recommendations** | **79** | — |
+| **P0 items implemented** | **72** | 91.1% |
+| **Total P1 recommendations** | **158** | — |
+| **P1 items implemented** | **127** | 80.4% |
+| **Combined P0+P1 rate** | **84.0%** | (199/237) |
 
 ---
 

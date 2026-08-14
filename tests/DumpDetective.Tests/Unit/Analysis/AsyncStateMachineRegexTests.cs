@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 
+using DumpDetective.Analysis.Utilities;
+
 using FluentAssertions;
 
 using Xunit;
@@ -8,8 +10,10 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 public sealed class AsyncStateMachineRegexTests
 {
-    private static readonly Regex StateMachinePattern =
-        new(@"<(.+?)>d__\d+(?:\[\[.+?\]\])?$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
+    // Tests the actual shared production regex (DumpDetective.Analysis.Utilities.AsyncStateMachineNamePattern),
+    // not a private copy — this is what caught the Phase 1/Phase 2 drift bug (P0-4): a disconnected
+    // fourth copy of this pattern previously lived here and validated itself, not production code.
+    private static readonly Regex StateMachinePattern = AsyncStateMachineNamePattern.Regex;
 
     [Theory]
     [InlineData("<Method>d__1", "Method")]

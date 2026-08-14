@@ -35,4 +35,8 @@ internal sealed record AsyncStateMachineDomainResult(
     IReadOnlyList<StateMachineTypeProfile> TopStateMachineTypes,
     IReadOnlyList<HighCaptureStateMachine> TopByCapturedSize,
     IReadOnlyList<SuspendedMethodEntry> SuspendedMethodMap,
-    bool ScanLimited) : AnalyzerDomainResult;
+    bool ScanLimited,
+    // Summed over ALL candidate types (bounded by TypeCandidateLimit), not just
+    // TopStateMachineTypes (bounded by TopTypeLimit) — keeps this consistent with
+    // TotalStateMachines as a denominator for Gen2 fraction (see AsyncStateMachineTrendComparer).
+    long TotalGen2Count = 0) : AnalyzerDomainResult;

@@ -323,7 +323,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P2-4 | Harmonize section builder lead finding threshold (>50) with finding generator threshold (≥10) | 2 | Improvement | Low | Low | High | ✅ DONE (ac3f451) |
 | P2-5 | Report `AvgContinuationDepth` denominator (`depthSampleCount`) in key metrics | 2 | Improvement | Low | Low | High | ✅ DONE (58d5e88) |
 | P2-6 | Detect continuation chain cycles (async deadlock heuristic) during BFS | 4 | Improvement | High | Low | High | ✅ DONE (66b94cb) |
-| P2-7 | Pending task GC generation distribution (Gen0/Gen1/Gen2/LOH) | 4 | Improvement | Medium | Low | High |
+| P2-7 | Pending task GC generation distribution (Gen0/Gen1/Gen2/LOH) | 4 | Improvement | Medium | Low | High | ✅ DONE (b8d3c3c) |
 | P3-1 | Add `ValueTask` / `IValueTaskSource` tracking via `ManualResetValueTaskSourceCore` | 4 | Evolution | High | High | Medium |
 | P3-2 | Add `TaskCompletionSource<T>` orphan detection | 4 | Evolution | Medium | Medium | High |
 | P3-3 | Rank pending types by total retained bytes (Size × Count) | 4, 7 | Improvement | Medium | Low | High |

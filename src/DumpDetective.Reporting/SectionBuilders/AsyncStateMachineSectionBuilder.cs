@@ -43,11 +43,13 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             int limit = Math.Min(d.TopStateMachineTypes.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top async state machine types by instance count",
-                new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Sample State"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
+                new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Dominant State"), CH("State Distribution"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
                 BuildTypeRows(d.TopStateMachineTypes, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            
-            blocks.Add(T("Sample State values indicate the suspend position in the async method: " +
-                         "-2 = completed, -1 = not started, 0 = suspended at first await, 1 = suspended at second await, and so on."));
+
+            blocks.Add(T("State values indicate the suspend position in the async method: " +
+                         "-2 = completed, -1 = not started, 0 = suspended at first await, 1 = suspended at second await, and so on. " +
+                         "Dominant State and State Distribution are sampled from up to a bounded number of instances per type " +
+                         "(not the sample instance alone); distribution is blank for types beyond the histogram sampling limit."));
         }
 
         if (d.TopByCapturedSize.Count > 0)
@@ -90,7 +92,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                 Cell(FormatHelper.TruncateString(t.DeclaringType, 50)),
                 Cell($"{t.Count:N0}",                       t.Count),
                 Cell(FormatHelper.FormatBytes(t.TotalBytes)),
-                Cell(t.SampleStateValue.ToString()),
+                Cell(t.DominantState.ToString()),
+                Cell(FormatStateDistribution(t.StateDistribution)),
                 Cell($"{t.ReferenceFieldCount:N0}",         t.ReferenceFieldCount),
                 Cell($"{t.Gen2Count:N0}",                   t.Gen2Count),
                 Cell($"{t.Gen2Fraction * 100:F1}%",         t.Gen2Fraction),
@@ -98,6 +101,12 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             ]));
         }
         return rows;
+    }
+
+    private static string FormatStateDistribution(IReadOnlyList<(int State, int Count)> distribution)
+    {
+        if (distribution.Count == 0) return "—";
+        return string.Join(", ", distribution.Select(d => $"{d.State}: {d.Count:N0}"));
     }
 
     private static List<TableRow> BuildCaptureRows(IReadOnlyList<HighCaptureStateMachine> captures, int limit)

@@ -14,7 +14,7 @@
 | **Total P1 Identified** | 156 |
 | **P0 Implemented** | 71 |
 | **P1 Implemented** | 125 |
-| **P2 Implemented** | 23 |
+| **P2 Implemented** | 24 |
 | **Overall P0+P1 Rate** | 83.8% (196/234) |
 
 ---
@@ -23,7 +23,7 @@
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Complete? |
 |---|----------|----|----|----|----|-----------|
-| 1 | **AsyncStateMachineAnalyzer** | 3/3 | 6/6 | 2/4 | 1/3 | ✅ P0+P1; P2-2, P2-4, P3-3 done |
+| 1 | **AsyncStateMachineAnalyzer** | 3/3 | 6/6 | 3/4 | 1/3 | ✅ P0+P1; P2-1, P2-2, P2-4, P3-3 done |
 | 2 | **AllocationPatternAnalyzer** | 2/2 | 5/5 | 5/6 | 0/5 | ✅ P0+P1 |
 | 3 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 0/4 | ✅ P0+P1+P2 |
 | 4 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 0/4 | ✅ P0+P1+P2 |

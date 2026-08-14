@@ -831,6 +831,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 result.Add(new(kvp.Key, kvp.Value));
                 if (kvp.Value < threshold || result.Count == 1)
                     threshold = kvp.Value;
+
+                // After fill phase completes, sync threshold to the actual minimum
+                // in the filled result before proceeding to replacements.
+                if (result.Count == topTypesToShow)
+                {
+                    threshold = int.MaxValue;
+                    for (int i = 0; i < result.Count; i++)
+                        if (result[i].Count < threshold) threshold = result[i].Count;
+                }
             }
             else if (kvp.Value > threshold)
             {

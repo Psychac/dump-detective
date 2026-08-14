@@ -25,7 +25,7 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
     {
         if (result is not AsyncTaskDomainResult r) return [];
 
-        var signals = new List<AsyncSignal>(capacity: 5);
+        var signals = new List<AsyncSignal>(capacity: 6);
 
         // Continuation chain cycles — hard deadlock
         if (r.CycleDetected)
@@ -40,6 +40,25 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
                 Tags: ["async", "task", "deadlock", "cycle"],
                 MetricValue: 1.0,
                 MetricUnit: "cycle-detected"));
+        }
+
+        // Gen2/LOH pending tasks — strong leak signal
+        int pendingOldGen = r.PendingGen2 + r.PendingLOH;
+        if (pendingOldGen > 0 && r.PendingTasks > 0)
+        {
+            double oldGenPct = pendingOldGen * 100.0 / r.PendingTasks;
+            FindingSeverity severity = oldGenPct >= 50 ? FindingSeverity.Warning : FindingSeverity.Info;
+
+            signals.Add(new AsyncSignal(
+                Key: "pending-oldgen",
+                Severity: severity,
+                Priority: 500 + pendingOldGen,
+                Title: $"Pending tasks in Gen2/LOH ({pendingOldGen:N0}, {oldGenPct:F1}%)",
+                Evidence: $"{pendingOldGen:N0} of {r.PendingTasks:N0} pending tasks ({oldGenPct:F1}%) are in Gen2 (old generation) or LOH (large object heap). Gen2 residency is a strong indicator of long-lived memory retention and potential leaks.",
+                Recommendation: "Inspect Gen2/LOH pending tasks for root cause. Check if tasks are waiting on external events, resources, or deadlocks. Gen2 presence suggests these tasks have survived multiple GC cycles.",
+                Tags: ["async", "task", "pending", "generation", "gc", "retention"],
+                MetricValue: pendingOldGen,
+                MetricUnit: "pending-oldgen"));
         }
 
         // Orphaned tasks — fire-and-forget anti-pattern or unobserved faults

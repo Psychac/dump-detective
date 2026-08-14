@@ -173,7 +173,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 MaxContinuationFanOut: 0,
                 TopContinuationFanoutTypes: [],
                 DepthSampleCount: 0,
-                CycleDetected: false);
+                CycleDetected: false,
+                PendingGen0: 0,
+                PendingGen1: 0,
+                PendingGen2: 0,
+                PendingLOH: 0);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -203,6 +207,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int multiContinuationNodes = 0;
         int maxFanOut = 0;
         bool cycleDetected = false;
+        int pendingGen0 = 0;
+        int pendingGen1 = 0;
+        int pendingGen2 = 0;
+        int pendingLOH = 0;
 
         // MT → type-name cache to avoid repeated ClrMD lookups
         var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
@@ -240,6 +248,16 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             else if (isCompleted) completed++;
             else if (isRunning) running++;
             else pending++;
+
+            // Track GC generation for pending tasks
+            if (!isCompleted && !isCanceled && !isFaulted && !isRunning)
+            {
+                int gen = SegmentKindMapper.ResolveGeneration(heap, address);
+                if (gen == 0) pendingGen0++;
+                else if (gen == 1) pendingGen1++;
+                else if (gen == 2) pendingGen2++;
+                else if (gen == 3) pendingLOH++;
+            }
 
             // Resolve type name
             string typeName = ResolveTypeName(heap, mt, typeNameByMt);
@@ -388,7 +406,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             MaxContinuationFanOut: maxFanOut,
             TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow),
             DepthSampleCount: depthSampleCount,
-            CycleDetected: cycleDetected);
+            CycleDetected: cycleDetected,
+            PendingGen0: pendingGen0,
+            PendingGen1: pendingGen1,
+            PendingGen2: pendingGen2,
+            PendingLOH: pendingLOH);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────

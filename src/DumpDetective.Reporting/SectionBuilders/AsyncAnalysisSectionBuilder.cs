@@ -43,6 +43,10 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
         {
             ["total_tasks"] = new NumericMetricValue(asyncTasks.TotalTasks, MetricUnit.Count),
             ["pending_tasks"] = new NumericMetricValue(asyncTasks.PendingTasks, MetricUnit.Count),
+            ["pending_gen0"] = new NumericMetricValue(asyncTasks.PendingGen0, MetricUnit.Count),
+            ["pending_gen1"] = new NumericMetricValue(asyncTasks.PendingGen1, MetricUnit.Count),
+            ["pending_gen2"] = new NumericMetricValue(asyncTasks.PendingGen2, MetricUnit.Count),
+            ["pending_loh"] = new NumericMetricValue(asyncTasks.PendingLOH, MetricUnit.Count),
             ["running_tasks"] = new NumericMetricValue(asyncTasks.RunningTasks, MetricUnit.Count),
             ["faulted_tasks"] = new NumericMetricValue(asyncTasks.FaultedTasks, MetricUnit.Count),
             ["canceled_tasks"] = new NumericMetricValue(asyncTasks.CanceledTasks, MetricUnit.Count),
@@ -65,6 +69,20 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 R("RanToCompletion", asyncTasks.CompletedTasks),
                 R("Orphaned", asyncTasks.OrphanedTasks),
             }));
+
+        // Pending task generation distribution
+        if (asyncTasks.PendingTasks > 0)
+        {
+            compactTables.Add(STCompact(
+                "Pending task GC generation distribution",
+                new[] { CH("Generation"), CH("Count","number"), CH("Percentage") },
+                new[] {
+                    R("Gen0 (young)", asyncTasks.PendingGen0, $"{(asyncTasks.PendingGen0 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("Gen1", asyncTasks.PendingGen1, $"{(asyncTasks.PendingGen1 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("Gen2 (old)", asyncTasks.PendingGen2, $"{(asyncTasks.PendingGen2 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("LOH (large)", asyncTasks.PendingLOH, $"{(asyncTasks.PendingLOH * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                }));
+        }
 
         if (asyncTasks.TopContinuationTypes.Count > 0)
         {

@@ -24,6 +24,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
     private bool _participantScanSucceeded;
 
+    // TaskCompletionSource candidate collection — rides the same shared heap-index scan
+    // pass as _taskMts/_participantEntries above (no extra heap/disk pass). Unlike task MTs,
+    // there's no precomputed TypeAggregateFlags bit for this (see TaskTypeNamePattern), so
+    // the candidate set is built by resolving each distinct TypeAggregates MT's name once in
+    // BeforeHeapIndexScan — bounded by distinct type count, not object count.
+    private HashSet<ulong>? _tcsMts;
+    private List<(ulong Address, ulong Mt)>? _participantTcsEntries;
+    private int _participantMaxTcsToScan;
+
     // Field cache by MethodTable to avoid repeated ClrMD lookups per type
     // Maps (MethodTable, fieldName) to ClrInstanceField? (null if field not found on that type)
     private Dictionary<(ulong MethodTable, string FieldName), ClrInstanceField?>? _fieldCacheByMt;
@@ -88,28 +97,48 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     public void BeforeHeapIndexScan(AnalysisContext context)
     {
         _participantMaxTasksToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTasksToScan;
+        _participantMaxTcsToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTcsToScan;
         _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
+        _participantTcsEntries = new List<(ulong, ulong)>(capacity: 64);
         _taskMts = null;
+        _tcsMts = null;
         _fieldCacheByMt = new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
 
         if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {
             _taskMts = new HashSet<ulong>(capacity: 32);
+            _tcsMts = new HashSet<ulong>(capacity: 8);
             foreach (var kvp in heapIndex.TypeAggregates)
             {
                 if ((kvp.Value.Flags & TypeAggregateFlags.IsTaskType) != 0)
+                {
                     _taskMts.Add(kvp.Key);
+                    continue;
+                }
+
+                // No precomputed TypeAggregateFlags bit for TaskCompletionSource — resolve the
+                // name once per distinct type here (bounded by type count, not object count).
+                string? name = context.Heap.GetTypeByMethodTable(kvp.Key)?.Name;
+                if (name != null && TaskTypeNamePattern.IsTaskCompletionSource(name))
+                    _tcsMts.Add(kvp.Key);
             }
         }
     }
 
     public void OnHeapEntry(in HeapEntry entry)
     {
-        if (_taskMts is null || _participantEntries!.Count >= _participantMaxTasksToScan)
-            return;
-
-        if (_taskMts.Contains(entry.MethodTable))
+        if (_taskMts is not null && _participantEntries!.Count < _participantMaxTasksToScan
+            && _taskMts.Contains(entry.MethodTable))
+        {
             _participantEntries.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
+            return;
+        }
+
+        if (_tcsMts is not null && _participantTcsEntries!.Count < _participantMaxTcsToScan
+            && _tcsMts.Contains(entry.MethodTable))
+        {
+            _participantTcsEntries.Add((entry.Address, entry.MethodTable));
+        }
     }
 
     public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
@@ -128,11 +157,18 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             var other = (AsyncTaskAnalyzer)p;
             if (other._participantEntries is not null)
                 _participantEntries!.AddRange(other._participantEntries);
+            if (other._participantTcsEntries is not null)
+                _participantTcsEntries!.AddRange(other._participantTcsEntries);
         }
 
         _participantEntries = _participantEntries!
             .OrderBy(e => e.Address)
             .Take(_participantMaxTasksToScan)
+            .ToList();
+
+        _participantTcsEntries = _participantTcsEntries!
+            .OrderBy(e => e.Address)
+            .Take(_participantMaxTcsToScan)
             .ToList();
     }
 
@@ -148,6 +184,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         var taskEntries = LoadTaskEntries(heap, cache, progress, options, ct);
         int total = taskEntries.Count;
+
+        // TaskCompletionSource entries are independent of task-scan results (a heap could in
+        // principle have TCS instances even when the task scan finds none), so this runs
+        // regardless of the early-return below.
+        var tcsEntries = LoadTcsEntries(heap, cache, progress, options, ct);
+        var tcsResult = AnalyzeTaskCompletionSources(heap, tcsEntries, options, ct);
 
         if (total == 0)
         {
@@ -178,7 +220,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 PendingGen1: 0,
                 PendingGen2: 0,
                 PendingLOH: 0,
-                TopPendingTaskTypesByBytes: []);
+                TopPendingTaskTypesByBytes: [],
+                TotalTaskCompletionSources: tcsResult.TotalTcs,
+                UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
+                UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
+                TcsScanLimited: tcsResult.TcsScanLimited,
+                TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -419,7 +466,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             PendingGen1: pendingGen1,
             PendingGen2: pendingGen2,
             PendingLOH: pendingLOH,
-            TopPendingTaskTypesByBytes: BuildTopNByBytes(pendingTypeBytes, options.TopTypesToShow));
+            TopPendingTaskTypesByBytes: BuildTopNByBytes(pendingTypeBytes, options.TopTypesToShow),
+            TotalTaskCompletionSources: tcsResult.TotalTcs,
+            UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
+            UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
+            TcsScanLimited: tcsResult.TcsScanLimited,
+            TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -513,6 +565,146 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         scanCounter.Complete();
         return result;
+    }
+
+    // ── TaskCompletionSource entry loading ──────────────────────────────────────
+
+    /// <summary>
+    /// Loads TaskCompletionSource candidate entries. No disk satellite index exists for these
+    /// (unlike TaskIndex.bin) — TCS instance counts are a bounded resource (created explicitly
+    /// per pending external operation, not per compiler-generated async call like Task), so the
+    /// participant-collected list from the shared heap-index scan (or a raw heap scan fallback
+    /// when no index exists) is sufficient without a dedicated fast-path file.
+    /// </summary>
+    private List<(ulong Address, ulong Mt)> LoadTcsEntries(
+        ClrHeap heap,
+        IHeapAnalysisCache? cache,
+        IProgress<AnalyzerProgressReport>? progress,
+        AsyncTaskAnalysisOptions options,
+        CancellationToken ct)
+    {
+        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+        {
+            return _participantScanSucceeded
+                ? (_participantTcsEntries ?? [])
+                : ScanRawHeapForTcs(heap, progress, options.MaxTcsToScan, ct);
+        }
+
+        return ScanRawHeapForTcs(heap, progress, options.MaxTcsToScan, ct);
+    }
+
+    private static List<(ulong, ulong)> ScanRawHeapForTcs(
+        ClrHeap heap,
+        IProgress<AnalyzerProgressReport>? progress,
+        int maxTcsToScan,
+        CancellationToken ct)
+    {
+        var result = new List<(ulong, ulong)>(capacity: 64);
+        var scanCounter = new ObjectScanCounter("scanning TaskCompletionSource objects", progress);
+
+        foreach (ClrObject obj in heap.EnumerateObjects())
+        {
+            ct.ThrowIfCancellationRequested();
+            scanCounter.Tick();
+
+            if (!obj.IsValid || obj.Type is null)
+                continue;
+
+            string? typeName = obj.Type.Name;
+            if (typeName is null || !TaskTypeNamePattern.IsTaskCompletionSource(typeName))
+                continue;
+
+            result.Add((obj.Address, obj.Type.MethodTable));
+            if (result.Count >= maxTcsToScan)
+                break;
+        }
+
+        scanCounter.Complete();
+        return result;
+    }
+
+    private readonly record struct TcsAnalysisResult(
+        int TotalTcs,
+        int UnresolvedTcs,
+        int UnresolvedTcsGen2Count,
+        bool TcsScanLimited,
+        IReadOnlyList<UnresolvedTcsSnapshot> TopUnresolved);
+
+    /// <summary>
+    /// Classifies each TaskCompletionSource candidate by reading its inner Task (field
+    /// <c>_task</c>/<c>m_task</c>, fallback for the .NET Core 3 field-rename convention) and
+    /// checking whether that inner task is terminal. A non-terminal inner task means nobody has
+    /// called SetResult/SetException/SetCanceled — either a normal in-flight promise, or (if the
+    /// TCS has survived into Gen2/LOH) a leaked one. See <see cref="UnresolvedTcsSnapshot"/>.
+    /// </summary>
+    private TcsAnalysisResult AnalyzeTaskCompletionSources(
+        ClrHeap heap,
+        List<(ulong Address, ulong Mt)> tcsEntries,
+        AsyncTaskAnalysisOptions options,
+        CancellationToken ct)
+    {
+        if (tcsEntries.Count == 0)
+            return new TcsAnalysisResult(0, 0, 0, false, []);
+
+        bool tcsScanLimited = tcsEntries.Count >= options.MaxTcsToScan;
+        int unresolvedTcs = 0;
+        int unresolvedTcsGen2 = 0;
+        var unresolvedSnapshots = new List<UnresolvedTcsSnapshot>(capacity: 32);
+
+        for (int i = 0; i < tcsEntries.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (address, mt) = tcsEntries[i];
+
+            ClrObject tcsObj = heap.GetObject(address);
+            if (!tcsObj.IsValid || tcsObj.Type is null)
+                continue;
+
+            var innerTaskField = TryGetCachedField(tcsObj.Type, mt, "m_task", "_task");
+            if (innerTaskField is null)
+                continue;
+
+            ClrObject innerTask = innerTaskField.ReadObject(tcsObj, interior: false);
+            if (!innerTask.IsValid || innerTask.Type is null)
+                continue;
+
+            var stateField = TryGetCachedField(innerTask.Type, innerTask.Type.MethodTable, "m_stateFlags", "_stateFlags");
+            if (stateField is null)
+                continue;
+
+            int stateFlags = stateField.Read<int>(innerTask, interior: false);
+            bool isTerminal = (stateFlags & (MaskCompleted | MaskFaulted | MaskCanceled)) != 0;
+            if (isTerminal)
+                continue;
+
+            unresolvedTcs++;
+
+            int generation = SegmentKindMapper.ResolveGeneration(heap, address);
+            if (generation is 2 or 3)
+                unresolvedTcsGen2++;
+
+            unresolvedSnapshots.Add(new UnresolvedTcsSnapshot(
+                Address: address,
+                TypeName: tcsObj.Type.Name ?? $"MT:0x{mt:X}",
+                Size: tcsObj.Size,
+                Generation: generation));
+        }
+
+        // Bounded population (TCS instance counts are a bounded resource, capped further by
+        // MaxTcsToScan) — a full sort of the unresolved subset is cheap, no need for the
+        // maintained-threshold partial-sort pattern used elsewhere for large populations.
+        // Strongest leak signal first: old-generation residency, then size within that tier.
+        unresolvedSnapshots.Sort((a, b) =>
+        {
+            int genCompare = b.Generation.CompareTo(a.Generation);
+            return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
+        });
+
+        IReadOnlyList<UnresolvedTcsSnapshot> topUnresolved = unresolvedSnapshots.Count > options.TopUnresolvedTcsToShow
+            ? unresolvedSnapshots.GetRange(0, options.TopUnresolvedTcsToShow)
+            : unresolvedSnapshots;
+
+        return new TcsAnalysisResult(tcsEntries.Count, unresolvedTcs, unresolvedTcsGen2, tcsScanLimited, topUnresolved);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

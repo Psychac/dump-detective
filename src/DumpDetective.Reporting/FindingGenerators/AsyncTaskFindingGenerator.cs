@@ -25,7 +25,7 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
     {
         if (result is not AsyncTaskDomainResult r) return [];
 
-        var signals = new List<AsyncSignal>(capacity: 6);
+        var signals = new List<AsyncSignal>(capacity: 7);
 
         // Continuation chain cycles — hard deadlock
         if (r.CycleDetected)
@@ -59,6 +59,24 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
                 Tags: ["async", "task", "pending", "generation", "gc", "retention"],
                 MetricValue: pendingOldGen,
                 MetricUnit: "pending-oldgen"));
+        }
+
+        // Unresolved TaskCompletionSource in Gen2/LOH — leaked promise signal. Gated on
+        // old-generation residency, not raw unresolved count: a fresh in-flight TCS and a
+        // genuinely stuck one look identical at the instant of the dump, but only a leaked one
+        // survives multiple GC cycles into Gen2/LOH.
+        if (r.UnresolvedTcsGen2Count > 0)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "tcs-unresolved-oldgen",
+                Severity: r.UnresolvedTcsGen2Count >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Priority: 450 + r.UnresolvedTcsGen2Count,
+                Title: $"Unresolved TaskCompletionSource instances in Gen2/LOH ({r.UnresolvedTcsGen2Count:N0})",
+                Evidence: $"{r.UnresolvedTcsGen2Count:N0} of {r.UnresolvedTaskCompletionSources:N0} unresolved TaskCompletionSource instances (out of {r.TotalTaskCompletionSources:N0} total) are in Gen2 (old generation) or LOH, meaning nobody has called SetResult/SetException/SetCanceled and the promise has survived multiple GC cycles — a leaked promise, not just an in-flight one.",
+                Recommendation: "Inspect the retention path for these TaskCompletionSource instances. Common causes: an event handler expected to call Set* was unsubscribed before firing, an external callback never invoked, or a timeout/cancellation path that doesn't resolve the TCS.",
+                Tags: ["async", "task", "tcs", "leak", "generation", "gc"],
+                MetricValue: r.UnresolvedTcsGen2Count,
+                MetricUnit: "unresolved-tcs-oldgen"));
         }
 
         // Orphaned tasks — fire-and-forget anti-pattern or unobserved faults

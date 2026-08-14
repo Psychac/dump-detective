@@ -38,4 +38,22 @@ public sealed class TaskTypeNamePatternTests
     {
         TaskTypeNamePattern.IsTaskType(typeName).Should().BeFalse();
     }
+
+    [Theory]
+    [InlineData("System.Threading.Tasks.TaskCompletionSource")]
+    [InlineData("System.Threading.Tasks.TaskCompletionSource`1[[System.Int32, mscorlib]]")]
+    public void IsTaskCompletionSource_ReturnsTrue_ForTaskCompletionSourceTypes(string typeName)
+    {
+        TaskTypeNamePattern.IsTaskCompletionSource(typeName).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("System.Threading.Tasks.Task")]
+    [InlineData("System.Threading.Tasks.Task`1[[System.String, mscorlib]]")]
+    [InlineData("System.String")]
+    [InlineData("")]
+    public void IsTaskCompletionSource_ReturnsFalse_ForNonTaskCompletionSourceTypes(string typeName)
+    {
+        TaskTypeNamePattern.IsTaskCompletionSource(typeName).Should().BeFalse();
+    }
 }

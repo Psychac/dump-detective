@@ -28,6 +28,17 @@ internal sealed record NameSizeCountEntry(
     long TotalBytes,
     int Count);
 
+// A TaskCompletionSource<T> whose inner Task was still non-terminal (Pending/Running) at dump
+// time — either a normal in-flight promise, or a leaked one nobody will ever resolve. Generation
+// (of the TCS object itself, not the inner task) is the leak-strength proxy: a fresh in-flight
+// TCS and a genuinely stuck one look identical at the instant of the dump, but only the latter
+// survives multiple GC cycles into Gen2/LOH.
+internal sealed record UnresolvedTcsSnapshot(
+    ulong Address,
+    string TypeName,
+    ulong Size,
+    int Generation);
+
 internal sealed record AsyncTaskDomainResult(
     int TotalTasks,
     int PendingTasks,
@@ -55,4 +66,9 @@ internal sealed record AsyncTaskDomainResult(
     int PendingGen1 = 0,
     int PendingGen2 = 0,
     int PendingLOH = 0,
-    IReadOnlyList<NameSizeCountEntry>? TopPendingTaskTypesByBytes = default) : AnalyzerDomainResult;
+    IReadOnlyList<NameSizeCountEntry>? TopPendingTaskTypesByBytes = default,
+    int TotalTaskCompletionSources = 0,
+    int UnresolvedTaskCompletionSources = 0,
+    int UnresolvedTcsGen2Count = 0,
+    bool TcsScanLimited = false,
+    IReadOnlyList<UnresolvedTcsSnapshot>? TopUnresolvedTaskCompletionSources = default) : AnalyzerDomainResult;

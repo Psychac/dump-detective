@@ -56,6 +56,9 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             ["max_continuation_depth"] = new NumericMetricValue(asyncTasks.MaxContinuationDepth, MetricUnit.Count),
             ["avg_continuation_depth"] = new NumericMetricValue(asyncTasks.AvgContinuationDepth, MetricUnit.Custom, asyncTasks.AvgContinuationDepth.ToString("F1")),
             ["depth_sample_count"] = new NumericMetricValue(asyncTasks.DepthSampleCount, MetricUnit.Count),
+            ["total_tcs"] = new NumericMetricValue(asyncTasks.TotalTaskCompletionSources, MetricUnit.Count),
+            ["unresolved_tcs"] = new NumericMetricValue(asyncTasks.UnresolvedTaskCompletionSources, MetricUnit.Count),
+            ["unresolved_tcs_gen2"] = new NumericMetricValue(asyncTasks.UnresolvedTcsGen2Count, MetricUnit.Count),
         };
 
         compactTables.Add(STCompact(
@@ -161,8 +164,33 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (asyncTasks.TopUnresolvedTaskCompletionSources is { Count: > 0 } unresolvedTcs)
+        {
+            var rows = new List<TableRow>(unresolvedTcs.Count);
+            for (int i = 0; i < unresolvedTcs.Count; i++)
+            {
+                UnresolvedTcsSnapshot snapshot = unresolvedTcs[i];
+                rows.Add(Row(
+                    Cell($"0x{snapshot.Address:X}"),
+                    Cell(snapshot.TypeName),
+                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
+                    Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
+            }
+
+            string tcsTableTitle = "Unresolved TaskCompletionSource instances";
+            if (unresolvedTcs.Count < asyncTasks.UnresolvedTaskCompletionSources)
+                tcsTableTitle += $" (showing {unresolvedTcs.Count} of {asyncTasks.UnresolvedTaskCompletionSources})";
+
+            compactTables.Add(STCompact(tcsTableTitle,
+                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (asyncTasks.TaskScanLimited)
             blocks.Add(T("Task scanning was limited; orphan and continuation totals may be partial."));
+
+        if (asyncTasks.TcsScanLimited)
+            blocks.Add(T("TaskCompletionSource scanning was limited; unresolved counts may be partial."));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

@@ -50,6 +50,75 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     }
 
     [Fact]
+    public void OnHeapEntry_AccumulatesTcsEntries_WhenMethodTableIsInTcsMtSet()
+    {
+        // BeforeHeapIndexScan's TCS-name resolution needs a live ClrHeap (not mockable in this
+        // test setup), so _tcsMts is injected directly via reflection after BeforeHeapIndexScan
+        // resets it — this isolates the OnHeapEntry/cap-enforcement mechanics under test from
+        // the ClrMD-dependent name resolution, which has no unit-testable seam of its own.
+        const ulong TcsMt = 0x4000;
+        AsyncTaskAnalyzer analyzer = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100);
+
+        analyzer.BeforeHeapIndexScan(context);
+        SetTcsMts(analyzer, [TcsMt]);
+
+        analyzer.OnHeapEntry(new HeapEntry(0x1000, TaskMt, 100));
+        analyzer.OnHeapEntry(new HeapEntry(0x2000, TcsMt, 50));
+        analyzer.OnHeapEntry(new HeapEntry(0x2100, OtherMt, 50));
+        analyzer.OnHeapEntry(new HeapEntry(0x2200, TcsMt, 50));
+
+        var taskEntries = GetParticipantEntries(analyzer);
+        taskEntries.Should().HaveCount(1);
+        taskEntries.Select(e => e.Address).Should().Equal(0x1000UL);
+
+        var tcsEntries = GetParticipantTcsEntries(analyzer);
+        tcsEntries.Should().HaveCount(2);
+        tcsEntries.Select(e => e.Address).Should().Equal(0x2000UL, 0x2200UL);
+    }
+
+    [Fact]
+    public void OnHeapEntry_RespectsMaxTcsToScan()
+    {
+        const ulong TcsMt = 0x4000;
+        AsyncTaskAnalyzer analyzer = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxTcsToScan: 1);
+
+        analyzer.BeforeHeapIndexScan(context);
+        SetTcsMts(analyzer, [TcsMt]);
+
+        analyzer.OnHeapEntry(new HeapEntry(0x2000, TcsMt, 50));
+        analyzer.OnHeapEntry(new HeapEntry(0x2100, TcsMt, 50));
+
+        var tcsEntries = GetParticipantTcsEntries(analyzer);
+        tcsEntries.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void MergePartial_MergesTcsWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    {
+        const ulong TcsMt = 0x4000;
+        AsyncTaskAnalyzer primary = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxTcsToScan: 3);
+
+        primary.BeforeHeapIndexScan(context);
+        SetTcsMts(primary, [TcsMt]);
+        primary.OnHeapEntry(new HeapEntry(0x3000, TcsMt, 50));
+        primary.OnHeapEntry(new HeapEntry(0x1000, TcsMt, 50));
+
+        AsyncTaskAnalyzer worker = new();
+        worker.BeforeHeapIndexScan(context);
+        SetTcsMts(worker, [TcsMt]);
+        worker.OnHeapEntry(new HeapEntry(0x2000, TcsMt, 50));
+        worker.OnHeapEntry(new HeapEntry(0x4000, TcsMt, 50));
+
+        primary.MergePartial([worker]);
+
+        var merged = GetParticipantTcsEntries(primary);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+    }
+
+    [Fact]
     public void MergePartial_MergesWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
     {
         // maxTasksToScan caps each worker individually (uncapped relative to the others), so
@@ -74,7 +143,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
     }
 
-    private static AnalysisContext CreateContext(int maxTasksToScan)
+    private static AnalysisContext CreateContext(int maxTasksToScan, int maxTcsToScan = 100)
     {
         HeapAnalysisCache cache = new();
 
@@ -112,7 +181,8 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
             {
                 AsyncTaskAnalysis = new AsyncTaskAnalysisOptions
                 {
-                    MaxTasksToScan = maxTasksToScan
+                    MaxTasksToScan = maxTasksToScan,
+                    MaxTcsToScan = maxTcsToScan
                 }
             }
         };
@@ -123,5 +193,22 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         return (List<(ulong Address, ulong Mt, int StateFlags)>)typeof(AsyncTaskAnalyzer)
             .GetField("_participantEntries", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(analyzer)!;
+    }
+
+    private static List<(ulong Address, ulong Mt)> GetParticipantTcsEntries(AsyncTaskAnalyzer analyzer)
+    {
+        return (List<(ulong Address, ulong Mt)>)typeof(AsyncTaskAnalyzer)
+            .GetField("_participantTcsEntries", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+    }
+
+    // BeforeHeapIndexScan's TCS candidate-set construction resolves type names via a live
+    // ClrHeap, which isn't mockable in this test setup (Runtime = null!) — inject the resulting
+    // set directly to isolate OnHeapEntry/MergePartial's TCS-path mechanics under test.
+    private static void SetTcsMts(AsyncTaskAnalyzer analyzer, HashSet<ulong> tcsMts)
+    {
+        typeof(AsyncTaskAnalyzer)
+            .GetField("_tcsMts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(analyzer, tcsMts);
     }
 }

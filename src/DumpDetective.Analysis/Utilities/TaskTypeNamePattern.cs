@@ -23,4 +23,9 @@ internal static class TaskTypeNamePattern
         return typeName.StartsWith(TaskPrefix, StringComparison.Ordinal)
             && !typeName.StartsWith(TaskCompletionSourcePrefix, StringComparison.Ordinal);
     }
+
+    public static bool IsTaskCompletionSource(string typeName)
+    {
+        return typeName.StartsWith(TaskCompletionSourcePrefix, StringComparison.Ordinal);
+    }
 }

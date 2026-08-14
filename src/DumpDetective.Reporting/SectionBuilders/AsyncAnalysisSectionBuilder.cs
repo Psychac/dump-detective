@@ -119,7 +119,12 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.ExceptionType ?? "—"),
                     Cell(snapshot.ExceptionMessage is null ? "—" : FormatHelper.TruncateString(snapshot.ExceptionMessage, 80))));
             }
-            compactTables.Add(STCompact("Orphaned tasks",
+
+            string orphanedTableTitle = "Orphaned tasks";
+            if (asyncTasks.TopOrphanedTasks.Count < asyncTasks.OrphanedTasks)
+                orphanedTableTitle += $" (showing {asyncTasks.TopOrphanedTasks.Count} of {asyncTasks.OrphanedTasks})";
+
+            compactTables.Add(STCompact(orphanedTableTitle,
                 new[] { CH("Address"), CH("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }

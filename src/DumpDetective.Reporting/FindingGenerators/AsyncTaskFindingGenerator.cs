@@ -82,12 +82,22 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
         // High pending task count — possible starvation
         if (r.PendingTasks > 500)
         {
+            // Escalate severity if pending tasks represent a high fraction of the total
+            double pendingRate = r.TotalTasks > 0 ? r.PendingTasks * 100.0 / r.TotalTasks : 0;
+            FindingSeverity pendingSeverity = r.PendingTasks > 5000 || pendingRate > 70
+                ? FindingSeverity.Critical
+                : pendingRate > 50
+                    ? FindingSeverity.Warning
+                    : r.PendingTasks > 2000
+                        ? FindingSeverity.Warning
+                        : FindingSeverity.Info;
+
             signals.Add(new AsyncSignal(
                 Key: "pending",
-                Severity: r.PendingTasks > 5000 ? FindingSeverity.Critical : FindingSeverity.Warning,
+                Severity: pendingSeverity,
                 Priority: 300 + (r.PendingTasks / 10),
                 Title: "High number of pending tasks",
-                Evidence: $"{r.PendingTasks:N0} tasks are pending ({r.TotalTasks:N0} total). A large pending queue may indicate thread-pool starvation or awaiting blocked continuations.",
+                Evidence: $"{r.PendingTasks:N0} tasks are pending ({pendingRate:F1}% of {r.TotalTasks:N0} total). A large pending queue may indicate thread-pool starvation or awaiting blocked continuations.",
                 Recommendation: "Check for synchronous blocking inside async methods (.Result / .Wait). Use ValueTask where tasks complete synchronously. Verify thread-pool sizing.",
                 Tags: ["async", "task", "pending", "starvation"],
                 MetricValue: r.PendingTasks,

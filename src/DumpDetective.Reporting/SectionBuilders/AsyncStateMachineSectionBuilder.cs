@@ -55,11 +55,12 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         if (d.TopByCapturedSize.Count > 0)
         {
             blocks.Add(T("Async methods capture all variables referenced across await boundaries. " +
-                          "Instances with large captured closures may indicate long-lived objects being retained unintentionally."));
+                          "Instances with large captured closures may indicate long-lived objects being retained unintentionally. " +
+                          "Note: the captured reference bytes count is shallow (direct references only, not transitive closure) and counts objects even if referenced by multiple state machines; it is an estimate of closure size, not unique waste."));
             int limit = Math.Min(d.TopByCapturedSize.Count, TopCaptureRows);
             compactTables.Add(STCompact(
                 "Top async state machine instances by captured reference bytes",
-                new[] { CH("Address"), CH("Type Name"), CH("Captured Ref Bytes","bytes"), CH("Large Captures") },
+                new[] { CH("Address"), CH("Type Name"), CH("Captured Ref Bytes (shallow)","bytes"), CH("Large Captures") },
                 BuildCaptureRows(d.TopByCapturedSize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

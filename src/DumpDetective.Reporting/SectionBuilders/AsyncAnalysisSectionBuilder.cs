@@ -51,6 +51,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             ["total_task_continuations"] = new NumericMetricValue(asyncTasks.TotalTaskContinuations, MetricUnit.Count),
             ["max_continuation_depth"] = new NumericMetricValue(asyncTasks.MaxContinuationDepth, MetricUnit.Count),
             ["avg_continuation_depth"] = new NumericMetricValue(asyncTasks.AvgContinuationDepth, MetricUnit.Custom, asyncTasks.AvgContinuationDepth.ToString("F1")),
+            ["depth_sample_count"] = new NumericMetricValue(asyncTasks.DepthSampleCount, MetricUnit.Count),
         };
 
         compactTables.Add(STCompact(

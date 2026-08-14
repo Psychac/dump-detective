@@ -171,7 +171,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 FaultedTaskExceptionHistograms: [],
                 MultiContinuationNodeCount: 0,
                 MaxContinuationFanOut: 0,
-                TopContinuationFanoutTypes: []);
+                TopContinuationFanoutTypes: [],
+                DepthSampleCount: 0);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -383,7 +384,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             FaultedTaskExceptionHistograms: faultedProfiles,
             MultiContinuationNodeCount: multiContinuationNodes,
             MaxContinuationFanOut: maxFanOut,
-            TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow));
+            TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow),
+            DepthSampleCount: depthSampleCount);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────

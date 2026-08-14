@@ -1,5 +1,6 @@
 ﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -681,7 +682,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 bool isQueuedWorkItem = typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal)
                     || typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal);
-                bool isTask = typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal);
+                bool isTask = TaskTypeNamePattern.IsTaskType(typeName);
                 bool isContinuation = typeName.Contains("ContinuationTask", StringComparison.Ordinal)
                     || typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal);
 

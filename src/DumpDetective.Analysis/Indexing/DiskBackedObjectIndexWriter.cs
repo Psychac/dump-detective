@@ -928,7 +928,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             if (name == "System.String")
                 flags |= TypeAggregateFlags.IsStringType;
 
-            if (name.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal))
+            if (TaskTypeNamePattern.IsTaskType(name))
                 flags |= TypeAggregateFlags.IsTaskType;
         }
 

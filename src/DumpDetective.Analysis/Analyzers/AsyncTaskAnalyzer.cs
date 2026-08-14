@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -60,7 +61,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // multi-continuation graphs) independent of MaxContinuationDepth, which only bounds
     // the depth of any single branch, not the total size of the reachable subgraph.
     private const int MaxContinuationNodesToVisitPerTask = 2_000;
-    private static readonly string[] TaskNamespacePrefixes = ["System.Threading.Tasks.Task"];
     private static readonly string[] ExceptionRelatedFields =
     [
         "m_exceptionsHolder",
@@ -493,7 +493,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 continue;
 
             string? typeName = obj.Type.Name;
-            if (typeName is null || !TypeNamePatternMatcher.HasAnyPrefix(typeName, TaskNamespacePrefixes))
+            if (typeName is null || !TaskTypeNamePattern.IsTaskType(typeName))
                 continue;
 
             // obj.Type is already resolved here, so reading m_stateFlags now is free

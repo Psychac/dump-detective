@@ -177,7 +177,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 PendingGen0: 0,
                 PendingGen1: 0,
                 PendingGen2: 0,
-                PendingLOH: 0);
+                PendingLOH: 0,
+                TopPendingTaskTypesByBytes: []);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -193,6 +194,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int orphaned = 0;
 
         var pendingTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        var pendingTypeBytes = new Dictionary<string, (long TotalBytes, int Count)>(StringComparer.Ordinal);
         var faultedTypeCount = new Dictionary<string, int>(StringComparer.Ordinal);
         var faultedTypeExceptions = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
         var continuationCount = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -285,7 +287,14 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     }
                 }
                 else
+                {
                     IncrementCount(pendingTypeCount, typeName);
+                    if (taskObj.IsValid)
+                    {
+                        pendingTypeBytes.TryGetValue(typeName, out var byteEntry);
+                        pendingTypeBytes[typeName] = (byteEntry.TotalBytes + (long)taskObj.Size, byteEntry.Count + 1);
+                    }
+                }
             }
 
             // ── Orphan detection + continuation chain BFS ─────────────────────
@@ -409,7 +418,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             PendingGen0: pendingGen0,
             PendingGen1: pendingGen1,
             PendingGen2: pendingGen2,
-            PendingLOH: pendingLOH);
+            PendingLOH: pendingLOH,
+            TopPendingTaskTypesByBytes: BuildTopNByBytes(pendingTypeBytes, options.TopTypesToShow));
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -888,6 +898,57 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             }
         }
         result.Sort((a, b) => b.Count.CompareTo(a.Count));
+        return result;
+    }
+
+    private static IReadOnlyList<NameSizeCountEntry> BuildTopNByBytes(
+        Dictionary<string, (long TotalBytes, int Count)> byteCounts, int topTypesToShow)
+    {
+        if (byteCounts.Count == 0) return [];
+
+        var result = new List<NameSizeCountEntry>(capacity: Math.Min(byteCounts.Count, topTypesToShow));
+        long threshold = 0;
+
+        // Find top-N without LINQ — sort only if we must
+        if (byteCounts.Count <= topTypesToShow)
+        {
+            foreach (var kvp in byteCounts)
+                result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
+            result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
+            return result;
+        }
+
+        // Partial sort: track min in top-N bucket
+        foreach (var kvp in byteCounts)
+        {
+            if (result.Count < topTypesToShow)
+            {
+                result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
+                if (kvp.Value.TotalBytes < threshold || result.Count == 1)
+                    threshold = kvp.Value.TotalBytes;
+
+                // After fill phase completes, sync threshold to the actual minimum
+                // in the filled result before proceeding to replacements.
+                if (result.Count == topTypesToShow)
+                {
+                    threshold = long.MaxValue;
+                    for (int i = 0; i < result.Count; i++)
+                        if (result[i].TotalBytes < threshold) threshold = result[i].TotalBytes;
+                }
+            }
+            else if (kvp.Value.TotalBytes > threshold)
+            {
+                // Replace the entry with the lowest total bytes
+                int minIdx = 0;
+                for (int i = 1; i < result.Count; i++)
+                    if (result[i].TotalBytes < result[minIdx].TotalBytes) minIdx = i;
+                result[minIdx] = new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count);
+                threshold = long.MaxValue;
+                for (int i = 0; i < result.Count; i++)
+                    if (result[i].TotalBytes < threshold) threshold = result[i].TotalBytes;
+            }
+        }
+        result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
         return result;
     }
 

@@ -23,6 +23,11 @@ internal sealed record FaultedTaskTypeProfile(
     int TotalCount,
     IReadOnlyList<NameCountEntry> ExceptionTypes);
 
+internal sealed record NameSizeCountEntry(
+    string Name,
+    long TotalBytes,
+    int Count);
+
 internal sealed record AsyncTaskDomainResult(
     int TotalTasks,
     int PendingTasks,
@@ -49,4 +54,5 @@ internal sealed record AsyncTaskDomainResult(
     int PendingGen0 = 0,
     int PendingGen1 = 0,
     int PendingGen2 = 0,
-    int PendingLOH = 0) : AnalyzerDomainResult;
+    int PendingLOH = 0,
+    IReadOnlyList<NameSizeCountEntry>? TopPendingTaskTypesByBytes = default) : AnalyzerDomainResult;

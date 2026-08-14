@@ -116,6 +116,19 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             compactTables.Add(STCompact("Pending task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (asyncTasks.TopPendingTaskTypesByBytes is { Count: > 0 } byBytes)
+        {
+            var rows = new List<TableRow>(byBytes.Count);
+            for (int i = 0; i < byBytes.Count; i++)
+            {
+                rows.Add(Row(
+                    Cell(byBytes[i].Name),
+                    Cell(FormatBytes((ulong)byBytes[i].TotalBytes), byBytes[i].TotalBytes),
+                    Cell(byBytes[i].Count.ToString("N0"), byBytes[i].Count)));
+            }
+            compactTables.Add(STCompact("Pending task types by retained bytes", new[] { CH("Type"), CH("Total Size","bytes"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (asyncTasks.TopFaultedTaskTypes.Count > 0)
         {
             var rows = new List<TableRow>(asyncTasks.TopFaultedTaskTypes.Count);

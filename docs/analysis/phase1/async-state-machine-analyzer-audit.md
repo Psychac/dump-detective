@@ -344,7 +344,7 @@ dotMemory's "Async/Await" view (available in newer versions) shows async method 
 | P2-4 | Verify regex `<(.+?)>d__\d+$` against generic async state machine type names emitted by ClrMD; add `Contains(">d__")` post-processing to handle trailing generic params if needed | Improvement | Medium — correctness risk for generic async methods | Low | Medium |
 | P3-1 | Task linkage: read `AsyncTaskMethodBuilder.m_task` from state machine sample; cross-reference with `AsyncTaskAnalyzer` results (absorbs [AsyncTaskAnalyzer P1-2](async-task-analyzer-audit.md#priority-roadmap), which is superseded here) | Evolution | High — enables cross-analyzer async call graph | High | Medium |
 | P3-2 | Async call tree reconstruction analogous to `!dumpasync` (state machine → builder task → continuation → next state machine) | Evolution | Very High — flagship capability | Very High | Medium |
-| P3-3 | Add `statemachine.gen2.count` and `statemachine.gen2.fraction` to `AsyncStateMachineTrendComparer` metrics | Improvement | Medium — enables regression tracking of long-lived suspensions | Low | High |
+| P3-3 | Add `statemachine.gen2.count` and `statemachine.gen2.fraction` to `AsyncStateMachineTrendComparer` metrics | Improvement | Medium — enables regression tracking of long-lived suspensions | Low | High | DONE |
 | P3-4 | Re-audit against .NET 11 GA Runtime Async; add additive `RuntimeAsyncTask`/spilled-locals detection alongside (not replacing) `d__N`/`IAsyncStateMachine` scan once ClrMD exposes the finalized shape | Evolution | High — prevents silent under-counting as Runtime Async adoption grows | Medium | Low (spec not final) |
 
 ### Final Verdict

@@ -26,7 +26,7 @@ public sealed class LeakCandidateFindingGeneratorTests
     {
         var gen = new LeakCandidateFindingGenerator();
         var result = BuildResult(
-            new LeakCandidateRecord("A.Type", 120_000_000, 1200, 75.0, 94, FindingSeverity.Critical, LeakClass.CacheLeak, null, false, true, 0.8),
+            new LeakCandidateRecord("A.Type", 120_000_000, 1200, 75.0, 94, FindingSeverity.Warning, LeakClass.CacheLeak, null, false, true, 0.8),
             new LeakCandidateRecord("B.Type", 50_000_000, 600, 62.0, 70, FindingSeverity.Warning, LeakClass.CacheLeak, null, false, true, 0.7),
             new LeakCandidateRecord("C.Type", 20_000_000, 220, 54.0, 55, FindingSeverity.Warning, LeakClass.EventLeak, null, false, false, 0.6));
 
@@ -40,6 +40,24 @@ public sealed class LeakCandidateFindingGeneratorTests
         finding.Tags.Should().Contain("aggregate");
         finding.Tags.Should().Contain("CacheLeak");
         finding.MetricUnit.Should().Be("bytes");
+    }
+
+    [Fact]
+    public void Generate_CriticalCandidates_ReturnsSeparateFindingPerCandidate()
+    {
+        var gen = new LeakCandidateFindingGenerator();
+        var result = BuildResult(
+            new LeakCandidateRecord("A.Type", 120_000_000, 1200, 75.0, 94, FindingSeverity.Critical, LeakClass.CacheLeak, null, false, true, 0.8),
+            new LeakCandidateRecord("B.Type", 50_000_000, 600, 62.0, 70, FindingSeverity.Warning, LeakClass.CacheLeak, null, false, true, 0.7),
+            new LeakCandidateRecord("C.Type", 20_000_000, 220, 54.0, 55, FindingSeverity.Warning, LeakClass.EventLeak, null, false, false, 0.6));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        var finding = findings[0];
+        finding.Title.Should().Contain("Critical leak candidate: A.Type");
+        finding.Severity.Should().Be(FindingSeverity.Critical);
+        finding.Tags.Should().Contain("critical");
     }
 
     [Fact]

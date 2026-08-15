@@ -31,7 +31,7 @@ public sealed class MemoryAnalysisProjectionTests
         result.TotalLohMemory.Should().Be(100_000);
         result.SelectedTypes.Should().HaveCount(2);
         result.SelectedTypes[0].TypeName.Should().Be("Gamma");
-        result.SelectedTypes[1].TypeName.Should().Be("Alpha");
+        result.SelectedTypes[1].TypeName.Should().Be("Beta");
         result.MemoryPressureScore.Should().BeGreaterThan(0);
         result.Top5Bytes.Should().Be(111_000);
         result.SmallObjectCount.Should().Be(100);

@@ -138,6 +138,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
     private ClrHeap? _heap;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
+    private HashSet<ulong>? _factoryMts;
     private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<WcfChannelSnapshot>? _sampler;
     private int _factoryCount;
@@ -145,6 +146,9 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     /// <summary>
     /// Resolves candidate WCF-type MethodTables and pre-seeds per-type counters from
     /// TypeAggregates, exactly mirroring the historical single-shot "Step 1 + pre-seed" logic.
+    /// Also resolves factory-type MethodTables here (once per distinct type, bounded by type
+    /// count) so OnHeapEntry can classify factories via a MethodTable hashset lookup instead of
+    /// resolving heap.GetObject(...).Type.Name for every object in the heap — see OnHeapEntry.
     /// </summary>
     public void BeforeHeapIndexScan(AnalysisContext context)
     {
@@ -154,6 +158,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
         _candidateMts = candidateMts;
+
+        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> factoryCandidates =
+            TypedResourceCandidateScanner.DiscoverCandidates(heap, context.Cache, IsFactoryType);
+        _factoryMts = new HashSet<ulong>(factoryCandidates.Keys);
 
         var typeStats = new Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
@@ -220,8 +228,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         var typeStats = _typeStats!;
         var sampler = _sampler!;
 
-        ClrObject obj = _heap!.GetObject(entry.Address);
-        if (obj.IsValid && obj.Type != null && IsFactoryType(obj.Type.Name))
+        // MethodTable-only checks (both against sets resolved once per distinct type in
+        // BeforeHeapIndexScan) — no heap.GetObject/ClrType resolution needed for the ~99.9% of
+        // objects that are neither a WCF channel nor a channel factory.
+        if (_factoryMts!.Contains(entry.MethodTable))
         {
             _factoryCount++;
             return;

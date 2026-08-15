@@ -417,8 +417,8 @@ output is treated as authoritative.
 | P1 | Fix section builder `.Take(20)` hardcode — respect `TopHighlyReferencedObjectsToShow` from options | Medium — configured value silently ignored | Low | High | Improvement | ✅ DONE |
 | P1 | Remove or rename `HeuristicOnly` flag — either always omit it or replace with a graduated confidence enum (`ShallowEstimate` / `DeepEstimate`) | Medium — currently misleads with a permanent confidence deduction | Medium | High | Improvement | ✅ DONE |
 | P1 | Source `RootPathSearchLimits` in `PopulateEvidence` from `RetentionOptions` or `ExecutionPolicy` | Medium — evidence quality not tunable | Low | High | Improvement | ✅ DONE |
-| P2 | Add retention pressure ratio (`total_retained_est / total_heap_size`) as a key metric and trend metric | Medium — context for absolute byte values | Low | High | Improvement |
-| P2 | Add `wasCapped` per-type to `TypeSnapshot` and the section builder | Medium — indicates estimate reliability | Low | Medium | Improvement |
+| P2 | Add retention pressure ratio (`total_retained_est / total_heap_size`) as a key metric and trend metric | Medium — context for absolute byte values | Low | High | Improvement | ✅ DONE |
+| P2 | Add `wasCapped` per-type to `TypeSnapshot` and the section builder | Medium — indicates estimate reliability | Low | Medium | Improvement | ✅ DONE |
 | P2 | Add fan-in distribution histogram to `DominatorDomainResult` | Medium — useful for cluster analysis | Medium | High | Improvement |
 | P2 | Add Gen2/LOH dominator sub-table to section builder | Medium — immediately actionable for GC investigations | Medium | High | Improvement |
 | P2 | Export `dominator.type.retained.bytes` per type in `DominatorTrendComparer` | Medium — enables retained-size regression tracking | Low | High | Improvement |

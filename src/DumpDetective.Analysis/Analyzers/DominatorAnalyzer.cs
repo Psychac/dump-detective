@@ -10,127 +10,26 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
-public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
+public sealed class DominatorAnalyzer : IAnalyzer
 {
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
     public int Order => 110;
 
-    // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
-    // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
-    // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
-    private ClrHeap? _heap;
-    private IHeapAnalysisCache? _cache;
-    private Dictionary<ulong, int>? _referenceCount;
-    private long _skippedReferenceAddresses;
-    private bool _objectScanCapped;
-    private long _objectsTraced;
-    private int _maxScan;
-    private int _maxReferenceAddresses;
-    private ObjectScanCounter? _scanCounter;
-    private IProgress<AnalyzerProgressReport>? _progress;
-    // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
-    // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
-    // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsync.
-    private bool _participantScanSucceeded;
-
     /// <summary>
-    /// Resets the leak-signal reference-counting accumulator ahead of the shared heap-index scan.
-    /// The candidate-scoring / bounded-graph-walk section of <see cref="Analyze"/> is unaffected —
-    /// it never scans the full index and stays a self-contained, on-demand pass.
+    /// Builds the "highly referenced object" leak signal, preferring the disk-backed
+    /// reverse-edge index (built during Phase 1 — see
+    /// docs/analysis/phase1-redesigns/full-reverse-index-plan.md) over a live per-object
+    /// reference count. The index already recorded every object's incoming-reference count as
+    /// part of the one-time Phase 1 edge extraction, so reading it here is a single sequential,
+    /// allocation-light pass with no ClrMD field walks — this analyzer no longer needs to
+    /// participate in <see cref="Pipeline.HeapIndexScanDispatcher"/>'s shared heap-index scan
+    /// for this signal at all (it previously did, as an <c>IParallelHeapIndexScanParticipant</c>,
+    /// live-counting incoming references by walking every referencing object's fields — see git
+    /// history for that implementation). Falls back to <see cref="AnalyzeObjectsPass"/>'s live
+    /// scan only when no reverse index is available (in-memory mode, disabled via
+    /// <c>DD_SKIP_REVERSE_INDEX_BUILD=1</c>, or a pre-v4 cache.bin).
     /// </summary>
-    public void BeforeHeapIndexScan(AnalysisContext context)
-    {
-        _heap = context.Heap;
-        _cache = context.Cache;
-
-        ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
-        _maxScan = policy.MaxLeakScanObjects;
-        _maxReferenceAddresses = policy.MaxReferenceAddresses;
-        _progress = context.Progress;
-
-        _referenceCount = new Dictionary<ulong, int>(capacity: 4096);
-        _skippedReferenceAddresses = 0;
-        _objectScanCapped = false;
-        _objectsTraced = 0;
-        _scanCounter = new ObjectScanCounter("scanning heap objects", context.Progress);
-    }
-
-    /// <summary>
-    /// Called once per disk-backed index entry, in address order, during the shared heap-index
-    /// scan pass. Ports the former index-tuple fast-path loop body (see the no-index fallback
-    /// still in <see cref="AnalyzeObjectsPass"/> for the case the dispatcher didn't run).
-    /// Explicit interface implementation because <see cref="HeapEntry"/> is internal and this
-    /// class is public — an implicit implementation would leak the internal type as public API.
-    /// </summary>
-    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
-
-    public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
-
-    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new DominatorAnalyzer();
-
-    // Sums each worker's independently-capped reference-count map by address key, subject to
-    // the same _maxReferenceAddresses cap the sequential path enforces via AccumulateReference.
-    // Mirrors AsyncTaskAnalyzer.MergePartial's merge-then-trim pattern; _objectsTraced is summed
-    // for diagnostics only and doesn't gate anything after the scan completes.
-    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-    {
-        Dictionary<ulong, int> referenceCount = _referenceCount!;
-        foreach (IHeapIndexScanParticipant p in partials)
-        {
-            var other = (DominatorAnalyzer)p;
-            if (other._referenceCount is null)
-                continue;
-
-            foreach (KeyValuePair<ulong, int> kvp in other._referenceCount)
-                MergeReferenceCount(kvp.Key, kvp.Value, referenceCount, _maxReferenceAddresses, ref _skippedReferenceAddresses);
-
-            _skippedReferenceAddresses += other._skippedReferenceAddresses;
-            _objectsTraced += other._objectsTraced;
-            _objectScanCapped |= other._objectScanCapped;
-        }
-    }
-
-    private void OnHeapEntry(in HeapEntry entry)
-    {
-        _scanCounter!.Tick();
-
-        if (_objectScanCapped) return;
-
-        ulong objectAddress = entry.Address;
-        if (objectAddress == 0) return;
-
-        if (!_cache!.MethodTableHasOutgoingRefs(_heap!, entry.MethodTable))
-            return;
-
-        if (_maxScan > 0 && _objectsTraced >= _maxScan)
-        {
-            _objectScanCapped = true;
-            return;
-        }
-
-        CountIncomingReferencesByAddress(_heap!, objectAddress, _referenceCount!, _maxReferenceAddresses, ref _skippedReferenceAddresses);
-        _objectsTraced++;
-    }
-
-    // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
-    // for this context (when an on-disk heap index exists) before AnalyzeAsync runs.
-    private LeakSignals BuildLeakSignalsFromParticipantState(ClrHeap heap, RetentionOptions options)
-    {
-        _scanCounter!.Complete();
-        _progress?.Report(new(_scanCounter.Scanned, "building leak signals"));
-
-        Dictionary<ulong, int> referenceCount = _referenceCount!;
-        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, _cache, referenceCount, options);
-        int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
-
-        return new LeakSignals(
-            highlyReferencedCount,
-            _skippedReferenceAddresses,
-            topHighlyReferencedObjects,
-            _objectScanCapped);
-    }
-
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -138,13 +37,66 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
         ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-        LeakSignals signals = _participantScanSucceeded
-            ? BuildLeakSignalsFromParticipantState(context.Heap, options)
+        IBackwardReferenceProvider? reverseIndex = context.Cache.TryGetReverseIndexProvider();
+        LeakSignals signals = reverseIndex is not null
+            ? BuildLeakSignalsFromReverseIndex(context.Heap, context.Cache, reverseIndex, options, context.Progress)
             : AnalyzeObjectsPass(context.Heap, context.Cache, options, policy, context.Progress);
 
         AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
 
         return ValueTask.FromResult(result);
+    }
+
+    private static LeakSignals BuildLeakSignalsFromReverseIndex(
+        ClrHeap heap,
+        IHeapAnalysisCache cache,
+        IBackwardReferenceProvider reverseIndex,
+        RetentionOptions options,
+        IProgress<AnalyzerProgressReport>? progress)
+    {
+        int threshold = options.HighReferenceThreshold;
+        int topN = Math.Max(1, options.TopHighlyReferencedObjectsToShow);
+
+        var scanCounter = new ObjectScanCounter("scanning reverse index", progress);
+        int highlyReferencedCount = 0;
+        var topHeap = new PriorityQueue<(ulong Address, int Count), int>(topN + 1);
+
+        reverseIndex.EnumerateChildCounts((child, count, _) =>
+        {
+            scanCounter.Tick();
+
+            if (count <= threshold)
+                return;
+
+            highlyReferencedCount++;
+
+            topHeap.Enqueue((child, count), count);
+            if (topHeap.Count > topN)
+                topHeap.Dequeue(); // evict smallest
+        });
+
+        scanCounter.Complete();
+        progress?.Report(new(scanCounter.Scanned, "building leak signals"));
+
+        // Ascending by count out of the min-heap; reverse below for descending display order.
+        var buffer = new List<(ulong Address, int Count)>(topHeap.Count);
+        while (topHeap.Count > 0)
+            buffer.Add(topHeap.Dequeue());
+
+        var results = new List<HighlyReferencedObjectSnapshot>(buffer.Count);
+        for (int i = buffer.Count - 1; i >= 0; i--)
+        {
+            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, buffer[i].Address, buffer[i].Count);
+            if (snapshot is not null)
+                results.Add(snapshot);
+        }
+
+        // Unlike the live-scan fallback, there's no fixed-size accumulation dictionary here
+        // (no MaxReferenceAddresses cap applies), so no addresses are ever skipped; and there's
+        // no per-object ClrMD work to budget via MaxLeakScanObjects, since the whole pass is
+        // sequential index reads, not live heap resolution — so the scan is exhaustive over
+        // every recorded child, by construction, never capped.
+        return new LeakSignals(highlyReferencedCount, SkippedReferenceAddresses: 0, results, ObjectScanCapped: false);
     }
 
     private static DominatorDomainResult Analyze(
@@ -155,8 +107,16 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
         CancellationToken cancellationToken)
     {
         Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
+
+        // Calculate total heap size from all types
+        ulong totalHeapBytes = 0;
+        foreach (var stat in typeStats.Values)
+        {
+            totalHeapBytes += stat.TotalSize;
+        }
+
         if (typeStats.Count == 0)
-            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow);
+            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow, TotalHeapBytes: totalHeapBytes);
 
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? aggregates = null;
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
@@ -216,7 +176,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
                 ObjectScanCapped = signals.ObjectScanCapped,
                 TopRetentionTypes = topRetentionTypes,
                 TopHighlyReferencedTotalBytes = topHighlyReferencedTotalBytes,
-                MaxTopDominatorTypesToShow = options.TopHighlyReferencedObjectsToShow
+                MaxTopDominatorTypesToShow = options.TopHighlyReferencedObjectsToShow,
+                TotalHeapBytes = totalHeapBytes
             };
         }
 
@@ -276,6 +237,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             totalEstimatedRetainedBytes += retainedBytes;
 
             ulong averageSize = count > 0 ? totalSize / (ulong)count : 0;
+            // TODO: Track WasCapped from RetainedSizeCandidateSelector when it exceeds breadth/depth limits.
+            // For now, always false — future enhancement to propagate cap indicator from BFS traversal.
             topTypes.Add(new TypeSnapshot(
                 typeName,
                 count,
@@ -284,7 +247,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
                 AverageSize: averageSize,
                 EstimatedRetainedBytes: retainedBytes,
                 SampleAddress: sampleAddress,
-                Gen2Count: gen2Count));
+                Gen2Count: gen2Count,
+                WasCapped: false));
         }
 
         topTypes.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
@@ -302,7 +266,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             ObjectScanCapped: signals.ObjectScanCapped,
             TopRetentionTypes: topRetentionTypes,
             TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes,
-            MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow);
+            MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow,
+            TotalHeapBytes: totalHeapBytes);
     }
 
     // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when
@@ -677,28 +642,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IParallelHeapIndexScanPartici
             .ThenByDescending(static t => t.TotalBytes)
             .ThenByDescending(static t => t.TotalIncomingReferences)
             .ToArray();
-    }
-
-    // Like AccumulateReference, but merges a worker-partial count instead of always incrementing by 1.
-    private static void MergeReferenceCount(
-        ulong address,
-        int addCount,
-        Dictionary<ulong, int> referenceCount,
-        int maxReferenceAddresses,
-        ref long skippedReferenceAddresses)
-    {
-        if (referenceCount.TryGetValue(address, out int count))
-        {
-            referenceCount[address] = count + addCount;
-        }
-        else if (referenceCount.Count < maxReferenceAddresses)
-        {
-            referenceCount[address] = addCount;
-        }
-        else
-        {
-            skippedReferenceAddresses++;
-        }
     }
 
     private readonly record struct LeakSignals(

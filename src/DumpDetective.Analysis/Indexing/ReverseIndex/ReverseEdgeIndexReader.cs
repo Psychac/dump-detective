@@ -132,6 +132,43 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         }
     }
 
+    /// <summary>
+    /// Sequentially walks every bucket's directory (already sorted by child address at write
+    /// time) and, for each entry, reads only the group header's count/truncated fields — never
+    /// the parent-address list itself, unlike <see cref="TryGetParents"/>. No bucket-address
+    /// hashing and no <see cref="_bucketLocks"/> locking: this is a single-threaded, in-order
+    /// scan over already-mapped memory, so it avoids both the point-lookup contention
+    /// <see cref="TryGetParents"/> would hit if called once per heap object (bucket count is
+    /// sized for ~500MB/bucket during index build, not for read-time parallelism, so a caller
+    /// hammering random point lookups from N parallel workers can serialize on far fewer than
+    /// N buckets) and the per-call parent-array allocation.
+    /// </summary>
+    public void EnumerateChildCounts(Action<ulong, int, bool> onChild)
+    {
+        for (int b = 0; b < _bucketCount; b++)
+        {
+            ReverseIndexBucketLocation loc = _bucketLocations[b];
+            if (loc.DirectoryLength < DirectoryHeaderSize)
+                continue;
+
+            long entryCount = ReadInt64(_directoriesPtr, loc.DirectoryOffset + 8);
+            long entriesStart = loc.DirectoryOffset + DirectoryHeaderSize;
+
+            for (long i = 0; i < entryCount; i++)
+            {
+                long entryOffset = entriesStart + i * DirectoryEntrySize;
+                ulong child = ReadUInt64(_directoriesPtr, entryOffset);
+                long dataOffsetInBucket = ReadInt64(_directoriesPtr, entryOffset + 8);
+                long absoluteDataOffset = loc.DataOffset + dataOffsetInBucket;
+
+                int count = ReadInt32(_bucketsPtr, absoluteDataOffset + 8);
+                bool truncated = _bucketsPtr[absoluteDataOffset + 12] != 0;
+
+                onChild(child, count, truncated);
+            }
+        }
+    }
+
     private bool TryFindInDirectory(ReverseIndexBucketLocation loc, ulong child, out long dataOffsetInBucket)
     {
         dataOffsetInBucket = -1;

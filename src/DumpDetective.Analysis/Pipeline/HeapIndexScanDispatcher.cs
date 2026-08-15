@@ -91,6 +91,7 @@ internal sealed class HeapIndexScanDispatcher
         // ↳ phase line gets the text, and the ticking status line stays blank.
         int currentParticipantIndex = -1;
         string? currentSubPhase = null;
+        double[] setupCostByParticipant = new double[participants.Count];
 
         // No " • " separator here (unlike other Publish calls below) — each distinct participant/
         // sub-phase combination is reported as the phase itself, not as a fast-changing detail
@@ -127,6 +128,7 @@ internal sealed class HeapIndexScanDispatcher
                 Interlocked.Exchange(ref currentParticipantIndex, i);
                 Volatile.Write(ref currentSubPhase, null);
                 Publish(AnalysisDiagnosticsEventType.AnalyzerProgress, 0, BuildSetupPhaseText(i, null));
+                long setupStart = DispatcherProfiler.Now();
                 try
                 {
                     participants[i].BeforeHeapIndexScan(context);
@@ -135,6 +137,9 @@ internal sealed class HeapIndexScanDispatcher
                 {
                     failed[i] = true;
                 }
+
+                if (DispatcherProfiler.Enabled)
+                    setupCostByParticipant[i] = DispatcherProfiler.ToMs(DispatcherProfiler.Now() - setupStart);
             }
         }, cancellationToken);
 
@@ -146,6 +151,14 @@ internal sealed class HeapIndexScanDispatcher
         }
 
         setupTask.GetAwaiter().GetResult();
+
+        if (DispatcherProfiler.Enabled)
+        {
+            var setupRows = new List<(string, double, long)>(participants.Count);
+            for (int i = 0; i < participants.Count; i++)
+                setupRows.Add((participants[i].GetType().Name, setupCostByParticipant[i], 1));
+            DispatcherProfiler.LogTable("PHASE 1 — owner participant setup (BeforeHeapIndexScan, sequential):", setupRows);
+        }
 
         // Scoped to the single-threaded setup pass above: worker instances created for the
         // parallel pass below call BeforeHeapIndexScan concurrently on separate threads, and
@@ -262,15 +275,24 @@ internal sealed class HeapIndexScanDispatcher
         ObjectScanCounter scanCounter,
         CancellationToken cancellationToken)
     {
+        bool profile = DispatcherProfiler.Enabled;
+        long[] sampledTicks = profile ? new long[participants.Count] : [];
+        long[] sampledCalls = profile ? new long[participants.Count] : [];
+        long sampleCursor = 0;
+        long passStart = DispatcherProfiler.Now();
+
         foreach (HeapEntry entry in cache.EnumerateIndexedEntries())
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            bool sampleThis = profile && ++sampleCursor % DispatcherProfiler.SampleEvery == 0;
 
             for (int i = 0; i < participants.Count; i++)
             {
                 if (failed[i] || (mask is not null && !mask[i]))
                     continue;
 
+                long t0 = sampleThis ? Stopwatch.GetTimestamp() : 0;
                 try
                 {
                     participants[i].OnHeapEntry(in entry);
@@ -279,9 +301,29 @@ internal sealed class HeapIndexScanDispatcher
                 {
                     failed[i] = true;
                 }
+
+                if (sampleThis)
+                {
+                    sampledTicks[i] += Stopwatch.GetTimestamp() - t0;
+                    sampledCalls[i]++;
+                }
             }
 
             scanCounter.Tick();
+        }
+
+        if (profile)
+        {
+            DispatcherProfiler.Log($"SEQUENTIAL pass wall time: {DispatcherProfiler.ToMs(DispatcherProfiler.Now() - passStart):N1} ms over {sampleCursor:N0} entries");
+            var rows = new List<(string, double, long)>(participants.Count);
+            for (int i = 0; i < participants.Count; i++)
+            {
+                if (sampledCalls[i] == 0) continue;
+                rows.Add((participants[i].GetType().Name,
+                    DispatcherProfiler.ToMs(sampledTicks[i]) * DispatcherProfiler.SampleEvery, sampledCalls[i]));
+            }
+            DispatcherProfiler.LogTable(
+                $"SEQUENTIAL pass — estimated per-participant OnHeapEntry cost (1-in-{DispatcherProfiler.SampleEvery} sampled, scaled):", rows);
         }
     }
 
@@ -300,6 +342,13 @@ internal sealed class HeapIndexScanDispatcher
         CancellationToken cancellationToken)
     {
         int participantCount = parallelIndices.Count;
+
+        // Per-participant attribution accumulators (only populated under DD_DISPATCHER_PROFILE=1).
+        double[] workerSetupMs = new double[participantCount];
+        double[] mergeMs = new double[participantCount];
+        long[] sampledScanTicks = new long[participantCount];
+        long[] sampledScanCalls = new long[participantCount];
+        long profileWorkerSetupStart = DispatcherProfiler.Now();
 
         // workerInstances[w][p] / workerFailed[w][p] — worker w's private instance (and failure
         // state) of the p-th parallel-capable participant. Worker 0 reuses each participant's
@@ -325,6 +374,7 @@ internal sealed class HeapIndexScanDispatcher
                     continue;
                 }
 
+                long workerSetupStart = DispatcherProfiler.Now();
                 try
                 {
                     IHeapIndexScanParticipant worker = owner.CreateWorkerInstance();
@@ -336,7 +386,20 @@ internal sealed class HeapIndexScanDispatcher
                     workerInstances[w][p] = owner; // placeholder; never scanned since marked failed
                     workerFailed[w][p] = true;
                 }
+
+                if (DispatcherProfiler.Enabled)
+                    workerSetupMs[p] += DispatcherProfiler.ToMs(DispatcherProfiler.Now() - workerSetupStart);
             }
+        }
+
+        if (DispatcherProfiler.Enabled)
+        {
+            var rows = new List<(string, double, long)>(participantCount);
+            for (int p = 0; p < participantCount; p++)
+                rows.Add((participants[parallelIndices[p]].GetType().Name, workerSetupMs[p], workerCount - 1));
+            DispatcherProfiler.Log($"PHASE 2 — worker setup: {workerCount} workers, {participantCount} parallel participants, " +
+                $"{DispatcherProfiler.ToMs(DispatcherProfiler.Now() - profileWorkerSetupStart):N1} ms total (sequential, on caller thread)");
+            DispatcherProfiler.LogTable("PHASE 2 — per-worker CreateWorkerInstance + BeforeHeapIndexScan, summed over workers 1..N-1:", rows);
         }
 
         long[] rangeStarts = new long[workerCount];
@@ -358,8 +421,17 @@ internal sealed class HeapIndexScanDispatcher
             MaxDegreeOfParallelism = workerCount
         };
 
+        long profileScanStart = DispatcherProfiler.Now();
+        double[] workerWallMs = new double[workerCount];
+
         Parallel.For(0, workerCount, parallelOptions, w =>
         {
+            long workerStart = DispatcherProfiler.Now();
+            bool profile = DispatcherProfiler.Enabled;
+            long[] localScanTicks = profile ? new long[participantCount] : [];
+            long[] localScanCalls = profile ? new long[participantCount] : [];
+            long sampleCursor = 0;
+
             // Local, non-atomic tally flushed to the shared counter every LocalTickBatch objects
             // instead of once per object — an Interlocked op per object here forces every worker
             // thread to fight over the same cache line for the whole pass, which on wide core
@@ -370,11 +442,14 @@ internal sealed class HeapIndexScanDispatcher
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                bool sampleThis = profile && ++sampleCursor % DispatcherProfiler.SampleEvery == 0;
+
                 for (int p = 0; p < participantCount; p++)
                 {
                     if (workerFailed[w][p])
                         continue;
 
+                    long t0 = sampleThis ? Stopwatch.GetTimestamp() : 0;
                     try
                     {
                         workerInstances[w][p].OnHeapEntry(in entry);
@@ -382,6 +457,12 @@ internal sealed class HeapIndexScanDispatcher
                     catch (Exception) when (cancellationToken.IsCancellationRequested is false)
                     {
                         workerFailed[w][p] = true;
+                    }
+
+                    if (sampleThis)
+                    {
+                        localScanTicks[p] += Stopwatch.GetTimestamp() - t0;
+                        localScanCalls[p]++;
                     }
                 }
 
@@ -394,7 +475,39 @@ internal sealed class HeapIndexScanDispatcher
 
             if (localTicked > 0)
                 scanCounter.AddParallel(localTicked);
+
+            if (profile)
+            {
+                workerWallMs[w] = DispatcherProfiler.ToMs(DispatcherProfiler.Now() - workerStart);
+                for (int p = 0; p < participantCount; p++)
+                {
+                    Interlocked.Add(ref sampledScanTicks[p], localScanTicks[p]);
+                    Interlocked.Add(ref sampledScanCalls[p], localScanCalls[p]);
+                }
+            }
         });
+
+        if (DispatcherProfiler.Enabled)
+        {
+            double scanWallMs = DispatcherProfiler.ToMs(DispatcherProfiler.Now() - profileScanStart);
+            DispatcherProfiler.Log($"PHASE 3 — Parallel.For scan wall time: {scanWallMs:N1} ms over {objectCount:N0} entries, {workerCount} workers");
+
+            var rows = new List<(string, double, long)>(participantCount);
+            for (int p = 0; p < participantCount; p++)
+            {
+                // Sampled cost scaled back up to the full entry population, then divided by the
+                // worker count to express it as wall-clock contribution rather than CPU-seconds.
+                double estimatedCpuMs = DispatcherProfiler.ToMs(sampledScanTicks[p]) * DispatcherProfiler.SampleEvery;
+                rows.Add((participants[parallelIndices[p]].GetType().Name, estimatedCpuMs / workerCount, sampledScanCalls[p]));
+            }
+            DispatcherProfiler.LogTable(
+                $"PHASE 3 — estimated per-participant OnHeapEntry cost (1-in-{DispatcherProfiler.SampleEvery} sampled, scaled, /{workerCount} workers):", rows);
+
+            var workerRows = new List<(string, double, long)>(workerCount);
+            for (int w = 0; w < workerCount; w++)
+                workerRows.Add(($"worker {w}", workerWallMs[w], rangeCounts[w]));
+            DispatcherProfiler.LogTable("PHASE 3 — per-worker wall time (imbalance check):", workerRows);
+        }
 
         scanCounter.Report($"{ScanName}: merged {participantCount} parallel-capable participant(s).");
 
@@ -422,6 +535,7 @@ internal sealed class HeapIndexScanDispatcher
             for (int w = 1; w < workerCount; w++)
                 otherWorkers.Add(workerInstances[w][p]);
 
+            long mergeStart = DispatcherProfiler.Now();
             try
             {
                 ((IParallelHeapIndexScanParticipant)participants[originalIndex]).MergePartial(otherWorkers);
@@ -430,6 +544,17 @@ internal sealed class HeapIndexScanDispatcher
             {
                 failed[originalIndex] = true;
             }
+
+            if (DispatcherProfiler.Enabled)
+                mergeMs[p] = DispatcherProfiler.ToMs(DispatcherProfiler.Now() - mergeStart);
+        }
+
+        if (DispatcherProfiler.Enabled)
+        {
+            var rows = new List<(string, double, long)>(participantCount);
+            for (int p = 0; p < participantCount; p++)
+                rows.Add((participants[parallelIndices[p]].GetType().Name, mergeMs[p], workerCount - 1));
+            DispatcherProfiler.LogTable("PHASE 4 — MergePartial:", rows);
         }
     }
 }

@@ -19,4 +19,14 @@ public interface IBackwardReferenceProvider
     /// every real parent.
     /// </summary>
     bool TryGetParents(ulong child, out IReadOnlyList<ulong> parents, out bool truncated);
+
+    /// <summary>
+    /// Sequentially enumerates every child address recorded in the index together with its total
+    /// incoming-reference count, invoking <paramref name="onChild"/> once per child. Reads the
+    /// same directory/header data <see cref="TryGetParents"/> uses but never materializes a
+    /// per-child parent-address list — callers that only need counts (e.g. "highly referenced
+    /// object" detection) get every child's count via one sequential, unlocked pass instead of
+    /// one hashed point-lookup per candidate address.
+    /// </summary>
+    void EnumerateChildCounts(Action<ulong, int, bool> onChild);
 }

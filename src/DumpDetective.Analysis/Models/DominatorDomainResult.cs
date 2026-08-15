@@ -41,9 +41,11 @@ internal sealed record DominatorDomainResult(
     /// </summary>
     int MaxTopDominatorTypesToShow = 15,
     /// <summary>
-    /// True when analysis results are based on heuristics only, without strict GC root verification.
+    /// Total heap size in bytes (sum of all objects on all heaps).
+    /// Used to calculate retention pressure ratio (retained / total).
+    /// Zero if heap was too large to enumerate entirely.
     /// </summary>
-    bool HeuristicOnly = true) : AnalyzerDomainResult;
+    ulong TotalHeapBytes = 0) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

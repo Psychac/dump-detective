@@ -17,6 +17,7 @@ public sealed record GenericAnalyzerDomainResult : AnalyzerDomainResult;
 /// <param name="AverageSize">Average shallow object size in bytes (TotalBytes / Count). Zero when Count is zero.</param>
 /// <param name="EstimatedRetainedBytes">Approximate retained bytes including the reference sub-graph. Zero until populated by a retention/dominator analyzer.</param>
 /// <param name="Gen2Count">Number of instances in generation 2. Zero if not available or not applicable.</param>
+/// <param name="WasCapped">True when retained bytes estimate was capped (BFS hit breadth/depth limit). Indicates reduced reliability.</param>
 public sealed record TypeSnapshot(
     string TypeName,
     int Count,
@@ -26,7 +27,8 @@ public sealed record TypeSnapshot(
     ulong EstimatedRetainedBytes = 0,
     ulong SampleAddress = 0,
     string? ModuleName = null,
-    long Gen2Count = 0);
+    long Gen2Count = 0,
+    bool WasCapped = false);
 
 /// <summary>Shared primitive: a name paired with an object count. Used across multiple domain results.</summary>
 public sealed record NameCountEntry(string Name, int Count);

@@ -142,6 +142,41 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EnumerateChildCounts_MatchesTryGetParents_ForEveryChild()
+    {
+        var edges = new List<(ulong parent, ulong child)>();
+        var expectedByChild = new Dictionary<ulong, int>();
+        for (ulong child = 0; child < 500; child++)
+        {
+            for (ulong p = 0; p < (child % 5) + 1; p++)
+            {
+                edges.Add((0x100000UL + child * 10 + p, child));
+                expectedByChild[child] = expectedByChild.GetValueOrDefault(child) + 1;
+            }
+        }
+
+        string containerPath = await BuildContainer(5, edges.ToArray());
+
+        CacheContainerReader.TryOpen(containerPath, out var container).Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(container!, out var reader).Should().BeTrue();
+
+        using (reader)
+        {
+            var seen = new Dictionary<ulong, (int Count, bool Truncated)>();
+            reader!.EnumerateChildCounts((child, count, truncated) => seen[child] = (count, truncated));
+
+            seen.Keys.Should().BeEquivalentTo(expectedByChild.Keys);
+            foreach (var (child, expectedCount) in expectedByChild)
+            {
+                reader.TryGetParents(child, out var parents, out bool truncatedFromLookup).Should().BeTrue();
+                seen[child].Count.Should().Be(expectedCount);
+                seen[child].Count.Should().Be(parents.Count);
+                seen[child].Truncated.Should().Be(truncatedFromLookup);
+            }
+        }
+    }
+
+    [Fact]
     public void TryOpen_NoReverseIndexSections_ReturnsFalse()
     {
         string containerPath = Path.Combine(_tempDir, "cache.bin");

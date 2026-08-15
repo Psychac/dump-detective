@@ -39,6 +39,10 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["candidate_count"] = new NumericMetricValue(d.CandidateCount, MetricUnit.Count),
             ["analyzed_count"] = new NumericMetricValue(d.AnalyzedCount, MetricUnit.Count),
             ["total_retained_est"] = new NumericMetricValue((double)Math.Min(d.TotalEstimatedRetainedBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(d.TotalEstimatedRetainedBytes)),
+            ["retention_pressure_ratio"] = d.TotalHeapBytes > 0
+                ? new NumericMetricValue((double)d.TotalEstimatedRetainedBytes / d.TotalHeapBytes, MetricUnit.Ratio,
+                    $"{(double)d.TotalEstimatedRetainedBytes / d.TotalHeapBytes:P1}")
+                : new TextMetricValue("N/A"),
             ["max_bfs_breadth"] = new NumericMetricValue(d.MaxBreadth, MetricUnit.Count),
             ["max_bfs_depth"] = new NumericMetricValue(d.MaxDepth, MetricUnit.Count),
             ["highly_referenced_objects"] = new NumericMetricValue(d.HighlyReferencedObjectCount, MetricUnit.Count),
@@ -52,7 +56,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             compactTables.Add(STCompact(
                 "Top dominator suspects by retained bytes",
-                new[] { CH("Type"), CH("Objects","number"), CH("Gen2","number"), CH("Shallow","bytes"), CH("LOH","bytes"), CH("Retained","bytes"), CH("Ratio", "number", "permille"), CH("Avg Size","bytes"), CH("Sample Addr") },
+                new[] { CH("Type"), CH("Objects","number"), CH("Gen2","number"), CH("Shallow","bytes"), CH("LOH","bytes"), CH("Retained","bytes"), CH("Ratio", "number", "permille"), CH("Avg Size","bytes"), CH("Capped?"), CH("Sample Addr") },
                 d.TopDominatorTypes.Take(d.MaxTopDominatorTypesToShow).Select(type => R(
                     type.TypeName,
                     type.Count,
@@ -62,6 +66,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
                     (long)Math.Round(RatioValue(type.EstimatedRetainedBytes, type.TotalBytes) * 1000),
                     type.AverageSize > 0 ? type.AverageSize : null,
+                    type.WasCapped ? "Yes" : null,
                     $"0x{type.SampleAddress:X}")).ToArray()));
             if (d.TotalEstimatedRetainedBytes > 0)
             {

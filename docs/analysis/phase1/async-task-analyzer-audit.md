@@ -324,7 +324,7 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 | P2-5 | Report `AvgContinuationDepth` denominator (`depthSampleCount`) in key metrics | 2 | Improvement | Low | Low | High | ✅ DONE (58d5e88) |
 | P2-6 | Detect continuation chain cycles (async deadlock heuristic) during BFS | 4 | Improvement | High | Low | High | ✅ DONE (66b94cb) |
 | P2-7 | Pending task GC generation distribution (Gen0/Gen1/Gen2/LOH) | 4 | Improvement | Medium | Low | High | ✅ DONE (b8d3c3c) |
-| P3-1 | Add `ValueTask` / `IValueTaskSource` tracking via `ManualResetValueTaskSourceCore` | 4 | Evolution | High | High | Medium |
+| P3-1 | Add `ValueTask` / `IValueTaskSource` tracking via `ManualResetValueTaskSourceCore` | 4 | Evolution | High | High | Medium | ✅ DONE (5d98746) — difficulty was lower than rated once ClrMD 4's `ReadValueTypeField`/`ClrValueType.ReadField` API was verified; confidence caveat refined to "implementation-pattern dependent" (only `ManualResetValueTaskSourceCore`-based implementers are detectable, not fully custom `IValueTaskSource` implementations) |
 | P3-2 | Add `TaskCompletionSource<T>` orphan detection | 4 | Evolution | Medium | Medium | High | ✅ DONE (24dfb39); prerequisite conflation bug fixed first (3056035) |
 | P3-3 | Rank pending types by total retained bytes (Size × Count) | 4, 7 | Improvement | Medium | Low | High | ✅ DONE (7f3e5c8) |
 | P3-4 | Merge duplicate state-read with BFS `heap.GetObject` call to eliminate second lookup | 6 | Improvement | Low | Low | High | ✅ DONE (82ad3aa) |

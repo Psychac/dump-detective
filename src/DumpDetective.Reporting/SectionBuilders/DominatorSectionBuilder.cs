@@ -78,6 +78,29 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                         type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null,
                         type.EstimatedRetainedBytes == 0 ? null : (double)type.EstimatedRetainedBytes * 1000 / d.TotalEstimatedRetainedBytes)).ToArray()));
             }
+
+            // GC-focused sub-table: isolates types with a meaningful Gen2 or LOH footprint from the
+            // Gen0/1 noise mixed into the main dominator table above — immediately actionable for
+            // GC-pressure investigations (long-lived / large-object retention).
+            var gen2LohTypes = d.TopDominatorTypes
+                .Where(type => type.Gen2Count > 0 || type.LohBytes > 0)
+                .OrderByDescending(type => type.Gen2Count)
+                .ThenByDescending(type => type.LohBytes)
+                .Take(d.MaxTopDominatorTypesToShow)
+                .ToArray();
+            if (gen2LohTypes.Length > 0)
+            {
+                compactTables.Add(STCompact(
+                    "Gen2 / LOH dominator suspects",
+                    new[] { CH("Type"), CH("Objects","number"), CH("Gen2","number"), CH("Gen2 %", "number", "percent"), CH("LOH","bytes"), CH("Retained","bytes") },
+                    gen2LohTypes.Select(type => R(
+                        type.TypeName,
+                        type.Count,
+                        type.Gen2Count > 0 ? type.Gen2Count : null,
+                        type.Count == 0 ? 0.0 : type.Gen2Count * 100.0 / type.Count,
+                        type.LohBytes > 0 ? type.LohBytes : null,
+                        type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null)).ToArray()));
+            }
         }
 
         if (d.TopHighlyReferencedObjects is { Count: > 0 })

@@ -420,7 +420,7 @@ output is treated as authoritative.
 | P2 | Add retention pressure ratio (`total_retained_est / total_heap_size`) as a key metric and trend metric | Medium — context for absolute byte values | Low | High | Improvement | ✅ DONE |
 | P2 | Add `wasCapped` per-type to `TypeSnapshot` and the section builder | Medium — indicates estimate reliability | Low | Medium | Improvement | ✅ DONE |
 | P2 | Add fan-in distribution histogram to `DominatorDomainResult` | Medium — useful for cluster analysis | Medium | High | Improvement | ✅ DONE |
-| P2 | Add Gen2/LOH dominator sub-table to section builder | Medium — immediately actionable for GC investigations | Medium | High | Improvement |
+| P2 | Add Gen2/LOH dominator sub-table to section builder | Medium — immediately actionable for GC investigations | Medium | High | Improvement | ✅ DONE |
 | P2 | Export `dominator.type.retained.bytes` per type in `DominatorTrendComparer` | Medium — enables retained-size regression tracking | Low | High | Improvement | ✅ DONE |
 | P3 | Address reference-count admission ordering bias (e.g., reservoir sampling, or two-pass min-heap admission) | Medium — systematic bias on large heaps | High | Medium | Improvement |
 | P3 | Investigate Lengauer-Tarjan dominator tree over Gen2+LOH subgraph | Very High — true retained bytes, competitive with dotMemory | Very High | High | Evolution |

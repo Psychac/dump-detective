@@ -65,7 +65,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
 | 11 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
 | 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
-| 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 2/6 | 0/2 | ✅ P0+P1 complete; P2 33% (2/6 done) |
+| 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 3/6 | 0/2 | ✅ P0+P1 complete; P2 50% (3/6 done) |
 | 14 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 15 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 16 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |

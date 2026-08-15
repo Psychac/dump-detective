@@ -21,7 +21,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
             };
 
             foreach (TypeSnapshot t in r.TopDominatorTypes)
+            {
                 metrics.Add(new("dominator.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+                if (t.EstimatedRetainedBytes > 0)
+                    metrics.Add(new("dominator.type.retained.bytes", t.TypeName, t.EstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
 
             foreach (RetentionTypeSnapshot t in r.TopRetentionTypes ?? [])
             {

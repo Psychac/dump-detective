@@ -247,7 +247,7 @@ DumpDetective's generation distribution analysis is on par with or better than S
 | P3-2 | Add runtime guard (exception or assertion) when `HeapIndexBuildResult` is absent at analysis time | 1 | Low — improves debuggability when factory order regresses | Low | High | ✓ DONE (commit c6db98d) |
 | P3-3 | LOH size-band distribution (85KB–1MB, 1MB–10MB, >10MB) — requires Phase 1 index extension | 4 | High (future) | High | Medium | Evolution |
 | P3-4 | Finalizable type detection via `TypeAggregateFlags` or a new Phase 1 flag | 4 | High (future) | High | Medium | Evolution |
-| P3-5 | Dominator tree / retention tree analysis | 7 | Critical competitive gap | Very High | High | Evolution |
+| ~~P3-5~~ | ~~Dominator tree / retention tree analysis~~ — out of scope for this analyzer; tracked as [dominator-analyzer-audit.md P3 "Investigate Lengauer-Tarjan dominator tree over Gen2+LOH subgraph"](dominator-analyzer-audit.md) | 7 | — | — | — | Moved |
 
 ---
 

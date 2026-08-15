@@ -119,6 +119,73 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     }
 
     [Fact]
+    public void OnHeapEntry_AccumulatesVtsEntries_WhenMethodTableIsInVtsMtSet()
+    {
+        // Same rationale as OnHeapEntry_AccumulatesTcsEntries_WhenMethodTableIsInTcsMtSet — VTS
+        // candidate resolution (interface enumeration + embedded field lookup) needs a live
+        // ClrHeap, so _vtsMts is injected directly to isolate OnHeapEntry's mechanics.
+        const ulong VtsMt = 0x5000;
+        AsyncTaskAnalyzer analyzer = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100);
+
+        analyzer.BeforeHeapIndexScan(context);
+        SetVtsMts(analyzer, [VtsMt]);
+
+        analyzer.OnHeapEntry(new HeapEntry(0x1000, TaskMt, 100));
+        analyzer.OnHeapEntry(new HeapEntry(0x5000, VtsMt, 80));
+        analyzer.OnHeapEntry(new HeapEntry(0x5100, OtherMt, 80));
+        analyzer.OnHeapEntry(new HeapEntry(0x5200, VtsMt, 80));
+
+        var taskEntries = GetParticipantEntries(analyzer);
+        taskEntries.Should().HaveCount(1);
+
+        var vtsEntries = GetParticipantVtsEntries(analyzer);
+        vtsEntries.Should().HaveCount(2);
+        vtsEntries.Select(e => e.Address).Should().Equal(0x5000UL, 0x5200UL);
+    }
+
+    [Fact]
+    public void OnHeapEntry_RespectsMaxVtsToScan()
+    {
+        const ulong VtsMt = 0x5000;
+        AsyncTaskAnalyzer analyzer = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxVtsToScan: 1);
+
+        analyzer.BeforeHeapIndexScan(context);
+        SetVtsMts(analyzer, [VtsMt]);
+
+        analyzer.OnHeapEntry(new HeapEntry(0x5000, VtsMt, 80));
+        analyzer.OnHeapEntry(new HeapEntry(0x5100, VtsMt, 80));
+
+        var vtsEntries = GetParticipantVtsEntries(analyzer);
+        vtsEntries.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void MergePartial_MergesVtsWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    {
+        const ulong VtsMt = 0x5000;
+        AsyncTaskAnalyzer primary = new();
+        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxVtsToScan: 3);
+
+        primary.BeforeHeapIndexScan(context);
+        SetVtsMts(primary, [VtsMt]);
+        primary.OnHeapEntry(new HeapEntry(0x3000, VtsMt, 80));
+        primary.OnHeapEntry(new HeapEntry(0x1000, VtsMt, 80));
+
+        AsyncTaskAnalyzer worker = new();
+        worker.BeforeHeapIndexScan(context);
+        SetVtsMts(worker, [VtsMt]);
+        worker.OnHeapEntry(new HeapEntry(0x2000, VtsMt, 80));
+        worker.OnHeapEntry(new HeapEntry(0x4000, VtsMt, 80));
+
+        primary.MergePartial([worker]);
+
+        var merged = GetParticipantVtsEntries(primary);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+    }
+
+    [Fact]
     public void MergePartial_MergesWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
     {
         // maxTasksToScan caps each worker individually (uncapped relative to the others), so
@@ -143,7 +210,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
     }
 
-    private static AnalysisContext CreateContext(int maxTasksToScan, int maxTcsToScan = 100)
+    private static AnalysisContext CreateContext(int maxTasksToScan, int maxTcsToScan = 100, int maxVtsToScan = 100)
     {
         HeapAnalysisCache cache = new();
 
@@ -182,7 +249,8 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
                 AsyncTaskAnalysis = new AsyncTaskAnalysisOptions
                 {
                     MaxTasksToScan = maxTasksToScan,
-                    MaxTcsToScan = maxTcsToScan
+                    MaxTcsToScan = maxTcsToScan,
+                    MaxVtsToScan = maxVtsToScan
                 }
             }
         };
@@ -210,5 +278,21 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         typeof(AsyncTaskAnalyzer)
             .GetField("_tcsMts", BindingFlags.NonPublic | BindingFlags.Instance)!
             .SetValue(analyzer, tcsMts);
+    }
+
+    private static List<(ulong Address, ulong Mt)> GetParticipantVtsEntries(AsyncTaskAnalyzer analyzer)
+    {
+        return (List<(ulong Address, ulong Mt)>)typeof(AsyncTaskAnalyzer)
+            .GetField("_participantVtsEntries", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+    }
+
+    // Same rationale as SetTcsMts — VTS candidate resolution (interface enumeration + embedded
+    // field lookup) needs a live ClrHeap, not mockable here.
+    private static void SetVtsMts(AsyncTaskAnalyzer analyzer, HashSet<ulong> vtsMts)
+    {
+        typeof(AsyncTaskAnalyzer)
+            .GetField("_vtsMts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(analyzer, vtsMts);
     }
 }

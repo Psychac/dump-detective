@@ -39,6 +39,16 @@ internal sealed record UnresolvedTcsSnapshot(
     ulong Size,
     int Generation);
 
+// An IValueTaskSource implementer (built on ManualResetValueTaskSourceCore<T>, see
+// ValueTaskSourcePattern) whose embedded core's _completed flag was still false at dump time.
+// Same leak-strength caveat as UnresolvedTcsSnapshot: only Gen2/LOH residency distinguishes a
+// genuinely stuck source from one that just hasn't completed its (usually fast) operation yet.
+internal sealed record PendingValueTaskSourceSnapshot(
+    ulong Address,
+    string TypeName,
+    ulong Size,
+    int Generation);
+
 internal sealed record AsyncTaskDomainResult(
     int TotalTasks,
     int PendingTasks,
@@ -71,4 +81,9 @@ internal sealed record AsyncTaskDomainResult(
     int UnresolvedTaskCompletionSources = 0,
     int UnresolvedTcsGen2Count = 0,
     bool TcsScanLimited = false,
-    IReadOnlyList<UnresolvedTcsSnapshot>? TopUnresolvedTaskCompletionSources = default) : AnalyzerDomainResult;
+    IReadOnlyList<UnresolvedTcsSnapshot>? TopUnresolvedTaskCompletionSources = default,
+    int TotalValueTaskSources = 0,
+    int PendingValueTaskSources = 0,
+    int PendingVtsGen2Count = 0,
+    bool VtsScanLimited = false,
+    IReadOnlyList<PendingValueTaskSourceSnapshot>? TopPendingValueTaskSources = default) : AnalyzerDomainResult;

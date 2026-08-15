@@ -33,6 +33,16 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     private List<(ulong Address, ulong Mt)>? _participantTcsEntries;
     private int _participantMaxTcsToScan;
 
+    // IValueTaskSource candidate collection — same rides-the-shared-scan approach as _tcsMts
+    // above. Unlike TCS (a name-prefix check), detection here requires per-type interface
+    // enumeration (see ValueTaskSourcePattern) plus locating the embedded
+    // ManualResetValueTaskSourceCore<T> field, so the resolved ClrInstanceField is cached here
+    // during BeforeHeapIndexScan (once per distinct type) for direct reuse in Phase 2.
+    private HashSet<ulong>? _vtsMts;
+    private List<(ulong Address, ulong Mt)>? _participantVtsEntries;
+    private int _participantMaxVtsToScan;
+    private Dictionary<ulong, ClrInstanceField>? _vtsCoreFieldByMt;
+
     // Field cache by MethodTable to avoid repeated ClrMD lookups per type
     // Maps (MethodTable, fieldName) to ClrInstanceField? (null if field not found on that type)
     private Dictionary<(ulong MethodTable, string FieldName), ClrInstanceField?>? _fieldCacheByMt;
@@ -98,16 +108,22 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     {
         _participantMaxTasksToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTasksToScan;
         _participantMaxTcsToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTcsToScan;
+        _participantMaxVtsToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxVtsToScan;
         _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
         _participantTcsEntries = new List<(ulong, ulong)>(capacity: 64);
+        _participantVtsEntries = new List<(ulong, ulong)>(capacity: 64);
         _taskMts = null;
         _tcsMts = null;
+        _vtsMts = null;
+        _vtsCoreFieldByMt = null;
         _fieldCacheByMt = new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
 
         if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {
             _taskMts = new HashSet<ulong>(capacity: 32);
             _tcsMts = new HashSet<ulong>(capacity: 8);
+            _vtsMts = new HashSet<ulong>(capacity: 8);
+            _vtsCoreFieldByMt = new Dictionary<ulong, ClrInstanceField>(capacity: 8);
             foreach (var kvp in heapIndex.TypeAggregates)
             {
                 if ((kvp.Value.Flags & TypeAggregateFlags.IsTaskType) != 0)
@@ -116,11 +132,28 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     continue;
                 }
 
-                // No precomputed TypeAggregateFlags bit for TaskCompletionSource — resolve the
-                // name once per distinct type here (bounded by type count, not object count).
-                string? name = context.Heap.GetTypeByMethodTable(kvp.Key)?.Name;
-                if (name != null && TaskTypeNamePattern.IsTaskCompletionSource(name))
+                // No precomputed TypeAggregateFlags bit for TaskCompletionSource or
+                // IValueTaskSource — resolve the type once per distinct MT here (bounded by
+                // type count, not object count) and check both.
+                ClrType? type = context.Heap.GetTypeByMethodTable(kvp.Key);
+                if (type is null)
+                    continue;
+
+                if (type.Name != null && TaskTypeNamePattern.IsTaskCompletionSource(type.Name))
+                {
                     _tcsMts.Add(kvp.Key);
+                    continue;
+                }
+
+                if (ValueTaskSourcePattern.ImplementsValueTaskSource(type))
+                {
+                    ClrInstanceField? coreField = ValueTaskSourcePattern.FindCoreField(type);
+                    if (coreField != null)
+                    {
+                        _vtsMts.Add(kvp.Key);
+                        _vtsCoreFieldByMt[kvp.Key] = coreField;
+                    }
+                }
             }
         }
     }
@@ -138,6 +171,13 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             && _tcsMts.Contains(entry.MethodTable))
         {
             _participantTcsEntries.Add((entry.Address, entry.MethodTable));
+            return;
+        }
+
+        if (_vtsMts is not null && _participantVtsEntries!.Count < _participantMaxVtsToScan
+            && _vtsMts.Contains(entry.MethodTable))
+        {
+            _participantVtsEntries.Add((entry.Address, entry.MethodTable));
         }
     }
 
@@ -159,6 +199,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 _participantEntries!.AddRange(other._participantEntries);
             if (other._participantTcsEntries is not null)
                 _participantTcsEntries!.AddRange(other._participantTcsEntries);
+            if (other._participantVtsEntries is not null)
+                _participantVtsEntries!.AddRange(other._participantVtsEntries);
         }
 
         _participantEntries = _participantEntries!
@@ -169,6 +211,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         _participantTcsEntries = _participantTcsEntries!
             .OrderBy(e => e.Address)
             .Take(_participantMaxTcsToScan)
+            .ToList();
+
+        _participantVtsEntries = _participantVtsEntries!
+            .OrderBy(e => e.Address)
+            .Take(_participantMaxVtsToScan)
             .ToList();
     }
 
@@ -185,11 +232,14 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         var taskEntries = LoadTaskEntries(heap, cache, progress, options, ct);
         int total = taskEntries.Count;
 
-        // TaskCompletionSource entries are independent of task-scan results (a heap could in
-        // principle have TCS instances even when the task scan finds none), so this runs
-        // regardless of the early-return below.
+        // TaskCompletionSource and IValueTaskSource entries are independent of task-scan results
+        // (a heap could in principle have TCS/VTS instances even when the task scan finds none),
+        // so both run regardless of the early-return below.
         var tcsEntries = LoadTcsEntries(heap, cache, progress, options, ct);
         var tcsResult = AnalyzeTaskCompletionSources(heap, tcsEntries, options, ct);
+
+        var vtsEntries = LoadVtsEntries(heap, cache, progress, options, ct);
+        var vtsResult = AnalyzeValueTaskSources(heap, vtsEntries, options, ct);
 
         if (total == 0)
         {
@@ -225,7 +275,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
                 UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
                 TcsScanLimited: tcsResult.TcsScanLimited,
-                TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved);
+                TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
+                TotalValueTaskSources: vtsResult.TotalVts,
+                PendingValueTaskSources: vtsResult.PendingVts,
+                PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
+                VtsScanLimited: vtsResult.VtsScanLimited,
+                TopPendingValueTaskSources: vtsResult.TopPending);
         }
 
         bool taskScanLimited = total >= options.MaxTasksToScan;
@@ -471,7 +526,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
             UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
             TcsScanLimited: tcsResult.TcsScanLimited,
-            TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved);
+            TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
+            TotalValueTaskSources: vtsResult.TotalVts,
+            PendingValueTaskSources: vtsResult.PendingVts,
+            PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
+            VtsScanLimited: vtsResult.VtsScanLimited,
+            TopPendingValueTaskSources: vtsResult.TopPending);
     }
 
     // ── TaskIndex.bin reader ──────────────────────────────────────────────────
@@ -621,6 +681,160 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         scanCounter.Complete();
         return result;
+    }
+
+    // ── IValueTaskSource entry loading ──────────────────────────────────────────
+
+    /// <summary>
+    /// Loads IValueTaskSource candidate entries. Same rationale as <see cref="LoadTcsEntries"/>
+    /// for skipping a dedicated disk satellite index — these are a bounded resource, not created
+    /// per compiler-generated async call.
+    /// </summary>
+    private List<(ulong Address, ulong Mt)> LoadVtsEntries(
+        ClrHeap heap,
+        IHeapAnalysisCache? cache,
+        IProgress<AnalyzerProgressReport>? progress,
+        AsyncTaskAnalysisOptions options,
+        CancellationToken ct)
+    {
+        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
+        {
+            return _participantScanSucceeded
+                ? (_participantVtsEntries ?? [])
+                : ScanRawHeapForVts(heap, progress, options.MaxVtsToScan, ct);
+        }
+
+        return ScanRawHeapForVts(heap, progress, options.MaxVtsToScan, ct);
+    }
+
+    private static List<(ulong, ulong)> ScanRawHeapForVts(
+        ClrHeap heap,
+        IProgress<AnalyzerProgressReport>? progress,
+        int maxVtsToScan,
+        CancellationToken ct)
+    {
+        var result = new List<(ulong, ulong)>(capacity: 64);
+        var scanCounter = new ObjectScanCounter("scanning IValueTaskSource objects", progress);
+        // Interface enumeration is more expensive than a name check, so cache the negative
+        // result per-MT to avoid re-checking every instance of a non-matching type.
+        var checkedNonMatchMts = new HashSet<ulong>(capacity: 64);
+
+        foreach (ClrObject obj in heap.EnumerateObjects())
+        {
+            ct.ThrowIfCancellationRequested();
+            scanCounter.Tick();
+
+            if (!obj.IsValid || obj.Type is null)
+                continue;
+
+            ulong mt = obj.Type.MethodTable;
+            if (checkedNonMatchMts.Contains(mt))
+                continue;
+
+            if (!ValueTaskSourcePattern.ImplementsValueTaskSource(obj.Type) || ValueTaskSourcePattern.FindCoreField(obj.Type) is null)
+            {
+                checkedNonMatchMts.Add(mt);
+                continue;
+            }
+
+            result.Add((obj.Address, mt));
+            if (result.Count >= maxVtsToScan)
+                break;
+        }
+
+        scanCounter.Complete();
+        return result;
+    }
+
+    private readonly record struct VtsAnalysisResult(
+        int TotalVts,
+        int PendingVts,
+        int PendingVtsGen2Count,
+        bool VtsScanLimited,
+        IReadOnlyList<PendingValueTaskSourceSnapshot> TopPending);
+
+    /// <summary>
+    /// Classifies each IValueTaskSource candidate by reading its embedded
+    /// ManualResetValueTaskSourceCore&lt;T&gt; field (resolved during BeforeHeapIndexScan, or
+    /// lazily here for the raw-heap-scan fallback path) and checking its <c>_completed</c> flag.
+    /// A false value means the source hasn't signaled completion — either a normal in-flight
+    /// operation, or (if it has survived into Gen2/LOH) a stuck one. See
+    /// <see cref="PendingValueTaskSourceSnapshot"/>.
+    /// </summary>
+    private VtsAnalysisResult AnalyzeValueTaskSources(
+        ClrHeap heap,
+        List<(ulong Address, ulong Mt)> vtsEntries,
+        AsyncTaskAnalysisOptions options,
+        CancellationToken ct)
+    {
+        if (vtsEntries.Count == 0)
+            return new VtsAnalysisResult(0, 0, 0, false, []);
+
+        bool vtsScanLimited = vtsEntries.Count >= options.MaxVtsToScan;
+        int pendingVts = 0;
+        int pendingVtsGen2 = 0;
+        var pendingSnapshots = new List<PendingValueTaskSourceSnapshot>(capacity: 32);
+        _vtsCoreFieldByMt ??= new Dictionary<ulong, ClrInstanceField>(capacity: 8);
+
+        for (int i = 0; i < vtsEntries.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (address, mt) = vtsEntries[i];
+
+            if (!_vtsCoreFieldByMt.TryGetValue(mt, out ClrInstanceField? coreField))
+            {
+                ClrType? type = heap.GetTypeByMethodTable(mt);
+                coreField = type != null ? ValueTaskSourcePattern.FindCoreField(type) : null;
+                if (coreField != null)
+                    _vtsCoreFieldByMt[mt] = coreField;
+            }
+
+            if (coreField is null)
+                continue;
+
+            ClrObject vtsObj = heap.GetObject(address);
+            if (!vtsObj.IsValid || vtsObj.Type is null)
+                continue;
+
+            ClrValueType core = vtsObj.ReadValueTypeField(coreField);
+            if (!core.IsValid || core.Type is null)
+                continue;
+
+            var completedField = TryGetCachedField(core.Type, core.Type.MethodTable, "_completed", "m_completed");
+            if (completedField is null)
+                continue;
+
+            bool completed = core.ReadField<bool>(completedField);
+            if (completed)
+                continue;
+
+            pendingVts++;
+
+            int generation = SegmentKindMapper.ResolveGeneration(heap, address);
+            if (generation is 2 or 3)
+                pendingVtsGen2++;
+
+            pendingSnapshots.Add(new PendingValueTaskSourceSnapshot(
+                Address: address,
+                TypeName: vtsObj.Type.Name ?? $"MT:0x{mt:X}",
+                Size: vtsObj.Size,
+                Generation: generation));
+        }
+
+        // Same bounded-population rationale as AnalyzeTaskCompletionSources: a full sort of the
+        // pending subset is cheap here. Strongest leak signal first: old-generation residency,
+        // then size within that tier.
+        pendingSnapshots.Sort((a, b) =>
+        {
+            int genCompare = b.Generation.CompareTo(a.Generation);
+            return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
+        });
+
+        IReadOnlyList<PendingValueTaskSourceSnapshot> topPending = pendingSnapshots.Count > options.TopPendingVtsToShow
+            ? pendingSnapshots.GetRange(0, options.TopPendingVtsToShow)
+            : pendingSnapshots;
+
+        return new VtsAnalysisResult(vtsEntries.Count, pendingVts, pendingVtsGen2, vtsScanLimited, topPending);
     }
 
     private readonly record struct TcsAnalysisResult(

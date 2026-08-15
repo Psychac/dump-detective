@@ -59,6 +59,9 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             ["total_tcs"] = new NumericMetricValue(asyncTasks.TotalTaskCompletionSources, MetricUnit.Count),
             ["unresolved_tcs"] = new NumericMetricValue(asyncTasks.UnresolvedTaskCompletionSources, MetricUnit.Count),
             ["unresolved_tcs_gen2"] = new NumericMetricValue(asyncTasks.UnresolvedTcsGen2Count, MetricUnit.Count),
+            ["total_vts"] = new NumericMetricValue(asyncTasks.TotalValueTaskSources, MetricUnit.Count),
+            ["pending_vts"] = new NumericMetricValue(asyncTasks.PendingValueTaskSources, MetricUnit.Count),
+            ["pending_vts_gen2"] = new NumericMetricValue(asyncTasks.PendingVtsGen2Count, MetricUnit.Count),
         };
 
         compactTables.Add(STCompact(
@@ -186,11 +189,36 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (asyncTasks.TopPendingValueTaskSources is { Count: > 0 } pendingVts)
+        {
+            var rows = new List<TableRow>(pendingVts.Count);
+            for (int i = 0; i < pendingVts.Count; i++)
+            {
+                PendingValueTaskSourceSnapshot snapshot = pendingVts[i];
+                rows.Add(Row(
+                    Cell($"0x{snapshot.Address:X}"),
+                    Cell(snapshot.TypeName),
+                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
+                    Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
+            }
+
+            string vtsTableTitle = "Pending IValueTaskSource instances";
+            if (pendingVts.Count < asyncTasks.PendingValueTaskSources)
+                vtsTableTitle += $" (showing {pendingVts.Count} of {asyncTasks.PendingValueTaskSources})";
+
+            compactTables.Add(STCompact(vtsTableTitle,
+                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (asyncTasks.TaskScanLimited)
             blocks.Add(T("Task scanning was limited; orphan and continuation totals may be partial."));
 
         if (asyncTasks.TcsScanLimited)
             blocks.Add(T("TaskCompletionSource scanning was limited; unresolved counts may be partial."));
+
+        if (asyncTasks.VtsScanLimited)
+            blocks.Add(T("IValueTaskSource scanning was limited; pending counts may be partial."));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

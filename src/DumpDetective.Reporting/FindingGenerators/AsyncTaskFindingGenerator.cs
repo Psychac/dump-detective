@@ -25,7 +25,7 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
     {
         if (result is not AsyncTaskDomainResult r) return [];
 
-        var signals = new List<AsyncSignal>(capacity: 7);
+        var signals = new List<AsyncSignal>(capacity: 8);
 
         // Continuation chain cycles — hard deadlock
         if (r.CycleDetected)
@@ -77,6 +77,23 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
                 Tags: ["async", "task", "tcs", "leak", "generation", "gc"],
                 MetricValue: r.UnresolvedTcsGen2Count,
                 MetricUnit: "unresolved-tcs-oldgen"));
+        }
+
+        // Pending IValueTaskSource in Gen2/LOH — same leak-strength rationale as the TCS signal
+        // above: a fresh in-flight ValueTask source and a genuinely stuck one look identical at
+        // dump time, but only a stuck one survives multiple GC cycles into Gen2/LOH.
+        if (r.PendingVtsGen2Count > 0)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "vts-pending-oldgen",
+                Severity: r.PendingVtsGen2Count >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Priority: 440 + r.PendingVtsGen2Count,
+                Title: $"Pending IValueTaskSource instances in Gen2/LOH ({r.PendingVtsGen2Count:N0})",
+                Evidence: $"{r.PendingVtsGen2Count:N0} of {r.PendingValueTaskSources:N0} pending IValueTaskSource instances (out of {r.TotalValueTaskSources:N0} total) are in Gen2 (old generation) or LOH, meaning the underlying operation has not signaled completion and has survived multiple GC cycles — a stuck source, not just an in-flight one.",
+                Recommendation: "Inspect the retention path for these ValueTaskSource-backed objects (common in Socket, System.IO.Pipelines, and pooled ASP.NET Core primitives). Check for a completion callback that never fires or a pooled instance that was never returned/reset.",
+                Tags: ["async", "valuetask", "vts", "leak", "generation", "gc"],
+                MetricValue: r.PendingVtsGen2Count,
+                MetricUnit: "pending-vts-oldgen"));
         }
 
         // Orphaned tasks — fire-and-forget anti-pattern or unobserved faults

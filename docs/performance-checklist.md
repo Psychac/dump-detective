@@ -150,8 +150,12 @@ All contributions MUST comply.
 
 # 🔄 Concurrency
 
-- [ ] Do NOT parallelize heap enumeration (I/O bound)
+- [ ] Phase 1 segment scan may parallelize across `ClrHeap.Segments` (tiered degree of
+      parallelism by dump size) — this is the one sanctioned exception; see
+      `DiskBackedObjectIndexWriter`
+- [ ] Do NOT otherwise parallelize heap enumeration outside the segment scan
 - [ ] Parallelize only:
+  - The Phase 1 segment scan (above)
   - Type analysis
   - Independent queries
 

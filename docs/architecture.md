@@ -1,92 +1,413 @@
-# 🧠 High-Performance .NET Dump Analyzer
-## Architecture Document
+# DumpDetective — Architecture
+
+Ground truth verified directly against source on `upgrade/clrmd-4`.
 
 ---
 
-# 1. 📌 Overview
+## 1. Overview
 
-This system is a high-performance memory dump analyzer built using Microsoft.Diagnostics.Runtime (ClrMD 3.1.5).
+DumpDetective is a high-performance .NET memory dump analyzer built on
+Microsoft.Diagnostics.Runtime (ClrMD) **4.0.732401**. It is designed to:
 
-It is designed to:
 - Analyze extremely large memory dumps (1GB–25GB+)
-- Operate under constrained memory environments
-- Provide actionable diagnostics (leaks, retention, thread issues)
+- Operate under bounded memory regardless of dump size
+- Provide actionable diagnostics (leaks, retention, thread issues, async/task health,
+  infra resource leaks) via a fixed pipeline of independent analyzers
+
+Design goals:
+- Scale to very large dumps via disk-backed indices and streaming, not full materialization
+- Keep analyzer contracts small and stable to minimize ripple across projects
+- Make reporting depend on Analysis via stable models (Core stays minimal and stable)
 
 ---
 
-## DumpDetective — Architecture (concise)
+## 2. Project layout and dependency graph
 
-Purpose
-- Provide a concise, operational architecture for a high-performance dump analyzer.
+- **Core** — small, stable contracts and domain primitives (`IAnalyzer`, `IFindingGenerator`,
+  `AnalyzerDomainResult`, `IHeapAnalysisCache`)
+- **Analysis** — dump loading, heap indexing/cache, analyzers, graph traversal
+- **Reporting** — finding generators, section builders, report composition/formatters, trend analysis
+- **Cli** — entrypoint, staged pipeline orchestration, DI registration, hosting
 
-Design goals (summary)
-- Scale to very large dumps (1GB–25GB+)
-- Keep runtime memory bounded via disk-backed indices and streaming
-- Keep analyzer contracts small and stable to minimize ripples across projects
-- Make reporting depend on Analysis via stable models (avoid polluting Core)
-
-High-level layers
-- CLI: entrypoint, pipeline orchestration, DI registration
-- Analysis: dump loading, heap indexing, analyzers, traversal, cache
-- Reporting: finding generators, printers, report composition
-- Core: small, stable contracts and base domain primitives
-
-Dependency graph
+```
 Cli -> Analysis, Reporting, Core
-Analysis -> Core
 Reporting -> Analysis, Core
+Analysis -> Core
 Core -> ClrMD (runtime dependency)
+```
 
-Two-phase execution
-- Phase 1 — Index build: single-pass heap scan; write compact on-disk index (Address|MethodTable|Size)
-- Phase 2 — On-demand analysis: run analyzers against `IHeapAnalysisCache` and `RuntimeFacade`; expensive operations are lazy and bounded
+Key contracts:
+- `IDumpLoader` (Analysis.Dump) — load dump, resolve DAC, produce `DumpLoadContext`
+- `RuntimeFacade` (Analysis.Dump) — cached ClrMD access with `MethodTable → ClrType` cache
+- `IHeapAnalysisCache` (Core.Abstractions) — read-only queries for analyzers (type stats,
+  indexed entries, roots, point lookup)
+- `IHeapIndexBuilder` (Analysis.Cache) — build-time contract: `PrebuildHeapIndex`, `TryGetHeapIndex`
+- `IAnalyzer` (Core.Abstractions) — `Name`, `Category`, `Tags`, `Order`, `IsThreadSafe`,
+  `AnalyzeAsync(context, ct)`, and `IDisposable` (default no-op; analyzers holding buffers/streams
+  override it for deterministic cleanup)
+- `IFindingGenerator` (Core.Abstractions) — convert an `AnalyzerDomainResult` to `InsightFinding`s
+- `IAnalyzerSectionBuilder` / `IReportSectionBuilder` (Reporting.Abstractions) — convert domain
+  results into structured `AnalyzerDetailSection` report data (per-analyzer and cross-cutting,
+  respectively); replaced the older printer-based text formatting entirely — there is no `IPrinter`
+  in the codebase
 
-- Key contracts
-- `IDumpLoader` — load dump, resolve DAC, produce `DumpLoadContext`
-- `RuntimeFacade` — safe, cached ClrMD access with `MethodTable->ClrType` cache
-- `IHeapAnalysisCache` (Core) — read-only queries for analyzers (type stats, indexed entries, roots)
-- `IHeapIndexBuilder` (Analysis) — build-time contract: `PrebuildHeapIndex`, progress callbacks
-- `IAnalyzer` (Core) — `Name`, `Category`, `Order`, `IsThreadSafe`, `AnalyzeAsync(context)`
-- `IFindingGenerator` (Reporting) — convert domain results to `InsightFinding`
+---
 
-- Performance and safety rules (enforced)
-- Stream enumerations; avoid `.ToList()` on heap
-- Avoid LINQ allocations in hot paths; prefer loops and `yield return`
-- Use `ArrayPool` and small readonly structs for hot-paths
-- Cache `ClrType` metadata; prefer `GetTypeByMethodTable` before `GetObject`
+## 3. Two-phase execution
 
-Graph and traversal
-- Forward refs computed lazily from object fields
-- Reverse indexes built selectively and disk-backed when needed
-- Root-path BFS: depth limits, visited set, and time budget
-- `RootSetCache` (`DumpDetective.Analysis.Cache`) is the single canonical root-set service: builds
-  `RootRecord` (`TargetAddr`, `RootAddr`, `Kind`) once per run from the Phase-1 disk index, falling
-  back to a live `heap.EnumerateRoots()` walk when no index is present. `GCRootAnalyzer`,
-  `StaticRootLeakDetector`, and `EventLeakAnalyzer` all read roots through it instead of
-  independently re-enumerating stack/static/handle roots.
-- `BoundedGraphWalk` (`DumpDetective.Analysis.Traversal`) is the single canonical forward-BFS
-  primitive, enforcing a hard 20-depth cap inside the walk itself (not left to caller discipline).
-  It replaces the formerly-separate `HeapTypePathTraversal`, `BoundedRetainedSizeBfs`, and
-  `HeapAnalysisCache.GetRetainedObjects` implementations; `GCRootAnalyzer`, `RetentionAnalyzer`,
-  `DominatorAnalyzer`, and `StaticRootLeakDetector` all call into it. Callers still own their
-  `visited` set's lifetime — `RetentionAnalyzer` shares one set across a batch (exclusive-retained,
-  no double counting), while `DominatorAnalyzer` intentionally allocates a fresh set per candidate
-  (unchanged, deferred design decision — see `RootPathFinder`, below, for the unrelated
-  bidirectional shortest-path search `ReferenceChainAnalyzer` uses instead).
+- **Phase 1 — Index build**: single-pass heap scan (parallelized across segments); writes a
+  compact on-disk container (`cache.bin`) or, for small dumps, mirrors the same data in memory
+- **Phase 2 — On-demand analysis**: each `IAnalyzer` runs against `IHeapAnalysisCache` and
+  `RuntimeFacade`; expensive graph operations (root paths, retained-size walks) are lazy and
+  bounded
 
-Reporting and fault handling
-- Finding generator failures are captured on `AnalyzerRunResult.FindingGeneratorError` and surfaced as warnings in console and report
+Index storage modes:
+- `HeapIndexPrebuildMode` — `Auto`, `Memory`, or `Disk` (config/CLI `--index-mode`). In `Auto`,
+  `HeapAnalysisCache` selects `Disk` for large dumps and `Memory` for small dumps based on a
+  size-tier threshold (currently tuned around several GB; configurable).
+- `HeapIndexStorageKind` — the actual storage used at runtime (`Memory` or `Disk`); many analyzers
+  branch on this to prefer fast in-memory candidate lists when available.
 
-Extensibility and testing
-- Add analyzers and their models to `DumpDetective.Analysis.Models`; register analyzer, comparer, and generator in DI
-- Keep orchestration small and testable (`AnalyzerFilterService`, `SingleDumpOrchestrationService`)
+For the on-disk container's byte-level layout, see [docs/binary-format.md](binary-format.md).
+For the cache subsystem's internal architecture (facade, sub-caches, writer/reader orchestration,
+governing design constraints), see [docs/cache/cache-architecture.md](cache/cache-architecture.md)
+— not duplicated here.
 
-Operational recommendations
-- Make resource bounds and index-mode selection configurable via `ResolvedExecutionOptions`
-- Prefer `internal` test-only APIs; avoid exposing production surface as public
+---
 
-ExecutionPolicy (example)
-The runtime reads an `ExecutionPolicy` / `Indexing` block from config (see `config.sample.json`) to centralize resource bounds and tuning. Current `config.sample.json` exposes keys the CLI reads; example settings:
+## 4. Performance and safety rules (enforced)
+
+- Stream heap enumeration; never `.ToList()` on `heap.EnumerateObjects()`
+- Avoid LINQ allocations in hot paths; prefer explicit loops and `yield return`
+- Use `ArrayPool<T>` and small `readonly struct`s on hot paths
+- Cache `ClrType` metadata; never cache `ClrObject`/`ClrType` instances themselves — extract
+  immutable data (addresses, `MethodTable`s, `TypeMetadata` records) instead
+- Prefer the disk/memory index over a live ClrMD call whenever the index already has the answer
+
+---
+
+## 5. Heap layer
+
+### HeapEntry
+Minimal per-object representation:
+
+```csharp
+internal readonly struct HeapEntry
+{
+    public readonly ulong Address;
+    public readonly ulong MethodTable;
+    public readonly ulong Size;       // 64-bit — object size can exceed int.MaxValue on large heaps
+    public readonly sbyte Generation; // GC generation (0/1/2, higher for LOH/POH/Frozen), or -1 if unresolved
+}
+```
+
+### DiskBackedObjectIndexWriter (Phase 1 scan)
+`src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs` is the single-pass heap
+scanner:
+
+- **Segment scan**: `Parallel.For` over `ClrHeap.Segments`, degree of parallelism tiered by dump
+  size (`Min(ProcessorCount, 8)` Large / `4` Medium / `2` otherwise). Each segment writes its own
+  columnar scratch file; scratch files are concatenated into the container after the full scan
+  completes.
+- **Per-object work**: per-type shape/flags (`ComputeTypeFlags`, `IsDelegateType`,
+  `IsAsyncStateMachineType`, field-shape/string-field detection) computed once per unique
+  `MethodTable`, not per object.
+- **String dedup**: `masterStringDedup` capped at 500k unique entries (XxHash64-keyed).
+- **Satellite candidates** collected in the same pass: task/event/LOH-free-block/large-object
+  candidates, avoiding extra heap passes.
+- A `MemoryBackedObjectIndexWriter` mirrors the same output in memory for small dumps
+  (`HeapIndexPrebuildMode.Memory`).
+
+For the memory-backed vs disk-backed dispatch and sub-cache design, see
+[docs/cache/cache-architecture.md](cache/cache-architecture.md).
+
+---
+
+## 6. Storage layer
+
+### cache.bin container
+As of 2026-07-15, all Phase 1 disk-backed index data is written into a single `cache.bin`
+container per dump (`<dump>.dumpindex/cache.bin`), replacing a prior nine-file layout. See
+[docs/binary-format.md](binary-format.md) for the full byte-level format.
+
+### ObjectIndexReader
+Reads the columnar `ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes`/`ObjectGenerations`
+sections back into `HeapEntry` batches using pooled buffers, sized to the index's total record
+count.
+
+### Cache directory resolution (`--cache-dir`)
+`DumpIndexPaths.ResolveCacheDirectory` picks where `.dumpindex/` is written, trying tiers in
+order and stopping at the first writable location:
+
+1. **`--cache-dir <dir>`** (or `CacheDirectory` config) — explicit override; fails immediately if
+   not writable rather than silently falling through.
+2. **Colocated** — `<dumpPath>.dumpindex/`, the default.
+3. **Temp folder (best effort)** — `%TEMP%/dumpdetective-cache/<hash>/`, used only when the dump
+   folder isn't writable; a warning is printed since this location can be evicted at any time.
+4. **Failure** — if neither tier is writable, an error asks the user to specify `--cache-dir`.
+
+Resolved once per dump (keyed by full path) and reused by all `DumpIndexPaths` call sites for
+that run.
+
+---
+
+## 7. Graph layer
+
+### BoundedGraphWalk
+`src/DumpDetective.Analysis/Traversal/BoundedGraphWalk.cs` is the single canonical forward-BFS
+primitive, enforcing a hard 20-depth cap (`AbsoluteMaxDepth`) internally, not left to caller
+discipline. It replaced three previously-separate implementations (`HeapTypePathTraversal`,
+`BoundedRetainedSizeBfs`, `HeapAnalysisCache.GetRetainedObjects`). `GCRootAnalyzer`,
+`RetentionAnalyzer` (in `MemoryAnalyzer.cs`), `DominatorAnalyzer`, and `StaticRootLeakDetector`
+all call into it. Callers own their `visited` set's lifetime — e.g. retention analysis shares one
+set across a batch (exclusive-retained, no double counting) while `DominatorAnalyzer` allocates a
+fresh set per candidate.
+
+### Reverse (parent-lookup) index
+`src/DumpDetective.Analysis/Indexing/ReverseIndex/` — a real, shipped, disk-backed index of
+incoming references, hash-partitioned and sorted per-bucket. Scoped narrowly to parent lookup, not
+a general forward+reverse object graph; never fully materialized in memory. Optional/skippable via
+`DD_SKIP_REVERSE_INDEX_BUILD=1`. See
+[docs/cache/cache-architecture.md § 5](cache/cache-architecture.md) for the write/read path.
+
+### RootSetCache
+`src/DumpDetective.Analysis/Cache/` — the single canonical root-set service: builds `RootRecord`
+(`TargetAddr`, `RootAddr`, `Kind`) once per run from the Phase 1 disk index, falling back to a live
+`heap.EnumerateRoots()` walk when no index is present. `GCRootAnalyzer`, `StaticRootLeakDetector`,
+and `EventLeakAnalyzer` all read roots through it instead of independently re-enumerating
+stack/static/handle roots.
+
+### RootPathFinder / ReferenceChainAnalyzer
+Distinct from `BoundedGraphWalk`: solves shortest-path-to-any-root via a bidirectional
+candidate-set search (forward-expand from root-frontier and target-frontier, then BFS with
+reverse-index backpointers); used only by `ReferenceChainAnalyzer`. Different problem shape from
+the root/retention graph service above — not migrated onto `BoundedGraphWalk`.
+
+---
+
+## 8. Cache layer
+
+### IHeapAnalysisCache (Core.Abstractions)
+Read-only contract used by all analyzers: `GetOrBuildTypeStatistics`,
+`EnumerateIndexedEntriesAsTuples`, `GetStaticRootedAddresses`, `GetOrBuildValidRoots`,
+`TryGetObjectMetadata` (address → `(MethodTable, Size)` point lookup).
+
+### HeapAnalysisCache (Analysis.Cache)
+Implements both `IHeapAnalysisCache` and `IHeapIndexBuilder`. A thin facade delegating to seven
+single-responsibility sub-caches (`HeapIndexCache`, `StatisticsCache`, `RootSetCache`,
+`ReverseIndexCache`, `ThreadCache`, `MethodTableCache`, `TypeMetadataCache`), each closed over the
+shared built index. Full sub-cache responsibilities and governing constraints are documented in
+[docs/cache/cache-architecture.md](cache/cache-architecture.md) — not duplicated here.
+
+---
+
+## 9. Analysis layer — analyzer catalog
+
+Analyzers are registered as **feature modules** in `DefaultAnalyzerFeatureModuleCatalog`
+(`DumpDetective.Reporting.Capabilities`), one entry per analyzer bundling its `IAnalyzer`,
+`IFindingGenerator`, `IAnalyzerTrendComparer`, and `IAnalyzerSectionBuilder`, plus an execution
+`Order` and a set of `Tags` used for CLI filtering (`--tags`, `--only`, `--skip`). Current catalog,
+in execution order:
+
+| Order | Key | Analyzer | Tags |
+|---|---|---|---|
+| 100 | `memory` | `MemoryAnalyzer` (+ retention logic) | memory |
+| 110 | `gc-generation` | `GCGenerationAnalyzer` | gc |
+| 120 | `allocation-pattern` | `AllocationPatternAnalyzer` | gc, allocation |
+| 130 | `object-shape` | `ObjectShapeAnalyzer` | types |
+| 140 | `gc-root` | `GCRootAnalyzer` | roots |
+| 150 | `heap-topology` | `HeapTopologyAnalyzer` | heap |
+| 160 | `module` | `ModuleAnalyzer` | runtime |
+| 170 | `crash` | `CrashAnalyzer` | exceptions |
+| 180 | `hang` | `HangAnalyzer` | threads |
+| 190 | `async-task` | `AsyncTaskAnalyzer` | async |
+| 210 | `leak-candidate` | `LeakCandidateAnalyzer` | leaks |
+| 220 | `dominator` | `DominatorAnalyzer` | retention, dominator |
+| 230 | `string` | `StringAnalyzer` | memory, string |
+| 240 | `collection` | `CollectionAnalyzer` | collections |
+| 250 | `static-root` | `StaticRootLeakDetector` | roots, leaks |
+| 260 | `reference-chain` | `ReferenceChainAnalyzer` | roots |
+| 270 | `gc-handle` | `GCHandleAnalyzer` | handles |
+| 290 | `loh-fragmentation` | `LohFragmentationAnalyzer` | gc, loh |
+| 300 | `thread-stack-cluster` | `ThreadStackClusterAnalyzer` | threads |
+| 310 | `thread` | `ThreadAnalyzer` | threads |
+| 320 | `lock-graph` | `LockGraphAnalyzer` | threads, locks |
+| 330 | `event-leak` | `EventLeakAnalyzer` | events, leaks |
+| 340 | `finalizable-object` | `FinalizableObjectAnalyzer` | gc |
+| 350 | `async-state-machine` | `AsyncStateMachineAnalyzer` | async |
+| 360 | `array` | `ArrayAnalyzer` | types |
+| 380 | `segment-reservation` | `SegmentReservationAnalyzer` | gc, segments |
+| 390 | `weak-reference` | `WeakReferenceAnalyzer` | gc |
+| 400 | `boxing` | `BoxingAnalyzer` | types, perf |
+| 410 | `jit` | `JitAnalyzer` | runtime, perf |
+| 420 | `db-connection` | `DbConnectionAnalyzer` | infra, network |
+| 430 | `wcf-channel` | `WcfChannelAnalyzer` | infra, network |
+| 440 | `http-object` | `HttpObjectAnalyzer` | infra, network |
+| 450 | `timer-leak` | `TimerLeakAnalyzer` | infra, timers |
+
+Plus cross-cutting, non-catalog stages: `InsightEngine` (cross-analyzer synthesis) and
+`TrendAnalyzer` (multi-snapshot comparison, § 12).
+
+Global (non-analyzer-scoped) report sections, also registered in the catalog:
+`ExecutiveSummarySectionBuilder`, `TypeSystemSectionBuilder`, `InsightsSectionBuilder`,
+`ConfidenceSectionBuilder`.
+
+Brief responsibility notes for less-obvious analyzers:
+- **DominatorAnalyzer** — dominator-tree-style exclusive retained-size analysis over
+  `BoundedGraphWalk`
+- **LeakCandidateAnalyzer** — cross-type leak candidate scoring (distinct from
+  `StaticRootLeakDetector`'s static-root-specific view)
+- **HeapTopologyAnalyzer** — heap-wide shape/segment topology summary
+- **DbConnectionAnalyzer / WcfChannelAnalyzer / HttpObjectAnalyzer / TimerLeakAnalyzer** —
+  infra-resource-leak analyzers (connections, WCF channels, `HttpClient`/handler objects, timers)
+  targeting typed-resource retention patterns, sharing `TypedResourceSampler` /
+  `TypedResourceScanDriver` / `ITypedResourceCandidateSource` scan infrastructure
+- **EventLeakAnalyzer** — has a dedicated fast-scan path, `EventLeakFastScanner`, alongside the
+  full analyzer
+
+---
+
+## 10. Query layer
+
+### QueryEngine
+Structured querying over indices (not raw heap): top types by memory, objects of a specific type,
+reference paths.
+
+---
+
+## 11. Reporting layer (`DumpDetective.Reporting`)
+
+- **`IFindingGenerator`** (Core.Abstractions) — one per analyzer; converts a strongly-typed
+  `AnalyzerDomainResult` into zero or more `InsightFinding` records
+- **`IAnalyzerSectionBuilder`** — one per analyzer; converts a domain result into a structured
+  `AnalyzerDetailSection` (pure data, no text formatting)
+- **`IReportSectionBuilder`** — cross-cutting sections that pull from multiple analyzer results
+  (`AnalyzerResultSet`) — e.g. executive summary, type system, insights, confidence
+- **`FindingGenerationPipeline`** — runs all registered finding generators after analysis
+  completes, attaching `InsightFinding` lists to each `AnalyzerRunResult`
+- **`ReportBuilderFacade`** — assembles per-analyzer and global sections into a full
+  `AnalysisReportDocument`
+- **Canonical formatters** (`Formatters/`) — `TextCanonicalReportFormatter`,
+  `MarkdownCanonicalReportFormatter`, `JsonCanonicalReportFormatter` render the same
+  `AnalysisReportDocument` to each output format
+- **Trend report composer** — compares snapshot results across multiple dumps, producing
+  lifecycle/regression summaries (§ 12)
+
+Finding generator failures are captured on `AnalyzerRunResult.FindingGeneratorError` and surfaced
+as warnings rather than failing the run.
+
+---
+
+## 12. Trend analysis
+
+- **`TrendAnalyzer`** (`DumpDetective.Analysis.Trend`) — compares `AnalyzerRunResult` collections
+  across multiple dump snapshots, delegating domain-specific comparison to one
+  `IAnalyzerTrendComparer` per analyzer (registered in the same feature-module catalog as its
+  analyzer)
+- **`TrendOrchestrationService`** (`DumpDetective.Cli.Services`) — loads each dump sequentially,
+  runs analysis, then invokes `TrendAnalyzer`
+- **`TrendReportComposer`** (`DumpDetective.Reporting.Services`) — assembles per-finding lifecycle
+  (new / worsened / stable / resolved) across snapshots into a ranked trend report
+
+---
+
+## 13. CLI staged pipeline (`DumpDetective.Cli.Pipeline`)
+
+The CLI executes analysis as a linear sequence of `IAnalysisStage` steps sharing a single
+`SingleDumpPipelineState`, run by `StagedPipelineRunner`:
+
+| Stage | Responsibility |
+|---|---|
+| `LoadDumpStage` | Loads dump via `IDumpLoader`; stores `DumpLoadContext` |
+| `BuildHeapIndexStage` | Calls `IHeapIndexBuilder.PrebuildHeapIndex`; stores index |
+| `RunAnalyzersPipelineStage` | Runs all active analyzers (per `AnalyzerFilterService` selection); stores `AnalyzerRunResult[]` |
+| `BuildReportStage` | Runs `FindingGenerationPipeline` and renders the full report via `ReportBuilderFacade` |
+| `WriteOutputStage` | Writes report to console and/or file |
+
+`ExecutePerDumpPipelineStage` composes the above for each dump in a multi-dump/trend run.
+`InsightEngine` runs cross-cutting analysis after the per-analyzer pipeline completes.
+
+---
+
+## 14. Concurrency model
+
+- **Phase 1**: heap scan is parallelized across segments (see § 5); index write-out is
+  single-threaded/sequential
+- **Phase 2**: analyzers may run in parallel when `IsThreadSafe` is opted in; graph traversal
+  parallelism is bounded per-call, not heap-wide
+
+---
+
+## 15. Failure handling
+
+- Invalid objects (`obj.IsValid == false`, `obj.Type == null`) are skipped, not thrown
+- Missing/optional satellite sections degrade gracefully — analyzers fall back to a live ClrMD
+  scan (see [docs/cache/cache-architecture.md § 7](cache/cache-architecture.md))
+- Partial results are allowed; finding-generator failures are captured per-analyzer, not fatal
+
+---
+
+## 16. Observability
+
+### Execution & performance tracking
+`PhaseTimeline` tracks per-stage timing through the staged pipeline.
+
+### Analyzer logging
+Analyzers may take an optional `ILogger<T>? logger = null` constructor parameter for per-object
+error/debug diagnostics, resolved automatically via `ActivatorUtilities` in
+`DefaultAnalyzerFactory`. The CLI host wires up generic-host logging; the Reporting layer provides
+a `NullLoggerFactory` fallback for direct construction (tests, benchmarks).
+
+Use case: analyzers that scan large object populations and expect malformed/unexpected heap data —
+e.g. `CollectionAnalyzer` logging per-Dictionary/Queue/List/HashSet errors and generation-lookup
+failures while walking millions of collection objects. Not intended for routine control-flow
+logging.
+
+Diagnostics levels:
+- **Errors** (`LogError`): genuine per-object scan failures (exceptions during field read,
+  invalid object state)
+- **Debug** (`LogDebug`): expected/ignorable per-object issues (missing optional fields, invalid
+  backing arrays, resolution fallbacks)
+- **Information** (`LogInformation`): user-initiated cancellation, analysis milestones
+
+---
+
+## 17. Extensibility
+
+```csharp
+public interface IAnalyzer : IDisposable
+{
+    string Name { get; }
+    string Category => AnalyzerCategory.Infer(Name);   // default: inferred from Name
+    IReadOnlyCollection<string> Tags => [];            // default: []
+    int Order => 0;                                    // default: 0 — controls execution order
+    bool IsThreadSafe => false;                         // default: false — opt-in for parallel execution
+    ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
+    void IDisposable.Dispose() { }                      // default: no-op
+}
+```
+
+Each analyzer returns a strongly-typed `AnalyzerDomainResult` subtype (e.g. `MemoryDomainResult`,
+`ThreadDomainResult`) and stamps `AnalyzerName`/`Category` via `result.Stamp(this)` at the end of
+`AnalyzeAsync`.
+
+Adding an analyzer:
+1. Add a `XxxDomainResult` in `DumpDetective.Analysis.Models`
+2. Implement `XxxAnalyzer.cs` using streaming heap loops
+3. Implement its `IFindingGenerator`, `IAnalyzerTrendComparer`, `IAnalyzerSectionBuilder`
+4. Register one `Module(...)` entry in `DefaultAnalyzerFeatureModuleCatalog` (key, display name,
+   the four types above, execution order, tags)
+5. Add tests and docs
+
+No core engine changes are needed to add an analyzer — the staged pipeline, report assembly, and
+trend analysis all iterate the catalog generically.
+
+---
+
+## 18. ExecutionPolicy (example)
+
+The runtime reads an `ExecutionPolicy` / `Indexing` block from config (see `config.sample.json`)
+to centralize resource bounds and tuning:
 
 ```json
 "ExecutionPolicy": {
@@ -101,602 +422,22 @@ The runtime reads an `ExecutionPolicy` / `Indexing` block from config (see `conf
 
 Place defaults in `config.sample.json` and document any CLI overrides in the CLI help text.
 
-Where to look next
-- See `docs/binary-format.md` and `docs/performance-checklist.md` for low-level constraints and tuning guidance.
+---
 
-## 5.1 Heap Layer
+## 19. Where to look next
 
-### HeapStreamer
-- Streams heap objects using `yield return`
-- Produces minimal `HeapEntry` structs
-
-Implementation notes:
-- Phase 1 scanning is parallelized across heap segments (controlled by dump size tier) with per-segment buffers rented from `ArrayPool<T>` to avoid large allocations.
-- Each segment builds a small per-thread `TypeIndexBuilder` which is merged into a global `TypeIndexBuilder` after the parallel loop.
-- Serialization to `ObjectIndex.bin` happens in fixed-size chunks; segment threads serialize into pooled byte buffers and flush under a short write lock to the shared stream.
-- During the scan the indexer also collects satellite candidates (task addresses, event/delegate candidates, LOH free-block candidates, large objects) and a `StringDedup` table via XxHash64 sampling to avoid additional heap passes.
-
-### HeapEntry
-Minimal representation of an object:
-
-```csharp
-internal readonly struct HeapEntry
-{
-    public readonly ulong Address;
-    public readonly ulong MethodTable;
-    public readonly ulong Size;   // 8 bytes — object size in bytes (uses 64-bit to preserve full size fidelity)
-    public readonly sbyte Generation; // GC generation (0/1/2, higher for LOH/POH/Frozen), or -1 if unresolved
-
-    public HeapEntry(ulong address, ulong methodTable, ulong size) { ... } // Generation defaults to -1
-    public HeapEntry(ulong address, ulong methodTable, ulong size, sbyte generation) { ... }
-}
-```
-
-### TypeIndexBuilder
-- Aggregates per-type statistics
-- Runs during streaming phase
-- Stores:
-  - Count
-  - Total size
-
-### SegmentAnalyzer
-- Classifies heap segments:
-  - SOH
-  - LOH
-  - POH
-- Tracks distribution and fragmentation indicators
+- [docs/binary-format.md](binary-format.md) — disk-based indexing / binary container format
+- [docs/cache/cache-architecture.md](cache/cache-architecture.md) — cache subsystem internals
+  (facade, sub-caches, writer/reader orchestration, governing constraints)
+- [docs/cache/backlog.md](cache/backlog.md) — known gaps and unbuilt perf wins in the cache
+  subsystem
+- [docs/performance-checklist.md](performance-checklist.md) — perf requirements checklist
+- [docs/schema-versioning.md](schema-versioning.md) — report/snapshot schema versioning policy
 
 ---
 
-## 5.2 Storage Layer
-
-### ObjectIndexWriter
-- Writes object metadata to disk
-- Uses sequential binary format
-
-### ObjectIndexReader
-- Reads object metadata efficiently
-- Supports sequential `FileStream + ArrayPool<byte>` reads with bounded batches
-
-### Storage Format
-
-As of format version 2, object records are stored **columnar** (struct-of-arrays), not interleaved: three parallel `ulong[]` sections — `ObjectAddresses`, `ObjectMethodTables`, `ObjectSizes` — one entry per heap object, aligned by index. `DiskBackedObjectIndexWriter` writes per-segment scratch-file columns that are concatenated into the three container sections; `ObjectIndexReader` zips them back into `HeapEntry` records in batches sized to the index's total byte count, using pooled buffers. The container TOC's `RecordCount` field replaces the old per-section header.
-
-Per-column record size: 8 bytes (`ulong`), no padding.
-
-Characteristics:
-- Append-only
-- Sequential writes
-- Cache-friendly
-
-### Phase 1 — Single container format (`cache.bin`)
-
-As of **2026-07-15**, the system writes all index data into a single **`cache.bin`** container file into a per-dump `<dump>.dumpindex/` folder to accelerate Phase 2 analyzers and to avoid re-scanning the heap on subsequent runs. (Prior to this, data was written as nine separate files; the container consolidates them while preserving all binary payload formats unchanged.)
-
-The container holds these sections (see `DumpDetective.Analysis.Indexing.Container.CacheSectionId`):
-- **ObjectAddresses / ObjectMethodTables / ObjectSizes / ObjectGenerations** — columnar (struct-of-arrays) object index: three parallel `ulong[]` sections plus an `sbyte[]` GC-generation column, aligned by index, replacing the legacy interleaved `Objects` section as of format version 2 (ObjectGenerations added in format version 3).
-- **TypeAggregates** — compact TypeAggregate table, module registry, global size buckets, and type-shape cache; presence enables a fast-path that skips full heap rescan.
-- **StringDedup** + **StringDedupMeta** — XxHash64 -> preview/count/total-size table for string deduplication and sampling (meta section holds UTF-8 JSON distribution summary).
-- **Handles** — GC handle snapshot (Addr, MethodTable, Kind) consumed by handle/weakref analyzers.
-- **Roots** — pre-enumerated GC roots (TargetAddr, RootAddr, Kind) consumed by `GCRootAnalyzer`, `FinalizableObjectAnalyzer`, and `StaticRootLeakDetector`.
-- **Tasks** — Task / ValueTask candidate addresses used by `AsyncTaskAnalyzer`.
-- **EventCandidates** — delegate/event candidates for `EventLeakAnalyzer`.
-- **LohFreeBlocks** — LOH/POH free-block candidates used by `LohFragmentationAnalyzer`.
-- **LargeObjects** — top-large-object list (LOH) used by LOH and array analyzers.
-
-Consumers and notes:
-- Index data is produced in disk-backed mode and mirrored by in-memory structures when the prebuild mode selects `Memory`.
-- Many analyzers prefer satellite sections when present in the container and will fall back to an in-memory scan otherwise (see `HeapIndexBuildResult` fields: `InMemoryEntries`, `InMemoryTaskCandidates`, `InMemoryEventCandidates`, `InMemoryRootCandidates`, etc.).
-- Container validity is verified once via `Magic` + `FormatVersion`; subsequent section access is instant. Presence of a valid container indicates a successful completed Phase 1 and is used as a cache hit to skip re-scans.
-- Satellite writes are non-fatal: partial section failures are surfaced as `SatelliteWarnings` on the `HeapIndexBuildResult` so downstream stages can either degrade gracefully or warn the user.
-- Container writes are atomic: a crash during write leaves no partial `.dumpindex/cache.bin` behind (only the `.tmp` file, which cleanup removes); the next run sees a cache miss and rebuilds cleanly.
-
-For binary format details, see [docs/binary-format.md § Container Format](../binary-format.md#-container-format-cachebin).
-
-### Cache directory resolution (`--cache-dir`)
-
-Before the first index access, `DumpIndexPaths.ResolveCacheDirectory` picks where the `.dumpindex/` folder
-above is written, trying each tier in order and stopping at the first writable location:
-
-1. **`--cache-dir <dir>`** (or the `CacheDirectory` config-file setting) — if set, the index is written to
-   `<dir>/<dumpFileName>.dumpindex/`. If this location is not writable, resolution fails immediately with an
-   error rather than silently falling through, since an explicit user override that can't be honored should
-   be surfaced, not masked.
-2. **Colocated** — `<dumpPath>.dumpindex/`, next to the dump file. This is the default when no `--cache-dir`
-   is given.
-3. **Temp folder (best effort)** — `%TEMP%/dumpdetective-cache/<hash>/`, where `<hash>` is a truncated SHA256
-   of the dump's full path, used to isolate the cache per-dump when several dumps share the fallback temp
-   root. Used only when the dump folder itself is not writable (e.g. read-only or network storage). A
-   warning is printed when this tier is used, since the temp folder can be evicted at any time and the
-   cached index is not guaranteed to persist across runs.
-4. **Failure** — if neither the dump folder nor the temp folder are writable, an error is thrown asking the
-   user to specify a writable `--cache-dir`.
-
-The chosen directory is resolved once per dump (keyed by the dump's full path) and reused by all other
-`DumpIndexPaths` call sites for that run.
-
----
-
-## 5.3 Graph Layer
-
-### ReferenceGraph
-- Provides lazy forward traversal
-- Extracts references via ClrMD field inspection
-
-### ReverseReferenceIndex (Optional)
-- Built selectively for subsets
-- Disk-backed when large
-- Never fully materialized
-
-### RootPathFinder
-- Finds paths from GC roots to target objects
-- Uses bounded BFS:
-  - Depth-limited
-  - Early termination
-- Distinct from `BoundedGraphWalk`: solves shortest-path-to-any-root via a bidirectional
-  candidate-set search (forward-expand from root-frontier and target-frontier, then BFS with
-  reverse-index backpointers); used only by `ReferenceChainAnalyzer`. Not migrated onto
-  `BoundedGraphWalk` — different problem shape, out of scope for the root/retention graph
-  service below.
-
----
-
-## 5.4 Analysis Layer
-
-### RetentionAnalyzer (+ StaticRootLeakDetector)
-Together implement the `LeakDetector` role described in guidelines:
-- `RetentionAnalyzer` (in `MemoryLeakAnalyzer.cs`) — retained-reference / highly-referenced object
-  analysis; computes exclusive retained bytes via `BoundedGraphWalk.ComputeExclusiveRetained` with
-  one `visited` set shared across its batch
-- `StaticRootLeakDetector` — identifies large object graphs retained by static roots; reads roots
-  from `RootSetCache` (byte-kind filter on `RootRecord.IsStatic`, not string matching) and walks
-  retained objects via `BoundedGraphWalk.CollectRetainedObjects` (depth-capped at 20)
-- Uses heuristic scoring: retained size, root type, object lifetime
-
-### ThreadAnalyzer
-- Enumerates threads
-- Groups stack traces, detects blocking/wait patterns
-- Reports finalizer thread state
-
-### AllocationPatternAnalyzer
-- Classifies allocation pressure and churn using generation mix and size buckets
-
-### ObjectShapeAnalyzer
-- Profiles field shapes and reference density from Phase 1 type shape data
-
-### GCRootAnalyzer
-- Builds bounded GC root paths and retention summaries from indexed roots
-- Reads roots via `RootSetCache.GetOrBuildRoots(heap)` (disk index, falling back to a live
-  `heap.EnumerateRoots()` walk when no index is present) and traces top-N root paths via
-  `BoundedGraphWalk.CollectForwardTypeNames`
-
-### GCHandleAnalyzer
-- Analyzes GC handles: Strong, Weak, Pinned, Dependent
-
-### DependentHandleAnalyzer
-- Analyzes ConditionalWeakTable / dependent handle edges
-
-### CollectionAnalyzer
-- Detects wasteful List/Dictionary/Queue/Stack allocations
-- Computes fill-rate and wasted capacity per collection
-
-### EventLeakAnalyzer
-- Detects unsubscribed event handler leaks
-
-### CrashAnalyzer
-- Reports active exceptions and crash-thread candidates
-
-### LockGraphAnalyzer
-- Identifies potential deadlocks via lock-graph analysis
-
-### HangAnalyzer
-- Detects blocked threads, waiting tasks, and async-over-sync patterns
-
-### ModuleAnalyzer
-- Reports loaded modules, version conflicts, and per-module heap footprint
-- Summarizes appdomains, module distribution, and cross-domain loading
-
-### LohFragmentationAnalyzer
-- Reports LOH free-block distribution and fragmentation percentage
-
-### GCGenerationAnalyzer
-- Reports object distribution across Gen0 / Gen1 / Gen2 / LOH
-
-### ReferenceChainAnalyzer
-- Samples reference chains from heap index to GC roots
-
-### SegmentAnalyzer
-- Classifies all heap segments (SOH / LOH / POH / Frozen)
-- Tracks committed bytes and object count per segment kind
-
-### ThreadStackClusterAnalyzer
-- Groups threads by stack signature to identify contention hotspots
-
-### AsyncTaskAnalyzer
-- Summarizes task states, orphaned continuations, and async chain depth
-
-### AsyncStateMachineAnalyzer
-- Profiles compiler-generated async state machines and captured closures
-
-### BoxingAnalyzer
-- Detects boxed value types and oversized value-type pressure
-
-### FinalizableObjectAnalyzer
-- Profiles finalizable objects, finalizer queue backlog, and thread health
-
-### ArrayAnalyzer
-- Reports array sizes, element distributions, and large-array hotspots
-
-### WeakReferenceAnalyzer
-- Analyzes weak-reference population and stale wrappers
-
-### JitAnalyzer
-- Reports JIT heap usage and active method/native code hotspots
-
-### SegmentReservationAnalyzer
-- Tracks committed vs reserved memory and address-space pressure
-
----
-
-## 5.5 Query Layer
-
-### QueryEngine
-- Provides structured querying capabilities
-- Operates on indices (not raw heap)
-
-Examples:
-- Top types by memory
-- Objects of a specific type
-- Reference paths
-
----
-
-## 5.6 Insight Layer
-
-### InsightEngine
-Generates high-level diagnostics:
-- Leak suspicion
-- GC pressure issues
-- Thread contention
-
----
-
-## 5.7 Output Layer
-
-Supports:
-- CLI output
-- JSON export
-- Structured reports
-
----
-
-# 6. ⚙️ Execution Model
-
-## Phase 1: Index Build
-- Single pass over heap
-- Streaming processing
-- Disk-backed persistence
-- No large allocations
-
-Index storage modes:
-- `HeapIndexPrebuildMode` can be `Auto`, `Memory`, or `Disk` (config/CLI). In `Auto` mode the `HeapAnalysisCache` selects `Disk` for large dumps and `Memory` for small dumps based on dump size tiers.
-- `HeapIndexStorageKind` indicates the actual storage used: `Memory` (in-memory arrays and candidate snapshots) or `Disk` (writes `.dumpindex/` satellite files). Many analyzers switch behavior based on `StorageKind` to prefer fast in-memory access when available.
-
-Sizing notes:
-- The in-repo threshold for choosing disk-backed mode is currently tuned around several GB (see `HeapAnalysisCache`), but the exact value is configurable via CLI/config and may be adjusted by profiling.
-
-## Phase 2: Analysis
-- Triggered by queries
-- Lazy computation
-- Scoped to subsets
-
----
-
-# 7. 🧠 Memory Model
-
-## Key Principles
-- Address-based identity (`ulong`)
-- No object retention unless required
-- Disk as primary storage for large data
-
-## Memory Usage Strategy
-
-| Component        | Memory Usage |
-|------------------|--------------|
-| Heap Streaming   | Minimal      |
-| Type Index       | Small        |
-| Object Index     | Disk-backed  |
-| Graph Traversal  | On-demand    |
-
----
-
-# 8. ⚡ Performance Considerations
-
-## Optimizations
-- Streaming enumeration
-- Struct-based data models
-- String deduplication (TypeId mapping)
-- Sequential disk IO
-- `ArrayPool` usage
-
-## Avoided Patterns
-- Full heap materialization
-- Recursive graph traversal without bounds
-- Large in-memory dictionaries of objects
-
----
-
-# 9. 🔗 Graph Traversal Strategy
-
-## Forward Traversal
-- Computed lazily per object
-
-## Reverse Traversal
-- Built selectively
-- Scoped to:
-  - Specific types
-  - Suspicious objects
-
-## Root Path Finding
-BFS with:
-- Depth limit (default: 20)
-- Visited tracking
-- Stops on first match
-
----
-
-# 10. 🧪 Leak Detection Strategy
-
-## Step 1: Candidate Selection
-- Top N types by memory usage
-
-## Step 2: Deep Analysis
-- Reference paths
-- GC roots
-- Retention patterns
-
-## Step 3: Scoring
-
-Example factors:
-- Object size
-- Root type (static > stack)
-- Retention depth
-
----
-
-# 11. 🏗️ Dump Layer
-
-## DumpLoader (`DumpDetective.Analysis.Dump`)
-- Loads a memory dump via `DataTarget.LoadDump(path)`
-- Validates CLR version presence and heap walkability
-- Returns `DumpLoadContext` (owns and disposes `DataTarget` + `ClrRuntime`)
-- Registered via `IDumpLoader` interface — decoupled from CLI
-
-## RuntimeFacade (`DumpDetective.Analysis.Dump`)
-- Wraps `ClrRuntime` + `ClrHeap` with a `ConcurrentDictionary`-backed
-  `MethodTable → ClrType` cache (`IMethodTableCache`)
-- Prevents redundant `GetTypeByMethodTable` calls across analyzers
-- Exposed as `RuntimeFacade?` on `RuntimeAnalysisContext`
-
----
-
-# 12. 🗄️ Cache Layer
-
-## IHeapAnalysisCache (`DumpDetective.Core.Abstractions`)
-Read-only contract used by all analyzers:
-- `GetOrBuildTypeStatistics(heap)` — type name → `CachedTypeStatistics`
-- `EnumerateIndexedEntriesAsTuples()` — stream `(Address, MT, Size)` tuples
-- `GetStaticRootedAddresses(heap)` — addresses reachable from static roots (derived from `RootSetCache`, byte-kind filtered)
-- `GetOrBuildValidRoots(heap)` — named GC roots (string-projected compatibility shape over `RootSetCache`)
-
-`HeapAnalysisCache` (the concrete `IHeapAnalysisCache` implementation, `DumpDetective.Analysis.Cache`)
-additionally exposes `GetOrBuildRoots(heap) -> IReadOnlyList<RootRecord>` for same-assembly
-consumers that need the richer `(TargetAddr, RootAddr, Kind)` shape (`RootRecord` can't be exposed
-on the public interface — it lives in `DumpDetective.Analysis`, a different assembly than
-`DumpDetective.Core.Abstractions`). Internally this is backed by `RootSetCache`, memoized per run.
-
-## IHeapIndexBuilder (`DumpDetective.Analysis.Cache`)
-Build-time contract (same `HeapAnalysisCache` instance, different interface):
-- `PrebuildHeapIndex(heap, dumpPath, ct, progress, mode)` — builds disk or memory index
-- `TryGetHeapIndex(out result)` — check if index is ready
-
-## HeapAnalysisCache (`DumpDetective.Analysis.Cache`)
-- Implements both `IHeapAnalysisCache` and `IHeapIndexBuilder`
-- Selects disk-backed or memory-backed index writer based on dump size tier
-- Lazy-initializes all cached data on first access
-
----
-
-# 13. 📊 Reporting Layer (`DumpDetective.Reporting`)
-
-## FindingGenerator Pattern
-One `IFindingGenerator` per analyzer:
-- Receives strongly-typed `AnalyzerDomainResult`
-- Emits zero or more `InsightFinding` records
-- Registered as `IFindingGenerator` in DI
-
-## Printer Pattern
-One `IPrinter` per analyzer:
-- Formats domain results for console output
-- Ordered by `SortOrder` for consistent section layout
-
-## FindingGenerationPipeline
-- Iterates all `IFindingGenerator` registrations
-- Attaches `InsightFinding` lists to `AnalyzerRunResult` records
-- Runs as a dedicated stage after analysis completes
-
-## ReportBuilder / CanonicalReportFormatter
-- Assembles per-analyzer sections into a full structured report
-- Supports JSON, markdown, and HTML renderers from the same `AnalysisReportDocument` payload
-
-## Trend Report Composer
-- Compares snapshot results across multiple dumps
-- Produces lifecycle/regression summaries and snapshot-aware deltas
-
----
-
-# 14. ⚙️ CLI Staged Pipeline (`DumpDetective.Cli.Pipeline`)
-
-The CLI executes analysis as a linear sequence of `IAnalysisStage` steps
-sharing a single `SingleDumpPipelineState` instance:
-
-| Stage | Responsibility |
-|---|---|
-| `LoadDumpStage` | Loads dump via `IDumpLoader`; stores `DumpLoadContext` |
-| `BuildHeapIndexStage` | Calls `IHeapIndexBuilder.PrebuildHeapIndex`; stores index |
-| `RunAnalyzersPipelineStage` | Runs all active analyzers; stores `AnalyzerRunResult[]` |
-| `GenerateFindingsStage` | Runs `FindingGenerationPipeline`; enriches run results |
-| `BuildReportStage` | Renders full report via `ReportBuilderFacade` |
-| `WriteOutputStage` | Writes report to console and/or file |
-
-After the pipeline, `InsightEngine` runs cross-cutting analysis on the completed runs.
-
----
-
-# 15. 📈 Trend Analysis
-
-## TrendAnalyzer (`DumpDetective.Analysis.Trend`)
-- Compares `AnalyzerRunResult` collections across multiple dump snapshots
-- Delegates domain-specific comparison to registered `IAnalyzerTrendComparer` implementations
-- One comparer per analyzer (e.g. `MemoryAnalyzerTrendComparer`, `HangTrendComparer`)
-
-## TrendOrchestrationService (`DumpDetective.Cli.Services`)
-- Orchestrates multi-dump trend runs: loads each dump sequentially,
-  runs analysis, then invokes `TrendAnalyzer`
-
-## TrendReportComposer (`DumpDetective.Reporting.Services`)
-- Assembles per-finding lifecycle (new / worsened / stable / resolved)
-  across trend snapshots into a ranked trend report
-
----
-
-# 17. 📋 Analyzer Coverage Snapshot
-
-Current analyzer set in the CLI factory:
-- MemoryAnalyzer
-- AllocationPatternAnalyzer
-- GCGenerationAnalyzer
-- ObjectShapeAnalyzer
-- SegmentAnalyzer
-- GCRootAnalyzer
-- RetentionAnalyzer
-- StringAnalyzer
-- StaticRootLeakDetector
-- LohFragmentationAnalyzer
-- ThreadAnalyzer
-- LockGraphAnalyzer
-- HangAnalyzer
-- AsyncTaskAnalyzer
-- ThreadStackClusterAnalyzer
-- GCHandleAnalyzer
-- DependentHandleAnalyzer
-- EventLeakAnalyzer
-- CollectionAnalyzer
-- CrashAnalyzer
-- ModuleAnalyzer
-- ReferenceChainAnalyzer
-- InsightEngine
-- TrendAnalyzer
-- JitAnalyzer
-- BoxingAnalyzer
-- FinalizableObjectAnalyzer
-- ArrayAnalyzer
-- AsyncStateMachineAnalyzer
-- WeakReferenceAnalyzer
-- SegmentReservationAnalyzer
-
----
-
-# 16. 🧩 Extensibility Model
-
-All analyzers implement:
-
-```csharp
-public interface IAnalyzer
-{
-    string Name { get; }
-    string Category { get; }     // default: inferred from Name
-    IReadOnlyCollection<string> Tags { get; }  // default: []
-    int Order { get; }           // default: 0 — controls execution order
-    bool IsThreadSafe { get; }   // default: false — opt-in for parallel execution
-    ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-        AnalysisContext context,
-        CancellationToken cancellationToken);
-}
-```
-
-Return type `AnalyzerDomainResult` is an abstract record. Each analyzer defines a
-strongly-typed subtype (e.g. `MemoryDomainResult`, `ThreadDomainResult`) and stamps
-`AnalyzerName` and `Category` via `result.Stamp(this)` at the end of `AnalyzeAsync`.
-
-## Plugin Capability
-- New analyzers can be added without modifying core engine
-- Analyzer execution pipeline is configurable
-
----
-
-# 12. 🧵 Concurrency Model
-
-## Phase 1
-- Single-threaded (sequential IO optimized)
-
-## Phase 2
-Parallelizable:
-- Type analysis
-- Graph traversal (controlled)
-
----
-
-# 13. 🚨 Failure Handling
-- Invalid objects are skipped
-- Missing metadata handled gracefully
-- Partial results allowed
-
----
-
-# 14. 📊 Observability
-
-## Execution & Performance Tracking
-- Execution time tracking
-- Memory usage monitoring
-
-## Analyzer Logging
-
-Analyzers may take an optional `ILogger<T>? logger = null` constructor parameter for
-per-object error/debug diagnostics. The parameter is resolved automatically via
-`ActivatorUtilities` in `DefaultAnalyzerFactory` when analyzers are constructed at runtime.
-The CLI host wires up generic-host logging; the Reporting layer provides a compatibility
-fallback with `NullLoggerFactory` for direct construction (tests, benchmarks).
-
-**Use case**: Analyzers that scan large object populations and expect to encounter
-malformed/unexpected heap data — e.g., `CollectionAnalyzer` logging per-Dictionary/Queue/List/HashSet
-errors and generation-lookup failures as it walks millions of collection objects. Not intended
-for routine control-flow logging.
-
-## Diagnostics Levels
-
-Logging categories by severity:
-- **Errors** (`LogError`): genuine per-object scan failures (exceptions during field read, invalid object state)
-- **Debug** (`LogDebug`): expected/ignorable per-object issues (missing optional fields, invalid backing arrays, resolution fallbacks)
-- **Information** (`LogInformation`): user-initiated cancellation, analysis milestones
-
----
-
-# 15. 🚀 Future Enhancements
-- Dump diffing engine
-- Async/Task analysis
-- Event/delegate graph analysis
-- Web-based visualization UI
-
----
-
-# 16. 🏁 Summary
-
-This architecture prioritizes:
-- Scalability over convenience
-- Streaming over materialization
-- Insight over raw data
-
-The system is designed to operate efficiently on massive dumps while providing deep, actionable diagnostics.
-
----
+## 20. Summary
+
+This architecture prioritizes scalability over convenience, streaming over materialization, and
+insight over raw data — designed to operate efficiently on massive dumps while providing deep,
+actionable diagnostics across memory, threading, async, GC, and infra-resource domains.

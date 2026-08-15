@@ -5,6 +5,7 @@ namespace DumpDetective.Analysis.Models;
 // Allocation Pattern
 
 public enum AllocationProfile { Transient, Steady, Retained, Mixed }
+public enum TypeProfile { Transient, Retained, Mixed }
 public enum GCPressureLevel { Low, Moderate, High, Critical }
 
 public sealed record TypeAllocationProfile(
@@ -13,7 +14,7 @@ public sealed record TypeAllocationProfile(
     int Gen1Count,
     int Gen2Count,
     double LongLivedRatio,
-    AllocationProfile Profile,
+    TypeProfile Profile,
     ulong TotalSize,
     double Gen1SurvivalRate);
 

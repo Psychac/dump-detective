@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -29,6 +30,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (context.Cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
             {
+                System.Diagnostics.Debug.Fail("AllocationPatternAnalyzer requires HeapIndexBuildResult from GCGenerationAnalyzer. Check DefaultAnalyzerFactory ordering.");
                 return new AllocationPatternDomainResult(
                     Gen0CountPct: 0, Gen1CountPct: 0, Gen2CountPct: 0, LohCountPct: 0,
                     Gen0SizePct: 0, Gen1SizePct: 0, Gen2SizePct: 0, LohSizePct: 0,
@@ -175,11 +177,11 @@ namespace DumpDetective.Analysis.Analyzers
                     double longLivedRatio = item.Gen2Ratio;
                     double typeGen0Pct = item.Gen0Pct;
                     double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
-                    AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
-                        ? AllocationProfile.Transient
+                    TypeProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
+                        ? TypeProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
-                            ? AllocationProfile.Retained
-                            : AllocationProfile.Mixed;
+                            ? TypeProfile.Retained
+                            : TypeProfile.Mixed;
 
                     string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
 
@@ -281,11 +283,11 @@ namespace DumpDetective.Analysis.Analyzers
                     double longLivedRatio = item.Gen2Ratio;
                     double typeGen0Pct = item.Gen0Pct;
                     double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
-                    AllocationProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
-                        ? AllocationProfile.Transient
+                    TypeProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
+                        ? TypeProfile.Transient
                         : longLivedRatio > options.LongLivedClassificationThreshold
-                            ? AllocationProfile.Retained
-                            : AllocationProfile.Mixed;
+                            ? TypeProfile.Retained
+                            : TypeProfile.Mixed;
 
                     string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
 

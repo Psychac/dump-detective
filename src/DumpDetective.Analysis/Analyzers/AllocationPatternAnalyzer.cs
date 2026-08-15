@@ -41,7 +41,10 @@ namespace DumpDetective.Analysis.Analyzers
                     TopTransientTypes: [],
                     TopShortishTypes: [],
                     TopLongLivedTypes: [],
-                    TopHighGen1SurvivorTypes: []);
+                    TopHighGen1SurvivorTypes: [],
+                    LohSizeBands: null,
+                    FinalizableTypeCount: 0,
+                    FinalizableBytes: 0);
             }
 
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
@@ -49,6 +52,12 @@ namespace DumpDetective.Analysis.Analyzers
             long totalObjects = 0;
             long gen0Objects = 0, gen1Objects = 0, gen2Objects = 0, lohObjects = 0;
             ulong totalSize = 0, lohBytes = 0;
+            int finalizableTypeCount = 0;
+            ulong finalizableBytes = 0;
+            // Approximate per-bucket byte totals from each type's average object size — same
+            // approach MemoryAnalysisProjection uses, since exact per-object sizes are not
+            // retained past Phase 1 aggregation.
+            var bucketBytes = new ulong[SizeBucketHelper.BucketCount];
 
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
@@ -60,6 +69,32 @@ namespace DumpDetective.Analysis.Analyzers
                 lohObjects += e.LohCount;
                 totalSize += e.TotalSize;
                 lohBytes += e.LohSize;
+
+                if ((e.Flags & TypeAggregateFlags.IsFinalizableType) != 0)
+                {
+                    finalizableTypeCount++;
+                    finalizableBytes += e.TotalSize;
+                }
+
+                if (e.Count > 0)
+                {
+                    ulong avgSize = e.TotalSize / (ulong)e.Count;
+                    bucketBytes[SizeBucketHelper.GetBucketIndex(avgSize)] += e.TotalSize;
+                }
+            }
+
+            // LOH size-band distribution: last three buckets (85 KB–1 MB, 1 MB–10 MB, ≥10 MB).
+            // Object counts come from the exact Phase 1 global histogram; byte totals use the
+            // avgSize approximation above. Falls back gracefully if an older cache.bin loaded
+            // an 8-bucket (pre-10MB-split) histogram.
+            List<SizeBucketEntry>? lohSizeBands = null;
+            if (idx.GlobalSizeBuckets is { Length: >= SizeBucketHelper.BucketCount } globalBuckets)
+            {
+                lohSizeBands = new List<SizeBucketEntry>(3);
+                for (int i = SizeBucketHelper.BucketCount - 3; i < SizeBucketHelper.BucketCount; i++)
+                {
+                    lohSizeBands.Add(new SizeBucketEntry(SizeBucketHelper.BucketLabels[i], globalBuckets[i], bucketBytes[i]));
+                }
             }
 
             // Exact gen bytes from segment metadata if available; otherwise approximate from aggregates.
@@ -193,7 +228,8 @@ namespace DumpDetective.Analysis.Analyzers
                         longLivedRatio,
                         typeProfile,
                         e.TotalSize,
-                        gen1SurvivalRate);
+                        gen1SurvivalRate,
+                        IsFinalizable: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
 
                     if (gen1SurvivalRate > 0.5)
                         highGen1Survivors.Add((gen1SurvivalRate, entry));
@@ -299,7 +335,8 @@ namespace DumpDetective.Analysis.Analyzers
                         longLivedRatio,
                         typeProfile,
                         e.TotalSize,
-                        gen1SurvivalRate);
+                        gen1SurvivalRate,
+                        IsFinalizable: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
 
                     if (gen1SurvivalRate > 0.5)
                         highGen1Survivors.Add((gen1SurvivalRate, entry));
@@ -341,7 +378,10 @@ namespace DumpDetective.Analysis.Analyzers
                 gen0SizePct, gen1SizePct, gen2SizePct, lohSizePct,
                 TotalManagedBytes: totalSize, Gen0Bytes: gen0Bytes, Gen1Bytes: gen1Bytes, Gen2Bytes: gen2Bytes, LohBytes: lohBytes,
                 profile, pressure, promotionScore,
-                transient, shortish, longLived, topGen1Survivors);
+                transient, shortish, longLived, topGen1Survivors,
+                LohSizeBands: lohSizeBands,
+                FinalizableTypeCount: finalizableTypeCount,
+                FinalizableBytes: finalizableBytes);
         }
 
         private static AllocationProfile ClassifyProfile(double gen0Pct, double gen2Pct, double transientThreshold)

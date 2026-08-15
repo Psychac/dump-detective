@@ -40,6 +40,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
             ["gen2_bytes"] = new NumericMetricValue(d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
             ["loh_size_pct"] = new NumericMetricValue(d.LohSizePct, MetricUnit.Percent, $"{d.LohSizePct:F1}%"),
             ["loh_bytes"] = new NumericMetricValue(d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
+            ["finalizable_type_count"] = new NumericMetricValue(d.FinalizableTypeCount, MetricUnit.Custom, d.FinalizableTypeCount.ToString("N0")),
+            ["finalizable_bytes"] = new NumericMetricValue(d.FinalizableBytes, MetricUnit.Bytes, FormatBytes(d.FinalizableBytes)),
         };
 
         blocks.Add(T(d.GCPressure switch
@@ -53,29 +55,43 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         blocks.Add(T("Allocation-site precision is ETW-dependent; these signals summarize heap pressure from the dump state only."));
         blocks.Add(T("GC Pressure Score scale: 0–20 = Low, 20–45 = Moderate, 45–70 = High, >70 = Critical. Factors include Gen2 object count%, inverted Gen0 count% (high Gen0 dominance reduces pressure), and LOH size% contribution."));
 
+        if (d.FinalizableTypeCount > 0)
+        {
+            blocks.Add(T($"{d.FinalizableTypeCount:N0} type(s) with finalizers hold {FormatBytes(d.FinalizableBytes)} — finalizable objects delay collection by at least one extra GC cycle and are worth reviewing if retention is unexpected."));
+        }
+
         compactTables.Add(STCompact(
             "Classification summary",
             new[] { CH("Signal"), CH("Value") },
             new[] { R("Allocation profile", d.Profile.ToString()), R("GC pressure level", d.GCPressure.ToString()) }));
 
+        if (d.LohSizeBands is { Count: > 0 })
+        {
+            compactTables.Add(STCompact("LOH size-band distribution",
+                new[] { CH("Size range"), CH("Object Count", "number"), CH("Total Bytes", "number") },
+                d.LohSizeBands.Select(b => R(b.RangeLabel, b.ObjectCount.ToString("N0"), FormatBytes(b.TotalBytes))).ToArray()));
+        }
+
+        var typeTableHeaders = new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile"), CH("Finalizable") };
+
         if (d.TopTransientTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top transient types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile") },
+                typeTableHeaders,
                 BuildRows(d.TopTransientTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopShortishTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top medium-lived types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile") },
+                typeTableHeaders,
                 BuildRows(d.TopShortishTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLongLivedTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Top long-lived types",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile") },
+                typeTableHeaders,
                 BuildRows(d.TopLongLivedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -108,7 +124,8 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 Cell(p.Gen2Count.ToString("N0"), p.Gen2Count),
                 Cell(p.LongLivedRatio.ToString("P1"), p.LongLivedRatio),
                 Cell(FormatBytes(p.TotalSize), p.TotalSize),
-                Cell(p.Profile.ToString())));
+                Cell(p.Profile.ToString()),
+                Cell(p.IsFinalizable ? "Yes" : "")));
         }
         return rows;
     }

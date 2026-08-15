@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Utilities;
 
 namespace DumpDetective.Reporting.FindingGenerators;
 
@@ -29,11 +30,16 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
             ? $" Top long-lived type: {r.TopLongLivedTypes[0].TypeName}."
             : "";
 
+        // Makes the "investigate finalizable types" recommendation below actionable with a count.
+        string finalizableNote = r.FinalizableTypeCount > 0
+            ? $" {r.FinalizableTypeCount:N0} finalizable type(s) hold {FormatHelper.FormatBytes(r.FinalizableBytes)}."
+            : "";
+
         string evidence = $"Allocation profile: {r.Profile}. " +
             $"Gen0: {r.Gen0CountPct:F1}% obj / {r.Gen0SizePct:F1}% bytes, " +
             $"Gen2: {r.Gen2CountPct:F1}% obj / {r.Gen2SizePct:F1}% bytes, " +
             $"LOH: {r.LohSizePct:F1}% bytes. " +
-            $"GC pressure: {r.GCPressure} (score: {r.PromotionPressureScore:F1}).{topLongLivedType}";
+            $"GC pressure: {r.GCPressure} (score: {r.PromotionPressureScore:F1}).{topLongLivedType}{finalizableNote}";
 
         string recommendation = r.GCPressure switch
         {

@@ -51,9 +51,9 @@ internal sealed record HeapIndexBuildResult(
     HeapEntry[]? InMemoryEntries = null,
     IReadOnlyList<ModuleInfo>? Modules = null,
     /// <summary>
-    /// 8-element heap-wide object-size histogram built during Phase 1.
+    /// 9-element heap-wide object-size histogram built during Phase 1.
     /// Bucket boundaries are defined in <see cref="SizeBucketHelper.BucketLabels"/>.
-    /// Always 64 bytes — never null after a successful build.
+    /// Always 72 bytes — never null after a successful build.
     /// </summary>
     long[]? GlobalSizeBuckets = null,
     /// <summary>

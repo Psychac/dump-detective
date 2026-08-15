@@ -16,7 +16,8 @@ public sealed record TypeAllocationProfile(
     double LongLivedRatio,
     TypeProfile Profile,
     ulong TotalSize,
-    double Gen1SurvivalRate);
+    double Gen1SurvivalRate,
+    bool IsFinalizable = false);
 
 internal sealed record AllocationPatternDomainResult(
     // Object-count percentages (objects in generation / total objects)
@@ -41,4 +42,12 @@ internal sealed record AllocationPatternDomainResult(
     IReadOnlyList<TypeAllocationProfile> TopTransientTypes,
     IReadOnlyList<TypeAllocationProfile> TopShortishTypes,
     IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes,
-    IReadOnlyList<TypeAllocationProfile> TopHighGen1SurvivorTypes) : AnalyzerDomainResult;
+    IReadOnlyList<TypeAllocationProfile> TopHighGen1SurvivorTypes,
+    // LOH size-band distribution (85 KB–1 MB, 1 MB–10 MB, ≥10 MB) sourced from the Phase 1
+    // global size histogram — object counts are exact, byte totals are approximated from
+    // each type's average object size (same approximation MemoryAnalyzer already uses).
+    IReadOnlyList<SizeBucketEntry>? LohSizeBands = null,
+    // Aggregated across all types (not just the top-K profiled sample), since finalizable
+    // retention is a heap-wide GC-pressure signal, not a per-type classification detail.
+    int FinalizableTypeCount = 0,
+    ulong FinalizableBytes = 0) : AnalyzerDomainResult;

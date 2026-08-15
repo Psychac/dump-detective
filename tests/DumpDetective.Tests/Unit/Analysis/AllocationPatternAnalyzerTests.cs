@@ -255,4 +255,90 @@ public sealed class AllocationPatternAnalyzerTests
         // shortish bucket was empty; Mixed should allow spillover from long-lived to fill transient/shortish up to TopTypeLimit
         (result.TopTransientTypes.Count + result.TopShortishTypes.Count + result.TopLongLivedTypes.Count).Should().BeGreaterThanOrEqualTo(2);
     }
+
+    [Fact]
+    public async Task FinalizableFlag_SurfacedOnTypeProfile_AndAggregatedInDomainResult()
+    {
+        var aggregates = new Dictionary<ulong, TypeAggregateIndexEntry>
+        {
+            // Finalizable, retained (long-lived)
+            [0x1] = new TypeAggregateIndexEntry(0x1, 0, 100, 1000, 0, 0, 0, Gen0Count: 5, Gen1Count: 5, Gen2Count: 90, Flags: TypeAggregateFlags.IsFinalizableType),
+            // Not finalizable, transient
+            [0x2] = new TypeAggregateIndexEntry(0x2, 0, 100, 500, 0, 0, 0, Gen0Count: 80, Gen1Count: 10, Gen2Count: 10)
+        };
+
+        var heapIndex = new HeapIndexBuildResult(
+            HeapIndexStorageKind.Disk,
+            IndexPath: string.Empty,
+            ObjectCount: 200,
+            Elapsed: TimeSpan.Zero,
+            TypeAggregates: aggregates);
+
+        var cache = new HeapAnalysisCache();
+        var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        fi.SetValue(cache, heapIndex);
+
+        var options = new AllocationPatternAnalysisOptions
+        {
+            TopTypeLimit = 10,
+            ScanMultiplier = 2,
+            LongLivedSelectionThreshold = 0.3,
+            LongLivedClassificationThreshold = 0.5
+        };
+
+        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options } };
+        var analyzer = new AllocationPatternAnalyzer();
+        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+
+        result.FinalizableTypeCount.Should().Be(1);
+        result.FinalizableBytes.Should().Be(1000);
+        result.TopLongLivedTypes.Should().ContainSingle(t => t.TypeName.StartsWith("MT:0x1", System.StringComparison.OrdinalIgnoreCase) && t.IsFinalizable);
+        result.TopTransientTypes.Should().ContainSingle(t => t.TypeName.StartsWith("MT:0x2", System.StringComparison.OrdinalIgnoreCase) && !t.IsFinalizable);
+    }
+
+    [Fact]
+    public async Task LohSizeBands_PopulatedFromGlobalSizeBuckets()
+    {
+        var aggregates = new Dictionary<ulong, TypeAggregateIndexEntry>
+        {
+            // avg size 90,000 -> bucket 6 (85 KB-1 MB)
+            [0x1] = new TypeAggregateIndexEntry(0x1, 0, 1, 90_000, 1, 90_000, 0, Gen0Count: 0, Gen1Count: 0, Gen2Count: 1),
+            // avg size 2,000,000 -> bucket 7 (1 MB-10 MB)
+            [0x2] = new TypeAggregateIndexEntry(0x2, 0, 1, 2_000_000, 1, 2_000_000, 0, Gen0Count: 0, Gen1Count: 0, Gen2Count: 1),
+            // avg size 20,000,000 -> bucket 8 (>=10 MB)
+            [0x3] = new TypeAggregateIndexEntry(0x3, 0, 1, 20_000_000, 1, 20_000_000, 0, Gen0Count: 0, Gen1Count: 0, Gen2Count: 1),
+        };
+
+        var globalBuckets = new long[SizeBucketHelper.BucketCount];
+        globalBuckets[6] = 1;
+        globalBuckets[7] = 1;
+        globalBuckets[8] = 1;
+
+        var heapIndex = new HeapIndexBuildResult(
+            HeapIndexStorageKind.Disk,
+            IndexPath: string.Empty,
+            ObjectCount: 3,
+            Elapsed: TimeSpan.Zero,
+            TypeAggregates: aggregates,
+            GlobalSizeBuckets: globalBuckets);
+
+        var cache = new HeapAnalysisCache();
+        var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        fi.SetValue(cache, heapIndex);
+
+        var options = new AllocationPatternAnalysisOptions { TopTypeLimit = 10, ScanMultiplier = 2 };
+        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = options } };
+        var analyzer = new AllocationPatternAnalyzer();
+        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+
+        result.LohSizeBands.Should().NotBeNull();
+        result.LohSizeBands!.Should().HaveCount(3);
+        result.LohSizeBands[0].RangeLabel.Should().Be("85 KB–1 MB");
+        result.LohSizeBands[0].ObjectCount.Should().Be(1);
+        result.LohSizeBands[0].TotalBytes.Should().Be(90_000);
+        result.LohSizeBands[1].RangeLabel.Should().Be("1 MB–10 MB");
+        result.LohSizeBands[1].TotalBytes.Should().Be(2_000_000);
+        result.LohSizeBands[2].RangeLabel.Should().Be("≥ 10 MB");
+        result.LohSizeBands[2].TotalBytes.Should().Be(20_000_000);
+    }
 }
